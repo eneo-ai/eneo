@@ -1290,7 +1290,6 @@ def test_openapi_flow_evidence_policy_update_rejects_null_flags(
     required_fields = set(schema.get("required", []))
     properties = schema.get("properties", {})
     flag_fields = (
-        "allow_sensitive_flow_exports",
         "allow_space_admin_raw_export_class3",
         "allow_run_owner_raw_export_class3",
         "allow_service_key_raw_export_class3",
@@ -2267,6 +2266,27 @@ def test_openapi_flow_evidence_403_documents_service_key_permission_layers(
         assert "insufficient_scope" in description
         assert "insufficient_resource_permission" in description
         assert "flow_run_evidence_forbidden" in description
+
+
+def test_openapi_evidence_export_documents_the_flow_s_own_switch(
+    openapi_spec: dict,
+) -> None:
+    export = _get_operation(
+        openapi_spec, "/api/v1/flows/{id}/runs/{run_id}/evidence/export", "get"
+    )
+    view = _get_operation(
+        openapi_spec, "/api/v1/flows/{id}/runs/{run_id}/evidence/", "get"
+    )
+
+    assert "metadata_json.evidence_policy.allow_export" in export["description"]
+    assert (
+        "flow_run_evidence_export_disabled" in export["responses"]["403"]["description"]
+    )
+    # Viewing evidence is not an export: the switch does not refuse it.
+    assert (
+        "flow_run_evidence_export_disabled"
+        not in view["responses"]["403"]["description"]
+    )
 
 
 def test_openapi_runtime_discovery_response_schemas_are_closed(

@@ -30,13 +30,13 @@ function actions() {
   };
 }
 
-it("exports only diagnostic data for sensitive flows and offers no full-content copy", async () => {
+it("offers only debug data while the flow has download turned off, and says where to turn it on", async () => {
   const debugExport = diagnostics();
   const handlers = actions();
   render(FlowRunEvidenceToolbar, {
     debugExport,
     copiedKey: null,
-    sensitiveCareDataFlow: true,
+    evidenceExportAllowed: false,
     ...handlers
   });
 
@@ -53,7 +53,7 @@ it("exports only diagnostic data for sensitive flows and offers no full-content 
     m.flow_run_download_debug_export_failed()
   );
   expect(screen.getAllByRole("button")).toHaveLength(2);
-  expect(screen.getByText(m.flow_sensitive_evidence_export_disabled())).toBeTruthy();
+  expect(screen.getByText(m.flow_run_evidence_export_off())).toBeTruthy();
   expect(screen.queryByText(m.flow_run_evidence_content_heading())).toBeNull();
   expect(screen.queryByRole("button", { name: m.flow_run_download_evidence_export() })).toBeNull();
   expect(handlers.onDownloadCanonicalEvidence).not.toHaveBeenCalled();
@@ -66,7 +66,7 @@ it("withholds debug sharing until the server explicitly supplies a content-free 
   render(FlowRunEvidenceToolbar, {
     debugExport: legacy as FlowRunDebugExport,
     copiedKey: null,
-    sensitiveCareDataFlow: false,
+    evidenceExportAllowed: true,
     ...handlers
   });
 
@@ -81,7 +81,12 @@ it("withholds debug sharing until the server explicitly supplies a content-free 
 
 it("labels content-bearing evidence separately and keeps it collapsed initially", async () => {
   const handlers = actions();
-  render(FlowRunEvidenceToolbar, { debugExport: diagnostics(), copiedKey: null, ...handlers });
+  render(FlowRunEvidenceToolbar, {
+    debugExport: diagnostics(),
+    copiedKey: null,
+    evidenceExportAllowed: true,
+    ...handlers
+  });
 
   const heading = screen.getByText(m.flow_run_evidence_content_heading());
   const disclosure = heading.closest("details");
@@ -94,4 +99,11 @@ it("labels content-bearing evidence separately and keeps it collapsed initially"
   );
   expect(handlers.onDownloadCanonicalEvidence).toHaveBeenCalledOnce();
   expect(handlers.onCopyPayload).not.toHaveBeenCalled();
+});
+
+it("treats a flow that has not said yes as off", () => {
+  render(FlowRunEvidenceToolbar, { debugExport: diagnostics(), copiedKey: null, ...actions() });
+
+  expect(screen.getByText(m.flow_run_evidence_export_off())).toBeTruthy();
+  expect(screen.queryByRole("button", { name: m.flow_run_download_evidence_export() })).toBeNull();
 });

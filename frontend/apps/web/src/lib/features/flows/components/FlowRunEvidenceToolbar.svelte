@@ -2,20 +2,20 @@
   import type { FlowRunDebugExport } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { Badge } from "$lib/components/ui/badge/index.js";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
 
   let {
     debugExport,
     copiedKey,
-    sensitiveCareDataFlow = false,
+    evidenceExportAllowed = false,
     onDownloadCanonicalEvidence,
     onCopyPayload,
     onDownloadJsonArtifact
   }: {
     debugExport: FlowRunDebugExport | null;
     copiedKey: string | null;
-    sensitiveCareDataFlow?: boolean;
+    /** The flow's own setting; the server refuses the download without it. */
+    evidenceExportAllowed?: boolean;
     onDownloadCanonicalEvidence: () => Promise<void>;
     onCopyPayload: (key: string, payload: unknown, failureMessage: string) => Promise<void>;
     onDownloadJsonArtifact: (fileName: string, payload: unknown, failureMessage: string) => void;
@@ -67,10 +67,10 @@
     {/if}
   </div>
 
-  {#if sensitiveCareDataFlow}
-    <Badge variant="outline" class="w-fit text-xs">
-      {m.flow_sensitive_evidence_export_disabled()}
-    </Badge>
+  {#if !evidenceExportAllowed}
+    <p class="text-secondary border-default max-w-prose border-t pt-3 text-sm">
+      {m.flow_run_evidence_export_off()}
+    </p>
   {:else}
     <details bind:open={contentExportOpen} class="border-default border-t pt-3">
       <!-- The same chevron disclosure as the review panel's folds, in place of

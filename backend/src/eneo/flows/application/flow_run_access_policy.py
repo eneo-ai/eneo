@@ -188,6 +188,24 @@ class FlowRunAccessPolicy:
         access_kind: FlowRunAccessKind,
         history: bool = False,
     ) -> None:
+        await self._ensure_caller_may_access_run(
+            run, access_kind=access_kind, history=history
+        )
+        if access_kind in {"evidence_export_redacted", "evidence_export_raw"}:
+            # Last, so a caller the rules above refuse learns nothing about the
+            # flow's setting. It binds everyone they let through, tenant admins
+            # and service keys included.
+            await self._ensure_flow_allows_evidence_export(
+                flow_id=run.flow_id, history=history
+            )
+
+    async def _ensure_caller_may_access_run(
+        self,
+        run: FlowRunStatusSnapshot,
+        *,
+        access_kind: FlowRunAccessKind,
+        history: bool,
+    ) -> None:
         if not self._is_known_access_kind(access_kind):
             self.deny_run_access(auth_layer="flow_run_access_kind")
         if history and access_kind in _MUTATING_ACCESS_KINDS:
@@ -196,10 +214,6 @@ class FlowRunAccessPolicy:
             raise NotFoundException("Flow not found.")
         if run.tenant_id != self.user.tenant_id:
             self.deny_run_access(auth_layer="tenant_isolation")
-        if access_kind in {"evidence_export_redacted", "evidence_export_raw"}:
-            await self._ensure_sensitive_flow_export_allowed(
-                flow_id=run.flow_id, history=history
-            )
         principal = self.principal()
         if principal.is_service_key:
             if not principal.matches_run(run):
@@ -328,30 +342,24 @@ class FlowRunAccessPolicy:
         context = await self._load_flow_context(flow_id=run.flow_id, history=history)
         if not context.sensitive and not context.classified:
             return "text_disclosed"
-        # A raw export has already cleared the sensitive-flow and classification
-        # gates in `ensure_can_access_run`, so reaching here means the reader is
-        # entitled to the underlying content.
+        # A raw export has already cleared the flow's export switch and the
+        # classification gates in `ensure_can_access_run`, so reaching here
+        # means the reader is entitled to the underlying content.
         if access_kind == "evidence_export_raw":
             return "text_disclosed"
         if context.sensitive:
             return "text_withheld_sensitive_flow"
         return "text_withheld_classified_space"
 
-    async def _ensure_sensitive_flow_export_allowed(
+    async def _ensure_flow_allows_evidence_export(
         self, *, flow_id: UUID, history: bool
     ) -> None:
-        # The access context resolves sensitivity fail-closed: metadata that
-        # cannot be parsed counts as sensitive instead of raising and taking
-        # the whole export path down with it.
+        # The flow's current setting decides for all of its runs, old ones and a
+        # retired flow's included. The access context resolves it fail-closed:
+        # metadata that cannot be parsed does not allow export.
         context = await self._load_flow_context(flow_id=flow_id, history=history)
-        if (
-            context.sensitive
-            and not self._evidence_policy().allow_sensitive_flow_exports
-        ):
-            self.deny_evidence_access(
-                auth_layer="flow_runtime_policy",
-                message="Evidence export is disabled by policy for this sensitive flow.",
-            )
+        if context.evidence_export_allowed is not True:
+            self.deny_evidence_export_disabled(auth_layer="flow_evidence_policy")
 
     def _evidence_policy(self) -> FlowEvidencePolicy:
         tenant = getattr(self.user, "tenant", None)
@@ -375,6 +383,14 @@ class FlowRunAccessPolicy:
         raise UnauthorizedException(
             message,
             code=FlowApiErrorCode.RUN_EVIDENCE_FORBIDDEN.value,
+            context={"auth_layer": auth_layer},
+        )
+
+    @staticmethod
+    def deny_evidence_export_disabled(*, auth_layer: str) -> NoReturn:
+        raise UnauthorizedException(
+            "Evidence export is turned off for this flow.",
+            code=FlowApiErrorCode.RUN_EVIDENCE_EXPORT_DISABLED.value,
             context={"auth_layer": auth_layer},
         )
 

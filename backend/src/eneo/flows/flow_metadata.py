@@ -47,7 +47,7 @@ _FORM_FIELD_TYPES_BY_VALUE = {
     field_type.value: field_type for field_type in FlowFormFieldType
 }
 _FLOW_METADATA_TOP_LEVEL_KEYS = frozenset(
-    {"form_schema", "care_data_policy", "wizard", "ai_builder"}
+    {"form_schema", "care_data_policy", "evidence_policy", "wizard", "ai_builder"}
 )
 _AI_BUILDER_METADATA_KEYS = frozenset({"origin"})
 _AI_BUILDER_ORIGIN_FIELD_NAMES = (
@@ -84,6 +84,16 @@ class FlowCareDataPolicy(BaseModel):
     pre_approval_visibility: CareDataPreApprovalVisibility | None = None
 
 
+class FlowEvidencePolicyMetadata(BaseModel):
+    """The flow's own evidence choices. Export of a run's evidence is off until
+    the flow allows it; the run access policy enforces it for every caller its
+    other rules let through."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    allow_export: bool = False
+
+
 class FlowAIBuilderOriginMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -104,6 +114,9 @@ class FlowMetadata(BaseModel):
 
     form_schema: FlowFormSchema | None = None
     care_data_policy: FlowCareDataPolicy = Field(default_factory=FlowCareDataPolicy)
+    evidence_policy: FlowEvidencePolicyMetadata = Field(
+        default_factory=FlowEvidencePolicyMetadata
+    )
     wizard: FlowPersistedJsonObject | None = None
     ai_builder: FlowAIBuilderMetadata | None = None
 
@@ -258,6 +271,10 @@ def parse_flow_metadata(
     if "care_data_policy" in payload:
         payload["care_data_policy"] = care_data_policy
 
+    evidence_policy = _parse_evidence_policy(payload, mode=mode)
+    if "evidence_policy" in payload:
+        payload["evidence_policy"] = evidence_policy
+
     _parse_wizard_metadata(payload, mode=mode)
     _parse_ai_builder_metadata(payload, mode=mode)
 
@@ -395,6 +412,42 @@ def _parse_ai_builder_origin(
             return None
         origin_payload[key] = item
     return FlowAIBuilderOriginMetadata.model_validate(origin_payload)
+
+
+def _parse_evidence_policy(
+    metadata_json: Mapping[str, object],
+    *,
+    mode: FlowMetadataParseMode,
+) -> FlowEvidencePolicyMetadata:
+    evidence_policy = metadata_json.get("evidence_policy")
+    if evidence_policy is None:
+        return FlowEvidencePolicyMetadata()
+    if not isinstance(evidence_policy, Mapping):
+        if mode is FlowMetadataParseMode.PERSISTED_READ:
+            return FlowEvidencePolicyMetadata()
+        raise BadRequestException("metadata_json.evidence_policy must be an object.")
+
+    policy = cast(Mapping[str, object], evidence_policy)
+    allow_export = policy.get("allow_export")
+    if mode is FlowMetadataParseMode.PERSISTED_READ:
+        # Only a stored boolean counts, so nothing but `true` allows export.
+        if isinstance(allow_export, bool):
+            return FlowEvidencePolicyMetadata(allow_export=allow_export)
+        return FlowEvidencePolicyMetadata()
+
+    unknown_fields = set(policy) - {"allow_export"}
+    if unknown_fields:
+        unknown = ", ".join(sorted(unknown_fields))
+        raise BadRequestException(
+            f"metadata_json.evidence_policy contains unknown fields: {unknown}"
+        )
+    if allow_export is None:
+        return FlowEvidencePolicyMetadata()
+    if not isinstance(allow_export, bool):
+        raise BadRequestException(
+            "metadata_json.evidence_policy.allow_export must be a boolean."
+        )
+    return FlowEvidencePolicyMetadata(allow_export=allow_export)
 
 
 def _parse_care_data_policy(

@@ -74,6 +74,11 @@ _FLOW_TRACE_FORBIDDEN_DESCRIPTION = (
     "`flow_run_evidence_forbidden`."
 )
 
+_FLOW_EVIDENCE_EXPORT_FORBIDDEN_DESCRIPTION = (
+    f"{_FLOW_TRACE_FORBIDDEN_DESCRIPTION} A caller they let through is refused "
+    "with `flow_run_evidence_export_disabled` unless the flow allows export."
+)
+
 _FLOW_EVIDENCE_DESCRIPTION = """
 Get the redacted rich evidence trace for one flow run.
 
@@ -90,7 +95,13 @@ Evidence visibility is policy-based:
 _FLOW_EVIDENCE_EXPORT_DESCRIPTION = """
 Export the redacted rich evidence bundle for one flow run as a JSON attachment.
 
-Evidence export is policy-based and tiered:
+Each flow decides whether its run evidence may be exported at all:
+`metadata_json.evidence_policy.allow_export` is false until someone who may edit the
+flow sets it. The flow's current value applies to all of its runs, older runs and a
+deleted flow's runs included, and binds tenant administrators and service keys too.
+Allowing it widens nobody's access: the rules below still decide who may export.
+
+When the flow allows it, export is policy-based and tiered:
 - redacted/default export is the standard support/compliance export
 - raw/full export is a stricter surface, especially for classification 3 spaces
 - service keys may export only their own-run evidence and only when explicit machine evidence
@@ -433,7 +444,7 @@ async def list_flow_run_provider_calls(
             "model": FlowEvidenceExportTooLargeError,
         },
         403: error_response(
-            description=_FLOW_TRACE_FORBIDDEN_DESCRIPTION,
+            description=_FLOW_EVIDENCE_EXPORT_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
             code="insufficient_scope",

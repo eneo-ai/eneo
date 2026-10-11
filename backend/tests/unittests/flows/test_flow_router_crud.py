@@ -803,18 +803,19 @@ async def test_update_flow_allows_space_owner_to_override_draft_owner():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("expected_revision", [None, 7])
-async def test_update_flow_forwards_the_editor_revision_to_the_service(
-    expected_revision,
+@pytest.mark.parametrize(("expected_revision", "fenced_on"), [(None, 4), (7, 7)])
+async def test_update_flow_fences_the_write_on_the_editor_revision_or_the_authorized_one(
+    expected_revision, fenced_on
 ):
-    # The editor fences its own writes on the revision it read; the route
-    # must hand that token through unchanged (None keeps the request-time
-    # fence in the repository).
+    # The editor fences its own writes on the revision it read. Without one the
+    # write is fenced on the revision this request was authorized at, never on
+    # a later read: the audit entry compares against that same state.
     container = MagicMock()
     user = _user()
     flow_id = uuid4()
     flow = _flow(flow_id)
     flow.owner_user_id = user.id
+    flow.draft_revision = 4
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     flow_service.update_flow.return_value = flow
@@ -830,10 +831,34 @@ async def test_update_flow_forwards_the_editor_revision_to_the_service(
         container=container,
     )
 
-    assert (
-        flow_service.update_flow.await_args.kwargs["expected_revision"]
-        == expected_revision
+    assert flow_service.update_flow.await_args.kwargs["expected_revision"] == fenced_on
+
+
+@pytest.mark.asyncio
+async def test_update_flow_audits_nothing_when_the_write_is_refused_as_stale():
+    container = MagicMock()
+    user = _user()
+    flow_id = uuid4()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow_with_export(flow_id, user, allowed=False)
+    flow_service.update_flow.side_effect = BadRequestException(
+        "The flow has changed.", code="stale_revision"
     )
+    audit_service = AsyncMock()
+    container.flow_service.return_value = flow_service
+    container.audit_service.return_value = audit_service
+    container.user.return_value = user
+    _enable_space_access(container, can_edit=True)
+
+    with pytest.raises(BadRequestException):
+        await definition_update_flow(
+            id=flow_id,
+            request=_request(),
+            flow_in=FlowUpdateRequest(name="Renamed"),
+            container=container,
+        )
+
+    audit_service.log_async.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -883,6 +908,163 @@ async def test_update_flow_pins_audit_entity_ids():
     assert [
         call.kwargs["entity_id"] for call in audit_service.log_async.await_args_list
     ] == [flow_id, flow_id]
+
+
+def _flow_with_export(flow_id, user, *, allowed: bool | None):
+    flow = _flow(flow_id)
+    flow.owner_user_id = user.id
+    if allowed is not None:
+        flow.metadata_json = {"evidence_policy": {"allow_export": allowed}}
+    return flow
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allowed", [True, False])
+async def test_create_flow_audits_evidence_export_allowed_from_the_start(
+    monkeypatch, allowed: bool
+):
+    container = MagicMock()
+    user = _user()
+    flow_id = uuid4()
+    flow = _flow_with_export(flow_id, user, allowed=allowed)
+    flow_service = AsyncMock()
+    flow_service.create_flow.return_value = flow
+    audit_service = AsyncMock()
+    container.flow_service.return_value = flow_service
+    container.audit_service.return_value = audit_service
+    container.user.return_value = user
+    _enable_space_access(container)
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    await create_flow(
+        request=_request(),
+        flow_in=FlowCreateRequest(
+            space_id=flow.space_id,
+            name="Flow",
+            steps=[],
+            metadata_json={"evidence_policy": {"allow_export": allowed}},
+        ),
+        container=container,
+    )
+
+    [entry] = audit_service.log_async.await_args_list
+    assert entry.kwargs["action"] is ActionType.FLOW_CREATED
+    if allowed:
+        assert entry.kwargs["metadata"]["changes"] == {
+            "evidence_export_allowed": {"old": False, "new": True}
+        }
+    else:
+        assert "changes" not in entry.kwargs["metadata"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [(None, True), (False, True), (True, False), (True, None)],
+)
+async def test_update_flow_audits_a_change_of_the_evidence_export_switch(
+    before: bool | None, after: bool | None
+):
+    # Who may export a flow's evidence is an access decision: the audit entry
+    # says what the switch was and what it became.
+    container = MagicMock()
+    user = _user()
+    flow_id = uuid4()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow_with_export(
+        flow_id, user, allowed=before
+    )
+    flow_service.update_flow.return_value = _flow_with_export(
+        flow_id, user, allowed=after
+    )
+    audit_service = AsyncMock()
+    container.flow_service.return_value = flow_service
+    container.audit_service.return_value = audit_service
+    container.user.return_value = user
+    _enable_space_access(container, can_edit=True)
+
+    await definition_update_flow(
+        id=flow_id,
+        request=_request(),
+        flow_in=FlowUpdateRequest(
+            metadata_json=(
+                None if after is None else {"evidence_policy": {"allow_export": after}}
+            )
+        ),
+        container=container,
+    )
+
+    [entry] = audit_service.log_async.await_args_list
+    assert entry.kwargs["action"] is ActionType.FLOW_UPDATED
+    assert entry.kwargs["metadata"]["changes"] == {
+        "evidence_export_allowed": {"old": before is True, "new": after is True}
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_flow_refuses_the_export_switch_to_someone_who_may_not_edit_flows():
+    # The switch has no route of its own: whoever may not edit the flow may
+    # not turn its export on, and nothing is written or audited.
+    container = MagicMock()
+    user = _user()
+    flow_id = uuid4()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow_with_export(flow_id, user, allowed=False)
+    audit_service = AsyncMock()
+    container.flow_service.return_value = flow_service
+    container.audit_service.return_value = audit_service
+    container.user.return_value = user
+    _enable_space_access(container, can_edit=False)
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await definition_update_flow(
+            id=flow_id,
+            request=_request(),
+            flow_in=FlowUpdateRequest(
+                metadata_json={"evidence_policy": {"allow_export": True}}
+            ),
+            container=container,
+        )
+
+    assert exc_info.value.code == "insufficient_space_permission"
+    flow_service.update_flow.assert_not_awaited()
+    audit_service.log_async.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allowed", [None, False, True])
+async def test_update_flow_records_no_export_change_when_the_switch_is_untouched(
+    allowed: bool | None,
+):
+    container = MagicMock()
+    user = _user()
+    flow_id = uuid4()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow_with_export(
+        flow_id, user, allowed=allowed
+    )
+    flow_service.update_flow.return_value = _flow_with_export(
+        flow_id, user, allowed=allowed
+    )
+    audit_service = AsyncMock()
+    container.flow_service.return_value = flow_service
+    container.audit_service.return_value = audit_service
+    container.user.return_value = user
+    _enable_space_access(container, can_edit=True)
+
+    await definition_update_flow(
+        id=flow_id,
+        request=_request(),
+        flow_in=FlowUpdateRequest(name="New Name"),
+        container=container,
+    )
+
+    [entry] = audit_service.log_async.await_args_list
+    assert "changes" not in entry.kwargs["metadata"]
 
 
 @pytest.mark.asyncio

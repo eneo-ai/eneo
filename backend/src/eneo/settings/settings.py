@@ -191,14 +191,12 @@ FLOW_RAG_EVIDENCE_POLICY_UPDATE_EXAMPLE: JsonDict = {
 }
 
 FLOW_EVIDENCE_POLICY_EXAMPLE: JsonDict = {
-    "allow_sensitive_flow_exports": False,
     "allow_space_admin_raw_export_class3": False,
     "allow_run_owner_raw_export_class3": False,
     "allow_service_key_raw_export_class3": False,
 }
 
 FLOW_EVIDENCE_POLICY_UPDATE_EXAMPLE: JsonDict = {
-    "allow_sensitive_flow_exports": False,
     "allow_space_admin_raw_export_class3": True,
 }
 
@@ -725,7 +723,6 @@ class FlowEvidencePolicyPublic(BaseModel):
         json_schema_extra={"example": FLOW_EVIDENCE_POLICY_EXAMPLE}
     )
 
-    allow_sensitive_flow_exports: bool = False
     allow_space_admin_raw_export_class3: bool = False
     allow_run_owner_raw_export_class3: bool = False
     allow_service_key_raw_export_class3: bool = False
@@ -739,10 +736,6 @@ class FlowEvidencePolicyUpdate(BaseModel):
         json_schema_extra={"example": FLOW_EVIDENCE_POLICY_UPDATE_EXAMPLE},
     )
 
-    allow_sensitive_flow_exports: FlowEvidencePolicyUpdateFlag = Field(
-        default=None,
-        json_schema_extra=_strip_json_schema_default,
-    )
     allow_space_admin_raw_export_class3: FlowEvidencePolicyUpdateFlag = Field(
         default=None,
         json_schema_extra=_strip_json_schema_default,
@@ -757,7 +750,6 @@ class FlowEvidencePolicyUpdate(BaseModel):
     )
 
     @field_validator(
-        "allow_sensitive_flow_exports",
         "allow_space_admin_raw_export_class3",
         "allow_run_owner_raw_export_class3",
         "allow_service_key_raw_export_class3",

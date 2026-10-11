@@ -215,7 +215,6 @@ def _flow_evidence_policy_public(
 ) -> FlowEvidencePolicyPublic:
     policy = resolve_flow_evidence_policy(flow_settings)
     return FlowEvidencePolicyPublic(
-        allow_sensitive_flow_exports=policy.allow_sensitive_flow_exports,
         allow_space_admin_raw_export_class3=policy.allow_space_admin_raw_export_class3,
         allow_run_owner_raw_export_class3=policy.allow_run_owner_raw_export_class3,
         allow_service_key_raw_export_class3=policy.allow_service_key_raw_export_class3,

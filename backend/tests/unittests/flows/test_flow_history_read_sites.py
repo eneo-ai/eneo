@@ -65,7 +65,8 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
     {
         ("flows/application/flow_run_access_policy.py", name)
         for name in (
-            "FlowRunAccessPolicy._ensure_sensitive_flow_export_allowed",
+            "FlowRunAccessPolicy._ensure_caller_may_access_run",
+            "FlowRunAccessPolicy._ensure_flow_allows_evidence_export",
             "FlowRunAccessPolicy.can_list_all_runs_in_flow",
             "FlowRunAccessPolicy.ensure_can_access_run",
             "FlowRunAccessPolicy.load_run",

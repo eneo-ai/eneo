@@ -324,7 +324,6 @@ async def test_get_flow_evidence_policy_delegates_to_service() -> None:
     container = MagicMock()
     service = AsyncMock()
     service.get_flow_evidence_policy.return_value = FlowEvidencePolicyPublic(
-        allow_sensitive_flow_exports=False,
         allow_space_admin_raw_export_class3=False,
         allow_run_owner_raw_export_class3=True,
         allow_service_key_raw_export_class3=False,
@@ -336,7 +335,6 @@ async def test_get_flow_evidence_policy_delegates_to_service() -> None:
 
     response = await get_flow_evidence_policy(container=container)
 
-    assert response.allow_sensitive_flow_exports is False
     assert response.allow_run_owner_raw_export_class3 is True
     service.get_flow_evidence_policy.assert_awaited_once_with()
 
@@ -346,7 +344,6 @@ async def test_patch_flow_evidence_policy_delegates_to_service() -> None:
     container = MagicMock()
     service = AsyncMock()
     service.update_flow_evidence_policy.return_value = FlowEvidencePolicyPublic(
-        allow_sensitive_flow_exports=True,
         allow_space_admin_raw_export_class3=True,
         allow_run_owner_raw_export_class3=False,
         allow_service_key_raw_export_class3=True,
@@ -357,12 +354,10 @@ async def test_patch_flow_evidence_policy_delegates_to_service() -> None:
     )
 
     payload = FlowEvidencePolicyUpdate(
-        allow_sensitive_flow_exports=True,
         allow_service_key_raw_export_class3=True,
     )
     response = await update_flow_evidence_policy(payload=payload, container=container)
 
-    assert response.allow_sensitive_flow_exports is True
     assert response.allow_service_key_raw_export_class3 is True
     service.update_flow_evidence_policy.assert_awaited_once_with(payload)
 

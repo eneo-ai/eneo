@@ -465,3 +465,96 @@ def test_persisted_read_tolerates_empty_options_on_multiselect() -> None:
     )
     assert parsed is not None
     assert parsed.form_schema.fields[0].options == []
+
+
+def test_flow_evidence_export_is_off_until_the_flow_allows_it() -> None:
+    absent = parse_flow_metadata({}, mode=FlowMetadataParseMode.WRITE)
+
+    assert absent.evidence_policy.allow_export is False
+    assert serialize_flow_metadata(absent) == {}
+    assert (
+        parse_flow_metadata(
+            None, mode=FlowMetadataParseMode.PERSISTED_READ
+        ).evidence_policy.allow_export
+        is False
+    )
+
+
+@pytest.mark.parametrize("allowed", [True, False])
+def test_flow_evidence_policy_round_trips_an_explicit_choice(allowed: bool) -> None:
+    parsed = parse_flow_metadata(
+        {"evidence_policy": {"allow_export": allowed}},
+        mode=FlowMetadataParseMode.WRITE,
+    )
+
+    assert parsed.evidence_policy.allow_export is allowed
+    assert serialize_flow_metadata(parsed) == {
+        "evidence_policy": {"allow_export": allowed}
+    }
+
+
+@pytest.mark.parametrize(
+    ("policy", "message"),
+    [
+        ("yes", "metadata_json.evidence_policy must be an object."),
+        (
+            {"allow_export": "true"},
+            "metadata_json.evidence_policy.allow_export must be a boolean.",
+        ),
+        (
+            {"allow_export": 1},
+            "metadata_json.evidence_policy.allow_export must be a boolean.",
+        ),
+        (
+            {"allow_export": True, "allow_raw_export": True},
+            "metadata_json.evidence_policy contains unknown fields: allow_raw_export",
+        ),
+    ],
+)
+def test_flow_evidence_policy_write_accepts_only_a_real_boolean(
+    policy: object, message: str
+) -> None:
+    with pytest.raises(BadRequestException, match=re.escape(message)):
+        parse_flow_metadata(
+            {"evidence_policy": policy},
+            mode=FlowMetadataParseMode.WRITE,
+        )
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        "yes",
+        1,
+        [],
+        {},
+        {"allow_export": "true"},
+        {"allow_export": 1},
+        {"allow_export": None},
+    ],
+)
+def test_flow_evidence_policy_persisted_read_enables_only_on_exact_true(
+    stored: object,
+) -> None:
+    # An export switch that a corrupt value could open would not be a switch.
+    parsed = parse_flow_metadata(
+        {"evidence_policy": stored},
+        mode=FlowMetadataParseMode.PERSISTED_READ,
+    )
+
+    assert parsed.evidence_policy.allow_export is False
+
+
+@pytest.mark.parametrize("allowed", [True, False])
+def test_flow_evidence_policy_persisted_read_keeps_a_stored_boolean(
+    allowed: bool,
+) -> None:
+    parsed = parse_flow_metadata(
+        {"evidence_policy": {"allow_export": allowed, "legacy": "ignored"}},
+        mode=FlowMetadataParseMode.PERSISTED_READ,
+    )
+
+    assert parsed.evidence_policy.allow_export is allowed
+    assert serialize_flow_metadata(parsed) == {
+        "evidence_policy": {"allow_export": allowed}
+    }

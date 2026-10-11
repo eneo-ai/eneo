@@ -94,6 +94,7 @@ async def _seed_snapshot_run(
             name="Evidence snapshot",
             created_by_user_id=admin_user.id,
             owner_user_id=admin_user.id,
+            metadata_json={"evidence_policy": {"allow_export": True}},
         ),
         tenant_id=admin_user.tenant_id,
     )

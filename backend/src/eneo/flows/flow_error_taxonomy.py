@@ -560,6 +560,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Request evidence access with a principal allowed by run and policy checks.",
         user_action="Ask for permission to view run evidence.",
     ),
+    FlowApiErrorCode.RUN_EVIDENCE_EXPORT_DISABLED: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="Evidence export is turned off for the flow that owns the run.",
+        consumer_action="Allow evidence export in the flow's metadata, unpublishing the flow first if it is published.",
+        user_action="Ask whoever manages the flow to allow evidence export in the flow's settings.",
+    ),
     FlowApiErrorCode.RUN_EVIDENCE_RAW_EXPORT_FORBIDDEN: _entry(
         category="Evidence and artifacts",
         surfaced_through="API error response",

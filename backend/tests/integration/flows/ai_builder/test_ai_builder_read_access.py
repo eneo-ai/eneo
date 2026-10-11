@@ -58,6 +58,7 @@ from eneo.flows.api.flow_ai_builder_router import (
 )
 from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_evidence_policy import FlowEvidenceMetadataFacts
 from eneo.flows.infrastructure import flow_repo as flow_repo_module
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
@@ -284,8 +285,11 @@ async def test_a_refused_grant_parses_no_flow_metadata(
     parsed: list[object] = []
     monkeypatch.setattr(
         flow_repo_module,
-        "flow_metadata_marks_sensitive_or_unreadable",
-        lambda metadata: parsed.append(metadata) or False,
+        "flow_evidence_metadata_facts",
+        lambda metadata: (
+            parsed.append(metadata)
+            or FlowEvidenceMetadataFacts(sensitive=False, export_allowed=False)
+        ),
     )
     await _committed(
         "UPDATE spaces_users SET role = 'viewer' "

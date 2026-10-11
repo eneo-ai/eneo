@@ -51,7 +51,7 @@ Required audit persistence is fail-closed. A content request can return `503` ra
 
 Use `GET .../evidence/` for rich inline inspection. Use the paginated provider-calls endpoint for provider lifecycle detail. Evidence access is permission- and policy-gated; a service key may access only its own runs and needs explicit Flow evidence capability.
 
-Exports support redacted and raw detail. Prefer redacted. Raw export requires a meaningful reason and can be further restricted for sensitive classifications. Evidence export is synchronous and can refuse oversized bundles with `413 flow_evidence_export_too_large`; page provider calls instead of attempting an unbounded export.
+Export is the flow's own setting: until `metadata_json.evidence_policy.allow_export` is `true` on the flow, an export you are otherwise allowed to make is refused with `403 flow_run_evidence_export_disabled`. Do not retry; the flow's editor has to turn it on. Turning it on does not replace the capability your key needs. Exports support redacted and raw detail. Prefer redacted. Raw export requires a meaningful reason and can be further restricted for sensitive classifications. Evidence export is synchronous and can refuse oversized bundles with `413 flow_evidence_export_too_large`; page provider calls instead of attempting an unbounded export.
 
 Do not claim evidence proves which retrieved passage influenced a model. It records retrieval, prompt inclusion, attempts, and outputs; material influence remains unknown.
 

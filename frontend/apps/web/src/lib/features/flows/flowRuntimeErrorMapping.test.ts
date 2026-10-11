@@ -336,6 +336,13 @@ describe("flowRuntimeErrorMapping", () => {
       ]
     ],
     [
+      "flow_run_evidence_export_disabled",
+      [
+        "Evidence download is turned off for this flow. Whoever manages the flow can turn it on in the flow's basic settings.",
+        "Nedladdning av bevisunderlag är avstängd för det här flödet. Den som ansvarar för flödet kan slå på den under flödets grundinställningar."
+      ]
+    ],
+    [
       "flow_run_evidence_raw_export_forbidden",
       [
         "Exporting evidence with content is turned off for this run.",

@@ -105,6 +105,10 @@ decision actor are accepted. Approval resumes the same run; rejection or expiry
 uses canonical terminalization.
 
 Evidence and files preserve their tenant, run, step, and attempt provenance.
+Export of a run's evidence is off until the flow's own metadata allows it
+(`evidence_policy.allow_export`); the run access policy enforces it from the
+flow's current row for every principal its other rules let through, so a caller
+who may not export learns nothing about the setting.
 Raw evidence export is exceptional, audited before response, and fails closed
 when its protection preconditions are not met.
 

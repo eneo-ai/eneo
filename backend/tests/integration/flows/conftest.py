@@ -394,6 +394,7 @@ def create_published_compose_text_flow() -> Callable[
         name: str | None = None,
         output_mode: str = "compose_text",
         output_type: str = "text",
+        metadata_json: Mapping[str, object] | None = None,
     ) -> PublishedComposeTextFlow:
         suffix = uuid4().hex[:8]
         name = name or f"Flow process proof {suffix}"
@@ -412,6 +413,7 @@ def create_published_compose_text_flow() -> Callable[
                 "name": name,
                 "description": "Deterministic broker and worker process proof.",
                 "steps": [],
+                **({} if metadata_json is None else {"metadata_json": metadata_json}),
             },
             headers=headers,
         )

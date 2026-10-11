@@ -373,11 +373,7 @@ describe("FlowRunsTable search and pagination", () => {
       render(FlowRunsTable, {
         props: {
           flow: makeTestFlow(),
-          careDataPolicy: {
-            sensitive: true,
-            approvalMode: null,
-            preApprovalVisibility: null
-          },
+          evidenceExportAllowed: false,
           eneo,
           visible: true,
           optimisticRuns: [],
@@ -407,11 +403,9 @@ describe("FlowRunsTable search and pagination", () => {
       await waitFor(() => expect(evidenceCalls).toHaveLength(1));
       expect(document.querySelectorAll('[id="flow-run-evidence-aaa"]')).toHaveLength(1);
 
-      // The sensitive-care policy suppresses export actions and shows the
-      // explanatory badge instead.
-      await waitFor(() =>
-        expect(screen.getByText(m.flow_sensitive_evidence_export_disabled())).toBeTruthy()
-      );
+      // With download off for the flow there is no export action, and a
+      // line says why.
+      await waitFor(() => expect(screen.getByText(m.flow_run_evidence_export_off())).toBeTruthy());
       expect(
         screen.queryByRole("button", { name: m.flow_run_download_evidence_export() })
       ).toBeNull();

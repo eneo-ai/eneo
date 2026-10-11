@@ -33,7 +33,6 @@
   } from "./flowRunStatusSets";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { IsMobile } from "$lib/hooks/is-mobile.svelte";
-  import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
   import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import {
     createFlowRunHistoryState,
@@ -57,7 +56,7 @@
 
   let {
     flow,
-    careDataPolicy = undefined,
+    evidenceExportAllowed = false,
     eneo,
     visible = true,
     optimisticRuns = [],
@@ -67,7 +66,7 @@
     onrepair
   }: {
     flow: Flow;
-    careDataPolicy?: FlowCareDataPolicy;
+    evidenceExportAllowed?: boolean;
     eneo: Eneo;
     visible?: boolean;
     optimisticRuns?: FlowRun[];
@@ -367,7 +366,7 @@
     <FlowRunEvidence
       runId={run.id}
       flowId={flow.id}
-      sensitiveCareDataFlow={careDataPolicy?.sensitive === true}
+      {evidenceExportAllowed}
       {eneo}
       runStatus={run.status}
       onRepairFailure={onrepair ?? null}

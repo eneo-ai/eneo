@@ -7,6 +7,7 @@
 import { createContext } from "$lib/core/context";
 import type { Flow, FlowSparse, Eneo } from "@eneo/eneo-js";
 import { get, writable } from "svelte/store";
+import { flowAllowsEvidenceExport } from "./flowEvidencePolicy";
 import { loadFlowList } from "./flowListLoader";
 
 const [getFlowsManager, setFlowsManager] =
@@ -65,6 +66,13 @@ function FlowsManager(data: FlowsManagerParams) {
     await refreshFlows();
   }
 
+  /** The list rows do not carry a flow's settings, so the one that matters
+   *  before a delete is read then: a deleted flow can no longer be changed. */
+  async function readEvidenceExportAllowed(flowId: string): Promise<boolean> {
+    const flow = await eneo.flows.get({ id: flowId });
+    return flowAllowsEvidenceExport(flow.metadata_json);
+  }
+
   return Object.freeze({
     state: {
       flows,
@@ -74,7 +82,8 @@ function FlowsManager(data: FlowsManagerParams) {
     },
     refreshFlows,
     createFlow,
-    deleteFlow
+    deleteFlow,
+    readEvidenceExportAllowed
   });
 }
 

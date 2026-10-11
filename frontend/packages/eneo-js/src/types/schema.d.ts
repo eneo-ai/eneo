@@ -5221,7 +5221,13 @@ export interface paths {
      * Export flow run evidence bundle
      * @description Export the redacted rich evidence bundle for one flow run as a JSON attachment.
      *
-     *     Evidence export is policy-based and tiered:
+     *     Each flow decides whether its run evidence may be exported at all:
+     *     `metadata_json.evidence_policy.allow_export` is false until someone who may edit the
+     *     flow sets it. The flow's current value applies to all of its runs, older runs and a
+     *     deleted flow's runs included, and binds tenant administrators and service keys too.
+     *     Allowing it widens nobody's access: the rules below still decide who may export.
+     *
+     *     When the flow allows it, export is policy-based and tiered:
      *     - redacted/default export is the standard support/compliance export
      *     - raw/full export is a stricter surface, especially for classification 3 spaces
      *     - service keys may export only their own-run evidence and only when explicit machine evidence
@@ -18107,6 +18113,7 @@ export interface components {
       | "flow_run_abandoned"
       | "flow_run_error_payload_invalid"
       | "flow_run_evidence_forbidden"
+      | "flow_run_evidence_export_disabled"
       | "flow_run_evidence_raw_export_forbidden"
       | "flow_run_artifact_not_found"
       | "flow_run_artifact_content_unavailable"
@@ -18815,7 +18822,6 @@ export interface components {
      * FlowEvidencePolicyPublic
      * @example {
      *       "allow_run_owner_raw_export_class3": false,
-     *       "allow_sensitive_flow_exports": false,
      *       "allow_service_key_raw_export_class3": false,
      *       "allow_space_admin_raw_export_class3": false
      *     }
@@ -18826,11 +18832,6 @@ export interface components {
        * @default false
        */
       allow_run_owner_raw_export_class3?: boolean;
-      /**
-       * Allow Sensitive Flow Exports
-       * @default false
-       */
-      allow_sensitive_flow_exports?: boolean;
       /**
        * Allow Service Key Raw Export Class3
        * @default false
@@ -18846,15 +18847,12 @@ export interface components {
      * FlowEvidencePolicyUpdate
      * @description Omit fields to keep them unchanged; explicit null is not a policy value.
      * @example {
-     *       "allow_sensitive_flow_exports": false,
      *       "allow_space_admin_raw_export_class3": true
      *     }
      */
     FlowEvidencePolicyUpdate: {
       /** Allow Run Owner Raw Export Class3 */
       allow_run_owner_raw_export_class3?: boolean;
-      /** Allow Sensitive Flow Exports */
-      allow_sensitive_flow_exports?: boolean;
       /** Allow Service Key Raw Export Class3 */
       allow_service_key_raw_export_class3?: boolean;
       /** Allow Space Admin Raw Export Class3 */
@@ -59194,7 +59192,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Forbidden. Service keys (`sk_`) need `resource_permissions.flows >= read` before `resource_permissions.flow_evidence` is evaluated. For own-run evidence, `flow_evidence >= read` allows view, `flow_evidence >= write` allows redacted export, and `flow_evidence = admin` allows raw export when tenant Flow evidence policy also permits it. Scope, resource permission, tenant permission, run ownership, and evidence policy are evaluated before returning Flow evidence. Machine-readable codes include `insufficient_scope`, `insufficient_resource_permission`, and `flow_run_evidence_forbidden`. */
+      /** @description Forbidden. Service keys (`sk_`) need `resource_permissions.flows >= read` before `resource_permissions.flow_evidence` is evaluated. For own-run evidence, `flow_evidence >= read` allows view, `flow_evidence >= write` allows redacted export, and `flow_evidence = admin` allows raw export when tenant Flow evidence policy also permits it. Scope, resource permission, tenant permission, run ownership, and evidence policy are evaluated before returning Flow evidence. Machine-readable codes include `insufficient_scope`, `insufficient_resource_permission`, and `flow_run_evidence_forbidden`. A caller they let through is refused with `flow_run_evidence_export_disabled` unless the flow allows export. */
       403: {
         headers: {
           [name: string]: unknown;

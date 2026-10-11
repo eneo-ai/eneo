@@ -118,6 +118,7 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_run_abandoned: m.flow_error_flow_run_abandoned,
   flow_run_error_payload_invalid: m.flow_error_flow_run_error_payload_invalid,
   flow_run_evidence_forbidden: m.flow_error_flow_run_evidence_forbidden,
+  flow_run_evidence_export_disabled: m.flow_error_flow_run_evidence_export_disabled,
   flow_run_evidence_raw_export_forbidden: m.flow_error_flow_run_evidence_raw_export_forbidden,
   flow_run_artifact_not_found: m.flow_error_flow_run_artifact_not_found,
   flow_run_artifact_content_unavailable: m.flow_error_flow_run_artifact_content_unavailable,

@@ -64,7 +64,7 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_evidence_policy import (
     FlowHistoryAccessContext,
-    flow_metadata_marks_sensitive_or_unreadable,
+    flow_evidence_metadata_facts,
 )
 from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_run_input_envelope import build_initial_run_input_envelope
@@ -169,12 +169,14 @@ def _seed_flow_repo(flow_repo, flow) -> None:
     """
     flow_repo.get.return_value = flow
     flow_repo.lock_publication_pointer.return_value = flow.published_version
+    evidence_facts = flow_evidence_metadata_facts(flow.metadata_json)
     flow_repo.get_history_access_context.return_value = FlowHistoryAccessContext(
         flow_id=flow.id,
         space_id=flow.space_id,
         published=True,
         retired=False,
-        sensitive=flow_metadata_marks_sensitive_or_unreadable(flow.metadata_json),
+        sensitive=evidence_facts.sensitive,
+        evidence_export_allowed=evidence_facts.export_allowed,
         classification_level=0,
     )
 
@@ -402,6 +404,11 @@ def _step(step_order: int = 1) -> FlowStep:
         output_mode="pass_through",
         output_type="json",
     )
+
+
+def _exportable_flow(user) -> Flow:
+    """A flow whose own setting allows evidence export; a flow's default does not."""
+    return _flow(user=user, metadata_json={"evidence_policy": {"allow_export": True}})
 
 
 def _flow(
@@ -2620,7 +2627,7 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
             "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
-    flow = _flow(user=user).model_copy(update={"id": run.flow_id})
+    flow = _exportable_flow(user).model_copy(update={"id": run.flow_id})
     version = _version(user=user, flow=flow, version=1)
     _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get.return_value = run
@@ -2661,7 +2668,7 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
     actor_manager.get_space_actor_from_space.return_value = SimpleNamespace(
         get_current_role=lambda: "admin"
     )
-    flow = _flow(user=user)
+    flow = _exportable_flow(user)
     _seed_flow_repo(flow_repo, flow)
     run = _run(user=user, flow_id=flow.id).model_copy(
         update={
@@ -2707,19 +2714,16 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
 
 
 @pytest.mark.asyncio
-async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_by_default(
+async def test_export_evidence_json_is_refused_until_the_flow_allows_it(
     user,
 ):
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
-    sensitive_flow = _flow(
-        user=user,
-        metadata_json={"care_data_policy": {"sensitive": True}},
-    )
-    run = _run(user=user, flow_id=sensitive_flow.id)
+    flow = _flow(user=user)
+    run = _run(user=user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
-    flow_repo.get.return_value = sensitive_flow
+    _seed_flow_repo(flow_repo, flow)
     service = _flow_run_evidence_service(
         user=_trace_user(user),
         flow_repo=flow_repo,
@@ -2734,11 +2738,11 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_by_de
     with pytest.raises(UnauthorizedException) as exc_info:
         await service.export_evidence_json(run_id=run.id, detail="redacted")
 
-    assert exc_info.value.code == "flow_run_evidence_forbidden"
+    assert exc_info.value.code == "flow_run_evidence_export_disabled"
 
 
 @pytest.mark.asyncio
-async def test_export_evidence_json_allows_sensitive_flow_redacted_export_when_policy_enabled(
+async def test_export_evidence_json_allows_a_sensitive_flow_whose_own_switch_is_on(
     user,
 ):
     flow_repo = _flow_repo()
@@ -2746,28 +2750,20 @@ async def test_export_evidence_json_allows_sensitive_flow_redacted_export_when_p
     flow_version_repo = AsyncMock()
     sensitive_flow = _flow(
         user=user,
-        metadata_json={"care_data_policy": {"sensitive": True}},
+        metadata_json={
+            "care_data_policy": {"sensitive": True},
+            "evidence_policy": {"allow_export": True},
+        },
     )
     run = _run(user=user, flow_id=sensitive_flow.id)
     version = _version(user=user, flow=sensitive_flow, version=1)
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
-    flow_repo.get.return_value = sensitive_flow
+    _seed_flow_repo(flow_repo, sensitive_flow)
     flow_version_repo.get.return_value = version
-    allowed_user = _trace_user(
-        user.model_copy(
-            update={
-                "tenant": SimpleNamespace(
-                    flow_settings={
-                        "evidence_policy": {"allow_sensitive_flow_exports": True}
-                    }
-                )
-            }
-        )
-    )
     service = _flow_run_evidence_service(
-        user=allowed_user,
+        user=_trace_user(user),
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
@@ -2783,7 +2779,7 @@ async def test_export_evidence_json_allows_sensitive_flow_redacted_export_when_p
 
 
 @pytest.mark.asyncio
-async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_space_admin_by_default(
+async def test_export_evidence_json_refuses_a_space_admin_while_export_is_off(
     user,
 ):
     flow_repo = _flow_repo()
@@ -2794,17 +2790,14 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_s
     actor_manager.get_space_actor_from_space.return_value = SimpleNamespace(
         get_current_role=lambda: "admin"
     )
-    sensitive_flow = _flow(
-        user=user,
-        metadata_json={"care_data_policy": {"sensitive": True}},
-    )
+    flow = _flow(user=user)
     run = _run(
         user=SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id),
-        flow_id=sensitive_flow.id,
+        flow_id=flow.id,
     )
     flow_run_repo.get.return_value = run
-    flow_repo.get.return_value = sensitive_flow
-    space_service.get_space.return_value = SimpleNamespace(id=sensitive_flow.space_id)
+    _seed_flow_repo(flow_repo, flow)
+    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
@@ -2826,11 +2819,11 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_s
     with pytest.raises(UnauthorizedException) as exc_info:
         await service.export_evidence_json(run_id=run.id, detail="redacted")
 
-    assert exc_info.value.code == "flow_run_evidence_forbidden"
+    assert exc_info.value.code == "flow_run_evidence_export_disabled"
 
 
 @pytest.mark.asyncio
-async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_tenant_admin_by_default(
+async def test_export_evidence_json_refuses_a_tenant_admin_while_export_is_off(
     user,
 ):
     flow_repo = _flow_repo()
@@ -2842,16 +2835,13 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_t
             "tenant": SimpleNamespace(flow_settings={}),
         }
     )
-    sensitive_flow = _flow(
-        user=user,
-        metadata_json={"care_data_policy": {"sensitive": True}},
-    )
+    flow = _flow(user=user)
     run = _run(
         user=SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id),
-        flow_id=sensitive_flow.id,
+        flow_id=flow.id,
     )
     flow_run_repo.get.return_value = run
-    flow_repo.get.return_value = sensitive_flow
+    _seed_flow_repo(flow_repo, flow)
     service = _flow_run_evidence_service(
         user=admin_user,
         flow_repo=flow_repo,
@@ -2866,23 +2856,20 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_t
     with pytest.raises(UnauthorizedException) as exc_info:
         await service.export_evidence_json(run_id=run.id, detail="redacted")
 
-    assert exc_info.value.code == "flow_run_evidence_forbidden"
+    assert exc_info.value.code == "flow_run_evidence_export_disabled"
 
 
 @pytest.mark.asyncio
-async def test_export_evidence_json_rechecks_sensitive_policy_when_run_is_injected(
+async def test_export_evidence_json_rechecks_the_export_switch_when_run_is_injected(
     user,
 ):
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
-    sensitive_flow = _flow(
-        user=user,
-        metadata_json={"care_data_policy": {"sensitive": True}},
-    )
-    run = _run(user=user, flow_id=sensitive_flow.id)
-    version = _version(user=user, flow=sensitive_flow, version=1)
-    flow_repo.get.return_value = sensitive_flow
+    flow = _flow(user=user)
+    run = _run(user=user, flow_id=flow.id)
+    version = _version(user=user, flow=flow, version=1)
+    _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = version
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
@@ -2904,7 +2891,7 @@ async def test_export_evidence_json_rechecks_sensitive_policy_when_run_is_inject
             run=run,
         )
 
-    assert exc_info.value.code == "flow_run_evidence_forbidden"
+    assert exc_info.value.code == "flow_run_evidence_export_disabled"
 
 
 @pytest.mark.asyncio
@@ -3405,7 +3392,7 @@ async def test_export_evidence_json_rejects_space_admin_raw_export_in_classifica
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
     actor_manager.get_space_actor_from_space.return_value = actor
-    flow = _flow(user=user)
+    flow = _exportable_flow(user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=flow.id)
@@ -3451,7 +3438,7 @@ async def test_export_evidence_json_allows_space_owner_raw_export_in_classificat
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "owner")
     actor_manager.get_space_actor_from_space.return_value = actor
-    flow = _flow(user=user)
+    flow = _exportable_flow(user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=flow.id)
@@ -3509,7 +3496,7 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
     actor_manager.get_space_actor_from_space.return_value = SimpleNamespace(
         get_current_role=lambda: "viewer"
     )
-    flow = _flow(user=trace_user)
+    flow = _exportable_flow(trace_user)
     run = _run(user=trace_user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []

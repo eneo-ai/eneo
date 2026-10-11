@@ -129,7 +129,7 @@ def _build_flow(
         created_by_user_id=user_id,
         owner_user_id=user_id,
         published_version=None,
-        metadata_json=None,
+        metadata_json={"evidence_policy": {"allow_export": True}},
         data_retention_days=30,
         created_at=None,
         updated_at=None,

@@ -158,7 +158,10 @@ def _build_flow(
         owner_user_id=user_id,
         published_version=None,
         metadata_json={
-            "form_schema": {"fields": [{"name": "question", "type": "string"}]}
+            "form_schema": {"fields": [{"name": "question", "type": "string"}]},
+            # The flow row decides: the published snapshot these tests store
+            # carries no evidence policy of its own.
+            "evidence_policy": {"allow_export": True},
         },
         data_retention_days=30,
         created_at=None,
@@ -1278,6 +1281,8 @@ async def test_evidence_response_accepts_redacted_service_key_credential_id(
     flow = await create_published_compose_text_flow(
         client,
         flow_process_auth_headers,
+        # The export below is refused unless the flow itself allows it.
+        metadata_json={"evidence_policy": {"allow_export": True}},
     )
     key_response = await client.post(
         "/api/v1/api-keys",

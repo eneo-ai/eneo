@@ -41,20 +41,23 @@
     createTranscriptCorrectionsController,
     type TranscriptCorrectionsController
   } from "$lib/features/flows/transcriptCorrectionsController.svelte";
-  import { getReviewPolicyErrorStepsFromDefinitionSnapshot } from "$lib/features/flows/flowRuntimeErrorMapping";
+  import {
+    getFlowRuntimeErrorMessage,
+    getReviewPolicyErrorStepsFromDefinitionSnapshot
+  } from "$lib/features/flows/flowRuntimeErrorMapping";
   import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
 
   let {
     runId,
     flowId,
-    sensitiveCareDataFlow = false,
+    evidenceExportAllowed = false,
     eneo,
     runStatus,
     onRepairFailure = null
   }: {
     runId: string;
     flowId: string;
-    sensitiveCareDataFlow?: boolean;
+    evidenceExportAllowed?: boolean;
     eneo: Eneo;
     runStatus: FlowRunSummary["status"];
     /** Offered when the AI Builder may repair a failed step of this run. */
@@ -264,10 +267,12 @@
       await downloadEvidenceExport({ eneo: eneo, flowId, runId });
     } catch (error) {
       const recovery = exportRecoveryMessage(error);
+      // A refusal with a known code (download turned off for the flow while
+      // this tab was open, a missing permission) gets that code's message.
       toast.error(
         recovery
           ? `${m.flow_run_download_evidence_export_failed()} ${recovery}`
-          : m.flow_run_download_evidence_export_failed()
+          : getFlowRuntimeErrorMessage(error, m.flow_run_download_evidence_export_failed())
       );
     }
   }
@@ -514,7 +519,7 @@
       <FlowRunEvidenceToolbar
         debugExport={evidence.debug_export}
         {copiedKey}
-        {sensitiveCareDataFlow}
+        {evidenceExportAllowed}
         onDownloadCanonicalEvidence={downloadCanonicalEvidenceExport}
         onCopyPayload={copyPayload}
         onDownloadJsonArtifact={downloadJsonArtifact}

@@ -301,6 +301,7 @@ def _wire_flow_gate(container) -> None:
             published=flow.published,
             retired=False,
             sensitive=False,
+            evidence_export_allowed=True,
             classification_level=0,
         )
 

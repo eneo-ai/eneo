@@ -145,6 +145,23 @@ describe("FlowEditor metadata commands", () => {
     expect(hasUnsavedChanges).toBe(true);
   });
 
+  it("turns evidence download on for the flow without touching its other metadata", () => {
+    const { metadataJson, hasUnsavedChanges } = renderEditorMetadata({
+      operation: "allow-evidence-export",
+      flow: makeFlow({
+        care_data_policy: { sensitive: true },
+        wizard: { transcription_enabled: true }
+      })
+    });
+
+    expect(metadataJson).toEqual({
+      care_data_policy: { sensitive: true },
+      wizard: { transcription_enabled: true },
+      evidence_policy: { allow_export: true }
+    });
+    expect(hasUnsavedChanges).toBe(true);
+  });
+
   it("patches wizard metadata while preserving existing wizard and metadata keys", () => {
     const { metadataJson, hasUnsavedChanges } = renderEditorMetadata({
       operation: "wizard",
@@ -1235,7 +1252,7 @@ function renderEditorMetadata({
   operation
 }: {
   flow: Flow;
-  operation: "replace-form" | "empty-form" | "wizard";
+  operation: "replace-form" | "empty-form" | "wizard" | "allow-evidence-export";
 }): { metadataJson: unknown; hasUnsavedChanges: boolean } {
   const editor = createFlowEditor({ flow, eneo: makeEneo() });
   try {
@@ -1246,6 +1263,8 @@ function renderEditorMetadata({
       ]);
     } else if (operation === "empty-form") {
       editor.replaceFormSchemaFields([]);
+    } else if (operation === "allow-evidence-export") {
+      editor.setEvidenceExportAllowed(true);
     } else {
       editor.setWizardMetadata({ transcription_model: { id: "model-1" } });
       editor.setTranscriptionEnabled(false);

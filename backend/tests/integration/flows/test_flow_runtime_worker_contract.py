@@ -344,13 +344,14 @@ def _build_flow(
         owner_user_id=user_id,
         published_version=None,
         metadata_json={
+            "evidence_policy": {"allow_export": True},
             "form_schema": {
                 "fields": (
                     [{"name": "question", "type": "text"}]
                     if form_fields is None
                     else form_fields
                 )
-            }
+            },
         },
         data_retention_days=30,
         created_at=None,

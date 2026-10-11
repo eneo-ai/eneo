@@ -71,6 +71,7 @@ Always keep an unknown-code branch that shows a generic failure, records the raw
 | `401 invalid_api_key`                      | Replace or reissue the key; do not retry it.                                   |
 | `403 insufficient_scope`                   | Fix key scope. Do not infer whether the resource exists.                       |
 | `403 insufficient_resource_permission`     | Reissue with the required permission reported in context.                      |
+| `403 flow_run_evidence_export_disabled`    | The flow has not allowed evidence export. Ask its editor; do not retry.        |
 | `404 not_found`                            | Refetch discovery; do not retry the stale ID blindly.                          |
 | `413 file_too_large`                       | Read the effective step limit from the run contract.                           |
 | `415 unsupported_media_type`               | Match both declared MIME type and bytes to `accepted_mimetypes`.               |

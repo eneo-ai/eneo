@@ -11,6 +11,7 @@ import { EneoError, type Flow, type FlowStep, type Eneo, type PromptSparse } fro
 import { derived, get, readonly, writable } from "svelte/store";
 import { shouldSaveAssistantImmediately } from "./assistantSavePolicy";
 import { AssistantSaveManager } from "./flowAssistantSaveManager";
+import { withEvidenceExportAllowed } from "./flowEvidencePolicy";
 import {
   buildFlowFormSchemaMetadata,
   getFlowFormSchemaFields,
@@ -670,6 +671,10 @@ function createFlowEditor(data: FlowEditorInitData) {
     setWizardMetadata({ transcription_enabled: enabled });
   }
 
+  function setEvidenceExportAllowed(allowed: boolean): void {
+    updateMetadataJson((metadata) => withEvidenceExportAllowed(metadata, allowed));
+  }
+
   let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   function clearAutoSaveTimer() {
@@ -1161,6 +1166,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     moveStepAtIndex,
     replaceFormSchemaFields,
     setTranscriptionEnabled,
+    setEvidenceExportAllowed,
     setWizardMetadata,
     applyStepsWithSafeOrderRemap,
     rewriteInputFieldVariableReferences,

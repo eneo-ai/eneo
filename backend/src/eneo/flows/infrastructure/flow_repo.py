@@ -58,7 +58,7 @@ from eneo.flows.enums import (
 )
 from eneo.flows.flow_evidence_policy import (
     FlowHistoryAccessContext,
-    flow_metadata_marks_sensitive_or_unreadable,
+    flow_evidence_metadata_facts,
 )
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
@@ -384,12 +384,14 @@ class FlowRepository:
             metadata_json,
             security_level,
         ) = row
+        evidence_facts = flow_evidence_metadata_facts(metadata_json)
         return FlowHistoryAccessContext(
             flow_id=resolved_flow_id,
             space_id=space_id,
             published=published_version is not None,
             retired=deleted_at is not None,
-            sensitive=flow_metadata_marks_sensitive_or_unreadable(metadata_json),
+            sensitive=evidence_facts.sensitive,
+            evidence_export_allowed=evidence_facts.export_allowed,
             classification_level=(
                 security_level if isinstance(security_level, int) else 0
             ),

@@ -20,20 +20,21 @@ CLASSIFIED_SECURITY_LEVEL: Final[int] = 3
 FLOW_EVIDENCE_POLICY_SETTINGS_KEY: Final[str] = "evidence_policy"
 FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY: Final[str] = "version"
 FLOW_EVIDENCE_POLICY_STORAGE_VERSION: Final[int] = 1
-FLOW_EVIDENCE_POLICY_ALLOW_SENSITIVE_KEY: Final[str] = "allow_sensitive_flow_exports"
 FLOW_EVIDENCE_POLICY_CLASS3_KEY: Final[str] = "classification_3"
 FLOW_EVIDENCE_POLICY_SPACE_ADMIN_RAW_KEY: Final[str] = "allow_space_admin_raw_export"
 FLOW_EVIDENCE_POLICY_RUN_OWNER_RAW_KEY: Final[str] = "allow_run_owner_raw_export"
 FLOW_EVIDENCE_POLICY_SERVICE_KEY_RAW_KEY: Final[str] = "allow_service_key_raw_export"
-FLOW_EVIDENCE_POLICY_TOP_LEVEL_FLAG_KEYS: Final[frozenset[str]] = frozenset(
-    {FLOW_EVIDENCE_POLICY_ALLOW_SENSITIVE_KEY}
-)
 FLOW_EVIDENCE_POLICY_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset(
     {
         FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY,
-        FLOW_EVIDENCE_POLICY_ALLOW_SENSITIVE_KEY,
         FLOW_EVIDENCE_POLICY_CLASS3_KEY,
     }
+)
+# Export of a sensitive flow's evidence was a tenant switch before each flow
+# got its own (`metadata_json.evidence_policy.allow_export`). Stored rows may
+# still carry the key; it is dropped when read and refused when written.
+RETIRED_FLOW_EVIDENCE_POLICY_KEYS: Final[frozenset[str]] = frozenset(
+    {"allow_sensitive_flow_exports"}
 )
 FLOW_EVIDENCE_POLICY_CLASS3_KEYS: Final[frozenset[str]] = frozenset(
     {
@@ -60,6 +61,7 @@ class FlowHistoryAccessContext:
     published: bool
     retired: bool
     sensitive: bool
+    evidence_export_allowed: bool
     classification_level: int
 
     @property
@@ -80,7 +82,6 @@ class EvidenceCapabilityLevel(IntEnum):
 
 @dataclass(frozen=True)
 class FlowEvidencePolicy:
-    allow_sensitive_flow_exports: bool = False
     allow_space_admin_raw_export_class3: bool = False
     allow_run_owner_raw_export_class3: bool = False
     allow_service_key_raw_export_class3: bool = False
@@ -93,10 +94,6 @@ def resolve_flow_evidence_policy(
     class3 = _extract_class3_policy(evidence_policy)
 
     return FlowEvidencePolicy(
-        allow_sensitive_flow_exports=_enabled_flag(
-            evidence_policy,
-            FLOW_EVIDENCE_POLICY_ALLOW_SENSITIVE_KEY,
-        ),
         allow_space_admin_raw_export_class3=_enabled_flag(
             class3,
             FLOW_EVIDENCE_POLICY_SPACE_ADMIN_RAW_KEY,
@@ -130,13 +127,6 @@ def validate_flow_evidence_policy_object(value: Any) -> dict[str, Any]:
     _validate_storage_version(
         evidence_policy.get(FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY)
     )
-    for key in FLOW_EVIDENCE_POLICY_TOP_LEVEL_FLAG_KEYS:
-        if key in evidence_policy:
-            _validate_bool_flag(
-                evidence_policy[key],
-                path=f"flow_settings.evidence_policy.{key}",
-            )
-
     class3 = evidence_policy.get(FLOW_EVIDENCE_POLICY_CLASS3_KEY)
     if class3 is None:
         return evidence_policy
@@ -165,7 +155,6 @@ def validate_flow_evidence_policy_object(value: Any) -> dict[str, Any]:
 def apply_flow_evidence_policy_patch(
     current_flow_settings: dict[str, Any] | None,
     *,
-    allow_sensitive_flow_exports: bool | None = None,
     allow_space_admin_raw_export_class3: bool | None = None,
     allow_run_owner_raw_export_class3: bool | None = None,
     allow_service_key_raw_export_class3: bool | None = None,
@@ -173,33 +162,24 @@ def apply_flow_evidence_policy_patch(
     next_settings = (
         dict(current_flow_settings) if isinstance(current_flow_settings, dict) else {}
     )
-    existing_policy = _extract_evidence_policy(next_settings)
-    evidence_policy = _copy_bool_flags(
-        existing_policy,
-        FLOW_EVIDENCE_POLICY_TOP_LEVEL_FLAG_KEYS,
-    )
     class3 = _copy_bool_flags(
-        _extract_class3_policy(existing_policy),
+        _extract_class3_policy(_extract_evidence_policy(next_settings)),
         FLOW_EVIDENCE_POLICY_CLASS3_KEYS,
     )
 
     updates = {
-        FLOW_EVIDENCE_POLICY_ALLOW_SENSITIVE_KEY: allow_sensitive_flow_exports,
         FLOW_EVIDENCE_POLICY_SPACE_ADMIN_RAW_KEY: allow_space_admin_raw_export_class3,
         FLOW_EVIDENCE_POLICY_RUN_OWNER_RAW_KEY: allow_run_owner_raw_export_class3,
         FLOW_EVIDENCE_POLICY_SERVICE_KEY_RAW_KEY: allow_service_key_raw_export_class3,
     }
     for key, value in updates.items():
         if value is not None:
-            if key == FLOW_EVIDENCE_POLICY_ALLOW_SENSITIVE_KEY:
-                evidence_policy[key] = value
-            else:
-                class3[key] = value
+            class3[key] = value
 
-    evidence_policy[FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY] = (
-        FLOW_EVIDENCE_POLICY_STORAGE_VERSION
-    )
-    evidence_policy[FLOW_EVIDENCE_POLICY_CLASS3_KEY] = class3
+    evidence_policy: dict[str, Any] = {
+        FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY: FLOW_EVIDENCE_POLICY_STORAGE_VERSION,
+        FLOW_EVIDENCE_POLICY_CLASS3_KEY: class3,
+    }
     validate_flow_evidence_policy_object(evidence_policy)
     next_settings[FLOW_EVIDENCE_POLICY_SETTINGS_KEY] = evidence_policy
     return next_settings
@@ -285,29 +265,35 @@ def _reject_unknown_fields(
     )
 
 
-def flow_metadata_marks_sensitive(
-    metadata_json: FlowPersistedJsonObject | Mapping[str, object] | None,
-) -> bool:
-    return parse_flow_metadata(
-        metadata_json,
-        mode=FlowMetadataParseMode.PERSISTED_READ,
-    ).care_data_policy.sensitive
+@dataclass(frozen=True, slots=True)
+class FlowEvidenceMetadataFacts:
+    """What a flow's own metadata says about its evidence."""
+
+    sensitive: bool
+    export_allowed: bool
 
 
-def flow_metadata_marks_sensitive_or_unreadable(
+def flow_evidence_metadata_facts(
     metadata_json: FlowPersistedJsonObject | Mapping[str, object] | None,
-) -> bool:
-    """Sensitivity for a disclosure decision, failing closed when unreadable.
+) -> FlowEvidenceMetadataFacts:
+    """The flow's evidence facts for an access decision, failing closed when unreadable.
 
     Persisted metadata that cannot be parsed cannot be shown to be
-    non-sensitive, so it withholds content. Raising instead would make the
-    evidence view unreachable for the flow, which hides the whole trace rather
-    than the part that needs protecting.
+    non-sensitive or to allow export, so it withholds content and refuses the
+    export. Raising instead would make the evidence view unreachable for the
+    flow, which hides the whole trace rather than the part that needs protecting.
     """
     try:
-        return flow_metadata_marks_sensitive(metadata_json)
+        metadata = parse_flow_metadata(
+            metadata_json,
+            mode=FlowMetadataParseMode.PERSISTED_READ,
+        )
     except BadRequestException:
-        return True
+        return FlowEvidenceMetadataFacts(sensitive=True, export_allowed=False)
+    return FlowEvidenceMetadataFacts(
+        sensitive=metadata.care_data_policy.sensitive,
+        export_allowed=metadata.evidence_policy.allow_export,
+    )
 
 
 def resolve_service_key_evidence_capability(

@@ -15,7 +15,10 @@ from eneo.flows.flow_ai_builder_budget_settings import (
 from eneo.flows.flow_document_limits import (
     validate_flow_document_render_limits_object,
 )
-from eneo.flows.flow_evidence_policy import validate_flow_evidence_policy_object
+from eneo.flows.flow_evidence_policy import (
+    RETIRED_FLOW_EVIDENCE_POLICY_KEYS,
+    validate_flow_evidence_policy_object,
+)
 from eneo.flows.flow_input_limits import (
     RETIRED_FLOW_SIZE_KEYS,
     validate_flow_input_limits_object,
@@ -56,6 +59,13 @@ FLOW_SETTINGS_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset(
     }
 )
 
+# Settings that moved to another owner. Stored rows may still carry them: they
+# are dropped when a row is read and refused when settings are written.
+_RETIRED_KEYS_BY_SECTION: Final[tuple[tuple[str, frozenset[str]], ...]] = (
+    (FLOW_SETTINGS_INPUT_LIMITS_KEY, RETIRED_FLOW_SIZE_KEYS),
+    (FLOW_SETTINGS_EVIDENCE_POLICY_KEY, RETIRED_FLOW_EVIDENCE_POLICY_KEYS),
+)
+
 # Bounded by distinct unknown key names, not tenants, to avoid log spam from
 # historical JSONB rows without hiding newly observed keys.
 _warned_unknown_top_level_keys: set[str] = set()
@@ -78,15 +88,16 @@ def normalize_flow_settings_object(value: object | None) -> dict[str, Any]:
     known_settings = {
         key: settings[key] for key in settings if key in FLOW_SETTINGS_TOP_LEVEL_KEYS
     }
-    input_limits = known_settings.get(FLOW_SETTINGS_INPUT_LIMITS_KEY)
-    if isinstance(input_limits, dict):
-        known_settings[FLOW_SETTINGS_INPUT_LIMITS_KEY] = {
-            key: value
-            for key, value in _copy_string_key_mapping(
-                cast(Mapping[object, object], input_limits)
-            ).items()
-            if key not in RETIRED_FLOW_SIZE_KEYS
-        }
+    for section_key, retired_keys in _RETIRED_KEYS_BY_SECTION:
+        section = known_settings.get(section_key)
+        if isinstance(section, dict):
+            known_settings[section_key] = {
+                key: value
+                for key, value in _copy_string_key_mapping(
+                    cast(Mapping[object, object], section)
+                ).items()
+                if key not in retired_keys
+            }
     return normalize_flow_retention_policy_settings(known_settings)
 
 
@@ -114,6 +125,17 @@ def validate_flow_settings_write(value: object | None) -> dict[str, Any]:
     ):
         raise BadRequestException(
             "File and audio sizes are managed in Admin > File storage, for all flows.",
+            code="flow_settings_invalid_payload",
+        )
+    evidence_policy = settings.get(FLOW_SETTINGS_EVIDENCE_POLICY_KEY)
+    if isinstance(
+        evidence_policy, Mapping
+    ) and RETIRED_FLOW_EVIDENCE_POLICY_KEYS.intersection(
+        cast(Mapping[object, object], evidence_policy)
+    ):
+        raise BadRequestException(
+            "Evidence export is each flow's own setting "
+            "(metadata_json.evidence_policy.allow_export).",
             code="flow_settings_invalid_payload",
         )
     normalized = normalize_flow_settings_object(settings)

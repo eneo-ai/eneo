@@ -165,6 +165,16 @@ database bootstrap failed, and `21` means the audit operation or sink failed.
 
 ## Evidence export
 
+Each flow decides whether its run evidence may be exported:
+`metadata_json.evidence_policy.allow_export` is false until someone who may
+edit the flow turns it on (**Nedladdning av bevisunderlag** under the flow's
+basic settings). While it is off, everyone who could otherwise export is
+refused with `flow_run_evidence_export_disabled`, tenant administrators and
+service keys included; a caller who may not export gets the ordinary refusal.
+The flow's current value applies to all of its runs, and a deleted flow
+keeps the value it was deleted with, so it cannot be turned on afterwards. The
+flow's audit entry records each change with the old and the new value.
+
 Raw evidence export is exceptional. It requires the explicit non-default reason
 gate and an audit-before-response transaction. If audit or commit fails,
 protected bytes are not returned. Active encryption enforcement belongs to

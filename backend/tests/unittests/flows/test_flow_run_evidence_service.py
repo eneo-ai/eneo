@@ -51,7 +51,7 @@ from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_evidence_policy import (
     FlowHistoryAccessContext,
-    flow_metadata_marks_sensitive_or_unreadable,
+    flow_evidence_metadata_facts,
 )
 from eneo.flows.flow_run_provenance import (
     FlowAttemptProvenance,
@@ -105,12 +105,14 @@ def _seed_flow_repo(flow_repo, flow) -> None:
     double that returned a mock there would withhold every passage.
     """
     flow_repo.get.return_value = flow
+    evidence_facts = flow_evidence_metadata_facts(flow.metadata_json)
     flow_repo.get_history_access_context.return_value = FlowHistoryAccessContext(
         flow_id=flow.id,
         space_id=flow.space_id,
         published=True,
         retired=False,
-        sensitive=flow_metadata_marks_sensitive_or_unreadable(flow.metadata_json),
+        sensitive=evidence_facts.sensitive,
+        evidence_export_allowed=evidence_facts.export_allowed,
         classification_level=0,
     )
 

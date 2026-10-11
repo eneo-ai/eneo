@@ -173,7 +173,7 @@ def test_flow_settings_update_models_reject_unknown_fields() -> None:
         (FlowInputLimitsUpdate, {"max_files_per_run": 10}),
         (FlowDocumentRenderLimitsUpdate, {"max_source_chars": 500_000}),
         (FlowRuntimePolicyUpdate, {"default_step_timeout_seconds": 900}),
-        (FlowEvidencePolicyUpdate, {"allow_sensitive_flow_exports": True}),
+        (FlowEvidencePolicyUpdate, {"allow_run_owner_raw_export_class3": True}),
         (AIBuilderBudgetSettingsUpdate, {"max_attachments": 50}),
         (FlowRetentionPolicyUpdate, {"run_debug_evidence_days": 14}),
     )
@@ -224,7 +224,6 @@ def test_flow_retention_policy_public_rejects_invalid_debug_evidence_days(
 @pytest.mark.parametrize(
     "field_name",
     (
-        "allow_sensitive_flow_exports",
         "allow_space_admin_raw_export_class3",
         "allow_run_owner_raw_export_class3",
         "allow_service_key_raw_export_class3",
@@ -233,6 +232,14 @@ def test_flow_retention_policy_public_rejects_invalid_debug_evidence_days(
 def test_flow_evidence_policy_update_rejects_null_flags(field_name: str) -> None:
     with pytest.raises(ValidationError):
         FlowEvidencePolicyUpdate.model_validate({field_name: None})
+
+
+def test_flow_evidence_policy_update_refuses_the_retired_sensitive_export_switch() -> (
+    None
+):
+    # Export is each flow's own setting; the tenant switch no longer exists.
+    with pytest.raises(ValidationError):
+        FlowEvidencePolicyUpdate.model_validate({"allow_sensitive_flow_exports": True})
 
 
 def test_flow_settings_update_models_keep_intentional_null_clear_contracts() -> None:
@@ -709,7 +716,7 @@ async def test_update_flow_input_limits_scrubs_unknown_top_level_flow_settings()
     tenant_repo.tenant = tenant.model_copy(
         update={
             "flow_settings": {
-                "evidence_polici": {"allow_sensitive_flow_exports": True},
+                "evidence_polici": {"classification_3": {}},
                 "input_limits": {"max_files_per_run": 25},
             }
         }
@@ -946,7 +953,6 @@ async def test_get_flow_evidence_policy_reads_tenant_override():
 
     policy = await service.get_flow_evidence_policy()
 
-    assert policy.allow_sensitive_flow_exports is False
     assert policy.allow_space_admin_raw_export_class3 is True
     assert policy.allow_run_owner_raw_export_class3 is False
     assert policy.allow_service_key_raw_export_class3 is True
@@ -976,12 +982,10 @@ async def test_update_flow_evidence_policy_persists_and_audits():
 
     updated = await service.update_flow_evidence_policy(
         FlowEvidencePolicyUpdate(
-            allow_sensitive_flow_exports=True,
             allow_service_key_raw_export_class3=True,
         )
     )
 
-    assert updated.allow_sensitive_flow_exports is True
     assert updated.allow_service_key_raw_export_class3 is True
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
     assert (
@@ -989,9 +993,6 @@ async def test_update_flow_evidence_policy_persists_and_audits():
             FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY
         ]
         == FLOW_EVIDENCE_POLICY_STORAGE_VERSION
-    )
-    assert (
-        tenant.flow_settings["evidence_policy"]["allow_sensitive_flow_exports"] is True
     )
     assert (
         tenant.flow_settings["evidence_policy"]["classification_3"][

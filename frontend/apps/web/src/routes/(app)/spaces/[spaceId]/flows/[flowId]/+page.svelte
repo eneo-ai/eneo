@@ -65,6 +65,7 @@
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import FlowAIBuilderEditHost from "$lib/features/flows/ai-builder/FlowAIBuilderEditHost.svelte";
   import { resolveFlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
+  import { flowAllowsEvidenceExport } from "$lib/features/flows/flowEvidencePolicy";
   import {
     resolveAIBuilderApplyNavigation,
     resolveApplyFocusedStepId
@@ -226,6 +227,10 @@
     }
   } = flowEditor;
   const careDataPolicy = $derived(resolveFlowCareDataPolicy($resource.metadata_json));
+  // The editor shows the draft's choice; the run history follows what is saved,
+  // which is what the server enforces.
+  const evidenceExportDraft = $derived(flowAllowsEvidenceExport($update.metadata_json));
+  const evidenceExportSaved = $derived(flowAllowsEvidenceExport($resource.metadata_json));
   const activeProcessingStep = $derived(
     $update.steps.find((step) => step.id === $activeStepId) ?? null
   );
@@ -882,6 +887,28 @@
                           placeholder={m.flow_description_placeholder()}
                         />
                       </Field.Field>
+                      <Field.Separator />
+                      <Field.Field orientation="horizontal" data-disabled={$isPublished}>
+                        <Field.Content>
+                          <Field.Label for="flow-evidence-export-toggle">
+                            {m.flow_evidence_export_title()}
+                          </Field.Label>
+                          <Field.Description id="flow-evidence-export-help" class="max-w-prose">
+                            {m.flow_evidence_export_description()}
+                          </Field.Description>
+                        </Field.Content>
+                        <span class="text-secondary shrink-0 text-sm" aria-hidden="true">
+                          {evidenceExportDraft ? m.flow_setting_on() : m.flow_setting_off()}
+                        </span>
+                        <Switch
+                          id="flow-evidence-export-toggle"
+                          aria-describedby="flow-evidence-export-help"
+                          checked={evidenceExportDraft}
+                          disabled={$isPublished}
+                          onCheckedChange={(checked) =>
+                            flowEditor.setEvidenceExportAllowed(checked)}
+                        />
+                      </Field.Field>
                     </Field.Group>
                   </Card.Content>
                 </Card.Root>
@@ -911,9 +938,13 @@
                         <li class="flex items-center justify-between py-2.5">
                           <span class="text-secondary">{m.flow_summary_transcription()}</span>
                           <span class="text-primary font-medium">
-                            {transcriptionEnabled
-                              ? m.flow_transcription_on()
-                              : m.flow_transcription_off()}
+                            {transcriptionEnabled ? m.flow_setting_on() : m.flow_setting_off()}
+                          </span>
+                        </li>
+                        <li class="flex items-center justify-between gap-3 py-2.5">
+                          <span class="text-secondary">{m.flow_evidence_export_title()}</span>
+                          <span class="text-primary font-medium">
+                            {evidenceExportDraft ? m.flow_setting_on() : m.flow_setting_off()}
                           </span>
                         </li>
                         <li class="flex items-center justify-between py-2.5">
@@ -1040,9 +1071,7 @@
                     for="transcription-toggle"
                   >
                     <span class="text-secondary text-sm">
-                      {transcriptionEnabled
-                        ? m.flow_transcription_on()
-                        : m.flow_transcription_off()}
+                      {transcriptionEnabled ? m.flow_setting_on() : m.flow_setting_off()}
                     </span>
                     <Switch
                       id="transcription-toggle"
@@ -1472,7 +1501,7 @@
     >
       <FlowRunsTable
         flow={$resource}
-        {careDataPolicy}
+        evidenceExportAllowed={evidenceExportSaved}
         eneo={data.eneo}
         visible={activeTab === "history"}
         optimisticRuns={optimisticHistoryRuns}

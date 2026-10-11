@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Annotated
 from uuid import UUID
 
@@ -39,6 +40,7 @@ from eneo.flows.api.flow_runtime_paths import (
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_evidence_policy import flow_evidence_metadata_facts
 from eneo.flows.principal import FlowPrincipal
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
@@ -108,6 +110,21 @@ def _classification_override_step_orders(
         for step in steps
         if step.output_classification_override is not None
     ]
+
+
+def _evidence_export_change(
+    *,
+    before: Mapping[str, object] | None,
+    after: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    """Whether a flow's evidence may be exported is an access decision, so the
+    audit entry says what the switch was and what it became."""
+
+    old = flow_evidence_metadata_facts(before).export_allowed
+    new = flow_evidence_metadata_facts(after).export_allowed
+    if old == new:
+        return None
+    return {"evidence_export_allowed": {"old": old, "new": new}}
 
 
 @router.post(
@@ -184,7 +201,11 @@ async def create_flow(
         entity_type=EntityType.FLOW,
         entity_id=created_flow_id,
         description=f"Created flow '{created.name}'",
-        metadata=AuditMetadata.standard(actor=user, target=created),
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=created,
+            changes=_evidence_export_change(before=None, after=created.metadata_json),
+        ),
     )
     overrides = _classification_override_step_orders(flow_in)
     if overrides:
@@ -536,7 +557,7 @@ async def update_flow(
     flow_in: FlowUpdateRequest,
     container: Container = Depends(_MUTATING_CONTAINER),
 ):
-    await require_flow_edit_access(request, container, flow_id=id)
+    access_context = await require_flow_edit_access(request, container, flow_id=id)
 
     assembler = FlowAssembler()
     payload = flow_in.model_dump(exclude_unset=True)
@@ -544,13 +565,21 @@ async def update_flow(
     if "steps" in payload:
         steps = [assembler.to_domain_step_for_update(step) for step in flow_in.steps]
 
+    # Without the editor's own revision the write is fenced on the one this
+    # request was authorized at, which is also the state the audit entry below
+    # compares against.
+    expected_revision = (
+        access_context.flow.draft_revision
+        if flow_in.expected_revision is None
+        else flow_in.expected_revision
+    )
     updated = await container.flow_service().update_flow(
         flow_id=id,
         name=payload.get("name", NOT_PROVIDED),
         description=payload.get("description", NOT_PROVIDED),
         steps=steps,
         metadata_json=payload.get("metadata_json", NOT_PROVIDED),
-        expected_revision=flow_in.expected_revision,
+        expected_revision=expected_revision,
     )
 
     updated_flow_id = updated.require_persisted_id()
@@ -563,7 +592,14 @@ async def update_flow(
         entity_type=EntityType.FLOW,
         entity_id=updated_flow_id,
         description=f"Updated flow '{updated.name}'",
-        metadata=AuditMetadata.standard(actor=user, target=updated),
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=updated,
+            changes=_evidence_export_change(
+                before=access_context.flow.metadata_json,
+                after=updated.metadata_json,
+            ),
+        ),
     )
     overrides = _classification_override_step_orders(flow_in)
     if overrides:

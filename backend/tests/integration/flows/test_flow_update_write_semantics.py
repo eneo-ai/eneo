@@ -20,6 +20,7 @@ from pydantic import ValidationError
 
 from eneo.database.tables.flow_tables import Flows
 from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
+from eneo.flows.api import flow_authoring_router
 from eneo.flows.application.flow_authoring_command import (
     AIBuilderFlowAuthoringOrigin,
     CreateFlowAuthoringCommand,
@@ -1057,6 +1058,41 @@ async def test_a_patch_on_a_stale_revision_is_refused_and_writes_nothing(
     assert (await _flow_columns(db_container, typed.flow_id))[
         "description"
     ] == "Läser, bedömer, skriver."
+
+
+async def test_a_patch_without_a_revision_is_fenced_on_the_revision_it_was_authorized_at(
+    client, db_container, typed: Saved, monkeypatch
+) -> None:
+    """Someone else allows evidence export after this request was authorized
+    and before it writes. The request is refused; were it accepted, its audit
+    entry would say that it changed the setting."""
+    authorize = flow_authoring_router.require_flow_edit_access
+
+    async def authorize_then_be_overtaken(request, container, *, flow_id: UUID):
+        access = await authorize(request, container, flow_id=flow_id)
+        async with db_container() as other:
+            service = other.flow_service()
+            flow = await service.get_flow(flow_id)
+            await service.update_flow(
+                flow_id=flow_id,
+                metadata_json={
+                    **(flow.metadata_json or {}),
+                    "evidence_policy": {"allow_export": True},
+                },
+            )
+        return access
+
+    monkeypatch.setattr(
+        flow_authoring_router, "require_flow_edit_access", authorize_then_be_overtaken
+    )
+
+    response = await _patch(client, typed, {"name": "Sent", "description": None})
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "stale_revision"
+    columns = await _flow_columns(db_container, typed.flow_id)
+    assert columns["metadata_json"]["evidence_policy"] == {"allow_export": True}
+    assert columns["description"] == "Läser, bedömer, skriver."
 
 
 async def test_a_named_step_whose_producer_moves_keeps_its_credential_beside_the_new_alias(

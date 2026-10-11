@@ -269,7 +269,7 @@ These are admin surfaces, not end-user runtime endpoints:
 | Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                       | Control generated PDF/DOCX rendering limits                                                                              |
 | Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                               | Control step timeouts and the run limit                                                                                  |
 | Mapped execution policy     | `GET/PATCH /api/v1/settings/flow-mapped-execution-policy`                      | Control provider-call fan-out and aggregate estimated-input-token ceilings for each mapped step attempt                  |
-| Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                              | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces |
+| Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                              | Control stricter raw evidence export behavior for classification-3 spaces                                                |
 | Knowledge evidence policy   | `GET/PATCH /api/v1/settings/flow-rag-evidence-policy`                          | Control how much retrieval evidence a run records and exposes                                                            |
 | Flow data eligibility       | `GET/PATCH /api/v1/settings/flow-retention-policy`                             | Inspect and change never-attached-upload and debug-evidence eligibility                                                  |
 | Flow run-history retention  | `GET/PUT /api/v1/settings/flow-run-retention-policy` and its Space/Flow routes | Inspect, replace, or inherit complete run-history policies and read the review queue                                     |
@@ -373,16 +373,25 @@ Omit `scope` for the Organization, or use `{ scope: "flow", flowId }` for one Fl
 
 ### Flow evidence policy shape
 
-`/api/v1/settings/flow-evidence-policy` controls evidence export behavior for Flow runtime.
+`/api/v1/settings/flow-evidence-policy` controls who may make a raw evidence export in a classification-3 space.
 
 Key flags currently include:
 
-- `allow_sensitive_flow_exports`
 - `allow_space_admin_raw_export_class3`
 - `allow_run_owner_raw_export_class3`
 - `allow_service_key_raw_export_class3`
 
-For sensitive care-data flows, the intended default is that evidence export stays disabled unless an operator intentionally enables it by policy.
+Whether a flow's evidence may be exported at all is not a tenant setting. Each flow decides it for itself, as described next.
+
+### Evidence export setting in `metadata_json`
+
+A flow allows export of its run evidence with:
+
+```json
+{ "metadata_json": { "evidence_policy": { "allow_export": true } } }
+```
+
+`allow_export` is `false` when absent. While it is not `true`, `GET .../evidence/export` answers `403` with the code `flow_run_evidence_export_disabled` for every caller who could otherwise export, tenant admins and service keys included; `GET .../evidence/` is unaffected. Turning it on widens nobody's access: role, run ownership, service-key capability and the classification-3 raw-export rules still decide, and a caller they refuse gets the same refusal whatever the setting is. The flow's current value applies to all of its runs, earlier runs and a deleted flow's runs included. Anyone who may edit the flow may change it, the change applies as soon as it is saved, and the flow's audit entry records the old and the new value. `evidence_policy` accepts no other field, and `allow_export` must be a JSON boolean.
 
 ### Sensitive-flow governance in `metadata_json`
 
@@ -401,7 +410,7 @@ Common values for that review model are:
 
 This is the intended contract seam for workflows where review happens outside the flow but the workflow still needs explicit governance metadata.
 
-Sensitive flows still deny evidence export by default until tenant flow settings explicitly enable `evidence_policy.allow_sensitive_flow_exports`, even for elevated human roles.
+A sensitive flow has no export gate of its own: it follows `evidence_policy.allow_export` like any other flow, and the redacted export still withholds verbatim passage text.
 
 ### 1) Discover what the published flow expects
 
@@ -800,7 +809,7 @@ Approval and visibility boundary for sensitive audio-to-document flows:
 
 - final approval is a **single authorized reviewer outside the flow**
 - before final approval, generated output and run evidence should be treated as visible only to the uploader and explicitly authorized reviewers
-- evidence export stays disabled by default unless policy explicitly enables it
+- evidence export stays off until the flow's own `evidence_policy.allow_export` is turned on
 
 This keeps the published Flow runtime aligned with the same enterprise seams used elsewhere: typed policy metadata, admin-configurable retention/export controls, and idempotent completed-upload execution.
 
@@ -1579,6 +1588,8 @@ GET /api/v1/flows/{flow_id}/runs/{run_id}/evidence/export?format=json&detail=raw
 ```
 
 You can also pass a `reason` query parameter if you want the audit trail to capture why the export was performed.
+
+For a caller otherwise allowed to export, both requests answer `403 flow_run_evidence_export_disabled` until the flow's `metadata_json.evidence_policy.allow_export` is `true`. Do not retry: the flow's editor has to turn the setting on. An ordinary authorization refusal takes precedence: a caller who may not export gets it whatever the setting is.
 
 The default export is `detail=redacted` with reason `support_debug`. A raw export
 requires an explicit non-default reason between 3 and 500 characters. The

@@ -51,7 +51,7 @@ def test_tenant_in_db_normalizes_null_flow_settings():
 def test_tenant_in_db_scrubs_unknown_top_level_flow_settings_keys():
     tenant = _tenant_with_flow_settings(
         {
-            "evidence_polici": {"allow_sensitive_flow_exports": True},
+            "evidence_polici": {"classification_3": {}},
             "input_limits": {"max_files_per_run": 12},
         }
     )
@@ -64,7 +64,7 @@ def test_tenant_update_rejects_unknown_top_level_flow_settings_keys():
     with pytest.raises(BadRequestException) as exc_info:
         TenantUpdate(
             id=uuid4(),
-            flow_settings={"evidence_polici": {"allow_sensitive_flow_exports": True}},
+            flow_settings={"evidence_polici": {"classification_3": {}}},
         )
 
     assert exc_info.value.code == FLOW_SETTINGS_UNKNOWN_TOP_LEVEL_FIELD_CODE
@@ -351,38 +351,57 @@ def test_tenant_in_db_rejects_invalid_document_render_limit_settings():
 
 
 def test_tenant_in_db_validates_flow_evidence_policy_settings():
-    tenant = TenantInDB(
-        id=uuid4(),
-        name="Tenant",
-        display_name="Tenant",
-        quota_limit=1024**3,
-        modules=[],
-        api_credentials={},
-        federation_config={},
-        crawler_settings={},
-        api_key_policy={},
-        flow_settings={
+    tenant = _tenant_with_flow_settings(
+        {
             "evidence_policy": {
-                "allow_sensitive_flow_exports": True,
                 "classification_3": {
                     "allow_space_admin_raw_export": True,
                     "allow_run_owner_raw_export": False,
                     "allow_service_key_raw_export": True,
                 },
             }
-        },
-        state=TenantState.ACTIVE,
+        }
     )
 
-    assert (
-        tenant.flow_settings["evidence_policy"]["allow_sensitive_flow_exports"] is True
-    )
     assert (
         tenant.flow_settings["evidence_policy"]["classification_3"][
             "allow_space_admin_raw_export"
         ]
         is True
     )
+
+
+@pytest.mark.parametrize("stored_value", [True, False, "yes"])
+def test_tenant_in_db_drops_the_retired_sensitive_export_switch(stored_value):
+    # A row written while export of sensitive flows was a tenant switch still
+    # loads; the switch is gone and the rest of the policy is kept.
+    tenant = _tenant_with_flow_settings(
+        {
+            "evidence_policy": {
+                "version": 1,
+                "allow_sensitive_flow_exports": stored_value,
+                "classification_3": {"allow_run_owner_raw_export": True},
+            }
+        }
+    )
+
+    assert tenant.flow_settings["evidence_policy"] == {
+        "version": 1,
+        "classification_3": {"allow_run_owner_raw_export": True},
+    }
+
+
+def test_tenant_update_refuses_the_retired_sensitive_export_switch():
+    with pytest.raises(BadRequestException) as exc_info:
+        TenantUpdate(
+            id=uuid4(),
+            flow_settings={
+                "evidence_policy": {"allow_sensitive_flow_exports": True},
+            },
+        )
+
+    assert exc_info.value.code == "flow_settings_invalid_payload"
+    assert "each flow's own setting" in str(exc_info.value)
 
 
 def test_tenant_in_db_rejects_invalid_flow_evidence_policy_settings():
@@ -404,29 +423,6 @@ def test_tenant_in_db_rejects_invalid_flow_evidence_policy_settings():
                     "classification_3": {
                         "allow_space_admin_raw_export": "yes",
                     }
-                }
-            },
-            state=TenantState.ACTIVE,
-        )
-
-
-def test_tenant_in_db_rejects_invalid_flow_evidence_policy_sensitive_flag():
-    with pytest.raises(
-        ValueError, match="flow_settings.evidence_policy.allow_sensitive_flow_exports"
-    ):
-        TenantInDB(
-            id=uuid4(),
-            name="Tenant",
-            display_name="Tenant",
-            quota_limit=1024**3,
-            modules=[],
-            api_credentials={},
-            federation_config={},
-            crawler_settings={},
-            api_key_policy={},
-            flow_settings={
-                "evidence_policy": {
-                    "allow_sensitive_flow_exports": "yes",
                 }
             },
             state=TenantState.ACTIVE,

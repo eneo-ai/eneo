@@ -178,18 +178,37 @@ async def test_deleted_flow_evidence_export_and_provider_calls_readable_with_cur
 
     assert (await client.get(raw_export, headers=headers)).status_code == 200
 
-    # A flow marked sensitive after deletion: the export gate still applies,
-    # the redacted view stays readable.
+    # A sensitive flow needs nothing more than its own switch.
     async with db_container() as container:
         await container.session().execute(
             sa.update(Flows)
             .where(Flows.id == UUID(seeded["flow_id"]))
-            .values(metadata_json={"care_data_policy": {"sensitive": True}})
+            .values(
+                metadata_json={
+                    "care_data_policy": {"sensitive": True},
+                    "evidence_policy": {"allow_export": True},
+                }
+            )
         )
-    export = await client.get(f"{run_path}/evidence/export", headers=headers)
-    assert export.status_code == 403, export.text
-    assert export.json()["code"] == "flow_run_evidence_forbidden"
-    assert export.json()["context"]["auth_layer"] == "flow_runtime_policy"
+    assert (
+        await client.get(f"{run_path}/evidence/export", headers=headers)
+    ).status_code == 200
+
+    # The flow row as it stands decides, for a run of any version: with the
+    # switch off the export is refused, and stays refused, since a deleted
+    # flow cannot be edited. The evidence view is not an export and stays
+    # readable.
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(Flows)
+            .where(Flows.id == UUID(seeded["flow_id"]))
+            .values(metadata_json={"evidence_policy": {"allow_export": False}})
+        )
+    for export_path in (f"{run_path}/evidence/export", raw_export):
+        export = await client.get(export_path, headers=headers)
+        assert export.status_code == 403, export.text
+        assert export.json()["code"] == "flow_run_evidence_export_disabled"
+        assert export.json()["context"] == {"auth_layer": "flow_evidence_policy"}
     assert (
         await client.get(f"{run_path}/evidence/", headers=headers)
     ).status_code == 200
@@ -200,7 +219,7 @@ async def test_deleted_flow_evidence_export_and_provider_calls_readable_with_cur
         await session.execute(
             sa.update(Flows)
             .where(Flows.id == UUID(seeded["flow_id"]))
-            .values(metadata_json=None)
+            .values(metadata_json={"evidence_policy": {"allow_export": True}})
         )
         classification = SecurityClassification(
             name=f"Level three {uuid4().hex[:8]}",

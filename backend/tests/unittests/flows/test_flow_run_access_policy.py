@@ -26,7 +26,7 @@ from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.flow_evidence_policy import (
     FlowEvidencePolicy,
     FlowHistoryAccessContext,
-    flow_metadata_marks_sensitive,
+    flow_evidence_metadata_facts,
 )
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.roles.permissions import Permission
@@ -91,6 +91,7 @@ def _policy_with_space(
     flow_run_repo: AsyncMock,
     role: str,
     security_level: int = 0,
+    evidence_export_allowed: bool = True,
 ) -> FlowRunAccessPolicy:
     space = SimpleNamespace(
         id=uuid4(),
@@ -114,6 +115,7 @@ def _policy_with_space(
         published=True,
         retired=False,
         sensitive=False,
+        evidence_export_allowed=evidence_export_allowed,
         classification_level=security_level,
     )
     space_service.get_space.return_value = space
@@ -333,6 +335,7 @@ async def test_admin_service_key_evidence_access_requires_key_capability(
         published=True,
         retired=False,
         sensitive=False,
+        evidence_export_allowed=True,
         classification_level=0,
     )
 
@@ -376,57 +379,185 @@ async def test_load_space_access_returns_none_without_space_dependencies(user):
     assert await policy.load_space_access(flow_id=uuid4()) == (None, 0)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "access_kind",
-    ["evidence_export_redacted", "evidence_export_raw"],
-)
-async def test_load_run_rejects_sensitive_flow_export_when_policy_disabled(
-    user,
-    access_kind: FlowRunAccessKind,
-):
-    flow_id = uuid4()
-    run = _run(user, flow_id)
+def _export_switch_case(user, principal: str, *, evidence_export_allowed: bool):
+    """A caller who passes every rule behind the flow's export switch."""
+    acting_user = user
+    if principal == "tenant_admin":
+        acting_user = _tenant_admin(user)
+    elif principal == "service_key":
+        acting_user = _service_key_user(
+            user,
+            resource_permissions=ResourcePermissions(
+                flow_evidence=ResourcePermissionLevel.ADMIN
+            ),
+            tenant_admin=True,
+        )
     flow_repo = AsyncMock()
-    flow_repo.get.return_value = SimpleNamespace(
-        id=flow_id,
-        tenant_id=user.tenant_id,
-        space_id=uuid4(),
-        metadata_json={"care_data_policy": {"sensitive": True}},
-    )
-    flow_repo.get_history_access_context.return_value = FlowHistoryAccessContext(
-        flow_id=flow_id,
-        space_id=flow_repo.get.return_value.space_id,
-        published=True,
-        retired=False,
-        sensitive=True,
-        classification_level=0,
-    )
-    flow_run_repo = AsyncMock()
-    flow_run_repo.get.return_value = run
-    policy = FlowRunAccessPolicy(
-        user=user,
+    policy = _policy_with_space(
+        acting_user,
         flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
+        flow_run_repo=AsyncMock(),
+        role="owner",
+        evidence_export_allowed=evidence_export_allowed,
+    )
+    run = _run(user, flow_repo.get.return_value.id)
+    if principal == "service_key":
+        run = run.model_copy(
+            update={
+                "user_id": None,
+                "principal_type": PrincipalType.SERVICE_KEY.value,
+                "principal_user_id": None,
+                "principal_service_id": (
+                    acting_user.active_api_key.service_principal_id
+                ),
+                "created_by_api_key_id": acting_user.active_api_key.id,
+            }
+        )
+    return policy, run, flow_repo
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("principal", ["run_owner", "tenant_admin", "service_key"])
+@pytest.mark.parametrize(
+    "access_kind", ["evidence_export_redacted", "evidence_export_raw"]
+)
+async def test_export_is_refused_for_everyone_until_the_flow_allows_it(
+    user, principal: str, access_kind: FlowRunAccessKind
+) -> None:
+    policy, run, flow_repo = _export_switch_case(
+        user, principal, evidence_export_allowed=False
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
-        await policy.load_run(
-            run_id=run.id,
-            flow_id=flow_id,
-            access_kind=access_kind,
-        )
+        await policy.ensure_can_access_run(run, access_kind=access_kind)
 
-    assert str(exc_info.value) == (
-        "Evidence export is disabled by policy for this sensitive flow."
-    )
-    assert exc_info.value.code == "flow_run_evidence_forbidden"
-    assert exc_info.value.context == {"auth_layer": "flow_runtime_policy"}
+    assert str(exc_info.value) == "Evidence export is turned off for this flow."
+    assert exc_info.value.code == "flow_run_evidence_export_disabled"
+    assert exc_info.value.context == {"auth_layer": "flow_evidence_policy"}
     flow_repo.get_history_access_context.assert_awaited_once_with(
-        flow_id=flow_id,
+        flow_id=run.flow_id,
         tenant_id=user.tenant_id,
         include_retired=False,
     )
+
+
+def _caller_who_may_not_export(user, caller: str, *, evidence_export_allowed: bool):
+    """A caller the ordinary rules refuse, and the refusal those rules give."""
+    flow_repo = AsyncMock()
+    acting_user = user
+    if caller != "another_users_run":
+        acting_user = _service_key_user(
+            user,
+            resource_permissions=ResourcePermissions(
+                flow_evidence=ResourcePermissionLevel.READ
+            ),
+        )
+    policy = _policy_with_space(
+        acting_user,
+        flow_repo=flow_repo,
+        flow_run_repo=AsyncMock(),
+        role="viewer",
+        evidence_export_allowed=evidence_export_allowed,
+    )
+    run = _run(user, flow_repo.get.return_value.id)
+    if caller == "another_users_run":
+        run = run.model_copy(update={"principal_user_id": uuid4()})
+        return policy, run, ("flow_run_access_denied", "flow_run_owner")
+    key = acting_user.active_api_key
+    run = run.model_copy(
+        update={
+            "user_id": None,
+            "principal_type": PrincipalType.SERVICE_KEY.value,
+            "principal_user_id": None,
+            "principal_service_id": (
+                uuid4() if caller == "another_keys_run" else key.service_principal_id
+            ),
+            "created_by_api_key_id": key.id,
+        }
+    )
+    if caller == "another_keys_run":
+        return policy, run, ("flow_run_access_denied", "flow_run_principal")
+    return policy, run, ("flow_run_evidence_forbidden", "flow_run_principal")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "caller", ["another_users_run", "another_keys_run", "view_only_key"]
+)
+@pytest.mark.parametrize(
+    "access_kind", ["evidence_export_redacted", "evidence_export_raw"]
+)
+async def test_a_caller_who_may_not_export_cannot_tell_how_the_switch_is_set(
+    user, caller: str, access_kind: FlowRunAccessKind
+) -> None:
+    refusals = []
+    for allowed in (False, True):
+        policy, run, expected = _caller_who_may_not_export(
+            user, caller, evidence_export_allowed=allowed
+        )
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await policy.ensure_can_access_run(run, access_kind=access_kind)
+
+        refusal = (exc_info.value.code, exc_info.value.context["auth_layer"])
+        assert refusal == expected
+        refusals.append((refusal, str(exc_info.value)))
+
+    assert refusals[0] == refusals[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("principal", ["run_owner", "tenant_admin", "service_key"])
+async def test_evidence_can_be_viewed_while_export_is_off(user, principal: str) -> None:
+    policy, run, _ = _export_switch_case(user, principal, evidence_export_allowed=False)
+
+    await policy.ensure_can_access_run(run, access_kind="evidence_view")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "access_kind", ["evidence_export_redacted", "evidence_export_raw"]
+)
+async def test_a_sensitive_flow_exports_once_its_own_switch_is_on(
+    user, access_kind: FlowRunAccessKind
+) -> None:
+    # A sensitive flow has no export gate of its own: no tenant setting stands
+    # behind the flow's switch.
+    policy, run, flow_repo = _export_switch_case(
+        user, "run_owner", evidence_export_allowed=True
+    )
+    flow_repo.get_history_access_context.return_value = replace(
+        flow_repo.get_history_access_context.return_value, sensitive=True
+    )
+
+    await policy.ensure_can_access_run(run, access_kind=access_kind)
+
+
+@pytest.mark.asyncio
+async def test_a_retired_flow_keeps_the_export_switch_it_was_deleted_with(user) -> None:
+    for allowed in (True, False):
+        policy, run, flow_repo = _export_switch_case(
+            user, "run_owner", evidence_export_allowed=allowed
+        )
+        flow_repo.get_history_access_context.return_value = replace(
+            flow_repo.get_history_access_context.return_value, retired=True
+        )
+
+        if allowed:
+            await policy.ensure_can_access_run(
+                run, access_kind="evidence_export_redacted", history=True
+            )
+        else:
+            with pytest.raises(UnauthorizedException) as exc_info:
+                await policy.ensure_can_access_run(
+                    run, access_kind="evidence_export_redacted", history=True
+                )
+            assert exc_info.value.code == "flow_run_evidence_export_disabled"
+        flow_repo.get_history_access_context.assert_awaited_with(
+            flow_id=run.flow_id,
+            tenant_id=user.tenant_id,
+            include_retired=True,
+        )
 
 
 @pytest.mark.asyncio
@@ -482,7 +613,8 @@ def _disclosure_policy(
         space_id=flow.space_id,
         published=True,
         retired=False,
-        sensitive=flow_metadata_marks_sensitive(metadata_json),
+        sensitive=flow_evidence_metadata_facts(metadata_json).sensitive,
+        evidence_export_allowed=True,
         classification_level=security_level,
     )
     run = _run(user, flow_repo.get.return_value.id)
@@ -674,6 +806,7 @@ async def test_service_key_access_matrix_is_capability_exact(
         published=True,
         retired=False,
         sensitive=False,
+        evidence_export_allowed=True,
         classification_level=0,
     )
     run = _run(user, flow.id).model_copy(
@@ -738,6 +871,7 @@ async def test_space_manager_access_matrix_is_role_and_classification_exact(
         published=True,
         retired=False,
         sensitive=False,
+        evidence_export_allowed=True,
         classification_level=security_level,
     )
     run = _run(user, flow.id).model_copy(update={"principal_user_id": uuid4()})
@@ -777,6 +911,7 @@ async def test_cross_tenant_run_is_denied_before_every_access_surface(
     [
         ("deny_run_access", "flow_run_access_denied"),
         ("deny_evidence_access", "flow_run_evidence_forbidden"),
+        ("deny_evidence_export_disabled", "flow_run_evidence_export_disabled"),
         ("deny_raw_export_access", "flow_run_evidence_raw_export_forbidden"),
     ],
 )
@@ -786,17 +921,16 @@ def test_access_denials_preserve_message_code_and_layer(
 ) -> None:
     method = getattr(FlowRunAccessPolicy, method_name)
     kwargs = {"auth_layer": "test_layer"}
-    if method_name != "deny_run_access":
+    if method_name in {"deny_evidence_access", "deny_raw_export_access"}:
         kwargs["message"] = "Exact denial message."
 
     with pytest.raises(UnauthorizedException) as exc_info:
         method(**kwargs)
 
-    expected_message = (
-        "You do not have access to this flow run."
-        if method_name == "deny_run_access"
-        else "Exact denial message."
-    )
+    expected_message = {
+        "deny_run_access": "You do not have access to this flow run.",
+        "deny_evidence_export_disabled": "Evidence export is turned off for this flow.",
+    }.get(method_name, "Exact denial message.")
     assert str(exc_info.value) == expected_message
     assert exc_info.value.code == expected_code
     assert exc_info.value.context == {"auth_layer": "test_layer"}
@@ -901,6 +1035,7 @@ async def test_service_key_raw_export_fails_closed_in_classification_three(
         published=True,
         retired=False,
         sensitive=False,
+        evidence_export_allowed=True,
         classification_level=3,
     )
     run = _run(user, flow.id).model_copy(
@@ -933,7 +1068,6 @@ def test_evidence_policy_reads_only_the_tenant_flow_settings(user) -> None:
             "flow_settings": {
                 "evidence_policy": {
                     "version": 1,
-                    "allow_sensitive_flow_exports": True,
                     "classification_3": {
                         "allow_space_admin_raw_export": True,
                         "allow_run_owner_raw_export": True,
@@ -947,7 +1081,6 @@ def test_evidence_policy_reads_only_the_tenant_flow_settings(user) -> None:
     policy = _policy(configured_user, flow_run_repo=AsyncMock())
 
     assert policy._evidence_policy() == FlowEvidencePolicy(
-        allow_sensitive_flow_exports=True,
         allow_space_admin_raw_export_class3=True,
         allow_run_owner_raw_export_class3=True,
         allow_service_key_raw_export_class3=True,

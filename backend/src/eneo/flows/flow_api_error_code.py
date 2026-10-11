@@ -70,6 +70,7 @@ class FlowApiErrorCode(str, Enum):
     RUN_ABANDONED = "flow_run_abandoned"
     RUN_ERROR_PAYLOAD_INVALID = "flow_run_error_payload_invalid"
     RUN_EVIDENCE_FORBIDDEN = "flow_run_evidence_forbidden"
+    RUN_EVIDENCE_EXPORT_DISABLED = "flow_run_evidence_export_disabled"
     RUN_EVIDENCE_RAW_EXPORT_FORBIDDEN = "flow_run_evidence_raw_export_forbidden"
     RUN_ARTIFACT_NOT_FOUND = "flow_run_artifact_not_found"
     RUN_ARTIFACT_CONTENT_UNAVAILABLE = "flow_run_artifact_content_unavailable"
