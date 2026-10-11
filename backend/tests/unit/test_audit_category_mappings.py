@@ -181,6 +181,8 @@ class TestCategoryMappings:
         """Verify system action types are correctly mapped."""
         system_actions = [
             ActionType.RETENTION_POLICY_APPLIED,
+            ActionType.DATA_RETENTION_BATCH,
+            ActionType.DATA_RETENTION_SKIPPED,
             ActionType.ENCRYPTION_KEY_ROTATED,
             ActionType.SYSTEM_MAINTENANCE,
         ]
@@ -270,7 +272,7 @@ class TestCategoryDistribution:
             "security_events": 12,
             "file_operations": 7,
             "integration_events": 24,
-            "system_actions": 3,
+            "system_actions": 5,
             "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
         }
 

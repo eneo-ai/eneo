@@ -40,6 +40,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.prompt_library_table",
     "eneo.database.tables.prompts_table",
     "eneo.database.tables.questions_table",
+    "eneo.database.tables.retention_tables",
     "eneo.database.tables.roles_table",
     "eneo.database.tables.service_table",
     "eneo.database.tables.sessions_table",

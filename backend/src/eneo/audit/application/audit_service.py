@@ -118,6 +118,7 @@ class AuditService:
         entity_id: UUID,
         description: str,
         metadata: dict[str, Any],
+        required: bool = False,
         # Pass `user` to derive actor_id/actor_type via audit_actor_for so
         # service-key callers don't FK-violate audit_log.actor_id (their
         # synthetic UUID has no users row). Sysadmin paths that act without
@@ -130,6 +131,7 @@ class AuditService:
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
         error_message: Optional[str] = None,
+        audit_id: Optional[UUID] = None,
     ) -> Optional[AuditLog]:
         """
         Create an audit log entry.
@@ -142,12 +144,16 @@ class AuditService:
             entity_id: ID of affected entity
             description: Human-readable description
             metadata: Additional context (actor/target snapshots, changes)
+            required: Persist even when audit configuration disables the action;
+                persistence errors propagate to the caller's transaction.
             outcome: Success or failure
             actor_type: Type of actor (user, system, api_key)
             ip_address: Client IP address
             user_agent: Client user agent
             request_id: Request correlation ID
             error_message: Error details if outcome is failure
+            audit_id: Deterministic id chosen by the caller; a second write with
+                the same id fails instead of being dropped.
 
         Returns:
             Created audit log (or None if action is disabled)
@@ -155,10 +161,10 @@ class AuditService:
         Raises:
             ValueError: If outcome is failure but no error_message provided
         """
-        # Check if action should be logged based on configuration
-        should_log = await self._should_log_action(tenant_id, action)
-        if not should_log:
-            return None
+        if not required:
+            should_log = await self._should_log_action(tenant_id, action)
+            if not should_log:
+                return None
 
         if user is not None:
             from eneo.authentication.auth_models import audit_actor_for
@@ -173,7 +179,7 @@ class AuditService:
         )
 
         audit_log = AuditLog(
-            id=uuid4(),
+            id=audit_id or uuid4(),
             tenant_id=tenant_id,
             actor_id=actor_id,
             actor_type=actor_type,
