@@ -528,6 +528,15 @@ def _attempt_completion_evidence(
     )
 
 
+def _start_describes_a_completion_request(start: FlowStepAttemptStart | None) -> bool:
+    return start is not None and (
+        start.requested_model is not None
+        or start.provider is not None
+        or start.input_tokens_estimate is not None
+        or start.mapped_admission is not None
+    )
+
+
 def _attempt_start_for_step(
     *,
     state: RunExecutionState | None,
@@ -545,7 +554,12 @@ def _pre_attempt_start_model_from_state_cache(
 ) -> tuple[str | None, str | None]:
     # Preparation can fail after the assistant is loaded but before
     # attempt_start is persisted; preserve model triage data in that window.
-    if state is None or step.assistant_snapshot is None:
+    # A step that calls no completion model has none to report.
+    if (
+        state is None
+        or step.assistant_snapshot is None
+        or not step.may_call_completion_provider
+    ):
         return None, None
     assistant = state.assistant_cache.get(
         assistant_cache_key(step.assistant_id, step.assistant_snapshot)
@@ -1607,14 +1621,15 @@ class FlowRunExecutor:
             deps=execution_deps,
             step_input_override=step_input_override,
         )
-        prepared = replace(
-            prepared,
-            completion_call=build_prepared_completion_call(
-                step=step,
-                state=state,
-                prepared=prepared,
-            ),
-        )
+        if step.may_call_completion_provider:
+            prepared = replace(
+                prepared,
+                completion_call=build_prepared_completion_call(
+                    step=step,
+                    state=state,
+                    prepared=prepared,
+                ),
+            )
         prepared_step = PreparedAssistantStep(prepared=prepared, deps=execution_deps)
         attempt_start = self._build_attempt_start(
             step=step,
@@ -1645,9 +1660,12 @@ class FlowRunExecutor:
             contract_validation.get("parse_succeeded"),
         )
         grouping = _group_attempt_resolved_inputs(prepared.resolved_input_edges)
-        completion_configuration, execution_inputs = _attempt_completion_evidence(
-            (prepared_step,)
-        )
+        completion_configuration: FlowStepAttemptCompletionConfiguration | None = None
+        execution_inputs: tuple[FlowStepAttemptExecutionInput, ...] = ()
+        if step.may_call_completion_provider:
+            completion_configuration, execution_inputs = _attempt_completion_evidence(
+                (prepared_step,)
+            )
         await self._activate_step_attempt(
             run=run,
             step=step,
@@ -1676,11 +1694,19 @@ class FlowRunExecutor:
     ) -> FlowStepAttemptStart:
         prepared = prepared_step.prepared
         resolved_timeout_seconds = int(prepared_step.deps.llm_request_timeout_seconds)
+        input_text_length = len(prepared.step_input.text)
+        if not step.may_call_completion_provider:
+            # The step's assistant has a completion model, but this step asks
+            # it nothing, so the attempt names none.
+            return FlowStepAttemptStart(
+                resolved_timeout_seconds=resolved_timeout_seconds,
+                input_text_length=input_text_length,
+            )
         return FlowStepAttemptStart(
             requested_model=_requested_model_from_assistant(prepared.assistant),
             provider=_provider_from_assistant(prepared.assistant),
             resolved_timeout_seconds=resolved_timeout_seconds,
-            input_text_length=len(prepared.step_input.text),
+            input_text_length=input_text_length,
             input_tokens_estimate=count_tokens(prepared.step_input.text),
             mapped_admission=state.mapped_admission_by_step.get(step.step_id),
         )
@@ -1759,6 +1785,16 @@ class FlowRunExecutor:
                 "Flow step attempt input evidence was activated more than once "
                 f"(step_id={step.step_id}, attempt_no={attempt_no})."
             )
+        if not step.may_call_completion_provider and (
+            completion_configuration is not None
+            or execution_inputs
+            or _start_describes_a_completion_request(attempt_start)
+        ):
+            raise FlowRuntimeInvariantError(
+                "Flow step attempt evidence described a completion request for "
+                "a step that calls no completion model "
+                f"(step_id={step.step_id}, attempt_no={attempt_no})."
+            )
         pending_source = self._pending_transcript_sources.get(
             (run.id, step.step_id, attempt_no)
         )
@@ -1800,7 +1836,10 @@ class FlowRunExecutor:
             if (
                 persisted_attempt_input is None
                 or persisted_attempt_input.start is None
-                or persisted_attempt_input.execution_inputs is None
+                or (
+                    step.may_call_completion_provider
+                    and persisted_attempt_input.execution_inputs is None
+                )
             ):
                 raise FlowRuntimeInvariantError(
                     "Flow step attempt input evidence was activated without "
@@ -2072,8 +2111,9 @@ class FlowRunExecutor:
         state: RunExecutionState | None = None,
     ) -> dict[str, Any]:
         # A step that never calls a completion model sent no prompt, so its
-        # failed result carries none, like its completed result. The attempt
-        # row keeps what was prepared when the attempt was activated.
+        # failed result carries none, like its completed result. Input
+        # preparation interpolates one for every step and attaches it to what
+        # it refuses.
         failed_prompt = (
             getattr(typed_exc, "effective_prompt", None)
             if step.may_call_completion_provider

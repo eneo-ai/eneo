@@ -54,7 +54,7 @@ class ComposeTextStepHandler:
                     code=FlowApiErrorCode.TYPED_IO_INVALID_OUTPUT_MODE_COMBINATION.value,
                 ),
                 input_payload_for_result=prepared.input_payload_for_result,
-                effective_prompt=prepared.effective_prompt,
+                effective_prompt="",
             )
 
         try:
@@ -67,7 +67,7 @@ class ComposeTextStepHandler:
             raise attach_typed_failure_context(
                 exc,
                 input_payload_for_result=prepared.input_payload_for_result,
-                effective_prompt=prepared.effective_prompt,
+                effective_prompt="",
             ) from exc
 
         output_text = typed_output.persisted_text(prepared.step_input.text)

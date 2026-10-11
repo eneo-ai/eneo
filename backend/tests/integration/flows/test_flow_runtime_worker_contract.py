@@ -59,7 +59,7 @@ from eneo.flows.runtime.step_attempt_runtime import (
 )
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.container.container import Container
-from eneo.main.exceptions import NotFoundException
+from eneo.main.exceptions import NotFoundException, TypedIOValidationException
 from tests.unit.test_tenant_model_adapter_json_stream import (
     _Body,
     _event,
@@ -1155,6 +1155,89 @@ async def test_omitted_optional_form_fields_resolve_as_empty_prompt_text(
         "amnen": [],
         "anteckning": "",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("outcome", ["completed", "typed_failure", "generic_failure"])
+async def test_a_step_without_a_completion_model_keeps_what_it_read_and_names_no_model(
+    setup_database,
+    outcome,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            side_effect=AssertionError("this step asks no completion model")
+        )
+    )
+
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            output_mode="compose_text",
+        )
+        # Both failures happen after the attempt recorded what the step read.
+        if outcome == "typed_failure":
+            context.executor._process_typed_output = AsyncMock(
+                side_effect=TypedIOValidationException(
+                    "Step 1: the text could not be composed.",
+                    code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+                )
+            )
+        if outcome == "generic_failure":
+            context.executor._apply_output_cap = AsyncMock(
+                side_effect=RuntimeError("storage failed")
+            )
+        await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-no-completion-model-{uuid4()}",
+            retry_count=0,
+        )
+
+    run_row, _, attempt_rows, _ = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    completed = outcome == "completed"
+    assert run_row is not None
+    assert run_row.status == (
+        FlowRunStatus.COMPLETED.value if completed else FlowRunStatus.FAILED.value
+    )
+    (attempt,) = attempt_rows
+    assert attempt.status == (
+        FlowStepAttemptStatus.COMPLETED.value
+        if completed
+        else FlowStepAttemptStatus.FAILED.value
+    )
+    # The assistant's completion model is gpt-4o-mini; nothing was sent to it.
+    assert attempt.requested_model is None
+    assert attempt.provider is None
+    recorded = parse_flow_step_attempt_input(attempt.input_payload_json).attempt_input
+    assert recorded is not None
+    assert recorded.completion_configuration is None
+    assert recorded.execution_inputs is None
+    assert recorded.start is not None
+    assert recorded.start.model_dump(exclude_none=True) == {
+        "resolved_timeout_seconds": recorded.start.resolved_timeout_seconds,
+        "input_text_length": len("What happened?"),
+    }
+    assert recorded.resolved_input is not None
+    assert recorded.resolved_input["text"] == "What happened?"
+    assert recorded.resolved_input["material_aliases"] == []
 
 
 @pytest.mark.asyncio

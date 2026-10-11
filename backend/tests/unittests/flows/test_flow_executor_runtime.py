@@ -2702,6 +2702,77 @@ async def test_typed_validation_failure_partial_typed_exc_falls_back_field_indep
 
 
 @pytest.mark.asyncio
+async def test_a_step_without_a_completion_model_that_fails_before_it_starts_names_no_model(
+    user,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._rollback = AsyncMock()
+
+    step_id = uuid4()
+    assistant_id = uuid4()
+    run_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=run_id,
+        flow_id=uuid4(),
+        tenant_id=user.tenant_id,
+        step_id=step_id,
+        assistant_id=assistant_id,
+    )
+    snapshot = build_assistant_execution_snapshot(
+        assistant=_default_snapshot_assistant(assistant_id)
+    )
+    step = RuntimeStep(
+        step_id=step_id,
+        step_order=1,
+        assistant_id=assistant_id,
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="render_verbatim",
+        output_config=None,
+        output_type="pdf",
+        assistant_snapshot=snapshot,
+    )
+    # The assistant was loaded, so its completion model is known to the run.
+    state = _empty_execution_state()
+    state.assistant_cache[assistant_cache_key(assistant_id, snapshot)] = (
+        SimpleNamespace(
+            completion_model=SimpleNamespace(
+                litellm_model_name="openai/gpt-5.4-nano",
+                name="gpt-5.4-nano",
+                provider_type="openai",
+            )
+        )
+    )
+    # Input preparation attaches the interpolated prompt to what it refuses.
+    typed_exc = TypedIOValidationException(
+        "Step 1: the input is larger than this step can read.",
+        code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+    )
+    setattr(typed_exc, "effective_prompt", "Never sent to a model")
+
+    await executor._handle_typed_step_failure(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=typed_exc,
+        failed_input_payload=None,
+        state=state,
+    )
+
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["requested_model"] is None
+    assert finish_kwargs["provider"] is None
+    assert flow_run_repo.save_step_result.await_args.args[1].effective_prompt == ""
+
+
+@pytest.mark.asyncio
 async def test_typed_validation_failure_terminalizes_with_bounded_public_error(user):
     executor, flow_repo, flow_run_repo, _ = _build_executor(user)
     flow_run_repo.finish_attempt = AsyncMock()

@@ -52,6 +52,7 @@ from eneo.flows.domain.flow import (
     FlowStepResultStatus,
 )
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY, interpret_step_text
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import (
@@ -4704,6 +4705,93 @@ async def test_failed_step_without_a_completion_model_records_no_prompt(user):
     failed = flow_run_repo.save_step_result.await_args.args[1]
     assert failed.status == FlowStepResultStatus.FAILED
     assert failed.effective_prompt == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("output_mode", "input_type", "output_type"),
+    [
+        ("compose_text", "text", "text"),
+        ("render_verbatim", "text", "pdf"),
+        ("transcribe_only", "audio", "text"),
+    ],
+)
+async def test_an_attempt_of_a_step_without_a_completion_model_names_no_model_or_prompt(
+    user, output_mode, input_type, output_type
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.document_render_service = SimpleNamespace(
+        render_document=lambda text, output_type, step_order, title: (
+            b"rendered",
+            "application/pdf",
+        ),
+        render_structured_document=MagicMock(),
+        limits=DocumentRenderLimits(),
+    )
+    executor.file_service.save_generated_file = AsyncMock(
+        return_value=SimpleNamespace(id=uuid4())
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    step = _runtime_step(
+        input_type=input_type,
+        output_type=output_type,
+        output_mode=output_mode,
+    )
+    # The step's assistant has a completion model and a prompt, as every
+    # assistant does; this step kind never sends either anywhere.
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_prompt_text.return_value = "Never sent to a model"
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="What the step read",
+            source_text="What the step read",
+            input_source="flow_input",
+        )
+    )
+
+    await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assistant.get_response.assert_not_awaited()
+    recorded = flow_run_repo.activate_step_attempt.await_args.kwargs["attempt_input"]
+    assert recorded.completion_configuration is None
+    assert recorded.execution_inputs is None
+    assert recorded.start.model_dump(exclude_none=True) == {
+        "resolved_timeout_seconds": recorded.start.resolved_timeout_seconds,
+        "input_text_length": len("What the step read"),
+    }
+    assert recorded.resolved_input["text"] == "What the step read"
+
+
+@pytest.mark.asyncio
+async def test_completion_evidence_is_refused_for_a_step_without_a_completion_model(
+    user,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    step = _runtime_step(output_mode="compose_text")
+    state = RunExecutionState({}, [], {}, {}, {})
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="What the step read",
+            source_text="What the step read",
+            input_source="flow_input",
+        )
+    )
+    # The mapped path freezes a completion call for whatever step it is given.
+    prepared = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+
+    with pytest.raises(FlowRuntimeInvariantError, match="calls no completion model"):
+        await executor._activate_prepared_assistant_steps(
+            run, step, state, 1, (prepared,)
+        )
+
+    flow_run_repo.activate_step_attempt.assert_not_awaited()
 
 
 @pytest.mark.asyncio

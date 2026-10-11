@@ -57,7 +57,7 @@ class TranscribeOnlyStepHandler:
                     code=FlowApiErrorCode.TYPED_IO_INVALID_OUTPUT_MODE_COMBINATION.value,
                 ),
                 input_payload_for_result=prepared.input_payload_for_result,
-                effective_prompt=prepared.effective_prompt,
+                effective_prompt="",
             )
 
         diagnostics = list(prepared.diagnostics)

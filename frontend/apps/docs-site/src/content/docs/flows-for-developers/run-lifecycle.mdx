@@ -54,10 +54,17 @@ The executor resolves each published step in order. For each execution attempt
 it records:
 
 - immutable attempt-start input and resolved-input lineage;
-- selected model/provider configuration;
+- the completion model, provider and prepared request, when the step can call
+  a completion model;
 - provider-call lifecycle and token usage;
 - result payload, diagnostics, and generated files;
 - current step-result projection.
+
+A step that calls no completion model (`compose_text`, `render_verbatim`,
+`template_fill`, `transcribe_only`) records what it read and names no
+completion model, provider, model settings or prompt. The model an
+attempt names is the one the step was about to ask, not proof that it was
+called; the provider-call receipts record the calls that were made.
 
 Attempts are an append-only evidence ledger. They support task retries and
 crash recovery, not a user-facing partial-rerun operation. Mapped inputs execute
