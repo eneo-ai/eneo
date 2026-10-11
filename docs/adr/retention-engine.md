@@ -57,8 +57,9 @@ without releasing the uploads it used, and no single place could say what a
    eligibility check (inside the deleting statement for a conversation; under
    the family locks, immediately before the delete, for a File family),
    delete, typed result. A question's session that is left without a question
-   is deleted in the same unit, so no chat title or feedback outlives its
-   content. A unit
+   is deleted in the same unit unless a live chat holds it, so a chat title or
+   feedback normally leaves with its content; a held session goes to the
+   empty-session sweep. A unit
    that cannot complete (held lock, family larger than the cap, insufficient
    remaining budget, policy no longer due) rolls back whole, is reported under a
    typed reason, and leaves the rest of the chunk free to proceed. No deletion
@@ -143,7 +144,8 @@ policy) and, within a page, their due rows in creation order; the cursor names
 the last visited root and its owner, or the last owner once all of its rows
 were visited, and the pass ends only when both the owner page and the root
 window came back short. The overdue snapshot walks every owner once per
-execution, outside the budget, so it is complete whatever the deployment size. A chunk is one transaction: renew the lease first, run one bounded
+execution in discovery-sized pages, outside the budget, and is complete unless
+more rows than its cap are overdue, whatever the number of owners. A chunk is one transaction: renew the lease first, run one bounded
 step call, check the result against the task's declared keys and its batch
 allowance, write the audit events, persist counts, blocked reasons and the
 step's keyset cursor. A failure anywhere rolls the chunk back, so a deletion
@@ -163,6 +165,64 @@ snapshot for operators.
 Discovery and proof reads are charged like deletions: a root whose cascade is
 larger than the unit cap is examined up to that cap, charged, reported as
 blocked and skipped, so the rest of the night's work proceeds.
+
+## How one night of retention runs
+
+```mermaid
+sequenceDiagram
+    participant Cron as Worker cron at 03.30 UTC
+    participant Runner as Retention engine
+    participant Task as Task, for example conversations.history
+    participant Files as Files owner
+    participant OC as Object content storage
+    participant Audit as Audit log and health
+    Cron->>Runner: run every enabled task
+    Runner->>Runner: claim the task and set the timeouts
+    loop one chunk is one transaction, until the budget or the deadline ends it
+        Runner->>Task: run one bounded step call with rows, files, deadline and cursor
+        Task->>Task: lock a page, prove each unit, delete inside a savepoint
+        Task->>Files: release the files this unit used
+        Files-->>Task: deleted, in use, locked or too large
+        Task-->>Runner: typed result with counts, blocked reasons and the new cursor
+        Runner->>Audit: one event per chunk that removed or blocked something
+        Runner->>Runner: store counts, blocked reasons and cursor, then commit
+    end
+    Runner->>Audit: outcome succeeded, partial or failed, and the overdue snapshot
+    OC-->>OC: later, in its own batches, delete the bytes and write a tombstone
+```
+
+## One unit, step by step: a file shared by two spaces
+
+Space A keeps chat history 30 days, Space B 60 days, and the same uploaded file is attached to a chat in each. What happens on night 31 and on night 61:
+
+```mermaid
+flowchart TD
+    A31[Night 31. The chat in Space A is due] --> L[Lock the chat, prove its cascade and check the policy again inside the DELETE]
+    L --> D[Delete the chat and its links, in one savepoint]
+    D --> S{Did the chat leave its session empty?}
+    S -- yes --> DS[Delete the session too, same unit]
+    S -- no --> F
+    DS --> F[Files owner: lock the file family root-first, re-check every use under the lock]
+    F --> U{Any use left?}
+    U -- Yes, the chat in Space B still links the file --> K[Keep the file and count files_in_use]
+    U -- no --> R[Delete the file rows. Object content marks the bytes for deletion]
+    K --> N[Night 61: the chat in Space B is due]
+    N --> L2[Same unit again for that chat]
+    L2 --> F2[Files owner: no use left]
+    F2 --> R2[File rows deleted. Object content storage deletes the bytes and writes a tombstone]
+```
+
+What the records say afterwards: on night 31 the audit event carries `conversations_deleted: 1`, `files_in_use: 1` (an observation) and no blocked reason; on night 61 it carries `conversations_deleted: 1`, `files_deleted: 1`. At no point did Space A's shorter period reach into Space B's data. Erasing the file from both spaces at once is a different, explicit decision (`eneo-s55b.36`), never a side effect of expiry.
+
+## What "succeeded" means, and does not
+
+```mermaid
+flowchart LR
+    T[Task outcome succeeded] --> R1[Due database rows removed, within budget]
+    R1 --> R2[Content marked for deletion in object content storage]
+    R2 --> R3[Bytes removed from the active store and tombstoned: proved by storage reconciliation]
+    R3 -.-> R4[Older object versions, previous destinations and backups need separate procedures and evidence]
+```
 
 ## What adopters must and must not do
 

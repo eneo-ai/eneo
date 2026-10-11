@@ -397,7 +397,10 @@ class Settings(BaseSettings):
     retention_overdue_max_rows: int = Field(default=1000, gt=0)
     retention_max_rows_per_run: int = Field(default=50_000, gt=0)
     retention_conversations_max_rows_per_run: int = Field(default=250_000, gt=0)
-    retention_conversations_max_unit_rows: int = Field(default=5000, gt=0)
+    # A question with a session and its help-assistant helper charges four unit
+    # rows (root DELETE, the session's lock and proof, the session, the helper);
+    # a smaller cap would block every such question as unit_exceeds_budget.
+    retention_conversations_max_unit_rows: int = Field(default=5000, ge=4)
     retention_max_files_per_run: int = Field(default=10_000, gt=0)
     retention_max_seconds_per_run: int = Field(default=1800, gt=0)
     # Steps reserve a share of a chunk per unit (empty sessions a quarter, job

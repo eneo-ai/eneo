@@ -117,8 +117,17 @@ class ConversationHistoryRetentionTask:
         remaining = self.overdue_rows
         snapshots: list[RetentionOverdue] = []
         for repository in (self.questions, self.app_runs):
+            if remaining == 0:
+                # Rows past the cap are not counted, so the next stream is not
+                # read at all: the snapshot is incomplete whatever it holds.
+                snapshots.append(
+                    RetentionOverdue(count=0, complete=False, oldest_due_at=None)
+                )
+                break
             snapshot = await repository.overdue(
-                window=self.overdue_window, limit=remaining
+                window=self.overdue_window,
+                limit=remaining,
+                owner_page=self.allocation.page_size,
             )
             snapshots.append(snapshot)
             remaining -= snapshot.count

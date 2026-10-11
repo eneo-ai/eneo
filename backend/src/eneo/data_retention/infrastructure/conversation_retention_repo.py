@@ -283,20 +283,22 @@ class ConversationRetentionRepository:
             .order_by(window.c.owner_id, window.c.created_at, window.c.id)
         )
 
-    async def overdue(self, *, window: timedelta, limit: int) -> RetentionOverdue:
+    async def overdue(
+        self, *, window: timedelta, limit: int, owner_page: int
+    ) -> RetentionOverdue:
         """Due work past `window` over every owner, up to `limit` rows.
 
-        Pages of `limit` owners, each statement bounded, until the owners end or
-        `limit + 1` rows are found. This reads O(owners) once per execution, in
-        its own transaction outside the budget; capping the owners instead would
-        make a deployment with many owners read incomplete, and so `unknown` in
-        health, every night.
+        Pages of `owner_page` owners, each statement bounded, until the owners
+        end or `limit + 1` rows are found. The page does not follow `limit`, so
+        a small remaining cap does not cost two statements per owner. This reads
+        O(owners) once per execution, in its own transaction outside the budget;
+        capping the owners instead would make a deployment with many owners read
+        incomplete, and so `unknown` in health, every night.
         """
-        owner_limit = max(limit, 1)
         found: list[datetime] = []
         cursor: RetentionKeyset | None = None
         while True:
-            owner_ids = await self._owner_page(cursor, owner_limit)
+            owner_ids = await self._owner_page(cursor, owner_page)
             if owner_ids:
                 candidates = self._window_statement(
                     owner_ids, None, limit + 1 - len(found), window
@@ -313,7 +315,7 @@ class ConversationRetentionRepository:
                         )
                     )
                 )
-            if len(found) > limit or len(owner_ids) < owner_limit:
+            if len(found) > limit or len(owner_ids) < owner_page:
                 break
             cursor = past_owner(owner_ids[-1])
         covered = found[:limit]

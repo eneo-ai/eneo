@@ -125,6 +125,8 @@ class ConversationPageAllocation:
     unit_rows: int
     unit_files: int
     chunk_rows: int
+    # The most owners (and roots) one discovery page reads, from a full chunk.
+    page_size: int
     max_batch: int
     family_rows: int
 
@@ -145,6 +147,7 @@ def conversation_page_allocation(
         unit_rows=unit_rows,
         unit_files=min(unit_rows, execution_files),
         chunk_rows=chunk_rows,
+        page_size=page_size,
         max_batch=min(
             execution_rows, unit_rows + CONVERSATION_UNIT_OVERHEAD_ROWS * page_size
         ),

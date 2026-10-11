@@ -949,8 +949,8 @@ async def test_overdue_covers_every_owner_page(
     test_tenant,
     admin_user,
 ):
-    """Mutant: overdue reads one page of `limit` owners, so more owners than the
-    limit report an incomplete snapshot (unknown health) and miss a later one."""
+    """Mutant: overdue reads one page of owners, so more owners than the page
+    report an incomplete snapshot (unknown health) and miss a later one."""
     from eneo.data_retention.infrastructure.conversation_retention_repo import (
         ConversationRetentionRepository,
         ConversationRootKind,
@@ -964,16 +964,94 @@ async def test_overdue_covers_every_owner_page(
     )
     window = timedelta(days=1)
 
-    assert await repository.overdue(window=window, limit=2) == RetentionOverdue(
-        count=0, complete=True, oldest_due_at=None
-    )
+    assert await repository.overdue(
+        window=window, limit=2, owner_page=2
+    ) == RetentionOverdue(count=0, complete=True, oldest_due_at=None)
 
     await create_old_question(
         retention_session, owners[-1].id, test_tenant.id, admin_user.id, days_old=60
     )
-    overdue = await repository.overdue(window=window, limit=2)
+    overdue = await repository.overdue(window=window, limit=2, owner_page=2)
     assert (overdue.count, overdue.complete) == (1, True)
     assert overdue.oldest_due_at is not None
+
+
+@pytest.mark.asyncio
+async def test_overdue_pages_owners_apart_from_the_cap_and_stops_at_it(
+    retention_session: AsyncSession,
+    test_assistant: Assistants,
+    test_app: Apps,
+    test_tenant,
+    admin_user,
+):
+    """Mutants: the owner page shrinks to the remaining row cap (two statements
+    per owner); the app-run stream is still walked once questions spent the cap."""
+    from sqlalchemy import event
+
+    from eneo.data_retention.application.conversation_history_retention_task import (
+        ConversationHistoryRetentionTask,
+    )
+    from eneo.data_retention.application.conversation_retention import (
+        conversation_page_allocation,
+    )
+
+    owners = await _numbered_owners(retention_session, test_assistant, admin_user)
+    for _ in range(2):
+        await create_old_question(
+            retention_session, owners[-1].id, test_tenant.id, admin_user.id, days_old=60
+        )
+    other_app = Apps(
+        name="Second retention app",
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        space_id=test_app.space_id,
+        completion_model_id=test_app.completion_model_id,
+        completion_model_kwargs={},
+        data_retention_days=30,
+        published=False,
+    )
+    test_app.data_retention_days = 30
+    retention_session.add(other_app)
+    await retention_session.flush()
+    for app in (test_app, other_app):
+        await create_old_app_run(
+            retention_session,
+            app.id,
+            test_tenant.id,
+            admin_user.id,
+            app.completion_model_id,
+            days_old=60,
+        )
+    task = ConversationHistoryRetentionTask(
+        retention_session,
+        # Discovery pages hold 30 // 3 = 10 owners: all six assistants at once.
+        allocation=conversation_page_allocation(
+            unit_rows=4,
+            chunk_rows=30,
+            execution_rows=1000,
+            execution_files=10,
+            family_rows=5,
+        ),
+        now=datetime.now(timezone.utc),
+        overdue_window=timedelta(days=1),
+        overdue_rows=1,
+    )
+    statements: list[str] = []
+
+    def record(_conn, _cursor, statement, *_args) -> None:
+        statements.append(statement)
+
+    connection = (await retention_session.connection()).sync_connection
+    event.listen(connection, "before_cursor_execute", record)
+    try:
+        overdue = await task.overdue()
+    finally:
+        event.remove(connection, "before_cursor_execute", record)
+
+    assert (overdue.count, overdue.complete) == (1, False)
+    assert overdue.oldest_due_at is not None
+    # One owner page and one window over the questions; no app-run statement.
+    assert len(statements) == 2
 
 
 async def _numbered_owners(

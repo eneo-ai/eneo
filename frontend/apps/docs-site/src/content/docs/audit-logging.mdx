@@ -126,8 +126,8 @@ going first on consecutive days, and the empty-session scan runs as its own task
 with its own budget, so a backlog in one stream cannot starve another. The
 empty-session and unused-upload sweeps examine every row of their population once
 per pass, so a pass takes about population divided by `RETENTION_MAX_ROWS_PER_RUN`
-nights and reports `partial` until it ends; sessions emptied by history retention do
-not wait for that sweep. The execution record (`retention_job_runs`) keeps counts,
+nights and reports `partial` until it ends; a session emptied by history retention is
+removed in the same unit unless a live chat holds it, in which case the sweep removes it. The execution record (`retention_job_runs`) keeps counts,
 blocked reasons, cursors and the overdue snapshot for operators.
 
 A successful retention execution reports completed database work, not confirmed
@@ -141,13 +141,27 @@ appear as a blocked reason. A remaining reference describes technical use, not a
 legal basis for keeping personal data. Storage versions, previous destinations
 and backups need the separate [storage and restore procedures](/guides/object-content-storage#back-up-and-restore).
 
+#### Worked example: one file, two spaces
+
+Space A keeps chat history for 30 days and Space B for 60 days; the same uploaded
+file is attached to a chat in each. On night 31 the chat in Space A is due: the
+engine locks it, re-checks its policy inside the deleting statement, deletes the
+chat and its links (and its session, if nothing else is left in it), then asks the
+Files owner to release the file. The owner locks the file family and re-checks every
+use under the lock, finds the link from Space B's chat and keeps the file; the run
+records `conversations_deleted: 1` and the observation `files_in_use: 1`, nothing is
+reported as blocked. On night 61 the chat in Space B is due; the same unit runs, no
+use is left, the file rows are deleted and object content storage removes the bytes.
+Space A's shorter period never reaches Space B's data. Erasing a file from every
+place at once is a separate, explicit decision, never a side effect of expiry.
+
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `RETENTION_CRON_HOUR` / `RETENTION_CRON_MINUTE` | `3` / `30` | UTC schedule |
 | `RETENTION_CONVERSATIONS_HISTORY_ENABLED` / `RETENTION_EMPTY_SESSIONS_ENABLED` / `RETENTION_UNUSED_FILES_ENABLED` / `RETENTION_JOB_HISTORY_ENABLED` | `true` | Per-task emergency switches; disabled executions are audited |
 | `RETENTION_MAX_ROWS_PER_RUN` / `RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` | `50000` / `250000` | Rows examined or deleted per execution (session, file and job tasks / conversation task) |
 | `RETENTION_MAX_FILES_PER_RUN` | `10000` | File rows deleted per execution, including derived files |
-| `RETENTION_CONVERSATIONS_MAX_UNIT_ROWS` / `RETENTION_MAX_FAMILY_ROWS` | `5000` / `5000` | Maximum conversation-unit and file-family work, including proofs and cascades |
+| `RETENTION_CONVERSATIONS_MAX_UNIT_ROWS` / `RETENTION_MAX_FAMILY_ROWS` | `5000` (min 4) / `5000` (min 3) | Maximum conversation-unit and file-family work, including proofs and cascades; the minimums admit one question with its session and helper row, and one File family member |
 | `RETENTION_CHUNK_ROWS` | `500` (4–2000) | Rows per chunk transaction; a single large unit may use more |
 | `RETENTION_MAX_SECONDS_PER_RUN` | `1800` | Execution time budget; no new unit starts after it, the unit in progress completes |
 | `RETENTION_UNUSED_FILE_GRACE_HOURS` | `24` | Minimum age for unattached uploads |
@@ -156,7 +170,10 @@ and backups need the separate [storage and restore procedures](/guides/object-co
 Exhausting either the row or file budget ends that execution, including its
 attachment-free work. A remaining-budget shortage resumes from the retained cursor
 on a later execution. A conversation or file family is never partly deleted to fit.
-`/api/healthz` reports each retention task as initializing, healthy, degraded or
+The overdue snapshot behind health reads owners in discovery-sized pages until
+every owner is seen or `RETENTION_OVERDUE_MAX_ROWS` overdue rows are found, in which
+case it is reported incomplete. `/api/healthz` reports each retention task as
+initializing, healthy, degraded or
 unknown with typed flags only (disabled, stale, overdue, missing, failed, the latest
 outcome, its error code and the blocked reasons it recorded); counts and times are
 in the audit log. A missing first execution is initializing; a failed latest

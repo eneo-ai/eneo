@@ -48,13 +48,16 @@ def test_registrations_match_their_tasks():
         ("retention_max_family_rows", 3, True),
         ("retention_chunk_rows", 3, False),
         ("retention_chunk_rows", 4, True),
+        ("retention_conversations_max_unit_rows", 3, False),
+        ("retention_conversations_max_unit_rows", 4, True),
     ],
 )
 def test_unit_floors_admit_the_minimum_complete_unit(
     setting: str, value: int, valid: bool
 ):
     """Mutants: accept a family cap that cannot lock, prove and delete one File,
-    or a chunk below four rows, where a step reserving rows // 4 defers forever."""
+    a chunk below four rows, where a step reserving rows // 4 defers forever,
+    or a unit cap below a question's four rows with a session and its helper."""
     values = get_settings().model_dump()
     values[setting] = value
     if valid:
