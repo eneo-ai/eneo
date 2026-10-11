@@ -10,6 +10,7 @@ const meta: MetaRecord = {
   "data-retention": "Data Retention & Deletion",
   skills: "Skills",
   "ai-providers": "AI Provider Configuration",
+  transcription: "Transcription & Speaker Identification",
   "mcp-servers": "MCP Servers",
   capabilities: "Web Search & Image Generation",
   deployment: "Deploy Eneo",

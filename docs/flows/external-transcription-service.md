@@ -13,7 +13,7 @@ uploads and app runs always use the model-registry path regardless.
 ## How speaker identification works
 
 Model governance stays in Eneo and the service is reduced to a
-diarization backend (Tolka's `TOLKA_ENGINE=diarize` tier needs no ASR model at
+diarization backend (Vemsa's `VEMSA_ENGINE=diarize` tier needs no ASR model at
 all). It costs one extra upload of the audio per file (Eneo to the provider,
 then Eneo to the service). The provider is trusted for text only:
 
@@ -33,8 +33,11 @@ then Eneo to the service). The provider is trusted for text only:
 
 Speaker labels are assigned per audio file by the service; Eneo renumbers them
 so a multi-file transcript has unique labels, and records a speaker inventory
-in the step's transcription metadata. A follow-up `speaker_mapping` step (see
-`flow-developer-quickstart.md`) can map those labels to real participants.
+in the step's transcription metadata. The metadata also names the connection
+that labelled the step (`speaker_service` and `speaker_service_id`), as it was
+named then; the run's step details show it in Avancerad. A follow-up
+`speaker_mapping` step (see `flow-developer-quickstart.md`) can map those
+labels to real participants.
 
 The service's segments (`start`, `end`, `speaker`, `text` per rendered line)
 are admitted only when every entry is valid and their complete ordered rendering
@@ -67,53 +70,63 @@ file; its bytes remain fixed for checkpoint history and evidence.
 
 Connect the service in the admin interface under Modeller, Transkription, in the
 Talaridentifiering section:
-enter its base address (without a `/v1` suffix, for example `http://tolka:8000`)
-and its API key. Then give each space that needs speaker identification access
-to the connection. The backend API and the flow execution worker
-(`task-execution-worker`) both read the connection from Eneo, so no environment
-variables are needed on either.
+enter its base address (for example `https://vemsa.example.org`; a trailing
+`/v1` is removed) and its API key. Then give each space that needs speaker
+identification access to the connection. The backend API and the flow execution
+worker (`task-execution-worker`) both read the connection from Eneo, so no
+environment variables are needed on either. The operator steps are in the
+docs-site guide `guides/transcription.mdx`.
 
 Polling uses the step attempt's remaining execution budget. By default a step may
 use the whole invocation ceiling (`TASK_EXECUTION_TIMEOUT_SECONDS` minus the
 finalization allowance) less what earlier steps of the run consumed; a step's
 `timeout_seconds` can lower it, never raise it past the ceiling.
 
-### Service-side requirements (Tolka)
+### Service-side requirements (Vemsa)
 
-- Provision a named credential for Eneo: `TOLKA_API_TOKENS=eneo=<secret>`, and
+- Provision a named credential for Eneo: `VEMSA_API_TOKENS=eneo=<secret>`, and
   enter the same secret as the API key of the connection in the admin interface.
   Every space that uses the connection shares this one client identity; size
-  `TOLKA_MAX_QUEUED_JOBS_PER_CLIENT` for the combined load.
+  `VEMSA_MAX_QUEUED_JOBS_PER_CLIENT` for the combined load.
 - The flow execution worker must be able to reach the service over the
-  network. Tolka's reference compose binds its API to `127.0.0.1`; expose it
-  on a network the worker shares.
-- `TOLKA_MAX_AUDIO_BYTES` (default 2 GiB) must cover Eneo's audio upload
+  network, and so must the backend API, which runs the connection test.
+  Vemsa's reference compose publishes its API on `127.0.0.1`; set `VEMSA_BIND`
+  to a private interface, or attach the API to a network the worker shares
+  with Vemsa's `compose.eneo.yaml`.
+- `VEMSA_MAX_AUDIO_BYTES` (default 2 GiB) must cover Eneo's audio upload
   limit. Eneo sends the original uploaded bytes (mp3 etc.), not decoded wav.
+  The parts of one recording (`single_recording`) are the exception: they are
+  sent joined as one 16 kHz WAV.
 
 ## How it behaves
 
 - **Speaker identification** applies when the flow's space has access to a
   connected service; otherwise the transcript has no speaker labels.
-- **The flow's transcription model is always required.** The wizard's model
+- **The flow's transcription model is always required.** The flow's model
   selection and space governance apply; the selected model writes the text.
 - **Job flow**: one multipart `POST /v1/jobs` per audio file (with
   `language` and `diarize` from the flow's transcription config), a
   status poll every poll-interval, then `GET /v1/jobs/{id}/result`. Submission
   is retried on rate limiting and outages; once a job id exists nothing
   resubmits.
-- **Failures** surface as the step error `TYPED_IO_TRANSCRIPTION_FAILED`,
-  same as the model-registry path. There is no cancel endpoint: a cancelled
-  or timed-out step leaves the service job to finish server-side, and the
-  provider-call record marks the outcome unknown.
+- **Failures** of the service surface as the step error
+  `typed_io_speaker_identification_failed`: the model's text was written and
+  the service then failed on it. The run error's `details` carry
+  `transcription_failure_kind` and, when the service gave one,
+  `transcription_service_reason`. A step that runs out of time stays
+  `flow_step_timeout`. A cancelled or timed-out step asks the service to stop
+  the job (`DELETE /v1/jobs/{id}`, best effort), and the provider-call record
+  marks the outcome unknown.
 - **No progress signal** exists; a running step shows the usual running
   state until the job completes.
 
 ## Local development
 
-Run Tolka from its repo with the no-GPU fake engine:
+Run Vemsa from its repo with the no-GPU fake engine. Vemsa also needs
+`VEMSA_DATABASE_URL` pointing at a PostgreSQL database for its job store:
 
 ```bash
-TOLKA_ENGINE=fake TOLKA_API_TOKENS=eneo=devtoken uv run uvicorn tolka.main:app --port 8000
+VEMSA_ENGINE=fake VEMSA_API_TOKENS=eneo=devtoken uv run uvicorn vemsa.main:create_app --factory --port 8000
 ```
 
 Then in the admin interface under Modeller, Transkription (Talaridentifiering), connect it with the address
@@ -127,12 +140,13 @@ transcript should show the service's canned speaker labels.
 
 | Symptom | Likely cause |
 | --- | --- |
-| Step fails immediately, logs show invalid credentials | The connection's API key does not match a token in `TOLKA_API_TOKENS`. |
+| Step fails with `typed_io_speaker_identification_failed` once the model has transcribed, and the connection test shows "Key not accepted" | The connection's API key does not match a token in `VEMSA_API_TOKENS`. |
 | Step fails with `flow_step_timeout` | The step's execution budget is exhausted. Check the service's queue depth and worker health, or raise the step's `timeout_seconds` within the deployment ceiling. |
-| Steps fail with rate-limit errors | The service's per-client queue cap is full; raise `TOLKA_MAX_QUEUED_JOBS_PER_CLIENT` or add service workers. |
-| Transcript has no speaker labels | Speaker identification is off for the flow (wizard step 2), the space has no access to a connected service, or the service ran without diarization support; check its engine tier and extras. Also check the step for an `audio_diarization_skipped` diagnostic: the transcription model returned no word timestamps. |
-| Service rejects jobs with 422 | The service does not accept `task=diarize` (older Tolka); upgrade it. |
-| Steps fail with `diarize_task_unsupported` | The service ignored `task=diarize` and transcribed with its own model (pre-task Tolka); Eneo refuses that result because it did not come from the flow's model. Upgrade the service. |
+| Step fails with `flow_step_timeout` and `transcription_failure_kind` is `capacity` | The service kept refusing the job until the step's budget ran out: its per-client queue cap is full. Raise `VEMSA_MAX_QUEUED_JOBS_PER_CLIENT` or add service workers. |
+| Step fails with `typed_io_speaker_service_unavailable` | The run labels speakers but the space has no service the flow can use; `details.speaker_service_gap` is `no_service`, `choice_required` or `picked_unavailable`. |
+| Transcript has no speaker labels | Speaker identification is off for the flow (the Transcription stage of the flow editor), the run chose `speaker_labels: false`, the space has no usable service (not granted, switched off, or below the space's security classification), or the service ran without diarization support; check its engine tier and extras. Also check the step for an `audio_diarization_skipped` diagnostic: the transcription produced no text to label. |
+| Step fails with `typed_io_speaker_identification_failed` and `transcription_failure_kind` is `input` | The service rejected the job with 413 or 422: the audio or the transcript exceeds its size limit (`VEMSA_MAX_AUDIO_BYTES`, `VEMSA_MAX_TRANSCRIPT_BYTES`), or the service does not accept `task=diarize` (an older Vemsa); upgrade it. |
+| Step fails with `typed_io_speaker_identification_failed` and the worker logs `remote_transcription.diarize_unsupported` | The service ignored `task=diarize` and transcribed with its own model (a Vemsa that predates the task); Eneo refuses that result because it did not come from the flow's model. Upgrade the service. |
 
 
 ## Speaker review rollout

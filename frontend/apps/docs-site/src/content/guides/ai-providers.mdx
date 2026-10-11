@@ -147,53 +147,9 @@ When a completion model is added, Eneo records which model settings its route of
 
 ---
 
-## Live transcription
+## Transcription and speaker identification
 
-An app that records audio for a flow can show the text while someone speaks. The live text is a preview. When the recording ends, the app uploads it to the flow run as usual, and the flow's transcription model transcribes the whole recording. The run uses that transcript, not the preview. To build the app side, see [Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording).
-
-Live transcription needs a transcription model on a server that implements vLLM's realtime transcription API, such as vLLM or [vadsa](https://github.com/eneo-ai/vadsa). vadsa is a Swedish speech recognition server for the [KlangAI/pianissimo-sv](https://huggingface.co/KlangAI/pianissimo-sv) model, published as images under `ghcr.io/eneo-ai/vadsa`. The Eneo backend opens the realtime connection itself: it connects to `/v1/realtime` under the provider's endpoint (`ws://` for an `http://` endpoint, `wss://` for an `https://` endpoint) and sends the provider's API key as a bearer token.
-
-### Set up a model for live transcription
-
-Before you start, make sure the model server is reachable from the Eneo backend and workers, and that you are signed in as an administrator.
-
-1. **Add the server as a provider.** In **Admin → Models**, add a provider of type **vLLM**. Set **Endpoint** to the server's root URL, for example `http://vadsa:8000`, and **API Key** to one of the server's keys. For vadsa, use one of the keys in `VADSA_API_KEYS`.
-2. **Add the transcription model.** Add a transcription model on that provider, with the name the server serves as its identifier. For vadsa, the identifier is `KlangAI/pianissimo-sv` unless `VADSA_SERVED_MODEL_NAME` sets another name.
-3. **Mark the model for live transcription.** In **Admin → Models → Transcription models**, open the model's actions menu (the **⋯** button) and choose **Edit model**. Select **Live transcription** and choose **Save**. You can also select it in the model step while you add the model. In the Swedish interface the path is **Administratör → Modeller → Transkription**, then **Redigera modell**, and the checkbox is **Livetranskribering**.
-
-   The checkbox is available only for a model on a provider of type vLLM. For any other provider it is disabled, with the note "Requires a provider of type vLLM." After you save, the model's **Details** column (**Detaljer**) in the table shows the live transcription icon, a sound wave with the tooltip "The model can write out speech while someone is talking".
-
-   To automate this step, set `supports_realtime` through the admin API instead. Look up the model's `id` with `GET /api/v1/transcription-models/`, then:
-
-   ```bash
-   curl -X PUT "https://eneo.example.com/api/v1/admin/tenant-models/transcription/$MODEL_ID/" \
-     -H "Authorization: Bearer $ADMIN_TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"supports_realtime": true}'
-   ```
-
-   The API applies the same rule: for a provider that is not of type vLLM, Eneo answers `400`. You can also send `"supports_realtime": true` when you create the model with `POST /api/v1/admin/tenant-models/transcription/`.
-
-4. **Use the model in a flow.** Enable the model in the space settings under **Transcription models**, choose it as the flow's transcription model, and publish the flow.
-5. **Check the flow.** Request `GET /api/v1/flows/{id}/run-contract/`. The response contains `"live": { "available": true, "reason": null }` inside `transcription`.
-
-If `transcription` is `null`, the flow has no audio input step or does not transcribe audio. If `transcription.live.available` is `false`, `transcription.live.reason` says why:
-
-| `reason` | Meaning |
-| --- | --- |
-| `transcription_disabled` | The flow does not transcribe audio. |
-| `model_unavailable` | The flow has no transcription model, or its model is not available in the flow's space. |
-| `model_not_realtime` | The model is not marked for live transcription, or its provider is not of type vLLM. |
-
-### Connect a speaker identification service
-
-A speaker identification service (for example Vemsa) does not change live transcription. An administrator connects it in the admin interface under **Modeller**, **Transkription**, in the **Talaridentifiering** section, with its address and API key. Eneo tests the connection right away, and the latest result and when it ran stay visible to every administrator. Each space gets access to the service in its own settings. The flow's own transcription model always writes the text, so the live text and the final transcript come from the same model, and the service only identifies speakers. There is no deployment environment variable for it.
-
-### Proxy and session limits
-
-Apps connect to the live transcription WebSocket at `/api/v1/live-transcription`, under the same `/api/` prefix as the `/api/v1/ws` socket. A reverse proxy that meets the [WebSocket requirement](/guides/deployment#reverse-proxy-requirements) passes it without changes.
-
-A live session accepts at most `FLOW_AUDIO_MAX_DURATION_SECONDS` of audio, the same limit as an uploaded recording. `FLOW_LIVE_TRANSCRIPTION_IDLE_TIMEOUT_SECONDS` and `FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS` bound how long a session waits for audio and for the final text; see [Environment configuration](/guides/deployment#environment-configuration).
+A transcription model is added like any other model, with the steps under [Adding a Provider](#adding-a-provider-admin-ui). Live transcription, where an app shows the text while someone records, needs a transcription model on a provider of type vLLM that is marked for live use. The steps for that, for speaker identification services such as Vemsa, and the settings on the vadsa and Vemsa servers are in [Transcription and speaker identification](/guides/transcription).
 
 ---
 
