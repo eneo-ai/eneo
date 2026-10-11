@@ -189,7 +189,7 @@ button). Everything else is ink on paper with hairline rules.
 
 Density is moderate: a 15px root, a tight 12px floor, and short measured
 paragraphs. Hierarchy comes from weight and hairline rules, not from size
-jumps or colour. Progressive disclosure is structural: the Användare /
+jumps or colour. Progressive disclosure is structural: the Enkel /
 Avancerad split, collapsed chapters in the flow editor, and expandable
 assumptions on the confirm card all keep the default view readable for a
 first-time AI user while everything remains reachable.
@@ -452,7 +452,7 @@ the one primary action. Everything Eneo assumed is folded behind
   change, with `prefers-reduced-motion` honoured.
 - **Do** write Swedish first in the institution's own register: full
   sentences, no exclamation marks, "du" form, no developer words on
-  Användare screens.
+  Enkel screens.
 
 ### Don't:
 

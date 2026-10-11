@@ -15,7 +15,7 @@ Context of use: desktop-first, at office workstations, during work hours. The jo
 to be done is turning AI into practical operational tooling — building and running
 AI assistants, managing knowledge collections, composing multi-step flows, and
 setting up triggers — without ever feeling like they are using a developer tool.
-The `Användare` / `Avancerad` (User / Advanced) mode split keeps the interface
+The `Enkel` / `Avancerad` (Simple / Advanced) mode split keeps the interface
 simple by default and reveals power only on demand.
 
 ## Product Purpose
@@ -58,7 +58,7 @@ that still never intimidates.
 1. **Calm confidence over flashy capability.** Every interaction feels measured
    and reliable; motion is purposeful, never decorative.
 2. **Progressive disclosure is the architecture.** Simple by default, powerful on
-   demand (`Användare` / `Avancerad`). Never front-load complexity.
+   demand (`Enkel` / `Avancerad`). Never front-load complexity.
 3. **Warm professionalism.** Restrained and functional with warm undertones — the
    feeling of a trustworthy, well-run institution rather than a cold utility.
 4. **Improve, don't preserve.** The melt-ui → shadcn-svelte migration is a design
@@ -88,4 +88,4 @@ contrast ≥ 4.5:1 (≥ 3:1 for large text and UI boundaries), honoring
 All user-facing text carries `sv` / `en` translation keys (Paraglide); Swedish is
 the primary language. The experience is desktop-first but layouts must stay usable
 at smaller widths. Because users range from first-time to expert, the default
-`Användare` mode must remain legible and low in cognitive load.
+`Enkel` mode must remain legible and low in cognitive load.
