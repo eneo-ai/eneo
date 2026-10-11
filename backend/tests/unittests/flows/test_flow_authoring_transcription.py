@@ -18,6 +18,7 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.flow_authoring_transcription import (
     apply_audio_transcription_defaults,
     kept_speaker_service_id,
+    require_chosen_speaker_service,
     require_usable_speaker_service,
     requires_audio_transcription,
     transcription_config_for_write,
@@ -247,3 +248,84 @@ class TestPickedSpeakerService:
             code,
             {"issue_code": code},
         )
+
+
+_MAPS_SPEAKERS = [SimpleNamespace(output_mode="speaker_mapping")]
+_LABELS_OFF = {"transcription_diarization": False}
+
+
+class TestChosenSpeakerService:
+    """Publishing refuses a flow that asks for speaker labels without having
+    chosen the service that labels them: nothing is chosen for it."""
+
+    @staticmethod
+    def _require(wizard: dict[str, object], steps: list, usable: int) -> None:
+        require_chosen_speaker_service(
+            parse_transcription_config(
+                {"wizard": {"transcription_enabled": True, **wizard}}
+            ),
+            steps=steps,
+            space=SimpleNamespace(  # pyright: ignore[reportArgumentType]
+                usable_transcription_services=[object()] * usable
+            ),
+        )
+
+    @pytest.mark.parametrize(
+        ("wizard", "steps", "usable"),
+        [
+            ({}, _MAPS_SPEAKERS, 0),
+            ({}, _MAPS_SPEAKERS, 1),
+            (_LABELS_OFF, _MAPS_SPEAKERS, 0),
+            ({}, [], 1),
+            ({}, [], 2),
+        ],
+        ids=[
+            "step_requires_labels_no_service",
+            "step_requires_labels_one_service",
+            "step_requires_labels_with_the_setting_off",
+            "setting_on_one_service",
+            "setting_on_two_services",
+        ],
+    )
+    def test_labels_without_a_chosen_service_are_refused(
+        self, wizard: dict[str, object], steps: list, usable: int
+    ) -> None:
+        with pytest.raises(BadRequestException) as refused:
+            self._require(wizard, steps, usable)
+
+        code = FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_NOT_CHOSEN.value
+        assert code == "flow_speaker_service_not_chosen"
+        assert (refused.value.code, refused.value.context) == (
+            code,
+            {"issue_code": code},
+        )
+        # Switching labels off is an answer only while no step needs them.
+        assert ("switch speaker identification off" in str(refused.value)) is (
+            not steps
+        )
+
+    @pytest.mark.parametrize(
+        ("wizard", "steps", "usable"),
+        [
+            ({}, [], 0),
+            (_LABELS_OFF, [], 1),
+            ({"transcription_speaker_service": {"id": str(uuid4())}}, [], 1),
+            (
+                {"transcription_speaker_service": {"id": str(uuid4())}},
+                _MAPS_SPEAKERS,
+                1,
+            ),
+            ({"transcription_enabled": False}, _MAPS_SPEAKERS, 1),
+        ],
+        ids=[
+            "setting_on_nothing_to_choose",
+            "setting_off",
+            "chosen",
+            "chosen_for_a_step_that_requires_labels",
+            "transcribes_nothing",
+        ],
+    )
+    def test_a_flow_that_chose_or_asks_for_no_labels_is_not_refused(
+        self, wizard: dict[str, object], steps: list, usable: int
+    ) -> None:
+        self._require(wizard, steps, usable)

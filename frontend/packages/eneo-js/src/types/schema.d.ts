@@ -22116,7 +22116,7 @@ export interface components {
       provider_work_may_have_completed?: boolean | null;
       /** @description Execution heartbeat facts used to recover a stalled worker. */
       recovery?: components["schemas"]["FlowRunRecoveryFacts"] | null;
-      /** @description Why no speaker identification service could label this run's speakers: the space has none (no_service), has one or more but none it can use now, switched off or below the space's security classification (none_usable), or the service the flow chose is no longer usable (picked_unavailable). Refused before any audio was sent. */
+      /** @description Why no speaker identification service could label this run's speakers: the flow chose none (not_chosen), or the service it chose is no longer usable in the space (picked_unavailable). Refused before any audio was sent. */
       speaker_service_gap?: components["schemas"]["SpeakerServiceGap"] | null;
       /**
        * Step Description
@@ -26009,7 +26009,7 @@ export interface components {
     FlowSpeakerLabelsOptionPublic: {
       /**
        * Default
-       * @description What a run gets when it makes no choice: the flow's own speaker-label setting, or false while the space has no speaker identification service it can use.
+       * @description What a run gets when it makes no choice: the flow's own speaker-label setting, or false while the flow has no speaker identification service it can use in its space.
        */
       default: boolean;
       /**
@@ -26019,10 +26019,10 @@ export interface components {
       required: boolean;
       /**
        * Selectable
-       * @description Whether a run may choose with `speaker_labels` on run creation. False when the flow's space has no speaker identification service it can use, or the flow requires labels.
+       * @description Whether a run may choose with `speaker_labels` on run creation. False when the flow has no speaker identification service it can use in its space, or the flow requires labels.
        */
       selectable: boolean;
-      /** @description Why the speaker labels this flow asks for cannot be produced, or null. Set while the flow asks for labels (`required` is true, or its own speaker-label setting is on) and no speaker identification service can label it in its space: the space has none (`no_service`, reported only while `required` is true), it has one or more but none it can use now, because each is switched off or below the space's security classification (`none_usable`), or the service the flow chose is no longer usable there (`picked_unavailable`). While `required` is true a run created with it set fails its transcription step with `typed_io_speaker_service_unavailable`, so check it before collecting a recording. While `required` is false the run transcribes without speaker labels, so say so and let the person continue. */
+      /** @description Why the speaker labels this flow asks for cannot be produced, or null. `picked_unavailable`: the speaker identification service the flow chose cannot be used in its space now (it was taken from the space, switched off, or is below the space's security classification); reported while the flow asks for labels, that is `required` is true or the flow's own speaker-label setting is on. `not_chosen`: the flow chose no service although a step needs labels; reported only while `required` is true. Null otherwise: a flow that chose no service and requires no labels simply transcribes. A service is never chosen on the flow's behalf. When this is set and `required` is true, do not record or upload: the run would fail its transcription step with `typed_io_speaker_service_unavailable`. When this is set and `required` is false, the run goes on without speaker labels, so say so and let the person continue. */
       unavailable_reason: components["schemas"]["SpeakerServiceGap"] | null;
     };
     /** FlowStepAttemptCompletionConfiguration */
@@ -36059,11 +36059,6 @@ export interface components {
        */
       id: string;
       /**
-       * Is Standard
-       * @description True for the space's standard: flows in the space that have not chosen a service use this one. At most one link is the standard, and none is while the space has no usable service.
-       */
-      is_standard: boolean;
-      /**
        * Meets Security Classification
        * @description False when the service's security classification is below the space's.
        */
@@ -36076,7 +36071,7 @@ export interface components {
      * @description Why no service can label this flow's speakers.
      * @enum {string}
      */
-    SpeakerServiceGap: "no_service" | "none_usable" | "picked_unavailable";
+    SpeakerServiceGap: "not_chosen" | "picked_unavailable";
     /**
      * StartRunRequest
      * @description Body for ``POST /runs/`` — start a new helper run.

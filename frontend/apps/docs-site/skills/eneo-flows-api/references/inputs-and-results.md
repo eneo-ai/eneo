@@ -38,11 +38,11 @@ The server validates required fields, dates, finite numbers, collection shapes, 
 
 ## Speaker labels
 
-`transcription.speaker_labels` in the run contract has `selectable`, `required`, `default`, and `unavailable_reason`. When `selectable` is true, the create request may carry a top-level `speaker_labels` of `true` or `false`; omit it or send `null` to keep the Flow's `default`. `selectable` is false when no transcription service labels speakers, or when `required` is true because a step maps speakers to names.
+`transcription.speaker_labels` in the run contract has `selectable`, `required`, `default`, and `unavailable_reason`. When `selectable` is true, the create request may carry a top-level `speaker_labels` of `true` or `false`; omit it or send `null` to keep the Flow's `default`. `selectable` is false when the Flow has chosen no speaker identification service its Space can use, or when `required` is true because a step maps speakers to names. Eneo never chooses a service for a Flow.
 
 Sending `true` or `false` while `selectable` is false returns `422 flow_run_speaker_labels_not_selectable`. The choice is part of the logical request: a changed choice needs a new `Idempotency-Key`. Labelling speakers makes the run take longer.
 
-`unavailable_reason` says why the speaker labels the Flow asks for cannot be produced, or is `null`: `no_service` (the Space has no speaker identification service; reported only when `required` is true), `none_usable` (the Space has one, but none it can use now), or `picked_unavailable` (the service the Flow's author chose is no longer usable in the Space). When `required` is true, do not collect a recording or create a run; a run created anyway fails its transcription step with `typed_io_speaker_service_unavailable`. When `required` is false, the run transcribes without speaker labels: tell the person and continue.
+`unavailable_reason` says why the speaker labels the Flow asks for cannot be produced, or is `null`: `picked_unavailable` (the service the Flow's author chose is no longer usable in the Space; nothing replaces it) or `not_chosen` (a step requires labels and the author chose no service; Eneo does not publish a Flow in this state, so it is a safeguard). When `required` is true, do not collect a recording or create a run; a run created anyway fails its transcription step with `typed_io_speaker_service_unavailable`. When `required` is false, the run transcribes without speaker labels: tell the person and continue.
 
 ## Step-bound uploads
 

@@ -425,11 +425,8 @@ describe("speaker identification run errors", () => {
     runError({ details: speaker_service_gap ? { speaker_service_gap } : {} });
 
   it("says why speakers could not be identified", () => {
-    expect(getFlowRunErrorMessage(refused("no_service"))).toBe(
-      m.flow_error_typed_io_speaker_service_unavailable()
-    );
-    expect(getFlowRunErrorMessage(refused("none_usable"))).toBe(
-      m.flow_speaker_service_gap_none_usable()
+    expect(getFlowRunErrorMessage(refused("not_chosen"))).toBe(
+      m.flow_speaker_service_gap_not_chosen()
     );
     expect(getFlowRunErrorMessage(refused("picked_unavailable"))).toBe(
       m.flow_speaker_service_gap_picked_unavailable()

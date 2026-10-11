@@ -483,21 +483,26 @@
       ? wizardMetadata.transcription_speaker_service.id
       : null
   );
-  // Speakers are labelled by a speaker identification service granted to
-  // the space; without one there is nothing to switch on.
+  // Speakers are labelled by the speaker identification service the flow
+  // chose, among those granted to the space.
   const speakerServices = $derived($currentSpace.transcription_services ?? []);
-  const speakerServiceAvailable = $derived(usableSpeakerServices(speakerServices).length > 0);
+  const speakerServiceChosen = $derived(
+    usableSpeakerServices(speakerServices).some((service) => service.id === speakerServicePickId)
+  );
+  const speakersNamedByStep = $derived(
+    ($update.steps ?? []).some((step) => step.output_mode === "speaker_mapping")
+  );
   // Offer a "name the speakers" step after an audio step when diarization is
   // on and no step already does it.
   const activeStepForOffer = $derived(
     ($update.steps ?? []).find((step) => step.id === $activeStepId) ?? null
   );
   const speakerMappingStepOffered = $derived(
-    speakerServiceAvailable &&
+    speakerServiceChosen &&
       transcriptionEnabled &&
       transcriptionDiarization &&
       activeStepForOffer?.input_type === "audio" &&
-      !($update.steps ?? []).some((step) => step.output_mode === "speaker_mapping")
+      !speakersNamedByStep
   );
   const stepsCount = $derived($update.steps?.length ?? 0);
   const checklistHasName = $derived(($update.name ?? "").trim().length > 0);
@@ -1152,14 +1157,22 @@
                       <FlowSpeakerIdentification
                         services={speakerServices}
                         labels={transcriptionDiarization}
+                        required={speakersNamedByStep}
                         pickedId={speakerServicePickId}
                         disabled={$isPublished}
                         onLabelsChange={(checked) =>
-                          flowEditor.setWizardMetadata({ transcription_diarization: checked })}
+                          flowEditor.setWizardMetadata(
+                            // Switched off means no service: a choice nobody can see
+                            // would still let a run label speakers with it.
+                            checked
+                              ? { transcription_diarization: true }
+                              : {
+                                  transcription_diarization: false,
+                                  transcription_speaker_service: null
+                                }
+                          )}
                         onPick={(id) =>
-                          flowEditor.setWizardMetadata({
-                            transcription_speaker_service: id ? { id } : null
-                          })}
+                          flowEditor.setWizardMetadata({ transcription_speaker_service: { id } })}
                         maxSpeakers={wizardMetadata.transcription_max_speakers ?? null}
                         onMaxSpeakersChange={(value) =>
                           flowEditor.setWizardMetadata({ transcription_max_speakers: value })}

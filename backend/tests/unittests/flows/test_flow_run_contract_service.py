@@ -249,6 +249,7 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
 ):
     audio_step = _step(step_order=1, input_type="audio")
     mapping_assistant_id = uuid4()
+    chosen = _connection(1)
     flow = _flow(step=audio_step).model_copy(update={"published_version": 1})
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
@@ -264,6 +265,7 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
                 "wizard": {
                     "transcription_enabled": True,
                     "transcription_model": {"id": str(uuid4())},
+                    "transcription_speaker_service": {"id": str(chosen.id)},
                 }
             },
             "steps": [
@@ -298,7 +300,7 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
         flow_service=flow_service,
         settings_service=settings_service,
         flow_version_repo=versions,
-    ).get_run_contract(flow_id=flow.id, space=_space(None, [_connection(1)]))
+    ).get_run_contract(flow_id=flow.id, space=_space(None, [chosen]))
 
     assert contract.transcription is not None
     assert contract.transcription.speaker_labels.model_dump() == {
@@ -310,7 +312,8 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
     # A speaker service labels a multi-part recording as one.
     assert contract.transcription.single_recording is True
 
-    # Without one, the parts are still one recording: they take the longest recording together.
+    # Once the space lost it, the parts are still one recording: they take the
+    # longest recording together.
     unlabelled = await _service(
         flow_service=flow_service,
         settings_service=settings_service,
@@ -323,7 +326,7 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
         "selectable": False,
         "required": True,
         "default": False,
-        "unavailable_reason": SpeakerServiceGap.NO_SERVICE,
+        "unavailable_reason": SpeakerServiceGap.PICKED_UNAVAILABLE,
     }
 
 
@@ -331,25 +334,25 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
 @pytest.mark.parametrize(
     ("granted", "pick", "selectable", "reason"),
     [
-        # A space without any service simply transcribes: nothing to report.
+        # A flow that chose no service simply transcribes, whatever its space
+        # has: nothing is chosen for it, and there is nothing to report.
         (0, None, False, None),
-        (1, None, True, None),
-        # Without a pick the flow uses the space's standard.
-        (2, None, True, None),
+        (1, None, False, None),
+        (2, None, False, None),
         (2, 1, True, None),
         # The picked service's grant was revoked; the space's other service
         # does not stand in for the author's pick.
         (1, "revoked", False, SpeakerServiceGap.PICKED_UNAVAILABLE),
     ],
     ids=[
-        "no_service",
-        "one_service",
-        "two_without_pick",
+        "no_pick_no_service",
+        "no_pick_one_service",
+        "no_pick_two_services",
         "usable_pick",
         "revoked_pick",
     ],
 )
-async def test_a_run_chooses_speaker_labels_only_when_a_space_service_labels_them(
+async def test_a_run_chooses_speaker_labels_only_when_the_flows_own_service_labels_them(
     granted: int,
     pick: int | str | None,
     selectable: bool,
@@ -402,7 +405,7 @@ async def test_a_run_chooses_speaker_labels_only_when_a_space_service_labels_the
 
     assert contract.transcription is not None
     assert contract.transcription.speaker_labels.selectable is selectable
-    # The flow asks for labels by default; without a service a run gets none.
+    # The flow asks for labels by default; without its service a run gets none.
     assert contract.transcription.speaker_labels.default is selectable
     assert (contract.transcription.max_speakers is not None) is selectable
     assert contract.transcription.speaker_labels.unavailable_reason is reason
@@ -1412,6 +1415,7 @@ def test_a_flow_that_asks_for_labels_reports_why_none_can_be_produced(
     )
     labels_on: dict[str, object] = {"transcription_enabled": True}
     labels_off: dict[str, object] = {**labels_on, "transcription_diarization": False}
+    identifiable = gap is None
 
     # A step that maps speakers needs the labels whatever the flow's setting.
     required = speaker_labels_option(
@@ -1425,13 +1429,28 @@ def test_a_flow_that_asks_for_labels_reports_why_none_can_be_produced(
     )
 
     assert required is not None and preferred is not None and not_asked is not None
-    assert (required.required, required.unavailable_reason) == (True, gap)
-    # A space without any service simply transcribes: nothing to report.
-    assert (preferred.required, preferred.unavailable_reason) == (
-        False,
-        None if gap is SpeakerServiceGap.NO_SERVICE else gap,
-    )
-    assert (not_asked.required, not_asked.unavailable_reason) == (False, None)
+    assert required.model_dump() == {
+        "selectable": False,
+        "required": True,
+        "default": False,
+        "unavailable_reason": gap,
+    }
+    # A flow that chose no service and requires no labels simply transcribes:
+    # only a chosen service the space cannot use is worth reporting.
+    assert preferred.model_dump() == {
+        "selectable": identifiable,
+        "required": False,
+        "default": identifiable,
+        "unavailable_reason": (
+            gap if gap is SpeakerServiceGap.PICKED_UNAVAILABLE else None
+        ),
+    }
+    assert not_asked.model_dump() == {
+        "selectable": identifiable,
+        "required": False,
+        "default": False,
+        "unavailable_reason": None,
+    }
 
 
 @pytest.mark.parametrize(

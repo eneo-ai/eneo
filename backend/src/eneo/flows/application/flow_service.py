@@ -32,10 +32,12 @@ from eneo.flows.domain.flow_step_validation import (
     FlowGraphIssueCode,
     FlowStepValidationError,
 )
+from eneo.flows.domain.speaker_mapping_config import steps_require_speaker_labels
 from eneo.flows.domain.step_config import clean_inactive_step_config
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_transcription import (
     kept_speaker_service_id,
+    require_chosen_speaker_service,
     require_usable_speaker_service,
     transcription_config_for_write,
 )
@@ -614,7 +616,9 @@ class FlowService:
             metadata_json=normalized_metadata,
         )
         space = await self._check_speaker_service(
-            space_id=flow.space_id, metadata_json=normalized_metadata
+            space_id=flow.space_id,
+            metadata_json=normalized_metadata,
+            publishing_steps=flow.steps,
         )
         await self._validate_step_security_classification_for_steps(
             space_id=flow.space_id,
@@ -767,21 +771,35 @@ class FlowService:
         space_id: UUID,
         metadata_json: FlowPersistedJsonObject | None,
         kept_metadata_json: FlowPersistedJsonObject | None = None,
+        publishing_steps: list[FlowStep] | None = None,
     ) -> Space | None:
-        """Refuse a malformed transcription choice and a picked speaker service
-        the space may not use. A flow that picks none uses the space's
-        standard, so it has nothing to check. A saved draft keeps the pick it
-        has, as a space keeps its grants, so an administrator's later change
-        never blocks unrelated edits; publishing checks it again.
+        """Refuse a malformed transcription choice, a picked speaker service
+        the space may not use, and on publish (``publishing_steps``) a flow
+        that asks for speaker labels without having chosen a service. A draft
+        may be saved before the choice is made. A saved draft keeps the pick
+        it has, as a space keeps its grants, so an administrator's later
+        change never blocks unrelated edits; publishing checks it again.
 
         Returns the space when it was loaded, for the checks that follow."""
-        pick = transcription_config_for_write(metadata_json).speaker_service_in_use
+        config = transcription_config_for_write(metadata_json)
+        pick = config.speaker_service_in_use
         if pick is not None and pick == kept_speaker_service_id(kept_metadata_json):
             pick = None
-        if self.space_service is None or pick is None:
+        if (
+            publishing_steps is not None
+            and config.enabled
+            and steps_require_speaker_labels(publishing_steps)
+        ):
+            # A step's need overrides the flow's own setting, so a choice
+            # that is switched off is the one every run uses.
+            pick = config.speaker_service_id
+        if self.space_service is None or (pick is None and publishing_steps is None):
             return None
         space = await self.space_service.get_space(space_id)
-        require_usable_speaker_service(pick, space=space)
+        if pick is not None:
+            require_usable_speaker_service(pick, space=space)
+        if publishing_steps is not None:
+            require_chosen_speaker_service(config, steps=publishing_steps, space=space)
         return space
 
     async def _validate_step_security_classification_for_steps(

@@ -561,12 +561,12 @@ class FlowRunService:
     ) -> SpeakerServiceGap | None:
         """Why no connected service would label the flow's speakers in its
         space, None when one would; only a flow that transcribes loads the
-        space to ask."""
+        space to ask, and any other reads as having chosen no service."""
         try:
             if not parse_transcription_config({"wizard": wizard_metadata}).enabled:
-                return SpeakerServiceGap.NO_SERVICE
+                return SpeakerServiceGap.NOT_CHOSEN
         except FlowTranscriptionConfigError:
-            return SpeakerServiceGap.NO_SERVICE
+            return SpeakerServiceGap.NOT_CHOSEN
         space_service = self.access_policy.space_service
         assert space_service is not None, "run admission reads the flow's space"
         space = await space_service.get_space(flow.space_id)

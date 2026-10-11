@@ -45,8 +45,11 @@ from tests.unittests.flows import audio_spool_test_support
 
 spool_contract = audio_spool_test_support.spool_contract
 
-# The speaker service a space offers unless a test says otherwise.
+# The speaker service a space offers unless a test says otherwise, and the
+# flow's choice of it: a flow labels speakers only with the service it chose.
 _SPEAKER_SERVICE = SimpleNamespace(id=uuid4(), name="Vemsa", can_access=True)
+_SPEAKER_CHOICE = {"id": str(_SPEAKER_SERVICE.id)}
+_SWITCHED_OFF_SERVICE = SimpleNamespace(id=uuid4(), name="Vemsa", can_access=False)
 
 
 def _transcribers(engine) -> FlowTranscribers:
@@ -147,6 +150,7 @@ async def test_empty_chunk_intervals_reach_audio_runtime_diagnostics(
             version_metadata={
                 "wizard": {
                     "transcription_enabled": True,
+                    "transcription_speaker_service": _SPEAKER_CHOICE,
                     "transcription_model": {"id": str(model.id)},
                     "transcription_language": "sv",
                 }
@@ -347,12 +351,6 @@ class _SpaceStub:
 
     def get_default_transcription_model(self):
         return self._default_model
-
-    @property
-    def standard_transcription_service(self):
-        return next(
-            (s for s in self.linked_transcription_services if s.can_access), None
-        )
 
     def usable_transcription_service(self, connection_id):
         return next(
@@ -586,6 +584,7 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
         version_metadata={
             "wizard": {
                 "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
                 "transcription_model": {"id": str(model.id)},
                 "transcription_language": "sv",
             }
@@ -649,6 +648,7 @@ async def test_null_tenant_audio_limit_executes_with_default_capacity(
             version_metadata={
                 "wizard": {
                     "transcription_enabled": True,
+                    "transcription_speaker_service": _SPEAKER_CHOICE,
                     "transcription_model": {"id": str(model.id)},
                     "transcription_language": "sv",
                 }
@@ -692,6 +692,7 @@ async def test_audio_resolve_passes_no_language_for_auto(spool_contract, user):
         version_metadata={
             "wizard": {
                 "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
                 "transcription_model": {"id": str(model.id)},
                 "transcription_language": "auto",
             }
@@ -734,6 +735,7 @@ async def test_audio_resolve_lets_the_runs_speaker_choice_replace_the_flow_defau
         version_metadata={
             "wizard": {
                 "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
                 "transcription_model": {"id": str(model.id)},
                 "transcription_diarization": True,
             }
@@ -776,17 +778,15 @@ async def _resolve_meeting(executor, flow_run_repo, file_service, user, wizard):
 @pytest.mark.parametrize(
     ("speaker_services", "pick", "reason"),
     [
-        ([], None, "no_service"),
-        (
-            [SimpleNamespace(id=uuid4(), name="Vemsa", can_access=False)],
-            None,
-            "none_usable",
-        ),
+        ([], None, "not_chosen"),
+        # Nothing is chosen for the flow, even when the space has one service.
+        ([_SPEAKER_SERVICE], None, "not_chosen"),
+        ([_SWITCHED_OFF_SERVICE], _SWITCHED_OFF_SERVICE.id, "picked_unavailable"),
         ([_SPEAKER_SERVICE], uuid4(), "picked_unavailable"),
     ],
-    ids=["no_service", "switched_off", "revoked_pick"],
+    ids=["no_pick_no_service", "no_pick_one_service", "switched_off", "revoked_pick"],
 )
-async def test_labels_without_a_usable_speaker_service_are_refused_before_audio(
+async def test_labels_without_the_flows_own_usable_service_are_refused_before_audio(
     spool_contract, user, speaker_services, pick, reason
 ):
     executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
@@ -814,11 +814,8 @@ async def test_labels_without_a_usable_speaker_service_are_refused_before_audio(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("picked", "reason"), [(False, "no_service"), (True, "picked_unavailable")]
-)
 async def test_a_service_removed_before_its_key_is_read_is_the_same_refusal(
-    spool_contract, user, picked, reason
+    spool_contract, user
 ):
     executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
         spool_contract=spool_contract, user=user
@@ -832,15 +829,14 @@ async def test_a_service_removed_before_its_key_is_read_is_the_same_refusal(
     wizard: dict[str, object] = {
         "transcription_model": {"id": str(model.id)},
         "transcription_diarization": True,
+        "transcription_speaker_service": _SPEAKER_CHOICE,
     }
-    if picked:
-        wizard["transcription_speaker_service"] = {"id": str(_SPEAKER_SERVICE.id)}
 
     with pytest.raises(TypedIOValidationException) as exc_info:
         await _resolve_meeting(executor, flow_run_repo, file_service, user, wizard)
 
     assert exc_info.value.code == "typed_io_speaker_service_unavailable"
-    assert exc_info.value.context == {"speaker_service_gap": reason}
+    assert exc_info.value.context == {"speaker_service_gap": "picked_unavailable"}
     model_engine.transcribe.assert_not_awaited()
 
 
@@ -947,6 +943,7 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
         version_metadata={
             "wizard": {
                 "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
                 "transcription_model": {"id": str(model.id)},
                 "transcription_diarization": True,
             }
@@ -954,8 +951,8 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
         requested_file_ids=[file.id],
     )
 
-    # The step connects the speaker service its flow's space offers, and its
-    # evidence names the service that labelled it.
+    # The step connects the speaker service its flow chose, and its evidence
+    # names the service that labelled it.
     with_speaker_service.assert_awaited_once_with(_SPEAKER_SERVICE)
     assert resolved.transcription_metadata is not None
     assert (
@@ -1024,6 +1021,7 @@ async def test_audio_resolve_ignores_shared_file_transcription_cache(
         version_metadata={
             "wizard": {
                 "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
                 "transcription_model": {"id": str(model.id)},
                 "transcription_language": "auto",
             }
@@ -1163,6 +1161,7 @@ async def test_audio_resolve_near_cap_adds_warning_diagnostic(spool_contract, us
         version_metadata={
             "wizard": {
                 "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
                 "transcription_model": {"id": str(model.id)},
                 "transcription_language": "sv",
             }
@@ -1216,6 +1215,7 @@ async def test_audio_resolve_carries_empty_interval_diagnostics(spool_contract, 
         version_metadata={
             "wizard": {
                 "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
                 "transcription_model": {"id": str(model.id)},
                 "transcription_language": "sv",
             }
@@ -1287,6 +1287,7 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(
         version_metadata={
             "wizard": {
                 "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
                 "transcription_model": {"id": str(model.id)},
                 "transcription_language": "sv",
             }
@@ -1373,6 +1374,7 @@ async def test_audio_step_reads_one_payload_at_a_time(spool_contract, user):
         version_metadata={
             "wizard": {
                 "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
                 "transcription_model": {"id": str(model.id)},
                 "transcription_language": "sv",
             }
@@ -1450,6 +1452,7 @@ async def test_audio_payload_lost_between_identify_and_read_is_a_missing_file(
             version_metadata={
                 "wizard": {
                     "transcription_enabled": True,
+                    "transcription_speaker_service": _SPEAKER_CHOICE,
                     "transcription_model": {"id": str(model.id)},
                     "transcription_language": "sv",
                 }
@@ -1499,6 +1502,7 @@ async def test_audio_payload_read_failure_stays_inside_the_typed_contract(
             version_metadata={
                 "wizard": {
                     "transcription_enabled": True,
+                    "transcription_speaker_service": _SPEAKER_CHOICE,
                     "transcription_model": {"id": str(model.id)},
                     "transcription_language": "sv",
                 }
@@ -1547,6 +1551,7 @@ async def test_audio_resolve_multifile_overflow_spills_once_in_request_order(
         version_metadata={
             "wizard": {
                 "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
                 "transcription_model": {"id": str(model.id)},
                 "transcription_language": "sv",
             }

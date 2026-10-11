@@ -5,8 +5,8 @@ export type FlowWizardMetadata = {
   transcription_model?: { id: string } | null;
   transcription_language?: string;
   transcription_diarization?: boolean;
-  // The speaker identification service the author picked; absent or null
-  // means the space's standard.
+  // The speaker identification service the author chose; absent or null
+  // means none, and then the flow labels no speakers.
   transcription_speaker_service?: { id: string } | null;
   // The most speakers a run labels when it states no bound; absent = automatic.
   transcription_max_speakers?: number | null;

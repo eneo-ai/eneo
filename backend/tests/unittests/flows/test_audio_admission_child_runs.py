@@ -48,6 +48,7 @@ from tests.unittests.flows.test_flow_run_service import (
     flow_run_repo_mock,
 )
 from tests.unittests.flows.test_flow_transcription import (
+    _SPEAKER_CHOICE,
     _audio_file,
     _build_executor,
     _patch_run_input_payload,
@@ -436,6 +437,7 @@ async def test_the_runtime_decodes_a_step_under_the_limit_its_run_was_admitted_u
         version_metadata={
             "wizard": {
                 "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
                 "transcription_model": {"id": str(model.id)},
             }
         },

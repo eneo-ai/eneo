@@ -67,14 +67,7 @@ class TranscriptionServiceConnectionRepository:
     async def list_granted(
         self, space_id: UUID
     ) -> list[TranscriptionServiceConnection]:
-        """The connections granted to one space, the earliest grant first.
-
-        The order is the space's own: its first usable connection is the one
-        a flow uses when it chose none (``Space.standard_transcription_service``),
-        so a rename or a later grant never moves the flows already running on
-        it. Grants written by one request share a timestamp and fall back to
-        the age of the connection.
-        """
+        """The connections granted to one space, in name order."""
         grants = SpacesTranscriptionServiceConnections
         stmt = (
             self._select()
@@ -84,8 +77,7 @@ class TranscriptionServiceConnectionRepository:
             )
             .where(grants.space_id == space_id)
             .order_by(
-                grants.created_at,
-                TranscriptionServiceConnections.created_at,
+                TranscriptionServiceConnections.name,
                 TranscriptionServiceConnections.id,
             )
         )

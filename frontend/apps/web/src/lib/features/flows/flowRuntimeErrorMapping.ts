@@ -27,7 +27,7 @@ export type FlowApiErrorContext = {
   reason?: string;
   /** Server-provided recovery guidance for the exceeded limit. */
   hint?: string;
-  /** Why a run could not identify speakers (no_service, none_usable, picked_unavailable). */
+  /** Why a run could not identify speakers (not_chosen, picked_unavailable). */
   speaker_service_gap?: string;
 };
 
@@ -496,8 +496,8 @@ function resolveFlowApiErrorMessage(descriptor: FlowApiErrorDescriptor): string 
   }
   // The code says speakers could not be identified; the gap says why.
   if (descriptor.code === FLOW_API_ERROR_CODE.TYPED_IO_SPEAKER_SERVICE_UNAVAILABLE) {
-    if (descriptor.context.speaker_service_gap === "none_usable") {
-      return m.flow_speaker_service_gap_none_usable();
+    if (descriptor.context.speaker_service_gap === "not_chosen") {
+      return m.flow_speaker_service_gap_not_chosen();
     }
     if (descriptor.context.speaker_service_gap === "picked_unavailable") {
       return m.flow_speaker_service_gap_picked_unavailable();

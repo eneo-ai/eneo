@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -129,7 +130,7 @@ async def _create_transcription_model(
     return {"id": model.json()["id"], "model_name": model_name}
 
 
-async def _published_flow(
+async def _draft_flow(
     client: AsyncClient,
     headers: Mapping[str, str],
     db_container,
@@ -141,8 +142,11 @@ async def _published_flow(
     wizard: Mapping[str, object] | None = None,
     summarize: bool = False,
     speaker_mapping: bool = False,
+    space_id: str | None = None,
 ) -> LiveFlow:
-    space_id = await _create_space(client, headers)
+    """A saved flow ready to publish, in ``space_id`` or a space of its own."""
+    if space_id is None:
+        space_id = await _create_space(client, headers)
     model = await _create_transcription_model(
         client, headers, endpoint=endpoint, supports_realtime=supports_realtime
     )
@@ -246,14 +250,23 @@ async def _published_flow(
         headers=headers,
     )
     assert updated.status_code == 200, updated.text
-    published = await client.post(f"/api/v1/flows/{flow_id}/publish/", headers=headers)
-    assert published.status_code == 200, published.text
     return LiveFlow(
         flow_id=flow_id,
         step_id=updated.json()["steps"][0]["id"],
         model_id=model["id"],
         model_name=model["model_name"],
     )
+
+
+async def _published_flow(
+    client: AsyncClient, headers: Mapping[str, str], db_container, **draft: Any
+) -> LiveFlow:
+    flow = await _draft_flow(client, headers, db_container, **draft)
+    published = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/publish/", headers=headers
+    )
+    assert published.status_code == 200, published.text
+    return flow
 
 
 async def _started_audit_extras(db_container, flow_id: str) -> list[dict[str, object]]:

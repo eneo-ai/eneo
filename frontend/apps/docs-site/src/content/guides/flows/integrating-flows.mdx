@@ -90,12 +90,12 @@ Do not hardcode this table: `GET /api/v1/flows/runs/status-capabilities/` return
 
 | Status            | Active | Keep polling | Terminal | Can cancel | Awaiting review | Can redispatch |
 | ----------------- | ------ | ------------ | -------- | ---------- | --------------- | -------------- |
-| `queued`          | yes    | yes          | no       | yes        | no              | yes |
-| `running`         | yes    | yes          | no       | yes        | no              | no |
-| `awaiting_review` | no     | yes          | no       | yes        | yes             | no |
-| `completed`       | no     | no           | yes      | no         | no              | no |
-| `failed`          | no     | no           | yes      | no         | no              | no |
-| `cancelled`       | no     | no           | yes      | no         | no              | no |
+| `queued`          | yes    | yes          | no       | yes        | no              | yes            |
+| `running`         | yes    | yes          | no       | yes        | no              | no             |
+| `awaiting_review` | no     | yes          | no       | yes        | yes             | no             |
+| `completed`       | no     | no           | yes      | no         | no              | no             |
+| `failed`          | no     | no           | yes      | no         | no              | no             |
+| `cancelled`       | no     | no           | yes      | no         | no              | no             |
 
 The full state map, including review-checkpoint states, is on [The run lifecycle](/docs/flows-for-developers/run-lifecycle).
 
@@ -123,19 +123,19 @@ Seeing a flow in the list does not mean the caller may run it or that it is read
 
 Use this table to choose the right runtime journey before you read the detailed endpoint facts below.
 
-| Journey                             | Use it when                                                                                                               | Key endpoint                                                                                                     |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Quickstart                          | Discover the contract, create a run with idempotency, poll status, then read the final result.                            | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
-| Files                               | Upload files before run creation and bind returned ids to the step that consumes them.                                    | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
+| Journey                             | Use it when                                                                                                               | Key endpoint                                                                                                      |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Quickstart                          | Discover the contract, create a run with idempotency, poll status, then read the final result.                            | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                  |
+| Files                               | Upload files before run creation and bind returned ids to the step that consumes them.                                    | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                  |
 | Live text and speaker labels        | Show text while someone records, and let a run choose speaker labels.                                                     | `POST /api/v1/flows/{id}/steps/{step_id}/live-transcription-sessions/` (`create_flow_live_transcription_session`) |
-| Evidence and provider usage         | Inspect run evidence, page every provider-call lifecycle row, and export a verified evidence bundle.                      | `GET /api/v1/flows/{id}/runs/{run_id}/evidence/` (`get_flow_run_evidence`)                                       |
-| Human-in-the-loop pause and resume  | Runs pause only at review-marked steps and resume through review checkpoint endpoints.                                    | `GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/` (`get_active_flow_run_review_checkpoint`)      |
-| Sending files mid-run               | Eneo Flows does not accept arbitrary file injection while a run is executing.                                             | `PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` (`edit_flow_run_review_checkpoint`) |
-| Results                             | Drive the UI from the typed final result, step details, artifact links, and status capabilities.                          | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
-| Failed-run retry | Reuse an eligible completed prefix in a child run, then execute from the first unfinished step. | `POST /api/v1/flows/{id}/runs/{run_id}/retry/` (`retry_flow_run_from_failed_step`) |
-| Robustness                          | Use idempotency, version pins, cancellation, redispatch, polling backoff, and status capabilities for retry-safe clients. | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                              |
-| Failures                            | Branch on typed `FlowApiErrorCode` values and show the user the specific recovery action.                                 | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
-| Service keys and tenancy guarantees | Service keys can drive published runtime paths inside their scope and cannot inspect another principal's runs.            | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                              |
+| Evidence and provider usage         | Inspect run evidence, page every provider-call lifecycle row, and export a verified evidence bundle.                      | `GET /api/v1/flows/{id}/runs/{run_id}/evidence/` (`get_flow_run_evidence`)                                        |
+| Human-in-the-loop pause and resume  | Runs pause only at review-marked steps and resume through review checkpoint endpoints.                                    | `GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/` (`get_active_flow_run_review_checkpoint`)       |
+| Sending files mid-run               | Eneo Flows does not accept arbitrary file injection while a run is executing.                                             | `PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` (`edit_flow_run_review_checkpoint`)  |
+| Results                             | Drive the UI from the typed final result, step details, artifact links, and status capabilities.                          | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                          |
+| Failed-run retry                    | Reuse an eligible completed prefix in a child run, then execute from the first unfinished step.                           | `POST /api/v1/flows/{id}/runs/{run_id}/retry/` (`retry_flow_run_from_failed_step`)                                |
+| Robustness                          | Use idempotency, version pins, cancellation, redispatch, polling backoff, and status capabilities for retry-safe clients. | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                               |
+| Failures                            | Branch on typed `FlowApiErrorCode` values and show the user the specific recovery action.                                 | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                          |
+| Service keys and tenancy guarantees | Service keys can drive published runtime paths inside their scope and cannot inspect another principal's runs.            | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                               |
 
 ## Worked end-to-end example
 
@@ -249,8 +249,16 @@ Response:
   ],
   "transcription": {
     "live": { "available": true, "reason": null },
-    "speaker_labels": { "selectable": true, "required": false, "default": true },
-    "max_speakers": { "form_field": null, "participants_field": null, "default": null }
+    "speaker_labels": {
+      "selectable": true,
+      "required": false,
+      "default": true
+    },
+    "max_speakers": {
+      "form_field": null,
+      "participants_field": null,
+      "default": null
+    }
   },
   "security_classification": {
     "name": "Open information",
@@ -1077,9 +1085,9 @@ Eneo Flows does not accept arbitrary file injection while a run is executing.
 
 Endpoint facts:
 
-| Endpoint                                                               | Method  | Success        | Operation                         |
-| ---------------------------------------------------------------------- | ------- | -------------- | --------------------------------- |
-| `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` | `PATCH` | `200 OK`       | `edit_flow_run_review_checkpoint` |
+| Endpoint                                                               | Method  | Success  | Operation                         |
+| ---------------------------------------------------------------------- | ------- | -------- | --------------------------------- |
+| `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` | `PATCH` | `200 OK` | `edit_flow_run_review_checkpoint` |
 
 Contract coverage: These endpoints are contract-tested.
 
@@ -1209,10 +1217,10 @@ A flow that transcribes recorded audio reports live text availability, speaker-l
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `live.available`                    | The flow's audio step can show live text while someone records                                                                                                                                                                                                           |
 | `live.reason`                       | `null` when live text is available. Otherwise `transcription_disabled` (the flow does not transcribe audio), `model_unavailable` (the flow's transcription model is not available in its space), or `model_not_realtime` (the model does not support live transcription) |
-| `speaker_labels.selectable`         | A run may choose speaker labels with `speaker_labels`. It is `false` when the flow's space has no speaker identification service it can use, or when the flow requires labels                                                                                            |
+| `speaker_labels.selectable`         | A run may choose speaker labels with `speaker_labels`. It is `false` when the flow has chosen no speaker identification service its space can use, or when the flow requires labels                                                                                      |
 | `speaker_labels.required`           | The flow needs speaker labels, because a step maps speakers to names                                                                                                                                                                                                     |
-| `speaker_labels.default`            | The flow's own setting, which applies when a run makes no choice. It is `false` when the space has no speaker identification service it can use                                                                                                                          |
-| `speaker_labels.unavailable_reason` | Why the speaker labels the flow asks for cannot be produced: `no_service`, `none_usable` or `picked_unavailable`. `null` when they can, or when the flow asks for none. See [Check that speaker labels can be produced](#check-that-speaker-labels-can-be-produced)      |
+| `speaker_labels.default`            | The flow's own setting, which applies when a run makes no choice. It is `false` when the flow has chosen no speaker identification service its space can use                                                                                                             |
+| `speaker_labels.unavailable_reason` | Why the speaker labels the flow asks for cannot be produced: `picked_unavailable` or `not_chosen`. `null` when they can, or when the flow asks for none. See [Check that speaker labels can be produced](#check-that-speaker-labels-can-be-produced)                     |
 
 ### Choose speaker labels for a run
 
@@ -1241,20 +1249,19 @@ When `selectable` is `false`, do not send `true` or `false`: Eneo refuses the re
 
 ### Check that speaker labels can be produced
 
-A flow asks for speaker labels when a step requires them (`speaker_labels.required` is `true`) or when its own setting has them on. When no speaker identification service can label the flow, `speaker_labels.unavailable_reason` says why:
+A flow labels speakers only with the speaker identification service its author chose. Eneo never chooses a service for a flow. A flow asks for speaker labels when a step requires them (`speaker_labels.required` is `true`) or when its own setting has them on. When the labels it asks for cannot be produced, `speaker_labels.unavailable_reason` says why:
 
-| `unavailable_reason` | Meaning                                                                                                    | Who can fix it                                                                         |
-| -------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `no_service`         | The flow's space has no speaker identification service. Reported only when `required` is `true`            | An administrator gives the space access to a service                                   |
-| `none_usable`        | The space has a service, but none it can use now: switched off, or below the space's security class        | An administrator switches the service on, or gives the space another                   |
-| `picked_unavailable` | The service the flow's author chose can no longer be used in the space. Eneo never replaces a chosen one   | The author chooses another service or the space's standard and publishes again         |
+| `unavailable_reason` | Meaning                                                                                                              | Who can fix it                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `picked_unavailable` | The service the flow's author chose can no longer be used in the flow's space. Eneo never replaces a chosen service  | The author chooses another service and publishes again |
+| `not_chosen`         | A step requires labels and the author has chosen no service. Eneo does not publish a flow in this state: a safeguard | The author chooses a service and publishes again       |
 
 What your app does depends on `required`:
 
 - **`required` is `true`.** Do not start a recording or create a run. Show the reason instead. A run created anyway fails its transcription step with `typed_io_speaker_service_unavailable`, and the run error's `details.speaker_service_gap` carries the same value. The step is refused before any audio is transcribed.
 - **`required` is `false`.** The run works and transcribes without speaker labels. Tell the person before they record, so that a transcript without labels is not a surprise.
 
-A flow that does not require labels, and whose author has not chosen a service, reports `null` in a space without any service: such a flow transcribes without labels, and there is nothing to tell. A flow whose chosen service is gone reports `picked_unavailable` there too. A flow whose author has not chosen a service uses the space's standard, the first service the space was given that it can use, so giving a space a second service never makes `unavailable_reason` appear.
+A flow that does not require labels, and whose author has chosen no service, reports `null`: it transcribes without labels, and there is nothing to tell. Giving the flow's space access to another service never changes what a published flow reports, because only the flow's own choice counts.
 
 ### Set a speaker-count limit
 
@@ -1375,14 +1382,14 @@ The session works when the socket sends `ready` after it opens. If the socket se
 
 #### Socket messages
 
-| Direction   | Frame                                                                           | Meaning                                                                                                     |
-| ----------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| App to Eneo | Binary                                                                          | Audio: mono 16-bit little-endian PCM at 16 kHz, 2 bytes to 64 KiB per frame                                 |
-| App to Eneo | `{"type": "stop", "produced_samples": 3200}`                                    | The recording has ended; the sample count is optional. Text frames without `"type": "stop"` end the session with `invalid_message` |
-| Eneo to app | `{"type": "ready", "sample_rate": 16000, "max_seconds": 18000}`                 | Eneo has connected to the model server. Start sending audio                                                 |
-| Eneo to app | `{"type": "transcript.delta", "text": " världen"}`                              | Text to append to the preview                                                                               |
-| Eneo to app | `{"type": "transcript.done", "text": "Hej världen"}`                            | The full preview text of this session after `stop`. The socket then closes                                  |
-| Eneo to app | `{"type": "error", "code": "idle_timeout", "message": "...", "retryable": false}` | The session has ended. The socket then closes                                                               |
+| Direction   | Frame                                                                             | Meaning                                                                                                                            |
+| ----------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| App to Eneo | Binary                                                                            | Audio: mono 16-bit little-endian PCM at 16 kHz, 2 bytes to 64 KiB per frame                                                        |
+| App to Eneo | `{"type": "stop", "produced_samples": 3200}`                                      | The recording has ended; the sample count is optional. Text frames without `"type": "stop"` end the session with `invalid_message` |
+| Eneo to app | `{"type": "ready", "sample_rate": 16000, "max_seconds": 18000}`                   | Eneo has connected to the model server. Start sending audio                                                                        |
+| Eneo to app | `{"type": "transcript.delta", "text": " världen"}`                                | Text to append to the preview                                                                                                      |
+| Eneo to app | `{"type": "transcript.done", "text": "Hej världen"}`                              | The full preview text of this session after `stop`. The socket then closes                                                         |
+| Eneo to app | `{"type": "error", "code": "idle_timeout", "message": "...", "retryable": false}` | The session has ended. The socket then closes                                                                                      |
 
 `message` is for people; branch on `code`. Every code is listed in [Live transcription socket codes](/guides/flows/reference/errors#live-transcription-socket-codes).
 
@@ -1944,7 +1951,7 @@ Read effective per-flow values from `GET /api/v1/flows/{id}/run-contract/`. The 
 | Audio and video types today | `audio/wav`, `audio/mpeg`, `audio/mp3`, `audio/mp4`, `audio/x-m4a`, `audio/ogg`, `audio/webm`, `video/mp4`, `video/webm`. Always read the contract rather than hardcoding this list                                     |
 | Upload timeout budget       | `runtime_upload_policy` in the run contract: minimum 120 s, 8 s per MiB, maximum 600 s, idle timeout 120 s                                                                                                              |
 | Oversize handling           | The size is checked after the request body has been received, so an oversized upload still spends the full transfer before returning `413`. Compare the file against `max_file_size_bytes` client-side before you start |
-| Audio duration              | Default 5 hours per input (`FLOW_AUDIO_MAX_DURATION_SECONDS=18000`), with a separate 2 GiB decoded-audio ceiling                                                                                                                                                     |
+| Audio duration              | Default 5 hours per input (`FLOW_AUDIO_MAX_DURATION_SECONDS=18000`), with a separate 2 GiB decoded-audio ceiling                                                                                                        |
 
 Fresh deployments default to **256 MiB per session or knowledge file** and **384 MiB per audio file**. Administrators can change these in **Admin > File storage** without an environment override or restart. These limits apply to all Flows. There is no separate 2 GiB Flow upload ceiling. PostgreSQL inline capacity is just below 512 MiB per payload so COPY/pg_dump backups remain possible. Larger files, including 10 GiB, require object storage selected in the same admin page. Policy does not guarantee every format can be processed: text and Office extraction can materialize whole files, and audio/PDF processing budgets still apply. Persistent assistant attachments default to 256 MiB in total per assistant and must also fit the selected model's input context.
 
@@ -1965,18 +1972,18 @@ Structured output uses the same 8 MiB ceiling, measured as serialized JSON inclu
 
 ### Execution, PDF extraction, and Builder
 
-| Setting | Default | Applies to |
-| --- | --- | --- |
-| `TASK_EXECUTION_TIMEOUT_SECONDS` | 28,800 s (8 hours) | One worker invocation, shared by all steps; review pauses and requeues start a new invocation |
-| `FLOW_AUDIO_MAX_DURATION_SECONDS` | 18,000 s (5 hours) | Duration of each decoded audio input |
-| `FLOW_AUDIO_MAX_DECODED_BYTES` | 2,147,483,648 (2 GiB) | Decoded audio size, independently of compressed upload size |
-| `FLOW_AUDIO_MEASUREMENT_TIMEOUT_SECONDS` | 600 s | Waiting for and decoding one audio upload to measure it; past it the upload gets `503 flow_run_audio_measurement_busy`. The run contract's `runtime_upload_policy.response_timeout_seconds` is the longer of this and `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS`, plus 60 s |
-| `FLOW_MAPPED_STEP_MAX_PROVIDER_CALLS_DEFAULT` | 1000 | Provider calls per mapped step, including the native-JSON fallback reserve |
-| `FLOW_PDF_MAX_PAGES` | 2000 | Pages in each PDF extracted for a Flow |
-| `FLOW_PDF_MAX_EXTRACTED_BYTES` | 134,217,728 (128 MiB) | Extracted UTF-8 text, including page markers |
-| `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS` | 900 s | Supervised extraction of one PDF |
-| `AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS` | 300 s | Provider silence, including the wait for the first chunk; the separate whole-call ceiling is 1800 s |
-| `ATTACHMENT_MAX_FILES` | 100 | Persistent attachments per assistant; Builder separately allows up to 100 session attachments |
+| Setting                                       | Default               | Applies to                                                                                                                                                                                                                                                             |
+| --------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TASK_EXECUTION_TIMEOUT_SECONDS`              | 28,800 s (8 hours)    | One worker invocation, shared by all steps; review pauses and requeues start a new invocation                                                                                                                                                                          |
+| `FLOW_AUDIO_MAX_DURATION_SECONDS`             | 18,000 s (5 hours)    | Duration of each decoded audio input                                                                                                                                                                                                                                   |
+| `FLOW_AUDIO_MAX_DECODED_BYTES`                | 2,147,483,648 (2 GiB) | Decoded audio size, independently of compressed upload size                                                                                                                                                                                                            |
+| `FLOW_AUDIO_MEASUREMENT_TIMEOUT_SECONDS`      | 600 s                 | Waiting for and decoding one audio upload to measure it; past it the upload gets `503 flow_run_audio_measurement_busy`. The run contract's `runtime_upload_policy.response_timeout_seconds` is the longer of this and `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS`, plus 60 s |
+| `FLOW_MAPPED_STEP_MAX_PROVIDER_CALLS_DEFAULT` | 1000                  | Provider calls per mapped step, including the native-JSON fallback reserve                                                                                                                                                                                             |
+| `FLOW_PDF_MAX_PAGES`                          | 2000                  | Pages in each PDF extracted for a Flow                                                                                                                                                                                                                                 |
+| `FLOW_PDF_MAX_EXTRACTED_BYTES`                | 134,217,728 (128 MiB) | Extracted UTF-8 text, including page markers                                                                                                                                                                                                                           |
+| `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS`         | 900 s                 | Supervised extraction of one PDF                                                                                                                                                                                                                                       |
+| `AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS`         | 300 s                 | Provider silence, including the wait for the first chunk; the separate whole-call ceiling is 1800 s                                                                                                                                                                    |
+| `ATTACHMENT_MAX_FILES`                        | 100                   | Persistent attachments per assistant; Builder separately allows up to 100 session attachments                                                                                                                                                                          |
 
 The 8-hour invocation default must land after heartbeat-based recovery (`eneo-dgh9`); release orchestration enforces this dependency. For longer recordings, operators change **`FLOW_AUDIO_MAX_DURATION_SECONDS` and `TASK_EXECUTION_TIMEOUT_SECONDS` together**. The invocation budget still reserves 60 seconds for finalization, giving steps a maximum of 28,740 seconds within the remaining shared budget; the minimum invocation budget remains 65 seconds. Upload bytes, decoded bytes, and model/provider capacity must also admit the recording. These provisional duration and execution defaults may be revised by the measurement receipt tracked as `eneo-hy7c`.
 
@@ -1984,22 +1991,22 @@ The 8-hour invocation default must land after heartbeat-based recovery (`eneo-dg
 
 This table checks workloads against the default limits. It does not establish provider throughput or extraction time for every document.
 
-| Workload | Limits it touches | Default admission |
-| --- | --- | --- |
-| 5-hour recording at 128 kbps | Audio upload, decoded duration/bytes, transcript bytes, shared invocation budget | About 275 MiB (288 MB) compressed fits the 384 MiB audio ceiling; 5 hours fits the duration ceiling. Decoded audio must stay within 2 GiB and transcript text within 8 MiB; all steps share 8 hours. |
-| 2000-page PDF | File upload, page count, extracted text, extraction timeout | Up to 256 MiB uploaded, 2000 pages, 128 MiB extracted text, and 900 s extraction. Page count alone does not determine file size or processing time. |
-| 300 documents | Runtime file count, per-file bytes, mapped provider calls, structured output | Fits the default 1000-file count and 1000-call mapped-step budget for one call per document, including room for fallback. Each file and the combined structured output must fit their respective byte limits. |
-| 17-step Builder package with attachments | Proposal silence/whole-call deadlines, attachment count, selected model context | Step count does not consume attachment slots. Up to 100 Builder session attachments remain subject to tenant policy and model context; a streaming proposal has a 300 s silence deadline and an 1800 s whole-call ceiling. |
+| Workload                                 | Limits it touches                                                                | Default admission                                                                                                                                                                                                          |
+| ---------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 5-hour recording at 128 kbps             | Audio upload, decoded duration/bytes, transcript bytes, shared invocation budget | About 275 MiB (288 MB) compressed fits the 384 MiB audio ceiling; 5 hours fits the duration ceiling. Decoded audio must stay within 2 GiB and transcript text within 8 MiB; all steps share 8 hours.                       |
+| 2000-page PDF                            | File upload, page count, extracted text, extraction timeout                      | Up to 256 MiB uploaded, 2000 pages, 128 MiB extracted text, and 900 s extraction. Page count alone does not determine file size or processing time.                                                                        |
+| 300 documents                            | Runtime file count, per-file bytes, mapped provider calls, structured output     | Fits the default 1000-file count and 1000-call mapped-step budget for one call per document, including room for fallback. Each file and the combined structured output must fit their respective byte limits.              |
+| 17-step Builder package with attachments | Proposal silence/whole-call deadlines, attachment count, selected model context  | Step count does not consume attachment slots. Up to 100 Builder session attachments remain subject to tenant policy and model context; a streaming proposal has a 300 s silence deadline and an 1800 s whole-call ceiling. |
 
 ### Review checkpoints
 
-| What                   | Value                                                                                                                                                                            |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Deadline               | `steps_requiring_review[].expires_after_seconds` in the run contract, and `expires_at` on the checkpoint                                                                         |
-| Allowed range          | 60 seconds to 90 days, default 14 days. It is set per step when the flow is authored, and no runtime endpoint changes it                                                         |
-| What expiry does       | A background reconciler runs every 60 seconds and, for a checkpoint still open past `expires_at`, marks it `expired` and cancels the run with `error.code` `flow_review_expired` |
-| Timing you can promise | The run flips to `cancelled` within roughly a minute of the deadline, not at the instant it passes                                                                               |
-| Resume after review expiry | Approval persisted before `expires_at` remains resumable for 30 days after `approved_at`. An already-expired checkpoint returns `400 flow_review_expired` |
+| What                       | Value                                                                                                                                                                            |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Deadline                   | `steps_requiring_review[].expires_after_seconds` in the run contract, and `expires_at` on the checkpoint                                                                         |
+| Allowed range              | 60 seconds to 90 days, default 14 days. It is set per step when the flow is authored, and no runtime endpoint changes it                                                         |
+| What expiry does           | A background reconciler runs every 60 seconds and, for a checkpoint still open past `expires_at`, marks it `expired` and cancels the run with `error.code` `flow_review_expired` |
+| Timing you can promise     | The run flips to `cancelled` within roughly a minute of the deadline, not at the instant it passes                                                                               |
+| Resume after review expiry | Approval persisted before `expires_at` remains resumable for 30 days after `approved_at`. An already-expired checkpoint returns `400 flow_review_expired`                        |
 
 ### Retries and recovery
 

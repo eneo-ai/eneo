@@ -20,6 +20,7 @@ from eneo.flows.runtime.step_result_builder import build_completed_step_input_pa
 from eneo.main.exceptions import TypedIOValidationException
 from tests.unittests.flows import audio_spool_test_support
 from tests.unittests.flows.test_flow_transcription import (
+    _SPEAKER_CHOICE,
     _audio_file,
     _patch_run_input_payload,
     _SpaceStub,
@@ -310,6 +311,7 @@ def _metadata(executor):
     return {
         "wizard": {
             "transcription_enabled": True,
+            "transcription_speaker_service": _SPEAKER_CHOICE,
             "transcription_model": {"id": str(model.id)},
         }
     }

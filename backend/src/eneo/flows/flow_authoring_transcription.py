@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
-from eneo.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
+from eneo.flows.domain.flow import (
+    FlowPersistedJsonObject,
+    FlowStep,
+    clone_json_object,
+)
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.domain.runtime_input import parse_runtime_input_config
+from eneo.flows.domain.speaker_mapping_config import steps_require_speaker_labels
 from eneo.flows.flow_authoring_spec import InputSource, InputType
 from eneo.flows.transcription_config import (
     DEFAULT_TRANSCRIPTION_LANGUAGE,
@@ -91,6 +96,32 @@ def kept_speaker_service_id(metadata: FlowPersistedJsonObject | None) -> UUID | 
         return parse_transcription_config(metadata).speaker_service_in_use
     except FlowTranscriptionConfigError:
         return None
+
+
+def require_chosen_speaker_service(
+    config: FlowTranscriptionConfig, *, steps: Iterable[FlowStep], space: Space
+) -> None:
+    """Refuse to publish a flow that asks for speaker labels and chose no
+    service to label them: nothing is ever chosen for it. It asks when a step
+    requires the labels, or when its own setting is on in a space that has a
+    service to choose; in a space with none that setting labels nothing and
+    the flow simply transcribes."""
+    if not config.enabled or config.speaker_service_id is not None:
+        return
+    if steps_require_speaker_labels(steps):
+        message = (
+            "A step in this flow needs speakers identified; choose which "
+            "speaker identification service the flow uses."
+        )
+    elif config.diarization and space.usable_transcription_services:
+        message = (
+            "Choose which speaker identification service the flow uses, or "
+            "switch speaker identification off."
+        )
+    else:
+        return
+    code = FlowGraphIssueCode.FLOW_SPEAKER_SERVICE_NOT_CHOSEN.value
+    raise BadRequestException(message, code=code, context={"issue_code": code})
 
 
 def require_usable_speaker_service(service_id: UUID, *, space: Space) -> None:

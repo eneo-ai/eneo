@@ -36,8 +36,7 @@ const link = (id: string, name: string, meets = true, available = true) => ({
   id,
   name,
   meets_security_classification: meets,
-  available,
-  is_standard: false
+  available
 });
 
 // The selector hands the manager a function of the space as it stands when the
@@ -75,34 +74,6 @@ it("explains why a granted service cannot be used, and keeps it removable", asyn
   const low = page.getByRole("switch", { name: "Vemsa Sundsvall" });
   await expect.element(low).toBeChecked();
   await expect.element(low).toBeEnabled();
-});
-
-it("marks the space's standard once the space can use more than one service", async () => {
-  const services = [service("a", "Vemsa Sundsvall"), service("b", "Vemsa Timrå")];
-  const standard = { ...link("b", "Vemsa Timrå"), is_standard: true };
-  // With one usable service there is nothing to tell apart.
-  currentSpace.value = {
-    security_classification: null,
-    transcription_services: [link("a", "Vemsa Sundsvall", true, false), standard]
-  };
-  const first = render(SelectSpaceSpeakerServices, { services, securityEnabled: false });
-  await expect.element(page.getByRole("switch", { name: "Vemsa Timrå" })).toBeChecked();
-  await expect.element(page.getByText(m.speaker_service_space_standard())).not.toBeInTheDocument();
-  first.unmount();
-
-  // The space says which service is its standard; it need not be the first row.
-  currentSpace.value = {
-    security_classification: null,
-    transcription_services: [link("a", "Vemsa Sundsvall"), standard]
-  };
-  render(SelectSpaceSpeakerServices, { services, securityEnabled: false });
-  await expect.element(page.getByText(m.speaker_service_space_standard())).toBeVisible();
-  await expect
-    .element(page.getByRole("switch", { name: "Vemsa Timrå" }))
-    .toHaveAccessibleDescription(m.speaker_service_space_standard());
-  await expect
-    .element(page.getByRole("switch", { name: "Vemsa Sundsvall" }))
-    .not.toHaveAccessibleDescription();
 });
 
 it("grants a usable service and refuses one below the space's classification", async () => {

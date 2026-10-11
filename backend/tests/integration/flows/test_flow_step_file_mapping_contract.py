@@ -63,6 +63,7 @@ from eneo.main.container.container import Container
 from eneo.object_content.content import ContentFailureCode, ContentState
 from tests.flow_snapshot_fixtures import assistant_snapshot
 from tests.unittests.flows.test_flow_transcription import (
+    _SPEAKER_CHOICE,
     _SpaceStub,
     _state,
     _transcribers,
@@ -1405,6 +1406,7 @@ async def transcript_spill_runtime(
                     "wizard": {
                         "transcription_enabled": True,
                         "transcription_model": {"id": str(model.id)},
+                        "transcription_speaker_service": _SPEAKER_CHOICE,
                     }
                 },
             )

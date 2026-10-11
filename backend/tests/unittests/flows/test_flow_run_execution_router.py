@@ -211,6 +211,7 @@ async def test_get_flow_graph_says_speakers_are_labelled_only_when_the_run_label
     )
     run = _run(flow_id=flow_id, tenant_id=flow.tenant_id)
     assistant_id = uuid4()
+    chosen = _connection(1)
     flow_run_service.get_run_versioned_view.return_value = FlowRunVersionedView(
         published_definition=parse_published_definition(
             {
@@ -220,6 +221,7 @@ async def test_get_flow_graph_says_speakers_are_labelled_only_when_the_run_label
                     "wizard": {
                         "transcription_enabled": True,
                         "transcription_diarization": True,
+                        "transcription_speaker_service": {"id": str(chosen.id)},
                     }
                 },
                 "steps": [
@@ -243,10 +245,8 @@ async def test_get_flow_graph_says_speakers_are_labelled_only_when_the_run_label
         step_results=(),
         speaker_labels=speaker_labels,
     )
-    # The flow's space has one usable speaker service.
-    container.space_service.return_value.get_space.return_value = _space(
-        None, [_connection(1)]
-    )
+    # The flow's space can use the speaker service the flow chose.
+    container.space_service.return_value.get_space.return_value = _space(None, [chosen])
 
     graph = await get_flow_graph(
         id=flow_id,

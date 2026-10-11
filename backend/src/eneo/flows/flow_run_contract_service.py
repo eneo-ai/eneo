@@ -29,6 +29,7 @@ from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.speaker_mapping_config import (
     speaker_mapping_participants_field,
     speaker_mapping_speaker_count_field,
+    steps_require_speaker_labels,
 )
 from eneo.flows.domain.step_mapped_execution import single_mapped_array_key
 from eneo.flows.domain.text_processing import text_processing_config
@@ -276,14 +277,15 @@ def speaker_service_gap_in_space(
 ) -> SpeakerServiceGap | None:
     """Why no connected service would label this flow's speakers in ``space``,
     whatever the flow's own labels default: a run may switch labels on. None
-    when one would. A flow that transcribes nothing never asks its space and
-    reads as having no service."""
+    when one would. A flow that transcribes nothing, or whose transcription
+    choice is unreadable, never asks its space and reads as having chosen no
+    service."""
     try:
         config = parse_transcription_config({"wizard": wizard_metadata})
     except FlowTranscriptionConfigError:
-        return SpeakerServiceGap.NO_SERVICE
+        return SpeakerServiceGap.NOT_CHOSEN
     if not config.enabled:
-        return SpeakerServiceGap.NO_SERVICE
+        return SpeakerServiceGap.NOT_CHOSEN
     return resolve_speaker_service(config, space).gap
 
 
@@ -301,15 +303,17 @@ def speaker_labels_option(
 ) -> FlowSpeakerLabelsOptionPublic | None:
     """The speaker-label choice a run gets; None when the flow transcribes no audio.
 
-    Only a connected speaker service labels speakers, so without one
+    Only the service the flow chose labels speakers, so without it
     (``service_gap``) there is nothing to choose and a run transcribes without
     labels; a step that maps speakers to names needs the labels whatever the
-    space offers.
+    flow chose.
 
-    The gap is reported whenever the flow asks for labels and gets none: a
-    step requires them, or the flow's own setting is on. Except a space with
-    no service at all under a flow that only prefers labels: that space simply
-    transcribes, and there is nothing to tell anyone.
+    A chosen service the space may no longer use is reported whenever the flow
+    asks for labels: a step requires them, or the flow's own setting is on. A
+    flow that chose none is reported only when a step requires the labels.
+    Publishing refuses that state, so only a version published before that
+    rule reaches it. Otherwise a flow without a choice simply transcribes, and
+    there is nothing to tell anyone.
     """
     if _audio_input_step(steps) is None:
         return None
@@ -319,12 +323,10 @@ def speaker_labels_option(
         return None
     if not config.enabled:
         return None
-    required = any(
-        step.output_mode == FlowOutputMode.SPEAKER_MAPPING.value for step in steps
-    )
+    required = steps_require_speaker_labels(steps)
     identifiable = service_gap is None
     reported = required or (
-        config.diarization and service_gap is not SpeakerServiceGap.NO_SERVICE
+        config.diarization and service_gap is SpeakerServiceGap.PICKED_UNAVAILABLE
     )
     return FlowSpeakerLabelsOptionPublic(
         selectable=identifiable and not required,

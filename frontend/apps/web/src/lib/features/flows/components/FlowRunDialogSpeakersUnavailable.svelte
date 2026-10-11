@@ -10,8 +10,7 @@
   let { gap }: { gap: SpeakerServiceGap } = $props();
 
   const reasons: Record<SpeakerServiceGap, () => string> = {
-    no_service: m.flow_run_speakers_unavailable_no_service,
-    none_usable: m.flow_run_speakers_unavailable_none_usable,
+    not_chosen: m.flow_run_speakers_unavailable_not_chosen,
     picked_unavailable: m.flow_run_speakers_unavailable_picked_unavailable
   };
 </script>

@@ -100,13 +100,12 @@ finalization allowance) less what earlier steps of the run consumed; a step's
 
 ## How it behaves
 
-- **Speaker identification** applies when the flow's space has access to a
-  connected service; otherwise the transcript has no speaker labels. A flow
-  uses the service it chose, and otherwise the space's standard: the first
-  usable service the space was given (`Space.standard_transcription_service`;
-  a personal space ranks the organisation's connections by age). A second
-  grant therefore changes nothing for existing flows, and when the standard
-  becomes unusable the next one takes over.
+- **Speaker identification** applies when the flow chose a connected service
+  that its space can use; otherwise the transcript has no speaker labels.
+  Nothing is chosen for a flow (`resolve_speaker_service`): not the space's
+  only service, not a fallback when the chosen one becomes unusable. A flow
+  that asks for labels without a choice is refused at publish
+  (`flow_speaker_service_not_chosen`).
 - **The flow's transcription model is always required.** The flow's model
   selection and space governance apply; the selected model writes the text.
 - **Job flow**: one multipart `POST /v1/jobs` per audio file (with
@@ -148,8 +147,8 @@ transcript should show the service's canned speaker labels.
 | Step fails with `typed_io_speaker_identification_failed` once the model has transcribed, and the connection test shows "Key not accepted" | The connection's API key does not match a token in `VEMSA_API_TOKENS`. |
 | Step fails with `flow_step_timeout` | The step's execution budget is exhausted. Check the service's queue depth and worker health, or raise the step's `timeout_seconds` within the deployment ceiling. |
 | Step fails with `flow_step_timeout` and `transcription_failure_kind` is `capacity` | The service kept refusing the job until the step's budget ran out: its per-client queue cap is full. Raise `VEMSA_MAX_QUEUED_JOBS_PER_CLIENT` or add service workers. |
-| Step fails with `typed_io_speaker_service_unavailable` | The run labels speakers but the space has no service the flow can use; `details.speaker_service_gap` is `no_service` (the space has none), `none_usable` (it has some, none usable now) or `picked_unavailable` (the flow's own choice is not usable; a choice is never substituted). |
-| Transcript has no speaker labels | Speaker identification is off for the flow (the Transcription stage of the flow editor), the run chose `speaker_labels: false`, the space has no usable service (not granted, switched off, or below the space's security classification), or the service ran without diarization support; check its engine tier and extras. Also check the step for an `audio_diarization_skipped` diagnostic: the transcription produced no text to label. |
+| Step fails with `typed_io_speaker_service_unavailable` | The run labels speakers but the flow's chosen service cannot be used; `details.speaker_service_gap` is `picked_unavailable` (the flow's choice is not usable in the space; a choice is never substituted) or `not_chosen` (a version published before the publish refusal existed). |
+| Transcript has no speaker labels | Speaker identification is off for the flow (the Transcription stage of the flow editor), the run chose `speaker_labels: false`, the flow chose no service or its chosen service is not usable in the space (not granted, switched off, or below the space's security classification), or the service ran without diarization support; check its engine tier and extras. Also check the step for an `audio_diarization_skipped` diagnostic: the transcription produced no text to label. |
 | Step fails with `typed_io_speaker_identification_failed` and `transcription_failure_kind` is `input` | The service rejected the job with 413 or 422: the audio or the transcript exceeds its size limit (`VEMSA_MAX_AUDIO_BYTES`, `VEMSA_MAX_TRANSCRIPT_BYTES`), or the service does not accept `task=diarize` (an older Vemsa); upgrade it. |
 | Step fails with `typed_io_speaker_identification_failed` and the worker logs `remote_transcription.diarize_unsupported` | The service ignored `task=diarize` and transcribed with its own model (a Vemsa that predates the task); Eneo refuses that result because it did not come from the flow's model. Upgrade the service. |
 

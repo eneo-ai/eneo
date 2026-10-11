@@ -1,16 +1,30 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import cast
+from collections.abc import Iterable, Mapping
+from typing import Protocol, cast
 
 from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationError,
     FlowStepValidationView,
 )
+from eneo.flows.enums import FlowOutputMode
 
 SPEAKER_MAPPING_CONFIG_KEY = "speaker_mapping"
 SPEAKER_MAPPING_PARTICIPANT_FIELD_TYPES = frozenset({"text", "multiselect", "list"})
 SPEAKER_MAPPING_SPEAKER_COUNT_FIELD_TYPES = frozenset({"number"})
+
+
+class _StepWithOutputMode(Protocol):
+    @property
+    def output_mode(self) -> str: ...
+
+
+def steps_require_speaker_labels(steps: Iterable[_StepWithOutputMode]) -> bool:
+    """A step that maps speakers to names needs the transcript to carry speaker
+    labels, whatever the flow's own speaker-label setting says."""
+    return any(
+        step.output_mode == FlowOutputMode.SPEAKER_MAPPING.value for step in steps
+    )
 
 
 def _config_field(output_config: object, key: str) -> str | None:

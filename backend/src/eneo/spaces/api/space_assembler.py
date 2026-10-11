@@ -713,7 +713,6 @@ class SpaceAssembler:
     def _service_links(
         space: Space, connections: Sequence["TranscriptionServiceConnection"]
     ) -> list[SpaceTranscriptionServiceLink]:
-        standard = space.standard_transcription_service
         return [
             SpaceTranscriptionServiceLink(
                 id=connection.id,
@@ -722,7 +721,6 @@ class SpaceAssembler:
                     connection
                 ),
                 available=connection.can_access,
-                is_standard=standard is not None and connection.id == standard.id,
             )
             for connection in connections
         ]

@@ -1,4 +1,4 @@
-"""Which speaker identification service labels a flow's speakers in its space."""
+"""A flow's speakers are labelled only by the service its author chose."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from eneo.flows.transcription_config import (
     resolve_speaker_service,
 )
 from tests.unittests.spaces.test_space_transcription_services import (
-    _classification,
     _connection,
     _space,
 )
@@ -28,62 +27,53 @@ def _config(pick: UUID | None = None, *, labels: bool = True):
     return parse_transcription_config({"wizard": wizard})
 
 
-def test_without_a_choice_the_flow_uses_the_first_service_the_space_was_given() -> None:
-    first, second = _connection(3), _connection(3)
+def test_the_chosen_service_labels_the_speakers_whether_or_not_labels_are_on() -> None:
+    other, chosen = _connection(3), _connection(3)
+    space = _space(None, [other, chosen])
 
-    resolution = resolve_speaker_service(_config(), _space(None, [first, second]))
+    for labels in (True, False):
+        resolution = resolve_speaker_service(_config(chosen.id, labels=labels), space)
 
-    assert (resolution.connection, resolution.gap) == (first, None)
-    assert resolution.available
-
-
-@pytest.mark.parametrize(
-    "first",
-    [_connection(3, enabled=False), _connection(1)],
-    ids=["switched_off", "below_classification"],
-)
-def test_the_next_service_takes_over_while_the_first_is_not_usable(first) -> None:
-    second = _connection(3)
-    space = _space(_classification(3), [first, second])
-
-    assert resolve_speaker_service(_config(), space).connection == second
+        assert (resolution.connection, resolution.gap) == (chosen, None)
+        assert resolution.available
 
 
 @pytest.mark.parametrize(
-    ("granted", "gap"),
-    [
-        ([], SpeakerServiceGap.NO_SERVICE),
-        ([_connection(3, enabled=False)], SpeakerServiceGap.NONE_USABLE),
-        ([_connection(1)], SpeakerServiceGap.NONE_USABLE),
-    ],
-    ids=["nothing_granted", "switched_off", "below_classification"],
+    "chosen",
+    [None, _connection(3, enabled=False)],
+    ids=["not_granted", "switched_off"],
 )
-def test_without_a_usable_service_the_gap_says_whether_the_space_has_any(
-    granted, gap: SpeakerServiceGap
-) -> None:
-    space = _space(_classification(3), granted)
+def test_nothing_stands_in_for_a_chosen_service_the_space_cannot_use(chosen) -> None:
+    usable = _connection(3)
+    space = _space(None, [usable] if chosen is None else [usable, chosen])
 
-    resolution = resolve_speaker_service(_config(), space)
+    resolution = resolve_speaker_service(
+        _config(uuid4() if chosen is None else chosen.id), space
+    )
 
-    assert (resolution.connection, resolution.gap) == (None, gap)
-
-
-def test_the_standard_labels_speakers_even_when_the_flows_labels_are_off() -> None:
-    only = _connection(3)
-
-    resolution = resolve_speaker_service(_config(labels=False), _space(None, [only]))
-
-    assert resolution.connection == only
-
-
-def test_a_choice_wins_over_the_standard_and_nothing_stands_in_for_it() -> None:
-    standard, chosen = _connection(3), _connection(3)
-
-    used = resolve_speaker_service(_config(chosen.id), _space(None, [standard, chosen]))
-    revoked = resolve_speaker_service(_config(uuid4()), _space(None, [standard]))
-
-    assert used.connection == chosen
-    assert (revoked.connection, revoked.gap) == (
+    assert (resolution.connection, resolution.gap) == (
         None,
         SpeakerServiceGap.PICKED_UNAVAILABLE,
     )
+    assert not resolution.available
+
+
+@pytest.mark.parametrize("usable_services", [0, 1, 3])
+def test_nothing_is_chosen_for_a_flow_that_chose_no_service(
+    usable_services: int,
+) -> None:
+    space = _space(None, [_connection(3) for _ in range(usable_services)])
+
+    resolution = resolve_speaker_service(_config(), space)
+
+    assert (resolution.connection, resolution.gap) == (
+        None,
+        SpeakerServiceGap.NOT_CHOSEN,
+    )
+
+
+def test_a_speaker_service_gap_is_one_of_two_reasons() -> None:
+    assert {gap.value for gap in SpeakerServiceGap} == {
+        "not_chosen",
+        "picked_unavailable",
+    }

@@ -6,47 +6,43 @@ import FlowSpeakerIdentification from "./FlowSpeakerIdentification.svelte";
 
 afterEach(cleanup);
 
-// The space's standard: what a flow without a choice uses.
 const vemsa = {
   id: "s-1",
   name: "Vemsa Sundsvall",
   meets_security_classification: true,
-  available: true,
-  is_standard: true
+  available: true
 };
 const second = {
   id: "s-2",
   name: "Talare test",
   meets_security_classification: true,
-  available: true,
-  is_standard: false
+  available: true
 };
-const standardOption = m.flow_transcription_speakers_standard({ name: vemsa.name });
 
 function renderRow(props: {
   services?: (typeof vemsa)[];
   labels?: boolean;
+  required?: boolean;
   pickedId?: string | null;
-  onPick?: (serviceId: string | null) => void;
+  maxSpeakers?: number | null;
+  onLabelsChange?: (labels: boolean) => void;
+  onPick?: (serviceId: string) => void;
+  onMaxSpeakersChange?: (maxSpeakers: number | null) => void;
 }) {
   return render(FlowSpeakerIdentification, {
     services: props.services ?? [],
     labels: props.labels ?? true,
+    required: props.required ?? false,
     pickedId: props.pickedId ?? null,
-    maxSpeakers: null,
+    maxSpeakers: props.maxSpeakers ?? null,
     disabled: false,
-    onLabelsChange: vi.fn(),
+    onLabelsChange: props.onLabelsChange ?? vi.fn(),
     onPick: props.onPick ?? vi.fn(),
-    onMaxSpeakersChange: vi.fn()
+    onMaxSpeakersChange: props.onMaxSpeakersChange ?? vi.fn()
   });
 }
 
 const picker = () => page.getByLabelText(m.flow_transcription_speakers_service_label());
-
-async function choose(option: string) {
-  await picker().click();
-  await page.getByRole("option", { name: option, exact: true }).click();
-}
 
 describe("speaker identification", () => {
   it("is greyed out with an explanation when the space has no usable service", () => {
@@ -65,81 +61,154 @@ describe("speaker identification", () => {
     ).toBeInTheDocument();
   });
 
-  it("names the space's only service instead of asking", () => {
-    renderRow({ services: [vemsa] });
-
-    expect(
-      screen.getByText(m.flow_transcription_speakers_by({ name: vemsa.name }))
-    ).toBeInTheDocument();
-    expect(screen.queryByText(m.flow_transcription_speakers_service_label())).toBeNull();
-  });
-
-  it("uses the space's standard until the flow chooses another", async () => {
+  it("asks which service identifies speakers, also when the space has only one", async () => {
     const onPick = vi.fn();
-    // The space says which service is its standard; it need not be listed first.
-    renderRow({ services: [second, vemsa], onPick });
+    renderRow({ services: [vemsa], onPick });
 
-    await expect.element(picker()).toHaveTextContent(standardOption);
+    // Nothing is chosen for the flow, and nothing depends on a choice yet.
+    await expect.element(picker()).toHaveTextContent(m.flow_transcription_speakers_choose());
+    await expect
+      .element(picker())
+      .toHaveAccessibleDescription(m.flow_transcription_speakers_choose_hint());
+    expect(screen.queryByLabelText(m.flow_transcription_speakers_max_label())).toBeNull();
+
     await picker().click();
-    await expect.element(page.getByRole("option").first()).toHaveTextContent(standardOption);
-    await page.getByRole("option", { name: second.name, exact: true }).click();
+    await expect.element(page.getByRole("option")).toHaveTextContent(vemsa.name);
+    await page.getByRole("option", { name: vemsa.name, exact: true }).click();
 
-    expect(onPick.mock.calls).toEqual([[second.id]]);
+    expect(onPick.mock.calls).toEqual([[vemsa.id]]);
   });
 
-  it("goes back to the space's standard by clearing the flow's choice", async () => {
+  it("shows the flow's choice and offers the space's other services", async () => {
     const onPick = vi.fn();
     renderRow({ services: [vemsa, second], pickedId: second.id, onPick });
 
     await expect.element(picker()).toHaveTextContent(second.name);
-    await choose(standardOption);
+    expect(screen.queryByText(m.flow_transcription_speakers_choose_hint())).toBeNull();
+    await picker().click();
+    expect(page.getByRole("option").elements()).toHaveLength(2);
+    await page.getByRole("option", { name: vemsa.name, exact: true }).click();
 
-    expect(onPick.mock.calls).toEqual([[null]]);
+    expect(onPick.mock.calls).toEqual([[vemsa.id]]);
   });
 
-  it("shows a choice of the space's only service, so it can be cleared", async () => {
+  it.each([
+    {
+      case: "switched off",
+      services: [{ ...vemsa, available: false }, second],
+      reason: m.flow_transcription_speakers_lost_disabled({ name: vemsa.name }),
+      shown: vemsa.name
+    },
+    {
+      case: "below the space's classification",
+      services: [{ ...vemsa, meets_security_classification: false }, second],
+      reason: m.flow_transcription_speakers_lost_classification({ name: vemsa.name }),
+      shown: vemsa.name
+    },
+    {
+      case: "no longer in the space",
+      services: [second],
+      reason: m.flow_transcription_speakers_lost_removed(),
+      shown: m.flow_transcription_speakers_choose()
+    }
+  ])("keeps a choice that is $case and says why", async ({ services, reason, shown }) => {
     const onPick = vi.fn();
-    renderRow({ services: [vemsa], pickedId: vemsa.id, onPick });
+    renderRow({ services, pickedId: vemsa.id, onPick });
 
-    // Chosen, not merely used: the flow stays on it whatever the space's standard becomes.
-    await expect.element(picker()).toHaveTextContent(vemsa.name);
-    await choose(standardOption);
-
-    expect(onPick.mock.calls).toEqual([[null]]);
+    // The other usable service is offered, never chosen in its place.
+    await expect.element(picker()).toHaveTextContent(shown);
+    await expect.element(picker()).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      `${reason} ${m.flow_transcription_speakers_lost_choose_other()}`
+    );
+    expect(onPick).not.toHaveBeenCalled();
   });
 
-  it("says when the picked service is no longer usable, and lets the standard replace it", async () => {
-    const onPick = vi.fn();
-    renderRow({ services: [vemsa], pickedId: "gone", onPick });
+  it("lets the author turn labels off when the chosen service is lost and none is left", async () => {
+    // Publishing would refuse the lost choice; turning labels off is the way out.
+    const onLabelsChange = vi.fn();
+    renderRow({ services: [{ ...vemsa, available: false }], pickedId: vemsa.id, onLabelsChange });
+    const toggle = screen.getByRole("switch", { name: m.flow_transcription_diarization() });
 
-    expect(screen.getByText(m.flow_transcription_speakers_pick_unavailable())).toBeInTheDocument();
-    // The lost choice is not replaced on the author's behalf.
-    await expect.element(picker()).toHaveTextContent(m.flow_transcription_speakers_choose());
-    await choose(standardOption);
+    expect(toggle).toBeEnabled();
+    expect(toggle).toBeChecked();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      `${m.flow_transcription_speakers_lost_disabled({ name: vemsa.name })} ${m.flow_transcription_speakers_lost_no_other()}`
+    );
+    await fireEvent.click(toggle);
+    expect(onLabelsChange).toHaveBeenCalledWith(false);
+  });
 
-    expect(onPick.mock.calls).toEqual([[null]]);
+  it("stays on and asks for a service while a step names the speakers", async () => {
+    const onLabelsChange = vi.fn();
+    renderRow({ services: [vemsa], labels: false, required: true, onLabelsChange });
+    const toggle = screen.getByRole("switch", { name: m.flow_transcription_diarization() });
+
+    // The step needs the labels, so the switch has nothing to decide.
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(m.flow_transcription_speakers_required_note())).toBeInTheDocument();
+    await expect
+      .element(picker())
+      .toHaveAccessibleDescription(m.flow_transcription_speakers_choose_hint_required());
+  });
+
+  it.each([
+    { case: "has no service", services: [], labels: true },
+    { case: "has no service, with the flow's own setting off", services: [], labels: false },
+    {
+      case: "has only services it cannot use",
+      services: [
+        { ...vemsa, available: false },
+        { ...second, meets_security_classification: false }
+      ],
+      labels: true
+    },
+    {
+      case: "has only services it cannot use, with the flow's own setting off",
+      services: [{ ...vemsa, available: false }],
+      labels: false
+    }
+  ])(
+    "stays on and says what is missing when a step names the speakers and the space $case",
+    ({ services, labels }) => {
+      renderRow({ services, labels, required: true });
+      const toggle = screen.getByRole("switch", { name: m.flow_transcription_diarization() });
+
+      // The flow needs the labels: it is not shown as switched off or as optional.
+      expect(toggle).toBeChecked();
+      expect(toggle).toBeDisabled();
+      expect(screen.getByText(m.flow_transcription_speakers_required_note())).toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent(
+        m.flow_transcription_speakers_required_no_service()
+      );
+      expect(screen.queryByText(m.flow_transcription_speakers_service_label())).toBeNull();
+    }
+  );
+
+  it("offers no way out through the switch when a step needs the lost service", () => {
+    renderRow({
+      services: [{ ...vemsa, available: false }],
+      required: true,
+      pickedId: vemsa.id
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      `${m.flow_transcription_speakers_lost_disabled({ name: vemsa.name })} ${m.flow_transcription_speakers_lost_no_other_required()}`
+    );
   });
 
   it("shows nothing more while labels are off", () => {
-    renderRow({ services: [vemsa], labels: false });
+    renderRow({ services: [vemsa], labels: false, pickedId: vemsa.id });
 
-    expect(screen.queryByText(m.flow_transcription_speakers_by({ name: vemsa.name }))).toBeNull();
+    expect(screen.queryByText(m.flow_transcription_speakers_service_label())).toBeNull();
   });
 });
 
 describe("speaker count", () => {
   it("is automatic when empty and saves a whole number as the maximum", async () => {
     const onMaxSpeakersChange = vi.fn();
-    render(FlowSpeakerIdentification, {
-      services: [vemsa],
-      labels: true,
-      pickedId: null,
-      maxSpeakers: null,
-      disabled: false,
-      onLabelsChange: vi.fn(),
-      onPick: vi.fn(),
-      onMaxSpeakersChange
-    });
+    renderRow({ services: [vemsa], pickedId: vemsa.id, onMaxSpeakersChange });
     const input = screen.getByLabelText(m.flow_transcription_speakers_max_label());
 
     expect(input).toHaveAttribute("placeholder", m.flow_transcription_speakers_max_placeholder());
@@ -152,16 +221,7 @@ describe("speaker count", () => {
 
   it("refuses a count that is not a whole number from 1 and shows the saved one again", async () => {
     const onMaxSpeakersChange = vi.fn();
-    render(FlowSpeakerIdentification, {
-      services: [vemsa],
-      labels: true,
-      pickedId: null,
-      maxSpeakers: 3,
-      disabled: false,
-      onLabelsChange: vi.fn(),
-      onPick: vi.fn(),
-      onMaxSpeakersChange
-    });
+    renderRow({ services: [vemsa], pickedId: vemsa.id, maxSpeakers: 3, onMaxSpeakersChange });
     const input = screen.getByLabelText(m.flow_transcription_speakers_max_label());
 
     for (const refused of ["0", "2.5"]) {
@@ -176,29 +236,5 @@ describe("speaker count", () => {
 
     expect(onMaxSpeakersChange.mock.calls).toEqual([[5]]);
     expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("lets the author turn labels off when the picked service is gone and none is left", async () => {
-    // Publishing would refuse the lost pick; turning labels off is the way out.
-    const onLabelsChange = vi.fn();
-    render(FlowSpeakerIdentification, {
-      services: [{ ...vemsa, available: false }],
-      labels: true,
-      pickedId: vemsa.id,
-      maxSpeakers: null,
-      disabled: false,
-      onLabelsChange,
-      onPick: vi.fn(),
-      onMaxSpeakersChange: vi.fn()
-    });
-    const toggle = screen.getByRole("switch", { name: m.flow_transcription_diarization() });
-
-    expect(toggle).toBeEnabled();
-    expect(toggle).toBeChecked();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      m.flow_transcription_speakers_pick_unavailable_none()
-    );
-    await fireEvent.click(toggle);
-    expect(onLabelsChange).toHaveBeenCalledWith(false);
   });
 });

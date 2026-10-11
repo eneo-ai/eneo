@@ -173,13 +173,6 @@ class SpaceTranscriptionServiceLink(BaseModel):
         )
     )
     available: bool = Field(description="False when the organisation disabled it.")
-    is_standard: bool = Field(
-        description=(
-            "True for the space's standard: flows in the space that have not "
-            "chosen a service use this one. At most one link is the standard, "
-            "and none is while the space has no usable service."
-        )
-    )
 
 
 class UpdateSpaceDryRunResponse(BaseModel):

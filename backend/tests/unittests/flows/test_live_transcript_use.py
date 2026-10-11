@@ -25,6 +25,7 @@ from eneo.flows.runtime.transcription_runtime import (
 from eneo.transcription_services.client import TranscriptionJobResult
 from tests.unittests.flows import audio_spool_test_support
 from tests.unittests.flows.test_flow_transcription import (
+    _SPEAKER_CHOICE,
     _audio_file,
     _patch_run_input_payload,
     _run,
@@ -102,6 +103,7 @@ def live_audio(user, monkeypatch, spool_contract):
         version_metadata={
             "wizard": {
                 "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
                 "transcription_model": {"id": str(model.id)},
                 "transcription_language": "sv",
             }

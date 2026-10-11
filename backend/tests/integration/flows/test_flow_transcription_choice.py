@@ -1,4 +1,5 @@
-"""A flow picks a speaker identification service only from those its space may use."""
+"""A flow labels speakers only with the service its author chose, and picks it
+only from those its space may use."""
 
 from __future__ import annotations
 
@@ -12,10 +13,12 @@ from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserUpdate
+from tests.integration.flows.test_flow_live_transcription_session import _draft_flow
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 _UNAVAILABLE = "flow_speaker_service_unavailable"
+_NOT_CHOSEN = "flow_speaker_service_not_chosen"
 _INVALID = "flow_audio_transcription_invalid"
 
 
@@ -119,7 +122,7 @@ async def test_a_flow_picks_only_a_speaker_service_its_space_may_use(
         "transcription_speaker_service"
     ] == {"id": vemsa}
 
-    # Without a pick the space's standard is used when the audio step runs.
+    # A draft may be saved before the choice is made.
     created = await _create(client, headers, space_id, _metadata(None))
     assert created.status_code == 201, created.text
 
@@ -229,15 +232,81 @@ async def test_a_malformed_pick_is_refused_even_without_audio_steps(
     _refusal(refused, _INVALID)
 
 
-async def test_labels_without_a_pick_publish_in_a_space_with_several_services(
+async def _publish(client: AsyncClient, headers, flow_id: str):
+    return await client.post(f"/api/v1/flows/{flow_id}/publish/", headers=headers)
+
+
+async def test_labels_without_a_chosen_service_publish_only_where_none_can_be_chosen(
     client: AsyncClient, headers
 ):
     space_id = await _space(client, headers)
-    first = await _connection(client, headers)
-    second = await _connection(client, headers)
-    await _grant(client, headers, space_id, first, second)
-    flow_id = await _publishable(client, headers, space_id, _metadata(None))
-
-    published = await client.post(f"/api/v1/flows/{flow_id}/publish/", headers=headers)
-
+    # A space without a service: the flow's own setting labels nothing there.
+    simply_transcribes = await _publishable(client, headers, space_id, _metadata(None))
+    published = await _publish(client, headers, simply_transcribes)
     assert published.status_code == 200, published.text
+
+    vemsa = await _connection(client, headers)
+    await _grant(client, headers, space_id, vemsa)
+    # Saving the draft is never refused for a missing choice; publishing is.
+    flow_id = await _publishable(client, headers, space_id, _metadata(None))
+    _refusal(await _publish(client, headers, flow_id), _NOT_CHOSEN)
+
+    # Nothing is chosen for the flow: its author chooses, or switches labels off.
+    switched_off = await _publishable(
+        client, headers, space_id, _metadata(None, transcription_diarization=False)
+    )
+    published = await _publish(client, headers, switched_off)
+    assert published.status_code == 200, published.text
+    chosen = await client.patch(
+        f"/api/v1/flows/{flow_id}/",
+        json={"metadata_json": _metadata(vemsa)},
+        headers=headers,
+    )
+    assert chosen.status_code == 200, chosen.text
+    published = await _publish(client, headers, flow_id)
+    assert published.status_code == 200, published.text
+
+
+@pytest.mark.parametrize("space_has_a_service", [False, True])
+async def test_a_step_that_maps_speakers_publishes_only_with_a_chosen_service(
+    client: AsyncClient,
+    flow_process_auth_headers,
+    db_container,
+    space_has_a_service: bool,
+):
+    headers = dict(flow_process_auth_headers)
+    space_id = await _space(client, headers)
+    vemsa = await _connection(client, headers)
+    if space_has_a_service:
+        await _grant(client, headers, space_id, vemsa)
+    # The step needs the labels whatever the flow's own setting says. The draft
+    # is saved without a choice.
+    flow = await _draft_flow(
+        client,
+        headers,
+        db_container,
+        space_id=space_id,
+        speaker_mapping=True,
+        wizard={"transcription_diarization": False},
+    )
+
+    _refusal(await _publish(client, headers, flow.flow_id), _NOT_CHOSEN)
+
+    # The step's need overrides the flow's own setting: a choice that is
+    # switched off is the one every run uses, so it must be usable here.
+    chosen = await _draft_flow(
+        client,
+        headers,
+        db_container,
+        space_id=space_id,
+        speaker_mapping=True,
+        wizard={
+            "transcription_diarization": False,
+            "transcription_speaker_service": {"id": vemsa},
+        },
+    )
+    published = await _publish(client, headers, chosen.flow_id)
+    if space_has_a_service:
+        assert published.status_code == 200, published.text
+    else:
+        _refusal(published, _UNAVAILABLE)

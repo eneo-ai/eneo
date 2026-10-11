@@ -645,12 +645,12 @@ def select_speaker_service(
     space: "Space", *, config: FlowTranscriptionConfig, step_order: int
 ) -> "TranscriptionServiceConnection":
     """The service that labels this run's speakers, refused before any audio
-    is sent when the space has none the flow can use."""
+    is sent when the flow chose none or its choice is not usable in the space."""
     resolution = resolve_speaker_service(config, space)
     if resolution.connection is not None:
         return resolution.connection
     raise _speaker_service_refusal(
-        resolution.gap or SpeakerServiceGap.NO_SERVICE, step_order=step_order
+        resolution.gap or SpeakerServiceGap.NOT_CHOSEN, step_order=step_order
     )
 
 
@@ -668,13 +668,14 @@ def _speaker_service_refusal(
 
 
 _SPEAKER_SERVICE_GAP_MESSAGES = {
-    SpeakerServiceGap.NO_SERVICE: ("the space has no speaker identification service."),
-    SpeakerServiceGap.NONE_USABLE: (
-        "the space's speaker identification service is switched off or may not "
-        "be used in the space."
+    SpeakerServiceGap.NOT_CHOSEN: (
+        "the flow has not chosen a speaker identification service. Choose one "
+        "in the flow and publish it again."
     ),
     SpeakerServiceGap.PICKED_UNAVAILABLE: (
-        "the flow's speaker identification service is no longer available in the space."
+        "the speaker identification service the flow chose is no longer "
+        "available in the space. Make it available to the space again, or "
+        "choose another in the flow and publish it again."
     ),
 }
 
@@ -1240,12 +1241,10 @@ async def resolve_and_transcribe_audio_for_step(
     try:
         transcriber = await transcribers.for_step(speaker_service)
     except NotFoundException as exc:
-        # Removed between resolving it and reading its key: the same refusal.
+        # The chosen service was removed between resolving it and reading its
+        # key: the same refusal.
         raise _speaker_service_refusal(
-            SpeakerServiceGap.PICKED_UNAVAILABLE
-            if transcription_config.speaker_service_id is not None
-            else SpeakerServiceGap.NO_SERVICE,
-            step_order=step_order,
+            SpeakerServiceGap.PICKED_UNAVAILABLE, step_order=step_order
         ) from exc
     result = await transcribe_audio_input(
         files=ordered_files,
