@@ -186,6 +186,13 @@
         savedClassificationId = classificationId;
         apiKey = "";
         attempted = false;
+        // Marked in a second step, through the one path that takes the mark
+        // from the service that had it. If it fails the service stays
+        // connected and the box stays ticked, so saving tries again.
+        if (isDefault) {
+          saved = await onUpdate(saved.id, { is_default: true });
+          savedDefault = true;
+        }
       }
     } catch (error) {
       // The entered values stay; the message goes to the field it is about.
@@ -348,23 +355,19 @@
               </Field.Description>
             </Field.Field>
 
-            <!-- Offered once the service is connected: a default is a service
-                 an administrator has seen working. -->
-            {#if saved}
-              <Field.Field orientation="horizontal">
-                <Checkbox
-                  id="{uid}-default"
-                  bind:checked={isDefault}
-                  aria-describedby="{uid}-default-help"
-                />
-                <Field.Content>
-                  <Field.Label for="{uid}-default">{m.speaker_service_default_label()}</Field.Label>
-                  <Field.Description id="{uid}-default-help">
-                    {m.speaker_service_default_help()}
-                  </Field.Description>
-                </Field.Content>
-              </Field.Field>
-            {/if}
+            <Field.Field orientation="horizontal">
+              <Checkbox
+                id="{uid}-default"
+                bind:checked={isDefault}
+                aria-describedby="{uid}-default-help"
+              />
+              <Field.Content>
+                <Field.Label for="{uid}-default">{m.speaker_service_default_label()}</Field.Label>
+                <Field.Description id="{uid}-default-help">
+                  {m.speaker_service_default_help()}
+                </Field.Description>
+              </Field.Content>
+            </Field.Field>
           </Field.Group>
         </fieldset>
 

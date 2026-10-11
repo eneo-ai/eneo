@@ -251,6 +251,10 @@ class TranscriptionServiceSummary(BaseModel):
     id: UUID
     name: str
     is_enabled: bool
+    is_default: bool = Field(
+        description="The organisation's default: filled in as the service of "
+        "flows that identify speakers, in spaces that may use it."
+    )
     security_classification: SecurityClassificationPublic | None
 
     @classmethod
@@ -261,6 +265,7 @@ class TranscriptionServiceSummary(BaseModel):
             id=connection.id,
             name=connection.name,
             is_enabled=connection.is_enabled,
+            is_default=connection.is_default,
             security_classification=SecurityClassificationPublic.from_domain(
                 connection.security_classification
             ),

@@ -4,13 +4,14 @@ import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, expect, it, vi } from "vitest";
 
-const { update, check, invalidate } = vi.hoisted(() => ({
+const { create, update, check, invalidate } = vi.hoisted(() => ({
+  create: vi.fn(),
   update: vi.fn(),
   check: vi.fn(),
   invalidate: vi.fn()
 }));
 vi.mock("$lib/core/Eneo", () => ({
-  getEneo: () => ({ transcriptionServices: { update, check } })
+  getEneo: () => ({ transcriptionServices: { create, update, check } })
 }));
 vi.mock("$app/navigation", () => ({ invalidate }));
 
@@ -59,6 +60,7 @@ const actionsFor = (name: string) =>
   page.getByRole("button", { name: m.speaker_service_actions({ name }) });
 
 beforeEach(() => {
+  create.mockReset();
   update.mockReset();
   check.mockReset();
 });
@@ -219,6 +221,34 @@ async function makeDefault(name: string) {
   await page.getByLabelText(m.speaker_service_default_label()).click();
   await page.getByRole("button", { name: m.save() }).click();
 }
+
+it("connects a service as the default when the box is ticked, taking the mark from the other", async () => {
+  const timra = service({ id: "s2", name: "Vemsa Timrå", endpoint_url: "https://vemsa.timra.se" });
+  create.mockImplementation(async () => timra);
+  update.mockImplementation(async () => ({ ...timra, is_default: true }));
+  check.mockImplementation(async () => result("ready"));
+  render(TranscriptionServicesTable, {
+    services: [service({ is_default: true })],
+    classifications: []
+  });
+
+  await page.getByRole("button", { name: m.speaker_service_connect() }).click();
+  await page.getByLabelText(m.name()).fill(timra.name);
+  await page.getByLabelText(m.speaker_service_address()).fill(timra.endpoint_url);
+  await page.getByLabelText(m.speaker_service_api_key()).fill("key");
+  await page.getByLabelText(m.speaker_service_default_label()).click();
+  await page.getByRole("button", { name: m.speaker_service_connect_submit(), exact: true }).click();
+
+  // Connected first, then marked through the path that moves the mark.
+  await vi.waitFor(() => expect(update).toHaveBeenCalledWith({ id: "s2" }, { is_default: true }));
+  expect(create.mock.calls[0][0]).not.toHaveProperty("is_default");
+  await expect
+    .element(page.getByRole("row", { name: /Vemsa Timrå/ }))
+    .toHaveTextContent(m.speaker_service_default_badge());
+  await expect
+    .element(page.getByRole("row", { name: /Vemsa Sundsvall/ }))
+    .not.toHaveTextContent(m.speaker_service_default_badge());
+});
 
 it("keeps one default when a slower answer to another edit arrives after the mark moved", async () => {
   const timra = service({ id: "s2", name: "Vemsa Timrå", endpoint_url: "https://vemsa.timra.se" });

@@ -58,6 +58,14 @@
     return undefined;
   }
 
+  // The organisation's default fills in flows only where the space has it.
+  function defaultNote(service: TranscriptionServiceSummary, granted: boolean) {
+    if (!service.is_default) return undefined;
+    return granted
+      ? m.speaker_service_space_default()
+      : m.speaker_service_space_default_not_granted();
+  }
+
   async function toggle(service: TranscriptionServiceSummary) {
     if (saving || links === null) return;
     saving = true;
@@ -92,10 +100,9 @@
   {:else}
     <div class="border-default overflow-hidden rounded-xl border">
       {#each services as service (service.id)}
-        {@const link = links.find((granted) => granted.id === service.id)}
-        {@const granted = link !== undefined}
+        {@const granted = links.some((link) => link.id === service.id)}
         {@const reason = blockedReason(service)}
-        {@const note = reason ?? (link?.is_default ? m.speaker_service_space_default() : undefined)}
+        {@const note = reason ?? defaultNote(service, granted)}
         <Field.Field
           orientation="horizontal"
           class="border-default border-b px-4 py-3 last:border-b-0"

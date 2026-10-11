@@ -28,6 +28,7 @@ const service = (
   id,
   name,
   is_enabled: true,
+  is_default: false,
   security_classification: null,
   ...overrides
 });
@@ -77,25 +78,31 @@ it("explains why a granted service cannot be used, and keeps it removable", asyn
   await expect.element(low).toBeEnabled();
 });
 
-it("says which granted service is the organisation's default", async () => {
+it("says which service is the organisation's default, and that an ungranted one fills nothing in yet", async () => {
   currentSpace.value = {
     security_classification: null,
-    transcription_services: [
-      link("a", "Vemsa Sundsvall"),
-      { ...link("b", "Vemsa Timrå"), is_default: true }
-    ]
+    transcription_services: [link("a", "Vemsa Sundsvall")]
   };
-  render(SelectSpaceSpeakerServices, {
-    services: [service("a", "Vemsa Sundsvall"), service("b", "Vemsa Timrå")],
+  const { rerender } = render(SelectSpaceSpeakerServices, {
+    services: [service("a", "Vemsa Sundsvall", { is_default: true }), service("b", "Vemsa Timrå")],
     securityEnabled: false
   });
 
   await expect
-    .element(page.getByRole("switch", { name: "Vemsa Timrå" }))
+    .element(page.getByRole("switch", { name: "Vemsa Sundsvall" }))
     .toHaveAccessibleDescription(m.speaker_service_space_default());
   await expect
-    .element(page.getByRole("switch", { name: "Vemsa Sundsvall" }))
+    .element(page.getByRole("switch", { name: "Vemsa Timrå" }))
     .not.toHaveAccessibleDescription();
+
+  // The default the space has not been given says what giving it would do.
+  await rerender({
+    services: [service("a", "Vemsa Sundsvall"), service("b", "Vemsa Timrå", { is_default: true })],
+    securityEnabled: false
+  });
+  await expect
+    .element(page.getByRole("switch", { name: "Vemsa Timrå" }))
+    .toHaveAccessibleDescription(m.speaker_service_space_default_not_granted());
 });
 
 it("grants a usable service and refuses one below the space's classification", async () => {

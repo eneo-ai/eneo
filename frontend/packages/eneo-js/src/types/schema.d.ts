@@ -38222,6 +38222,11 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /**
+       * Is Default
+       * @description The organisation's default: filled in as the service of flows that identify speakers, in spaces that may use it.
+       */
+      is_default: boolean;
       /** Is Enabled */
       is_enabled: boolean;
       /** Name */

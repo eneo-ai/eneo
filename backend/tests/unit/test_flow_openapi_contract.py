@@ -4612,6 +4612,7 @@ def test_openapi_default_speaker_service_is_marked_by_update_and_shown_on_links(
     schemas = openapi_spec["components"]["schemas"]
     service = schemas["TranscriptionServicePublic"]
     link = schemas["SpaceTranscriptionServiceLink"]
+    summary = schemas["TranscriptionServiceSummary"]
     update = schemas["TranscriptionServiceUpdate"]
 
     assert set(service["properties"]) == {
@@ -4633,7 +4634,14 @@ def test_openapi_default_speaker_service_is_marked_by_update_and_shown_on_links(
         "available",
         "is_default",
     }
-    for schema in (service, link):
+    assert set(summary["properties"]) == {
+        "id",
+        "name",
+        "is_enabled",
+        "is_default",
+        "security_classification",
+    }
+    for schema in (service, link, summary):
         assert schema["properties"]["is_default"]["type"] == "boolean"
         assert "is_default" in schema["required"]
     # An update changes the mark only when it sends it, and never to null.

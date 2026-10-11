@@ -7666,6 +7666,7 @@
   "speaker_service_space_description": "Services that label who is speaking when the space's flows transcribe audio. Each flow chooses which service it uses.",
   "speaker_service_space_load_failed": "The space's speaker identification services could not be loaded.",
   "speaker_service_space_default": "The organisation's default. Filled in when a flow here starts identifying speakers.",
+  "speaker_service_space_default_not_granted": "The organisation's default. Give the space access, and it is filled in when a flow here starts identifying speakers.",
   "speaker_service_reason_classification": "The security class is lower than the space's.",
   "speaker_service_reason_disabled": "Turned off by an administrator.",
   "ai_builder_error_server_limitation": "Eneo could not build the flow because of a limitation in the service. Try a different setup, or contact support if it happens again.",

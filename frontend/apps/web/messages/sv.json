@@ -7666,6 +7666,7 @@
   "speaker_service_space_description": "Tjänster som märker upp vem som talar när ytans flöden transkriberar ljud. Varje flöde väljer själv vilken tjänst det använder.",
   "speaker_service_space_load_failed": "Ytans tjänster för talaridentifiering kunde inte läsas in.",
   "speaker_service_space_default": "Organisationens standard. Fylls i när ett flöde här börjar identifiera talare.",
+  "speaker_service_space_default_not_granted": "Organisationens standard. Ge ytan tillgång, så fylls den i när ett flöde här börjar identifiera talare.",
   "speaker_service_reason_classification": "Säkerhetsklassen är lägre än ytans.",
   "speaker_service_reason_disabled": "Avstängd av en administratör.",
   "ai_builder_error_server_limitation": "Eneo kunde inte bygga flödet på grund av en begränsning i tjänsten. Pröva ett annat upplägg, eller kontakta supporten om felet upprepas.",
