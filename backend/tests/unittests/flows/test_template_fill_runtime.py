@@ -1674,3 +1674,35 @@ async def test_template_publication_rechecks_ownership_after_activation(
     else:
         session.rollback.assert_not_awaited()
         deps.file_service.save_generated_file.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_an_unresolved_binding_with_too_many_digits_is_named_like_any_other() -> (
+    None
+):
+    # Kills the mutant that converts the digits of an unresolved binding
+    # unguarded: Python refuses more than 4300 of them, and the run then
+    # reported a general assembly failure that blames the template asset.
+    run = _run()
+    state = _state(result=_completed_result(run=run))
+    step = _step()
+    step.output_config["bindings"]["summary"] = "{{flow_input.step_" + "9" * 5000 + "}}"
+    deps = _runtime_deps(
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+        template_file=SimpleNamespace(
+            id=uuid4(),
+            name="template.docx",
+            checksum="checksum",
+            blob=_build_template_bytes(),
+        ),
+    )
+
+    with pytest.raises(
+        TypedIOValidationException,
+        match="Template binding 'summary' could not be resolved",
+    ) as exc_info:
+        await execute_template_fill_step(step=step, run=run, state=state, deps=deps)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED
+    deps.file_service.save_generated_file.assert_not_awaited()

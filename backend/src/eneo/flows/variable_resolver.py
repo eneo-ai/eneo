@@ -48,6 +48,19 @@ _TEMPLATE_VAR_PATTERN = re.compile(r"\{\{\s*([^{}]+)\s*\}\}")
 TEMPLATE_VARIABLE_PATTERN = _TEMPLATE_VAR_PATTERN
 
 
+def decimal_number(digits: str) -> int | None:
+    """The number a run of decimal digits spells. None when a character is no
+    decimal digit (`\u00b2` is a digit that is none) or when there are more digits
+    than Python converts: text a client wrote is refused, never a crash."""
+
+    if not digits.isdecimal():
+        return None
+    try:
+        return int(digits)
+    except ValueError:
+        return None
+
+
 def runtime_step_alias(step_order: int) -> str:
     """The name a step's result has in a template: `step_<order>`."""
 
@@ -59,11 +72,8 @@ def runtime_step_alias_order(name: str) -> int | None:
     step's result under it: exactly `runtime_step_alias(order)`, so no leading
     zero and ASCII digits only."""
 
-    raw = name.removeprefix("step_")
-    if raw == name or not (raw.isascii() and raw.isdigit()):
-        return None
-    order = int(raw)
-    return order if runtime_step_alias(order) == name else None
+    order = decimal_number(name.removeprefix("step_"))
+    return order if order is not None and runtime_step_alias(order) == name else None
 
 
 def _variable_resolution_error(message: str) -> TypedIOValidationException:
@@ -418,12 +428,12 @@ class FlowVariableResolver:
 
             if isinstance(current, list):
                 current_list = cast(list[Any], current)
-                if not token.isdigit():
+                index = decimal_number(token)
+                if index is None:
                     raise _variable_resolution_error(
                         f"Unknown variable reference: '{path}'. "
                         f"Expected numeric index for list access, got '{token}'."
                     )
-                index = int(token)
                 if index >= len(current_list):
                     raise _variable_resolution_error(
                         f"Unknown variable reference: '{path}'. "

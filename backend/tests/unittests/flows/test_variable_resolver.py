@@ -473,7 +473,11 @@ def test_interpolate_error_includes_available_keys_for_small_dicts():
     )
 
 
-def test_interpolate_raises_for_non_numeric_list_index():
+# "\u00b2" is a digit that is no number, and the long index has more digits than
+# Python converts: both killed the request before they were refused like "first".
+# "-1" and "1_0" are numbers to Python but no index: they stay refused.
+@pytest.mark.parametrize("index", ["first", "\u00b2", "9" * 5000, "-1", "1_0"])
+def test_interpolate_raises_for_non_numeric_list_index(index: str):
     resolver = FlowVariableResolver()
     context = resolver.build_context(
         flow_input={},
@@ -483,7 +487,7 @@ def test_interpolate_raises_for_non_numeric_list_index():
 
     with pytest.raises(BadRequestException, match="Expected numeric index"):
         resolver.interpolate(
-            template="{{ step_input.file_ids.first }}",
+            template="{{ step_input.file_ids." + index + " }}",
             context=context,
         )
 

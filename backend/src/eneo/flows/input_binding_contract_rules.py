@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
-from eneo.flows.variable_resolver import runtime_step_alias
+from eneo.flows.variable_resolver import decimal_number, runtime_step_alias
 
 FLOW_INPUT_BINDING_UNSUPPORTED_KEY = "flow_input_binding_unsupported_key"
 SOURCE_REFS_BINDING_KEY = "source_refs"
@@ -38,10 +38,7 @@ def source_ref_step_order(
 
     raw = step_ref.removeprefix("step_")
     if raw != step_ref and raw.isdecimal():
-        try:
-            return int(raw)
-        except ValueError:  # more digits than Python converts
-            return None
+        return decimal_number(raw)
     return named.get(step_ref) if named else None
 
 

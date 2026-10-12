@@ -9,6 +9,7 @@ from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationError,
     FlowStepValidationView,
 )
+from eneo.flows.variable_resolver import decimal_number
 from eneo.main.exceptions import BadRequestException
 
 _STEP_REFERENCE_PATTERN = re.compile(r"^step_(\d+)$")
@@ -117,13 +118,13 @@ def validate_template_expression_reference(
         return
     head = expression.split(".", maxsplit=1)[0]
     step_ref = _STEP_REFERENCE_PATTERN.match(head)
-    if step_ref is None:
+    referenced_order = decimal_number(step_ref.group(1)) if step_ref else None
+    if referenced_order is None:
         raise FlowStepValidationError(
             f"Invalid step reference '{head}' in template bindings.",
             step_order=current_step_order,
         )
 
-    referenced_order = int(step_ref.group(1))
     if referenced_order >= current_step_order:
         raise FlowStepValidationError(
             "Template bindings may only reference outputs from earlier steps.",

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from eneo.flows.flow_validators_template import validate_template_placeholder_bindings
+from eneo.flows.flow_validators_template import (
+    validate_template_expression_reference,
+    validate_template_placeholder_bindings,
+)
 from eneo.main.exceptions import BadRequestException
 
 
@@ -43,3 +46,16 @@ def test_the_bindings_must_be_an_object_of_strings(
     bindings: object, message: str
 ) -> None:
     assert _refusal(bindings) == message
+
+
+def test_a_step_reference_with_more_digits_than_a_number_is_refused_as_unknown() -> (
+    None
+):
+    # Kills the mutant that converts the digits unguarded: Python refuses more
+    # than 4300 of them, and the save answered a server error.
+    with pytest.raises(BadRequestException, match="Invalid step reference"):
+        validate_template_expression_reference(
+            expression="step_" + "9" * 5000 + ".output.text",
+            current_step_order=3,
+            available_orders={1, 2},
+        )

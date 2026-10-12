@@ -534,7 +534,8 @@ def _parse_care_data_policy_for_persisted_read(
 
 
 def _parse_care_data_approval_mode(value: object) -> CareDataApprovalMode | None:
-    if value in SUPPORTED_CARE_DATA_APPROVAL_MODES:
+    # Only text can be one of the modes; a list or object cannot even be looked up.
+    if isinstance(value, str) and value in SUPPORTED_CARE_DATA_APPROVAL_MODES:
         return "single_reviewer_outside_flow"
     return None
 
@@ -542,7 +543,7 @@ def _parse_care_data_approval_mode(value: object) -> CareDataApprovalMode | None
 def _parse_care_data_pre_approval_visibility(
     value: object,
 ) -> CareDataPreApprovalVisibility | None:
-    if value in SUPPORTED_CARE_DATA_PRE_APPROVAL_VISIBILITY:
+    if isinstance(value, str) and value in SUPPORTED_CARE_DATA_PRE_APPROVAL_VISIBILITY:
         return "uploader_and_reviewers"
     return None
 
@@ -564,6 +565,7 @@ def _parse_form_field(
     payload = dict(field)
     payload["name"] = field_name
     payload["type"] = field_type
+    _require_text_label(field, index=index)
     if "required" in field or required:
         payload["required"] = required
     if "order" in field or order is not None:
@@ -663,6 +665,18 @@ def parse_saved_form_field_type(
             f"metadata_json.form_schema.fields[{index}].type must be one of "
             f"{sorted(_FORM_FIELD_TYPES_BY_VALUE)}."
         ) from None
+
+
+def _require_text_label(field: Mapping[str, object], *, index: int) -> None:
+    """A caption that is no text is refused with its path, like an unusable
+    type or options list: on write, and when a stored schema is read (the
+    reader of published definitions names that a corrupt form schema)."""
+
+    label = field.get("label")
+    if label is not None and not isinstance(label, str):
+        raise BadRequestException(
+            f"metadata_json.form_schema.fields[{index}].label must be a string."
+        )
 
 
 def _parse_required(

@@ -56,6 +56,10 @@ def _ai_builder_origin() -> dict[str, object]:
             "metadata_json.form_schema.fields[0].type must be a non-empty string.",
         ),
         (
+            _metadata([{"name": "case_id", "type": "text", "label": 123}]),
+            "metadata_json.form_schema.fields[0].label must be a string.",
+        ),
+        (
             _metadata([{"name": "case_id", "type": "file"}]),
             "metadata_json.form_schema.fields[0].type must be one of",
         ),
@@ -435,6 +439,16 @@ def test_flow_metadata_persisted_read_fails_closed_for_legacy_sensitive() -> Non
         ),
         (
             {"care_data_policy": {"pre_approval_visibility": "everyone"}},
+            "metadata_json.care_data_policy.pre_approval_visibility must be 'uploader_and_reviewers' when provided.",
+        ),
+        # A list or object is no member of the allowed set and cannot be
+        # looked up in it: refused like any other value, not a server error.
+        (
+            {"care_data_policy": {"approval_mode": ["single_reviewer_outside_flow"]}},
+            "metadata_json.care_data_policy.approval_mode must be 'single_reviewer_outside_flow' when provided.",
+        ),
+        (
+            {"care_data_policy": {"pre_approval_visibility": {}}},
             "metadata_json.care_data_policy.pre_approval_visibility must be 'uploader_and_reviewers' when provided.",
         ),
     ],

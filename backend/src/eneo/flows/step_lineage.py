@@ -17,6 +17,7 @@ from eneo.flows.http_transport import (
 from eneo.flows.http_transport.authored_config import ConfigPath
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.template_reference_analyzer import TemplateReference, analyze_template
+from eneo.flows.variable_resolver import decimal_number
 
 
 class _StepReferenceFields(Protocol):
@@ -49,11 +50,9 @@ def existing_step_order_from_ref(existing_step_ref: str | None) -> int | None:
     ):
         return None
     raw_order = existing_step_ref.removeprefix(_EXISTING_STEP_REF_PREFIX)
-    if not raw_order.isdigit():
-        return None
-    step_order = int(raw_order)
+    step_order = decimal_number(raw_order)
     # Reject non-canonical aliases such as existing_step_01.
-    if raw_order != str(step_order):
+    if step_order is None or raw_order != str(step_order):
         return None
     return step_order if step_order >= 1 else None
 

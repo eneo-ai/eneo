@@ -1045,6 +1045,12 @@ def test_validate_steps_publish_rejects_invalid_numeric_label_and_authored_quest
         ("question", "step_\u0661", "flow_input_binding_invalid_step_reference"),
         ("question", "step_\u00b9", "flow_input_binding_invalid_step_reference"),
         ("question", "step_\uff13", "flow_input_binding_invalid_step_reference"),
+        # More digits than Python converts: the save refused with a server error.
+        (
+            "question",
+            "step_" + "9" * 5000,
+            "flow_input_binding_invalid_step_reference",
+        ),
         ("source_ref", "step_\u00b9", "flow_input_binding_invalid_step_reference"),
         ("source_ref", "step_\uff13", "flow_input_binding_future_step_reference"),
         ("source_ref", "step_03", "flow_input_binding_future_step_reference"),

@@ -126,6 +126,10 @@ def test_existing_step_order_from_ref_rejects_non_canonical_refs() -> None:
     assert existing_step_order_from_ref("existing_step_0") is None
     assert existing_step_order_from_ref("existing_step_01") is None
     assert existing_step_order_from_ref("step_1") is None
+    # A digit that is no number, and more digits than Python converts: both
+    # raised instead of naming no step.
+    assert existing_step_order_from_ref("existing_step_\u00b2") is None
+    assert existing_step_order_from_ref("existing_step_" + "9" * 5000) is None
 
 
 def test_resolve_reference_step_orders_keeps_completed_prior_references() -> None:

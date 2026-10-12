@@ -32,7 +32,7 @@ from eneo.flows.runtime.docx_template_runtime import (
 )
 from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.output_runtime import save_generated_flow_file
-from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.flows.variable_resolver import FlowVariableResolver, decimal_number
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -594,9 +594,9 @@ def _failed_step_order_for_expression(
     prior_results: list[Any],
 ) -> int | None:
     match = _STEP_REFERENCE_PATTERN.search(expression)
-    if match is None:
+    step_order = decimal_number(match.group(1)) if match else None
+    if step_order is None:
         return None
-    step_order = int(match.group(1))
     for result in prior_results:
         if result.step_order != step_order:
             continue
