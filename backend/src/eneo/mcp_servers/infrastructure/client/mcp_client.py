@@ -825,9 +825,9 @@ class MCPClient:
                 time; the server's session then expires on its own.
             follow_redirects: Whether a redirect the server answers with is
                 followed. False for a caller that vetted the server's address:
-                a redirect would take the request, and every credential header
-                but ``Authorization``, to an address nobody vetted. The
-                request then fails like any request the server fails.
+                a redirect would take the request, and credential headers with
+                it, to an address nobody vetted. The request then fails like
+                any request the server fails.
             on_tools_list_changed: Fired (best-effort) when the server pushes a
                 ``notifications/tools/list_changed``. Progressive-discovery
                 servers emit this after a tool like ``load_tools`` activates new
