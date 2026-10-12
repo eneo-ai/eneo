@@ -58,10 +58,10 @@ class _Stored:
             )
 
 
-def _server(tenant_id: UUID, **columns: object) -> MCPServers:
+def _server(tenant_id: UUID, sorts: str, **columns: object) -> MCPServers:
     return MCPServers(
         tenant_id=tenant_id,
-        name=f"unattended-facts-{uuid4()}",
+        name=f"unattended-facts-{sorts}-{uuid4()}",
         http_url="http://localhost:9000/mcp",
         http_auth_type="none",
         is_enabled=True,
@@ -106,9 +106,17 @@ async def stored(setup_database: None, admin_user) -> AsyncIterator[_Stored]:
             name=f"untouched-{uuid4().hex[:6]}",
         )
         personal = Spaces(tenant_id=tenant_id, name="Personal", user_id=owner.id)
-        server = _server(tenant_id, security_classification_id=level.id)
-        second_server = _server(tenant_id)
-        session.add_all([activated, untouched, personal, server, second_server])
+        # The names sort one way and the ids the other, so a list in id order
+        # is not taken for one in name order.
+        earlier_id, later_id = sorted([uuid4(), uuid4()])
+        server = _server(
+            tenant_id, "a", id=later_id, security_classification_id=level.id
+        )
+        second_server = _server(tenant_id, "b", id=earlier_id)
+        empty_server = _server(tenant_id, "c")
+        session.add_all(
+            [activated, untouched, personal, server, second_server, empty_server]
+        )
         await session.flush()
         pending = MCPServerTools(
             mcp_server_id=server.id,
@@ -122,7 +130,10 @@ async def stored(setup_database: None, admin_user) -> AsyncIterator[_Stored]:
         of_second_server = MCPServerTools(
             mcp_server_id=second_server.id, name="lookup_case"
         )
-        session.add_all([pending, plain, of_second_server])
+        gone_at_server = MCPServerTools(
+            mcp_server_id=second_server.id, name="aaa_first", removed_from_remote=True
+        )
+        session.add_all([pending, plain, of_second_server, gone_at_server])
         await session.flush()
         session.add_all(
             [
@@ -143,9 +154,11 @@ async def stored(setup_database: None, admin_user) -> AsyncIterator[_Stored]:
             "personal": personal.id,
             "server": server.id,
             "second-server": second_server.id,
+            "empty-server": empty_server.id,
             "pending": pending.id,
             "plain": plain.id,
             "of-second-server": of_second_server.id,
+            "gone-at-server": gone_at_server.id,
         }
         level_id, owner_id = level.id, owner.id
     try:
@@ -154,7 +167,9 @@ async def stored(setup_database: None, admin_user) -> AsyncIterator[_Stored]:
         async with sessionmanager.session() as session, session.begin():
             await session.execute(
                 sa.delete(MCPServers).where(
-                    MCPServers.id.in_([ids["server"], ids["second-server"]])
+                    MCPServers.id.in_(
+                        [ids["server"], ids["second-server"], ids["empty-server"]]
+                    )
                 )
             )
             await session.execute(
@@ -227,6 +242,81 @@ async def test_a_tool_is_a_fact_only_together_with_the_asked_server(
     foreign = await stored.read("activated", "of-second-server")
     assert foreign.server is not None and foreign.tool is None
     assert unattended_tool_refusal(foreign) is UnattendedToolRefusal.TOOL_NOT_FOUND
+
+
+def _seen(facts: UnattendedToolFacts) -> tuple[object, ...]:
+    """What a set of facts says, for comparing two reads of the same tool."""
+    assert facts.server is not None and facts.tool is not None
+    server, tool = facts.server, facts.tool
+    server_level, space_level = (
+        server.security_classification,
+        facts.space_security_classification,
+    )
+    return (
+        (server.id, server.is_enabled, server.purpose, server.http_auth_type),
+        (server.forward_identity, server_level and server_level.security_level),
+        (tool.id, tool.mcp_server_id, tool.requires_approval),
+        (tool.removed_from_remote, tool.is_enabled_by_default),
+        (facts.tenant_setting, facts.space_override, facts.server_in_space),
+        (facts.space_is_personal, space_level and space_level.security_level),
+    )
+
+
+async def test_the_tools_of_a_space_are_listed_with_the_facts_a_single_read_gives(
+    stored: _Stored,
+) -> None:
+    """Kills the mutants of the list that a tool picker reads.
+
+    A list that takes in the tools of a server the space did not activate,
+    repeats a tool for every space that activated its server, gives a tool
+    the switch of another tool or of another space, leaves out a tool that a
+    level refuses, shows a server that has no tool, or is in another order
+    than server name then tool name shows an author what publish will not
+    find, or hides why a tool cannot be chosen.
+    """
+    ids = stored.ids
+
+    async def listed(space: str) -> list[UnattendedToolFacts]:
+        async with sessionmanager.session() as session, session.begin():
+            return await UnattendedToolFactsReader(session).read_tools_of_space(
+                tenant_id=stored.tenant_id, space_id=ids.get(space, uuid4())
+            )
+
+    # A second space activates all three servers and sets no switch of its
+    # own. The second server is switched off, and one of its tools is gone at
+    # the server; the third has no tool.
+    async with sessionmanager.session() as session, session.begin():
+        session.add_all(
+            SpacesMCPServers(space_id=ids["untouched"], mcp_server_id=ids[name])
+            for name in ("server", "second-server", "empty-server")
+        )
+        await session.execute(
+            sa.update(MCPServers)
+            .where(MCPServers.id == ids["second-server"])
+            .values(is_enabled=False)
+        )
+
+    assert [_seen(facts) for facts in await listed("activated")] == [
+        _seen(await stored.read("activated", "plain")),
+        _seen(await stored.read("activated", "pending")),
+    ]
+    everything = await listed("untouched")
+    # Server "a" before "b" although its id is the later one; within a server
+    # by tool name, "list_cases" before "lookup_case", stored the other way.
+    assert [_seen(facts) for facts in everything] == [
+        _seen(await stored.read("untouched", "plain")),
+        _seen(await stored.read("untouched", "pending")),
+        _seen(await stored.read("untouched", "gone-at-server", "second-server")),
+        _seen(await stored.read("untouched", "of-second-server", "second-server")),
+    ]
+    assert [unattended_tool_refusal(facts) for facts in everything] == [
+        UnattendedToolRefusal.TOOL_SWITCHED_OFF,
+        UnattendedToolRefusal.TOOL_WAITING_FOR_REVIEW,
+        UnattendedToolRefusal.SERVER_DISABLED,
+        UnattendedToolRefusal.SERVER_DISABLED,
+    ]
+    assert await listed("personal") == []
+    assert await listed("no-such-space") == []
 
 
 async def test_a_personal_space_is_read_as_personal(stored: _Stored) -> None:
