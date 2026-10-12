@@ -245,6 +245,24 @@ describe("buildFlowGraphTopology", () => {
     expect(t.edges.filter((e) => e.kind === "http_get").map((e) => e.target)).toEqual(["s1", "s2"]);
   });
 
+  // Kills the mutant that draws a tool step with no source (it would look
+  // like a step that reads nothing) or hangs it on the HTTP source node.
+  it("gives tool steps one external source node of their own", () => {
+    const t = buildFlowGraphTopology([step(1, "tool"), step(2, "tool"), step(3, "http_get")]);
+    expect(ids(t)).toEqual(["s1", "s2", "s3", "output", "tool-source", "http-source"]);
+    expect(
+      t.edges.filter((e) => e.kind === "tool").map((e) => [e.source, e.target, e.sourceStepOrder])
+    ).toEqual([
+      ["tool-source", "s1", 0],
+      ["tool-source", "s2", 0]
+    ]);
+    expect(t.edges.filter((e) => e.kind === "flow_output").map((e) => e.source)).toEqual([
+      "s1",
+      "s2",
+      "s3"
+    ]);
+  });
+
   it("routes an HTTP delivery step to both the receiver and the flow output", () => {
     const t = buildFlowGraphTopology([step(1, "flow_input", "http_post")]);
     expect(ids(t)).toContain("http-target");

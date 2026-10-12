@@ -7,6 +7,7 @@ import {
   getFlowStepValidationIssues,
   getOutputModeCompatibilityIssue,
   getSelectableInputTypeOptions,
+  getSelectableInputSourceOptions,
   getValidInputSources,
   getValidInputTypes,
   hasOutboundDeliveryOutputMode,
@@ -77,6 +78,32 @@ describe("getValidInputSources", () => {
       "all_previous_steps",
       "http_get"
     ]);
+  });
+});
+
+describe("getSelectableInputSourceOptions", () => {
+  // Kills the mutant that offers the tool source in an editor that cannot
+  // configure it, and the one that shows a saved tool step as an invalid option.
+  it.each([
+    { stepOrder: 1, isAdvancedMode: false },
+    { stepOrder: 2, isAdvancedMode: true }
+  ])("lists the tool source only on a step saved with it (%o)", (params) => {
+    const offered = getSelectableInputSourceOptions({
+      steps: [],
+      currentInputSource: "http_get",
+      ...params
+    });
+    const saved = getSelectableInputSourceOptions({
+      steps: [],
+      currentInputSource: "tool",
+      ...params
+    });
+
+    expect(offered.map((option) => option.value)).not.toContain("tool");
+    expect(saved.filter((option) => option.value === "tool")).toEqual([
+      { value: "tool", legacyInvalid: false }
+    ]);
+    expect(getValidInputTypes("tool")).toEqual(["text", "json"]);
   });
 });
 

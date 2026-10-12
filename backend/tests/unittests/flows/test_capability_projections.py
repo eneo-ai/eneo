@@ -77,6 +77,11 @@ def _legal(cell: Cell) -> bool:
         FlowInputType.AUDIO,
     }:
         return False
+    if source is FlowInputSource.TOOL and (
+        input_type not in {FlowInputType.TEXT, FlowInputType.JSON}
+        or output_mode is FlowOutputMode.TEMPLATE_FILL
+    ):
+        return False
     if (
         input_type in {FlowInputType.DOCUMENT, FlowInputType.AUDIO, FlowInputType.FILE}
         and source is not FlowInputSource.FLOW_INPUT
@@ -102,7 +107,7 @@ LEGAL_CELLS = frozenset(cell for cell in ALL_CELLS if _legal(cell))
 def test_inspectable_is_every_cell_the_listed_rules_admit() -> None:
     inspectable = projection_cells(CapabilityProjection.INSPECTABLE)
     assert inspectable == LEGAL_CELLS
-    assert (len(inspectable), len(_triples(inspectable))) == (159, 66)
+    assert (len(inspectable), len(_triples(inspectable))) == (176, 66)
 
 
 def test_http_cells_stay_inspectable() -> None:
@@ -112,8 +117,26 @@ def test_http_cells_stay_inspectable() -> None:
         for cell in inspectable
         if FlowInputSource.HTTP_GET in cell or FlowOutputMode.HTTP_POST in cell
     }
-    assert len(http) == 84
+    assert len(http) == 92
     assert any(FlowInputType.IMAGE in cell for cell in inspectable)
+
+
+def test_a_tool_input_is_inspectable_as_text_or_json_and_never_authored() -> None:
+    # Kills the mutants that offer the tool source to the Builder (its cells
+    # joining PROPOSABLE_NEW or EDITABLE_EXISTING, which the pinned sizes of
+    # both also catch), admit a tool step that reads a file type, or list as
+    # legal a tool step in a mode that never reads its input (template_fill),
+    # which the step validation refuses.
+    tool = {
+        cell
+        for cell in projection_cells(CapabilityProjection.INSPECTABLE)
+        if cell[0] is FlowInputSource.TOOL
+    }
+    assert len(tool) == 17
+    assert {cell[1] for cell in tool} == {FlowInputType.TEXT, FlowInputType.JSON}
+    assert FlowOutputMode.TEMPLATE_FILL not in {cell[3] for cell in tool}
+    assert not tool & projection_cells(CapabilityProjection.EDITABLE_EXISTING)
+    assert not tool & projection_cells(CapabilityProjection.PROPOSABLE_NEW)
 
 
 def test_editable_existing_is_what_an_authoring_spec_can_carry() -> None:
@@ -150,6 +173,7 @@ def test_proposable_new_is_what_the_builder_may_author_from_scratch() -> None:
     assert (len(proposable), len(_triples(proposable))) == (59, 32)
     for cell in proposable:
         assert FlowInputSource.HTTP_GET not in cell
+        assert FlowInputSource.TOOL not in cell
         assert FlowOutputMode.HTTP_POST not in cell
         assert FlowOutputMode.SPEAKER_MAPPING not in cell
         assert FlowInputType.IMAGE not in cell
@@ -166,9 +190,9 @@ def test_coverage_report_exposed_is_exactly_proposable_new() -> None:
     report = coverage_report()
     assert dict(report.by_classification) == {
         "exposed": 59,
-        "not_exposed": 100,
-        "illegal_io_triple": 520,
-        "illegal_source_type_pair": 105,
+        "not_exposed": 117,
+        "illegal_io_triple": 650,
+        "illegal_source_type_pair": 154,
     }
     assert report.has_drift is False
 
@@ -371,8 +395,8 @@ def test_step_triple_refuses_modes_the_builder_cannot_propose(output_mode: str) 
 
 
 def test_planning_state_stamps_the_manifest_version_and_loads_older_stamps() -> None:
-    assert FCM_VERSION == 10
-    assert PlanningState.empty().fcm_version == 10
+    assert FCM_VERSION == 11
+    assert PlanningState.empty().fcm_version == 11
     restored = PlanningState.model_validate(
         {**PlanningState.empty().model_dump(mode="json"), "fcm_version": 9}
     )

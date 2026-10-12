@@ -4907,7 +4907,7 @@ export interface paths {
     put?: never;
     /**
      * Publish Flow
-     * @description Publish the current draft revision so new runs use a version-pinned definition. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
+     * @description Publish the current draft revision so new runs use a version-pinned definition. A step whose input source is `tool` is published only when the instance and the space allow that tool in the flow's space; the published definition then holds the tool's name and the SHA-256 fingerprint of its approved input schema inside `input_config.tool`. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     post: operations["publish_flow"];
     delete?: never;
@@ -18196,6 +18196,9 @@ export interface components {
       | "typed_io_http_response_too_large"
       | "typed_io_http_ssrf_blocked"
       | "typed_io_http_timeout"
+      | "typed_io_tool_invalid_config"
+      | "typed_io_tool_invalid_schema"
+      | "typed_io_tool_not_allowed"
       | "typed_io_input_exceeds_model_window"
       | "typed_io_input_too_large"
       | "typed_io_structured_output_exceeds_limit"
@@ -19019,7 +19022,7 @@ export interface components {
      * FlowInputSource
      * @enum {string}
      */
-    FlowInputSource: "flow_input" | "previous_step" | "all_previous_steps" | "http_get";
+    FlowInputSource: "flow_input" | "previous_step" | "all_previous_steps" | "http_get" | "tool";
     /**
      * FlowInputType
      * @enum {string}
@@ -22100,6 +22103,7 @@ export interface components {
         | "typed_io_structured_output_exceeds_limit"
         | "typed_io_template_checksum_mismatch"
         | "typed_io_template_render_failed"
+        | "typed_io_tool_invalid_config"
         | "typed_io_transcript_too_large"
         | "typed_io_transcription_config_invalid"
         | "typed_io_transcription_empty"
@@ -24873,6 +24877,7 @@ export interface components {
             | "typed_io_structured_output_exceeds_limit"
             | "typed_io_template_checksum_mismatch"
             | "typed_io_template_render_failed"
+            | "typed_io_tool_invalid_config"
             | "typed_io_transcript_too_large"
             | "typed_io_transcription_config_invalid"
             | "typed_io_transcription_empty"
@@ -26262,6 +26267,7 @@ export interface components {
             | "typed_io_structured_output_exceeds_limit"
             | "typed_io_template_checksum_mismatch"
             | "typed_io_template_render_failed"
+            | "typed_io_tool_invalid_config"
             | "typed_io_transcript_too_large"
             | "typed_io_transcription_config_invalid"
             | "typed_io_transcription_empty"
@@ -26393,6 +26399,7 @@ export interface components {
       input_contract?: {
         [key: string]: unknown;
       } | null;
+      /** @description Where the step's input comes from. `tool` names one MCP tool in `input_config.tool` (`mcp_server_id`, `tool_id`, `arguments`). Each argument is a fixed JSON value or one whole reference such as `{{flow_input.field}}`. A fixed string cannot contain `{{...}}`: it is read as a reference, and there is no escape syntax. Argument values are stored and returned as written and are not treated as secrets, so a credential does not belong in one; the MCP server's credential is stored with the server. A tool step reads text or JSON, takes no uploaded files and cannot use the output mode `template_fill`. Publish also requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. Publish does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. Any other configuration is refused with `typed_io_tool_invalid_config`. */
       input_source: components["schemas"]["FlowInputSource"];
       input_type: components["schemas"]["FlowInputType"];
       /** Output Classification Override */
@@ -26668,6 +26675,7 @@ export interface components {
       input_contract?: {
         [key: string]: unknown;
       } | null;
+      /** @description Where the step's input comes from. `tool` names one MCP tool in `input_config.tool` (`mcp_server_id`, `tool_id`, `arguments`). Each argument is a fixed JSON value or one whole reference such as `{{flow_input.field}}`. A fixed string cannot contain `{{...}}`: it is read as a reference, and there is no escape syntax. Argument values are stored and returned as written and are not treated as secrets, so a credential does not belong in one; the MCP server's credential is stored with the server. A tool step reads text or JSON, takes no uploaded files and cannot use the output mode `template_fill`. Publish also requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. Publish does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. Any other configuration is refused with `typed_io_tool_invalid_config`. */
       input_source: components["schemas"]["FlowInputSource"];
       input_type: components["schemas"]["FlowInputType"];
       /** Output Classification Override */
@@ -58598,7 +58606,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
-      /** @description The flow cannot be published because its draft definition is incomplete or invalid. */
+      /** @description The flow cannot be published because its draft definition is incomplete or invalid. A step whose tool the instance or the space does not allow is refused with `typed_io_tool_not_allowed`; `context` holds `step_order`, `refusal` (the refusing level), `mcp_server_id` and `tool_id`. A step whose tool has an input schema that is not a valid JSON Schema, or of a draft Eneo does not support, is refused with `typed_io_tool_invalid_schema`. */
       400: {
         headers: {
           [name: string]: unknown;

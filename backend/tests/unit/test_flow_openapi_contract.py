@@ -3429,6 +3429,7 @@ def test_openapi_flow_step_create_enum_values_match_contract(
             "previous_step",
             "all_previous_steps",
             "http_get",
+            "tool",
         },
         "input_type": {"text", "json", "image", "audio", "document", "file", "any"},
         "output_mode": {
@@ -3564,6 +3565,7 @@ def test_openapi_excludes_http_post_input_and_retains_http_post_output(
         "previous_step",
         "all_previous_steps",
         "http_get",
+        "tool",
     }
     assert "http_post" in output_modes
 

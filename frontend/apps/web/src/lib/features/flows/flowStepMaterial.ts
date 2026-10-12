@@ -27,6 +27,7 @@ export type StepMaterial =
   | { kind: "previous_step"; stepOrder: number; stepName: string | null }
   | { kind: "all_previous_steps" }
   | { kind: "web_address" }
+  | { kind: "tool" }
   | { kind: "flow_input" };
 
 type MaterialStep = Pick<FlowStep, "step_order" | "input_source" | "input_bindings"> &
@@ -69,6 +70,7 @@ export function getDefaultStepMaterial(
     return { kind: "all_previous_steps" };
   }
   if (step.input_source === "http_get") return { kind: "web_address" };
+  if (step.input_source === "tool") return { kind: "tool" };
   if (step.input_source === "flow_input") return { kind: "flow_input" };
   return null;
 }
@@ -117,6 +119,8 @@ export function describeStepMaterial(material: StepMaterial): string {
       return m.flow_material_what_all_previous();
     case "web_address":
       return m.flow_material_what_http();
+    case "tool":
+      return m.flow_material_what_tool();
     case "flow_input":
       return m.flow_material_what_flow_input();
   }
@@ -205,6 +209,8 @@ export function getStepSourceLine(
       return sourceLine([m.flow_step_reads_all_previous()]);
     case "web_address":
       return sourceLine([m.flow_step_reads_web()]);
+    case "tool":
+      return sourceLine([m.flow_step_reads_tool()]);
   }
 }
 

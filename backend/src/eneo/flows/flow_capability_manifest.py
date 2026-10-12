@@ -35,6 +35,7 @@ from eneo.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
     resolve_citation_mode,
 )
+from eneo.flows.domain.tool_input import TOOL_INPUT_TYPES
 from eneo.flows.enums import (
     FlowAuthoringInputSource,
     FlowAuthoringInputType,
@@ -45,10 +46,13 @@ from eneo.flows.enums import (
     FlowOutputType,
     flow_output_mode_uses_completion_model,
 )
-from eneo.flows.output_modes import speaker_mapping_violation
+from eneo.flows.output_modes import (
+    OUTPUT_MODES_WITHOUT_STEP_INPUT,
+    speaker_mapping_violation,
+)
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 10
+FCM_VERSION: int = 11
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -483,6 +487,11 @@ _NOT_EXPOSED_INPUT_SOURCES: Mapping[FlowInputSource, str] = MappingProxyType(
             "credentials that an authoring spec never carries, and the Builder "
             "neither proposes nor edits it."
         ),
+        FlowInputSource.TOOL: (
+            "A tool input names one governed MCP tool by its id: the Builder has "
+            "no catalogue of the tools a space has activated, so it neither "
+            "proposes nor edits it."
+        ),
     }
 )
 
@@ -841,8 +850,9 @@ def _source_type_illegality(
     """Return a diagnostic string when `(input_source, input_type)` is
     illegal at the single-cell level, else `None`.
 
-    Mirrors the three single-cell rules from `step_chain_rules.py` and
-    `flow_validators_http.py`; the full set of chain-level rules lives in
+    Mirrors the single-cell rules from `step_chain_rules.py`,
+    `flow_validators_http.py` and `domain/tool_input_validation.py`; the full
+    set of chain-level rules lives in
     `step_chain_rules.find_first_step_chain_violation`.
     """
     if (
@@ -853,6 +863,12 @@ def _source_type_illegality(
             f"input_type {input_type.value!r} is not supported with "
             f"input_source {input_source.value!r} "
             "(flow_validators_http.validate_http_input_config)."
+        )
+    if input_source is FlowInputSource.TOOL and input_type not in TOOL_INPUT_TYPES:
+        return (
+            f"input_type {input_type.value!r} is not supported with "
+            "input_source 'tool' "
+            "(domain.tool_input_validation.validate_tool_input_config)."
         )
     if (
         input_type in _FLOW_INPUT_ONLY_TYPES
@@ -888,6 +904,15 @@ def _cell_illegality(cell: TupleSpec) -> tuple[str, str | None] | None:
     source_type_issue = _source_type_illegality(source, input_type)
     if source_type_issue is not None:
         return "illegal_source_type_pair", source_type_issue
+    if (
+        source is FlowInputSource.TOOL
+        and output_mode in OUTPUT_MODES_WITHOUT_STEP_INPUT
+    ):
+        return "illegal_source_type_pair", (
+            f"output_mode {output_mode.value!r} does not read the step's input, "
+            "so it cannot be used with input_source 'tool' "
+            "(domain.tool_input_validation.validate_tool_input_config)."
+        )
     if (
         speaker_mapping_violation(
             step_order=1,

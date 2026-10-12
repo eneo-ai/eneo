@@ -2505,6 +2505,33 @@ async def test_resolve_step_input_adds_underlag_summary_diagnostic(user):
 
 
 @pytest.mark.asyncio
+async def test_a_tool_step_fails_its_attempt_with_a_typed_code(user):
+    # Kills the mutant that lets a tool step fall through to the sources the
+    # runtime does read: the attempt would end in an untyped bad request.
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "x"})
+    step = _runtime_step(
+        input_source="tool",
+        input_config={"tool": {"mcp_server_id": str(uuid4()), "tool_id": str(uuid4())}},
+    )
+    run_state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, state=run_state, attempt_no=1)
+
+    assert exc.value.code == "typed_io_validation_failed"
+
+
+@pytest.mark.asyncio
 async def test_audio_input_previous_step_rejected_runtime(user):
     """Audio input is flow_input-only at runtime."""
     executor, _, _, _ = _build_executor(user)

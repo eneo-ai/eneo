@@ -126,7 +126,8 @@ const INPUT_SOURCE_ORDER: InputSource[] = [
   "flow_input",
   "previous_step",
   "all_previous_steps",
-  "http_get"
+  "http_get",
+  "tool"
 ];
 
 const ADVANCED_ONLY_INPUT_TYPES = new Set<InputType>(["file", "any"]);
@@ -175,6 +176,8 @@ export function getValidInputTypes(
       return ["text", "any"];
     case "http_get":
       return ["text", "json", "any"];
+    case "tool":
+      return ["text", "json"];
     case "previous_step":
       return previousOutputType
         ? [...(COMPATIBLE_COERCIONS[previousOutputType] ?? ["text", "any"])]
@@ -202,7 +205,11 @@ export function getSelectableInputSourceOptions(params: {
 }): SelectableInputSourceOption[] {
   const { steps, stepOrder, currentInputSource, isAdvancedMode } = params;
   const visible = getValidInputSources({ steps, stepOrder });
-  let options = INPUT_SOURCE_ORDER.filter((value) => visible.includes(value))
+  // The editor cannot configure a tool input, so it never offers one: the
+  // option is listed only on a step saved with it, to show what the step has.
+  let options = INPUT_SOURCE_ORDER.filter(
+    (value) => visible.includes(value) || (value === "tool" && currentInputSource === "tool")
+  )
     .filter((value) => isAdvancedMode || value !== "http_get" || value === currentInputSource)
     .map((value) => ({
       value,

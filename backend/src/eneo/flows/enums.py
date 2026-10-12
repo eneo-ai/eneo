@@ -22,6 +22,7 @@ class FlowInputSource(str, Enum):
     PREVIOUS_STEP = "previous_step"
     ALL_PREVIOUS_STEPS = "all_previous_steps"
     HTTP_GET = "http_get"
+    TOOL = "tool"
 
 
 class FlowAuthoringInputSource(str, Enum):

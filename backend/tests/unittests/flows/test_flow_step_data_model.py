@@ -335,5 +335,6 @@ def test_flow_step_source_constraint_excludes_post_but_output_retains_post() -> 
     output_mode_sql = constraints["ck_flow_steps_output_mode"]
 
     assert "http_get" in input_source_sql
+    assert "'tool'" in input_source_sql
     assert "http_post" not in input_source_sql
     assert "http_post" in output_mode_sql

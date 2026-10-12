@@ -140,4 +140,52 @@ describe("computeStepOrderRemap", () => {
     expect(result.impactedDeletedBindingOrders.size).toBe(0);
     expect(result.rewrittenSteps).toHaveLength(1);
   });
+
+  it("renumbers a tool step's bound arguments and reports the one whose step was deleted", () => {
+    // Kills the mutant that leaves `input_config.tool.arguments` as it was when
+    // steps move (the argument would silently read another step's result), the
+    // one that rewrites a reference inside a fixed list or object, and the one
+    // that does not report a deleted reference.
+    const toolStep = (stepOrder: number) =>
+      makeStep({
+        id: "T",
+        step_order: stepOrder,
+        input_source: "tool",
+        input_config: {
+          tool: {
+            mcp_server_id: "s",
+            tool_id: "t",
+            arguments: {
+              days: "{{step_2.output.structured.days}}",
+              gone: "{{ step_1.output.text }}",
+              fixed: ["{{step_2.output.text}}"],
+              limit: 5
+            }
+          }
+        }
+      });
+    const prev = [
+      makeStep({ id: "A", step_order: 1 }),
+      makeStep({ id: "B", step_order: 2 }),
+      toolStep(3)
+    ];
+    const next = [makeStep({ id: "B", step_order: 1 }), toolStep(2)];
+
+    const result = computeStepOrderRemap(prev, next);
+
+    const tool = result.rewrittenSteps.find((s) => s.id === "T")!;
+    expect(tool.input_config).toEqual({
+      tool: {
+        mcp_server_id: "s",
+        tool_id: "t",
+        arguments: {
+          days: "{{step_1.output.structured.days}}",
+          gone: "{{step_1_deleted.output.text}}",
+          fixed: ["{{step_2.output.text}}"],
+          limit: 5
+        }
+      }
+    });
+    expect([...result.impactedDeletedBindingOrders]).toEqual([1]);
+  });
 });

@@ -709,11 +709,24 @@ async def delete_flow(
     summary="Publish Flow",
     description=(
         "Publish the current draft revision so new runs use a version-pinned definition. "
+        "A step whose input source is `tool` is published only when the instance and "
+        "the space allow that tool in the flow's space; the published definition then "
+        "holds the tool's name and the SHA-256 fingerprint of its approved input "
+        "schema inside `input_config.tool`. "
         f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
     ),
     responses={
         400: error_response(
-            description="The flow cannot be published because its draft definition is incomplete or invalid.",
+            description=(
+                "The flow cannot be published because its draft definition is "
+                "incomplete or invalid. A step whose tool the instance or the space "
+                "does not allow is refused with `typed_io_tool_not_allowed`; "
+                "`context` holds `step_order`, `refusal` (the refusing level), "
+                "`mcp_server_id` and `tool_id`. A step whose tool has an input "
+                "schema that is not a valid JSON Schema, or of a draft Eneo "
+                "does not support, is refused with "
+                "`typed_io_tool_invalid_schema`."
+            ),
             message="Flow cannot be published in its current state.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
         ),

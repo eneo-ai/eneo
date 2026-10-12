@@ -144,6 +144,9 @@ class FlowApiErrorCode(StrEnum):
     TYPED_IO_HTTP_RESPONSE_TOO_LARGE = "typed_io_http_response_too_large"
     TYPED_IO_HTTP_SSRF_BLOCKED = "typed_io_http_ssrf_blocked"
     TYPED_IO_HTTP_TIMEOUT = "typed_io_http_timeout"
+    TYPED_IO_TOOL_INVALID_CONFIG = "typed_io_tool_invalid_config"
+    TYPED_IO_TOOL_INVALID_SCHEMA = "typed_io_tool_invalid_schema"
+    TYPED_IO_TOOL_NOT_ALLOWED = "typed_io_tool_not_allowed"
     TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW = "typed_io_input_exceeds_model_window"
     TYPED_IO_INPUT_TOO_LARGE = "typed_io_input_too_large"
     TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT = (
@@ -293,6 +296,7 @@ FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.TYPED_IO_HTTP_RESPONSE_TOO_LARGE,
         FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED,
         FlowApiErrorCode.TYPED_IO_HTTP_TIMEOUT,
+        FlowApiErrorCode.TYPED_IO_TOOL_INVALID_CONFIG,
         FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW,
         FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE,
         FlowApiErrorCode.TYPED_IO_INVALID_FILE_TYPE,

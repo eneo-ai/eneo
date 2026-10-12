@@ -85,6 +85,7 @@
     input: FlowNodeIO,
     output: FlowNodeIO,
     http_source: FlowNodeIO,
+    tool_source: FlowNodeIO,
     http_target: FlowNodeIO
   };
   const edgeTypes = {
@@ -370,7 +371,9 @@
             ? m.flow_graph_node_output()
             : node.kind === "http_source"
               ? m.flow_graph_node_http_source()
-              : m.flow_graph_node_http_target();
+              : node.kind === "tool_source"
+                ? m.flow_graph_node_tool_source()
+                : m.flow_graph_node_http_target();
       g.setNode(node.id, node.kind === "input" ? inputNodeSize : outputNodeSize);
       resultNodes.push({
         id: node.id,
@@ -380,7 +383,7 @@
         // that answer Enter with nothing, under a description promising they
         // would open a step.
         focusable: false,
-        ...(node.kind === "input" || node.kind === "http_source"
+        ...(node.kind === "input" || node.kind === "http_source" || node.kind === "tool_source"
           ? { sourcePosition: Position.Right }
           : { targetPosition: Position.Left }),
         position: { x: 0, y: 0 },
@@ -437,8 +440,10 @@
           ? m.flow_graph_node_input()
           : edge.source === "http-source"
             ? m.flow_graph_node_http_source()
-            : (sourceStep?.user_description ??
-              m.flow_step_fallback_label({ order: edge.sourceStepOrder }));
+            : edge.source === "tool-source"
+              ? m.flow_graph_node_tool_source()
+              : (sourceStep?.user_description ??
+                m.flow_step_fallback_label({ order: edge.sourceStepOrder }));
       const targetLabel =
         edge.target === "output"
           ? m.flow_graph_node_output()
@@ -455,6 +460,7 @@
       const allowInsert =
         edge.kind !== "all_previous_steps" &&
         edge.kind !== "http_get" &&
+        edge.kind !== "tool" &&
         edge.kind !== "http_post" &&
         // An inserted step would not feed a consumer whose underlag names
         // its producer explicitly, so underlag edges offer no insertion.

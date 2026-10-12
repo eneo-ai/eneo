@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from enum import Enum
 
-from eneo.flows.enums import FLOW_OUTPUT_MODE_VALUES
+from eneo.flows.enums import FLOW_OUTPUT_MODE_VALUES, FlowOutputMode
 
 ALLOWED_OUTPUT_MODES = set(FLOW_OUTPUT_MODE_VALUES)
+# The modes whose handler builds its result without resolving the step's
+# input. A source that exists only as the step's input (an MCP tool's answer)
+# would never be read under one of them.
+OUTPUT_MODES_WITHOUT_STEP_INPUT: frozenset[FlowOutputMode] = frozenset(
+    {FlowOutputMode.TEMPLATE_FILL}
+)
 
 
 def transcribe_only_violation(

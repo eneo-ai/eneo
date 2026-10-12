@@ -13,6 +13,11 @@ from eneo.assistants.assistant_update import (
     AssistantUpdateCommand,
 )
 from eneo.files.file_models import File
+from eneo.flows.application.flow_tool_publication import (
+    UnattendedToolFactsSource,
+    pin_tool_steps,
+    published_input_config,
+)
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
@@ -33,6 +38,7 @@ from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationError,
 )
 from eneo.flows.domain.step_config import clean_inactive_step_config
+from eneo.flows.domain.tool_input import PublishedToolInputConfig
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_authoring_transcription import (
@@ -133,6 +139,7 @@ class FlowService:
         template_asset_service: FlowTemplateAssetService | None = None,
         encryption_service: EncryptionService | None = None,
         space_service: SpaceService | None = None,
+        tool_facts_reader: UnattendedToolFactsSource | None = None,
     ):
         self.user = user
         self.flow_repo = flow_repo
@@ -141,6 +148,14 @@ class FlowService:
         self.template_asset_service = template_asset_service
         self.encryption_service = encryption_service
         self.space_service = space_service
+        self.tool_facts_reader = tool_facts_reader
+
+    def _require_tool_facts_reader(self) -> UnattendedToolFactsSource:
+        if self.tool_facts_reader is None:
+            raise RuntimeError(
+                "FlowService requires tool_facts_reader for a flow with a tool step."
+            )
+        return self.tool_facts_reader
 
     def _require_template_asset_service(self) -> FlowTemplateAssetService:
         if self.template_asset_service is None:
@@ -640,9 +655,17 @@ class FlowService:
             update={"metadata_json": normalized_metadata},
             deep=True,
         )
+        tool_pins = await pin_tool_steps(
+            flow.steps,
+            facts_reader=self._require_tool_facts_reader,
+            tenant_id=self.user.tenant_id,
+            space_id=flow.space_id,
+        )
         # The version snapshots the assistants validated above, not a re-read.
         definition = await self._build_definition(
-            flow_with_normalized_metadata, assistants_by_id=assistants_by_id
+            flow_with_normalized_metadata,
+            assistants_by_id=assistants_by_id,
+            tool_pins=tool_pins,
         )
 
         # Lock after reading the draft so a concurrent publisher retains its
@@ -1236,7 +1259,11 @@ class FlowService:
         return merged.model_dump(mode="json")
 
     async def _build_definition(
-        self, flow: Flow, *, assistants_by_id: dict[UUID, Assistant]
+        self,
+        flow: Flow,
+        *,
+        assistants_by_id: dict[UUID, Assistant],
+        tool_pins: Mapping[int, PublishedToolInputConfig],
     ) -> FlowPersistedJsonObject:
         return build_published_definition_json(
             flow_id=flow.require_persisted_id(),
@@ -1245,7 +1272,10 @@ class FlowService:
             metadata_json=flow.metadata_json,
             steps=[
                 await self._step_to_definition(
-                    step, flow=flow, assistant=assistants_by_id[step.assistant_id]
+                    step,
+                    flow=flow,
+                    assistant=assistants_by_id[step.assistant_id],
+                    tool_pin=tool_pins.get(step.step_order),
                 )
                 for step in sorted(flow.steps, key=lambda item: item.step_order)
             ],
@@ -1278,6 +1308,7 @@ class FlowService:
         *,
         flow: Flow,
         assistant: Assistant,
+        tool_pin: PublishedToolInputConfig | None,
     ) -> FlowPersistedJsonObject:
         output_config = step.output_config
         if step.output_mode == "template_fill":
@@ -1314,7 +1345,7 @@ class FlowService:
             "input_bindings": step.input_bindings,
             "output_classification_override": step.output_classification_override,
             "assistant_snapshot": assistant_snapshot,
-            "input_config": step.input_config,
+            "input_config": published_input_config(step, tool_pin),
             "output_config": output_config,
             "review_policy": dump_flow_step_review_policy(step.review_policy),
         }

@@ -32,7 +32,7 @@ def test_flow_run_error_from_source_requires_public_error_code() -> None:
 
 
 def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
-    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 91
+    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 92
     assert FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[FlowApiErrorCode.RUN_ABANDONED] is False
     assert set(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == FLOW_RUN_TERMINAL_ERROR_CODES
     assert {

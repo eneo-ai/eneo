@@ -655,7 +655,27 @@ class FlowStepCreateRequest(BaseModel):
         ),
     )
     user_description: str | None = None
-    input_source: FlowInputSource
+    input_source: FlowInputSource = Field(
+        description=(
+            "Where the step's input comes from. `tool` names one MCP tool in "
+            "`input_config.tool` (`mcp_server_id`, `tool_id`, `arguments`). "
+            "Each argument is a fixed JSON value or one whole reference such "
+            "as `{{flow_input.field}}`. A fixed string cannot contain "
+            "`{{...}}`: it is read as a reference, and there is no escape "
+            "syntax. Argument values are stored and returned as written and "
+            "are not treated as secrets, so a credential does not belong in "
+            "one; the MCP server's credential is stored with the server. A "
+            "tool step reads text or JSON, takes no uploaded files and cannot "
+            "use the output mode `template_fill`. Publish also requires each "
+            "reference to name one of these: an earlier step's text "
+            "(`step_N.output.text`, or the step's name alone), its status, "
+            "its error message or a field of its declared contract, a "
+            "declared run-form field, or a runtime variable. Publish does not "
+            "judge whether a runtime variable that depends on the run's data "
+            "(a transcript, an upload) has a value in a run. Any other "
+            "configuration is refused with `typed_io_tool_invalid_config`."
+        ),
+    )
     input_type: FlowInputType
     input_contract: dict[str, Any] | None = None
     output_mode: FlowOutputMode

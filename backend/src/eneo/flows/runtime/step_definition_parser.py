@@ -5,6 +5,8 @@ from enum import Enum
 from typing import Mapping, Sequence, TypeGuard, cast
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from eneo.flows.assistant_execution_snapshot import (
     validate_assistant_execution_snapshot,
 )
@@ -18,6 +20,7 @@ from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
 from eneo.flows.domain.step_item_map import build_step_item_map_config
+from eneo.flows.domain.tool_input import read_published_tool_input_config
 from eneo.flows.enums import (
     FLOW_INPUT_SOURCE_VALUES,
     FLOW_INPUT_TYPE_VALUES,
@@ -433,12 +436,32 @@ def _parse_input_config(
         if raw_headers is not None and not isinstance(raw_headers, dict):
             raise BadRequestException("HTTP input_config.headers must be an object.")
         return raw_input_config
+    if input_source == "tool":
+        if not _is_json_object(raw_input_config):
+            raise _invalid_tool_config(
+                "Tool input source requires input_config object."
+            )
+        try:
+            # A stored definition is a published one, so its tool step is pinned.
+            read_published_tool_input_config(raw_input_config)
+        except ValidationError:
+            # Pydantic's message quotes the input value, so it is not passed on.
+            raise _invalid_tool_config(
+                "Tool input_config.tool is not a pinned tool configuration."
+            ) from None
+        return raw_input_config
 
     if raw_input_config is None:
         return None
     if not _is_json_object(raw_input_config):
         raise BadRequestException("Step input_config must be an object.")
     return raw_input_config
+
+
+def _invalid_tool_config(message: str) -> BadRequestException:
+    return BadRequestException(
+        message, code=FlowApiErrorCode.TYPED_IO_TOOL_INVALID_CONFIG.value
+    )
 
 
 def _parse_output_fields(item: Mapping[str, object]) -> _StepOutputFields:

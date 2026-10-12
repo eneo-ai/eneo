@@ -6,6 +6,7 @@ from typing import Literal, Protocol, TypeAlias, TypeGuard, cast
 
 from pydantic import ValidationError
 
+from eneo.flows.domain.tool_input import tool_reference_sites
 from eneo.flows.enums import FlowInputSource, FlowOutputMode
 from eneo.flows.flow_variable_definitions import PREVIOUS_STEP_TEXT_ALIAS
 from eneo.flows.http_transport import (
@@ -176,7 +177,8 @@ def resolve_step_upstream_orders(
     The step's input and prompt (``resolve_step_input_orders``), plus the
     templates the runtime fills from earlier results in the configuration of
     the mode the step runs: the bindings of a template fill, the request of an
-    ``http_post`` delivery, the request of an ``http_get`` input. What a
+    ``http_post`` delivery, the request of an ``http_get`` input, the bound
+    arguments of a ``tool`` input. What a
     template reads is carried by the result or the request, so the security
     classification counts it like any other input.
 
@@ -256,6 +258,8 @@ def config_channel(
     is literal data."""
     if column == "output_config" and output_mode is FlowOutputMode.TEMPLATE_FILL:
         return ConfigChannel(column, _template_fill_sites(config), step_order)
+    if column == "input_config" and input_source is FlowInputSource.TOOL:
+        return ConfigChannel(column, tool_reference_sites(config), step_order)
     if not sends_http_config(column, input_source, output_mode, config):
         return None
     # A webhook is built once the step has answered, so its context is the
@@ -320,10 +324,9 @@ def selected_source_step_order(
         section_processing and reference.tail.startswith("output.")
     ):
         return None
-    order = referenced_step_order(reference, step_order=step_order)
-    if order is None or not 1 <= order < step_order:
+    if names_step_without_result(reference, step_order=step_order):
         return None
-    return order
+    return referenced_step_order(reference, step_order=step_order)
 
 
 def referenced_step_order(
@@ -337,6 +340,16 @@ def referenced_step_order(
     if reference.head == PREVIOUS_STEP_TEXT_ALIAS and not reference.tail:
         return step_order - 1
     return reference.step_order
+
+
+def names_step_without_result(reference: TemplateReference, *, step_order: int) -> bool:
+    """Whether a reference in step ``step_order`` names a step whose result
+    does not exist when that step runs: the step itself, a later one, or an
+    order the flow does not have. Step orders are contiguous from 1, so the
+    steps with a result are exactly the orders below ``step_order``. A
+    reference that names no step at all is not this function's to judge."""
+    referenced_order = referenced_step_order(reference, step_order=step_order)
+    return referenced_order is not None and not 1 <= referenced_order < step_order
 
 
 def resolve_reference_step_orders(

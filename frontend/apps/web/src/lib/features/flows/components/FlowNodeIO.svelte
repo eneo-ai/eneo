@@ -6,14 +6,18 @@
   }: {
     data: {
       label: string;
-      nodeType: "input" | "output" | "http_source" | "http_target";
+      nodeType: "input" | "output" | "http_source" | "tool_source" | "http_target";
       mode?: "user" | "power_user";
       direction?: "LR" | "TB";
     };
   } = $props();
 
-  const isSource = $derived(data.nodeType === "input" || data.nodeType === "http_source");
-  const isExternal = $derived(data.nodeType === "http_source" || data.nodeType === "http_target");
+  const isExternal = $derived(
+    data.nodeType === "http_source" ||
+      data.nodeType === "tool_source" ||
+      data.nodeType === "http_target"
+  );
+  const isSource = $derived(data.nodeType !== "output" && data.nodeType !== "http_target");
 </script>
 
 <!-- Where the flow starts and ends is a place, not an action or an outcome, so

@@ -126,7 +126,7 @@ def build_graph_from_steps(
             )
             continue
 
-        if input_source in {"flow_input", "http_get"}:
+        if input_source in {"flow_input", "http_get", "tool"}:
             style = "dashed" if input_source != "flow_input" else None
             edges.append(
                 GraphEdge(

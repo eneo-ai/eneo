@@ -18,7 +18,8 @@ export type FlowSourceHintKind =
   | "previous_step_json"
   | "previous_step_document_text"
   | "all_previous_steps"
-  | "http_source";
+  | "http_source"
+  | "tool_source";
 
 export type FlowOutputHintKind = "plain" | "structured_json" | "document_artifact";
 
@@ -55,6 +56,8 @@ export function getSourceHintKind(params: {
       return "all_previous_steps";
     case "http_get":
       return "http_source";
+    case "tool":
+      return "tool_source";
     case "previous_step":
       if (previousOutputType === "json") return "previous_step_json";
       if (previousOutputType === "pdf" || previousOutputType === "docx")
@@ -126,6 +129,7 @@ export type FlowEdgeKind =
   | "input_bindings"
   | "flow_output"
   | "http_get"
+  | "tool"
   | "http_post";
 
 export function getEdgePayloadKind(params: {
@@ -138,7 +142,7 @@ export function getEdgePayloadKind(params: {
   if (edgeKind === "flow_output" || edgeKind === "http_post") return "none";
   if (edgeKind === "flow_input") return "flow_input";
   if (edgeKind === "all_previous_steps") return "text";
-  if (edgeKind === "http_get") {
+  if (edgeKind === "http_get" || edgeKind === "tool") {
     return targetStep?.input_type === "json" ? "structured" : "text";
   }
 
@@ -168,8 +172,15 @@ export type FlowGraphTopologyNode =
   | { id: "input"; kind: "input" }
   | { id: "output"; kind: "output" }
   | { id: "http-source"; kind: "http_source" }
+  | { id: "tool-source"; kind: "tool_source" }
   | { id: "http-target"; kind: "http_target" }
   | { id: string; kind: "step"; stepOrder: number };
+
+// A step fed from outside the flow hangs on one node per kind of source.
+const EXTERNAL_SOURCE_NODES = {
+  http_get: { id: "http-source", kind: "http_source" },
+  tool: { id: "tool-source", kind: "tool_source" }
+} as const;
 
 export type FlowGraphTopologyEdge = {
   source: string;
@@ -247,18 +258,19 @@ export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
   }
   nodes.push({ id: "output", kind: "output" });
 
-  let hasHttpSource = false;
+  const externalSourcesDrawn = new Set<string>();
   for (const step of orderedSteps) {
     const id = stepId(step);
-    if (step.input_source === "http_get") {
-      if (!hasHttpSource) {
-        hasHttpSource = true;
-        nodes.push({ id: "http-source", kind: "http_source" });
+    if (step.input_source === "http_get" || step.input_source === "tool") {
+      const externalSource = EXTERNAL_SOURCE_NODES[step.input_source];
+      if (!externalSourcesDrawn.has(externalSource.id)) {
+        externalSourcesDrawn.add(externalSource.id);
+        nodes.push(externalSource);
       }
       edges.push({
-        source: "http-source",
+        source: externalSource.id,
         target: id,
-        kind: "http_get",
+        kind: step.input_source,
         sourceStepOrder: 0,
         targetStepOrder: step.step_order
       });
@@ -336,7 +348,12 @@ export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
   if (orderedSteps.length > 0) {
     const outgoingSteps = new Set<string>();
     for (const edge of edges) {
-      if (edge.source !== "input" && edge.source !== "http-source" && edge.target !== "output") {
+      if (
+        edge.source !== "input" &&
+        edge.source !== "http-source" &&
+        edge.source !== "tool-source" &&
+        edge.target !== "output"
+      ) {
         outgoingSteps.add(edge.source);
       }
     }

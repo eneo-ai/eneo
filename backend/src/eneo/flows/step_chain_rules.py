@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol, Sequence
 
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
-from eneo.flows.enums import FlowInputType, FlowOutputType
+from eneo.flows.enums import FlowInputSource, FlowInputType, FlowOutputType
 from eneo.flows.flow_capability_manifest import is_chain_compatible
 from eneo.flows.input_binding_contract_rules import has_explicit_underlag
 
@@ -178,11 +178,12 @@ def _first_global_step_chain_violation(
             ),
             code=FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION,
         )
-    if step.input_source == "http_get" and underlag:
+    if step.input_source in {"http_get", "tool"} and underlag:
         return StepChainViolation(
             step_order=step.step_order,
             message=(
-                f"Step {step.step_order}: input_source 'http_get' cannot be combined with "
+                f"Step {step.step_order}: input_source "
+                f"'{FlowInputSource(step.input_source).value}' cannot be combined with "
                 "input_bindings because the underlag replaces the fetched response. "
                 "Fetch in its own step and bind that step's output."
             ),

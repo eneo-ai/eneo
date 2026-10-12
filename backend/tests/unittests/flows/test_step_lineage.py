@@ -658,6 +658,77 @@ def test_upstream_orders_fail_closed_on_config_they_cannot_read(
     assert orders == [1, 2, 3]
 
 
+_TOOL_IDS = {
+    "mcp_server_id": "8f2f0a2e-51f5-4c53-9d0c-0c1a2b3c4d5e",
+    "tool_id": "0b6a7c1d-93e4-4f0a-8a55-6d7e8f9a0b1c",
+}
+
+
+@pytest.mark.parametrize(
+    ("input_config", "expected"),
+    [
+        pytest.param(
+            {"tool": {**_TOOL_IDS, "arguments": {"limit": 10, "view": "step_2"}}},
+            [],
+            id="fixed-arguments-read-no-step",
+        ),
+        pytest.param(
+            {
+                "tool": {
+                    **_TOOL_IDS,
+                    "arguments": {"days": "{{ step_1.output.structured.days }}"},
+                }
+            },
+            [1],
+            id="a-bound-argument-reads-its-step",
+        ),
+        pytest.param(
+            {
+                "tool": {
+                    **_TOOL_IDS,
+                    "arguments": {"days": "{{ step_2.output.structured.days }}"},
+                    "tool_name": "lookup_case",
+                    "input_schema_sha256": "0" * 64,
+                }
+            },
+            [2],
+            id="a-published-configuration-reads-the-same-steps",
+        ),
+        pytest.param(
+            {"tool": {**_TOOL_IDS, "arguments": {"q": "day {{ step_1.output.text }}"}}},
+            [1, 2, 3],
+            id="composed-argument-is-unreadable",
+        ),
+        pytest.param({"tool": {"tool_id": 7}}, [1, 2, 3], id="unparseable"),
+        pytest.param(None, [1, 2, 3], id="absent"),
+    ],
+)
+def test_upstream_orders_of_a_tool_step_are_what_its_bound_arguments_read(
+    input_config: dict[str, object] | None, expected: list[int]
+) -> None:
+    # Kills the mutants that hide a tool argument's read from the security
+    # classification (the channel missing, so step 1's level never reaches the
+    # step), the one that reads an unreadable configuration as "reads
+    # nothing" instead of every earlier step, and the one that cannot read the
+    # configuration of a published step (the pin beside the arguments), so a
+    # run's classification check would count every earlier step.
+    orders = _upstream(
+        step_order=4, input_source=FlowInputSource.TOOL, input_config=input_config
+    )
+
+    assert orders == expected
+
+
+def test_a_tool_configuration_on_a_step_of_another_source_reads_nothing() -> None:
+    # Kills the mutant that reads the key whatever the source: a leftover
+    # configuration is literal data and must not raise the step's level.
+    leftover = {
+        "tool": {**_TOOL_IDS, "arguments": {"days": "{{ step_1.output.text }}"}}
+    }
+
+    assert _upstream(step_order=4, input_config=leftover) == []
+
+
 def test_upstream_orders_fail_closed_on_an_unknown_output_mode() -> None:
     with pytest.raises(ValueError):
         _upstream(output_mode="sideways")

@@ -194,6 +194,13 @@ async def resolve_step_input(
     attempt_no: int = 1,
     deps: StepInputResolutionDeps,
 ) -> StepInputValue:
+    if step.input_source == "tool":
+        # This runtime has no read of a tool's answer: the attempt fails typed
+        # before any other source is looked at.
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: input_source 'tool' cannot be read at run time.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        )
     if step.step_order == 1 and step.input_source in {
         "previous_step",
         "all_previous_steps",

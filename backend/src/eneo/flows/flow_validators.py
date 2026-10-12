@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import replace
-from enum import Enum
+from dataclasses import dataclass, replace
+from enum import Enum, StrEnum
 from typing import Any, cast
 
 from pydantic import ValidationError
@@ -39,11 +39,18 @@ from eneo.flows.domain.step_mapped_execution import (
     single_mapped_array_key,
 )
 from eneo.flows.domain.text_processing import text_processing_config
+from eneo.flows.domain.tool_input import BoundArgument, tool_reference_sites
+from eneo.flows.domain.tool_input_validation import (
+    invalid_tool_config,
+    tool_argument_context,
+    validate_tool_input_config,
+)
 from eneo.flows.enums import (
     FLOW_INPUT_SOURCE_VALUES,
     FLOW_INPUT_TYPE_VALUES,
     FLOW_OUTPUT_TYPE_VALUES,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import MAX_FLOW_AUTHORING_STEPS
 from eneo.flows.flow_authoring_transcription import requires_audio_transcription
 from eneo.flows.flow_capability_manifest import (
@@ -108,10 +115,12 @@ from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.step_chain_rules import iter_step_chain_violations
 from eneo.flows.step_lineage import (
     build_step_ref_mapping,
+    names_step_without_result,
     resolve_upstream_step_orders,
     selected_source_step_order,
 )
 from eneo.flows.template_reference_analyzer import (
+    TemplateReference,
     TemplateReferenceKind,
     analyze_template,
     consumes_runtime_input,
@@ -358,6 +367,18 @@ def collect_step_graph_issues(
                 FlowGraphIssueCode.FLOW_STEP_INVALID,
                 step_order=step.step_order,
                 validate=lambda: validate_http_input_config(step=step),
+            )
+        if step.input_source == "tool":
+            _capture_flow_step_validation(
+                issues,
+                FlowGraphIssueCode.FLOW_STEP_INVALID,
+                lambda: _validate_tool_input(
+                    step=step,
+                    judge_references=require_complete_template_fill_config,
+                    steps_by_order=steps_by_order,
+                    form_field_types=form_field_types,
+                    step_ref_mapping=step_ref_mapping,
+                ),
             )
         if step.output_mode == "http_post":
             if step.step_order != terminal_step_order:
@@ -1140,6 +1161,136 @@ def _validate_template_fill_config(
         )
 
 
+class WholeReferenceProblem(StrEnum):
+    # No reference, or more than one.
+    NOT_ONE_REFERENCE = "not_one_reference"
+    # A step that has no result when the reading step runs: the step itself,
+    # a later one, or an order the flow does not have.
+    STEP_NOT_EARLIER = "step_not_earlier"
+    # A name the flow does not declare, or a path the named value does not
+    # declare.
+    UNKNOWN_REFERENCE = "unknown_reference"
+
+
+@dataclass(frozen=True, slots=True)
+class WholeReferenceValue:
+    """The value one whole reference names, as far as the flow declares it."""
+
+    reference: TemplateReference
+    scalar: bool
+
+
+def whole_reference_value(
+    binding: str,
+    *,
+    step_order: int,
+    output_contracts_by_order: Mapping[int, FlowPersistedJsonObject | None],
+    form_field_types: Mapping[str, str],
+    step_ref_mapping: Mapping[str, int],
+    path_label: str,
+    context: dict[str, object],
+    error_code: str | None,
+) -> WholeReferenceValue | WholeReferenceProblem:
+    """What a binding that is ONE reference names, or why it names nothing.
+
+    The one rule for a reference that is resolved before the step has an
+    input of its own (a DOCX placeholder, a tool argument). It names a known
+    value when it reads an earlier step's text, status or error message, a
+    field of an earlier step's declared contract or that whole declared
+    result, a declared Flow input field, or a runtime variable of the run.
+    The step's own input (``step_input``) does not exist yet.
+
+    A path that an earlier step's contract does not declare raises
+    FlowStepValidationError with ``path_label``, ``context`` and
+    ``error_code``, naming the missing field.
+    """
+
+    references = analyze_template(
+        binding,
+        step_refs=dict(step_ref_mapping),
+        form_field_names=set(form_field_types),
+    )
+    if len(references) != 1:
+        return WholeReferenceProblem.NOT_ONE_REFERENCE
+    reference = references[0]
+    scalar: bool | None = None
+    if reference.kind is TemplateReferenceKind.STEP:
+        source_order = reference.step_order
+        if source_order is None:
+            return WholeReferenceProblem.UNKNOWN_REFERENCE
+        if source_order not in output_contracts_by_order or source_order >= step_order:
+            return WholeReferenceProblem.STEP_NOT_EARLIER
+        scalar = _step_value_is_scalar(
+            reference,
+            contract=output_contracts_by_order[source_order],
+            step_order=step_order,
+            path_label=path_label,
+            context=context,
+            error_code=error_code,
+        )
+    elif reference.kind is TemplateReferenceKind.FORM_FIELD:
+        if not reference.tail:
+            scalar = form_field_types.get(reference.head) in _SCALAR_FORM_FIELD_TYPES
+    elif reference.kind is TemplateReferenceKind.RUNTIME:
+        scalar = _runtime_value_is_scalar(reference, form_field_types)
+    if scalar is None or reference.path_error_code is not None:
+        return WholeReferenceProblem.UNKNOWN_REFERENCE
+    return WholeReferenceValue(reference=reference, scalar=scalar)
+
+
+def _step_value_is_scalar(
+    reference: TemplateReference,
+    *,
+    contract: FlowPersistedJsonObject | None,
+    step_order: int,
+    path_label: str,
+    context: dict[str, object],
+    error_code: str | None,
+) -> bool | None:
+    """Whether what a reference reads of an earlier step is a scalar; None
+    when it reads nothing that step declares."""
+    if reference.tail in {"output.text", "status", "error_message"}:
+        return True
+    if contract is None:
+        return None
+    if reference.structured_path:
+        return _schema_is_scalar(
+            _source_ref_schema(
+                contract=contract,
+                field_path=reference.structured_path,
+                current_step_order=step_order,
+                path_label=path_label,
+                context=context,
+                error_code=error_code,
+            )
+        )
+    return False if reference.tail == "output.structured" else None
+
+
+def _runtime_value_is_scalar(
+    reference: TemplateReference, form_field_types: Mapping[str, str]
+) -> bool | None:
+    """Whether a runtime variable, or the Flow input field a path under
+    ``flow_input`` names, is a scalar; None when the run has no such value."""
+    if not reference.tail:
+        shape = runtime_variable_shape(reference.head)
+        return None if shape is None else shape is VariableShape.SCALAR
+    if reference.head not in {"flow_input", "flow"}:
+        return None
+    field_name = reference.tail
+    if reference.head == "flow":
+        field_name = (
+            field_name.removeprefix("input.") if field_name.startswith("input.") else ""
+        )
+    key_shape = flow_input_key_shape(field_name)
+    if (
+        form_field_types.get(field_name) in _SCALAR_FORM_FIELD_TYPES
+        or key_shape is VariableShape.SCALAR
+    ):
+        return True
+    return False if field_name in form_field_types or key_shape is not None else None
+
+
 def validate_template_binding_scalar(
     binding: str,
     *,
@@ -1151,73 +1302,138 @@ def validate_template_binding_scalar(
 ) -> None:
     """Require one template binding to name a known scalar, or raise.
 
-    The one rule for what a DOCX placeholder may read: an earlier step's text,
-    status or error message, a scalar field of an earlier step's declared
-    contract, a scalar Flow input field, or a scalar runtime variable. An
-    explicit blank is allowed. Publication applies it to persisted steps; the
-    Builder applies the same rule to mappings an edit keeps.
+    What a DOCX placeholder may read: a value ``whole_reference_value`` knows
+    that is a scalar. An explicit blank is allowed. Publication applies it to
+    persisted steps; the Builder applies the same rule to mappings an edit
+    keeps.
     """
 
     if not binding.strip():
         return
-    references = analyze_template(
+    context: dict[str, object] = {
+        "field": "output_config.bindings",
+        "placeholder": placeholder,
+    }
+    value = whole_reference_value(
         binding,
-        step_refs=dict(step_ref_mapping),
-        form_field_names=set(form_field_types),
+        step_order=step_order,
+        output_contracts_by_order=output_contracts_by_order,
+        form_field_types=form_field_types,
+        step_ref_mapping=step_ref_mapping,
+        path_label=f"template binding '{placeholder}'",
+        context=context,
+        error_code=None,
     )
-    reference = references[0] if len(references) == 1 else None
-    scalar = False
-    if reference is None:
-        pass
-    elif reference.kind is TemplateReferenceKind.STEP:
-        source_order = reference.step_order
-        if (
-            source_order is not None
-            and source_order in output_contracts_by_order
-            and source_order < step_order
-        ):
-            scalar = reference.tail in {"output.text", "status", "error_message"}
-            source_contract = output_contracts_by_order[source_order]
-            if reference.structured_path and source_contract is not None:
-                schema = _source_ref_schema(
-                    contract=source_contract,
-                    field_path=reference.structured_path,
-                    current_step_order=step_order,
-                    path_label=f"template binding '{placeholder}'",
-                    context={
-                        "field": "output_config.bindings",
-                        "placeholder": placeholder,
-                    },
-                    error_code=None,
-                )
-                scalar = _schema_is_scalar(schema)
-    elif reference.kind is TemplateReferenceKind.FORM_FIELD:
-        scalar = (
-            not reference.tail
-            and form_field_types.get(reference.head) in _SCALAR_FORM_FIELD_TYPES
-        )
-    elif reference.kind is TemplateReferenceKind.RUNTIME:
-        if not reference.tail:
-            scalar = runtime_variable_shape(reference.head) is VariableShape.SCALAR
-        elif reference.head in {"flow_input", "flow"}:
-            field_name = reference.tail
-            if reference.head == "flow":
-                field_name = (
-                    field_name.removeprefix("input.")
-                    if field_name.startswith("input.")
-                    else ""
-                )
-            scalar = (
-                form_field_types.get(field_name) in _SCALAR_FORM_FIELD_TYPES
-                or flow_input_key_shape(field_name) is VariableShape.SCALAR
-            )
-    if not scalar or (reference is not None and reference.path_error_code is not None):
+    if not isinstance(value, WholeReferenceValue) or not value.scalar:
         raise FlowStepValidationError(
             f"Step {step_order}: template binding '{placeholder}' must resolve "
             "to a scalar value; select a text output or a scalar field from a declared contract.",
-            context={"field": "output_config.bindings", "placeholder": placeholder},
+            context=context,
             step_order=step_order,
         )
+
+
+def _validate_tool_input(
+    *,
+    step: FlowStepValidationView,
+    judge_references: bool,
+    steps_by_order: Mapping[int, FlowStepValidationView],
+    form_field_types: Mapping[str, str],
+    step_ref_mapping: Mapping[str, int],
+) -> None:
+    """Refuse a tool step that cannot be used: its shape, an upload beside the
+    tool's answer and, with ``judge_references`` (a publish, which knows the
+    run form), a bound argument that names no value the run has when the step
+    runs."""
+    config = validate_tool_input_config(step=step)
+    # A JSON step reads the tool's structured answer alone, so the text of an
+    # upload would be dropped from its input while the run's evidence names it.
+    if takes_runtime_files(step.input_config):
+        raise invalid_tool_config(
+            f"Step {step.step_order}: a step with input_source 'tool' cannot "
+            "also take uploaded files (input_config.runtime_input).",
+            step_order=step.step_order,
+            context={"field": "input_config.runtime_input"},
+        )
+    if not judge_references:
+        return
+    output_contracts_by_order = {
+        order: source.output_contract for order, source in steps_by_order.items()
+    }
+    for bound in config.bound_arguments():
+        problem = _tool_reference_problem(
+            bound,
+            step_order=step.step_order,
+            output_contracts_by_order=output_contracts_by_order,
+            form_field_types=form_field_types,
+            step_ref_mapping=step_ref_mapping,
+        )
+        if problem is not None:
+            raise invalid_tool_config(
+                f"Step {step.step_order}: tool argument '{bound.name}' reads "
+                f"'{bound.expression}', which names no value the run has when "
+                f"this step runs ({problem.value}).",
+                step_order=step.step_order,
+                context=_tool_reference_context(bound, problem),
+            )
+
+
+def _tool_reference_problem(
+    bound: BoundArgument,
+    *,
+    step_order: int,
+    output_contracts_by_order: Mapping[int, FlowPersistedJsonObject | None],
+    form_field_types: Mapping[str, str],
+    step_ref_mapping: Mapping[str, int],
+) -> WholeReferenceProblem | None:
+    """Why a bound argument of the tool step ``step_order`` names no value the
+    run has when the step runs; None when it names one."""
+    reference = analyze_template(
+        bound.template,
+        step_refs=dict(step_ref_mapping),
+        form_field_names=set(form_field_types),
+    )[0]
+    if _names_step_by_its_name(reference, step_ref_mapping):
+        if names_step_without_result(reference, step_order=step_order):
+            return WholeReferenceProblem.STEP_NOT_EARLIER
+        return WholeReferenceProblem.UNKNOWN_REFERENCE if reference.tail else None
+    value = whole_reference_value(
+        bound.template,
+        step_order=step_order,
+        output_contracts_by_order=output_contracts_by_order,
+        form_field_types=form_field_types,
+        step_ref_mapping=step_ref_mapping,
+        path_label=f"tool argument '{bound.name}'",
+        context=_tool_reference_context(bound, WholeReferenceProblem.UNKNOWN_REFERENCE),
+        error_code=FlowApiErrorCode.TYPED_IO_TOOL_INVALID_CONFIG.value,
+    )
+    # ``föregående_steg`` is a runtime variable to the rule above, and on the
+    # first step it names a step the flow does not have.
+    if isinstance(value, WholeReferenceValue) and names_step_without_result(
+        value.reference, step_order=step_order
+    ):
+        return WholeReferenceProblem.STEP_NOT_EARLIER
+    return value if isinstance(value, WholeReferenceProblem) else None
+
+
+def _names_step_by_its_name(
+    reference: TemplateReference, step_ref_mapping: Mapping[str, int]
+) -> bool:
+    """Whether a reference names a step by its name, not by its ``step_N``
+    alias. The run binds a name to that step's text and to nothing below it."""
+    return (
+        reference.head in step_ref_mapping
+        and runtime_step_alias_order(reference.head) is None
+    )
+
+
+def _tool_reference_context(
+    bound: BoundArgument, problem: WholeReferenceProblem
+) -> dict[str, object]:
+    return {
+        **tool_argument_context(bound.name, problem.value),
+        "reference": bound.expression,
+    }
 
 
 def template_binding_structured_source(
@@ -1670,11 +1886,7 @@ def _validate_binding_references(
                 )
             if reference.kind is not TemplateReferenceKind.STEP:
                 continue
-            if (
-                reference.head in step_ref_mapping
-                and runtime_step_alias_order(reference.head) is None
-                and reference.tail
-            ):
+            if _names_step_by_its_name(reference, step_ref_mapping) and reference.tail:
                 raise FlowStepValidationError(
                     f"Invalid input binding reference '{reference.expression}'.",
                     code=FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE.value,
@@ -2213,6 +2425,12 @@ def _validate_run_input_alias_reads(
         # The fetch's URL, headers and body are interpolated with the run
         # context like a question is.
         sites.append(("input_config", _template_text(step.input_config)))
+    elif step.input_source == "tool":
+        # An unreadable tool configuration is refused by its own check.
+        sites.extend(
+            (".".join(("input_config", *(str(part) for part in path))), template)
+            for path, template in tool_reference_sites(step.input_config) or []
+        )
     for field, template in sites:
         for expression in iter_template_expressions(template or ""):
             if reads_unreceived_run_input(expression, run_input):

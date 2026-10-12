@@ -61,8 +61,8 @@ def _flow_capability_manifest_source() -> Path:
     )
 
 
-def test_fcm_version_is_ten() -> None:
-    assert FCM_VERSION == 10
+def test_fcm_version_is_eleven() -> None:
+    assert FCM_VERSION == 11
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
@@ -1013,7 +1013,7 @@ def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
     )
 
 
-_FCM_SURFACE_FINGERPRINT_V10: tuple[object, ...] = (
+_FCM_SURFACE_FINGERPRINT_V11: tuple[object, ...] = (
     (
         "applies_to_tuples",
         "channel",
@@ -1172,7 +1172,7 @@ _FCM_SURFACE_FINGERPRINT_V10: tuple[object, ...] = (
             "builder",
             "text_only",
             "text",
-            "d064433b7adb8594f25d83d2a2fdc34ba4d79d0055080473c8cd1f7fa006c3de",
+            "c7b4cac8010fb7d51ba5042e46c580356904df735e113ab444f67496e484bae5",
             (),
             (),
         ),
@@ -1180,7 +1180,7 @@ _FCM_SURFACE_FINGERPRINT_V10: tuple[object, ...] = (
             "builder",
             "text_only",
             "text",
-            "0fde8ba640d7c2fd646a5fe1ced4fbe34ccd8ca289e64b6a25957f3270cfc401",
+            "0463d088c7e2f08ebfbf60de2e31291827580a91bd68d9dc548943edb603c298",
             (),
             (),
         ),
@@ -1188,7 +1188,7 @@ _FCM_SURFACE_FINGERPRINT_V10: tuple[object, ...] = (
             "builder",
             None,
             None,
-            "a4db4c731dc1e9d579f35baa9c9e5f4dffd503532d0c597962366aa6cdcaabe3",
+            "f784a06d77d5442858a5298dcbde3ce002b3e52a70a9cfbe77742f131a73cc42",
             (
                 (
                     "requires_text_input_text_output",
@@ -1203,7 +1203,7 @@ _FCM_SURFACE_FINGERPRINT_V10: tuple[object, ...] = (
             "not_exposed",
             None,
             None,
-            "6408e4012ad9b77b426495098f172562f6a6559f55b70d77d47ff79c4744c8b5",
+            "a633a61f7dbd06ded9cc30d2861095b1810ae0aec3b3d983eb78db194c08c37c",
             (
                 (
                     "requires_http_output_config",
@@ -1220,7 +1220,7 @@ _FCM_SURFACE_FINGERPRINT_V10: tuple[object, ...] = (
             "builder",
             None,
             None,
-            "5df5c896357f09e1701de4fc3bb897f25d3e5e17b4e5b974d2b15e4dfc1217cc",
+            "f55a3d99c5f4bf1a8037c812037af0488b2e871c5f62019cd2fa5409142a71ca",
             (
                 (
                     "forbids_text_document_render_path",
@@ -1235,7 +1235,7 @@ _FCM_SURFACE_FINGERPRINT_V10: tuple[object, ...] = (
             "builder",
             None,
             None,
-            "68c213e2a048fb21261cad9fe7f303ee424feb33e4ca96348fa5546bfcbf46a1",
+            "e4627a2b99089cc78a1b94553647053ffbd36f297e0235835f799522e5289a8f",
             (
                 (
                     "forbids_output_contract",
@@ -1391,11 +1391,11 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
-    assert actual == _FCM_SURFACE_FINGERPRINT_V10, (
+    assert actual == _FCM_SURFACE_FINGERPRINT_V11, (
         "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
         f"{FCM_VERSION + 1} and update the expected fingerprint constant "
         "in this test.\n\n"
-        f"Expected: {_FCM_SURFACE_FINGERPRINT_V10}\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V11}\n\n"
         f"Actual:   {actual}"
     )
 

@@ -197,6 +197,7 @@ def _service(
     encryption_service=None,
     space_service=None,
     stub_assistant_scope: bool = True,
+    tool_facts_reader=None,
 ) -> FlowService:
     service = FlowService(
         user=user,
@@ -206,6 +207,7 @@ def _service(
         template_asset_service=AsyncMock(),
         encryption_service=encryption_service,
         space_service=space_service,
+        tool_facts_reader=tool_facts_reader,
     )
     if stub_assistant_scope:
         service._validate_assistant_scope_for_steps = AsyncMock()  # type: ignore[method-assign]

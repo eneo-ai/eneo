@@ -1128,6 +1128,27 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Reduce the request scope or increase upstream responsiveness before starting another run.",
         user_action="Try again later or ask a flow editor to reduce the request.",
     ),
+    FlowApiErrorCode.TYPED_IO_TOOL_INVALID_CONFIG: _entry(
+        category="Typed input/output",
+        surfaced_through="API response and run error payload",
+        cause="The step's tool input configuration is invalid.",
+        consumer_action="Store the server id, the tool id and arguments that are each a fixed value or one whole reference.",
+        user_action="Ask a flow editor to check the selected tool and its arguments.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_INVALID_SCHEMA: _entry(
+        category="Typed input/output",
+        surfaced_through="API error response",
+        cause="The input schema of the step's tool is not a valid JSON Schema, or of a draft Eneo does not support, so the tool's arguments cannot be checked.",
+        consumer_action="Leave the step as it is and publish again once the MCP server gives a valid input schema and an administrator has approved it.",
+        user_action="Ask the instance administrator to take the tool's input schema up with whoever runs the MCP server, or choose another tool.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_NOT_ALLOWED: _entry(
+        category="Typed input/output",
+        surfaced_through="API error response",
+        cause="The instance or the space does not allow the step's tool in the flow's space.",
+        consumer_action="Read the refusal in the error context for the refusing level and publish again once that level allows the tool.",
+        user_action="Ask the administrator the message names, or choose another tool.",
+    ),
     FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",

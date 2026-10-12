@@ -6,7 +6,7 @@ import json
 import math
 import re
 import unicodedata
-from collections.abc import Callable, Generator, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, NoReturn, Protocol, cast
@@ -120,11 +120,53 @@ def _check_metaschema(schema: Schema, dialect: type[Validator]) -> None:
         raise jsonschema.SchemaError.create_from(exc) from exc
 
 
-def _unevaluable(label: str) -> TypedIOValidationException:
-    return TypedIOValidationException(
+class ContractUnevaluable(TypedIOValidationException):
+    """No data can be judged against the contract: the fault is the schema's,
+    whatever the data is."""
+
+
+def _unevaluable(label: str) -> ContractUnevaluable:
+    return ContractUnevaluable(
         f"{label}: the contract cannot be evaluated.",
         code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
     )
+
+
+def refuse_unknown_dialect(schema: Mapping[str, object], *, label: str) -> None:
+    """Raise ContractUnevaluable for a schema that names, in ``$schema``, a
+    dialect the validator library does not have: checked by the default
+    draft's rules, it would be judged by other rules than its own. A schema
+    that names none is read as the default draft and is not refused.
+
+    The checks of a tool's input schema ask this. A step's contract is not
+    asked: a write refuses every dialect but the current one, and a contract
+    stored before that rule is read as ``_dialect_of`` reads it.
+    """
+    if not isinstance(schema.get("$schema"), str):
+        return
+    try:
+        # The library's registry answers a name it has with that dialect,
+        # whatever default it is given, and a name it does not have with the
+        # default.
+        known = any(
+            validator_for(schema, default=default) is not default
+            for default in (jsonschema.Draft202012Validator, jsonschema.Draft7Validator)
+        )
+    except ValueError as exc:  # a name that is no URI
+        raise _unevaluable(label) from exc
+    if not known:
+        raise _unevaluable(label)
+
+
+def refuse_unevaluable_contract(schema: Mapping[str, object], *, label: str) -> None:
+    """Raise ContractUnevaluable for a schema that is not a valid schema of the
+    draft it names. ``validate_against_contract`` asks this before it reads
+    any data; a reference that does not resolve inside the schema is found
+    only when data reaches it."""
+    try:
+        _check_metaschema(schema, _dialect_of(schema))
+    except _CONTRACT_FAILURES as exc:
+        raise _unevaluable(label) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,15 +242,16 @@ def validate_against_contract(
     label: str,
     side: ContractSide | None = None,
 ) -> None:
-    """Validate data against JSON Schema. Raises TypedIOValidationException.
+    """Validate data against JSON Schema. Raises TypedIOValidationException:
+    ContractUnevaluable when the schema itself cannot be evaluated.
 
     A run boundary passes `side`; the context then carries the facts a terminal
     run error keeps (FlowRunContractViolation, which owns their bounds): the rule
     and the RFC 6901 pointer ("" is the root), cut before any key that comes from
     the data. The message keeps the full location.
     """
+    refuse_unevaluable_contract(schema, label=label)
     try:
-        _check_metaschema(schema, _dialect_of(schema))
         with _panic_as_recursion():
             build_schema_validator(schema).validate(data)
     except jsonschema.ValidationError as exc:

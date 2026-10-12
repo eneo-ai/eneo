@@ -26,6 +26,7 @@ from eneo.flows import (
 )
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.enums import (
+    FlowInputSource,
     FlowOutputDelivery,
     FlowOutputType,
     FlowRuntimeInputFormat,
@@ -319,6 +320,55 @@ async def test_flow_repository_create_get_and_tenant_scope(
 
         with pytest.raises(NotFoundException):
             await repo.get(created.id, uuid4())
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_repository_stores_a_tool_step_with_its_configuration(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    # Kills the mutant where the migrated CHECK on flow_steps.input_source does
+    # not admit ``tool``: the insert would be refused by the database.
+    tool_config = {
+        "tool": {
+            "mcp_server_id": str(uuid4()),
+            "tool_id": str(uuid4()),
+            "arguments": {"limit": 10, "day": "{{flow_input.day}}"},
+        }
+    }
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Tool step space", [model.id])
+        assistant = await assistant_factory(
+            session, "Tool step assistant", model.id, space_id=space.id
+        )
+        flow = _build_flow(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            user_id=admin_user.id,
+            assistant_id=assistant.id,
+        )
+        flow.steps = [
+            flow.steps[0].model_copy(
+                update={
+                    "input_source": FlowInputSource.TOOL,
+                    "input_bindings": None,
+                    "input_config": tool_config,
+                }
+            )
+        ]
+
+        repo = FlowRepository(session=session)
+        created = await repo.create(flow=flow, tenant_id=admin_user.tenant_id)
+        fetched = await repo.get(created.require_persisted_id(), admin_user.tenant_id)
+
+        assert fetched.steps[0].input_source is FlowInputSource.TOOL
+        assert fetched.steps[0].input_config == tool_config
 
 
 @pytest.mark.asyncio

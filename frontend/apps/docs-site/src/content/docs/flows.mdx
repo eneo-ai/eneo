@@ -133,11 +133,19 @@ _A worked example: audio goes in, a DOCX document comes out. Each step declares 
 
 | Field                            | What it controls                                   | Common values                                                                                                                  | Default behavior  |
 | -------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------- |
-| `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`                                                                | Explicit per step |
+| `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, `tool`                                                        | Explicit per step |
 | `input_type`                     | What kind of input the step expects                | `text`, `json`, `audio`, `document`, `file`, `any`. `image` exists in the enum but the runtime rejects it; do not build on it. | Explicit per step |
 | `output_mode`                    | How the step produces its result                   | `pass_through`, `compose_text`, `http_post`, `transcribe_only`, `render_verbatim`, `template_fill`                             | Explicit per step |
 | `output_type`                    | The result shape                                   | `text`, `json`, `pdf`, `docx`                                                                                                  | Explicit per step |
 | `output_classification_override` | Optional higher classification for the step output | integer: the level of one of your organisation's security classes                                                              | No override       |
+
+A step whose `input_source` is `tool` names one MCP tool in `input_config.tool`: the server's id, the tool's id and the arguments. It is configured through the API in this release line; the step editor shows such a step and cannot change the tool or its arguments.
+
+- An argument is a fixed JSON value or one whole reference such as `{{step_1.output.structured.days}}`, which keeps the JSON type of what it names. Text around a reference is refused, and so is a reference inside a list or an object.
+- A fixed string cannot contain `{{...}}`: it is read as a reference. There is no escape syntax.
+- Argument values are stored and returned as written and are not treated as secrets. Do not put a credential in an argument; the MCP server's credential is stored with the server.
+- Such a step reads `text` or `json`, takes no uploaded files and cannot use `template_fill`.
+- Publishing requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. A step's name with a path after it (`{{Hämta.output.text}}`) is refused, because a run binds the name to the step's text only. Publishing does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. It also asks whether the instance and the space allow the tool in the flow's space, and stores the tool's name and the fingerprint of its approved input schema in the published version.
 
 ### Step chaining
 

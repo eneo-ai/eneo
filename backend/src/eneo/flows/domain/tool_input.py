@@ -8,18 +8,25 @@ composed into an argument, so nothing in a flow assembles a query out of run
 data.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
+from eneo.flows.enums import FlowInputType
 from eneo.flows.flow_validators_template import EXACT_TEMPLATE_EXPRESSION_PATTERN
 from eneo.flows.http_transport.authored_config import ConfigPath
 from eneo.flows.variable_resolver import TEMPLATE_VARIABLE_PATTERN
 from eneo.json_types import JsonValue
 
 TOOL_INPUT_CONFIG_KEY = "tool"
+# A tool answers with text or JSON; it hands over no file.
+TOOL_INPUT_TYPES: frozenset[FlowInputType] = frozenset(
+    {FlowInputType.TEXT, FlowInputType.JSON}
+)
 
 
 class ToolArgumentProblem(StrEnum):
@@ -77,6 +84,62 @@ class ToolInputConfig(BaseModel):
             ((TOOL_INPUT_CONFIG_KEY, "arguments", bound.name), bound.template)
             for bound in self.bound_arguments()
         ]
+
+
+class PublishedToolInputConfig(ToolInputConfig):
+    """The configuration in a published definition: what the author saved and
+    the pin, which is what publish read on the server's own tool row. An
+    editable step never holds the pin: ``ToolInputConfig`` refuses its keys."""
+
+    tool_name: str = Field(min_length=1)
+    # tool_input_schema_sha256 of the input schema that was approved then.
+    input_schema_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+# Lineage is asked about editable steps and about published ones.
+_SAVED_OR_PUBLISHED = TypeAdapter[ToolInputConfig](
+    ToolInputConfig | PublishedToolInputConfig
+)
+
+
+def tool_input_schema_sha256(input_schema: Mapping[str, object] | None) -> str:
+    """The fingerprint of a tool's input schema. A tool that declares none is
+    fingerprinted as the empty object."""
+    return canonical_json_hash(input_schema or {})
+
+
+def read_tool_input_config(
+    input_config: Mapping[str, object] | None,
+) -> ToolInputConfig:
+    """The tool configuration an editable step's ``input_config`` holds. Raises
+    pydantic's ValidationError when the key is absent or its value is not one."""
+    return ToolInputConfig.model_validate(
+        (input_config or {}).get(TOOL_INPUT_CONFIG_KEY)
+    )
+
+
+def read_published_tool_input_config(
+    input_config: Mapping[str, object] | None,
+) -> PublishedToolInputConfig:
+    """The pinned tool configuration a published step's ``input_config`` holds.
+    Raises pydantic's ValidationError when it is absent, unreadable or
+    without the pin."""
+    return PublishedToolInputConfig.model_validate(
+        (input_config or {}).get(TOOL_INPUT_CONFIG_KEY)
+    )
+
+
+def tool_reference_sites(
+    input_config: Mapping[str, object] | None,
+) -> list[tuple[ConfigPath, str]] | None:
+    """Where a step's tool configuration, editable or published, reads run
+    values. None when the configuration cannot be read."""
+    try:
+        return _SAVED_OR_PUBLISHED.validate_python(
+            (input_config or {}).get(TOOL_INPUT_CONFIG_KEY)
+        ).reference_sites()
+    except (ValidationError, ToolArgumentError):
+        return None
 
 
 def _bound_argument(name: str, value: JsonValue) -> BoundArgument | None:

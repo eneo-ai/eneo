@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
+from eneo.flows.domain.tool_input import TOOL_INPUT_CONFIG_KEY
 from eneo.flows.http_transport.authored_config import HTTP_CONFIG_KEYS
 
 _TEMPLATE_CONFIG_KEYS = frozenset(
@@ -20,6 +21,8 @@ def clean_inactive_step_config(step: FlowStep) -> FlowStep:
     input_keys = (
         HTTP_CONFIG_KEYS if step.input_source != "http_get" else frozenset[str]()
     )
+    if step.input_source != "tool":
+        input_keys = input_keys | {TOOL_INPUT_CONFIG_KEY}
     output_keys = (
         HTTP_CONFIG_KEYS if step.output_mode != "http_post" else frozenset[str]()
     )

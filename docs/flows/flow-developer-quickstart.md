@@ -106,7 +106,7 @@ The fields below explain most step behavior.
 | `step_order` | Execution order within the published Flow. |
 | `assistant_id` | Assistant/model configuration used by model-backed execution. |
 | `user_description` | Authoring prompt or task description for the step. |
-| `input_source` | Where the step gets its input: `flow_input`, `previous_step`, `all_previous_steps`, or `http_get`. |
+| `input_source` | Where the step gets its input: `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, or `tool`. |
 | `input_type` | Expected input kind: `text`, `json`, `image`, `audio`, `document`, `file`, or `any`. |
 | `input_bindings` | Structured references to form answers, source refs, or prior structured fields. Prefer this for explicit data flow. |
 | `input_config` | Step input configuration, including HTTP or runtime file settings. |

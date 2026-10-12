@@ -648,6 +648,22 @@ def test_export_omits_disabled_portable_config_when_mode_irrelevant() -> None:
             "input_config",
             "unknown-plaintext",
         ),
+        # Kills the mutant that lets a tool step into a package: its server
+        # and tool ids name rows of this instance only.
+        (
+            {
+                "input_source": "tool",
+                "input_config": {
+                    "tool": {
+                        "mcp_server_id": "8f2f0a2e-51f5-4c53-9d0c-0c1a2b3c4d5e",
+                        "tool_id": "0b6a7c1d-93e4-4f0a-8a55-6d7e8f9a0b1c",
+                        "arguments": {"query": "fixed-argument-value"},
+                    }
+                },
+            },
+            "input_config",
+            "fixed-argument-value",
+        ),
         (
             {
                 "output_config": {
@@ -677,6 +693,7 @@ def test_export_omits_disabled_portable_config_when_mode_irrelevant() -> None:
         "active-http-basic-password",
         "stored-secret-sentinel",
         "unknown-top-level-field",
+        "tool-input",
         "unknown-output-field",
         "unknown-nested-field",
     ],

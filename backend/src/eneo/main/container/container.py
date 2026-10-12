@@ -358,6 +358,9 @@ from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
 from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_tool_repo_impl import (
     MCPServerToolRepoImpl,
 )
+from eneo.mcp_servers.infrastructure.repo_impl.unattended_tool_facts_reader import (
+    UnattendedToolFactsReader,
+)
 from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
     MCPServerAssembler,
     MCPServerSettingsAssembler,
@@ -1549,6 +1552,11 @@ class Container(containers.DeclarativeContainer):
         template_asset_repo=flow_template_asset_repo,
         flow_version_repo=flow_version_repo,
     )
+    # Built on the session `flow_repo` writes through: a publish decides on
+    # these facts in the transaction that stores its version.
+    unattended_tool_facts_reader = providers.Factory(
+        UnattendedToolFactsReader, session=session
+    )
     flow_service = providers.Factory(
         FlowService,
         user=user,
@@ -1558,6 +1566,7 @@ class Container(containers.DeclarativeContainer):
         template_asset_service=flow_template_asset_service,
         encryption_service=encryption_service,
         space_service=space_service,
+        tool_facts_reader=unattended_tool_facts_reader,
     )
     flow_run_access_policy = providers.Factory(
         FlowRunAccessPolicy,

@@ -165,6 +165,12 @@ describe("getStepSourceLine", () => {
     expect(lineFor(step({ step_order: 2, input_source: "http_get" }))?.text).toBe(
       reads(m.flow_step_reads_web())
     );
+    // Kills the mutant that gives a tool step no material: the step list
+    // would say it reads what is sent in.
+    expect(lineFor(step({ step_order: 2, input_source: "tool" }))).toEqual({
+      text: reads(m.flow_step_reads_tool()),
+      readsRunInput: false
+    });
   });
 
   it("counts the flow's input aliases as its input, and fixed text as the step's own", () => {
