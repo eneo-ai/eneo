@@ -8,7 +8,7 @@ import unicodedata
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from typing import Any, Literal, NamedTuple, assert_never, cast, get_args
+from typing import Any, Literal, NamedTuple, TypeGuard, assert_never, cast, get_args
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -39,6 +39,27 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 SlotClassificationConfidence = Literal["high", "medium", "low"]
 SlotClassificationEvidenceLevel = SlotEvidenceLevel
 CheckpointUpdateOperation = Literal["update", "clear"]
+
+
+def _is_confidence(value: object) -> TypeGuard[SlotClassificationConfidence]:
+    """A reply field holds whatever the model wrote. Only text can be one of
+    the words; a list or an object cannot even be looked up among them."""
+
+    return isinstance(value, str) and value in get_args(SlotClassificationConfidence)
+
+
+def _is_update_operation(value: object) -> TypeGuard[CheckpointUpdateOperation]:
+    return isinstance(value, str) and value in get_args(CheckpointUpdateOperation)
+
+
+def _is_evidence_level(value: object) -> TypeGuard[SlotClassificationEvidenceLevel]:
+    return isinstance(value, str) and value in get_args(SlotEvidenceLevel)
+
+
+def _is_file_role(value: object) -> TypeGuard[FileRole]:
+    return isinstance(value, str) and value in get_args(FileRole)
+
+
 # What one provider reply to a classification request turned out to be.
 SlotClassificationReplyOutcome = Literal[
     "resolved",
@@ -968,7 +989,7 @@ def _parse_slot_outcome(
     confidence = item.get("confidence")
     if not isinstance(value, str) or value.strip() not in allowed_values:
         return None
-    if confidence not in {"high", "medium", "low"}:
+    if not _is_confidence(confidence):
         return None
     raw_evidence = item.get("evidence", [])
     if not legacy_entry and not _evidence_array_is_exact(raw_evidence):
@@ -1004,7 +1025,7 @@ def _parse_slot_outcome(
         return None
     value, evidence = reading.value, reading.evidence
     raw_evidence_level = item.get("evidence_level", "inferred")
-    if not legacy_entry and raw_evidence_level not in {"explicit", "inferred"}:
+    if not legacy_entry and not _is_evidence_level(raw_evidence_level):
         return None
     evidence_level = _validated_evidence_level(
         raw_evidence_level,
@@ -1024,7 +1045,7 @@ def _parse_slot_outcome(
     ):
         return None
     graded = _downgrade_unsupported_confidence(
-        cast(SlotClassificationConfidence, confidence),
+        confidence,
         evidence,
     )
     regraded = reading.regraded
@@ -1144,7 +1165,7 @@ def _parse_named_result_evidence(
         raise _MalformedNamedResultDelta
     item = cast(dict[str, Any], raw_value)
     operation = item.get("operation")
-    if operation not in {"update", "clear"}:
+    if not _is_update_operation(operation):
         raise _MalformedNamedResultDelta
     raw_upserts = item.get("upserts")
     raw_removals = item.get("removals")
@@ -1157,7 +1178,7 @@ def _parse_named_result_evidence(
     if operation == "clear" and (raw_upsert_items or raw_removal_items):
         raise _MalformedNamedResultDelta
     confidence = item.get("confidence")
-    if confidence not in {"high", "medium", "low"}:
+    if not _is_confidence(confidence):
         raise _MalformedNamedResultDelta
     cited_items = item.get("evidence", [])
     if (
@@ -1227,9 +1248,9 @@ def _parse_named_result_evidence(
         return None
     reason = item.get("reason")
     return ClassifiedNamedResultDelta(
-        operation=cast(Literal["update", "clear"], operation),
+        operation=operation,
         upserts=upserts,
-        confidence=cast(SlotClassificationConfidence, confidence),
+        confidence=confidence,
         reason=(
             reason.strip()
             if isinstance(reason, str) and reason.strip()
@@ -1269,19 +1290,19 @@ def _parse_checkpoint_updates(
             return None
         payload = cast(dict[str, object], item)
         operation = payload.get("operation")
-        if operation not in {"update", "clear"}:
+        if not _is_update_operation(operation):
             return None
         producer_kind = payload.get("producer_kind")
         if not isinstance(producer_kind, str) or producer_kind not in producer_kinds:
             return None
         confidence = payload.get("confidence", _OMITTED_CONFIDENCE)
-        if confidence not in {"high", "medium"}:
+        if not _is_confidence(confidence) or confidence == "low":
             return None
         raw_mode = payload.get("mode")
         if operation == "update":
-            if raw_mode not in review_modes:
+            if not isinstance(raw_mode, str) or raw_mode not in review_modes:
                 return None
-            mode = review_modes[cast(str, raw_mode)]
+            mode = review_modes[raw_mode]
         else:
             if raw_mode is not None:
                 return None
@@ -1349,10 +1370,10 @@ def _parse_checkpoint_updates(
             continue
         updates.append(
             ClassifiedCheckpointUpdate(
-                operation=cast(CheckpointUpdateOperation, operation),
+                operation=operation,
                 producer_kind=cast(CheckpointProducerKind, producer_kind),
                 mode=mode,
-                confidence=cast(SlotClassificationConfidence, confidence),
+                confidence=confidence,
                 reason=reason.strip(),
                 evidence=evidence,
                 evidence_level=evidence_level,
@@ -2326,9 +2347,9 @@ def _parse_schema_direction(
         if fingerprint is not None
     ):
         return None
-    if confidence not in {"high", "medium", "low"}:
+    if not _is_confidence(confidence):
         return None
-    confidence_value = cast(SlotClassificationConfidence, confidence)
+    confidence_value = confidence
     source_kinds_by_id: dict[str, SlotClassificationSourceKind] = {
         source.source_id: source.kind for source in classification_input.sources
     }
@@ -2362,7 +2383,6 @@ def _parse_file_roles(
 ) -> tuple[ClassifiedFileRole, ...]:
     if not isinstance(raw_value, list):
         return ()
-    allowed_roles = set(get_args(FileRole))
     roles: list[ClassifiedFileRole] = []
     seen_file_ids: set[UUID] = set()
     for item in cast(list[object], raw_value):
@@ -2388,9 +2408,9 @@ def _parse_file_roles(
             continue
         if file_id not in _classification_file_ids(classification_input):
             continue
-        if role not in allowed_roles:
+        if not _is_file_role(role):
             continue
-        if confidence not in {"high", "medium", "low"}:
+        if not _is_confidence(confidence):
             continue
         evidence = _file_role_evidence(
             evidence,
@@ -2403,12 +2423,11 @@ def _parse_file_roles(
             classification_input=classification_input,
             structured_question_id=None,
         )
-        role_value = cast(FileRole, role)
-        confidence_value = cast(SlotClassificationConfidence, confidence)
+        confidence_value = confidence
         roles.append(
             ClassifiedFileRole(
                 file_id=file_id,
-                role=role_value,
+                role=role,
                 confidence=_downgrade_unsupported_confidence(
                     confidence_value,
                     evidence,
@@ -2475,9 +2494,9 @@ def _parse_form_intake(
         return None
     if not needs_form_fields and not sectioned_form_intake:
         return None
-    if confidence not in {"high", "medium", "low"}:
+    if not _is_confidence(confidence):
         return None
-    confidence_value = cast(SlotClassificationConfidence, confidence)
+    confidence_value = confidence
     return ClassifiedFormIntake(
         needs_form_fields=needs_form_fields or sectioned_form_intake,
         sectioned_form_intake=sectioned_form_intake,
@@ -2598,7 +2617,7 @@ def _parse_example_output_constraints(
         return None
 
     confidence = raw.get("confidence")
-    if confidence not in {"high", "medium", "low"}:
+    if not _is_confidence(confidence):
         return None
     if confidence == "high" and not any(
         sources_by_id[item.source_id].kind != "uploaded_file" for item in evidence

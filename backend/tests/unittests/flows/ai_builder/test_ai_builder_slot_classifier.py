@@ -394,6 +394,170 @@ def test_non_strict_parser_refuses_malformed_and_duplicate_slot_entries() -> Non
     assert duplicate.diagnostics[0].code == "slot_outcome_duplicate"
 
 
+_WORD_REQUEST = "Innan något sammanfattas vill jag kunna sätta rätt namn på talarna."
+_WORD_FILE_ID = UUID("00000000-0000-0000-0000-000000000333")
+_WORD_FILE_SOURCE = f"uploaded_file:{_WORD_FILE_ID}"
+_WORD_SCHEMAS = ("a" * 64, "b" * 64)
+# Every place in a classifier reply that holds one word out of a fixed few.
+_WORD_PLACES: tuple[tuple[str | int, ...], ...] = (
+    ("slots", "terminal_output", "confidence"),
+    ("slots", "terminal_output", "evidence_level"),
+    ("file_roles", 0, "role"),
+    ("file_roles", 0, "confidence"),
+    ("checkpoint_updates", 0, "operation"),
+    ("checkpoint_updates", 0, "confidence"),
+    ("checkpoint_updates", 0, "mode"),
+    ("form_intake", "confidence"),
+    ("named_result_evidence", "operation"),
+    ("named_result_evidence", "confidence"),
+    ("example_output_constraints", "confidence"),
+    ("schema_direction", "confidence"),
+)
+
+
+def _read_reply_with_word(
+    place: tuple[str | int, ...] | None, word: object, *, legacy_slots: bool = False
+) -> SlotClassificationResult | None:
+    """Read a reply that is accepted in every section, with one word replaced."""
+    said = [_evidence(_WORD_REQUEST)]
+    shown = [_evidence("# Executive summary", source_id=_WORD_FILE_SOURCE)]
+    slot: dict[str, object] = {
+        "outcome": "resolved",
+        "value": "pdf_document",
+        "confidence": "high",
+        "reason": "requested PDF",
+        "evidence": said,
+        "evidence_level": "explicit",
+    }
+    reply: dict[str, Any] = {
+        **_VALID_CLASSIFICATION_RESPONSE,
+        "slots": {"terminal_output": slot},
+        "file_roles": [
+            {
+                "file_id": str(_WORD_FILE_ID),
+                "role": "example_output",
+                "confidence": "medium",
+                "reason": "the attachment shows the wanted result",
+                "evidence": shown,
+                "evidence_level": "inferred",
+            }
+        ],
+        "checkpoint_updates": [
+            {
+                "operation": "update",
+                "producer_kind": "transcript",
+                "mode": "edit",
+                "confidence": "high",
+                "reason": "Namnge talarna.",
+                "evidence": said,
+                "evidence_level": "explicit",
+            }
+        ],
+        "form_intake": {
+            "needs_form_fields": True,
+            "sectioned_form_intake": False,
+            "confidence": "high",
+            "reason": "r",
+            "evidence": said,
+        },
+        "named_result_evidence": {
+            "operation": "update",
+            "upserts": _named_result_locations(["namn"], said),
+            "removals": [],
+            "confidence": "high",
+            "reason": "The user named a field.",
+            "evidence": said,
+        },
+        "example_output_constraints": {
+            "source_file_ids": [str(_WORD_FILE_ID)],
+            "headings": ["Executive summary"],
+            "style_constraints": [
+                {"category": "tone", "description": "Formal and concise"}
+            ],
+            "confidence": "medium",
+            "evidence": shown,
+        },
+        "schema_direction": {
+            "input_fingerprint": _WORD_SCHEMAS[0],
+            "output_fingerprint": _WORD_SCHEMAS[1],
+            "reference_only": False,
+            "confidence": "high",
+            "reason": "The user assigned both.",
+            "evidence": said,
+        },
+    }
+    if place is not None:
+        holder: Any = reply
+        for key in place[:-1]:
+            holder = holder[key]
+        holder[place[-1]] = word
+    if legacy_slots:
+        reply["slots"] = [{"slot_name": "terminal_output", **slot}]
+    return parse_slot_classification_response(
+        json.dumps(reply),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        classification_input=SlotClassificationInput(
+            sources=(
+                *_classification_input(_WORD_REQUEST).sources,
+                SlotClassificationSource(
+                    source_id=_WORD_FILE_SOURCE,
+                    kind="uploaded_file",
+                    text="# Executive summary\nDecision comes first.",
+                    file_id=_WORD_FILE_ID,
+                    coverage="fully_seen",
+                ),
+            ),
+            current_user_message_id="user-1",
+        ),
+        schema_candidate_fingerprints=_WORD_SCHEMAS,
+    )
+
+
+def test_the_reply_used_for_the_word_cases_is_accepted_in_every_section() -> None:
+    # The control for the cases below: with its own words the reply reaches
+    # and passes every lookup, so a refusal there is caused by the word.
+    result = _read_reply_with_word(None, None)
+
+    assert result is not None
+    assert result.slot_outcomes["terminal_output"].kind == "resolved"
+    assert (result.diagnostics, result.checkpoint_diagnostics) == ((), ())
+    assert (len(result.file_roles), len(result.checkpoint_updates)) == (1, 1)
+    assert None not in (
+        result.form_intake,
+        result.named_result_evidence,
+        result.example_output_constraints,
+        result.schema_direction,
+    )
+
+
+@pytest.mark.parametrize("place", _WORD_PLACES)
+@pytest.mark.parametrize("unreadable", [["high"], {"word": "high"}])
+def test_a_list_or_object_for_a_word_is_refused_like_an_unknown_word(
+    place: tuple[str | int, ...], unreadable: object
+) -> None:
+    # Kills the mutant that looks a reply's raw value up in a set of words: a
+    # list or an object cannot be looked up, and the whole parse raised
+    # TypeError instead of refusing the entry as it refuses an unknown word.
+    unknown = _read_reply_with_word(place, "no-such-word")
+
+    assert unknown != _read_reply_with_word(None, None)
+    assert _read_reply_with_word(place, unreadable) == unknown
+
+
+@pytest.mark.parametrize("unreadable", [["high"], {"word": "high"}])
+def test_a_list_or_object_for_a_word_is_refused_in_the_older_slot_list(
+    unreadable: object,
+) -> None:
+    # Kills the same mutant on the path a route without the reply schema takes:
+    # there the slots arrive as a list of named entries.
+    place = ("slots", "terminal_output", "confidence")
+    unknown = _read_reply_with_word(place, "no-such-word", legacy_slots=True)
+
+    assert unknown is not None
+    assert unknown.slot_outcomes["terminal_output"].kind == "absent"
+    assert _read_reply_with_word(place, unreadable, legacy_slots=True) == unknown
+
+
 @pytest.mark.parametrize(
     "entry",
     [
