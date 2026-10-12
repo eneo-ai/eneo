@@ -12,7 +12,7 @@ The resolved provider is then gated by the user's role permission for the
 purpose and by the space's security classification.
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -156,18 +156,22 @@ def meets_security_classification(
 def general_servers_for_space(
     attached_servers: Sequence["MCPServer"],
     space_security_classification: "SecurityClassification | None",
+    *,
+    in_space: Callable[[UUID], bool],
 ) -> list["MCPServer"]:
     """The general-purpose servers among ``attached_servers`` the space may call.
 
     Capability-purpose servers are markers resolved separately. A general
-    server is called directly, so one whose classification has dropped below
-    the space's since it was attached is left out this turn; attachments are
-    never pruned here.
+    server is called directly, so one that the space no longer has
+    (``in_space``), or whose classification has dropped below the space's
+    since it was attached, is left out this turn; attachments are never
+    pruned here.
     """
     return [
         server
         for server in attached_servers
         if not is_capability_purpose(server.purpose)
+        and in_space(server.id)
         and meets_security_classification(server, space_security_classification)
     ]
 
@@ -190,14 +194,16 @@ async def resolve_capability_servers(
     user_group_ids: "set[UUID] | None" = None,
     allowed_purposes: "set[str] | None" = None,
     space_security_classification: "SecurityClassification | None" = None,
+    in_space: Callable[[UUID], bool],
 ) -> CapabilityResolution:
     """Resolve independent purposes to the providers serving the user.
 
     Capability-purpose servers among ``attached_servers`` are stripped (they
-    may be stale or deactivated), general servers below the space's security
-    classification are left out, and, for every requested purpose in
-    ``CAPABILITY_PURPOSES`` order, the provider serving the user is attached
-    in its place when the user's role allows the purpose (``allowed_purposes``,
+    may be stale or deactivated), general servers the space no longer has or
+    that are below its security classification are left out, and, for every
+    requested purpose in ``CAPABILITY_PURPOSES`` order, the provider serving
+    the user is attached in its place when the user's role allows the purpose
+    (``allowed_purposes``,
     None meaning every purpose), a provider exists for the user's groups or
     the tenant default, its backing model (if any) is enabled, it has usable
     tools, it meets the space's security classification, and the model can
@@ -205,7 +211,7 @@ async def resolve_capability_servers(
     turn.
     """
     general_servers = general_servers_for_space(
-        attached_servers, space_security_classification
+        attached_servers, space_security_classification, in_space=in_space
     )
     requested_purposes = set(requested_capabilities)
     if allowed_purposes is not None:

@@ -472,6 +472,19 @@ class AssistantService:
             ):
                 raise BadRequestException("Invalid integration knowledge")
 
+    @staticmethod
+    def _space_membership(
+        space: "Space", effective_config: "EffectiveConfig | None"
+    ) -> Callable[[UUID], bool]:
+        """Which servers the space lets an assistant call, as at save.
+
+        The policy grants its servers to the personal assistant directly;
+        for every other assistant the space's own list decides.
+        """
+        if effective_config is not None and effective_config.mcp_enforced:
+            return lambda _server_id: True
+        return space.is_mcp_server_in_space
+
     async def _resolve_effective_config(
         self, *, space: "Space", assistant: Assistant
     ) -> "EffectiveConfig | None":
@@ -1013,6 +1026,7 @@ class AssistantService:
                 user_group_ids=self.user.user_groups_ids,
                 allowed_purposes=allowed_capability_purposes(self.user.permissions),
                 space_security_classification=space.security_classification,
+                in_space=self._space_membership(space, effective_config),
             )
             effective_mcp_servers = [
                 *resolution.general_servers,
@@ -3235,10 +3249,12 @@ class AssistantService:
             else list(assistant_to_ask.mcp_servers)
         )
         # Provider IDs never grant a capability, including old attachments
-        # after a purpose edit. A general server whose classification has
-        # dropped below the space's is skipped this turn rather than called.
+        # after a purpose edit. A general server that the space no longer has,
+        # or whose classification has dropped below the space's, is skipped
+        # this turn rather than called.
+        in_space = self._space_membership(space, effective_config)
         mcp_servers_override = general_servers_for_space(
-            capability_base, space.security_classification
+            capability_base, space.security_classification, in_space=in_space
         )
         capability_mcp_servers: list["MCPServer"] = []
         requested_capabilities = set(assistant_to_ask.enabled_capabilities)
@@ -3257,6 +3273,7 @@ class AssistantService:
                 user_group_ids=self.user.user_groups_ids,
                 allowed_purposes=allowed_capability_purposes(self.user.permissions),
                 space_security_classification=space.security_classification,
+                in_space=in_space,
             )
             mcp_servers_override = resolution.general_servers
             capability_mcp_servers = [

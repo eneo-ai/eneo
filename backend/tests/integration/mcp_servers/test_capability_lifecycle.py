@@ -101,6 +101,7 @@ async def test_intent_survives_switch_delete_and_restore(
                 [],
                 requested_capabilities=["image_generation"],
                 supports_tool_calling=True,
+                in_space=lambda _server_id: True,
             )
             assert [p.id for p in result.capability_servers] == expected_provider
 

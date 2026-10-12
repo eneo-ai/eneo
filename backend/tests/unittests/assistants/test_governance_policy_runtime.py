@@ -570,6 +570,9 @@ async def test_ask_respects_disabled_mcp_server_ids():
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
     space.security_classification = None
+    # Kills the mutant that asks the space's own list for a policy grant: the
+    # policy is what gives these servers to the personal assistant.
+    space.is_mcp_server_in_space.return_value = False
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -632,6 +635,80 @@ async def test_ask_respects_disabled_mcp_server_ids():
 
     assistant.ask.assert_awaited_once()
     assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [server_b]
+
+
+async def test_ask_skips_a_server_the_space_no_longer_has():
+    # Kills the mutant that asks the space only when an assistant is saved: a
+    # server a space admin removed stayed callable for assistants that had it.
+    service, assistant, _ = _runtime_service(
+        personal_default=False, skill_service=_empty_skill_service()
+    )
+    kept = SimpleNamespace(id=uuid4(), name="kept", purpose=None)
+    removed = SimpleNamespace(id=uuid4(), name="removed", purpose=None)
+    assistant.mcp_servers = [kept, removed]
+    space = service.space_repo.get_space_by_assistant.return_value
+    space.security_classification = None
+    space.is_mcp_server_in_space.side_effect = lambda server_id: server_id == kept.id
+
+    await service.ask(question="hello", assistant_id=assistant.id)
+
+    assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [kept]
+
+
+async def test_ask_asks_the_space_when_a_policy_does_not_govern_mcp():
+    # Kills the mutant that lets ANY policy grant every server: only a policy
+    # that enforces MCP replaces the space's own list.
+    service, assistant, _ = _runtime_service(
+        personal_default=True,
+        skill_service=_empty_skill_service(),
+        effective_config=SimpleNamespace(
+            models_enforced=False,
+            available_models=[],
+            policy_default_model=None,
+            mcp_enforced=False,
+            available_mcp_servers=[],
+            enabled_capabilities=[],
+            prompt_enforced=False,
+            enforced_prompt_text=None,
+            reasoning_policy_configured=False,
+            inline_file_text=None,
+            governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+        ),
+    )
+    kept = SimpleNamespace(id=uuid4(), name="kept", purpose=None)
+    removed = SimpleNamespace(id=uuid4(), name="removed", purpose=None)
+    assistant.mcp_servers = [kept, removed]
+    space = service.space_repo.get_space_by_assistant.return_value
+    space.security_classification = None
+    space.is_mcp_server_in_space.side_effect = lambda server_id: server_id == kept.id
+
+    await service.ask(question="hello", assistant_id=assistant.id)
+
+    assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [kept]
+
+
+async def test_ask_skips_a_removed_server_when_a_capability_is_requested(monkeypatch):
+    # Kills the mutant that resolves capabilities without the space: that path
+    # replaces the server list, so the removed server came back with web search.
+    monkeypatch.setattr(
+        "eneo.mcp_servers.application.capability_resolver.get_active_capability_servers",
+        AsyncMock(return_value=[]),
+    )
+    service, assistant, _ = _runtime_service(
+        personal_default=False, skill_service=_empty_skill_service()
+    )
+    kept = SimpleNamespace(id=uuid4(), name="kept", purpose=None)
+    removed = SimpleNamespace(id=uuid4(), name="removed", purpose=None)
+    assistant.mcp_servers = [kept, removed]
+    assistant.enabled_capabilities = ["web_search"]
+    space = service.space_repo.get_space_by_assistant.return_value
+    space.security_classification = None
+    space.enabled_capabilities = ["web_search"]
+    space.is_mcp_server_in_space.side_effect = lambda server_id: server_id == kept.id
+
+    await service.ask(question="hello", assistant_id=assistant.id)
+
+    assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [kept]
 
 
 async def test_update_guard_rejects_disallowed_model_on_personal_default_assistant():

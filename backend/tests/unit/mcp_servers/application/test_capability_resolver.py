@@ -31,6 +31,10 @@ from eneo.security_classifications.domain.entities.security_classification impor
 )
 
 
+def _every_server(_server_id: object) -> bool:
+    return True
+
+
 def _server(
     purpose: str,
     *,
@@ -232,7 +236,9 @@ class TestGeneralServersForSpace:
         general = _server("general")
 
         assert general_servers_for_space(
-            [general, _server("web_search"), _server("image_generation")], None
+            [general, _server("web_search"), _server("image_generation")],
+            None,
+            in_space=_every_server,
         ) == [general]
 
     def test_server_below_space_classification_is_left_out(self):
@@ -245,13 +251,25 @@ class TestGeneralServersForSpace:
         unclassified = _server("general", name="unclassified")
 
         assert general_servers_for_space(
-            [matching, below, above, unclassified], space
+            [matching, below, above, unclassified], space, in_space=_every_server
         ) == [matching, above]
 
     def test_unclassified_space_keeps_every_general_server(self):
         servers = [_server("general"), _server("general", security_level=0)]
 
-        assert general_servers_for_space(servers, None) == servers
+        assert (
+            general_servers_for_space(servers, None, in_space=_every_server) == servers
+        )
+
+    def test_server_the_space_no_longer_has_is_left_out(self):
+        # Kills the mutant that asks only the classification: a server a space
+        # admin removed stayed callable for every assistant that had picked it.
+        kept = _server("general", name="kept")
+        removed = _server("general", name="removed")
+
+        assert general_servers_for_space(
+            [kept, removed], None, in_space=lambda server_id: server_id == kept.id
+        ) == [kept]
 
 
 class TestCapabilityPermissions:
@@ -284,11 +302,27 @@ class TestResolveCapabilityServers:
                 s.purpose for s in [general] if s.purpose != "general"
             ],
             supports_tool_calling=True,
+            in_space=_every_server,
         )
 
         assert resolution.general_servers == [general]
         assert resolution.capability_servers == []
         lookup.assert_not_awaited()
+
+    async def test_general_server_the_space_no_longer_has_is_left_out(self):
+        # Kills the mutant that resolves capabilities without asking the space.
+        kept = _server("general", name="kept")
+        removed = _server("general", name="removed")
+
+        resolution = await resolve_capability_servers(
+            AsyncMock(),
+            uuid4(),
+            [kept, removed],
+            supports_tool_calling=True,
+            in_space=lambda server_id: server_id == kept.id,
+        )
+
+        assert resolution.general_servers == [kept]
 
     async def test_general_server_below_space_classification_is_left_out(
         self, monkeypatch
@@ -305,6 +339,7 @@ class TestResolveCapabilityServers:
             [kept, below],
             requested_capabilities=[],
             supports_tool_calling=True,
+            in_space=_every_server,
             space_security_classification=_classification(2),
         )
 
@@ -334,6 +369,7 @@ class TestResolveCapabilityServers:
                 s.purpose for s in [*markers, general] if s.purpose != "general"
             ],
             supports_tool_calling=True,
+            in_space=_every_server,
         )
 
         assert resolution.general_servers == [general]
@@ -358,6 +394,7 @@ class TestResolveCapabilityServers:
                 s.purpose for s in markers if s.purpose != "general"
             ],
             supports_tool_calling=False,
+            in_space=_every_server,
         )
 
         assert resolution.general_servers == []
@@ -386,6 +423,7 @@ class TestResolveCapabilityServers:
                 s.purpose for s in markers if s.purpose != "general"
             ],
             supports_tool_calling=True,
+            in_space=_every_server,
         )
 
         assert resolution.capability_servers == [web_search]
@@ -411,6 +449,7 @@ class TestResolveCapabilityServers:
                 if s.purpose != "general"
             ],
             supports_tool_calling=True,
+            in_space=_every_server,
         )
 
         assert looked_up == ["image_generation"]
@@ -432,6 +471,7 @@ class TestResolveCapabilityServers:
                 s.purpose for s in markers if s.purpose != "general"
             ],
             supports_tool_calling=True,
+            in_space=_every_server,
             allowed_purposes={"web_search"},
         )
 
@@ -459,6 +499,7 @@ class TestResolveCapabilityServers:
                 s.purpose for s in [_server("web_search")] if s.purpose != "general"
             ],
             supports_tool_calling=True,
+            in_space=_every_server,
             user_group_ids={group_id},
         )
         outsider = await resolve_capability_servers(
@@ -469,6 +510,7 @@ class TestResolveCapabilityServers:
                 s.purpose for s in [_server("web_search")] if s.purpose != "general"
             ],
             supports_tool_calling=True,
+            in_space=_every_server,
             user_group_ids={uuid4()},
         )
 
@@ -492,6 +534,7 @@ class TestResolveCapabilityServers:
                 s.purpose for s in [_server("web_search")] if s.purpose != "general"
             ],
             supports_tool_calling=True,
+            in_space=_every_server,
             space_security_classification=_classification(1),
         )
 
@@ -539,6 +582,7 @@ class TestBackingModel:
                 s.purpose for s in [marker] if s.purpose != "general"
             ],
             supports_tool_calling=True,
+            in_space=_every_server,
         )
 
         assert resolution.capability_servers == []
@@ -561,6 +605,7 @@ class TestBackingModel:
                 s.purpose for s in [marker] if s.purpose != "general"
             ],
             supports_tool_calling=True,
+            in_space=_every_server,
         )
 
         assert resolution.capability_servers == [provider]
@@ -572,7 +617,11 @@ async def test_provider_attachment_without_purpose_grant_does_not_enable_capabil
     lookup = AsyncMock()
     monkeypatch.setattr(capability_resolver, "get_active_capability_servers", lookup)
     result = await resolve_capability_servers(
-        AsyncMock(), uuid4(), [_server("image_generation")], supports_tool_calling=True
+        AsyncMock(),
+        uuid4(),
+        [_server("image_generation")],
+        supports_tool_calling=True,
+        in_space=_every_server,
     )
     assert result.capability_servers == []
     assert result.general_servers == []
