@@ -782,14 +782,20 @@ class InfoBlobRepository:
         records = await self.delegate.get_models_from_query(query)
         return [InfoBlobInDB.model_validate(record) for record in records]
 
-    async def get_by_website(self, website_id: UUID) -> list[InfoBlobInDB]:
+    async def get_by_website(self, website_id: UUID) -> list[InfoBlobInDBNoText]:
         records = await self.session.scalars(
-            sa.select(InfoBlobs).where(
+            sa.select(InfoBlobs)
+            .where(
                 InfoBlobs.website_id == website_id,
                 active_info_blob_version(),
             )
+            .order_by(InfoBlobs.id.asc())
+            .options(
+                defer(InfoBlobs.text),
+                selectinload(InfoBlobs.website),
+            )
         )
-        return [InfoBlobInDB.model_validate(record) for record in records]
+        return [InfoBlobInDBNoText.model_validate(record) for record in records]
 
     @staticmethod
     def _source_filter(

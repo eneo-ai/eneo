@@ -592,7 +592,7 @@ class InfoBlobService:
             await self.repo.get_by_group(group.id)
         )
 
-    async def get_by_website(self, id: UUID) -> list[InfoBlobInDB]:
+    async def get_by_website(self, id: UUID) -> list[InfoBlobInDBNoText]:
         space = await self.space_service.get_space_by_website(website_id=id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
