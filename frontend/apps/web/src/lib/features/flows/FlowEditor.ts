@@ -59,6 +59,32 @@ export class FlowSaveFailedError extends Error {
     this.name = "FlowSaveFailedError";
   }
 }
+
+/** A save the editor refused, for the reader. */
+export type FlowSaveRefusal = {
+  sentence: string;
+  /** The validation banner carries the issues the sentence points at. */
+  issuesInBanner: boolean;
+};
+
+/**
+ * The refusal behind an error from a flush or save path; null for any other
+ * error (a failed request has already fired its own toast).
+ * `reportServerValidationError` is the editor's own check: it routes a server
+ * validation error into the banner and says whether it did.
+ */
+export function describeFlowSaveRefusal(
+  error: unknown,
+  reportServerValidationError: (error: unknown) => boolean
+): FlowSaveRefusal | null {
+  if (error instanceof FlowSaveRejectedError || reportServerValidationError(error)) {
+    return { sentence: m.flow_validation_save_rejected(), issuesInBanner: true };
+  }
+  if (error instanceof FlowSaveIncompleteError) {
+    return { sentence: m.flow_save_incomplete(), issuesInBanner: false };
+  }
+  return null;
+}
 import {
   getFlowWizardMetadata,
   getUnifiedFlowSaveStatus,

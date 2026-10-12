@@ -448,7 +448,37 @@ export function mapFlowPackageImportError(error: unknown): string | null {
   return [message, ...details].join(" ");
 }
 
+/** Stops an export before its request for a reason the reader can act on; the dialog shows the sentence. */
+class FlowPackageExportRefusedError extends Error {
+  readonly sentence: string;
+
+  constructor(sentence: string) {
+    super("flow package export refused");
+    this.name = "FlowPackageExportRefusedError";
+    this.sentence = sentence;
+  }
+}
+
+/**
+ * The export dialog's `beforeExport` for an editor with unsaved changes: save
+ * first. A save the editor refused stops the export with the sentence
+ * `refusalSentence` gives for it; any other error is passed on.
+ */
+export async function saveDraftBeforeExport(
+  flushSaves: () => Promise<void>,
+  refusalSentence: (error: unknown) => string | null
+): Promise<void> {
+  try {
+    await flushSaves();
+  } catch (error) {
+    const sentence = refusalSentence(error);
+    if (sentence !== null) throw new FlowPackageExportRefusedError(sentence);
+    throw error;
+  }
+}
+
 export function mapFlowPackageExportError(error: unknown): string | null {
+  if (error instanceof FlowPackageExportRefusedError) return error.sentence;
   const code = getFlowPackageResponseCode(error);
   if (!code || !isFlowPackageExportErrorCode(code)) return null;
   const message = FLOW_PACKAGE_ERROR_MESSAGES[code]();

@@ -3,6 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Eneo, Flow, FlowPackageExportResponse } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
+import {
+  describeFlowSaveRefusal,
+  FlowSaveIncompleteError,
+  FlowSaveRejectedError
+} from "$lib/features/flows/FlowEditor";
+import { saveDraftBeforeExport } from "$lib/features/flows/flowPackageTransfer";
 import FlowPackageExportDialog from "./FlowPackageExportDialog.svelte";
 
 vi.mock("$lib/components/toast", () => ({
@@ -102,6 +108,37 @@ describe("FlowPackageExportDialog", () => {
 
     expect(createObjectURL).toHaveBeenCalledOnce();
     expect(exportPackage).toHaveBeenCalledTimes(1);
+  });
+
+  // The editor page's own hook and classifier, with a save that is refused.
+  // Kills three mutants: the hook throws an untyped error again (the reader
+  // sees "something went wrong"), a refusal kind loses its sentence, and the
+  // export request is sent although the draft was not saved.
+  it.each([
+    [() => new FlowSaveRejectedError(), m.flow_validation_save_rejected],
+    [() => new FlowSaveIncompleteError(), m.flow_save_incomplete]
+  ])("says why the draft could not be saved before the export (%#)", async (refusal, sentence) => {
+    const exportPackage = vi.fn(async () => exportedPackageWithMcpOmissions());
+    render(FlowPackageExportDialog, {
+      flow: flow(),
+      eneo: eneo(exportPackage),
+      beforeExport: () =>
+        saveDraftBeforeExport(
+          async () => {
+            throw refusal();
+          },
+          (error) => describeFlowSaveRefusal(error, () => false)?.sentence ?? null
+        )
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_package_export_button() }));
+    const buttons = screen.getAllByRole("button", { name: m.flow_package_export_button() });
+    await fireEvent.click(buttons[buttons.length - 1]);
+
+    await waitFor(() =>
+      expect(screen.getByText(m.flow_package_export_failed({ message: sentence() }))).toBeTruthy()
+    );
+    expect(exportPackage).not.toHaveBeenCalled();
   });
 });
 

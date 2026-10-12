@@ -25,6 +25,7 @@
   import FlowRunsTable from "$lib/features/flows/components/FlowRunsTable.svelte";
   import FlowRunDialog from "$lib/features/flows/components/FlowRunDialog.svelte";
   import FlowPackageExportDialog from "$lib/features/flows/components/FlowPackageExportDialog.svelte";
+  import { saveDraftBeforeExport } from "$lib/features/flows/flowPackageTransfer";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Sheet from "$lib/components/ui/sheet/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
@@ -56,11 +57,7 @@
     inSentence
   } from "$lib/features/flows/ai-builder/builderStepPhrases";
   import type { AIBuilderStepIntent } from "$lib/features/flows/ai-builder/protocol";
-  import {
-    FlowSaveFailedError,
-    FlowSaveIncompleteError,
-    FlowSaveRejectedError
-  } from "$lib/features/flows/FlowEditor";
+  import { describeFlowSaveRefusal, FlowSaveFailedError } from "$lib/features/flows/FlowEditor";
   import { tick, untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { slide } from "svelte/transition";
@@ -105,14 +102,22 @@
     }
   }
 
+  /**
+   * The sentence for a save the editor refused, after opening the banner that
+   * carries the translated issue and step link; null for any other error.
+   */
+  function saveRefusalSentence(error: unknown): string | null {
+    const refusal = describeFlowSaveRefusal(error, (e) =>
+      flowEditor.reportServerValidationError(e)
+    );
+    if (refusal?.issuesInBanner) validationBannerExpanded = true;
+    return refusal?.sentence ?? null;
+  }
+
   function surfaceRoutedSaveRejection(error: unknown): boolean {
-    if (error instanceof FlowSaveRejectedError || flowEditor.reportServerValidationError(error)) {
-      validationBannerExpanded = true;
-      toast.error(m.flow_validation_save_rejected());
-      return true;
-    }
-    if (error instanceof FlowSaveIncompleteError) {
-      toast.error(m.flow_save_incomplete());
+    const sentence = saveRefusalSentence(error);
+    if (sentence !== null) {
+      toast.error(sentence);
       return true;
     }
     // A generic save failure already fired its raw toast at the
@@ -604,22 +609,8 @@
       <FlowPackageExportDialog
         flow={$resource}
         eneo={data.eneo}
-        beforeExport={async () => {
-          try {
-            await flowEditor.flushSaves();
-          } catch (error) {
-            if (
-              error instanceof FlowSaveRejectedError ||
-              flowEditor.reportServerValidationError(error)
-            ) {
-              validationBannerExpanded = true;
-              // The dialog shows this short line; the banner carries the
-              // translated issue and step link.
-              throw new Error(m.flow_validation_save_rejected());
-            }
-            throw error;
-          }
-        }}
+        beforeExport={() =>
+          saveDraftBeforeExport(() => flowEditor.flushSaves(), saveRefusalSentence)}
       />
       {#if $isPublished}
         <!-- While a change is being prepared, the only primary on screen
