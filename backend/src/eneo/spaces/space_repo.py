@@ -95,6 +95,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import GENERAL_PURPOSE
+from eneo.mcp_servers.domain.tool_switch import ToolSwitch, tool_switch
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from eneo.prompts.prompt_factory import PromptFactory
 from eneo.security_classifications.domain.entities.security_classification import (
@@ -1055,18 +1056,11 @@ class SpaceRepository:
         mcp_servers: list["MCPServer"],
         assistant_tool_overrides: dict[UUID, bool] | None = None,
     ) -> list["MCPServer"]:
-        """Load tools for assistant's MCP servers and apply space + assistant-level overrides.
+        """Load the tools of an assistant's MCP servers, each on or off for the assistant.
 
-        Hierarchy:
-        1. Tool default (is_enabled_by_default)
-        2. Tenant override (mcp_server_tool_settings.is_enabled) - if exists
-        3. Space override (spaces_mcp_server_tools.is_enabled) - if exists
-        4. Assistant override (assistant_mcp_server_tools.is_enabled) - if exists
-
-        Rules:
-        - If tenant disables a tool, it won't appear at all (filtered out)
-        - If space disables a tool, it won't appear in assistant (filtered out)
-        - Assistant can only override tools that are space-enabled
+        Only tools that are on for the space (``tool_switch``: the instance
+        admin's switch, then the space's) are returned; of those, a tool is on
+        when the assistant switched it on (assistant_mcp_server_tools).
         """
         from eneo.database.tables.assistant_table import AssistantMCPServerTools
 
@@ -1149,35 +1143,19 @@ class SpaceRepository:
 
         tools_by_server: defaultdict[UUID, list[MCPServerTool]] = defaultdict(list)
         for tool_db in tools_db:
-            # Determine effective is_enabled status
-            # Priority: assistant override > space override > tenant override > tool default
-            tenant_enabled = tenant_tool_settings.get(
-                tool_db.id, tool_db.is_enabled_by_default
-            )
-
-            # If tenant disabled this tool, skip it entirely (don't show in space/assistant)
+            # An assistant is offered only the tools that are on for its space.
             if (
-                tool_db.id in tenant_tool_settings
-                and not tenant_tool_settings[tool_db.id]
+                tool_switch(
+                    enabled_by_default=tool_db.is_enabled_by_default,
+                    tenant_setting=tenant_tool_settings.get(tool_db.id),
+                    space_override=space_tool_overrides.get(tool_db.id),
+                )
+                is not ToolSwitch.ON
             ):
                 continue
 
-            # Apply space override if exists, otherwise use tenant/default
-            if tool_db.id in space_tool_overrides:
-                space_enabled = space_tool_overrides[tool_db.id]
-            else:
-                space_enabled = tenant_enabled
-
-            # If space disabled this tool, skip it (don't show in assistant)
-            if not space_enabled:
-                continue
-
-            # Apply assistant override if exists, otherwise default to OFF for assistants
-            # (tools must be explicitly enabled at assistant level)
-            if tool_db.id in assistant_tool_overrides:
-                is_enabled = assistant_tool_overrides[tool_db.id]
-            else:
-                is_enabled = False  # Tools OFF by default for assistants
+            # Of those, a tool is off until the assistant switches it on.
+            is_enabled = assistant_tool_overrides.get(tool_db.id, False)
 
             tool = MCPServerTool(
                 id=tool_db.id,
@@ -1477,16 +1455,11 @@ class SpaceRepository:
     async def _load_mcp_server_tools_with_overrides(
         self, space_id: UUID, mcp_servers: list["MCPServer"]
     ) -> list["MCPServer"]:
-        """Load tools for MCP servers and apply tenant + space-level enablement overrides.
+        """Load the tools of a space's MCP servers, each on or off for the space.
 
-        Hierarchy:
-        1. Tool default (is_enabled_by_default)
-        2. Tenant override (mcp_server_tool_settings.is_enabled) - if exists
-        3. Space override (spaces_mcp_server_tools.is_enabled) - if exists
-
-        Rules:
-        - If tenant disables a tool, it won't appear in space (filtered out)
-        - Space can only override tools that are tenant-enabled
+        ``tool_switch`` owns the order of the instance admin's switch and the
+        space's. A tool the instance admin switched off is not listed; every
+        other tool is, so that the space can switch it.
         """
         if not mcp_servers:
             return mcp_servers
@@ -1530,31 +1503,37 @@ class SpaceRepository:
             for override in space_overrides_db
         }
 
-        # Group tools by server
+        return self._project_space_mcp_server_tools(
+            mcp_servers=mcp_servers,
+            tools_db=tools_db,
+            tenant_tool_settings=tenant_tool_settings,
+            space_tool_overrides=space_tool_overrides,
+        )
+
+    @staticmethod
+    def _project_space_mcp_server_tools(
+        *,
+        mcp_servers: list["MCPServer"],
+        tools_db: Sequence[MCPServerToolsTable],
+        tenant_tool_settings: dict[UUID, bool],
+        space_tool_overrides: dict[UUID, bool],
+    ) -> list["MCPServer"]:
+        """The tools a space shows for its servers, each on or off for the space."""
         from collections import defaultdict
 
         from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
 
         tools_by_server: defaultdict[UUID, list[MCPServerTool]] = defaultdict(list)
         for tool_db in tools_db:
-            # Determine effective is_enabled status
-            # Priority: space override > tenant override > tool default
-            tenant_enabled = tenant_tool_settings.get(
-                tool_db.id, tool_db.is_enabled_by_default
+            switch = tool_switch(
+                enabled_by_default=tool_db.is_enabled_by_default,
+                tenant_setting=tenant_tool_settings.get(tool_db.id),
+                space_override=space_tool_overrides.get(tool_db.id),
             )
-
-            # If tenant disabled this tool, skip it entirely (don't show in space)
-            if (
-                tool_db.id in tenant_tool_settings
-                and not tenant_tool_settings[tool_db.id]
-            ):
+            # A tool the instance admin switched off is not shown in a space.
+            if switch is ToolSwitch.OFF_FOR_ALL:
                 continue
-
-            # Apply space override if exists, otherwise use tenant/default
-            if tool_db.id in space_tool_overrides:
-                is_enabled = space_tool_overrides[tool_db.id]
-            else:
-                is_enabled = tenant_enabled
+            is_enabled = switch is ToolSwitch.ON
 
             tool = MCPServerTool(
                 id=tool_db.id,
