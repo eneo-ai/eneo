@@ -708,6 +708,8 @@
   "job_failure_processing_interrupted": "Behandlingen avbröts innan den blev klar. Ladda upp filen igen. Befintlig kunskap ändrades inte.",
   "job_failure_invalid_job_payload": "Eneo kunde inte starta behandlingen av filen. Ladda upp den igen. Kontakta en administratör om felet uppstår igen.",
   "job_failure_quota_exceeded": "Lagringskvoten är full. Ta bort kunskap eller be en administratör höja kvoten och ladda sedan upp filen igen.",
+  "job_failure_tenant_quota_exceeded": "Organisationens lagringskvot är full. Be en administratör höja kvoten eller frigöra utrymme och försök sedan igen.",
+  "job_failure_user_quota_exceeded": "Din lagringskvot är full. Ta bort kunskap som du äger eller be en administratör höja din kvot och försök sedan igen.",
   "job_failure_storage_limit_exceeded": "Filen är större än den lagringsgräns som gäller för bakgrundsbearbetningen. Be en administratör jämföra lagringsgränserna för API-tjänsten och bakgrundsprocesserna och ladda sedan upp filen igen.",
   "job_failure_storage_unavailable": "Fillagringen är tillfälligt otillgänglig. Försök igen. Kontakta en administratör om felet kvarstår.",
   "job_failure_storage_verification_failed": "Eneo kunde inte verifiera den lagrade originalfilen. Ladda upp filen igen. Kontakta en administratör om felet uppstår igen.",
