@@ -1,7 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
+import { EneoError, type EneoErrorCode } from "@eneo/eneo-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { m } from "$lib/paraglide/messages";
 
 import TranscriptPlayer from "./TranscriptPlayer.svelte";
+
+vi.mock("$lib/components/toast", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() }
+}));
+import { toast } from "$lib/components/toast";
 import { attachWords, parseTranscript } from "$lib/features/flows/transcriptSegments";
 import { withLocale } from "../testLocale";
 
@@ -21,6 +28,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  vi.mocked(toast.info).mockClear();
   vi.spyOn(console, "error").mockImplementation(() => {});
   // jsdom has no media playback; the component only needs the calls to resolve.
   vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve());
@@ -35,6 +43,57 @@ beforeEach(() => {
 
 function signed(url = "https://app.test/api/v1/files/f1/download/?token=abc") {
   return vi.fn(async () => ({ url, expires_at: Math.floor(Date.now() / 1000) + 3600 }));
+}
+
+const UNAVAILABLE = "flow_run_file_access_audit_unavailable";
+const PURGED = "flow_run_input_file_content_unavailable";
+const URLS = [0, 1, 2].map((part) => `https://app.test/api/v1/files/part-${part}/download/`);
+const PURGED_SENTENCE = m.flow_error_flow_run_input_file_content_unavailable;
+const purgedNotice = (n: number) =>
+  `${m.flow_run_transcript_part({ n: String(n) })}: ${PURGED_SENTENCE()}`;
+
+function flowError(status: number, eneoCode: EneoErrorCode, code: string): EneoError {
+  return new EneoError("refused", "RESPONSE", status, eneoCode, { code });
+}
+
+type Answer = "ok" | "purged" | "unavailable" | Promise<void>;
+
+/**
+ * A recording by part: what each signing of that part answers in turn; the
+ * last answer repeats. A promise is awaited first, then the part is signed.
+ */
+function recording(...script: Answer[][]) {
+  const asked = script.map(() => 0);
+  return vi.fn(async (fileIndex: number) => {
+    const answers = script[fileIndex];
+    const answer = answers[Math.min(asked[fileIndex]++, answers.length - 1)];
+    if (answer === "purged") throw flowError(410, 9056, PURGED);
+    if (answer === "unavailable") throw flowError(503, 9024, UNAVAILABLE);
+    if (answer !== "ok") await answer;
+    return { url: URLS[fileIndex], expires_at: Math.floor(Date.now() / 1000) + 3600 };
+  });
+}
+
+/** The transcript with each speaker's lines in the given part (index). */
+function segmentsByPart(partOfSpeaker: Record<string, number>) {
+  return parseTranscript(TRANSCRIPT).map((segment) => ({
+    ...segment,
+    fileIndex: partOfSpeaker[segment.speaker ?? ""] ?? 0
+  }));
+}
+
+function audioSrc(container: HTMLElement): string | null {
+  return container.querySelector("audio")?.getAttribute("src") ?? null;
+}
+
+function playButton(): HTMLButtonElement {
+  return screen.getByRole("button", { name: m.flow_run_transcript_play() }) as HTMLButtonElement;
+}
+
+function partTab(n: number): HTMLButtonElement {
+  return screen.getByRole("button", {
+    name: m.flow_run_transcript_part({ n: String(n) })
+  }) as HTMLButtonElement;
 }
 
 function turnBlocks(container: HTMLElement): HTMLElement[] {
@@ -208,20 +267,233 @@ describe("TranscriptPlayer turns", () => {
     expect(audio.currentTime).toBe(12.5);
   });
 
-  it("keeps the transcript readable when the audio cannot be signed", async () => {
+  // Kills two mutants: no retry after any failed load, and every typed
+  // refusal told as purged (a retry can help after 503; 404 is no purge).
+  it.each([
+    ["an untyped failure", () => new Error("network")],
+    ["503 access log unavailable", () => flowError(503, 9024, UNAVAILABLE)],
+    ["404 not found", () => flowError(404, 9000, "flow_run_input_file_not_found")]
+  ])("keeps the transcript readable and offers a retry after %s", async (_name, failure) => {
     render(TranscriptPlayer, {
       props: {
         segments: parseTranscript(TRANSCRIPT),
         getAudioUrl: vi.fn(async () => {
-          throw new Error("410");
+          throw failure();
         })
       }
     });
 
-    await waitFor(() =>
-      expect(screen.getByText(/kan inte spelas upp|cannot be played/)).toBeTruthy()
-    );
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(m.flow_run_transcript_audio_unavailable());
+    expect(alert.className).toContain("text-negative");
+    expect(screen.getByRole("button", { name: m.flow_retry() })).toBeTruthy();
     expect(screen.getByText(/Hej och välkomna/)).toBeTruthy();
+  });
+
+  it("says that retention removed the recording: a status, no retry", async () => {
+    // Kills the mutant that tells purged audio as a playback fault with a
+    // retry that asks for the same removed file again.
+    render(TranscriptPlayer, {
+      props: { segments: parseTranscript(TRANSCRIPT), getAudioUrl: recording(["purged"]) }
+    });
+
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toContain(PURGED_SENTENCE());
+    expect(status.className).not.toContain("text-negative");
+    expect(screen.queryByRole("button", { name: m.flow_retry() })).toBeNull();
+    expect(screen.getByText(/Hej och välkomna/)).toBeTruthy();
+  });
+
+  it("stays on the part that plays when the reader tries a purged part", async () => {
+    // Kills three mutants: the refused switch told as a playback fault
+    // (transport and tabs locked while the part may still sound), refused
+    // without a word, and the playing part reloaded for nothing.
+    const getAudioUrl = recording(["ok"], ["purged"], ["ok"]);
+    const { container } = render(TranscriptPlayer, {
+      props: { segments: parseTranscript(TRANSCRIPT), fileCount: 3, getAudioUrl }
+    });
+    await waitFor(() => expect(audioSrc(container)).toBe(URLS[0]));
+
+    await fireEvent.click(partTab(2));
+
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith(purgedNotice(2)));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(partTab(1).getAttribute("aria-pressed")).toBe("true");
+    expect(playButton().disabled).toBe(false);
+    expect(getAudioUrl.mock.calls).toEqual([[0], [1]]);
+
+    await fireEvent.click(partTab(3));
+    await waitFor(() => expect(audioSrc(container)).toBe(URLS[2]));
+    expect(partTab(3).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("walks on from a purged first part, past another purged one, to a part that plays", async () => {
+    // Kills three mutants: part tabs disabled in the purged state (no way
+    // on), the first part's status lost after a second purged part was
+    // tried, and a part that loads keeping the message of the one before.
+    const getAudioUrl = recording(["purged"], ["purged"], ["ok"]);
+    const { container } = render(TranscriptPlayer, {
+      props: { segments: parseTranscript(TRANSCRIPT), fileCount: 3, getAudioUrl }
+    });
+    await screen.findByRole("status");
+
+    // Asserted on its own: a dispatched click reaches a disabled button here.
+    expect(partTab(2).disabled).toBe(false);
+    await fireEvent.click(partTab(2));
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith(purgedNotice(2)));
+    // The first part is asked again: its status was hidden for the switch.
+    await waitFor(() => expect(getAudioUrl.mock.calls).toEqual([[0], [1], [0]]));
+    expect((await screen.findByRole("status")).textContent).toContain(PURGED_SENTENCE());
+    expect(partTab(1).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByRole("button", { name: m.flow_retry() })).toBeNull();
+
+    await fireEvent.click(partTab(3));
+    await waitFor(() => expect(audioSrc(container)).toBe(URLS[2]));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(partTab(3).getAttribute("aria-pressed")).toBe("true");
+    expect(partTab(1).disabled).toBe(false);
+    expect(playButton().disabled).toBe(false);
+  });
+
+  it("asks the first part again when a refused switch overtook its first load", async () => {
+    // Kills the mutant that leaves the player without a recording and
+    // without a message: the overtaken load is dropped, so it is repeated.
+    const never = new Promise<void>(() => {});
+    const getAudioUrl = recording([never, "ok"], ["purged"]);
+    const { container } = render(TranscriptPlayer, {
+      props: { segments: parseTranscript(TRANSCRIPT), fileCount: 2, getAudioUrl }
+    });
+    await waitFor(() => expect(getAudioUrl).toHaveBeenCalledWith(0));
+
+    await fireEvent.click(partTab(2));
+
+    await waitFor(() => expect(audioSrc(container)).toBe(URLS[0]));
+    expect(toast.info).toHaveBeenCalledWith(purgedNotice(2));
+    expect(playButton().disabled).toBe(false);
+  });
+
+  it("does not let a sample of a purged part stop the part that plays", async () => {
+    // Kills the mutant that sets the sample's end before its part has
+    // loaded: the part that plays would pause there at its next tick.
+    const { component, container } = render(TranscriptPlayer, {
+      props: {
+        segments: segmentsByPart({ SPEAKER_00: 1, SPEAKER_01: 0 }),
+        fileCount: 2,
+        getAudioUrl: recording(["ok"], ["purged"])
+      }
+    });
+    await waitFor(() => expect(audioSrc(container)).toBe(URLS[0]));
+    const audio = container.querySelector("audio") as HTMLAudioElement;
+
+    component.playSpeakerSample("SPEAKER_00");
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith(purgedNotice(2)));
+    vi.mocked(HTMLMediaElement.prototype.pause).mockClear();
+    audio.currentTime = 600;
+    await fireEvent(audio, new Event("timeupdate"));
+
+    expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled();
+  });
+
+  it("reloads the part before by the retry after a switch that failed", async () => {
+    // Kills the mutant that drops the retry (or the part before) when a
+    // switch fails for a reason that is no purge: the tabs are disabled then.
+    let finishRetry!: () => void;
+    const retried = new Promise<void>((resolve) => (finishRetry = resolve));
+    const getAudioUrl = recording(["ok", retried], ["unavailable"]);
+    const { container } = render(TranscriptPlayer, {
+      props: { segments: parseTranscript(TRANSCRIPT), fileCount: 2, getAudioUrl }
+    });
+    await waitFor(() => expect(audioSrc(container)).toBe(URLS[0]));
+
+    await fireEvent.click(partTab(2));
+    await fireEvent.click(await screen.findByRole("button", { name: m.flow_retry() }));
+
+    // The load has started, not finished: the fault is gone, the transport waits.
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(getAudioUrl).toHaveBeenLastCalledWith(0);
+    expect(playButton().disabled).toBe(true);
+    finishRetry();
+    await waitFor(() => expect(playButton().disabled).toBe(false));
+    expect(partTab(1).getAttribute("aria-pressed")).toBe("true");
+    expect(partTab(2).disabled).toBe(false);
+  });
+
+  it("plays nothing of a part once the server says it is purged", async () => {
+    // Part 2 loads for a sample (autoplay still pending: no metadata here),
+    // a switch back fails, and the retry of part 2 answers purged. Kills
+    // three mutants: the part goes on playing from its old link, the
+    // pending autoplay starts later, and "listen" plays the old link. A
+    // fourth: "listen" for a sample in another part is refused as well.
+    const getAudioUrl = recording(["ok", "unavailable", "ok"], ["ok", "purged"]);
+    const { component, container } = render(TranscriptPlayer, {
+      props: {
+        segments: segmentsByPart({ SPEAKER_00: 1, SPEAKER_01: 0 }),
+        fileCount: 2,
+        getAudioUrl
+      }
+    });
+    await waitFor(() => expect(audioSrc(container)).toBe(URLS[0]));
+    const audio = container.querySelector("audio") as HTMLAudioElement;
+    component.playSpeakerSample("SPEAKER_00");
+    await waitFor(() => expect(audioSrc(container)).toBe(URLS[1]));
+    await fireEvent.click(partTab(1));
+    vi.mocked(HTMLMediaElement.prototype.pause).mockClear();
+
+    await fireEvent.click(await screen.findByRole("button", { name: m.flow_retry() }));
+    await screen.findByRole("status");
+
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(1);
+    audio.currentTime = 7;
+    await fireEvent(audio, new Event("loadedmetadata"));
+    component.playSpeakerSample("SPEAKER_00");
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+    expect(audio.currentTime).toBe(7);
+
+    // A sample in the other part loads, plays and stops at its end; so does
+    // the next sample in that part, now the current one. Kills three more:
+    // a sample that plays past its end after a load, one that does so in
+    // the current part, and "listen" still refused after the purged part.
+    component.playSpeakerSample("SPEAKER_01");
+    await waitFor(() => expect(audioSrc(container)).toBe(URLS[0]));
+    expect(screen.queryByRole("status")).toBeNull();
+    for (const sample of [1, 2]) {
+      if (sample === 1) await fireEvent(audio, new Event("loadedmetadata"));
+      else component.playSpeakerSample("SPEAKER_01");
+      expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(sample);
+      vi.mocked(HTMLMediaElement.prototype.pause).mockClear();
+      audio.currentTime = 600;
+      await fireEvent(audio, new Event("timeupdate"));
+      expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("asks the part again where it was, and playing if it was, after a refused switch hid its fault", async () => {
+    // Kills the mutant that reloads the part from its start, or silent.
+    const getAudioUrl = recording(["ok"], ["unavailable"], ["purged"]);
+    const { component, container } = render(TranscriptPlayer, {
+      props: {
+        segments: segmentsByPart({ SPEAKER_00: 2, SPEAKER_01: 0 }),
+        fileCount: 3,
+        getAudioUrl
+      }
+    });
+    await waitFor(() => expect(audioSrc(container)).toBe(URLS[0]));
+    const audio = container.querySelector("audio") as HTMLAudioElement;
+    await fireEvent.click(partTab(2));
+    await screen.findByRole("alert");
+    audio.currentTime = 42;
+    Object.defineProperty(audio, "paused", { configurable: true, get: () => false });
+
+    component.playSpeakerSample("SPEAKER_00");
+
+    await waitFor(() => expect(getAudioUrl.mock.calls).toEqual([[0], [1], [2], [0]]));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    audio.currentTime = 0;
+    await fireEvent(audio, new Event("loadedmetadata"));
+    expect(audio.currentTime).toBe(42);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1);
   });
 
   it("waits for the audio files and then signs the first one exactly once", async () => {

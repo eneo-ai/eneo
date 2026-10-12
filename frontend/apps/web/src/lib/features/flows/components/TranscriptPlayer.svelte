@@ -7,6 +7,12 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
+  import {
+    extractFlowApiError,
+    FLOW_API_ERROR_CODE,
+    getFlowRuntimeErrorMessageByCode
+  } from "$lib/features/flows/flowRuntimeErrorMapping";
   import { renderReviewedTranscript } from "../speakerReview";
   import {
     countFiles,
@@ -127,6 +133,14 @@
   let activeWordIndex = $state(-1);
   let loadingAudio = $state(false);
   let audioUnavailable = $state(false);
+  // The server said retention has removed the current part's recording. That
+  // is final: it is told by its own sentence, without the retry, and the
+  // other parts stay reachable.
+  const AUDIO_PURGED_CODE = FLOW_API_ERROR_CODE.RUN_INPUT_FILE_CONTENT_UNAVAILABLE;
+  let audioPurged = $state(false);
+  const purgedSentence = () =>
+    getFlowRuntimeErrorMessageByCode(AUDIO_PURGED_CODE) ??
+    m.flow_run_transcript_audio_unavailable();
 
   // Applied once the next source has its metadata, so a seek into a file that
   // is not loaded yet lands where the reviewer clicked.
@@ -172,22 +186,55 @@
     }))
   );
 
-  async function loadAudio(fileIndex: number, seekTo: number | null = null, autoplay = false) {
+  /** `playUntil`, when given, is where playback of the loaded part stops (a sample). */
+  async function loadAudio(
+    fileIndex: number,
+    seekTo: number | null = null,
+    autoplay = false,
+    playUntil?: number | null
+  ) {
     const generation = ++loadGeneration;
+    // This load hides what was said about the current part, or overtakes a
+    // load of it that is still in flight. Either way a refused switch must
+    // ask that part again instead of guessing its state.
+    const currentPartUnsettled = audioUnavailable || loadingAudio;
     loadingAudio = true;
     audioUnavailable = false;
+    audioPurged = false;
     try {
       const signed = await getAudioUrl(fileIndex);
       if (generation !== loadGeneration) return;
       pendingSeek = seekTo;
       pendingAutoplay = autoplay;
+      if (playUntil !== undefined) playbackEnd = playUntil;
       currentFile = fileIndex;
       expiresAt = signed.expires_at;
       src = signed.url;
     } catch (error) {
       if (generation !== loadGeneration) return;
       console.error("Failed to load transcript audio", error);
+      const purged = extractFlowApiError(error)?.code === AUDIO_PURGED_CODE;
+      if (purged && fileIndex !== currentFile) {
+        // Another part's recording is purged: the switch does not happen
+        // and the reader is told which part and why. The part they are on
+        // keeps playing; it is asked again only when its state is not known.
+        toast.info(
+          `${m.flow_run_transcript_part({ n: String(fileIndex + 1) })}: ${purgedSentence()}`
+        );
+        if (currentPartUnsettled) {
+          void loadAudio(currentFile, audioEl?.currentTime ?? 0, audioEl ? !audioEl.paused : false);
+        }
+        return;
+      }
+      audioPurged = purged;
       audioUnavailable = true;
+      if (purged) {
+        // Nothing of a purged part goes on playing, or starts later, from a
+        // link signed before.
+        audioEl?.pause();
+        pendingSeek = null;
+        pendingAutoplay = false;
+      }
     } finally {
       if (generation === loadGeneration) loadingAudio = false;
     }
@@ -467,11 +514,16 @@
   }
 
   function reviewSeek(file: number, time: number, autoplay: boolean, end?: number) {
-    playbackEnd = end ?? null;
+    // The current part's recording is purged: what the element may still
+    // hold of it was signed before that and is not played again.
+    if (audioPurged && file === currentFile) return;
     if (file !== currentFile || !audioEl) {
-      void loadAudio(file, time, autoplay);
+      // The sample's end belongs to the part being loaded: it is set when
+      // that part has loaded, not while another one may still be playing.
+      void loadAudio(file, time, autoplay, end ?? null);
       return;
     }
+    playbackEnd = end ?? null;
     audioEl.currentTime = time;
     if (autoplay) void audioEl.play().catch(markPlayFailure);
     else audioEl.pause();
@@ -623,18 +675,26 @@
 
     <div class="border-default bg-primary flex flex-col gap-2 border-b px-3 py-2">
       {#if audioUnavailable}
-        <Alert.Root variant="destructive" class="flex items-center gap-3 py-2">
+        <!-- Audio removed by retention is the expected end of a recording, not
+             a fault: it is a status without the error colour. -->
+        <Alert.Root
+          variant={audioPurged ? "default" : "destructive"}
+          role={audioPurged ? "status" : "alert"}
+          class="flex items-center gap-3 py-2"
+        >
           <Alert.Description class="flex-1 text-xs">
-            {m.flow_run_transcript_audio_unavailable()}
+            {audioPurged ? purgedSentence() : m.flow_run_transcript_audio_unavailable()}
           </Alert.Description>
-          <Button
-            variant="outline"
-            size="sm"
-            class="h-7 text-xs"
-            onclick={() => void loadAudio(currentFile, audioEl?.currentTime ?? 0)}
-          >
-            {m.flow_retry()}
-          </Button>
+          {#if !audioPurged}
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-7 text-xs"
+              onclick={() => void loadAudio(currentFile, audioEl?.currentTime ?? 0)}
+            >
+              {m.flow_retry()}
+            </Button>
+          {/if}
         </Alert.Root>
       {/if}
       <div class="flex flex-wrap items-center gap-2">
@@ -746,7 +806,7 @@
               size="sm"
               class="h-7 text-xs"
               aria-pressed={fileIndex === currentFile}
-              disabled={audioUnavailable}
+              disabled={audioUnavailable && !audioPurged}
               onclick={() => selectFile(fileIndex)}
             >
               {m.flow_run_transcript_part({ n: String(fileIndex + 1) })}
