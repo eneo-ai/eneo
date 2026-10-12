@@ -5,7 +5,6 @@ _TABLE_MODULES = (
     "eneo.database.tables.ai_models_table",
     "eneo.database.tables.allowed_origins_table",
     "eneo.database.tables.api_keys_v2_table",
-    "eneo.database.tables.audit_action_config_table",
     "eneo.database.tables.audit_category_config_table",
     "eneo.database.tables.audit_log_table",
     "eneo.database.tables.audit_retention_policy_table",
