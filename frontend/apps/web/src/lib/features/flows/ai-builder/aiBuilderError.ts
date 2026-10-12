@@ -232,6 +232,9 @@ const ERROR_COPY: Record<AIBuilderErrorCode, ErrorCopy> = {
   invalid_ai_builder_settings: () => m.ai_builder_error_invalid_settings(),
   insufficient_scope: () => m.ai_builder_error_insufficient_scope(),
   insufficient_space_permission: () => m.ai_builder_error_insufficient_space_permission(),
+  insufficient_tenant_permission: () => m.ai_builder_error_insufficient_tenant_permission(),
+  // Only a service key gets this answer, and none uses this client.
+  flow_service_key_principal_not_supported: null,
   invalid_existing_step_ref: () => m.ai_builder_error_step_changed(),
   // Also raised for a model's malformed step reference, which the reader
   // cannot act on: the failed operation is the honest sentence.

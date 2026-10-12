@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
+from eneo.flows.application.flow_authoring_refusal import FlowAuthoringRefusalCode
 from eneo.flows.application.flow_draft_materialization import (
     compile_flow_draft_changeset,
 )
@@ -189,7 +190,10 @@ async def test_materialize_template_attachment_refuses_changed_placeholder_contr
             template_asset_service=template_asset_service,
         )
 
-    assert exc_info.value.code == "architecture_materialization_failed"
+    assert (
+        exc_info.value.code
+        is FlowAuthoringRefusalCode.ARCHITECTURE_MATERIALIZATION_FAILED
+    )
     assert exc_info.value.context == {
         "reason": "template_placeholder_contract_changed",
         "approved_count": 1,
@@ -236,7 +240,10 @@ async def test_materialize_template_attachment_refuses_missing_approved_bindings
             template_asset_service=template_asset_service,
         )
 
-    assert exc_info.value.code == "architecture_materialization_failed"
+    assert (
+        exc_info.value.code
+        is FlowAuthoringRefusalCode.ARCHITECTURE_MATERIALIZATION_FAILED
+    )
     assert exc_info.value.context["reason"] == "template_binding_contract_missing"
     template_asset_service.create_from_existing_attached_file.assert_not_awaited()
 
@@ -291,7 +298,10 @@ def test_the_placeholder_contract_names_what_a_file_lacks_and_what_it_adds() -> 
             approved=frozenset({"a", "b"}), actual=frozenset({"a", "c"})
         )
 
-    assert refused.value.code == "architecture_materialization_failed"
+    assert (
+        refused.value.code
+        is FlowAuthoringRefusalCode.ARCHITECTURE_MATERIALIZATION_FAILED
+    )
     assert refused.value.context == {
         "reason": "template_placeholder_contract_changed",
         "approved_count": 2,

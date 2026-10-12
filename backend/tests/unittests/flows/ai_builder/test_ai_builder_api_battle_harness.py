@@ -12393,6 +12393,11 @@ def test_journey_economics_leave_classifier_spend_unknown_without_complete_evide
         ({"code": "planner_stream_failed", "details": {}}, "builder_semantic"),
         ({"code": "no_planner_model_available"}, "credential_route"),
         ({"code": "insufficient_space_permission"}, "harness_configuration"),
+        ({"code": "insufficient_tenant_permission"}, "harness_configuration"),
+        (
+            {"code": "flow_service_key_principal_not_supported"},
+            "harness_configuration",
+        ),
         ({"code": "self_correction_quality_failure"}, "builder_semantic"),
         ({"code": "planner_parse_error", "details": {}}, "builder_semantic"),
     ],

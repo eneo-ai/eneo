@@ -838,7 +838,7 @@ async def test_service_key_space_scoped_published_runtime_surfaces_work_and_ai_b
         headers={"X-API-Key": secret},
     )
     assert ai_builder_resp.status_code == 403, ai_builder_resp.text
-    assert ai_builder_resp.json()["code"] == "insufficient_space_permission"
+    assert ai_builder_resp.json()["code"] == "flow_service_key_principal_not_supported"
 
 
 @pytest.mark.integration

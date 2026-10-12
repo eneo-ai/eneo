@@ -161,6 +161,8 @@ class AIBuilderErrorCode(StrEnum):
     INVALID_AI_BUILDER_SETTINGS = "invalid_ai_builder_settings"
     INSUFFICIENT_SCOPE = "insufficient_scope"
     INSUFFICIENT_SPACE_PERMISSION = "insufficient_space_permission"
+    INSUFFICIENT_TENANT_PERMISSION = "insufficient_tenant_permission"
+    SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED = "flow_service_key_principal_not_supported"
     INVALID_EXISTING_STEP_REF = "invalid_existing_step_ref"
     INVALID_PLAN_STEP_REF = "invalid_plan_step_ref"
     INVALID_PLAN_STATUS = "invalid_plan_status"
@@ -984,6 +986,16 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
         ),
         AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION: _entry(
+            category=AIBuilderErrorCategory.UNAUTHORIZED,
+            http_status=403,
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+        ),
+        AIBuilderErrorCode.INSUFFICIENT_TENANT_PERMISSION: _entry(
+            category=AIBuilderErrorCategory.UNAUTHORIZED,
+            http_status=403,
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+        ),
+        AIBuilderErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED: _entry(
             category=AIBuilderErrorCategory.UNAUTHORIZED,
             http_status=403,
             eneo_error_code=ErrorCodes.UNAUTHORIZED,

@@ -11569,6 +11569,8 @@ export interface components {
       | "invalid_ai_builder_settings"
       | "insufficient_scope"
       | "insufficient_space_permission"
+      | "insufficient_tenant_permission"
+      | "flow_service_key_principal_not_supported"
       | "invalid_existing_step_ref"
       | "invalid_plan_step_ref"
       | "invalid_plan_status"
@@ -55651,10 +55653,10 @@ export interface operations {
           /**
            * @example {
            *       "category": "unauthorized",
-           *       "code": "insufficient_scope",
+           *       "code": "insufficient_tenant_permission",
            *       "diagnostic_context": {
            *         "error_category": "unauthorized",
-           *         "error_code": "insufficient_scope",
+           *         "error_code": "insufficient_tenant_permission",
            *         "error_phase": "router",
            *         "request_id": "req_01HZYXEXAMPLE"
            *       },

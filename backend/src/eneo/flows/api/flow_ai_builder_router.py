@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Annotated, Any, cast, get_args
+from types import MappingProxyType, SimpleNamespace
+from typing import TYPE_CHECKING, Annotated, Any, Final, cast, get_args
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
@@ -19,6 +19,7 @@ from sse_starlette import EventSourceResponse, ServerSentEvent
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.auth_dependencies import get_scope_filter
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -99,7 +100,6 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     ai_builder_error_example,
     build_ai_builder_error,
     build_ai_builder_error_event,
-    coerce_ai_builder_error_code,
     split_ai_builder_error_context,
     translate_unknown_model_capacity,
 )
@@ -157,9 +157,10 @@ from eneo.flows.ai_builder.ai_builder_tools import (
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.api import flow_access_context
-from eneo.flows.api.flow_definition_access import (
-    FlowOwnerRequiredException,
-    ensure_can_mutate_flow_draft,
+from eneo.flows.api.flow_definition_access import ensure_can_mutate_flow_draft
+from eneo.flows.application.flow_authoring_refusal import (
+    FlowAuthoringRefusalCode,
+    FlowAuthoringRefusalException,
 )
 from eneo.flows.application.flow_run_evidence_snapshot import (
     flow_run_evidence_snapshot_transaction,
@@ -174,6 +175,11 @@ from eneo.flows.flow_access_policy import (
     FlowApiAction,
     flow_action_access_reason,
     require_flow_action,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import (
+    FlowBadRequestException,
+    FlowUnauthorizedException,
 )
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
@@ -197,6 +203,47 @@ logger = get_logger(__name__)
 _FAILURE_PRODUCERS = frozenset(get_args(FailureProducer))
 
 
+# The Flows refusals a Builder route answers with, each under the Builder's
+# code for it. Any other refusal is logged as unexpected and answered with the
+# default code of its status.
+_REPUBLISHED_FLOW_REFUSALS: Final[
+    Mapping[
+        FlowApiErrorCode | AccessDenialCode | FlowAuthoringRefusalCode,
+        AIBuilderErrorCode,
+    ]
+] = MappingProxyType(
+    {
+        AccessDenialCode.INSUFFICIENT_SCOPE: AIBuilderErrorCode.INSUFFICIENT_SCOPE,
+        AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION: (
+            AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION
+        ),
+        AccessDenialCode.INSUFFICIENT_TENANT_PERMISSION: (
+            AIBuilderErrorCode.INSUFFICIENT_TENANT_PERMISSION
+        ),
+        FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED: (
+            AIBuilderErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED
+        ),
+        FlowApiErrorCode.OWNER_REQUIRED: AIBuilderErrorCode.FLOW_OWNER_REQUIRED,
+        FlowApiErrorCode.STALE_REVISION: AIBuilderErrorCode.STALE_REVISION,
+        FlowAuthoringRefusalCode.FLOW_IS_PUBLISHED: (
+            AIBuilderErrorCode.FLOW_IS_PUBLISHED
+        ),
+        FlowAuthoringRefusalCode.FLOW_SPACE_MISMATCH: (
+            AIBuilderErrorCode.FLOW_SPACE_MISMATCH
+        ),
+        FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF: (
+            AIBuilderErrorCode.INVALID_EXISTING_STEP_REF
+        ),
+        FlowAuthoringRefusalCode.ARCHITECTURE_MATERIALIZATION_FAILED: (
+            AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED
+        ),
+        FlowAuthoringRefusalCode.ASSISTANT_SHARED_BY_STEPS: (
+            AIBuilderErrorCode.BAD_REQUEST
+        ),
+    }
+)
+
+
 def _public_error_code_from_exception(
     error: BadRequestException | UnauthorizedException | NotFoundException,
     *,
@@ -204,8 +251,6 @@ def _public_error_code_from_exception(
     request_id: str | None,
     surface: str,
 ) -> AIBuilderErrorCode:
-    if isinstance(error, FlowOwnerRequiredException):
-        return AIBuilderErrorCode.FLOW_OWNER_REQUIRED
     if isinstance(
         error,
         (
@@ -215,6 +260,17 @@ def _public_error_code_from_exception(
         ),
     ):
         return error.code
+    if isinstance(
+        error,
+        (
+            FlowBadRequestException,
+            FlowUnauthorizedException,
+            FlowAuthoringRefusalException,
+        ),
+    ):
+        republished = _REPUBLISHED_FLOW_REFUSALS.get(error.code)
+        if republished is not None:
+            return republished
     logger.error(
         "AI Builder raw public exception reached adapter.",
         extra={
@@ -224,7 +280,7 @@ def _public_error_code_from_exception(
             "fallback_error_code": default.value,
         },
     )
-    return coerce_ai_builder_error_code(getattr(error, "code", None), default=default)
+    return default
 
 
 _PUBLIC_ERROR_TYPES = (
@@ -917,7 +973,7 @@ def _ai_builder_json_error_response(
         **_ai_builder_error_response(
             description="Caller lacks the Flow AI Builder permission.",
             message="You do not have permission to use Flow AI Builder.",
-            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
+            code=AIBuilderErrorCode.INSUFFICIENT_TENANT_PERMISSION,
         ),
     },
 )

@@ -36,6 +36,7 @@ describe("aiBuilderErrorText", () => {
     ["planner_model_missing_context_window", {}, m.ai_builder_model_capacity_undeclared()],
     ["planner_model_incompatible_token_limits", {}, m.ai_builder_model_capacity_too_small()],
     ["flow_owner_required", {}, m.flow_error_flow_owner_required()],
+    ["insufficient_tenant_permission", {}, m.ai_builder_error_insufficient_tenant_permission()],
     ["session_message_in_progress", {}, m.ai_builder_error_request_in_progress()],
     ["stale_revision", {}, m.ai_builder_error_flow_changed()],
     [

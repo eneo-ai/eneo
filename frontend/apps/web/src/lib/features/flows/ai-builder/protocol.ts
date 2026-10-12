@@ -736,6 +736,8 @@ const aiBuilderErrorCodes = [
   "invalid_ai_builder_settings",
   "insufficient_scope",
   "insufficient_space_permission",
+  "insufficient_tenant_permission",
+  "flow_service_key_principal_not_supported",
   "invalid_existing_step_ref",
   "invalid_plan_step_ref",
   "invalid_plan_status",

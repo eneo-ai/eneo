@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import partial
@@ -20,6 +21,7 @@ from fastapi.testclient import TestClient
 from eneo.actors.actors.space_actor import SpaceAccessFacts
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
@@ -93,6 +95,7 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     StepTriple,
 )
+from eneo.flows.api import flow_access_context
 from eneo.flows.api import flow_ai_builder_router as ai_builder_router_module
 from eneo.flows.api.flow_ai_builder_router import (
     AIBuilderEnvelopedError,
@@ -121,10 +124,26 @@ from eneo.flows.api.flow_ai_builder_router import (
 from eneo.flows.api.flow_ai_builder_router import (
     router as ai_builder_router,
 )
+from eneo.flows.api.flow_definition_access import FlowOwnerRequiredException
+from eneo.flows.application.flow_authoring_command import _load_current_flow
+from eneo.flows.application.flow_draft_materialization import (
+    _invalid_existing_step_ref,
+    _one_update_per_assistant,
+)
+from eneo.flows.application.flow_template_attachment_materialization import (
+    require_template_placeholder_contract,
+)
 from eneo.flows.flow_access_policy import (
     FlowAccessFilterMode,
     FlowApiAction,
+    require_flow_action,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import (
+    FlowBadRequestException,
+    FlowUnauthorizedException,
+)
+from eneo.flows.infrastructure.flow_repo import _stale_revision_error
 from eneo.main.exceptions import (
     AuditLoggingUnavailableException,
     BadRequestException,
@@ -134,6 +153,7 @@ from eneo.main.exceptions import (
 from eneo.roles.permissions import Permission
 from eneo.spaces.space import Space
 from tests.unit.api_key_test_utils import flatten_routes
+from tests.unittests.flows.test_flow_access_policy import _service_key_user, _user
 
 
 def test_ai_builder_openapi_errors_reference_public_error_contract() -> None:
@@ -374,6 +394,190 @@ def test_ai_builder_route_class_logs_raw_public_exception_fallback() -> None:
     assert records[0].surface == "route_bad_request"
     assert records[0].raw_error_code == "not_registered"
     assert records[0].fallback_error_code == "bad_request"
+
+
+def _refusal(error: Exception) -> Callable[[], None]:
+    def refuse() -> None:
+        raise error
+
+    return refuse
+
+
+def _answer_of_a_refusing_ai_builder_route(
+    refuse: Callable[[], object],
+) -> tuple[tuple[int, str, str, int], list[logging.LogRecord]]:
+    app = FastAPI()
+    app.add_exception_handler(
+        AIBuilderEnvelopedError, ai_builder_enveloped_error_handler
+    )
+    test_router = APIRouter(route_class=AIBuilderPublicErrorRoute)
+
+    @test_router.get("/refused")
+    async def refused() -> None:
+        refused_by = refuse()
+        if inspect.isawaitable(refused_by):
+            await refused_by
+
+    app.include_router(test_router)
+    with _captured_router_logs() as captured:
+        response = TestClient(app).get("/refused")
+    body = response.json()
+    answer = (
+        response.status_code,
+        body["code"],
+        body["category"],
+        body["eneo_error_code"],
+    )
+    return answer, [record for record in captured if record.levelno >= logging.ERROR]
+
+
+_COMMAND_SPACE_ID = uuid4()
+_SHARED_ASSISTANT_ID = uuid4()
+
+
+def _edit_command() -> SimpleNamespace:
+    return SimpleNamespace(
+        kind="edit", flow_id=uuid4(), space_id=_COMMAND_SPACE_ID, expected_revision=1
+    )
+
+
+def _flow_service(
+    *, space_id: UUID = _COMMAND_SPACE_ID, published_version: int | None = None
+) -> SimpleNamespace:
+    flow = SimpleNamespace(
+        id=uuid4(),
+        space_id=space_id,
+        published_version=published_version,
+        draft_revision=1,
+    )
+    return SimpleNamespace(get_flow=AsyncMock(return_value=flow))
+
+
+def _assistant_update(existing_step_ref: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        existing_step_ref=existing_step_ref,
+        existing_assistant_id=_SHARED_ASSISTANT_ID,
+        fields=frozenset({"instructions"}),
+        prompt_alias_renumbering={},
+        assistant_spec=None,
+    )
+
+
+def _saved_step(step_order: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        saved_step=SimpleNamespace(step_order=step_order),
+        assistant_id=_SHARED_ASSISTANT_ID,
+    )
+
+
+_FORBIDDEN = ("unauthorized", int(ErrorCodes.UNAUTHORIZED))
+_BAD_REQUEST = ("bad_request", int(ErrorCodes.BAD_REQUEST))
+
+
+@pytest.mark.parametrize(
+    ("refuse", "answer"),
+    [
+        pytest.param(
+            lambda: require_flow_action(
+                _user(Permission.FLOWS_VIEW), FlowApiAction.EDIT
+            ),
+            (403, "insufficient_tenant_permission", *_FORBIDDEN),
+            id="tenant permission, from the access policy",
+        ),
+        pytest.param(
+            lambda: require_flow_action(
+                _service_key_user(Permission.FLOWS), FlowApiAction.VIEW
+            ),
+            (403, "flow_service_key_principal_not_supported", *_FORBIDDEN),
+            id="service key, from the access policy",
+        ),
+        pytest.param(
+            _refusal(FlowOwnerRequiredException()),
+            (403, "flow_owner_required", *_FORBIDDEN),
+        ),
+        pytest.param(
+            _refusal(_stale_revision_error(flow_id=uuid4(), expected_revision=3)),
+            (409, "stale_revision", "conflict", int(ErrorCodes.BAD_REQUEST)),
+        ),
+        pytest.param(
+            flow_access_context._raise_scope_mismatch,
+            (403, "insufficient_scope", *_FORBIDDEN),
+            id="API key scope, from the flow access context",
+        ),
+        pytest.param(
+            _refusal(
+                FlowUnauthorizedException(
+                    "Refused.", code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION
+                )
+            ),
+            (403, "insufficient_space_permission", *_FORBIDDEN),
+        ),
+        pytest.param(
+            lambda: _load_current_flow(
+                command=_edit_command(), flow_service=_flow_service(published_version=2)
+            ),
+            (400, "flow_is_published", *_BAD_REQUEST),
+            id="published flow, from the authoring command",
+        ),
+        pytest.param(
+            lambda: _load_current_flow(
+                command=_edit_command(), flow_service=_flow_service(space_id=uuid4())
+            ),
+            (400, "flow_space_mismatch", *_BAD_REQUEST),
+            id="space mismatch, from the authoring command",
+        ),
+        pytest.param(
+            _refusal(
+                _invalid_existing_step_ref(
+                    "Refused.", reason="unknown_existing_step_ref"
+                )
+            ),
+            (400, "invalid_existing_step_ref", *_BAD_REQUEST),
+        ),
+        pytest.param(
+            lambda: require_template_placeholder_contract(
+                approved=frozenset({"name"}), actual=frozenset({"date"})
+            ),
+            (400, "architecture_materialization_failed", *_BAD_REQUEST),
+            id="template placeholders, from the attachment materialization",
+        ),
+        pytest.param(
+            lambda: _one_update_per_assistant(
+                [_assistant_update("existing_step_1")],
+                [_saved_step(1), _saved_step(2)],
+            ),
+            (400, "bad_request", *_BAD_REQUEST),
+            id="shared assistant, from the draft materialization",
+        ),
+    ],
+)
+def test_ai_builder_route_answers_a_flows_refusal_under_the_builders_code_for_it(
+    refuse: Callable[[], None], answer: tuple[int, str, str, int]
+) -> None:
+    assert _answer_of_a_refusing_ai_builder_route(refuse) == (answer, [])
+
+
+@pytest.mark.parametrize(
+    ("refusal", "raw_code"),
+    [
+        # A typed Flows refusal the Builder has no code for.
+        (
+            FlowBadRequestException(
+                "Too many steps.", code=FlowApiErrorCode.STEP_LIMIT_EXCEEDED
+            ),
+            "flow_step_limit_exceeded",
+        ),
+        # A Builder value that arrives as a bare string is not looked up.
+        (BadRequestException("Refused.", code="stale_revision"), "stale_revision"),
+    ],
+)
+def test_ai_builder_route_logs_a_refusal_it_does_not_republish(
+    refusal: Exception, raw_code: str
+) -> None:
+    answer, errors = _answer_of_a_refusing_ai_builder_route(_refusal(refusal))
+
+    assert answer == (400, "bad_request", *_BAD_REQUEST)
+    assert [record.raw_error_code for record in errors] == [raw_code]
 
 
 # ---------------------------------------------------------------------------

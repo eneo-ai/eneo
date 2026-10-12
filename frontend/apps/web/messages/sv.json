@@ -7704,6 +7704,7 @@
   "ai_builder_error_invalid_settings": "AI-byggarens inställningar är ogiltiga. Kontakta din administratör.",
   "ai_builder_error_insufficient_scope": "API-nyckeln som används gäller inte den här ytan. Kontakta din administratör.",
   "ai_builder_error_insufficient_space_permission": "Du har inte behörighet att använda AI-byggaren i den här ytan. Be ytans ägare eller en administratör om behörighet.",
+  "ai_builder_error_insufficient_tenant_permission": "Din roll i organisationen saknar en behörighet som åtgärden kräver. Be en administratör om behörighet.",
   "ai_builder_error_step_changed": "Steget har ändrats eller tagits bort i flödet. Hämta det senaste läget och försök igen.",
   "ai_builder_error_plan_already_handled": "Planen har redan godkänts eller ändrats, kanske i en annan flik. Hämta det senaste läget.",
   "ai_builder_error_client_outdated": "Sidan behöver laddas om innan du kan svara. Ladda om sidan och försök igen.",

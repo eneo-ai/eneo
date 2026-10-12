@@ -9,6 +9,7 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,
 )
+from eneo.flows.application.flow_authoring_refusal import FlowAuthoringRefusalCode
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind,
     InvalidExistingStepRefReason,
@@ -443,7 +444,7 @@ def test_shared_compile_rejects_omitted_existing_step_without_explicit_removal()
     with pytest.raises(BadRequestException) as exc_info:
         compile_flow_draft_changeset(spec, current_flow=current_flow)
 
-    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.code is FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF
     assert exc_info.value.context == {
         "reason": "missing_existing_step_ref",
         "missing_refs": ["existing_step_2"],
@@ -506,7 +507,7 @@ def test_shared_compile_rejects_unknown_removed_existing_step_ref() -> None:
             removed_existing_step_refs=frozenset({"existing_step_99"}),
         )
 
-    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.code is FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF
     assert exc_info.value.context == {
         "reason": "unknown_removed_existing_step_ref",
         "unknown_refs": ["existing_step_99"],
@@ -529,7 +530,7 @@ def test_shared_compile_rejects_unknown_preserved_existing_step_ref() -> None:
             removed_existing_step_refs=frozenset({"existing_step_1"}),
         )
 
-    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.code is FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF
     assert exc_info.value.context == {
         "reason": "unknown_existing_step_ref",
         "unknown_refs": ["existing_step_99"],
@@ -553,7 +554,7 @@ def test_shared_compile_rejects_preserved_and_removed_existing_ref_overlap() -> 
             removed_existing_step_refs=frozenset({"existing_step_1"}),
         )
 
-    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.code is FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF
     assert exc_info.value.context == {
         "reason": "preserved_and_removed_existing_step_ref",
         "overlap_refs": ["existing_step_1"],
@@ -573,7 +574,7 @@ def test_shared_compile_rejects_duplicate_existing_step_ref() -> None:
     with pytest.raises(BadRequestException) as exc_info:
         compile_flow_draft_changeset(spec, current_flow=current_flow)
 
-    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.code is FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF
     assert exc_info.value.context == {
         "reason": "duplicate_existing_step_ref",
         "duplicate_refs": ["existing_step_1"],
@@ -615,7 +616,7 @@ def test_shared_compile_rejects_create_spec_with_existing_step_ref() -> None:
     with pytest.raises(BadRequestException) as exc_info:
         compile_flow_draft_changeset(spec, current_flow=None)
 
-    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.code is FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF
     assert exc_info.value.context == {
         "reason": "create_cannot_use_existing_step_ref",
         "existing_step_ref": "existing_step_1",
@@ -635,7 +636,7 @@ def test_shared_compile_rejects_create_with_removed_existing_step_refs() -> None
             removed_existing_step_refs=frozenset({"existing_step_1"}),
         )
 
-    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.code is FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF
     assert exc_info.value.context == {
         "reason": "create_cannot_remove_existing_step_refs",
         "removed_refs": ["existing_step_1"],
@@ -1510,7 +1511,7 @@ def test_a_kept_read_follows_its_producer_or_the_edit_is_refused(
     if not readable:
         with pytest.raises(BadRequestException) as exc_info:
             _compile_topology(flow, order, removed)
-        assert exc_info.value.code == "invalid_existing_step_ref"
+        assert exc_info.value.code is FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF
         context = exc_info.value.context or {}
         assert context["reason"] == "kept_read_lost_its_producer"
         assert context["reader_ref"] == "existing_step_3"
@@ -1639,7 +1640,7 @@ def test_a_read_that_named_no_step_when_saved_is_refused_once_the_edit_makes_it_
     with pytest.raises(BadRequestException) as exc_info:
         _compile_topology(flow, ["new", "new", "new", 1, 2, 3], set())
 
-    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.code is FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF
     context = exc_info.value.context or {}
     assert context["reason"] == "dangling_read_now_bound"
     assert context["reader_ref"] == "existing_step_3"

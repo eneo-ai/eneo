@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import BackgroundTasks
 
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileType
@@ -448,7 +449,7 @@ def _assert_scope_mismatch(
     error = exc_info.value
     if message is not None:
         assert str(error) == message
-    assert error.code == "insufficient_scope"
+    assert error.code is AccessDenialCode.INSUFFICIENT_SCOPE
     assert error.context == {"auth_layer": "api_key_scope"}
 
 

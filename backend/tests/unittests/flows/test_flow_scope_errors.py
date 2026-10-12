@@ -15,6 +15,7 @@ import pytest
 from fastapi import BackgroundTasks
 
 from eneo.actors.actors.space_actor import SpaceRole
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.flows.api import flow_access_context as flow_access_context_module
 from eneo.flows.api.flow_authoring_router import (
@@ -269,7 +270,7 @@ async def test_list_flow_runs_viewer_cannot_read_unpublished_flow(monkeypatch):
             container=container,
         )
 
-    assert exc_info.value.code == "insufficient_space_permission"
+    assert exc_info.value.code is AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION
     run_service.list_run_statuses.assert_not_awaited()
 
 
@@ -451,7 +452,7 @@ async def test_get_flow_rejects_non_member():
 
     with pytest.raises(UnauthorizedException) as exc_info:
         await definition_get_flow(id=flow_id, request=_request(), container=container)
-    assert exc_info.value.code == "insufficient_space_permission"
+    assert exc_info.value.code is AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION
 
 
 @pytest.mark.asyncio
@@ -472,7 +473,7 @@ async def test_get_flow_viewer_cannot_read_unpublished():
 
     with pytest.raises(UnauthorizedException) as exc_info:
         await definition_get_flow(id=flow_id, request=_request(), container=container)
-    assert exc_info.value.code == "insufficient_space_permission"
+    assert exc_info.value.code is AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION
 
 
 @pytest.mark.asyncio
@@ -498,7 +499,7 @@ async def test_update_flow_rejects_viewer():
             flow_in=update_req,
             container=container,
         )
-    assert exc_info.value.code == "insufficient_space_permission"
+    assert exc_info.value.code is AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION
 
 
 @pytest.mark.asyncio
@@ -549,7 +550,7 @@ async def test_delete_flow_rejects_viewer():
         await definition_delete_flow(
             id=flow_id, request=_request(), container=container
         )
-    assert exc_info.value.code == "insufficient_space_permission"
+    assert exc_info.value.code is AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION
     assert exc_info.value.context == {"auth_layer": "space_membership"}
 
 
@@ -596,7 +597,7 @@ async def test_publish_flow_rejects_editor_in_personal_space():
         await definition_publish_flow(
             id=flow_id, request=_request(), container=container
         )
-    assert exc_info.value.code == "insufficient_space_permission"
+    assert exc_info.value.code is AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION
     assert exc_info.value.context == {"auth_layer": "space_membership"}
 
 
@@ -643,7 +644,7 @@ async def test_unpublish_flow_rejects_without_publish_permission():
         await definition_unpublish_flow(
             id=flow_id, request=_request(), container=container
         )
-    assert exc_info.value.code == "insufficient_space_permission"
+    assert exc_info.value.code is AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION
     assert exc_info.value.context == {"auth_layer": "space_membership"}
 
 
@@ -720,7 +721,7 @@ async def test_list_flows_rejects_non_member(monkeypatch):
             space_id=space_id,
             container=container,
         )
-    assert exc_info.value.code == "insufficient_space_permission"
+    assert exc_info.value.code is AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION
 
 
 @pytest.mark.asyncio
@@ -880,7 +881,7 @@ async def test_create_flow_rejects_non_member(monkeypatch):
             flow_in=flow_in,
             container=container,
         )
-    assert exc_info.value.code == "insufficient_space_permission"
+    assert exc_info.value.code is AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION
 
 
 @pytest.mark.asyncio
@@ -954,7 +955,7 @@ async def test_enforce_flow_scope_rejects_non_member_on_consumer_endpoint(monkey
             background_tasks=BackgroundTasks(),
             container=container,
         )
-    assert exc_info.value.code == "insufficient_space_permission"
+    assert exc_info.value.code is AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION
 
 
 @pytest.mark.asyncio

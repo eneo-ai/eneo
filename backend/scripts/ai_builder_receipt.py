@@ -271,6 +271,8 @@ _HARNESS_CONFIGURATION_ERROR_CODES = frozenset(
         "flow_space_mismatch",
         "insufficient_scope",
         "insufficient_space_permission",
+        "insufficient_tenant_permission",
+        "flow_service_key_principal_not_supported",
         "invalid_plan_status",
         "invalid_question_payload",
         "not_found",

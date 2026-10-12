@@ -7704,6 +7704,7 @@
   "ai_builder_error_invalid_settings": "The AI Builder settings are invalid. Contact your administrator.",
   "ai_builder_error_insufficient_scope": "The API key in use does not cover this space. Contact your administrator.",
   "ai_builder_error_insufficient_space_permission": "You do not have permission to use the AI Builder in this space. Ask the space owner or an administrator for access.",
+  "ai_builder_error_insufficient_tenant_permission": "Your role in the organisation lacks a permission this action needs. Ask an administrator for access.",
   "ai_builder_error_step_changed": "The step has changed or been removed from the flow. Get the latest state and try again.",
   "ai_builder_error_plan_already_handled": "The plan has already been approved or changed, perhaps in another tab. Get the latest state.",
   "ai_builder_error_client_outdated": "The page needs to be reloaded before you can answer. Reload the page and try again.",
