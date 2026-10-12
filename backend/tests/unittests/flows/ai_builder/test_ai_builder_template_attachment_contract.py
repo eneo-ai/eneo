@@ -697,6 +697,38 @@ def test_contract_drops_unused_json_step_before_template_fill() -> None:
     }
 
 
+def test_a_placeholder_step_number_names_the_step_at_that_position() -> None:
+    # Kills the mutants that shift or drop the position: step_1 is the first step.
+    contracted = apply_template_attachment_contract(
+        _template_spec(),
+        selected_template_count=1,
+        placeholders=("step_1.output.text",),
+    )
+
+    assert contracted.steps[-1].output_config == {
+        "bindings": {"step_1.output.text": "{{ step_a.output.text }}"}
+    }
+
+
+@pytest.mark.parametrize("step_number", ["\u00b2", "9" * 5000])
+def test_a_placeholder_step_number_that_is_no_number_is_unresolved(
+    step_number: str,
+) -> None:
+    # Kills the mutant that converts the digits unguarded: "\u00b2" is a digit that
+    # is no number and Python converts at most 4300 digits, so a Word template
+    # with such a placeholder raised ValueError out of the contract.
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        apply_template_attachment_contract(
+            _template_spec(),
+            selected_template_count=1,
+            placeholders=(f"step_{step_number}.output.text",),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "template_placeholder_unresolved"
+    )
+
+
 def test_contract_keeps_text_step_referenced_by_template() -> None:
     spec = _template_spec()
     referenced_text_step = spec.steps[0].model_copy(

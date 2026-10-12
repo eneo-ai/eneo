@@ -73,6 +73,7 @@ from eneo.flows.input_binding_contract_rules import (
     derive_structured_projection_contract,
     is_structured_projection_binding,
 )
+from eneo.flows.variable_resolver import decimal_number
 
 _LOCAL_TEMPLATE_CONFIG_KEYS = frozenset(
     {
@@ -1013,9 +1014,9 @@ def _referenced_step(
         if step.plan_step_ref == head:
             return index, step
     if head.startswith("step_"):
-        raw_order = head.removeprefix("step_")
-        if raw_order.isdigit():
-            index = int(raw_order) - 1
+        order = decimal_number(head.removeprefix("step_"))
+        if order is not None:
+            index = order - 1
             if 0 <= index < len(spec.steps):
                 return index, spec.steps[index]
     return None

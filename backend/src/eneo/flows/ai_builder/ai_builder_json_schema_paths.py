@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any, cast
 
+from eneo.flows.variable_resolver import decimal_number
+
 _COMPOSITE_SCHEMA_KEYWORDS = ("allOf", "anyOf", "oneOf")
 
 
@@ -25,7 +27,8 @@ def missing_structured_output_path(
 
         schema_type = current.get("type")
         if schema_type == "array":
-            if not part.isdigit():
+            # The same reading as the runtime's list index.
+            if decimal_number(part) is None:
                 return ".".join(traversed)
             current = _dict_or_none(current.get("items"))
             if current is None:

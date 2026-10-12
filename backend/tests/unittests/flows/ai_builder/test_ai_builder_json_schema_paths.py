@@ -25,6 +25,12 @@ def test_missing_structured_output_path_accepts_whole_arrays_and_numeric_indexes
 
     assert missing_structured_output_path(contract, "risker") is None
     assert missing_structured_output_path(contract, "risker.0.rubrik") is None
+    # Kills the mutant that asks isdigit(): "\u00b2" is a digit that is no number,
+    # and the runtime refuses it as a list index.
+    assert (
+        missing_structured_output_path(contract, "risker.\u00b2.rubrik")
+        == "risker.\u00b2"
+    )
 
 
 def test_missing_structured_output_path_reports_first_missing_segment() -> None:
