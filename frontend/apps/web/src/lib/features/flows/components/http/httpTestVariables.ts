@@ -1,3 +1,5 @@
+import { isJsonObject } from "../../jsonObject";
+
 export type HttpTestVariablesParseResult =
   { ok: true; value: Record<string, unknown> } | { ok: false };
 
@@ -15,8 +17,4 @@ export function parseHttpTestVariables(raw: string): HttpTestVariablesParseResul
   }
 
   return { ok: false };
-}
-
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

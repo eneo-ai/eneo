@@ -3,6 +3,7 @@ import {
   collectTemplateNonStepTokens,
   collectTemplateStepReferenceOrders
 } from "./flowVariableTokens";
+import { isJsonObject } from "./jsonObject";
 
 const SOURCE_REFS_BINDING_KEY = "source_refs";
 const SUPPORTED_INPUT_BINDING_KEYS = new Set(["question", SOURCE_REFS_BINDING_KEY]);
@@ -105,7 +106,7 @@ export function parseFlowInputBindings(inputBindings: unknown): FlowInputBinding
   if (inputBindings === null || inputBindings === undefined) {
     return validInputBindings(null, []);
   }
-  if (!isRecord(inputBindings)) return invalidInputBindings();
+  if (!isJsonObject(inputBindings)) return invalidInputBindings();
   if (Object.keys(inputBindings).some((key) => !SUPPORTED_INPUT_BINDING_KEYS.has(key))) {
     return invalidInputBindings();
   }
@@ -159,7 +160,7 @@ export function hasDeletedInputBindingSourceRefs(inputBindings: unknown): boolea
   if (!Array.isArray(rawRefs)) return false;
   return rawRefs.some(
     (rawRef) =>
-      isRecord(rawRef) &&
+      isJsonObject(rawRef) &&
       typeof rawRef.step_ref === "string" &&
       getDeletedStepOrderFromStepRef(rawRef.step_ref) !== null
   );
@@ -188,7 +189,7 @@ export function getFlowInputMaterialOptions(
     const stepRef = `step_${step.step_order}`;
     const sourceStepName = stringValue(step.user_description);
     const output = step.output_type === "json" ? "structured" : "text";
-    if (output === "structured" && !isRecord(step.output_contract)) continue;
+    if (output === "structured" && !isJsonObject(step.output_contract)) continue;
     options.push({
       key: `${stepRef}:${output}:*`,
       stepRef,
@@ -209,8 +210,8 @@ export function getFlowInputMaterialOptions(
         sourceStepName,
         output: "structured",
         fieldPath,
-        schemaType: isRecord(schema) ? stringValue(schema.type) : null,
-        description: isRecord(schema) ? stringValue(schema.description) : null
+        schemaType: isJsonObject(schema) ? stringValue(schema.type) : null,
+        description: isJsonObject(schema) ? stringValue(schema.description) : null
       });
     }
   }
@@ -341,7 +342,7 @@ export function remapInputBindingSourceRefs(
   let changed = false;
   const rewrittenDeletedReferences = new Set<number>();
   const rewrittenRefs = rawRefs.map((rawRef) => {
-    if (!isRecord(rawRef) || typeof rawRef.step_ref !== "string") return rawRef;
+    if (!isJsonObject(rawRef) || typeof rawRef.step_ref !== "string") return rawRef;
     const oldOrder = getStepOrderFromStepRef(rawRef.step_ref);
     if (oldOrder === null) return rawRef;
 
@@ -382,7 +383,7 @@ function getDeletedStepOrderFromStepRef(stepRef: string): number | null {
 }
 
 function rawInputBindingRecord(inputBindings: unknown): Record<string, unknown> | null {
-  return isRecord(inputBindings) ? inputBindings : null;
+  return isJsonObject(inputBindings) ? inputBindings : null;
 }
 
 function validInputBindings(
@@ -407,7 +408,7 @@ function invalidInputBindings(): FlowInputBindingsState {
 }
 
 function parseSourceRef(value: unknown): FlowInputBindingSourceRef | null {
-  if (!isRecord(value)) return null;
+  if (!isJsonObject(value)) return null;
   if (Object.keys(value).some((key) => !SUPPORTED_SOURCE_REF_KEYS.has(key))) return null;
 
   const stepRef = stringValue(value.step_ref);
@@ -459,12 +460,8 @@ function updatedInputBindings(
 }
 
 function outputContractProperties(contract: unknown): [string, unknown][] {
-  if (!isRecord(contract) || !isRecord(contract.properties)) return [];
+  if (!isJsonObject(contract) || !isJsonObject(contract.properties)) return [];
   return Object.entries(contract.properties);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function stringValue(value: unknown): string | null {

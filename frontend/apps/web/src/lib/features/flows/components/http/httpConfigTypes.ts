@@ -1,3 +1,5 @@
+import { isJsonObject } from "../../jsonObject";
+
 export type HttpAuthMode = "none" | "bearer_token" | "api_key" | "basic_auth";
 
 export interface HttpAuthNone {
@@ -25,7 +27,7 @@ export interface SecretSentinel {
 export type SecretValue = string | SecretSentinel;
 
 export function isSecretSentinel(value: unknown): value is SecretSentinel {
-  return isRecord(value) && value.$secret === "stored";
+  return isJsonObject(value) && value.$secret === "stored";
 }
 
 export type HttpBodyMode = "auto" | "json_template" | "text_template" | "none";
@@ -56,7 +58,7 @@ export function parseHttpAuthoredConfig(
   value: unknown,
   defaults: HttpAuthoredConfig
 ): HttpAuthoredConfig {
-  const record = isRecord(value) ? value : {};
+  const record = isJsonObject(value) ? value : {};
   return {
     url: stringOrDefault(record.url, defaults.url),
     auth: parseHttpAuth(record.auth, defaults.auth),
@@ -68,7 +70,7 @@ export function parseHttpAuthoredConfig(
 }
 
 function parseHttpAuth(value: unknown, defaults: HttpAuth): HttpAuth {
-  if (!isRecord(value) || typeof value.mode !== "string") {
+  if (!isJsonObject(value) || typeof value.mode !== "string") {
     return cloneHttpAuth(defaults);
   }
 
@@ -108,7 +110,7 @@ function parseHttpAuth(value: unknown, defaults: HttpAuth): HttpAuth {
 }
 
 function parseHttpBody(value: unknown, defaults: HttpBody): HttpBody {
-  if (!isRecord(value)) {
+  if (!isJsonObject(value)) {
     return cloneHttpBody(defaults);
   }
 
@@ -126,7 +128,7 @@ function parseCustomHeaders(value: unknown, defaults: CustomHeader[]): CustomHea
   }
 
   return value.flatMap((item) => {
-    if (!isRecord(item)) return [];
+    if (!isJsonObject(item)) return [];
     return [
       {
         name: stringOrDefault(item.name, ""),
@@ -206,8 +208,4 @@ function isHttpBodyMode(value: unknown): value is HttpBodyMode {
   return (
     value === "auto" || value === "json_template" || value === "text_template" || value === "none"
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

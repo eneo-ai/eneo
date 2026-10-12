@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { Flow } from "@eneo/eneo-js";
+  // Type only: the component itself arrives with the lazily fetched graph chunk.
+  import type FlowGraph from "./FlowGraph.svelte";
   import type { NamedSecurityLevel } from "$lib/features/flows/flowClassificationNames";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconRefresh } from "@eneo/icons/refresh";
@@ -25,9 +27,7 @@
 
   let isOpen = $state(false);
   let isEnlarged = $state(false);
-  // Dynamically imported Svelte component; concrete shape is unknown at this call site.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let FlowGraphComponent: any = $state(null);
+  let FlowGraphComponent: typeof FlowGraph | null = $state(null);
   let loadState: "idle" | "loading" | "ready" | "error" = $state("idle");
 
   // The graph chunk carries @xyflow/svelte and dagre, so it is fetched the
@@ -78,8 +78,8 @@
       {flow}
       {activeStepId}
       {classifications}
-      onnodeclick={(id: string) => onNodeClick?.(id)}
-      oncontentsize={(size: { width: number; height: number }) => (contentSize = size)}
+      onnodeclick={(id) => onNodeClick?.(id)}
+      oncontentsize={(size) => (contentSize = size)}
     />
   {:else if loadState === "error"}
     <div class="text-secondary flex h-full flex-col items-center justify-center gap-3">
@@ -172,7 +172,7 @@
           {flow}
           {activeStepId}
           {classifications}
-          onnodeclick={(id: string) => {
+          onnodeclick={(id) => {
             onNodeClick?.(id);
             isEnlarged = false;
           }}
