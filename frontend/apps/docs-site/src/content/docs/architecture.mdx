@@ -251,11 +251,14 @@ backend/
 
 **Schema conventions:** every table is declared in
 `backend/src/eneo/database/tables/`. Table names are derived from the class
-name in snake case, primary keys are UUIDs, and rows carry `created_at` and
-`updated_at`. Junction tables (`BaseCrossReference`) use composite primary keys
-but carry the same two timestamps. The integration suite selects every junction
-model's full column set against the migrated schema, so a model whose
-migration is missing a column fails CI.
+name in snake case. Entity tables use UUID primary keys and carry `created_at`
+and `updated_at`. Junction tables use composite primary keys;
+`BaseCrossReference` supplies both timestamps. The distribution links
+`groups_spaces` and `websites_spaces` use `CreatedAtMixin` and only carry
+`created_at`: links are inserted or deleted and have no mutable settings.
+The integration suite selects the full column set of every `BaseCrossReference`
+model plus these two distribution models against the migrated schema, so a
+missing table or column fails CI.
 
 **Core tables:**
 
