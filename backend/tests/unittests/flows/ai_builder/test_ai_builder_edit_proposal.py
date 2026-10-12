@@ -105,6 +105,8 @@ from eneo.flows.assistant_authoring_snapshot import (
 from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.enums import FlowOutputMode
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FormFieldSpec,
@@ -1266,6 +1268,28 @@ async def test_an_edit_failure_records_only_a_reason_its_producer_declares() -> 
     assert isinstance(result, CorrectableFailure), result
     assert result.producers == {"assembly"}
     assert result.codes == frozenset({"invalid_existing_step_ref"})
+
+
+@pytest.mark.asyncio
+async def test_an_edit_failure_records_the_wire_code_of_a_typed_flow_refusal() -> None:
+    flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
+        side_effect=FlowBadRequestException(
+            "Edit refused.", code=FlowApiErrorCode.STEP_LIMIT_EXCEEDED
+        ),
+    ):
+        result = await _process(
+            flow=flow,
+            arguments={
+                "plan_rationale": "Keep the analysis step.",
+                "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+            },
+        )
+
+    assert isinstance(result, CorrectableFailure), result
+    assert result.codes == frozenset({"flow_step_limit_exceeded"})
 
 
 @pytest.mark.asyncio

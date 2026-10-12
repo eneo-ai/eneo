@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from enum import Enum, unique
+from enum import StrEnum, unique
 
 
 @unique
-class FlowApiErrorCode(str, Enum):
+class FlowApiErrorCode(StrEnum):
     """Public Flow error codes with generated SDK and localized client messages."""
 
     FLOW_NOT_PUBLISHED = "flow_not_published"
