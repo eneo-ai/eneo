@@ -74,7 +74,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <header>
 <p class="kicker">Underlag för dataskyddsombudet · utkast för synpunkter</p>
 <h1>Så gallrar Eneo:<br>när, vem och hur</h1>
-<p class="lead">Eneo får en gemensam gallringsmotor för chattar, appar och uppladdade filer. Flows ansluts i nästa steg. Detta dokument beskriver när uppgifter gallras, vem som har kontroll och vad som finns kvar i loggen efteråt.</p>
+<p class="lead">Eneo får en gemensam gallringsmotor för chattar, appar och uppladdade filer. Flows ansluts i nästa steg. Dokumentet beskriver när uppgifter gallras, vem som har kontroll och vad som kan spåras efteråt, så att dataskyddsombudet kan bedöma förslaget innan det tas i drift.</p>
 <div class="summary">
 <p><strong>När:</strong> när lagringstiden för en fråga eller en appkörning har gått ut. Motorn prövar varje natt och raderar bara det som regeln tillåter just då.</p>
 <p><strong>Vem:</strong> verksamheten sätter lagringstiden per utrymme, assistent eller app. Driftansvarig styr om motorn körs och hur mycket den får göra per natt. Ingen lagringstid betyder ingen automatisk gallring.</p>
@@ -86,6 +86,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 
 <section aria-labelledby="concept-title">
 <h2 id="concept-title">1. Konceptet i en bild</h2>
+<p>Med gallring menas här radering som är slutgiltig i produkten, sker vid en bestämd tid under ett bestämt ansvar, och kan spåras i loggen utan att innehållet sparas. Bild 1 visar delarna: de områden som lämnar förfallna poster, motorn som prövar och raderar dem, filägaren som avgör om en fil får släppas, objektlagringen som raderar innehållet, och auditloggen som visar resultatet.</p>
 <figure>
 <div class="diagram-wrap">
 <svg class="chart" viewBox="0 0 1000 570" role="img" aria-labelledby="concept-chart-title concept-chart-desc">
@@ -133,7 +134,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <text class="sub start" x="40" y="532">Radering av en fil överallt är ett särskilt beslut med egen omfattning och egen rapport. Den funktionen är planerad, inte byggd.</text>
 </svg>
 </div>
-<figcaption>Chattar, appar och uppladdningar använder samma motor. Flows ansluts med samma regler i nästa steg.</figcaption>
+<figcaption>Bild 1. Chattar, appar och uppladdningar använder samma motor. Flows ansluts med samma regler i nästa steg.</figcaption>
 </figure>
 </section>
 
@@ -151,11 +152,11 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <p><strong>Planerad.</strong> Den byggs som ett eget steg efter att motorn är i drift. Tills dess tas en fil bort manuellt av en behörig person.</p>
 </div>
 </div>
-<p class="small">Systemet rapporterar aldrig det ena som det andra. En gallrad chatt betyder inte att en delad fil är borta, och tvärtom.</p>
 </section>
 
 <section aria-labelledby="who-title">
 <h2 id="who-title">3. Vem bestämmer vad</h2>
+<p>Fyra roller delar på kontrollen (bild 2). Verksamheten bestämmer vad och när, driftansvarig bestämmer om och hur mycket, systemet verkställer, och administratören följer upp.</p>
 <figure>
 <div class="diagram-wrap">
 <svg class="chart" viewBox="0 0 1000 260" role="img" aria-labelledby="who-chart-title who-chart-desc">
@@ -194,7 +195,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <text class="sub" x="867" y="180">i sig.</text>
 </svg>
 </div>
-<figcaption>Ingen lagringstid på någon nivå betyder ingen automatisk gallring av den historiken.</figcaption>
+<figcaption>Bild 2. Ingen lagringstid på någon nivå betyder ingen automatisk gallring av den historiken.</figcaption>
 </figure>
 
 <div class="table-wrap" style="margin-top:32px">
@@ -240,6 +241,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 
 <section aria-labelledby="when-title">
 <h2 id="when-title">5. När gallras informationen?</h2>
+<p>Bild 3 följer en fråga från att den sparas till att den raderas, med ett utrymme som har 30 dagar som exempel.</p>
 <figure>
 <div class="diagram-wrap">
 <svg class="chart" viewBox="0 0 1000 250" role="img" aria-labelledby="when-chart-title when-chart-desc">
@@ -261,7 +263,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <text class="sub" x="640" y="232">Efter ett dygn räknas den som försenad och syns i hälsostatusen.</text>
 </svg>
 </div>
-<figcaption>Den nattliga körningen startar kl. 03.30 i standardinstallationen (UTC). Driftansvarig kan ändra tidpunkten.</figcaption>
+<figcaption>Bild 3. Den nattliga körningen startar kl. 03.30 i standardinstallationen (UTC). Driftansvarig kan ändra tidpunkten.</figcaption>
 </figure>
 <div class="table-wrap" style="margin-top:32px">
 <table>
@@ -277,13 +279,13 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 </div>
 <div class="note">
 <p><strong>Fördröjning.</strong> Automatisk gallring sker tidigast natten efter att tiden gått ut. Driftansvarig sätter en budget per natt (rader, filer och minuter). Räcker inte budgeten fortsätter motorn nästa natt där den slutade och körningen rapporteras som "delvis". En kö som är äldre än ett dygn syns som försenad i hälsostatusen.</p>
-<p><strong>Tidpunkter.</strong> Chattar och sessioner jämförs med klockan i den tjänst som kör gallringen, filer med databasens klocka. Båda använder UTC.</p>
+<p><strong>Tidpunkter.</strong> Alla tider i loggen och i detta dokument anges i UTC.</p>
 </div>
 </section>
 
 <section aria-labelledby="process-title">
 <h2 id="process-title">6. Så går gallringen till</h2>
-<p>Automatisk gallring kräver att tiden har gått ut. Radering på begäran kräver ett särskilt beslut. Varje enhet går genom samma steg, i en enda databastransaktion.</p>
+<p>Varje enhet går genom samma steg i en enda databastransaktion (bild 4). Automatisk gallring kräver att tiden har gått ut. Radering på begäran kräver ett särskilt beslut.</p>
 <figure>
 <div class="diagram-wrap">
 <svg class="chart" viewBox="0 0 780 650" role="img" aria-labelledby="process-chart-title process-chart-desc" style="max-width:780px">
@@ -314,18 +316,18 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <text x="560" y="587">Logga och rapportera</text><text class="sub" x="560" y="611">Antal och regel. Klart, delvis eller misslyckat</text>
 </svg>
 </div>
-<figcaption>Kan en enhet inte raderas helt, raderas den inte alls. Resten av nattens arbete fortsätter.</figcaption>
+<figcaption>Bild 4. Kan en enhet inte raderas helt, raderas den inte alls. Resten av nattens arbete fortsätter.</figcaption>
 </figure>
 <ul style="margin-top:28px">
-<li><strong>Låsning och ny kontroll.</strong> Motorn låser posten och kontrollerar regeln en gång till i samma ögonblick som den raderar. En tid som just förlängts respekteras därför även om posten valdes ut tidigare samma natt.</li>
-<li><strong>Allt eller inget.</strong> En fråga, en appkörning eller en filfamilj raderas hel eller inte alls. Ett hinder, till exempel att en annan användare just då arbetar i chatten, gör att enheten behålls och prövas igen nästa natt.</li>
-<li><strong>Loggen skrivs i samma transaktion.</strong> En radering kan inte ske utan sin loggpost, och en loggpost kan inte skrivas utan sin radering.</li>
+<li><strong>Låsning och ny kontroll.</strong> Motorn låser posten och kontrollerar regeln en gång till i samma ögonblick som den raderar. En tid som just förlängts respekteras därför.</li>
+<li><strong>Allt eller inget.</strong> En fråga, en appkörning eller en filfamilj raderas hel eller inte alls. Ett hinder, till exempel att någon just då arbetar i chatten, gör att enheten behålls och prövas nästa natt.</li>
+<li><strong>Loggen skrivs i samma transaktion.</strong> Ingen radering utan loggpost, ingen loggpost utan radering.</li>
 </ul>
 </section>
 
 <section aria-labelledby="shared-title">
 <h2 id="shared-title">7. Exempel: en fil som delas av två utrymmen</h2>
-<p>Utrymme A har 30 dagars lagringstid och utrymme B har 60 dagar. Samma uppladdade fil är bifogad i en chatt i vardera utrymmet.</p>
+<p>Utrymme A har 30 dagars lagringstid och utrymme B har 60 dagar. Samma uppladdade fil är bifogad i en chatt i vardera utrymmet (bild 5).</p>
 <figure>
 <div class="diagram-wrap">
 <svg class="chart" viewBox="0 0 1000 300" role="img" aria-labelledby="shared-chart-title shared-chart-desc">
@@ -344,7 +346,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <rect class="box" x="640" y="210" width="340" height="56" rx="10"/><text x="810" y="243">Chatten i B raderas</text>
 </svg>
 </div>
-<figcaption>A:s kortare tid når aldrig B:s uppgifter. Att radera filen i båda utrymmena samtidigt är ett särskilt beslut, aldrig en bieffekt av gallringen.</figcaption>
+<figcaption>Bild 5. A:s kortare tid når aldrig B:s uppgifter. Att radera filen i båda utrymmena samtidigt är ett särskilt beslut, aldrig en bieffekt av gallringen.</figcaption>
 </figure>
 <p class="small" style="margin-top:14px">Loggen natt 31 anger en raderad fråga enligt utrymmets regel. Att filen behölls för att den används syns i körningsposten. Loggen natt 61 anger en raderad fråga och en raderad fil.</p>
 </section>
@@ -380,13 +382,11 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <p><strong>Exempel på en loggpost:</strong> "Gallring conversations.history, steg questions: questions deleted 12, sessions deleted 3, files deleted 5, by space rule 12; kept 1 root locked". Posten säger att tolv frågor, tre sessioner och fem filer raderades enligt utrymmets regel, och att en fråga behölls därför att den var låst. Den säger inte vad frågorna innehöll.</p>
 <p><strong>Loggposterna är obligatoriska.</strong> De kan inte stängas av i auditloggens inställningar. Auditloggen har sin egen lagringstid, som administratören sätter.</p>
 </div>
-<h3>Vad "klart" betyder</h3>
-<p>"Klart" betyder att motorn har prövat varje förfallen post inom nattens budget. Poster som inte raderades räknas under en orsak. "Klart" betyder inte att alla kopior av informationen är borta. Raderingen av själva filinnehållet i lagringen sker i en egen rutin med egen uppföljning, och säkerhetskopior omfattas inte.</p>
 </section>
 
 <section aria-labelledby="places-title">
 <h2 id="places-title">9. Alla lagringsplatser</h2>
-<p>IMY kräver att en gallringsrutin omfattar varje plats där uppgifterna finns. Så här hanterar förslaget varje plats, och så följs det upp.</p>
+<p>"Klart" i loggen betyder att motorn har prövat varje förfallen post inom nattens budget och räknat de poster som inte raderades under en orsak. Det betyder inte att alla kopior av informationen är borta. IMY kräver att en gallringsrutin omfattar varje plats där uppgifterna finns. Tabellen visar vad förslaget gör på varje plats och hur det följs upp.</p>
 <div class="table-wrap">
 <table class="places">
 <thead><tr><th scope="col">Lagringsplats</th><th scope="col">Vad gallringen gör</th><th scope="col">Så följs det upp</th></tr></thead>
@@ -400,19 +400,17 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 </tbody>
 </table>
 </div>
-<p class="small" style="margin-top:14px">En lyckad gallringskörning är bevis för arbetet i databasen. Den är inte bevis för att alla kopior är borta.</p>
 </section>
 
 <section aria-labelledby="remaining-title">
 <h2 id="remaining-title">10. Vad gallras inte automatiskt</h2>
+<p>Fem fall ligger utanför den automatiska gallringen trots att posterna finns i databasen.</p>
 <ul>
-<li><strong>Historik utan lagringstid.</strong> Finns ingen tid på assistenten, appen eller utrymmet, gallras historiken inte. Det är en medveten standard, se frågorna nedan.</li>
+<li><strong>Historik utan lagringstid.</strong> Finns ingen tid på assistenten, appen eller utrymmet, gallras historiken inte. Det är en medveten standard (avsnitt 12).</li>
 <li><strong>Frågor vars assistent har tagits bort.</strong> De saknar ägare och följer ingen regel. Detta är en känd brist som finns sedan tidigare och är planerad att åtgärdas.</li>
 <li><strong>Filer som fortfarande används.</strong> En fil som en annan chatt, app eller assistent använder behålls tills den sista användningen är borta. Att den finns kvar är ett tekniskt faktum, inte en rättslig grund för att behålla uppgifterna.</li>
-<li><strong>Kunskapsmaterial, nedladdade kopior och externa system.</strong> De omfattas inte av lagringstiden för chatthistorik och behöver egna rutiner.</li>
-<li><strong>Säkerhetskopior och äldre lagringsversioner.</strong> Gallringen raderar inte dem. De behöver egna lagringstider, åtkomstbegränsningar och ett ansvar hos leverantören. Vid en återställning ska raderingar som skett efter kopian göras om innan systemet öppnas igen. Eneo intygar inte att alla kopior är borta.</li>
 <li><strong>Enheter som är för stora eller låsta.</strong> De behålls, syns som hinder i loggen och i hälsostatusen, och kräver att driftansvarig åtgärdar orsaken.</li>
-<li><strong>Flows-historik.</strong> I dag rör den nattliga gallringen ingen Flows-data. Se nästa avsnitt.</li>
+<li><strong>Flows-historik.</strong> I dag rör den nattliga gallringen ingen Flows-data (avsnitt 11).</li>
 </ul>
 </section>
 
