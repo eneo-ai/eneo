@@ -275,10 +275,12 @@ def _template_fill_sites(
         return []
     if not isinstance(bindings, Mapping):
         return None
-    items = cast(Mapping[str, object], bindings).items()
-    if not all(isinstance(value, str) for _, value in items):
-        return None
-    return [(("bindings", key), cast(str, value)) for key, value in items]
+    sites: list[tuple[ConfigPath, str]] = []
+    for key, value in cast(Mapping[str, object], bindings).items():
+        if not isinstance(value, str):
+            return None
+        sites.append((("bindings", key), value))
+    return sites
 
 
 def _http_config_sites(

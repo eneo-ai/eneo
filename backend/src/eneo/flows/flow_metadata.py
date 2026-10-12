@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal, Mapping, cast
+from typing import Literal, Mapping, TypeGuard, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -121,7 +121,7 @@ class FlowMetadata(BaseModel):
     ai_builder: FlowAIBuilderMetadata | None = None
 
 
-def is_form_field_order(value: object) -> bool:
+def is_form_field_order(value: object) -> TypeGuard[int]:
     """A writable `order`: a whole number from 1."""
 
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
@@ -131,7 +131,7 @@ def form_field_display_position(order: object, index: int) -> int:
     """Where the editor and the run form show a field: at its `order`, or at its
     position when it has no writable one."""
 
-    return cast(int, order) if is_form_field_order(order) else index + 1
+    return order if is_form_field_order(order) else index + 1
 
 
 def form_fields_in_display_order(

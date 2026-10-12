@@ -411,16 +411,12 @@ class FlowService:
     ) -> tuple[Assistant, list[ResourcePermission]]:
         flow = await self.get_flow(flow_id)
         self._ensure_flow_is_mutable(flow)
-        assistant_service = cast(Any, self.assistant_service)
-        return cast(
-            tuple[Assistant, list[ResourcePermission]],
-            await assistant_service.create_assistant(
-                name=name,
-                space_id=flow.space_id,
-                hidden=True,
-                origin=AssistantOrigin.FLOW_MANAGED,
-                managing_flow_id=flow.id,
-            ),
+        return await self.assistant_service.create_assistant(
+            name=name,
+            space_id=flow.space_id,
+            hidden=True,
+            origin=AssistantOrigin.FLOW_MANAGED,
+            managing_flow_id=flow.id,
         )
 
     async def get_flow_assistant(
@@ -1255,7 +1251,7 @@ class FlowService:
         self, flow: Flow, *, assistants_by_id: dict[UUID, Assistant]
     ) -> FlowPersistedJsonObject:
         return build_published_definition_json(
-            flow_id=cast(UUID, flow.id),
+            flow_id=flow.require_persisted_id(),
             name=flow.name,
             description=flow.description,
             metadata_json=flow.metadata_json,

@@ -29,7 +29,7 @@ from enum import Enum, StrEnum
 from functools import cache
 from itertools import product
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, TypeVar
 
 from eneo.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
@@ -615,6 +615,21 @@ CHAIN_COMPATIBILITY: frozenset[tuple[FlowOutputType, FlowInputType]] = frozenset
 )
 
 
+_Member = TypeVar("_Member", bound=Enum)
+
+
+def _require_member(value: object, kind: type[_Member], name: str) -> None:
+    """Refuse a raw string where a member is expected.
+
+    A string enum's member equals its text, so `"text"` would pass every table
+    lookup below as if it were `FlowInputType.TEXT`. A caller that holds
+    unparsed JSON has to convert first; this is where that is noticed.
+    """
+
+    if not isinstance(value, kind):
+        raise TypeError(f"{name} must be {kind.__name__}, got {type(value).__name__}")
+
+
 def is_chain_compatible(
     *,
     output_type: FlowOutputType,
@@ -622,14 +637,8 @@ def is_chain_compatible(
 ) -> bool:
     """Engine-truth: can one step's output feed the next step's input?"""
 
-    if not isinstance(output_type, FlowOutputType):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"output_type must be FlowOutputType, got {type(output_type).__name__}"
-        )
-    if not isinstance(input_type, FlowInputType):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"input_type must be FlowInputType, got {type(input_type).__name__}"
-        )
+    _require_member(output_type, FlowOutputType, "output_type")
+    _require_member(input_type, FlowInputType, "input_type")
     return (output_type, input_type) in CHAIN_COMPATIBILITY
 
 
@@ -677,18 +686,10 @@ def supports_step_io_tuple(
     `input_type=None` still returns `False` — transcription requires
     `AUDIO` input, never an unknown one.
     """
-    if input_type is not None and not isinstance(input_type, FlowInputType):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"input_type must be FlowInputType or None, got {type(input_type).__name__}"
-        )
-    if not isinstance(output_type, FlowOutputType):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"output_type must be FlowOutputType, got {type(output_type).__name__}"
-        )
-    if not isinstance(output_mode, FlowOutputMode):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"output_mode must be FlowOutputMode, got {type(output_mode).__name__}"
-        )
+    if input_type is not None:
+        _require_member(input_type, FlowInputType, "input_type")
+    _require_member(output_type, FlowOutputType, "output_type")
+    _require_member(output_mode, FlowOutputMode, "output_mode")
     if output_mode is FlowOutputMode.TEMPLATE_FILL:
         return output_type is FlowOutputType.DOCX
     if output_mode is FlowOutputMode.TRANSCRIBE_ONLY:
@@ -732,14 +733,8 @@ def resolve_document_generation_mode(
     Strict enum-only contract: non-enum inputs raise `TypeError` rather
     than silently returning `None` via failed identity checks.
     """
-    if not isinstance(output_type, FlowOutputType):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"output_type must be FlowOutputType, got {type(output_type).__name__}"
-        )
-    if not isinstance(output_mode, FlowOutputMode):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"output_mode must be FlowOutputMode, got {type(output_mode).__name__}"
-        )
+    _require_member(output_type, FlowOutputType, "output_type")
+    _require_member(output_mode, FlowOutputMode, "output_mode")
     if output_type is FlowOutputType.DOCX:
         return (
             "template_fill"
@@ -778,14 +773,8 @@ def is_citation_capable_step(
     `off` and returns `False`. Keeping the wide type covers malformed
     persisted payloads without the caller having to pre-validate.
     """
-    if not isinstance(output_type, FlowOutputType):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"output_type must be FlowOutputType, got {type(output_type).__name__}"
-        )
-    if not isinstance(output_mode, FlowOutputMode):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"output_mode must be FlowOutputMode, got {type(output_mode).__name__}"
-        )
+    _require_member(output_type, FlowOutputType, "output_type")
+    _require_member(output_mode, FlowOutputMode, "output_mode")
     if resolve_citation_mode(output_config) != CITATION_MODE_INLINE_INREF_SIDECAR:
         return False
     if output_type is not FlowOutputType.TEXT:
@@ -996,22 +985,10 @@ def resolve_capability_for_tuple(
     `citation_sidecar` is intentionally not included because it is not
     conditioned on the 4-tuple alone.
     """
-    if not isinstance(input_source, FlowInputSource):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"input_source must be FlowInputSource, got {type(input_source).__name__}"
-        )
-    if not isinstance(input_type, FlowInputType):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"input_type must be FlowInputType, got {type(input_type).__name__}"
-        )
-    if not isinstance(output_type, FlowOutputType):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"output_type must be FlowOutputType, got {type(output_type).__name__}"
-        )
-    if not isinstance(output_mode, FlowOutputMode):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"output_mode must be FlowOutputMode, got {type(output_mode).__name__}"
-        )
+    _require_member(input_source, FlowInputSource, "input_source")
+    _require_member(input_type, FlowInputType, "input_type")
+    _require_member(output_type, FlowOutputType, "output_type")
+    _require_member(output_mode, FlowOutputMode, "output_mode")
     classification, _reason = _classify_cell(
         input_source, input_type, output_type, output_mode
     )

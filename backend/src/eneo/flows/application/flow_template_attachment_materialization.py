@@ -222,20 +222,22 @@ def _approved_placeholder_names(
             code="architecture_materialization_failed",
             context={"reason": "template_binding_contract_missing"},
         )
-    bindings = cast(dict[object, object], raw_bindings)
-    if any(
-        not isinstance(name, str)
-        or not name.strip()
-        or not isinstance(expression, str)
-        or not expression.strip()
-        for name, expression in bindings.items()
-    ):
+    names: set[str] = set()
+    for name, expression in cast(dict[object, object], raw_bindings).items():
+        if (
+            isinstance(name, str)
+            and name.strip()
+            and isinstance(expression, str)
+            and expression.strip()
+        ):
+            names.add(name)
+            continue
         raise BadRequestException(
             "The approved template-fill step has an invalid placeholder binding contract. Generate a new proposal and try again.",
             code="architecture_materialization_failed",
             context={"reason": "template_binding_contract_invalid"},
         )
-    return frozenset(cast(str, name) for name in bindings)
+    return frozenset(names)
 
 
 def _bounded_names(names: list[str]) -> list[str]:
