@@ -209,13 +209,13 @@ class SpaceService:
 
         space.transcription_models = transcription_models
 
-        # Set all tenant-enabled MCP servers for new spaces
+        # A new space offers the capabilities the tenant has a provider for.
+        # It has no general MCP server: its admin activates the ones it may use.
         import sqlalchemy as sa
 
         from eneo.database.tables.mcp_server_table import (
             MCPServers as MCPServersTable,
         )
-        from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 
         query = (
             sa.select(MCPServersTable)
@@ -225,7 +225,6 @@ class SpaceService:
         result = await self.repo.session.execute(query)
         servers_db = result.scalars().all()
 
-        # Convert to domain entities
         space.enabled_capabilities = sorted(
             {
                 purpose
@@ -233,27 +232,6 @@ class SpaceService:
                 if any(s.purpose == purpose for s in servers_db)
             }
         )
-        servers_db = [s for s in servers_db if not is_capability_purpose(s.purpose)]
-        space.mcp_servers = [
-            MCPServer(
-                id=server.id,
-                tenant_id=server.tenant_id,
-                name=server.name,
-                description=server.description,
-                http_url=server.http_url,
-                http_auth_type=server.http_auth_type,
-                http_auth_config_schema=server.http_auth_config_schema,
-                purpose=server.purpose,
-                is_enabled=server.is_enabled,
-                env_vars=server.env_vars,
-                tags=server.tags,
-                icon_url=server.icon_url,
-                documentation_url=server.documentation_url,
-                created_at=server.created_at,
-                updated_at=server.updated_at,
-            )
-            for server in servers_db
-        ]
 
         # Set admin
         admin = SpaceMember(

@@ -1779,10 +1779,10 @@ class AssistantService:
                 # same source the editor/UI uses to offer servers. For a personal
                 # space that is every tenant-enabled server (space_factory exposes
                 # them all); for a shared space it is the spaces_mcp_servers
-                # mapping. Do NOT query spaces_mcp_servers directly: that table is
-                # seeded once at space creation and never back-filled, so for a
-                # personal space it goes stale and wrongly rejects servers enabled
-                # after the space was created (#500).
+                # mapping. Do NOT query spaces_mcp_servers directly: that table
+                # holds what a shared space's admin activated, and a personal
+                # space has no say there, so the table wrongly rejects servers
+                # for a personal space (#500).
                 missing_space_ids = [
                     str(server_id)
                     for server_id in mcp_server_ids
@@ -3691,10 +3691,10 @@ class AssistantService:
         )
         mcp_governed = effective_config is not None and effective_config.mcp_enforced
         if not mcp_governed and not space.is_mcp_server_in_space(mcp_server_id):
-            # Validate against the space read model, not the stale
-            # spaces_mcp_servers table (seeded once at space creation, never
-            # back-filled), so a server enabled after a personal space was
-            # created is assignable. See update_assistant (#500).
+            # Validate against the space read model, not the spaces_mcp_servers
+            # table (what a shared space's admin activated), so every enabled
+            # server is assignable in a personal space. See update_assistant
+            # (#500).
             raise BadRequestException(
                 "MCP server is not assigned to this assistant's space"
             )

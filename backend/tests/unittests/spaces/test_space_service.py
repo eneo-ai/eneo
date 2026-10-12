@@ -10,6 +10,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.spaces.api.space_models import SpaceRoleValue
+from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_service import SpaceService
 from tests.fixtures import TEST_USER
 
@@ -66,6 +67,28 @@ async def test_create_space_is_created_with_latest_available_embedding_model(
     await service.create_space(MagicMock())
 
     assert space.embedding_models == [embedding_models[0]]
+
+
+async def test_a_new_space_has_no_mcp_server_until_its_admin_activates_one(
+    service: SpaceService,
+):
+    # Kills the mutant that gives a new space every enabled server: a space
+    # admin activates the servers the space may use. Capabilities are not
+    # servers a space picks, and a new space still offers the tenant's.
+    space = SpaceFactory.create_space(name="space", tenant_id=TEST_USER.tenant_id)
+    service.factory.create_space.return_value = space
+    service.completion_model_service.get_available_completion_models.return_value = []
+    service.transcription_model_service.get_default_model.return_value = None
+    service.embedding_model_crud_service.get_embedding_models.return_value = []
+    service.repo.session.execute.return_value.scalars.return_value.all.return_value = [
+        MagicMock(purpose="general", tenant_id=TEST_USER.tenant_id),
+        MagicMock(purpose="web_search", tenant_id=TEST_USER.tenant_id),
+    ]
+
+    await service.create_space("space")
+
+    assert space.mcp_servers == []
+    assert space.enabled_capabilities == ["web_search"]
 
 
 async def test_raise_not_found_if_user_not_member_of_space(
