@@ -5,6 +5,10 @@ from copy import deepcopy
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_api_models import PlanResponse
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AI_BUILDER_ERROR_REGISTRY,
+    AIBuilderErrorCode,
+)
 from eneo.server.main import get_application
 
 
@@ -515,6 +519,48 @@ def test_openapi_attachment_detach_declares_active_send_conflict(
     assert "active send" in conflict_response["description"]
     assert content["schema"] == {"$ref": "#/components/schemas/AIBuilderPublicError"}
     assert content["example"]["code"] == "session_send_in_progress"
+
+
+def test_openapi_ai_builder_refusals_are_documented_under_their_registry_status(
+    openapi_spec: dict,
+) -> None:
+    documented = [
+        (path, method, status, response["content"]["application/json"]["example"])
+        for path, operations in openapi_spec["paths"].items()
+        if path.startswith("/api/v1/flows/ai-builder")
+        for method, operation in operations.items()
+        for status, response in operation["responses"].items()
+        if "#/components/schemas/AIBuilderPublicError"
+        in _schema_refs(
+            response.get("content", {}).get("application/json", {}).get("schema")
+        )
+    ]
+
+    assert documented
+    assert [
+        (path, method, status, example["code"])
+        for path, method, status, example in documented
+        if AI_BUILDER_ERROR_REGISTRY[AIBuilderErrorCode(example["code"])].http_status
+        != int(status)
+    ] == []
+
+
+@pytest.mark.parametrize(
+    ("path", "statuses"),
+    [
+        ("/api/v1/flows/ai-builder/plans/{plan_id}/approve", {"400", "409"}),
+        ("/api/v1/flows/ai-builder/plans/{plan_id}/apply", {"400", "409"}),
+        ("/api/v1/flows/ai-builder/plans/{plan_id}/create", {"400", "409"}),
+        ("/api/v1/flows/ai-builder/plans/{plan_id}/revise", {"400", "404", "409"}),
+        ("/api/v1/flows/ai-builder/sessions/{session_id}/cancel", {"409"}),
+    ],
+)
+def test_openapi_ai_builder_plan_lifecycle_refusals_are_documented(
+    openapi_spec: dict,
+    path: str,
+    statuses: set[str],
+) -> None:
+    assert statuses <= set(openapi_spec["paths"][path]["post"]["responses"])
 
 
 def test_openapi_session_conversation_uses_public_projection(

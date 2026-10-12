@@ -55994,7 +55994,7 @@ export interface operations {
            *         "request_id": "req_01HZYXEXAMPLE"
            *       },
            *       "eneo_error_code": 9000,
-           *       "message": "AI Builder plan not found.",
+           *       "message": "Builder plan not found.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2
@@ -56039,7 +56039,7 @@ export interface operations {
           "application/json": components["schemas"]["ApplyResultResponse"];
         };
       };
-      /** @description The approved plan cannot be materialized in the current space configuration. Representative machine-readable codes include: transcription_model_required, invalid_existing_step_ref. */
+      /** @description The approved plan cannot be materialized in the current space configuration. Representative machine-readable codes include: transcription_model_required, invalid_existing_step_ref, invalid_plan_status, plan_session_mismatch. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -56111,7 +56111,7 @@ export interface operations {
            *         "request_id": "req_01HZYXEXAMPLE"
            *       },
            *       "eneo_error_code": 9000,
-           *       "message": "AI Builder plan not found.",
+           *       "message": "Builder plan not found.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2
@@ -56120,7 +56120,7 @@ export interface operations {
           "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
-      /** @description The target flow revision changed before apply completed. */
+      /** @description The target flow revision changed before apply completed, or the plan's session cannot take this action right now. Representative machine-readable codes include: stale_revision, invalid_session_transition (the session is not awaiting approval), session_message_in_progress. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -56137,7 +56137,7 @@ export interface operations {
            *         "request_id": "req_01HZYXEXAMPLE"
            *       },
            *       "eneo_error_code": 9007,
-           *       "message": "Flow revision changed while applying the plan.",
+           *       "message": "Expected revision does not match the approved edit proposal.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2
@@ -56178,6 +56178,32 @@ export interface operations {
           "application/json": components["schemas"]["PlanApprovalResponse"];
         };
       };
+      /** @description The plan cannot be approved. Representative machine-readable codes include: invalid_plan_status, plan_session_mismatch. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "bad_request",
+           *       "code": "invalid_plan_status",
+           *       "diagnostic_context": {
+           *         "error_category": "bad_request",
+           *         "error_code": "invalid_plan_status",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9007,
+           *       "message": "Cannot approve plan in status 'approved'. Plan must be proposed first.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
       /** @description Caller lacks space permission or API key scope for the plan's session. */
       403: {
         headers: {
@@ -56224,7 +56250,33 @@ export interface operations {
            *         "request_id": "req_01HZYXEXAMPLE"
            *       },
            *       "eneo_error_code": 9000,
-           *       "message": "AI Builder plan not found.",
+           *       "message": "Builder plan not found.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description The plan's session cannot take this action right now. Representative machine-readable codes include: invalid_session_transition (the session is not awaiting approval), session_message_in_progress. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "conflict",
+           *       "code": "invalid_session_transition",
+           *       "diagnostic_context": {
+           *         "error_category": "conflict",
+           *         "error_code": "invalid_session_transition",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9007,
+           *       "message": "The session is not awaiting approval.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2
@@ -56265,7 +56317,7 @@ export interface operations {
           "application/json": components["schemas"]["ApplyResultResponse"];
         };
       };
-      /** @description The plan cannot be created in one step. Representative machine-readable codes include: invalid_session_transition (edit-mode plan), invalid_plan_status, transcription_model_required. */
+      /** @description The plan cannot be created in one step. Representative machine-readable codes include: plan_session_mismatch, transcription_model_required, invalid_plan_status. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -56273,16 +56325,16 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "category": "conflict",
-           *       "code": "invalid_session_transition",
+           *       "category": "bad_request",
+           *       "code": "plan_session_mismatch",
            *       "diagnostic_context": {
-           *         "error_category": "conflict",
-           *         "error_code": "invalid_session_transition",
+           *         "error_category": "bad_request",
+           *         "error_code": "plan_session_mismatch",
            *         "error_phase": "router",
            *         "request_id": "req_01HZYXEXAMPLE"
            *       },
            *       "eneo_error_code": 9007,
-           *       "message": "Approve-and-create is only available for create sessions.",
+           *       "message": "The plan is no longer the session's latest proposal.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2
@@ -56337,7 +56389,33 @@ export interface operations {
            *         "request_id": "req_01HZYXEXAMPLE"
            *       },
            *       "eneo_error_code": 9000,
-           *       "message": "AI Builder plan not found.",
+           *       "message": "Builder plan not found.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description The plan's session cannot take this action right now. Representative machine-readable codes include: invalid_session_transition (edit-mode plan, or the session is not awaiting approval), session_message_in_progress. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "conflict",
+           *       "code": "invalid_session_transition",
+           *       "diagnostic_context": {
+           *         "error_category": "conflict",
+           *         "error_code": "invalid_session_transition",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9007,
+           *       "message": "Approve-and-create is only available for create sessions. Edit plans require explicit approve and apply.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2
@@ -56425,7 +56503,59 @@ export interface operations {
            *         "request_id": "req_01HZYXEXAMPLE"
            *       },
            *       "eneo_error_code": 9001,
-           *       "message": "Only the session creator can revise plans.",
+           *       "message": "Only the session creator can manage plans.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description AI Builder plan not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "not_found",
+           *       "code": "not_found",
+           *       "diagnostic_context": {
+           *         "error_category": "not_found",
+           *         "error_code": "not_found",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9000,
+           *       "message": "Builder plan not found.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description The plan's session cannot take this action right now. Representative machine-readable codes include: invalid_session_transition (the session is not awaiting approval), session_message_in_progress. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "conflict",
+           *       "code": "invalid_session_transition",
+           *       "diagnostic_context": {
+           *         "error_category": "conflict",
+           *         "error_code": "invalid_session_transition",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9007,
+           *       "message": "The session is not awaiting approval.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2
@@ -56864,7 +56994,33 @@ export interface operations {
            *         "request_id": "req_01HZYXEXAMPLE"
            *       },
            *       "eneo_error_code": 9000,
-           *       "message": "AI Builder session not found.",
+           *       "message": "Builder session not found.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description The session is already applied and cannot be cancelled. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "conflict",
+           *       "code": "invalid_session_transition",
+           *       "diagnostic_context": {
+           *         "error_category": "conflict",
+           *         "error_code": "invalid_session_transition",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9007,
+           *       "message": "Invalid AI Builder session transition: applied -> cancelled.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2
@@ -56927,32 +57083,6 @@ export interface operations {
             | components["schemas"]["AIBuilderDoneEvent"];
         };
       };
-      /** @description The AI Builder session cannot accept a new message in its current state. */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "category": "bad_request",
-           *       "code": "bad_request",
-           *       "diagnostic_context": {
-           *         "error_category": "bad_request",
-           *         "error_code": "bad_request",
-           *         "error_phase": "router",
-           *         "request_id": "req_01HZYXEXAMPLE"
-           *       },
-           *       "eneo_error_code": 9007,
-           *       "message": "Cannot send messages in this AI Builder session right now.",
-           *       "phase": "router",
-           *       "request_id": "req_01HZYXEXAMPLE",
-           *       "schema_version": 2
-           *     }
-           */
-          "application/json": components["schemas"]["AIBuilderPublicError"];
-        };
-      };
       /** @description Caller lacks space permission or API key scope for this session, or, for a turn that names or continues a flow review, the flow review permission. */
       403: {
         headers: {
@@ -57008,7 +57138,7 @@ export interface operations {
           "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
-      /** @description The client turn ID conflicts with a different payload, another turn is active, or the provider outcome is unknown and requires explicit duplicate-spend acknowledgement before retry. */
+      /** @description The session cannot accept another message in its current state (invalid_session_transition), the client turn ID conflicts with a different payload, another turn is active, or the provider outcome is unknown and requires explicit duplicate-spend acknowledgement before retry. */
       409: {
         headers: {
           [name: string]: unknown;

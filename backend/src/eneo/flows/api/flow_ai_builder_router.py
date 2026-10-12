@@ -818,19 +818,26 @@ def _ai_builder_error_response(
     message: str,
     code: AIBuilderErrorCode,
     details: Mapping[str, object] | None = None,
-) -> dict[str, Any]:
+) -> dict[int | str, dict[str, Any]]:
+    """One documented refusal under the status the registry returns for its code.
+
+    The registry decides the status a refusal is answered with, so the
+    documentation takes its key from the same entry and cannot name another.
+    """
     return {
-        "model": AIBuilderPublicError,
-        "description": description,
-        "content": {
-            "application/json": {
-                "example": ai_builder_error_example(
-                    message=message,
-                    code=code,
-                    details=details,
-                )
-            }
-        },
+        AI_BUILDER_ERROR_REGISTRY[code].http_status: {
+            "model": AIBuilderPublicError,
+            "description": description,
+            "content": {
+                "application/json": {
+                    "example": ai_builder_error_example(
+                        message=message,
+                        code=code,
+                        details=details,
+                    )
+                }
+            },
+        }
     }
 
 
@@ -907,7 +914,7 @@ def _ai_builder_json_error_response(
         204: {
             "description": "The client error report is stored (or was already stored)."
         },
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks the Flow AI Builder permission.",
             message="You do not have permission to use Flow AI Builder.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
@@ -999,12 +1006,12 @@ async def report_client_error(
         "view are counted, never named."
     ),
     responses={
-        400: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="The flow has no published version, or is not in the given space.",
             message="The flow has no published version to review runs of.",
             code=AIBuilderErrorCode.FLOW_NOT_PUBLISHED,
         ),
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks the flow review permission (flows_ai_builder_review with the AI Builder permissions), space permission, or API key scope for this space.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
@@ -1044,7 +1051,7 @@ async def get_flow_review_packet(
     operation_id="get_ai_builder_run_failure_launch",
     summary="Resolve an instruction repair for a failed step",
     responses={
-        400: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description=(
                 "REVIEW_STALE, FLOW_NOT_PUBLISHED, or REVIEW_FINDING_UNKNOWN. "
                 "Unavailable reasons: " + ", ".join(RUN_FAILURE_UNAVAILABLE_REASONS)
@@ -1052,7 +1059,7 @@ async def get_flow_review_packet(
             message="The failed step is unavailable for instruction repair.",
             code=AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN,
         ),
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks flow review permission, space permission, or run evidence access.",
             message="The caller cannot review this flow run.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
@@ -1121,7 +1128,7 @@ async def get_run_failure_launch(
         "classification level. Nothing is stored."
     ),
     responses={
-        400: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description=(
                 "The flow has no published version, the sample timed out, the "
                 "planner model is below the evidence level, or the model "
@@ -1130,7 +1137,7 @@ async def get_run_failure_launch(
             message="The review model answered in a format that could not be read.",
             code=AIBuilderErrorCode.REVIEW_SUGGESTIONS_INVALID_OUTPUT,
         ),
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks the flow review permission (flows_ai_builder_review with the AI Builder permissions), space permission, or API key scope for this space.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
@@ -1204,12 +1211,12 @@ async def post_flow_review_suggestions(
     description="Start or resume an AI Builder session for a space-scoped flow drafting workflow.",
     responses={
         201: {"description": "AI Builder session created."},
-        400: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="The request payload is valid JSON but cannot start the requested builder session.",
             message="The requested AI Builder session cannot be started.",
             code=AIBuilderErrorCode.BAD_REQUEST,
         ),
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this space.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
@@ -1284,7 +1291,7 @@ async def create_session(
     description="List AI Builder sessions visible to the caller within their permitted spaces.",
     responses={
         200: {"description": "Visible AI Builder sessions."},
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks permission to use the AI Builder.",
             message="You do not have permission to use the AI builder in this space.",
             code=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION,
@@ -1369,16 +1376,12 @@ async def list_sessions(
                 }
             },
         },
-        400: _ai_builder_error_response(
-            description="The AI Builder session cannot accept a new message in its current state.",
-            message="Cannot send messages in this AI Builder session right now.",
-            code=AIBuilderErrorCode.BAD_REQUEST,
-        ),
-        409: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description=(
-                "The client turn ID conflicts with a different payload, another turn "
-                "is active, or the provider outcome is unknown and requires explicit "
-                "duplicate-spend acknowledgement before retry."
+                "The session cannot accept another message in its current state "
+                "(invalid_session_transition), the client turn ID conflicts with a "
+                "different payload, another turn is active, or the provider outcome is "
+                "unknown and requires explicit duplicate-spend acknowledgement before retry."
             ),
             message=(
                 "The provider outcome is unknown. Explicitly acknowledge possible "
@@ -1386,13 +1389,13 @@ async def list_sessions(
             ),
             code=AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN,
         ),
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session, or, for a turn that names or continues a flow review, the flow review permission.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
         ),
-        404: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="AI Builder session or referenced flow context was not found.",
             message="AI Builder session not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
@@ -1733,13 +1736,13 @@ async def send_message(
     description="Return the current state and conversation for a single AI Builder session.",
     responses={
         200: {"description": "AI Builder session details."},
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
         ),
-        404: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="AI Builder session not found.",
             message="AI Builder session not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
@@ -1787,13 +1790,13 @@ async def get_session(
     description="Return comprehensive persisted classifier evidence for creator-only internal evaluation.",
     responses={
         200: {"description": "Persisted classifier diagnostics."},
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
         ),
-        404: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="AI Builder session not found.",
             message="AI Builder session not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
@@ -1839,13 +1842,13 @@ async def get_session_classifier_diagnostics(
     ),
     responses={
         200: {"description": "Persisted proposal telemetry diagnostics."},
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
         ),
-        404: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="AI Builder session not found.",
             message="AI Builder session not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
@@ -1898,18 +1901,18 @@ async def get_session_proposal_telemetry_diagnostics(
     description="Remove a previously attached reference file from an AI Builder session without deleting the underlying file globally.",
     responses={
         204: {"description": "Attachment detached from the AI Builder session."},
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
         ),
-        404: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="AI Builder session not found.",
             message="AI Builder session not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
         ),
-        409: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Attachment detachment is blocked while an active send owns the session.",
             message="An active send is currently in progress for this session.",
             code=AIBuilderErrorCode.SESSION_SEND_IN_PROGRESS,
@@ -1972,13 +1975,13 @@ async def detach_session_attachment(
     ),
     responses={
         200: {"description": "Available completion models and default planner model."},
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
         ),
-        404: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="AI Builder session not found.",
             message="AI Builder session not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
@@ -2081,15 +2084,15 @@ async def get_session_models(
     description="Fetch a stored AI Builder plan proposal for review or approval.",
     responses={
         200: {"description": "Stored AI Builder plan."},
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks space permission or API key scope for the plan's session.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
         ),
-        404: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="AI Builder plan not found.",
-            message="AI Builder plan not found.",
+            message="Builder plan not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
@@ -2130,13 +2133,13 @@ async def get_plan(
     description="List all plan revisions generated within a specific AI Builder session.",
     responses={
         200: {"description": "Stored plan revisions for the session."},
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
         ),
-        404: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="AI Builder session not found.",
             message="AI Builder session not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
@@ -2180,15 +2183,20 @@ async def list_session_plans(
     description="Cancel an active AI Builder session and stop further planning work in that session.",
     responses={
         200: {"description": "AI Builder session cancelled."},
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
+            description="The session is already applied and cannot be cancelled.",
+            message="Invalid AI Builder session transition: applied -> cancelled.",
+            code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
+        ),
+        **_ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
         ),
-        404: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="AI Builder session not found.",
-            message="AI Builder session not found.",
+            message="Builder session not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
@@ -2247,15 +2255,34 @@ async def cancel_session(
     description="Mark a plan revision as approved so it can be applied to a flow.",
     responses={
         200: {"description": "Plan approved."},
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
+            description=(
+                "The plan cannot be approved. Representative machine-readable codes "
+                "include: invalid_plan_status, plan_session_mismatch."
+            ),
+            message=(
+                "Cannot approve plan in status 'approved'. Plan must be proposed first."
+            ),
+            code=AIBuilderErrorCode.INVALID_PLAN_STATUS,
+        ),
+        **_ai_builder_error_response(
+            description=(
+                "The plan's session cannot take this action right now. Representative "
+                "machine-readable codes include: invalid_session_transition (the "
+                "session is not awaiting approval), session_message_in_progress."
+            ),
+            message="The session is not awaiting approval.",
+            code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
+        ),
+        **_ai_builder_error_response(
             description="Caller lacks space permission or API key scope for the plan's session.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
         ),
-        404: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="AI Builder plan not found.",
-            message="AI Builder plan not found.",
+            message="Builder plan not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
@@ -2316,16 +2343,16 @@ async def approve_plan(
     description="Materialize an approved AI Builder plan into the target flow definition.",
     responses={
         200: {"description": "Plan applied to the target flow."},
-        400: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description=(
                 "The approved plan cannot be materialized in the current space configuration. "
                 "Representative machine-readable codes include: transcription_model_required, "
-                "invalid_existing_step_ref."
+                "invalid_existing_step_ref, invalid_plan_status, plan_session_mismatch."
             ),
             message="A transcription model must be selected when using audio input steps.",
             code=AIBuilderErrorCode.TRANSCRIPTION_MODEL_REQUIRED,
         ),
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description=(
                 "Caller lacks space permission, API key scope or target draft ownership. "
                 "flow_owner_required refuses editing another member's draft unless the caller "
@@ -2335,14 +2362,20 @@ async def approve_plan(
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
         ),
-        404: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="AI Builder plan not found.",
-            message="AI Builder plan not found.",
+            message="Builder plan not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
         ),
-        409: _ai_builder_error_response(
-            description="The target flow revision changed before apply completed.",
-            message="Flow revision changed while applying the plan.",
+        **_ai_builder_error_response(
+            description=(
+                "The target flow revision changed before apply completed, or the plan's "
+                "session cannot take this action right now. Representative "
+                "machine-readable codes include: stale_revision, "
+                "invalid_session_transition (the session is not awaiting approval), "
+                "session_message_in_progress."
+            ),
+            message="Expected revision does not match the approved edit proposal.",
             code=AIBuilderErrorCode.STALE_REVISION,
         ),
     },
@@ -2420,24 +2453,37 @@ async def apply_plan(
     ),
     responses={
         200: {"description": "Flow created from the plan."},
-        400: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description=(
                 "The plan cannot be created in one step. Representative machine-readable "
-                "codes include: invalid_session_transition (edit-mode plan), "
-                "invalid_plan_status, transcription_model_required."
+                "codes include: plan_session_mismatch, transcription_model_required, "
+                "invalid_plan_status."
             ),
-            message="Approve-and-create is only available for create sessions.",
+            message="The plan is no longer the session's latest proposal.",
+            code=AIBuilderErrorCode.PLAN_SESSION_MISMATCH,
+        ),
+        **_ai_builder_error_response(
+            description=(
+                "The plan's session cannot take this action right now. Representative "
+                "machine-readable codes include: invalid_session_transition (edit-mode "
+                "plan, or the session is not awaiting approval), "
+                "session_message_in_progress."
+            ),
+            message=(
+                "Approve-and-create is only available for create sessions. "
+                "Edit plans require explicit approve and apply."
+            ),
             code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
         ),
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks space permission or API key scope for the plan's session.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
         ),
-        404: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="AI Builder plan not found.",
-            message="AI Builder plan not found.",
+            message="Builder plan not found.",
             code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
@@ -2516,15 +2562,29 @@ async def approve_and_apply_create_plan(
     ),
     responses={
         200: {"description": "New plan revision created."},
-        400: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Invalid revision request.",
             message="Can only revise proposed plans.",
             code=AIBuilderErrorCode.PLAN_NOT_PROPOSED,
         ),
-        403: _ai_builder_error_response(
+        **_ai_builder_error_response(
             description="Caller lacks permission.",
-            message="Only the session creator can revise plans.",
+            message="Only the session creator can manage plans.",
             code=AIBuilderErrorCode.SESSION_CREATOR_REQUIRED,
+        ),
+        **_ai_builder_error_response(
+            description="AI Builder plan not found.",
+            message="Builder plan not found.",
+            code=AIBuilderErrorCode.NOT_FOUND,
+        ),
+        **_ai_builder_error_response(
+            description=(
+                "The plan's session cannot take this action right now. Representative "
+                "machine-readable codes include: invalid_session_transition (the "
+                "session is not awaiting approval), session_message_in_progress."
+            ),
+            message="The session is not awaiting approval.",
+            code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
         ),
     },
 )
