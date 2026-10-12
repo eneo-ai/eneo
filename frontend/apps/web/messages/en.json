@@ -710,6 +710,8 @@
   "job_failure_processing_interrupted": "Processing stopped before it finished. Upload the file again. Existing knowledge was not changed.",
   "job_failure_invalid_job_payload": "Eneo could not start processing the file. Upload it again. If it fails again, contact an administrator.",
   "job_failure_quota_exceeded": "The storage quota is full. Delete knowledge or ask an administrator to increase the quota, then upload the file again.",
+  "job_failure_tenant_quota_exceeded": "The organization's storage quota is full. Ask an administrator to raise the quota or free up space, then try again.",
+  "job_failure_user_quota_exceeded": "Your storage quota is full. Delete knowledge you own or ask an administrator to raise your quota, then try again.",
   "job_failure_storage_limit_exceeded": "The file exceeds the worker's current storage limit. Ask an administrator to compare the API and worker storage limits, then upload the file again.",
   "job_failure_storage_unavailable": "File storage is temporarily unavailable. Try again. If the problem continues, contact an administrator.",
   "job_failure_storage_verification_failed": "Eneo could not verify the stored original file. Upload the file again. If it fails again, contact an administrator.",

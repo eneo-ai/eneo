@@ -708,7 +708,7 @@ async def test_combined_original_and_text_quota_fails_before_remote_work(
         assert content_count == 0
         assert orphan_count == 0
         assert job_state.status == Status.FAILED.value
-        assert job_state.failure_code == JobFailureCode.QUOTA_EXCEEDED.value
+        assert job_state.failure_code == JobFailureCode.TENANT_QUOTA_EXCEEDED.value
         upload_spy.assert_not_awaited()
         embeddings.get_embeddings.assert_not_awaited()
 

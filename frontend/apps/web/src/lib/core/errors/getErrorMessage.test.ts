@@ -5,6 +5,7 @@ import sv from "../../../../messages/sv.json";
 
 vi.mock("$lib/paraglide/messages", () => ({
   m: {
+    eneo_error_9008: () => "Usage quota exceeded.",
     eneo_error_9042: () => "Credential encryption must be configured before saving secrets.",
     eneo_error_9048: () => "Slug taken.",
     eneo_error_9049: () => "Published Skills are kept.",
@@ -17,6 +18,8 @@ vi.mock("$lib/paraglide/messages", () => ({
     eneo_error_9062: () => "Skill removal busy.",
     eneo_error_9063: () => "Active website sync.",
     eneo_error_9064: () => "Crawler cleanup pending.",
+    job_failure_tenant_quota_exceeded: () => "The organization's quota is full.",
+    job_failure_user_quota_exceeded: () => "Your quota is full.",
     request_failed: () => "Request failed."
   }
 }));
@@ -76,6 +79,25 @@ describe("getErrorMessage", () => {
         expect(skillCopy).not.toBe(modelCopy);
       }
     }
+  });
+
+  it("tells the user which storage quota refused the write", () => {
+    const quotaError = (code?: string) =>
+      new EneoError(
+        "Quota limit exceeded.",
+        "RESPONSE",
+        403,
+        9008,
+        code ? { eneo_error_code: 9008, code } : { eneo_error_code: 9008 },
+        { endpoint: "POST@/api/v1/groups/1/info-blobs/" }
+      );
+
+    expect(getErrorMessage(quotaError("tenant_quota_exceeded"))).toBe(
+      "The organization's quota is full."
+    );
+    expect(getErrorMessage(quotaError("user_quota_exceeded"))).toBe("Your quota is full.");
+    // A rate limit or an older backend sends 9008 without a reason code.
+    expect(getErrorMessage(quotaError())).toBe("Usage quota exceeded.");
   });
 
   it("keeps original-download, password, skill removal and crawler lifecycle errors distinct", () => {
