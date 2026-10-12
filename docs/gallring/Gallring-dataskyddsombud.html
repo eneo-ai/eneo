@@ -89,12 +89,12 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 
 <section aria-labelledby="concept-title">
 <h2 id="concept-title">1. Konceptet i en bild</h2>
-<p>Med gallring menas här radering som är slutgiltig i produkten, sker vid en bestämd tid under ett bestämt ansvar, och kan spåras i loggen utan att innehållet sparas. Bild 1 visar delarna: de områden som lämnar förfallna poster, motorn som prövar och raderar dem, filägaren som avgör om en fil får släppas, objektlagringen som raderar innehållet, och auditloggen som visar resultatet.</p>
+<p>Med gallring menas här radering som är slutgiltig i produkten, sker vid en bestämd tid under ett bestämt ansvar och kan spåras i loggen utan att innehållet sparas. Bild 1 visar delarna och hur de hänger ihop.</p>
 <figure>
 <div class="diagram-wrap">
 <svg class="chart" viewBox="0 0 1000 570" role="img" aria-labelledby="concept-chart-title concept-chart-desc">
 <title id="concept-chart-title">En gemensam gallringsmotor med filägaren, objektlagringen och auditloggen</title>
-<desc id="concept-chart-desc">Chattar, appar och uppladdningar lämnar sina förfallna poster till en gemensam motor. Motorn tar uppgiften, arbetar i begränsade portioner, låser, kontrollerar regeln igen och raderar, ångrar hela enheten vid hinder, loggar varje radering utan innehåll och sparar läget till nästa natt. Filägaren avgör om en fil används någon annanstans. Objektlagringen raderar själva innehållet. Auditloggen och hälsostatusen visar vad som togs bort, vad som behölls och varför. Gallring efter tid och radering på begäran är två olika beslut.</desc>
+<desc id="concept-chart-desc">Chattar, appar och uppladdningar lämnar sina förfallna poster till en gemensam motor. Motorn tar uppgiften, arbetar i begränsade portioner, låser, kontrollerar regeln igen och raderar, behåller hela posten vid hinder, loggar varje radering utan innehåll och sparar läget till nästa natt. Filkontrollen avgör om en fil används någon annanstans. Fillagringen raderar själva innehållet. Auditloggen och hälsostatusen visar vad som togs bort, vad som behölls och varför. Gallring efter tid och radering på begäran är två olika beslut.</desc>
 <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10" fill="none" stroke="#a2ad9b" stroke-width="1.4"/></marker></defs>
 
 <rect class="box" x="20" y="40" width="210" height="66" rx="10"/><text class="title" x="125" y="67">Chattar</text><text class="sub" x="125" y="90">frågor vars tid har gått ut</text>
@@ -106,28 +106,28 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 
 <rect class="engine" x="290" y="40" width="400" height="336" rx="14"/>
 <text class="title" x="490" y="72">En gemensam gallringsmotor</text>
-<text class="start" x="316" y="112">1. En körning i taget per uppgift</text>
+<text class="start" x="316" y="112">1. Hittar poster vars tid har gått ut</text>
 <text class="start" x="316" y="150">2. Arbetar i begränsade portioner per natt</text>
 <text class="start" x="316" y="188">3. Låser, kontrollerar regeln igen, raderar</text>
-<text class="start" x="316" y="226">4. Behåller hela enheten vid hinder</text>
-<text class="start" x="316" y="264">5. Loggar varje radering, aldrig innehåll</text>
-<text class="start" x="316" y="302">6. Sparar läget, fortsätter nästa natt</text>
-<text class="tiny" x="490" y="340">Varje område väljer bara sina poster</text>
-<text class="tiny" x="490" y="360">och namnger sina orsaker. Inget annat.</text>
+<text class="start" x="316" y="226">4. Behåller hela posten vid hinder</text>
+<text class="start" x="316" y="264">5. Loggar antal, aldrig innehåll</text>
+<text class="start" x="316" y="302">6. Fortsätter nästa natt där den slutade</text>
+<text class="tiny" x="490" y="340">Varje område pekar ut sina poster.</text>
+<text class="tiny" x="490" y="360">Motorn gör resten.</text>
 
 <path class="line" d="M690 90 H750"/><path class="line" d="M690 370 H750"/>
 
 <rect class="box" x="750" y="40" width="230" height="100" rx="10"/>
-<text class="title" x="865" y="70">Filägaren</text>
+<text class="title" x="865" y="70">Filkontrollen</text>
 <text class="sub" x="865" y="94">Används filen någon annanstans?</text>
 <text class="sub" x="865" y="114">Släpps bara när ingen använder den</text>
 <path class="line" d="M865 140 V180"/>
 <rect class="box" x="750" y="180" width="230" height="100" rx="10"/>
-<text class="title" x="865" y="210">Objektlagringen</text>
+<text class="title" x="865" y="210">Fillagringen</text>
 <text class="sub" x="865" y="234">Raderar själva innehållet</text>
-<text class="sub" x="865" y="254">och skriver en gravsten</text>
+<text class="sub" x="865" y="254">och markerar det som raderat</text>
 <rect class="box" x="750" y="320" width="230" height="100" rx="10"/>
-<text class="title" x="865" y="350">Auditlogg och hälsa</text>
+<text class="title" x="865" y="350">Auditlogg och hälsostatus</text>
 <text class="sub" x="865" y="374">Vad som togs bort, vad som</text>
 <text class="sub" x="865" y="394">behölls, och varför</text>
 
@@ -286,20 +286,20 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <tbody>
 <tr><td>Chatthistorik och apphistorik</td><td>Lagringstiden för frågan eller körningen har gått ut.</td><td>Frågan eller körningen och dess kopplingar. Chatten, om den blev tom. Filer som ingen annan använder.</td></tr>
 <tr><td>Tomma chattar</td><td>Chatten är äldre än 24 timmar och innehåller ingen fråga.</td><td>Den tomma chatten.</td></tr>
-<tr><td>Oanvända uppladdningar</td><td>Filen är äldre än 24 timmar och ingen chatt, app eller assistent använder den.</td><td>Filen med härledda filer, och dess innehåll i lagringen.</td></tr>
-<tr><td>Motorns egna körningsposter (tekniska poster om varje nattlig körning)</td><td>Posten är äldre än auditloggens lagringstid.</td><td>Körningsposten. Loggposterna i auditloggen följer auditloggens egen tid.</td></tr>
+<tr><td>Oanvända uppladdningar</td><td>Filen är äldre än 24 timmar och ingen chatt, app eller assistent använder den.</td><td>Filen med härledda filer, och dess innehåll i fillagringen.</td></tr>
 </tbody>
 </table>
 </div>
 <div class="note">
 <p><strong>Fördröjning.</strong> Plattformsförvaltningen sätter en budget per natt (rader, filer och minuter). Räcker den inte fortsätter motorn nästa natt där den slutade, och körningen rapporteras som "delvis". En kö som är äldre än ett dygn syns som försenad i hälsostatusen.</p>
 <p><strong>Tidpunkter.</strong> Alla tider i loggen och i detta dokument anges i UTC.</p>
+<p><strong>Motorns egna poster.</strong> Motorns tekniska poster om varje nattlig körning innehåller inga personuppgifter och rensas efter auditloggens lagringstid.</p>
 </div>
 </section>
 
 <section aria-labelledby="process-title">
 <h2 id="process-title">6. Så går gallringen till</h2>
-<p>Varje enhet går genom samma steg i en enda databastransaktion (bild 4). Automatisk gallring kräver att tiden har gått ut. Radering på begäran kräver ett särskilt beslut.</p>
+<p>Varje fråga, appkörning och filfamilj går genom samma steg i en enda databastransaktion (bild 4). Automatisk gallring kräver att tiden har gått ut. Radering på begäran kräver ett särskilt beslut.</p>
 <figure>
 <div class="diagram-wrap">
 <svg class="chart" viewBox="0 0 780 650" role="img" aria-labelledby="process-chart-title process-chart-desc" style="max-width:780px">
@@ -321,7 +321,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <rect class="box" x="25" y="342" width="270" height="72" rx="13"/>
 <text x="160" y="369">Behåll uppgifterna</text><text class="sub" x="160" y="393">Redovisa orsaken: låst, för stor, ej förfallen</text>
 <rect class="box" x="405" y="342" width="310" height="72" rx="13"/>
-<text x="560" y="369">Radera frågan eller körningen</text><text class="sub" x="560" y="393">och dess kopplingar, som en enhet</text>
+<text x="560" y="369">Radera frågan eller körningen</text><text class="sub" x="560" y="393">och dess kopplingar, som en helhet</text>
 <path class="line" d="M560 414 V444"/>
 <rect class="box" x="405" y="451" width="310" height="72" rx="13"/>
 <text x="560" y="478">Hantera filerna</text><text class="sub" x="560" y="502">Radera bara om ingen annan använder filen</text>
@@ -330,11 +330,11 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <text x="560" y="587">Logga och rapportera</text><text class="sub" x="560" y="611">Antal och regel. Klart, delvis eller misslyckat</text>
 </svg>
 </div>
-<figcaption>Bild 4. Kan en enhet inte raderas helt, raderas den inte alls. Resten av nattens arbete fortsätter.</figcaption>
+<figcaption>Bild 4. Kan en fråga, körning eller filfamilj inte raderas helt, raderas den inte alls. Resten av nattens arbete fortsätter.</figcaption>
 </figure>
 <ul style="margin-top:28px">
 <li><strong>Låsning och ny kontroll.</strong> Motorn låser posten och kontrollerar regeln en gång till i samma ögonblick som den raderar. En tid som just förlängts respekteras därför.</li>
-<li><strong>Allt eller inget.</strong> En fråga, en appkörning eller en filfamilj raderas hel eller inte alls. Ett hinder, till exempel att någon just då arbetar i chatten, gör att enheten behålls och prövas nästa natt.</li>
+<li><strong>Allt eller inget.</strong> En fråga, en appkörning eller en filfamilj raderas hel eller inte alls. Ett hinder, till exempel att någon just då arbetar i chatten, gör att posten behålls och prövas nästa natt.</li>
 <li><strong>Loggen skrivs i samma transaktion.</strong> Ingen radering utan loggpost, ingen loggpost utan radering.</li>
 </ul>
 </section>
@@ -362,7 +362,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 </div>
 <figcaption>Bild 5. A:s kortare tid når aldrig B:s uppgifter. Att radera filen i båda utrymmena samtidigt är ett särskilt beslut, aldrig en bieffekt av gallringen.</figcaption>
 </figure>
-<p class="small" style="margin-top:14px">Loggen natt 31 anger en raderad fråga enligt utrymmets regel. Att filen behölls för att den används syns i körningsposten. Loggen natt 61 anger en raderad fråga och en raderad fil.</p>
+<p class="small" style="margin-top:14px">Natt 31 loggas en raderad fråga enligt utrymmets regel. Att filen behölls syns i motorns egen uppföljning, inte i auditloggen. Natt 61 loggas en raderad fråga och en raderad fil.</p>
 </section>
 
 <section aria-labelledby="log-title">
@@ -393,23 +393,23 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 </div>
 </div>
 <div class="note">
-<p><strong>Exempel på en loggpost:</strong> "Gallring conversations.history, steg questions: questions deleted 12, sessions deleted 3, files deleted 5, by space rule 12; kept 1 root locked". Posten säger att tolv frågor, tre sessioner och fem filer raderades enligt utrymmets regel, och att en fråga behölls därför att den var låst. Den säger inte vad frågorna innehöll.</p>
+<p><strong>Exempel på en loggpost:</strong> "Gallring conversations.history, steg questions: questions deleted 12, sessions deleted 3, files deleted 5, by space rule 12; kept 1 root locked". Posten säger att tolv frågor, tre chattar och fem filer raderades enligt utrymmets regel, och att en fråga behölls därför att den var låst. Den säger inte vad frågorna innehöll.</p>
 <p><strong>Loggposterna är obligatoriska.</strong> De kan inte stängas av i auditloggens inställningar. Auditloggen har sin egen lagringstid, som plattformens administratörer sätter.</p>
 </div>
 </section>
 
 <section aria-labelledby="places-title">
 <h2 id="places-title">9. Alla lagringsplatser</h2>
-<p>Gallringen omfattar databasen och filinnehållet i lagringen. Andra lagringsplatser kräver egna rutiner. "Klart" i loggen betyder att motorn har prövat varje förfallen post inom nattens budget och räknat de poster som inte raderades under en orsak; det betyder inte att alla kopior av informationen är borta. IMY kräver att en gallringsrutin omfattar varje plats där uppgifterna finns. Tabellen visar vad förslaget gör på varje plats och hur det följs upp.</p>
+<p>Gallringen omfattar databasen och fillagringen. Andra lagringsplatser kräver egna rutiner, och IMY kräver att en gallringsrutin anger dem. "Klart" i loggen betyder att varje förfallen post har prövats; det betyder inte att alla kopior är borta.</p>
 <div class="table-wrap">
 <table class="places">
 <thead><tr><th scope="col">Lagringsplats</th><th scope="col">Vad gallringen gör</th><th scope="col">Så följs det upp</th></tr></thead>
 <tbody>
 <tr><td>Databasen: frågor, svar, appkörningar och kopplingar till filer</td><td>Raderas av motorn, i samma transaktion som loggposten skrivs.</td><td>Loggpost med antal och regel. Hälsostatusen visar kö och hinder.</td></tr>
-<tr><td>Filinnehållet i lagringen (databasen eller S3)</td><td>Markeras för radering när filens sista användning är borta. Lagringen raderar innehållet i en egen rutin och skriver en gravsten.</td><td>Lagringens egen avstämning och hälsostatus. Antalet raderade filer i loggen avser filposter, inte bekräftad radering av innehållet.</td></tr>
+<tr><td>Filinnehållet i fillagringen (databasen eller en objektlagring som S3)</td><td>Markeras för radering när filens sista användning är borta. Fillagringen raderar innehållet i en egen rutin och markerar det som raderat.</td><td>Lagringens egen avstämning och hälsostatus. Antalet raderade filer i loggen avser filposter, inte bekräftad radering av innehållet.</td></tr>
 <tr><td>Auditloggen</td><td>Innehåller aldrig innehåll, bara antal och identiteter. Har en egen lagringstid.</td><td>Plattformens administratörer sätter tiden. Äldre loggposter rensas dagligen.</td></tr>
 <tr><td>Säkerhetskopior</td><td>Rörs inte av gallringen.</td><td>Leverantörens rutin för kopiornas lagringstid och åtkomst. Vid en återställning görs raderingar som skett efter kopian om innan systemet öppnas igen.</td></tr>
-<tr><td>Äldre versioner i objektlagringen</td><td>Rörs inte. Eneo förutsätter att versionshantering är avstängd och kontrollerar det inte själv. Tidigare versioner kan finnas kvar om den har varit på.</td><td>Plattformsförvaltningen verifierar inställningen hos leverantören.</td></tr>
+<tr><td>Äldre versioner i fillagringen</td><td>Rörs inte. Eneo förutsätter att versionshantering är avstängd och kontrollerar det inte själv. Tidigare versioner kan finnas kvar om den har varit på.</td><td>Plattformsförvaltningen verifierar inställningen hos leverantören.</td></tr>
 <tr><td>Kunskapsmaterial, nedladdade kopior och externa system</td><td>Omfattas inte av lagringstiden för historik.</td><td>Egna rutiner i verksamheten.</td></tr>
 </tbody>
 </table>
@@ -423,7 +423,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <li><strong>Historik utan lagringstid.</strong> Finns ingen tid på assistenten, appen eller utrymmet, gallras historiken inte. Det är en medveten standard (avsnitt 12).</li>
 <li><strong>Frågor vars assistent har tagits bort.</strong> De saknar ägare och följer ingen regel. Detta är en känd brist som finns sedan tidigare och är planerad att åtgärdas.</li>
 <li><strong>Filer som fortfarande används.</strong> En fil som en annan chatt, app eller assistent använder behålls tills den sista användningen är borta. Att den finns kvar är ett tekniskt faktum, inte en rättslig grund för att behålla uppgifterna.</li>
-<li><strong>Enheter som är för stora eller låsta.</strong> De behålls, syns som hinder i loggen och i hälsostatusen, och kräver att plattformsförvaltningen åtgärdar orsaken.</li>
+<li><strong>Poster som är för stora eller låsta.</strong> De behålls, syns som hinder i loggen och i hälsostatusen, och kräver att plattformsförvaltningen åtgärdar orsaken.</li>
 <li><strong>Flows-historik.</strong> I dag rör den nattliga gallringen ingen Flows-data (avsnitt 11).</li>
 </ul>
 </section>
@@ -437,7 +437,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <tbody>
 <tr><td>Verksamheten anger en regel för körningshistorik per flöde, per utrymme eller för organisationen. Flödets regel går först, sedan utrymmets, sedan organisationens.</td><td>Samma ordning. Reglerna prövas av den gemensamma motorn med samma låsning, samma logg och samma hinder.</td></tr>
 <tr><td>Regeln anger tid i dagar och ett arbetssätt: "bevara" eller "kräver granskning". Utan regel finns ingen tidsgräns.</td><td>Ett tredje arbetssätt läggs till: automatisk gallring när tiden gått ut. "Kräver granskning" visar förfallna körningar i en läskö utan innehåll, där en person tar beslutet.</td></tr>
-<tr><td>Att spara en regel raderar inget. Det finns ingen funktion för att gallra körningshistorik, så förfallen historik finns kvar.</td><td>Avslutade körningar gallras som enheter: körningen med stegens historik, indata och resultat. Pågående körningar, flödet självt och dess inställningar berörs inte.</td></tr>
+<tr><td>Att spara en regel raderar inget. Det finns ingen funktion för att gallra körningshistorik, så förfallen historik finns kvar.</td><td>Avslutade körningar gallras som en helhet: körningen med stegens historik, indata och resultat. Pågående körningar, flödet självt och dess inställningar berörs inte.</td></tr>
 <tr><td>En behörig person kan lägga ett bevarandekrav på en körning.</td><td>Bevarandekravet stoppar gallringen av den körningen och orsaken redovisas.</td></tr>
 <tr><td>Ljud som laddas upp för transkribering sparas som indata till körningen.</td><td>En egen inställning kan släppa ljudet efter avslutad körning. Transkriptet följer körningens regel.</td></tr>
 </tbody>
@@ -471,11 +471,11 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <tr><td>Lagringstid</td><td>Antal dagar en fråga eller en appkörning får finnas kvar, räknat från när den skapades.</td></tr>
 <tr><td>Utrymme</td><td>En arbetsyta (Space) med egna medlemmar, assistenter och appar. Utrymmets administratör sätter lagringstiden.</td></tr>
 <tr><td>Assistent och app</td><td>Det användaren chattar med eller kör. Kan ha en egen lagringstid som ersätter utrymmets.</td></tr>
-<tr><td>Fråga</td><td>En sparad fråga med sitt svar. Den minsta enhet som gallras i en chatt.</td></tr>
+<tr><td>Fråga</td><td>En sparad fråga med sitt svar. Den minsta del som gallras i en chatt.</td></tr>
 <tr><td>Chatt (session)</td><td>En följd av frågor till en assistent. Raderas när dess sista fråga är borta. Kallas session i loggen.</td></tr>
 <tr><td>Appkörning</td><td>En körning av en app med sina indata och sitt resultat.</td></tr>
 <tr><td>Filfamilj</td><td>En uppladdad fil tillsammans med de filer som härletts ur den, till exempel text som tagits fram ur ett dokument.</td></tr>
-<tr><td>Enhet</td><td>Det som raderas helt eller inte alls: en fråga eller körning med sina kopplingar, eller en filfamilj.</td></tr>
+<tr><td>Fillagring</td><td>Där filernas innehåll ligger: i databasen eller i en objektlagring, till exempel S3.</td></tr>
 <tr><td>Auditlogg</td><td>Produktens granskningslogg. Plattformens administratörer läser den efter en motiverad åtkomst.</td></tr>
 <tr><td>Hälsostatus</td><td>Teknisk statussida som visar om gallringen går som den ska, om det finns kö och om något hindrar.</td></tr>
 <tr><td>Plattformsförvaltningen</td><td>De som installerar, konfigurerar och administrerar Eneo. Gör gallringsfunktionen tillgänglig, men sätter inte verksamheternas lagringstider.</td></tr>
