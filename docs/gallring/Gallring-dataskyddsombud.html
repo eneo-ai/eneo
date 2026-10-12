@@ -76,12 +76,14 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <h1>Så gallrar Eneo:<br>när, vem och hur</h1>
 <p class="lead">Eneo får en gemensam gallringsmotor för chattar, appar och uppladdade filer. Flows ansluts i nästa steg. Dokumentet beskriver när uppgifter gallras, vem som har kontroll och vad som kan spåras efteråt, så att dataskyddsombudet kan bedöma förslaget innan det tas i drift.</p>
 <div class="summary">
-<p><strong>När:</strong> när lagringstiden för en fråga eller en appkörning har gått ut. Motorn prövar varje natt och raderar bara det som regeln tillåter just då.</p>
+<p><strong>När:</strong> varje natt raderas de frågor och appkörningar vars lagringstid har gått ut.</p>
 <p><strong>Vem:</strong> verksamheten sätter lagringstiden per utrymme, assistent eller app. Driftansvarig styr om motorn körs och hur mycket den får göra per natt. Ingen lagringstid betyder ingen automatisk gallring.</p>
-<p><strong>Hur:</strong> raderingen är oåterkallelig i produkten och loggas som antal och regel, aldrig som innehåll. Systemet rapporterar aldrig mer än det faktiskt har gjort.</p>
+<p><strong>Vad:</strong> frågan eller körningen med dess kopplingar. En fil raderas först när ingen använder den längre.</p>
+<p><strong>Hur:</strong> varje radering är slutgiltig i produkten och loggas som antal och regel, aldrig som innehåll. Det som inte kan raderas behålls, och orsaken syns i loggen.</p>
+<p><strong>Gränser:</strong> säkerhetskopior, kunskapsmaterial och externa kopior omfattas inte. Radering av en fil på begäran är en planerad, separat funktion.</p>
 </div>
 <span class="status">Status: förslaget är granskat tekniskt men ännu inte i drift. Det går att ändra.</span>
-<p class="small" style="margin-top:16px">Avsnitten är numrerade så att synpunkter kan hänvisa till dem. Avsnitt 12 samlar de frågor vi särskilt vill ha svar på. Avsnitt 13 är en ordlista.</p>
+<p class="small" style="margin-top:16px">Avsnitt 1 till 7 beskriver hur gallringen fungerar, avsnitt 8 till 10 vad som kan spåras och vad som ligger utanför, avsnitt 11 Flows. Avsnitt 12 samlar de frågor som behöver svar och avsnitt 13 är en ordlista. Avsnitten är numrerade så att synpunkter kan hänvisa till dem.</p>
 </header>
 
 <section aria-labelledby="concept-title">
@@ -140,6 +142,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 
 <section aria-labelledby="decisions-title">
 <h2 id="decisions-title">2. Två olika beslut</h2>
+<p>Förslaget skiljer på två beslut. Gallring efter tid sker automatiskt. Radering på begäran kräver ett särskilt beslut.</p>
 <div class="cards">
 <div class="card">
 <h3>Gallring efter tid</h3>
@@ -217,6 +220,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 
 <section aria-labelledby="policy-title">
 <h2 id="policy-title">4. Vilken tid gäller?</h2>
+<p>Lagringstiden sätts på två nivåer, och den mest specifika gäller.</p>
 <p class="rule-order">Assistentens eller appens egen tid → utrymmets tid</p>
 <p>Systemet använder den första angivna tiden. En egen tid kan vara både kortare och längre än utrymmets tid. Tiden anges i dagar, från 1 till 2555 (sju år).</p>
 <div class="table-wrap">
@@ -232,7 +236,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 </tbody>
 </table>
 </div>
-<p class="small" style="margin-top:14px">Samma ordning gäller för appar. Loggen anger vilken regel som gällde vid varje radering: assistentens eller appens egen, eller utrymmets.</p>
+<p class="small" style="margin-top:14px">Loggen anger vilken regel som gällde vid varje radering: assistentens eller appens egen, eller utrymmets.</p>
 <div class="note">
 <p><strong>Tiden räknas per sparad fråga, från när frågan skapades.</strong> En ny fråga förlänger inte tiden för äldre frågor i samma chatt. Apphistorik räknas från när körningen skapades.</p>
 <p><strong>En ny eller kortare tid gäller även äldre innehåll.</strong> Att spara tiden raderar inget direkt. Motorn prövar innehållet vid nästa nattliga körning. Innehåll som redan är raderat kommer inte tillbaka om tiden förlängs.</p>
@@ -241,7 +245,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 
 <section aria-labelledby="when-title">
 <h2 id="when-title">5. När gallras informationen?</h2>
-<p>Bild 3 följer en fråga från att den sparas till att den raderas, med ett utrymme som har 30 dagar som exempel.</p>
+<p>Gallringen sker tidigast natten efter att lagringstiden har gått ut. Bild 3 följer en fråga från att den sparas till att den raderas, med ett utrymme som har 30 dagar som exempel.</p>
 <figure>
 <div class="diagram-wrap">
 <svg class="chart" viewBox="0 0 1000 250" role="img" aria-labelledby="when-chart-title when-chart-desc">
@@ -270,15 +274,15 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <caption>Vad motorn prövar varje natt, och från när.</caption>
 <thead><tr><th scope="col">Uppgift</th><th scope="col">Förfaller när</th><th scope="col">Tas bort</th></tr></thead>
 <tbody>
-<tr><td>Chatthistorik och apphistorik</td><td>Lagringstiden för frågan eller körningen har gått ut.</td><td>Frågan eller körningen och dess kopplingar. Chatten (sessionen), om den blev tom. Filer som ingen annan använder.</td></tr>
-<tr><td>Tomma sessioner (chattar utan fråga)</td><td>Sessionen är äldre än 24 timmar och innehåller ingen fråga.</td><td>Den tomma sessionen.</td></tr>
+<tr><td>Chatthistorik och apphistorik</td><td>Lagringstiden för frågan eller körningen har gått ut.</td><td>Frågan eller körningen och dess kopplingar. Chatten, om den blev tom. Filer som ingen annan använder.</td></tr>
+<tr><td>Tomma chattar</td><td>Chatten är äldre än 24 timmar och innehåller ingen fråga.</td><td>Den tomma chatten.</td></tr>
 <tr><td>Oanvända uppladdningar</td><td>Filen är äldre än 24 timmar och ingen chatt, app eller assistent använder den.</td><td>Filen med härledda filer, och dess innehåll i lagringen.</td></tr>
 <tr><td>Motorns egna körningsposter (tekniska poster om varje nattlig körning)</td><td>Posten är äldre än auditloggens lagringstid.</td><td>Körningsposten. Loggposterna i auditloggen följer auditloggens egen tid.</td></tr>
 </tbody>
 </table>
 </div>
 <div class="note">
-<p><strong>Fördröjning.</strong> Automatisk gallring sker tidigast natten efter att tiden gått ut. Driftansvarig sätter en budget per natt (rader, filer och minuter). Räcker inte budgeten fortsätter motorn nästa natt där den slutade och körningen rapporteras som "delvis". En kö som är äldre än ett dygn syns som försenad i hälsostatusen.</p>
+<p><strong>Fördröjning.</strong> Driftansvarig sätter en budget per natt (rader, filer och minuter). Räcker den inte fortsätter motorn nästa natt där den slutade, och körningen rapporteras som "delvis". En kö som är äldre än ett dygn syns som försenad i hälsostatusen.</p>
 <p><strong>Tidpunkter.</strong> Alla tider i loggen och i detta dokument anges i UTC.</p>
 </div>
 </section>
@@ -327,7 +331,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 
 <section aria-labelledby="shared-title">
 <h2 id="shared-title">7. Exempel: en fil som delas av två utrymmen</h2>
-<p>Utrymme A har 30 dagars lagringstid och utrymme B har 60 dagar. Samma uppladdade fil är bifogad i en chatt i vardera utrymmet (bild 5).</p>
+<p>Exemplet visar att en kortare tid i ett utrymme aldrig når ett annat utrymmes uppgifter. Utrymme A har 30 dagars lagringstid och utrymme B har 60 dagar. Samma uppladdade fil är bifogad i en chatt i vardera utrymmet (bild 5).</p>
 <figure>
 <div class="diagram-wrap">
 <svg class="chart" viewBox="0 0 1000 300" role="img" aria-labelledby="shared-chart-title shared-chart-desc">
@@ -353,12 +357,13 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 
 <section aria-labelledby="log-title">
 <h2 id="log-title">8. Vad loggas, och vad loggas inte</h2>
+<p>Loggen visar att något har gallrats, aldrig vad det innehöll.</p>
 <div class="cards">
 <div class="card">
 <h3>Loggas i auditloggen</h3>
 <ul>
 <li>Vilken gallringsuppgift och vilket steg som kördes, till exempel chattfrågor eller appkörningar.</li>
-<li>Antal raderade poster per typ: frågor, körningar, sessioner, filer.</li>
+<li>Antal raderade poster per typ: frågor, körningar, chattar, filer.</li>
 <li>Vilken regel som gällde: assistentens eller appens egen tid, eller utrymmets.</li>
 <li>Antal poster som behölls, med typad orsak: låst, för stor, inte längre förfallen, filen används.</li>
 <li>Körningens resultat: klart, delvis eller misslyckat, med summor och körningens identitet.</li>
@@ -375,7 +380,6 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <li>Vem som ställde frågan.</li>
 <li>Fritext. Orsakerna är fasta koder.</li>
 </ul>
-<p class="small">Loggen visar att något har gallrats, aldrig vad det innehöll.</p>
 </div>
 </div>
 <div class="note">
@@ -386,7 +390,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 
 <section aria-labelledby="places-title">
 <h2 id="places-title">9. Alla lagringsplatser</h2>
-<p>"Klart" i loggen betyder att motorn har prövat varje förfallen post inom nattens budget och räknat de poster som inte raderades under en orsak. Det betyder inte att alla kopior av informationen är borta. IMY kräver att en gallringsrutin omfattar varje plats där uppgifterna finns. Tabellen visar vad förslaget gör på varje plats och hur det följs upp.</p>
+<p>Gallringen omfattar databasen och filinnehållet i lagringen. Andra lagringsplatser kräver egna rutiner. "Klart" i loggen betyder att motorn har prövat varje förfallen post inom nattens budget och räknat de poster som inte raderades under en orsak; det betyder inte att alla kopior av informationen är borta. IMY kräver att en gallringsrutin omfattar varje plats där uppgifterna finns. Tabellen visar vad förslaget gör på varje plats och hur det följs upp.</p>
 <div class="table-wrap">
 <table class="places">
 <thead><tr><th scope="col">Lagringsplats</th><th scope="col">Vad gallringen gör</th><th scope="col">Så följs det upp</th></tr></thead>
@@ -433,15 +437,16 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 </section>
 
 <section aria-labelledby="questions-title">
-<h2 id="questions-title">12. Frågor vi vill ha synpunkter på</h2>
+<h2 id="questions-title">12. Frågor att ta ställning till</h2>
+<p>Svaren på följande frågor avgör hur förslaget bör justeras innan det tas i drift.</p>
 <ul class="questions">
 <li><strong>Standard utan tid.</strong> I dag betyder ingen lagringstid ingen automatisk gallring. Är det rätt, eller ska organisationen ha en standardtid som gäller där inget annat anges?</li>
 <li><strong>Vem sätter tiden.</strong> Utrymmets administratör sätter tiden, och en assistent- eller appägare kan sätta en egen tid som är både kortare och längre. Ska en längre egen tid vara tillåten?</li>
 <li><strong>Fördröjning.</strong> Gallringen sker tidigast natten efter att tiden gått ut, och vid stor kö över flera nätter. Är det acceptabelt?</li>
 <li><strong>Loggens innehåll.</strong> Räcker antal, regel och orsak som spårbarhet för gallringen, eller saknas något?</li>
 <li><strong>Granskning före gallring.</strong> Flows får "kräver granskning". Behövs samma möjlighet för chattar och appar?</li>
-<li><strong>Radering på begäran.</strong> Funktionen för att radera en fil överallt är planerad. Hur bör den prioriteras, och vilka krav ställer ni på dess rapport?</li>
-<li><strong>Säkerhetskopior.</strong> Vilken rutin för återställning och kopiors lagringstid vill ni se dokumenterad och beslutad?</li>
+<li><strong>Radering på begäran.</strong> Funktionen för att radera en fil överallt är planerad. Hur bör den prioriteras, och vilka krav bör ställas på dess rapport?</li>
+<li><strong>Säkerhetskopior.</strong> Vilken rutin för återställning och för kopiornas lagringstid bör dokumenteras och beslutas?</li>
 <li><strong>Ägarlösa frågor.</strong> Frågor vars assistent tagits bort gallras inte i dag. Hur bör de hanteras: följa utrymmets tid, eller en fast tid?</li>
 </ul>
 </section>
@@ -457,7 +462,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <tr><td>Utrymme</td><td>En arbetsyta (Space) med egna medlemmar, assistenter och appar. Utrymmets administratör sätter lagringstiden.</td></tr>
 <tr><td>Assistent och app</td><td>Det användaren chattar med eller kör. Kan ha en egen lagringstid som ersätter utrymmets.</td></tr>
 <tr><td>Fråga</td><td>En sparad fråga med sitt svar. Den minsta enhet som gallras i en chatt.</td></tr>
-<tr><td>Session</td><td>En chatt, det vill säga en följd av frågor. Raderas när dess sista fråga är borta.</td></tr>
+<tr><td>Chatt (session)</td><td>En följd av frågor till en assistent. Raderas när dess sista fråga är borta. Kallas session i loggen.</td></tr>
 <tr><td>Appkörning</td><td>En körning av en app med sina indata och sitt resultat.</td></tr>
 <tr><td>Filfamilj</td><td>En uppladdad fil tillsammans med de filer som härletts ur den, till exempel text som tagits fram ur ett dokument.</td></tr>
 <tr><td>Enhet</td><td>Det som raderas helt eller inte alls: en fråga eller körning med sina kopplingar, eller en filfamilj.</td></tr>
