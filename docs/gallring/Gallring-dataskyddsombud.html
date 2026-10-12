@@ -58,6 +58,7 @@ figure { margin:0; }
 .chart .tiny { fill:var(--muted); font-size:13px; }
 .chart .label { fill:var(--accent); font-size:14px; }
 .chart .title { font-weight:650; }
+.chart .t15 { font-size:15px; }
 .chart .start { text-anchor:start; }
 figcaption { color:var(--muted); font-size:14px; text-align:center; margin-top:12px; }
 .questions li { margin-bottom:10px; }
@@ -77,7 +78,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <p class="lead">Eneo får en gemensam gallringsmotor för chattar, appar och uppladdade filer. Flows ansluts i nästa steg. Dokumentet beskriver när uppgifter gallras, vem som har kontroll och vad som kan spåras efteråt, så att dataskyddsombudet kan bedöma förslaget innan det tas i drift.</p>
 <div class="summary">
 <p><strong>När:</strong> varje natt raderas de frågor och appkörningar vars lagringstid har gått ut.</p>
-<p><strong>Vem:</strong> verksamheten sätter lagringstiden per utrymme, assistent eller app. Driftansvarig styr om motorn körs och hur mycket den får göra per natt. Ingen lagringstid betyder ingen automatisk gallring.</p>
+<p><strong>Vem:</strong> plattformsförvaltningen gör gallringsfunktionen tillgänglig och slår på den. Varje verksamhet bestämmer sedan själv, enligt sitt regelverk, vilka utrymmen, assistenter och appar som ska gallras och efter hur lång tid. Ingen lagringstid betyder ingen automatisk gallring.</p>
 <p><strong>Vad:</strong> frågan eller körningen med dess kopplingar. En fil raderas först när ingen använder den längre.</p>
 <p><strong>Hur:</strong> varje radering är slutgiltig i produkten och loggas som antal och regel, aldrig som innehåll. Det som inte kan raderas behålls, och orsaken syns i loggen.</p>
 <p><strong>Gränser:</strong> säkerhetskopior, kunskapsmaterial och externa kopior omfattas inte. Radering av en fil på begäran är en planerad, separat funktion.</p>
@@ -159,46 +160,55 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 
 <section aria-labelledby="who-title">
 <h2 id="who-title">3. Vem bestämmer vad</h2>
-<p>Fyra roller delar på kontrollen (bild 2). Verksamheten bestämmer vad och när, driftansvarig bestämmer om och hur mycket, systemet verkställer, och administratören följer upp.</p>
+<p>Kontrollen är delad i fyra steg, i denna ordning (bild 2).</p>
+<ol>
+<li><strong>Plattformsförvaltningen inför gallringsfunktionen.</strong> Den slår på funktionen och väljer tidpunkt och nattbudget. Det görs en gång och gäller hela installationen. Inga lagringstider sätts i detta steg.</li>
+<li><strong>Varje verksamhet sätter sina lagringstider.</strong> Verksamheten bestämmer, enligt sitt eget regelverk, vilka utrymmen, assistenter och appar som ska gallras och efter hur många dagar. Utan lagringstid gallras inget automatiskt.</li>
+<li><strong>Systemet verkställer.</strong> Varje natt prövas reglerna och det som reglerna tillåter raderas.</li>
+<li><strong>Uppföljning.</strong> Plattformens administratörer läser auditloggen och hälsostatusen. Verksamheterna får underlag därifrån.</li>
+</ol>
 <figure>
 <div class="diagram-wrap">
-<svg class="chart" viewBox="0 0 1000 260" role="img" aria-labelledby="who-chart-title who-chart-desc">
-<title id="who-chart-title">Fyra roller: verksamheten, driftansvarig, systemet och uppföljningen</title>
-<desc id="who-chart-desc">Verksamheten sätter lagringstiden. Driftansvarig slår på eller av gallringsuppgifterna och väljer tidpunkt och nattbudget. Systemet prövar varje natt och raderar bara det regeln tillåter. Administratören följer upp i auditloggen och hälsostatusen.</desc>
-<rect class="box" x="20" y="30" width="220" height="190" rx="10"/>
-<text class="title" x="130" y="62">1. Verksamheten</text>
-<text class="sub" x="130" y="92">Utrymmets administratör,</text>
-<text class="sub" x="130" y="112">assistentens eller appens</text>
-<text class="sub" x="130" y="132">ägare sätter lagringstiden.</text>
-<text class="sub" x="130" y="160">Ändringen loggas med</text>
-<text class="sub" x="130" y="180">gammalt och nytt värde.</text>
-<path class="line" d="M240 125 H265"/>
-<rect class="box" x="265" y="30" width="220" height="190" rx="10"/>
-<text class="title" x="375" y="62">2. Driftansvarig</text>
-<text class="sub" x="375" y="92">Slår på eller av varje</text>
-<text class="sub" x="375" y="112">gallringsuppgift. Väljer</text>
-<text class="sub" x="375" y="132">tidpunkt och nattbudget.</text>
-<text class="sub" x="375" y="160">En avstängd uppgift syns</text>
-<text class="sub" x="375" y="180">i loggen varje natt.</text>
-<path class="line" d="M485 125 H510"/>
-<rect class="box engine" x="510" y="30" width="220" height="190" rx="10"/>
-<text class="title" x="620" y="62">3. Systemet</text>
-<text class="sub" x="620" y="92">Prövar varje natt. Raderar</text>
-<text class="sub" x="620" y="112">bara det regeln tillåter.</text>
-<text class="sub" x="620" y="132">Behåller vid hinder.</text>
-<text class="sub" x="620" y="160">Loggar antal och orsak,</text>
-<text class="sub" x="620" y="180">aldrig innehåll.</text>
-<path class="line" d="M730 125 H755"/>
-<rect class="box" x="755" y="30" width="225" height="190" rx="10"/>
-<text class="title" x="867" y="62">4. Uppföljning</text>
-<text class="sub" x="867" y="92">Administratören läser</text>
-<text class="sub" x="867" y="112">auditlogg och hälsostatus.</text>
-<text class="sub" x="867" y="140">Läsningen kräver en</text>
-<text class="sub" x="867" y="160">motivering och loggas</text>
-<text class="sub" x="867" y="180">i sig.</text>
+<svg class="chart" viewBox="0 0 1000 280" role="img" aria-labelledby="who-chart-title who-chart-desc">
+<title id="who-chart-title">Fyra steg: plattformsförvaltningen, verksamheterna, systemet och uppföljningen</title>
+<desc id="who-chart-desc">Plattformsförvaltningen inför gallringsfunktionen, slår på den och väljer tidpunkt och nattbudget, men sätter inga lagringstider. Varje verksamhet sätter lagringstid för sina utrymmen, assistenter och appar enligt sitt regelverk. Systemet prövar varje natt och raderar bara det reglerna tillåter. Plattformens administratörer följer upp i auditloggen och hälsostatusen, och verksamheterna får underlag därifrån.</desc>
+<rect class="box" x="12" y="30" width="232" height="210" rx="10"/>
+<text class="title t15" x="128" y="62">1. Plattformsförvaltningen</text>
+<text class="sub" x="128" y="92">Inför gallringsfunktionen:</text>
+<text class="sub" x="128" y="112">slår på den, väljer</text>
+<text class="sub" x="128" y="132">tidpunkt och nattbudget.</text>
+<text class="sub" x="128" y="152">Sätter inga lagringstider.</text>
+<text class="sub" x="128" y="180">En avstängd uppgift</text>
+<text class="sub" x="128" y="200">loggas varje natt.</text>
+<path class="line" d="M244 135 H260"/>
+<rect class="box" x="260" y="30" width="232" height="210" rx="10"/>
+<text class="title t15" x="376" y="62">2. Verksamheterna</text>
+<text class="sub" x="376" y="92">Varje verksamhet sätter</text>
+<text class="sub" x="376" y="112">lagringstid för sina</text>
+<text class="sub" x="376" y="132">utrymmen, assistenter och</text>
+<text class="sub" x="376" y="152">appar enligt sitt regelverk.</text>
+<text class="sub" x="376" y="180">Ändringen loggas med</text>
+<text class="sub" x="376" y="200">gammalt och nytt värde.</text>
+<path class="line" d="M492 135 H508"/>
+<rect class="box engine" x="508" y="30" width="232" height="210" rx="10"/>
+<text class="title t15" x="624" y="62">3. Systemet</text>
+<text class="sub" x="624" y="92">Prövar varje natt. Raderar</text>
+<text class="sub" x="624" y="112">bara det reglerna tillåter.</text>
+<text class="sub" x="624" y="132">Behåller vid hinder.</text>
+<text class="sub" x="624" y="180">Loggar antal och orsak,</text>
+<text class="sub" x="624" y="200">aldrig innehåll.</text>
+<path class="line" d="M740 135 H756"/>
+<rect class="box" x="756" y="30" width="232" height="210" rx="10"/>
+<text class="title t15" x="872" y="62">4. Uppföljning</text>
+<text class="sub" x="872" y="92">Plattformens administratörer</text>
+<text class="sub" x="872" y="112">läser auditlogg och hälsa.</text>
+<text class="sub" x="872" y="132">Verksamheterna får</text>
+<text class="sub" x="872" y="152">underlag därifrån.</text>
+<text class="sub" x="872" y="180">Läsningen kräver motivering</text>
+<text class="sub" x="872" y="200">och loggas i sig.</text>
 </svg>
 </div>
-<figcaption>Bild 2. Ingen lagringstid på någon nivå betyder ingen automatisk gallring av den historiken.</figcaption>
+<figcaption>Bild 2. Plattformsförvaltningen sätter inga lagringstider. Ingen lagringstid på någon nivå betyder ingen automatisk gallring.</figcaption>
 </figure>
 
 <div class="table-wrap" style="margin-top:32px">
@@ -206,13 +216,13 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <caption>Vem kan göra vad, och hur det syns efteråt.</caption>
 <thead><tr><th scope="col">Åtgärd</th><th scope="col">Vem</th><th scope="col">Spårbarhet</th></tr></thead>
 <tbody>
-<tr><td>Sätta lagringstid för ett utrymme</td><td>Utrymmets administratör.</td><td>Loggas som en ändring av utrymmet, med gammalt och nytt värde.</td></tr>
-<tr><td>Sätta egen tid för en assistent eller app</td><td>Utrymmets administratör. I ett personligt utrymme: ägaren.</td><td>Loggas som en ändring av assistenten eller appen.</td></tr>
+<tr><td>Sätta lagringstid för ett utrymme</td><td>Verksamheten, genom utrymmets administratör.</td><td>Loggas som en ändring av utrymmet, med gammalt och nytt värde.</td></tr>
+<tr><td>Sätta egen tid för en assistent eller app</td><td>Verksamheten, genom utrymmets administratör. I ett personligt utrymme: ägaren.</td><td>Loggas som en ändring av assistenten eller appen.</td></tr>
 <tr><td>Sätta en standardtid för hela organisationen</td><td>Ingen, i dag. Inställningen togs bort ur produkten för att undvika oavsiktlig radering.</td><td>Finns inte. Utan tid på utrymme, assistent eller app sker ingen automatisk gallring.</td></tr>
-<tr><td>Slå på eller av en gallringsuppgift, välja tidpunkt och nattbudget</td><td>Driftansvarig, i installationens driftinställningar. Kräver omstart.</td><td>En avstängd uppgift skriver varje natt en loggpost "Gallring överhoppad".</td></tr>
+<tr><td>Göra gallringsfunktionen tillgänglig: slå på den, välja tidpunkt och nattbudget</td><td>Plattformsförvaltningen, i installationens driftinställningar. Kräver omstart.</td><td>En avstängd uppgift skriver varje natt en loggpost "Gallring överhoppad".</td></tr>
 <tr><td>Ta bort en chatt manuellt</td><td>Användaren själv.</td><td>Filer som ingen annan använder släpps direkt.</td></tr>
 <tr><td>Radera en fil överallt på begäran</td><td>Planerad funktion för en behörig person.</td><td>Egen rapport över omfattning och resultat (planerad).</td></tr>
-<tr><td>Läsa auditloggen</td><td>Administratör.</td><td>Kräver en åtkomstsession med skriftlig motivering. Åtkomsten loggas.</td></tr>
+<tr><td>Läsa auditloggen</td><td>Plattformens administratörer.</td><td>Kräver en åtkomstsession med skriftlig motivering. Åtkomsten loggas.</td></tr>
 </tbody>
 </table>
 </div>
@@ -220,7 +230,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 
 <section aria-labelledby="policy-title">
 <h2 id="policy-title">4. Vilken tid gäller?</h2>
-<p>Lagringstiden sätts på två nivåer, och den mest specifika gäller.</p>
+<p>Verksamheten sätter lagringstiden på två nivåer, och den mest specifika gäller.</p>
 <p class="rule-order">Assistentens eller appens egen tid → utrymmets tid</p>
 <p>Systemet använder den första angivna tiden. En egen tid kan vara både kortare och längre än utrymmets tid. Tiden anges i dagar, från 1 till 2555 (sju år).</p>
 <div class="table-wrap">
@@ -267,7 +277,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <text class="sub" x="640" y="232">Efter ett dygn räknas den som försenad och syns i hälsostatusen.</text>
 </svg>
 </div>
-<figcaption>Bild 3. Den nattliga körningen startar kl. 03.30 i standardinstallationen (UTC). Driftansvarig kan ändra tidpunkten.</figcaption>
+<figcaption>Bild 3. Den nattliga körningen startar kl. 03.30 i standardinstallationen (UTC). Plattformsförvaltningen kan ändra tidpunkten.</figcaption>
 </figure>
 <div class="table-wrap" style="margin-top:32px">
 <table>
@@ -282,7 +292,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 </table>
 </div>
 <div class="note">
-<p><strong>Fördröjning.</strong> Driftansvarig sätter en budget per natt (rader, filer och minuter). Räcker den inte fortsätter motorn nästa natt där den slutade, och körningen rapporteras som "delvis". En kö som är äldre än ett dygn syns som försenad i hälsostatusen.</p>
+<p><strong>Fördröjning.</strong> Plattformsförvaltningen sätter en budget per natt (rader, filer och minuter). Räcker den inte fortsätter motorn nästa natt där den slutade, och körningen rapporteras som "delvis". En kö som är äldre än ett dygn syns som försenad i hälsostatusen.</p>
 <p><strong>Tidpunkter.</strong> Alla tider i loggen och i detta dokument anges i UTC.</p>
 </div>
 </section>
@@ -384,7 +394,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 </div>
 <div class="note">
 <p><strong>Exempel på en loggpost:</strong> "Gallring conversations.history, steg questions: questions deleted 12, sessions deleted 3, files deleted 5, by space rule 12; kept 1 root locked". Posten säger att tolv frågor, tre sessioner och fem filer raderades enligt utrymmets regel, och att en fråga behölls därför att den var låst. Den säger inte vad frågorna innehöll.</p>
-<p><strong>Loggposterna är obligatoriska.</strong> De kan inte stängas av i auditloggens inställningar. Auditloggen har sin egen lagringstid, som administratören sätter.</p>
+<p><strong>Loggposterna är obligatoriska.</strong> De kan inte stängas av i auditloggens inställningar. Auditloggen har sin egen lagringstid, som plattformens administratörer sätter.</p>
 </div>
 </section>
 
@@ -397,9 +407,9 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <tbody>
 <tr><td>Databasen: frågor, svar, appkörningar och kopplingar till filer</td><td>Raderas av motorn, i samma transaktion som loggposten skrivs.</td><td>Loggpost med antal och regel. Hälsostatusen visar kö och hinder.</td></tr>
 <tr><td>Filinnehållet i lagringen (databasen eller S3)</td><td>Markeras för radering när filens sista användning är borta. Lagringen raderar innehållet i en egen rutin och skriver en gravsten.</td><td>Lagringens egen avstämning och hälsostatus. Antalet raderade filer i loggen avser filposter, inte bekräftad radering av innehållet.</td></tr>
-<tr><td>Auditloggen</td><td>Innehåller aldrig innehåll, bara antal och identiteter. Har en egen lagringstid.</td><td>Administratören sätter tiden. Äldre loggposter rensas dagligen.</td></tr>
+<tr><td>Auditloggen</td><td>Innehåller aldrig innehåll, bara antal och identiteter. Har en egen lagringstid.</td><td>Plattformens administratörer sätter tiden. Äldre loggposter rensas dagligen.</td></tr>
 <tr><td>Säkerhetskopior</td><td>Rörs inte av gallringen.</td><td>Leverantörens rutin för kopiornas lagringstid och åtkomst. Vid en återställning görs raderingar som skett efter kopian om innan systemet öppnas igen.</td></tr>
-<tr><td>Äldre versioner i objektlagringen</td><td>Rörs inte. Eneo förutsätter att versionshantering är avstängd och kontrollerar det inte själv. Tidigare versioner kan finnas kvar om den har varit på.</td><td>Driftansvarig verifierar inställningen hos leverantören.</td></tr>
+<tr><td>Äldre versioner i objektlagringen</td><td>Rörs inte. Eneo förutsätter att versionshantering är avstängd och kontrollerar det inte själv. Tidigare versioner kan finnas kvar om den har varit på.</td><td>Plattformsförvaltningen verifierar inställningen hos leverantören.</td></tr>
 <tr><td>Kunskapsmaterial, nedladdade kopior och externa system</td><td>Omfattas inte av lagringstiden för historik.</td><td>Egna rutiner i verksamheten.</td></tr>
 </tbody>
 </table>
@@ -413,7 +423,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <li><strong>Historik utan lagringstid.</strong> Finns ingen tid på assistenten, appen eller utrymmet, gallras historiken inte. Det är en medveten standard (avsnitt 12).</li>
 <li><strong>Frågor vars assistent har tagits bort.</strong> De saknar ägare och följer ingen regel. Detta är en känd brist som finns sedan tidigare och är planerad att åtgärdas.</li>
 <li><strong>Filer som fortfarande används.</strong> En fil som en annan chatt, app eller assistent använder behålls tills den sista användningen är borta. Att den finns kvar är ett tekniskt faktum, inte en rättslig grund för att behålla uppgifterna.</li>
-<li><strong>Enheter som är för stora eller låsta.</strong> De behålls, syns som hinder i loggen och i hälsostatusen, och kräver att driftansvarig åtgärdar orsaken.</li>
+<li><strong>Enheter som är för stora eller låsta.</strong> De behålls, syns som hinder i loggen och i hälsostatusen, och kräver att plattformsförvaltningen åtgärdar orsaken.</li>
 <li><strong>Flows-historik.</strong> I dag rör den nattliga gallringen ingen Flows-data (avsnitt 11).</li>
 </ul>
 </section>
@@ -425,7 +435,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <table>
 <thead><tr><th scope="col">Så fungerar Flows i dag</th><th scope="col">Så är det tänkt efter anslutningen</th></tr></thead>
 <tbody>
-<tr><td>En regel för körningshistorik anges per flöde, per utrymme eller för organisationen. Flödets regel går först, sedan utrymmets, sedan organisationens.</td><td>Samma ordning. Reglerna prövas av den gemensamma motorn med samma låsning, samma logg och samma hinder.</td></tr>
+<tr><td>Verksamheten anger en regel för körningshistorik per flöde, per utrymme eller för organisationen. Flödets regel går först, sedan utrymmets, sedan organisationens.</td><td>Samma ordning. Reglerna prövas av den gemensamma motorn med samma låsning, samma logg och samma hinder.</td></tr>
 <tr><td>Regeln anger tid i dagar och ett arbetssätt: "bevara" eller "kräver granskning". Utan regel finns ingen tidsgräns.</td><td>Ett tredje arbetssätt läggs till: automatisk gallring när tiden gått ut. "Kräver granskning" visar förfallna körningar i en läskö utan innehåll, där en person tar beslutet.</td></tr>
 <tr><td>Att spara en regel raderar inget. Det finns ingen funktion för att gallra körningshistorik, så förfallen historik finns kvar.</td><td>Avslutade körningar gallras som enheter: körningen med stegens historik, indata och resultat. Pågående körningar, flödet självt och dess inställningar berörs inte.</td></tr>
 <tr><td>En behörig person kan lägga ett bevarandekrav på en körning.</td><td>Bevarandekravet stoppar gallringen av den körningen och orsaken redovisas.</td></tr>
@@ -466,9 +476,12 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 <tr><td>Appkörning</td><td>En körning av en app med sina indata och sitt resultat.</td></tr>
 <tr><td>Filfamilj</td><td>En uppladdad fil tillsammans med de filer som härletts ur den, till exempel text som tagits fram ur ett dokument.</td></tr>
 <tr><td>Enhet</td><td>Det som raderas helt eller inte alls: en fråga eller körning med sina kopplingar, eller en filfamilj.</td></tr>
-<tr><td>Auditlogg</td><td>Produktens granskningslogg. Administratören läser den efter en motiverad åtkomst.</td></tr>
+<tr><td>Auditlogg</td><td>Produktens granskningslogg. Plattformens administratörer läser den efter en motiverad åtkomst.</td></tr>
 <tr><td>Hälsostatus</td><td>Teknisk statussida som visar om gallringen går som den ska, om det finns kö och om något hindrar.</td></tr>
-<tr><td>Driftansvarig</td><td>Den som sköter installationen och dess driftinställningar.</td></tr>
+<tr><td>Plattformsförvaltningen</td><td>De som installerar, konfigurerar och administrerar Eneo. Gör gallringsfunktionen tillgänglig, men sätter inte verksamheternas lagringstider.</td></tr>
+<tr><td>Verksamhet</td><td>En förvaltning eller enhet som äger utrymmen, assistenter och appar i Eneo och bestämmer deras lagringstider enligt sitt regelverk.</td></tr>
+<tr><td>Plattformens administratörer</td><td>Administratörsrollen i Eneo. Läser auditloggen och sätter dess lagringstid.</td></tr>
+<tr><td>Driftinställningar</td><td>Installationens tekniska inställningar. Plattformsförvaltningen sätter dem, och en ändring kräver omstart.</td></tr>
 <tr><td>Radering på begäran</td><td>Ett särskilt beslut att radera en utpekad fil överallt. Planerad funktion.</td></tr>
 <tr><td>Bevarandekrav</td><td>Ett beslut att en körning inte får gallras, till exempel under en utredning. Finns i Flows.</td></tr>
 </tbody>
