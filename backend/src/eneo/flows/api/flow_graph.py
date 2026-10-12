@@ -8,11 +8,13 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.config import JsonDict
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStepResultAnnotation
+from eneo.flows.enums import FlowInputSource
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.step_lineage import (
     build_step_ref_mapping,
     referenced_step_order,
     resolve_reference_step_orders,
+    resolve_tool_argument_orders,
 )
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
@@ -136,6 +138,16 @@ def build_graph_from_steps(
                     source_step_order=0,
                     target_step_order=step_order,
                     style=style,
+                )
+            )
+        if input_source == "tool":
+            edges.extend(
+                _tool_argument_edges(
+                    step=step,
+                    step_id=step_id,
+                    step_order=step_order,
+                    sorted_steps=sorted_steps,
+                    step_ref_mapping=step_ref_mapping,
                 )
             )
 
@@ -263,6 +275,41 @@ def _binding_upstream(
             for reference in references
         ),
     )
+
+
+def _tool_argument_edges(
+    *,
+    step: FlowPersistedJsonObject,
+    step_id: str,
+    step_order: int,
+    sorted_steps: Sequence[FlowPersistedJsonObject],
+    step_ref_mapping: dict[str, int],
+) -> list[GraphEdge]:
+    """One edge from each earlier step a tool step's bound arguments read: what
+    that step produced is sent to the tool's server."""
+    steps_by_order = {int(item["step_order"]): item for item in sorted_steps}
+    raw_config = step.get("input_config")
+    return [
+        GraphEdge(
+            source=str(upstream.get("step_id") or upstream.get("id")),
+            target=step_id,
+            kind="tool_arguments",
+            source_step_order=upstream_order,
+            target_step_order=step_order,
+            style="dashed",
+            label="arguments",
+        )
+        for upstream_order in resolve_tool_argument_orders(
+            input_source=FlowInputSource.TOOL,
+            step_order=step_order,
+            input_config=cast(FlowPersistedJsonObject, raw_config)
+            if isinstance(raw_config, dict)
+            else None,
+            step_ref_mapping=step_ref_mapping,
+            max_prior_step_order=step_order - 1,
+        )
+        if (upstream := steps_by_order.get(upstream_order)) is not None
+    ]
 
 
 def _binding_edges(

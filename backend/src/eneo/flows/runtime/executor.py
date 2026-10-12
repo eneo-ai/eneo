@@ -28,6 +28,7 @@ from eneo.flows.application.flow_run_terminalization import (
     FlowRunTerminalizationResult,
     FlowRunTerminalizer,
 )
+from eneo.flows.application.flow_tool_publication import UnattendedToolFactsSource
 from eneo.flows.assistant_execution_snapshot import (
     AssistantExecutionSnapshotV2,
     validate_assistant_execution_snapshot,
@@ -85,6 +86,7 @@ from eneo.flows.domain.transcript_source import (
     with_transcript_source_reference,
 )
 from eneo.flows.enums import (
+    FlowInputSource,
     FlowOutputMode,
     FlowOutputType,
     FlowRunLifecycleSource,
@@ -98,7 +100,12 @@ from eneo.flows.flow_api_error_code import (
 )
 from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
-from eneo.flows.flow_run_error import FlowRunError, FlowRunErrorDetails
+from eneo.flows.flow_run_error import (
+    FlowRunError,
+    FlowRunErrorDetails,
+    after_possible_tool_call,
+    tool_call_possible,
+)
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdge,
     FlowResolvedInputEdgeGrouping,
@@ -156,6 +163,8 @@ from eneo.flows.runtime.document_rendering.limits import (
 from eneo.flows.runtime.document_rendering.service import (
     default_document_render_service,
 )
+from eneo.flows.runtime.egress.policy import FlowDestinationPolicy, Resolver
+from eneo.flows.runtime.egress.resolver import flow_name_resolver
 from eneo.flows.runtime.execution_heartbeat import (
     FlowExecutionOwnershipLost,
     current_execution_ownership_lost,
@@ -167,14 +176,15 @@ from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.flow_runtime_trace import trace_flow_step
 from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.http_audit import (
+    AuditedToolCall,
     HttpAuditDeps,
 )
 from eneo.flows.runtime.http_audit import (
     audit_http_outbound as audit_http_outbound_runtime,
 )
 from eneo.flows.runtime.http_orchestration import (
-    FlowHttpInputResolution,
     FlowHttpOrchestrationDeps,
+    FlowOutsideInputResolution,
 )
 from eneo.flows.runtime.http_orchestration import (
     resolve_http_input_source_text as resolve_http_input_source_text_orchestrated,
@@ -241,6 +251,16 @@ from eneo.flows.runtime.step_result_builder import (
 )
 from eneo.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
+)
+from eneo.flows.runtime.tool_argument_check import ToolArgumentCheckFailed
+from eneo.flows.runtime.tool_input import (
+    ToolCaller,
+    ToolInputDeps,
+    pinned_tool_config,
+    read_usable_tool,
+)
+from eneo.flows.runtime.tool_input import (
+    resolve_tool_input as resolve_tool_input_runtime,
 )
 from eneo.flows.runtime.transcription import (
     TranscriptionFailure,
@@ -331,6 +351,40 @@ def _with_provider_work_disclosure(
     return f"{message.rstrip()} {_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
 
 
+def _tool_step_failed_before_its_input_was_stored(
+    step: RuntimeStep, *, attempt_no: int, state: RunExecutionState | None
+) -> bool:
+    """Whether a failed attempt is a tool step's whose input was never stored.
+
+    Such an attempt asked no provider for anything: a tool step takes no
+    upload to transcribe, and a step's model is called only after the
+    attempt's input is stored.
+    """
+    return (
+        state is not None
+        and FlowInputSource(step.input_source) is FlowInputSource.TOOL
+        and (step.step_id, attempt_no) not in state.activated_attempts
+    )
+
+
+def _details_after_tool_steps(
+    details: FlowRunErrorDetails | None,
+    *,
+    code: FlowApiErrorCode,
+    step: RuntimeStep,
+    state: RunExecutionState | None,
+) -> FlowRunErrorDetails | None:
+    """``details`` of the run error of a run that failed at ``step``, with the
+    fact that a tool may have been called when ``tool_call_possible`` says so."""
+    if state is None or not tool_call_possible(
+        tool_step_orders=state.tool_step_orders,
+        completed_step_orders=state.completed_by_order,
+        failing_step_order=step.step_order,
+    ):
+        return details
+    return after_possible_tool_call(details, code=code)
+
+
 def _flow_provider_error_code(exc: Exception | None) -> FlowApiErrorCode | None:
     if not isinstance(exc, OpenAIException):
         return None
@@ -388,6 +442,9 @@ class FlowRunExecutorConfig:
     http_request_timeout_seconds: float = 30.0
     http_max_timeout_seconds: float = 30.0
     http_allow_private_networks: bool = False
+    tool_allow_private_networks: bool = True
+    # The deployment's ceiling for one MCP tool call.
+    tool_call_timeout_seconds: int = 60
     runtime_policy: FlowRuntimePolicy = field(
         default_factory=default_flow_runtime_policy
     )
@@ -433,6 +490,8 @@ class FlowRunExecutorConfig:
             ),
             http_max_timeout_seconds=float(settings.flow_http_max_timeout_seconds),
             http_allow_private_networks=bool(settings.flow_http_allow_private_networks),
+            tool_allow_private_networks=bool(settings.flow_tool_allow_private_networks),
+            tool_call_timeout_seconds=settings.mcp_client_call_timeout_seconds,
             runtime_policy=resolved_runtime_policy,
             mapped_execution_policy=(
                 mapped_execution_policy or resolve_flow_mapped_execution_policy(None)
@@ -603,6 +662,8 @@ class FlowRunExecutor:
         config: FlowRunExecutorConfig | None = None,
         transcript_words_repo: "FlowTranscriptWordsRepository | None" = None,
         invocation_deadline: float | None = None,
+        tool_facts_reader: UnattendedToolFactsSource | None = None,
+        tool_caller: ToolCaller | None = None,
     ) -> None:
         resolved_config = config
         if resolved_config is None:
@@ -658,6 +719,13 @@ class FlowRunExecutor:
             max_timeout_seconds=self.http_max_timeout_seconds,
             allow_private_networks=self.http_allow_private_networks,
         )
+        self.tool_facts_reader = tool_facts_reader
+        self.tool_caller = tool_caller
+        self.tool_destination_policy = FlowDestinationPolicy(
+            allow_private_networks=resolved_config.tool_allow_private_networks
+        )
+        self.tool_name_resolver: Resolver = flow_name_resolver()
+        self.tool_call_timeout_seconds = resolved_config.tool_call_timeout_seconds
         self.runtime_policy = resolved_config.runtime_policy
         self.mapped_execution_policy = resolved_config.mapped_execution_policy
         self._step_deadline_seconds = resolved_config.step_deadline_seconds
@@ -926,24 +994,26 @@ class FlowRunExecutor:
                 steps=steps, state=state
             )
         except BadRequestException as exc:
-            source = FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
-            run_error = self._run_error_from_bad_request(
+            return await self._fail_run_before_its_steps(
                 exc,
-                source=source,
-                default_code=FlowApiErrorCode.DEFINITION_INVALID,
-            )
-            await self._terminalize_run(
                 run_id=run_id,
                 tenant_id=tenant_id,
-                target_status=FlowRunStatus.FAILED,
-                source=source,
-                error=run_error,
+                source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
             )
-            await self._commit()
-            return {
-                "status": "failed",
-                "error": run_error.code.value,
-            }
+        try:
+            await self._refuse_unusable_tools(steps, run=run, state=state)
+        except TypedIOValidationException as exc:
+            # What a level decides about a tool is no fault of the definition:
+            # the run ends with the code, the source and the typed details it
+            # would have at the step that meets the same refusal. Its message
+            # is the refusal's own sentence, which at the step is the step
+            # attempt's.
+            return await self._fail_run_before_its_steps(
+                exc,
+                run_id=run_id,
+                tenant_id=tenant_id,
+                source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+            )
         await self.flow_run_repo.record_evidence_classification_level(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -1052,6 +1122,7 @@ class FlowRunExecutor:
                     tenant_id=tenant_id,
                     step=step,
                     claimed=claimed_result,
+                    state=state,
                 )
             attempt_no = started_attempt.attempt_no
 
@@ -2016,6 +2087,7 @@ class FlowRunExecutor:
         tenant_id: UUID,
         step: RuntimeStep,
         claimed: FlowStepResult,
+        state: RunExecutionState,
         error_code: FlowApiErrorCode | None = None,
         error_message: str | None = None,
     ) -> dict[str, Any]:
@@ -2058,6 +2130,9 @@ class FlowRunExecutor:
                 code=run_error_code,
                 message=run_error_message,
                 step_order=step.step_order,
+                details=_details_after_tool_steps(
+                    None, code=run_error_code, step=step, state=state
+                ),
             ),
         )
         await self._commit()
@@ -2125,9 +2200,19 @@ class FlowRunExecutor:
             if isinstance(typed_exc, StepOutputValidationException)
             else None
         )
+        run_error_message = build_typed_failure_run_error_message(
+            step_order=step.step_order,
+            error_code=error_code,
+            error_message=str(typed_exc),
+            contract_validation=getattr(typed_exc, "contract_validation", None),
+        )
         if isinstance(typed_exc, StepDeadlineExceeded):
             error_message = str(typed_exc)
             run_error_message = error_message
+        elif _tool_step_failed_before_its_input_was_stored(
+            step, attempt_no=attempt_no, state=state
+        ):
+            error_message = str(typed_exc)
         else:
             error_message = _with_provider_work_disclosure(
                 str(typed_exc),
@@ -2135,12 +2220,7 @@ class FlowRunExecutor:
                 completion_received=rejected_completion is not None,
             )
             run_error_message = _with_provider_work_disclosure(
-                build_typed_failure_run_error_message(
-                    step_order=step.step_order,
-                    error_code=error_code,
-                    error_message=str(typed_exc),
-                    contract_validation=getattr(typed_exc, "contract_validation", None),
-                ),
+                run_error_message,
                 step=step,
                 completion_received=rejected_completion is not None,
             )
@@ -2318,6 +2398,13 @@ class FlowRunExecutor:
                 "was unavailable.",
                 step=step,
             )
+        elif isinstance(exc, ToolArgumentCheckFailed):
+            # Before the tool call and before the step's model: nothing was
+            # asked of a provider or of the tool.
+            public_error = (
+                f"Flow step {step.step_order} failed because this worker could not "
+                "run the check of the tool's arguments; the tool was not called."
+            )
         else:
             public_error = _with_provider_work_disclosure(
                 f"Flow step {step.step_order} execution failed.",
@@ -2401,7 +2488,12 @@ class FlowRunExecutor:
                 code=failure_plan.error_code,
                 message=failure_plan.run_error_message,
                 step_order=step.step_order,
-                details=run_error_details,
+                details=_details_after_tool_steps(
+                    run_error_details,
+                    code=failure_plan.error_code,
+                    step=step,
+                    state=state,
+                ),
             ),
         )
         await self._commit()
@@ -2604,6 +2696,7 @@ class FlowRunExecutor:
             commit=self._commit,
             variable_resolver=self.variable_resolver,
             resolve_http_input_source_text=self._resolve_http_input_source_text,
+            resolve_tool_input=self._resolve_tool_input,
             file_service=self.file_service,
             transcribers=self.transcribers,
             flow_repo=self.flow_repo,
@@ -2714,7 +2807,7 @@ class FlowRunExecutor:
         step: RuntimeStep,
         run: FlowRun,
         context: FlowVariableContext,
-    ) -> FlowHttpInputResolution:
+    ) -> FlowOutsideInputResolution:
         deps = FlowHttpOrchestrationDeps(
             encryption_service=self.encryption_service,
             variable_resolver=self.variable_resolver,
@@ -2729,6 +2822,97 @@ class FlowRunExecutor:
             context=context,
             deps=deps,
         )
+
+    async def _resolve_tool_input(
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        context: FlowVariableContext,
+    ) -> FlowOutsideInputResolution:
+        return await resolve_tool_input_runtime(
+            step=step,
+            run=run,
+            context=context,
+            deps=self._tool_input_deps(),
+            space_id=await self._flow_space_id(run),
+        )
+
+    def _tool_input_deps(self) -> ToolInputDeps:
+        if self.tool_facts_reader is None or self.tool_caller is None:
+            raise FlowRuntimeInvariantError(
+                "A run with a tool step needs the tool facts reader and the tool caller."
+            )
+        return ToolInputDeps(
+            facts_reader=self.tool_facts_reader,
+            caller=self.tool_caller,
+            variable_resolver=self.variable_resolver,
+            destination_policy=self.tool_destination_policy,
+            name_resolver=self.tool_name_resolver,
+            call_timeout_seconds=self.tool_call_timeout_seconds,
+            max_answer_bytes=self.max_inline_text_bytes,
+            audit_http_outbound=self._audit_http_outbound,
+        )
+
+    async def _flow_space_id(self, run: FlowRun) -> UUID:
+        # Read for each check: the decision is about the space the flow is in
+        # now. A run of a deleted flow may still be finishing.
+        space_id = await self.flow_repo.get_space_id(
+            flow_id=run.flow_id, tenant_id=run.tenant_id, include_deleted=True
+        )
+        if space_id is None:
+            raise NotFoundException("Flow not found.")
+        return space_id
+
+    async def _fail_run_before_its_steps(
+        self,
+        exc: BadRequestException,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        source: FlowRunLifecycleSource,
+    ) -> dict[str, Any]:
+        run_error = self._run_error_from_bad_request(
+            exc, source=source, default_code=FlowApiErrorCode.DEFINITION_INVALID
+        )
+        await self._terminalize_run(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=source,
+            error=run_error,
+        )
+        await self._commit()
+        return {"status": "failed", "error": run_error.code.value}
+
+    async def _refuse_unusable_tools(
+        self, steps: list[RuntimeStep], *, run: FlowRun, state: RunExecutionState
+    ) -> None:
+        """Refuse a run with a tool step whose tool a level does not allow for
+        the flow's space, or is no longer the tool the flow pinned, before any
+        step. The read asks again before its call.
+
+        A step the run has already completed makes no call any more, so a
+        resumed run is not refused for it.
+        """
+        tool_steps = [
+            step
+            for step in sorted(steps, key=lambda item: item.step_order)
+            if FlowInputSource(step.input_source) is FlowInputSource.TOOL
+            and step.step_order not in state.completed_by_order
+        ]
+        if not tool_steps:
+            return
+        deps = self._tool_input_deps()
+        space_id = await self._flow_space_id(run)
+        for step in tool_steps:
+            await read_usable_tool(
+                step_order=step.step_order,
+                config=pinned_tool_config(step),
+                facts_reader=deps.facts_reader,
+                tenant_id=run.tenant_id,
+                space_id=space_id,
+            )
 
     async def _load_assistant(
         self,
@@ -3054,6 +3238,7 @@ class FlowRunExecutor:
         error_message: str | None = None,
         status_code: int | None = None,
         duration_ms: float | None = None,
+        tool: AuditedToolCall | None = None,
     ) -> None:
         deps = HttpAuditDeps(
             audit_service=self.audit_service,
@@ -3070,6 +3255,7 @@ class FlowRunExecutor:
             error_message=error_message,
             status_code=status_code,
             duration_ms=duration_ms,
+            tool=tool,
             deps=deps,
         )
 

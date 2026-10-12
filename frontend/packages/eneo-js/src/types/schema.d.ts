@@ -18196,9 +18196,17 @@ export interface components {
       | "typed_io_http_response_too_large"
       | "typed_io_http_ssrf_blocked"
       | "typed_io_http_timeout"
+      | "typed_io_tool_answer_too_large"
+      | "typed_io_tool_changed"
+      | "typed_io_tool_connection_error"
+      | "typed_io_tool_destination_blocked"
+      | "typed_io_tool_invalid_arguments"
       | "typed_io_tool_invalid_config"
       | "typed_io_tool_invalid_schema"
+      | "typed_io_tool_malformed_answer"
       | "typed_io_tool_not_allowed"
+      | "typed_io_tool_reported_error"
+      | "typed_io_tool_timeout"
       | "typed_io_input_exceeds_model_window"
       | "typed_io_input_too_large"
       | "typed_io_structured_output_exceeds_limit"
@@ -20135,7 +20143,8 @@ export interface components {
         | components["schemas"]["FlowResolvedInputSystemValueSource"]
         | components["schemas"]["FlowResolvedInputRuntimeSource"]
         | components["schemas"]["FlowResolvedInputRuntimeFileSource"]
-        | components["schemas"]["FlowResolvedInputHttpResponseSource"];
+        | components["schemas"]["FlowResolvedInputHttpResponseSource"]
+        | components["schemas"]["FlowResolvedInputToolAnswerSource"];
     };
     /** FlowResolvedInputEdgesCorruptionMarker */
     FlowResolvedInputEdgesCorruptionMarker: {
@@ -20277,6 +20286,36 @@ export interface components {
       kind: "system_value";
       /** Name */
       name: string;
+    };
+    /**
+     * FlowResolvedInputToolAnswerSource
+     * @description The answer of the MCP tool a step called for its input: the server and
+     *     the tool by id, and the name the call used.
+     */
+    FlowResolvedInputToolAnswerSource: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "tool_answer";
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       * @description The registered MCP server.
+       */
+      mcp_server_id: string;
+      selector: components["schemas"]["FlowResolvedInputJsonPath"];
+      /**
+       * Tool Id
+       * Format: uuid
+       * @description The server's tool that was called.
+       */
+      tool_id: string;
+      /**
+       * Tool Name
+       * @description The name the call used: the one pinned when the flow was published.
+       */
+      tool_name: string;
     };
     /**
      * FlowRetentionHold
@@ -21148,7 +21187,7 @@ export interface components {
     FlowRunContractViolation: {
       /**
        * Json Pointer
-       * @description RFC 6901 pointer into the value the contract checked: the step input or output. For a per-item, section or mapped step a check of one call points into that call's value, and a failure of the assembled output points into the complete assembled output. It is the deepest location the contract declares (properties and array indices), so it can be an ancestor of the failing object when a key that comes from the data was cut; the empty string is the whole value. For `required` it names the object missing the property.
+       * @description RFC 6901 pointer into the value the contract checked: the step input or output, or for `typed_io_tool_invalid_arguments` the arguments object the step resolved for its tool. For a per-item, section or mapped step a check of one call points into that call's value, and a failure of the assembled output points into the complete assembled output. It is the deepest location the contract declares (properties and array indices), so it can be an ancestor of the failing object when a key that comes from the data was cut; the empty string is the whole value. For `required` it names the object missing the property.
        */
       json_pointer: string;
       /**
@@ -21158,7 +21197,7 @@ export interface components {
       schema_rule: string;
       /**
        * Side
-       * @description Whether the step's input contract or its output contract was broken.
+       * @description Whether the step's input contract or its output contract was broken. `input` also for `typed_io_tool_invalid_arguments`, where the broken contract is the input schema of the step's tool.
        * @enum {string}
        */
       side: "input" | "output";
@@ -22103,7 +22142,17 @@ export interface components {
         | "typed_io_structured_output_exceeds_limit"
         | "typed_io_template_checksum_mismatch"
         | "typed_io_template_render_failed"
+        | "typed_io_tool_answer_too_large"
+        | "typed_io_tool_changed"
+        | "typed_io_tool_connection_error"
+        | "typed_io_tool_destination_blocked"
+        | "typed_io_tool_invalid_arguments"
         | "typed_io_tool_invalid_config"
+        | "typed_io_tool_invalid_schema"
+        | "typed_io_tool_malformed_answer"
+        | "typed_io_tool_not_allowed"
+        | "typed_io_tool_reported_error"
+        | "typed_io_tool_timeout"
         | "typed_io_transcript_too_large"
         | "typed_io_transcription_config_invalid"
         | "typed_io_transcription_empty"
@@ -22123,7 +22172,7 @@ export interface components {
       message: string;
       /**
        * Retryable
-       * @description Whether a consumer may safely submit a new logical run after terminalization. This does not automatically start work.
+       * @description Whether a consumer may submit a new logical run without repeating provider work that was accepted or an external effect. True only for a code the platform lists as such, and false for such a code when `details.tool_call_possible` is true, because a new run calls the tool again. This does not automatically start work.
        */
       readonly retryable: boolean;
       /**
@@ -22157,7 +22206,7 @@ export interface components {
        * @description Mapped items completed before the interruption.
        */
       completed_items?: number | null;
-      /** @description Where and which rule a value broke in a step's input or output contract. For a per-item, section or mapped step the rule can come from the bound the platform puts on one call, such as exactly one item. Absent when not recorded: a pointer longer than 400 characters, a violation found outside the platform's contract validator, or a run that failed before this field existed. Never contains the value itself. */
+      /** @description Where and which rule a value broke in a step's input or output contract, or in the approved input schema of the step's tool (`typed_io_tool_invalid_arguments`). For a per-item, section or mapped step the rule can come from the bound the platform puts on one call, such as exactly one item. Absent when not recorded: a pointer longer than 400 characters, a violation found outside the platform's contract validator, or a run that failed before this field existed. Never contains the value itself. */
       contract_violation?: components["schemas"]["FlowRunContractViolation"] | null;
       /** Measured Bytes */
       measured_bytes?: number | null;
@@ -22185,6 +22234,18 @@ export interface components {
       summarization_records?: number | null;
       /** Summarization Rounds */
       summarization_rounds?: number | null;
+      /**
+       * Tool Call Possible
+       * @description Set on an error whose code alone would be retryable: true when the run ended at or after a step whose input is a tool's answer, or had completed such a step when its dispatch failed, so a tool may have been called and may have changed something. `retryable` is then false.
+       */
+      tool_call_possible?: boolean | null;
+      /**
+       * Tool Error Text
+       * @description The start of the text a tool sent with its own statement that it failed, for a step whose input is a tool's answer. Never parse this text to classify a failure.
+       */
+      tool_error_text?: string | null;
+      /** @description What refuses the step's tool for the flow's space, for `typed_io_tool_not_allowed`: a personal space, or else the first level that says no, in the order instance server, instance tool, space. Absent for a stored value this version no longer has. */
+      tool_refusal?: components["schemas"]["UnattendedToolRefusal"] | null;
       /**
        * Total Items
        * @description Total mapped items in this step attempt.
@@ -24877,7 +24938,17 @@ export interface components {
             | "typed_io_structured_output_exceeds_limit"
             | "typed_io_template_checksum_mismatch"
             | "typed_io_template_render_failed"
+            | "typed_io_tool_answer_too_large"
+            | "typed_io_tool_changed"
+            | "typed_io_tool_connection_error"
+            | "typed_io_tool_destination_blocked"
+            | "typed_io_tool_invalid_arguments"
             | "typed_io_tool_invalid_config"
+            | "typed_io_tool_invalid_schema"
+            | "typed_io_tool_malformed_answer"
+            | "typed_io_tool_not_allowed"
+            | "typed_io_tool_reported_error"
+            | "typed_io_tool_timeout"
             | "typed_io_transcript_too_large"
             | "typed_io_transcription_config_invalid"
             | "typed_io_transcription_empty"
@@ -26267,7 +26338,17 @@ export interface components {
             | "typed_io_structured_output_exceeds_limit"
             | "typed_io_template_checksum_mismatch"
             | "typed_io_template_render_failed"
+            | "typed_io_tool_answer_too_large"
+            | "typed_io_tool_changed"
+            | "typed_io_tool_connection_error"
+            | "typed_io_tool_destination_blocked"
+            | "typed_io_tool_invalid_arguments"
             | "typed_io_tool_invalid_config"
+            | "typed_io_tool_invalid_schema"
+            | "typed_io_tool_malformed_answer"
+            | "typed_io_tool_not_allowed"
+            | "typed_io_tool_reported_error"
+            | "typed_io_tool_timeout"
             | "typed_io_transcript_too_large"
             | "typed_io_transcription_config_invalid"
             | "typed_io_transcription_empty"
@@ -26399,7 +26480,7 @@ export interface components {
       input_contract?: {
         [key: string]: unknown;
       } | null;
-      /** @description Where the step's input comes from. `tool` names one MCP tool in `input_config.tool` (`mcp_server_id`, `tool_id`, `arguments`). Each argument is a fixed JSON value or one whole reference such as `{{flow_input.field}}`. A fixed string cannot contain `{{...}}`: it is read as a reference, and there is no escape syntax. Argument values are stored and returned as written and are not treated as secrets, so a credential does not belong in one; the MCP server's credential is stored with the server. A tool step reads text or JSON, takes no uploaded files and cannot use the output mode `template_fill`. Publish also requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. Publish does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. Any other configuration is refused with `typed_io_tool_invalid_config`. */
+      /** @description Where the step's input comes from. `tool` names one MCP tool in `input_config.tool` (`mcp_server_id`, `tool_id`, `arguments`). Each argument is a fixed JSON value or one whole reference such as `{{flow_input.field}}`. A fixed string cannot contain `{{...}}`: it is read as a reference, and there is no escape syntax. Argument values are stored and returned as written and are not treated as secrets, so a credential does not belong in one; the MCP server's credential is stored with the server. A tool step reads text or JSON, takes no uploaded files and cannot use the output mode `template_fill`. Publish also requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. Publish does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. Any other configuration is refused with `typed_io_tool_invalid_config`. A run calls the tool once per step attempt and takes its answer as the step's input: for `input_type` `json` the structured content, or text that is a JSON object or array; for `text` the text. */
       input_source: components["schemas"]["FlowInputSource"];
       input_type: components["schemas"]["FlowInputType"];
       /** Output Classification Override */
@@ -26675,7 +26756,7 @@ export interface components {
       input_contract?: {
         [key: string]: unknown;
       } | null;
-      /** @description Where the step's input comes from. `tool` names one MCP tool in `input_config.tool` (`mcp_server_id`, `tool_id`, `arguments`). Each argument is a fixed JSON value or one whole reference such as `{{flow_input.field}}`. A fixed string cannot contain `{{...}}`: it is read as a reference, and there is no escape syntax. Argument values are stored and returned as written and are not treated as secrets, so a credential does not belong in one; the MCP server's credential is stored with the server. A tool step reads text or JSON, takes no uploaded files and cannot use the output mode `template_fill`. Publish also requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. Publish does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. Any other configuration is refused with `typed_io_tool_invalid_config`. */
+      /** @description Where the step's input comes from. `tool` names one MCP tool in `input_config.tool` (`mcp_server_id`, `tool_id`, `arguments`). Each argument is a fixed JSON value or one whole reference such as `{{flow_input.field}}`. A fixed string cannot contain `{{...}}`: it is read as a reference, and there is no escape syntax. Argument values are stored and returned as written and are not treated as secrets, so a credential does not belong in one; the MCP server's credential is stored with the server. A tool step reads text or JSON, takes no uploaded files and cannot use the output mode `template_fill`. Publish also requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. Publish does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. Any other configuration is refused with `typed_io_tool_invalid_config`. A run calls the tool once per step attempt and takes its answer as the step's input: for `input_type` `json` the structured content, or text that is a JSON object or array; for `text` the text. */
       input_source: components["schemas"]["FlowInputSource"];
       input_type: components["schemas"]["FlowInputType"];
       /** Output Classification Override */
@@ -38372,6 +38453,26 @@ export interface components {
        */
       target_space_id: string;
     };
+    /**
+     * UnattendedToolRefusal
+     * @description What refuses a tool for a caller that runs with nobody watching: a
+     *     personal space, or else the first level that says no, in the order
+     *     instance server, instance tool, space.
+     * @enum {string}
+     */
+    UnattendedToolRefusal:
+      | "server_not_found"
+      | "server_disabled"
+      | "server_not_general"
+      | "server_forwards_identity"
+      | "tool_not_found"
+      | "tool_removed_at_server"
+      | "tool_waiting_for_review"
+      | "tool_switched_off"
+      | "space_is_personal"
+      | "server_not_in_space"
+      | "tool_switched_off_in_space"
+      | "server_below_space_classification";
     /** UnavailableTranscriptSourcePage */
     UnavailableTranscriptSourcePage: {
       /** Attempt No */

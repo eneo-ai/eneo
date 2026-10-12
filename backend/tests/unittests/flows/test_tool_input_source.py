@@ -14,6 +14,7 @@ import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from eneo.flows.api.flow_graph import build_graph_from_steps
+from eneo.flows.application.flow_run_export_json import _build_input_lineage
 from eneo.flows.domain.flow import FlowStep, FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.flow_step_validation import FlowStepValidationError
 from eneo.flows.domain.step_config import clean_inactive_step_config
@@ -537,6 +538,55 @@ def test_the_graph_draws_a_tool_step_as_fed_from_outside_the_flow() -> None:
     assert [(edge.source, edge.kind, edge.style) for edge in incoming] == [
         ("input", "tool", "dashed")
     ]
+
+
+def _reading_tool_step(step_order: int) -> dict[str, object]:
+    """A stored tool step whose arguments read the first step and a form field."""
+    arguments = {"days": "{{step_1.output.structured.days}}", "case": "{{case_id}}"}
+    return {
+        "step_id": str(uuid4()),
+        "step_order": step_order,
+        "input_source": "tool",
+        "input_type": "json",
+        "output_type": "text",
+        "output_mode": "pass_through",
+        "input_config": {"tool": {**_IDS, **_PIN, "arguments": arguments}},
+    }
+
+
+def test_the_graph_draws_the_steps_a_tool_steps_arguments_read() -> None:
+    # Kills the mutant that draws a tool step from the run's input alone: what
+    # an earlier step produced is sent to the tool's server, and the graph
+    # would not show it.
+    first, second = (
+        {"step_id": str(uuid4()), "step_order": order, "input_source": "flow_input"}
+        for order in (1, 2)
+    )
+    tool = _reading_tool_step(3)
+
+    _, edges = build_graph_from_steps([first, second, tool])
+
+    incoming = [edge for edge in edges if edge.target == tool["step_id"]]
+    assert [(edge.source, edge.kind, edge.source_step_order) for edge in incoming] == [
+        ("input", "tool", 0),
+        (first["step_id"], "tool_arguments", 1),
+    ]
+
+
+def test_the_run_export_reports_the_steps_a_tool_steps_arguments_read() -> None:
+    # Kills the mutant that reports a tool step's upstream steps from its
+    # input source alone: the export would say the step read no earlier step.
+    lineage = _build_input_lineage(
+        step=_reading_tool_step(3),
+        step_order=3,
+        step_ref_mapping={},
+        step_labels_by_order={1: "Mätvärden", 2: "Annat", 3: "Hämta"},
+        result={},
+        max_prior_step_order=3,
+    )
+
+    assert lineage["upstream_step_orders"] == [1]
+    assert lineage["upstream_step_labels"] == ["Mätvärden"]
 
 
 def _migration_sql(direction: str) -> str:

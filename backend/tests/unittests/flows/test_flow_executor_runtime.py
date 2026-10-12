@@ -143,7 +143,7 @@ async def test_complete_material_reaches_provider_and_all_persisted_aliases_are_
         FileBackedStepText,
         parse_step_text_aliases,
     )
-    from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
+    from eneo.flows.runtime.http_orchestration import FlowOutsideInputResolution
     from eneo.flows.runtime.step_result_builder import (
         build_completed_step_input_payload,
     )
@@ -181,7 +181,7 @@ async def test_complete_material_reaches_provider_and_all_persisted_aliases_are_
         else text
     )
     executor._resolve_http_input_source_text = AsyncMock(
-        return_value=FlowHttpInputResolution(
+        return_value=FlowOutsideInputResolution(
             text=input_text, structured=None, resolved_input_edges=()
         )
     )
@@ -1832,6 +1832,8 @@ async def test_step_failure_reports_the_run_outcome_when_its_write_was_refused(
             "attempt_no": 1,
             "exc": OpenAIException("llm boom", code="provider_error"),
         }
+    else:
+        shared_kwargs |= {"state": _empty_execution_state()}
 
     result = await getattr(executor, handler_name)(**shared_kwargs)
 

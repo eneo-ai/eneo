@@ -106,7 +106,7 @@ The fields below explain most step behavior.
 | `step_order` | Execution order within the published Flow. |
 | `assistant_id` | Assistant/model configuration used by model-backed execution. |
 | `user_description` | Authoring prompt or task description for the step. |
-| `input_source` | Where the step gets its input: `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, or `tool`. |
+| `input_source` | Where the step gets its input: `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, or `tool`. With `tool`, a step takes its input from the answer of one MCP tool: a tool of a general MCP server that the flow's space has activated, switched on and with an approved definition. It is configured through the API in this release line. |
 | `input_type` | Expected input kind: `text`, `json`, `image`, `audio`, `document`, `file`, or `any`. |
 | `input_bindings` | Structured references to form answers, source refs, or prior structured fields. Prefer this for explicit data flow. |
 | `input_config` | Step input configuration, including HTTP or runtime file settings. |
@@ -121,9 +121,10 @@ The fields below explain most step behavior.
 "how should this step execute or render?" `output_type` answers "what kind of
 value or artifact does the step produce?"
 
-Flow supports HTTP GET as an input source and durable HTTP POST as a terminal
-output mode. Flow does not support HTTP POST input or source-local MCP
-configuration at authoring, publish, runtime, Builder, or package boundaries.
+Flow supports HTTP GET and the answer of one MCP tool (`tool`) as input sources
+and durable HTTP POST as a terminal output mode. Flow does not support HTTP POST
+input, or MCP servers and tools on a step's assistant, at authoring, publish,
+runtime, Builder, or package boundaries.
 Standalone assistants and conversations keep their separately owned MCP
 behavior. A Flow package export is not blocked when its step assistants have
 persisted MCP server or tool associations: it omits those associations and

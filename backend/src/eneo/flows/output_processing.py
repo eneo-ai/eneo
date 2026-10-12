@@ -6,20 +6,28 @@ import json
 import math
 import re
 import unicodedata
-from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, NoReturn, Protocol, cast
+from typing import Any, Literal, cast
 from urllib.parse import unquote
 
 import jsonschema
-from jsonschema.exceptions import UnknownType
 from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
-from referencing import Registry, Resource
-from referencing.exceptions import NoSuchResource, Unresolvable
+from referencing import Resource
 from referencing.jsonschema import DRAFT202012, Schema
 
+from eneo.flows.domain.schema_engine import (
+    CONTRACT_FAILURES,
+    LOCAL_SCHEMA_REGISTRY,
+    ContractFinding,
+    ContractNotEvaluable,
+    SchemaValidator,
+    build_schema_validator,
+    check_metaschema,
+    dialect_of,
+    evaluate_contract,
+)
 from eneo.flows.domain.strict_schema_limits import (
     COMMON_STRICT_SCHEMA_LIMITS,
     StrictSchemaLimits,
@@ -27,7 +35,6 @@ from eneo.flows.domain.strict_schema_limits import (
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import (
     CONTRACT_VIOLATION_POINTER_MAX_LENGTH,
-    CONTRACT_VIOLATION_RULE_MAX_LENGTH,
     ContractSide,
 )
 from eneo.json_types import JsonObject, JsonValue
@@ -46,78 +53,7 @@ StructuredOutputValue = JsonObject | list[JsonValue]
 MAX_REPORTED_KEY_PATHS = 20
 
 
-def _refuse_schema_retrieval(uri: str) -> NoReturn:
-    raise NoSuchResource(ref=uri)
-
-
-_LOCAL_SCHEMA_REGISTRY = Registry[Schema](retrieve=_refuse_schema_retrieval)
 _SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
-# What referencing and jsonschema raise, instead of a ValidationError, for a contract
-# they cannot evaluate: no metaschema fit, an unresolved or cyclic reference, a JSON
-# pointer that is not an array index, a draft-03 crawl of a malformed keyword, and a
-# schema the metaschema check never read (a $ref into `default`) with a null, unknown
-# or unhashable `type` or `$schema`.
-_CONTRACT_FAILURES = (
-    jsonschema.SchemaError,
-    UnknownType,
-    Unresolvable,
-    RecursionError,
-    AttributeError,
-    TypeError,
-    ValueError,
-)
-
-
-class _SchemaValidator(Protocol):
-    def validate(self, instance: Any) -> None: ...
-
-    def iter_errors(self, instance: Any) -> Iterator[jsonschema.ValidationError]: ...
-
-
-def _dialect_of(schema: Schema) -> type[Validator]:
-    """The draft a stored contract names, chosen as jsonschema.validate chose it."""
-    if isinstance(schema, dict) and isinstance(schema.get("$schema"), str):
-        return validator_for(schema, default=jsonschema.Draft202012Validator)
-    return jsonschema.Draft202012Validator
-
-
-def build_schema_validator(
-    schema: Schema,
-    *,
-    format_checker: jsonschema.FormatChecker | None = None,
-) -> _SchemaValidator:
-    """All Flow schemas resolve references without external retrieval."""
-    return cast(
-        _SchemaValidator,
-        _dialect_of(schema)(
-            schema, registry=_LOCAL_SCHEMA_REGISTRY, format_checker=format_checker
-        ),
-    )
-
-
-@contextmanager
-def _panic_as_recursion() -> Generator[None]:
-    """Report the recursion limit tripping inside rpds as a RecursionError.
-
-    rpds panics there, and pyo3 raises a BaseException that no `except Exception`
-    catches.
-    """
-    try:
-        yield
-    except BaseException as exc:
-        if type(exc).__module__ != "pyo3_runtime":
-            raise
-        raise RecursionError("recursion limit reached in the reference engine") from exc
-
-
-def _check_metaschema(schema: Schema, dialect: type[Validator]) -> None:
-    validator = build_schema_validator(
-        dialect.META_SCHEMA, format_checker=dialect.FORMAT_CHECKER
-    )
-    try:
-        validator.validate(schema)
-    except jsonschema.ValidationError as exc:
-        raise jsonschema.SchemaError.create_from(exc) from exc
 
 
 class ContractUnevaluable(TypedIOValidationException):
@@ -140,7 +76,7 @@ def refuse_unknown_dialect(schema: Mapping[str, object], *, label: str) -> None:
 
     The checks of a tool's input schema ask this. A step's contract is not
     asked: a write refuses every dialect but the current one, and a contract
-    stored before that rule is read as ``_dialect_of`` reads it.
+    stored before that rule is read as ``dialect_of`` reads it.
     """
     if not isinstance(schema.get("$schema"), str):
         return
@@ -160,12 +96,12 @@ def refuse_unknown_dialect(schema: Mapping[str, object], *, label: str) -> None:
 
 def refuse_unevaluable_contract(schema: Mapping[str, object], *, label: str) -> None:
     """Raise ContractUnevaluable for a schema that is not a valid schema of the
-    draft it names. ``validate_against_contract`` asks this before it reads
+    draft it names. ``evaluate_contract`` makes this check before it reads
     any data; a reference that does not resolve inside the schema is found
     only when data reaches it."""
     try:
-        _check_metaschema(schema, _dialect_of(schema))
-    except _CONTRACT_FAILURES as exc:
+        check_metaschema(schema, dialect_of(schema))
+    except CONTRACT_FAILURES as exc:
         raise _unevaluable(label) from exc
 
 
@@ -250,39 +186,39 @@ def validate_against_contract(
     and the RFC 6901 pointer ("" is the root), cut before any key that comes from
     the data. The message keeps the full location.
     """
-    refuse_unevaluable_contract(schema, label=label)
-    try:
-        with _panic_as_recursion():
-            build_schema_validator(schema).validate(data)
-    except jsonschema.ValidationError as exc:
-        pointer = "".join(
-            "/" + _json_pointer_token(str(part)) for part in exc.absolute_path
-        )
-        path = (pointer or "/")[:CONTRACT_VIOLATION_POINTER_MAX_LENGTH]
-        rule = str(exc.validator)[:CONTRACT_VIOLATION_RULE_MAX_LENGTH]
-        context: dict[str, object] = {
-            "json_pointer": _contract_named_pointer(schema, exc.absolute_path)
-        }
-        # A false subschema fails without a keyword (validator is None).
-        if isinstance(exc.validator, str):
-            context["schema_rule"] = exc.validator
-        if side is not None:
-            context["contract_side"] = side
-        if rule == "type":
-            detail = f"Value is not of type {exc.validator_value!r}."
-        elif rule == "required":
-            detail = exc.message
-        elif rule == "additionalProperties":
-            detail = "Additional properties are not allowed."
-        else:
-            detail = f"Value does not satisfy schema rule '{rule}'."
-        raise TypedIOValidationException(
-            f"{label} at {path}: {detail[:400]}",
-            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
-            context=context,
-        ) from exc
-    except _CONTRACT_FAILURES as exc:
-        raise _unevaluable(label) from exc
+    raise_contract_finding(
+        evaluate_contract(data, schema), schema, label=label, side=side
+    )
+
+
+def raise_contract_finding(
+    finding: ContractFinding,
+    schema: Schema,
+    *,
+    label: str,
+    side: ContractSide | None = None,
+) -> None:
+    """Raise for ``finding`` (from ``evaluate_contract`` on ``schema``) what
+    ``validate_against_contract`` raises: ContractUnevaluable, or the
+    violation with its typed context; nothing for None."""
+    if finding is None:
+        return
+    if isinstance(finding, ContractNotEvaluable):
+        raise _unevaluable(label)
+    pointer = "".join("/" + _json_pointer_token(str(part)) for part in finding.path)
+    path = (pointer or "/")[:CONTRACT_VIOLATION_POINTER_MAX_LENGTH]
+    context: dict[str, object] = {
+        "json_pointer": _contract_named_pointer(schema, finding.path)
+    }
+    if finding.rule is not None:
+        context["schema_rule"] = finding.rule
+    if side is not None:
+        context["contract_side"] = side
+    raise TypedIOValidationException(
+        f"{label} at {path}: {finding.detail[:400]}",
+        code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        context=context,
+    )
 
 
 def conform_keys_to_schema(
@@ -462,7 +398,7 @@ def _crawled_resolver(resource: Resource[Schema]):
     """A resolver over `resource` alone, crawled once: a lookup on an uncrawled
     registry crawls the document again."""
     uri = resource.id() or ""
-    return _LOCAL_SCHEMA_REGISTRY.with_resource(uri, resource).crawl().resolver(uri)
+    return LOCAL_SCHEMA_REGISTRY.with_resource(uri, resource).crawl().resolver(uri)
 
 
 def _contract_named_pointer(schema: Schema, path: Iterable[str | int]) -> str:
@@ -486,7 +422,7 @@ def _contract_named_pointer(schema: Schema, path: Iterable[str | int]) -> str:
                 break
             node = step[0]
             tokens.append(_json_pointer_token(str(part)))
-    except _CONTRACT_FAILURES:
+    except CONTRACT_FAILURES:
         pass
     return "".join("/" + token for token in tokens)
 
@@ -544,13 +480,13 @@ def validate_schema_syntax(
     every retrieval when it runs.
     """
     try:
-        _check_metaschema(schema, jsonschema.Draft202012Validator)
+        check_metaschema(schema, jsonschema.Draft202012Validator)
     except jsonschema.SchemaError as exc:
         raise TypedIOValidationException(
             f"{label} is not a valid JSON Schema: {exc.message}",
             code=FlowApiErrorCode.TYPED_IO_INVALID_SCHEMA.value,
         ) from exc
-    except _CONTRACT_FAILURES as exc:
+    except CONTRACT_FAILURES as exc:
         raise TypedIOValidationException(
             f"{label} is not a valid JSON Schema: it cannot be checked.",
             code=FlowApiErrorCode.TYPED_IO_INVALID_SCHEMA.value,
@@ -602,8 +538,8 @@ def normalize_pasted_schema(schema: JsonObject) -> JsonObject:
     stripped = {key: value for key, value in schema.items() if key != "$schema"}
     try:
         # The walk below reads only what the 2020-12 metaschema accepts.
-        _check_metaschema(stripped, jsonschema.Draft202012Validator)
-    except _CONTRACT_FAILURES:
+        check_metaschema(stripped, jsonschema.Draft202012Validator)
+    except CONTRACT_FAILURES:
         return schema
     if all(
         _reads_alike(node, draft)
@@ -655,7 +591,7 @@ def _self_containment_issue(schema: dict[str, Any]) -> tuple[str, str, str] | No
             return False
         try:
             found = resolver.lookup(target).contents
-        except _CONTRACT_FAILURES:
+        except CONTRACT_FAILURES:
             return False
         if isinstance(found, bool):
             return unquote(target[1:]) in boolean_pointers
@@ -917,7 +853,7 @@ def first_strict_response_violation(
                 string_chars_seen += _scalar_size(schema["const"])
             if string_chars_seen > limits.max_total_string_chars:
                 return pointer, "string_size_exceeded"
-    except _CONTRACT_FAILURES:
+    except CONTRACT_FAILURES:
         return pointer, "contract_unreadable"
     return None
 
@@ -953,9 +889,9 @@ def schema_yields_top_level_object(schema: dict[str, Any]) -> bool:
 
 def compile_validators(
     runtime_steps: list[Any],
-) -> dict[tuple[str, int], _SchemaValidator]:
+) -> dict[tuple[str, int], SchemaValidator]:
     """Pre-compile all step contracts once per run."""
-    compiled: dict[tuple[str, int], _SchemaValidator] = {}
+    compiled: dict[tuple[str, int], SchemaValidator] = {}
     for step in runtime_steps:
         for direction, contract in (
             ("input", step.input_contract),
@@ -966,6 +902,6 @@ def compile_validators(
             key = (direction, step.step_order)
             try:
                 compiled[key] = build_schema_validator(contract)
-            except _CONTRACT_FAILURES as exc:
+            except CONTRACT_FAILURES as exc:
                 raise _unevaluable(f"Step {step.step_order} {direction}") from exc
     return compiled

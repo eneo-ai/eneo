@@ -118,8 +118,9 @@ async def read_allowed_tool(
 
     The one place flows ask the MCP module's decision. Raises
     ``typed_io_tool_not_allowed`` with the first refusing level: ``context``
-    holds ``step_order``, ``refusal``, ``mcp_server_id`` and ``tool_id``. On
-    the publish route the refusal is the 400 every BadRequestException is.
+    holds ``step_order``, ``refusal``, ``mcp_server_id`` and ``tool_id``. The
+    refusal is a TypedIOValidationException because a run's step fails with
+    it too; on the publish route it is the 400 every BadRequestException is.
     """
     facts = await facts_reader.read(
         tenant_id=tenant_id,

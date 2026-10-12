@@ -65,6 +65,7 @@ from eneo.flows.source_display import (
 )
 from eneo.flows.step_lineage import (
     build_step_ref_mapping,
+    resolve_tool_argument_orders,
     resolve_upstream_step_orders,
 )
 from eneo.flows.template_reference_analyzer import (
@@ -939,11 +940,25 @@ def _build_input_lineage(
     recorded_input_source = step.get("input_source")
     input_source = _recorded_input_source(recorded_input_source)
     upstream_orders = (
-        resolve_upstream_step_orders(
-            input_source=input_source,
-            step_order=step_order,
-            binding_references=(references if question_template is not None else None),
-            max_prior_step_order=max_prior_step_order,
+        sorted(
+            {
+                *resolve_upstream_step_orders(
+                    input_source=input_source,
+                    step_order=step_order,
+                    binding_references=(
+                        references if question_template is not None else None
+                    ),
+                    max_prior_step_order=max_prior_step_order,
+                ),
+                # A tool step reads earlier steps through its bound arguments.
+                *resolve_tool_argument_orders(
+                    input_source=input_source,
+                    step_order=step_order,
+                    input_config=_as_json_object(step.get("input_config")),
+                    step_ref_mapping=step_ref_mapping,
+                    max_prior_step_order=min(max_prior_step_order, step_order - 1),
+                ),
+            }
         )
         if input_source is not None
         else None

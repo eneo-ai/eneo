@@ -1123,7 +1123,9 @@ def test_flow_api_provider_wiring_uses_typed_container_providers():
     )
 
 
-SCHEMA_ENGINE_OWNER = "output_processing.py"
+# domain/schema_engine builds every validator and is what the argument check's
+# child process imports; output_processing reads the drafts and syntax of schemas.
+SCHEMA_ENGINE_OWNERS = frozenset({"domain/schema_engine.py", "output_processing.py"})
 SCHEMA_ENGINE_PACKAGES = frozenset({"jsonschema", "referencing"})
 SCHEMA_ENGINE_ALLOWED_NAMES = frozenset({"ValidationError"})
 
@@ -1176,7 +1178,7 @@ def test_only_the_contract_owner_uses_the_schema_engine():
     offenders = [
         f"{path.relative_to(FLOW_SOURCE_ROOT)}:{lineno}"
         for path in _flow_python_files()
-        if path.name != SCHEMA_ENGINE_OWNER or path.parent != FLOW_SOURCE_ROOT
+        if path.relative_to(FLOW_SOURCE_ROOT).as_posix() not in SCHEMA_ENGINE_OWNERS
         for lineno in _schema_engine_uses(ast.parse(path.read_text()))
     ]
     assert offenders == []

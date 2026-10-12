@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from enum import StrEnum
 from typing import Annotated, Literal, TypeAlias, cast
 from uuid import UUID
@@ -31,6 +31,7 @@ from eneo.flows.flow_api_error_code import (
     FlowApiErrorCode,
 )
 from eneo.flows.transcription_config import SpeakerServiceGap
+from eneo.mcp_servers.domain.unattended_tool_refusal import UnattendedToolRefusal
 
 FlowRunErrorJson: TypeAlias = dict[str, object]
 FlowRunDispatchErrorJson: TypeAlias = dict[str, object]
@@ -42,6 +43,7 @@ CONTRACT_VIOLATION_RULE_MAX_LENGTH = 80
 _MAX_STEP_DESCRIPTION_LENGTH = 256
 _MAX_MESSAGE_LENGTH = 4096
 TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH = 512
+TOOL_ERROR_TEXT_MAX_LENGTH = 512
 _MESSAGE_TRUNCATION_SUFFIX = "... [truncated]"
 _INVALID_PERSISTED_ERROR_MESSAGE = "Persisted flow run error payload is invalid."
 _INVALID_PERSISTED_DISPATCH_ERROR_MESSAGE = (
@@ -234,7 +236,11 @@ class FlowRunContractViolation(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     side: ContractSide = Field(
-        description="Whether the step's input contract or its output contract was broken.",
+        description=(
+            "Whether the step's input contract or its output contract was broken. "
+            "`input` also for `typed_io_tool_invalid_arguments`, where the broken "
+            "contract is the input schema of the step's tool."
+        ),
     )
     schema_rule: str = Field(
         min_length=1,
@@ -249,7 +255,8 @@ class FlowRunContractViolation(BaseModel):
         strict=True,
         description=(
             "RFC 6901 pointer into the value the contract checked: the step input or "
-            "output. For a per-item, section or mapped step a check of one call "
+            "output, or for `typed_io_tool_invalid_arguments` the arguments object "
+            "the step resolved for its tool. For a per-item, section or mapped step a check of one call "
             "points into that call's value, and a failure of the assembled output "
             "points into the complete assembled output. It is the deepest location "
             "the contract declares (properties and array indices), so it can be an "
@@ -279,14 +286,24 @@ class FlowRunContractViolation(BaseModel):
 _SPEAKER_SERVICE_GAPS = {gap.value: gap for gap in SpeakerServiceGap}
 
 
+_TOOL_REFUSALS = {refusal.value: refusal for refusal in UnattendedToolRefusal}
+
+
+def _known_tool_refusal(value: object) -> UnattendedToolRefusal | None:
+    # The enum is the MCP module's. A value it no longer has, in a context or
+    # in a stored error, reads as no refusal: the rest of the error is kept.
+    return _TOOL_REFUSALS.get(str(value))
+
+
 class FlowRunErrorDetails(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     contract_violation: FlowRunContractViolation | None = Field(
         default=None,
         description=(
-            "Where and which rule a value broke in a step's input or output contract. "
-            "For a per-item, section or mapped step the rule can come from the bound "
+            "Where and which rule a value broke in a step's input or output contract, "
+            "or in the approved input schema of the step's tool "
+            "(`typed_io_tool_invalid_arguments`). For a per-item, section or mapped step the rule can come from the bound "
             "the platform puts on one call, such as exactly one item. Absent when not "
             "recorded: a pointer longer than 400 characters, a violation found "
             "outside the platform's contract validator, or a run that failed before "
@@ -338,6 +355,36 @@ class FlowRunErrorDetails(BaseModel):
         default=None,
         max_length=TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH,
         description="Bounded human-readable transcription service reason. Never parse this text to classify a failure.",
+    )
+    tool_refusal: Annotated[
+        UnattendedToolRefusal | None, BeforeValidator(_known_tool_refusal)
+    ] = Field(
+        default=None,
+        description=(
+            "What refuses the step's tool for the flow's space, for "
+            "`typed_io_tool_not_allowed`: a personal space, or else the first "
+            "level that says no, in the order instance server, instance tool, "
+            "space. Absent for a stored value this version no longer has."
+        ),
+    )
+    tool_call_possible: bool | None = Field(
+        default=None,
+        description=(
+            "Set on an error whose code alone would be retryable: true when the "
+            "run ended at or after a step whose input is a tool's answer, or "
+            "had completed such a step when its dispatch failed, so a tool may "
+            "have been called and may have changed something. `retryable` is "
+            "then false."
+        ),
+    )
+    tool_error_text: str | None = Field(
+        default=None,
+        max_length=TOOL_ERROR_TEXT_MAX_LENGTH,
+        description=(
+            "The start of the text a tool sent with its own statement that it "
+            "failed, for a step whose input is a tool's answer. Never parse this "
+            "text to classify a failure."
+        ),
     )
     transcription_stage: str | None = Field(
         default=None,
@@ -395,6 +442,7 @@ class FlowRunErrorDetails(BaseModel):
 
         kind = context.get("transcription_failure_kind")
         reason = context.get("transcription_service_reason")
+        tool_error_text = context.get("tool_error_text")
 
         details = cls(
             contract_violation=FlowRunContractViolation.from_context(context),
@@ -405,6 +453,10 @@ class FlowRunErrorDetails(BaseModel):
                 :TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH
             ]
             if isinstance(reason, str)
+            else None,
+            tool_refusal=_known_tool_refusal(context.get("refusal")),
+            tool_error_text=tool_error_text[:TOOL_ERROR_TEXT_MAX_LENGTH]
+            if isinstance(tool_error_text, str)
             else None,
             measured_bytes=count("measured_bytes", "measured"),
             summarization_rounds=count("summarization_rounds"),
@@ -433,12 +485,13 @@ class FlowRunErrorDetails(BaseModel):
             return None
 
         step_description = context.get("step_description")
-        if not isinstance(step_description, str) or not step_description:
-            return None
-
-        return cls(
-            step_description=step_description[:_MAX_STEP_DESCRIPTION_LENGTH],
+        details = cls(
+            step_description=step_description[:_MAX_STEP_DESCRIPTION_LENGTH]
+            if isinstance(step_description, str) and step_description
+            else None,
+            tool_refusal=_known_tool_refusal(context.get("refusal")),
         )
+        return details if details.model_dump(exclude_none=True) else None
 
 
 class FlowRunError(BaseModel):
@@ -550,13 +603,18 @@ class FlowRunError(BaseModel):
 
     @computed_field(
         description=(
-            "Whether a consumer may safely submit a new logical run after "
-            "terminalization. This does not automatically start work."
+            "Whether a consumer may submit a new logical run without repeating "
+            "provider work that was accepted or an external effect. True only "
+            "for a code the platform lists as such, and false for such a code "
+            "when `details.tool_call_possible` is true, because a new run "
+            "calls the tool again. This does not automatically start work."
         )
     )
     @property
     def retryable(self) -> bool:
-        return FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[self.code]
+        return FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[self.code] and not (
+            self.details is not None and self.details.tool_call_possible is True
+        )
 
     @classmethod
     def from_source(
@@ -577,6 +635,41 @@ class FlowRunError(BaseModel):
             step_order=step_order,
             details=details,
         )
+
+
+def tool_call_possible(
+    *,
+    tool_step_orders: Collection[int],
+    completed_step_orders: Collection[int],
+    failing_step_order: int | None,
+) -> bool:
+    """Whether a run may have called a tool: one of the tool steps of its
+    frozen definition is completed, or is at or before the step it failed at
+    (None when it failed before running a step, as on a failed dispatch).
+
+    A completed step counts also when it was imported from the run that a
+    retry started from: the tool was called for its answer all the same.
+    """
+    return any(
+        order in completed_step_orders
+        or (failing_step_order is not None and order <= failing_step_order)
+        for order in tool_step_orders
+    )
+
+
+def after_possible_tool_call(
+    details: FlowRunErrorDetails | None, *, code: FlowApiErrorCode
+) -> FlowRunErrorDetails | None:
+    """``details`` for an error of a run that ended at or after a tool step.
+
+    Only a code whose table entry is retryable gets the fact: for every other
+    code ``retryable`` is false already.
+    """
+    if not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY.get(code, False):
+        return details
+    return (details or FlowRunErrorDetails()).model_copy(
+        update={"tool_call_possible": True}
+    )
 
 
 def dump_flow_run_error(error: FlowRunError | None) -> FlowRunErrorJson | None:

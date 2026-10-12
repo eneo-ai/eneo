@@ -647,6 +647,9 @@ FLOW_INTERNAL_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "url_path",
             "status_code",
             "duration_ms",
+            # Only on a call to an MCP server for a step's tool input.
+            "mcp_server_id",
+            "tool_name",
         ),
         idempotency="runtime retry attempts are distinct; webhook delivery identity is durable",
         failure="admin audit is best effort; run step/attempt and webhook delivery state remain durable",

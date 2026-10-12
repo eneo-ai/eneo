@@ -6,6 +6,7 @@ from uuid import UUID
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.review_edit_references import ReviewedResult, ReviewedResultKey
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
+from eneo.flows.enums import FlowInputSource
 from eneo.flows.step_lineage import build_step_ref_mapping
 
 
@@ -36,4 +37,9 @@ def build_run_execution_state(
         },
         step_ref_mapping=build_step_ref_mapping(steps),
         reviewed_results=dict(reviewed_results or {}),
+        tool_step_orders=frozenset(
+            step.step_order
+            for step in steps
+            if FlowInputSource(step.input_source) is FlowInputSource.TOOL
+        ),
     )

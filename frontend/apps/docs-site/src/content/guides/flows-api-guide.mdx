@@ -1023,7 +1023,10 @@ the same queued work; it does not tell a client to create another run.
 
 After terminalization, `error.retryable` answers a different question: whether
 a consumer may safely submit a new logical run. It is conservative and true
-only for `flow_dispatch_failed` and `flow_step_attempt_start_failed`. A true
+only for `flow_dispatch_failed`, `flow_step_attempt_start_failed` and
+`flow_provider_rate_limited`, and for none of them when
+`error.details.tool_call_possible` is true: the run may already have called
+a tool, and a new run calls it again. A true
 value does not start work automatically; the consumer still decides whether
 and when to submit a new run.
 

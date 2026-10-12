@@ -81,7 +81,8 @@ before any step executes. Republish the Flow after reviewing the change.
 
 This protects against silent configuration drift. It does not freeze the contents
 behind a knowledge source. If that source changes, the Flow still uses its current
-data at run time. Flow steps do not execute MCP servers or tools.
+data at run time. A step's assistant does not use MCP servers or tools in a
+Flow; a step whose `input_source` is `tool` is where a Flow calls one MCP tool.
 
 ### Owner vs creator
 
@@ -146,6 +147,17 @@ A step whose `input_source` is `tool` names one MCP tool in `input_config.tool`:
 - Argument values are stored and returned as written and are not treated as secrets. Do not put a credential in an argument; the MCP server's credential is stored with the server.
 - Such a step reads `text` or `json`, takes no uploaded files and cannot use `template_fill`.
 - Publishing requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. A step's name with a path after it (`{{Hämta.output.text}}`) is refused, because a run binds the name to the step's text only. Publishing does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. It also asks whether the instance and the space allow the tool in the flow's space, and stores the tool's name and the fingerprint of its approved input schema in the published version.
+
+At run time a step with `tool` calls the pinned tool once per step attempt, with the MCP server's stored credential, and the answer becomes the step's input: for `input_type` `json` the structured content, or one text block that is a JSON object or array; for `text` the text blocks, or the structured content as JSON text. An answer with a number JSON does not have (NaN, an infinity), with the character U+0000, or with a block that is not text, is refused. The tool must belong to a general MCP server that the flow's space has activated, be switched on, and have an approved definition. The flow calls the tool once per step run; a tool that changes something changes it again when the run is started again, and Eneo does not prevent a repeated change. When a run fails at a step at or after a tool step, or its dispatch fails after it has completed one (also one it took over from the run a retry started from), its error has `retryable` false; for a code that is retryable otherwise, `error.details.tool_call_possible` is true.
+
+A run asks every level about its tool steps before it runs them (when it starts, and again when it is taken up after a review, for the tool steps it has not completed) and once more before the call. Between that last question and the call, the server's registered address is vetted against the flow destination policy and its name is resolved, within the time the step has left. The call follows no redirect. This is not a pinned connection: the MCP client resolves the name again when it connects. Resolving the name and the exchange with the server (connecting, initializing, the call, closing) each get at most `MCP_CLIENT_CALL_TIMEOUT_SECONDS` (60 seconds by default), or less when the step's timeout leaves less. Cancelling a run does not stop a tool read that is in flight: the call can still reach the server, and the read ends within those two bounds, one second more at the latest.
+
+What a run keeps of a tool read:
+
+- On a successful read, the evidence edges of the bound arguments and one `tool_answer` edge with the server's id, the tool's id and name, and the hash and size of the answer, never the value.
+- One audit record for each read that reached out for the server and ended with a typed result (a success or a typed failure): the server's host and path, the outcome, the duration, the server's id and the tool's name, never the arguments.
+- A read that fails keeps that one audit record and no argument edge. A read that is cancelled, or that fails with an error that has no typed code, writes no audit record, as for an HTTP input.
+- A typed record of each call (what was sent, also for a failed or interrupted call) is not built in this release line.
 
 ### Step chaining
 
@@ -628,9 +640,10 @@ When a save is refused for its classification, the response names the step, the 
 
 ### Supported external effects
 
-Flow input may use HTTP GET. HTTP POST input and MCP servers or tools are not
-supported in Flow authoring, AI Builder, published runtime definitions, or Flow
-packages. Standalone assistants and conversations retain their separately owned
+Flow input may use HTTP GET, or the answer of one MCP tool through
+`input_source` `tool`. HTTP POST input, and MCP servers or tools on a step's
+assistant, are not supported in Flow authoring, AI Builder, published runtime
+definitions, or Flow packages. Standalone assistants and conversations retain their separately owned
 MCP behavior.
 
 Terminal HTTP POST output remains supported through the durable webhook outbox,

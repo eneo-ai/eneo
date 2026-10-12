@@ -2669,6 +2669,12 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
         "transcription_service_reason",
         "transcription_stage",
         "transcription_queue_position",
+        # The level that refuses a step's tool, what a tool said when it
+        # answered that it failed, and that a tool may have been called before
+        # an error whose code alone would be retryable.
+        "tool_refusal",
+        "tool_error_text",
+        "tool_call_possible",
         # Why no speaker identification service could label the run's speakers.
         "speaker_service_gap",
         "summarization_rounds",

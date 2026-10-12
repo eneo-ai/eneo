@@ -21,7 +21,7 @@ from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
     redrive_flow_run_recoverably_after_commit,
 )
-from eneo.flows.domain.flow import FlowRunStatus
+from eneo.flows.domain.flow import FlowRunStatus, FlowStepResultStatus
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_DISPATCH_MAX_ATTEMPTS,
     flow_dispatch_retry_delay_seconds,
@@ -40,7 +40,7 @@ from eneo.flows.flow_run_error import (
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunDispatchRedriveGenerationConflict,
 )
-from eneo.main.exceptions import AuditLoggingUnavailableException
+from eneo.main.exceptions import AuditLoggingUnavailableException, BadRequestException
 from tests.unittests.flows.test_flow_router import _run
 
 
@@ -150,6 +150,9 @@ def _install_dispatch_dependencies(
 
         def audit_service(self):
             return audit_service
+
+        def flow_version_repo(self):
+            return MagicMock()
 
     monkeypatch.setattr(
         flow_dispatch_module.sessionmanager,
@@ -559,10 +562,54 @@ async def test_dispatch_coordinator_terminalizes_invalid_principal_once(
     backend.dispatch.assert_not_awaited()
 
 
+# The tool step of the run's frozen definition (None: the definition cannot
+# be read) and whether the run's dispatch failure stays retryable when step 1
+# is completed.
+_TOOL_STEPS_AND_RETRYABLE = pytest.mark.parametrize(
+    ("tool_step_order", "retryable"),
+    [
+        pytest.param(2, True, id="tool-step-not-completed"),
+        pytest.param(1, False, id="tool-step-completed"),
+        pytest.param(None, False, id="definition-unreadable"),
+    ],
+)
+
+
+def _frozen_definition(monkeypatch, run_repo, tool_step_order: int | None) -> None:
+    async def load_published_definition(**_: object) -> SimpleNamespace:
+        if tool_step_order is None:
+            raise BadRequestException("Flow definition snapshot is invalid.")
+        return SimpleNamespace(
+            runtime_steps=lambda: [
+                SimpleNamespace(step_order=order, input_source=source)
+                for order, source in ((1, "flow_input"), (2, "flow_input"))
+                if order != tool_step_order
+            ]
+            + [SimpleNamespace(step_order=tool_step_order, input_source="tool")]
+        )
+
+    monkeypatch.setattr(
+        flow_dispatch_module, "load_published_definition", load_published_definition
+    )
+    run_repo.list_step_result_identities = AsyncMock(
+        return_value=[
+            SimpleNamespace(step_order=1, status=FlowStepResultStatus.COMPLETED),
+            SimpleNamespace(step_order=2, status=FlowStepResultStatus.PENDING),
+        ]
+    )
+
+
 @pytest.mark.asyncio
+@_TOOL_STEPS_AND_RETRYABLE
 async def test_dispatch_coordinator_terminalizes_certified_final_rejection_once(
-    monkeypatch,
+    monkeypatch, tool_step_order: int | None, retryable: bool
 ) -> None:
+    # Kills the mutants that report a rejected last dispatch as safe to run
+    # again for a run that has completed a tool step of its frozen definition
+    # (taken up after a review, or created by a retry with the steps it
+    # imported): a new run calls the tool again; that count a tool step the
+    # run has not completed; and that fail the terminalization, or call it
+    # safe, when the definition cannot be read.
     events: list[str] = []
     run = _run(flow_id=uuid4(), tenant_id=uuid4())
     claimed = run.model_copy(update={"dispatch_attempt_count": 5})
@@ -572,6 +619,7 @@ async def test_dispatch_coordinator_terminalizes_certified_final_rejection_once(
     run_repo.mark_dispatch_exhausted_if_due = AsyncMock(return_value=None)
     run_repo.claim_queued_run_for_dispatch = AsyncMock(return_value=claimed)
     run_repo.record_dispatch_failure = AsyncMock(return_value=exhausted)
+    _frozen_definition(monkeypatch, run_repo, tool_step_order)
     backend = MagicMock()
     backend.dispatch = AsyncMock(
         side_effect=FlowExecutionDispatchRejected("broker rejected dispatch")
@@ -597,6 +645,9 @@ async def test_dispatch_coordinator_terminalizes_certified_final_rejection_once(
     assert isinstance(result, FlowRunDispatchFailed)
     assert result.run.status == FlowRunStatus.FAILED
     terminalizer.terminalize_run.assert_awaited_once()
+    terminal_error = terminalizer.terminalize_run.await_args.kwargs["error"]
+    assert terminal_error.code == FlowApiErrorCode.RUN_DISPATCH_FAILED
+    assert terminal_error.retryable is retryable
 
 
 @pytest.mark.asyncio
@@ -650,9 +701,13 @@ async def test_dispatch_coordinator_keeps_final_ambiguous_exception_queued_and_e
 
 
 @pytest.mark.asyncio
+@_TOOL_STEPS_AND_RETRYABLE
 async def test_dispatch_coordinator_terminalizes_due_exhausted_epoch_once(
-    monkeypatch,
+    monkeypatch, tool_step_order: int | None, retryable: bool
 ) -> None:
+    # Kills the mutant that marks only the rejected dispatch: an epoch found
+    # exhausted when it is due would stay retryable after a completed tool
+    # step.
     events: list[str] = []
     run = _run(flow_id=uuid4(), tenant_id=uuid4()).model_copy(
         update={
@@ -668,6 +723,7 @@ async def test_dispatch_coordinator_terminalizes_due_exhausted_epoch_once(
     run_repo = MagicMock()
     run_repo.mark_dispatch_exhausted_if_due = AsyncMock(return_value=exhausted)
     run_repo.claim_queued_run_for_dispatch = AsyncMock()
+    _frozen_definition(monkeypatch, run_repo, tool_step_order)
     backend = MagicMock()
     backend.dispatch = AsyncMock()
     terminalizer = MagicMock()
@@ -696,6 +752,7 @@ async def test_dispatch_coordinator_terminalizes_due_exhausted_epoch_once(
     assert terminal_error.message == (
         "flow_dispatch_failed: Flow run dispatch exhausted its bounded attempts."
     )
+    assert terminal_error.retryable is retryable
     run_repo.claim_queued_run_for_dispatch.assert_not_awaited()
     backend.dispatch.assert_not_awaited()
 

@@ -37,7 +37,7 @@ from eneo.flows.flow_run_provenance import (
 from eneo.flows.flow_validators import validate_steps
 from eneo.flows.flow_variable_definitions import FlowRunInput
 from eneo.flows.runtime import step_input_resolution
-from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
+from eneo.flows.runtime.http_orchestration import FlowOutsideInputResolution
 from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
@@ -395,12 +395,13 @@ def _resolution_deps(
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         variable_resolver=FlowVariableResolver(),
         resolve_http_input_source_text=AsyncMock(
-            return_value=FlowHttpInputResolution(
+            return_value=FlowOutsideInputResolution(
                 text="",
                 structured=None,
                 resolved_input_edges=(),
             )
         ),
+        resolve_tool_input=AsyncMock(),
         file_service=file_service,
         transcribers=None,
         flow_repo=object(),

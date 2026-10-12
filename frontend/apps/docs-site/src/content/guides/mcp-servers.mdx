@@ -238,16 +238,34 @@ For example, if a space is classified as "Confidential" (level 3), only MCP serv
 
 ---
 
-## MCP boundary for Flows and AI Builder
+## MCP in Flows and AI Builder
 
-MCP remains available to standalone assistants and conversations. Flow and AI
-Builder do not support MCP servers or tools at authoring, publish, runtime, or
-package boundaries.
+A Flow step can take its input from the answer of one MCP tool: the step's
+input source is `tool`. See [Flows](/docs/flows) for how the step is
+configured and what it records.
+
+- The tool belongs to a general MCP server that the flow's space has activated,
+  it is switched on, and its definition is approved. Publishing asks every
+  level and refuses with the first one that says no; a run asks again before it
+  runs its tool steps and before the call.
+- The flow calls the tool once per step run, with nobody watching, using the
+  server's stored access. A tool that changes something changes it again when
+  the run is started again, and Eneo does not prevent a repeated change. A
+  server that forwards the signed-in user's identity cannot be used: a run has
+  no signed-in user at the server.
+- A tool whose changed definition waits for review, or that the server no
+  longer offers, is refused until an administrator has dealt with it. When the
+  tool's name or its approved input schema has changed since the flow was
+  published, the flow must be published again.
+
+Everything else of MCP stays outside Flows. A step's assistant does not use
+MCP servers or tools in a Flow, AI Builder does not propose tool steps, and a
+flow with a tool step cannot be exported as a Flow package.
 
 <Callout type="warning">
-  Do not configure MCP on an assistant managed by a Flow. Use supported Flow
-  inputs for required data and the durable terminal webhook output for external
-  delivery.
+  Do not configure MCP on an assistant managed by a Flow. Use a step with the
+  input source `tool`, or another supported Flow input, for the data the flow
+  needs, and the durable terminal webhook output for external delivery.
 </Callout>
 
 ---

@@ -76,6 +76,10 @@ from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.main.request_context import clear_request_context, set_request_context
+from eneo.mcp_servers.application.unattended_tool_call import UnattendedToolCaller
+from eneo.mcp_servers.infrastructure.repo_impl.unattended_tool_facts_reader import (
+    UnattendedToolFactsReader,
+)
 from eneo.object_content.deployment_policy import load_upload_admission_snapshot
 from eneo.object_content.runtime import object_content_runtime
 from eneo.tasks.routing import FLOW_DRAIN_RETIRED_RUNS_TASK
@@ -387,6 +391,10 @@ async def _execute_flow_run_async_traced(
                         encryption=runtime_container.encryption_service(),
                     ),
                     transcript_words_repo=runtime_container.flow_transcript_words_repo(),
+                    tool_facts_reader=UnattendedToolFactsReader(session),
+                    tool_caller=UnattendedToolCaller(
+                        runtime_container.mcp_proxy_session_factory()
+                    ),
                     config=FlowRunExecutorConfig.from_settings(
                         max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
                         input_limits=flow_limits,

@@ -97,7 +97,10 @@ class WebhookDeliveryError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class FlowHttpInputResolution:
+class FlowOutsideInputResolution:
+    """A step input that was read from outside the run: the response of an
+    HTTP GET or the answer of a tool."""
+
     text: str
     structured: dict[str, Any] | list[Any] | None
     resolved_input_edges: tuple[FlowResolvedInputEdge, ...]
@@ -161,7 +164,7 @@ async def resolve_http_input_source_text(
     run: RuntimeHttpRun,
     context: FlowVariableContext,
     deps: FlowHttpOrchestrationDeps,
-) -> FlowHttpInputResolution:
+) -> FlowOutsideInputResolution:
     if step.input_source != "http_get":
         raise TypedIOValidationException(
             f"Step {step.step_order}: HTTP input orchestration only supports input_source 'http_get'.",
@@ -286,7 +289,7 @@ async def resolve_http_input_source_text(
             duration_ms=duration_ms,
         )
         response_edge = _http_response_edge(parsed)
-        return FlowHttpInputResolution(
+        return FlowOutsideInputResolution(
             text=json.dumps(parsed, ensure_ascii=False),
             structured=parsed,
             resolved_input_edges=merge_resolved_input_edges(
@@ -306,7 +309,7 @@ async def resolve_http_input_source_text(
         duration_ms=duration_ms,
     )
     response_edge = _http_response_edge(response_text)
-    return FlowHttpInputResolution(
+    return FlowOutsideInputResolution(
         text=response_text,
         structured=None,
         resolved_input_edges=merge_resolved_input_edges(

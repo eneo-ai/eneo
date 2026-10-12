@@ -2189,3 +2189,60 @@ async def test_task_bootstrap_binds_embedding_identity_for_user_and_service_runs
         assert result == {"status": "completed"}
     finally:
         await flow_runtime_tasks.execution_heartbeats().stop()
+
+
+@pytest.mark.asyncio
+async def test_task_bootstrap_gives_the_executor_its_tool_reader_and_caller(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+):
+    # Kills the mutant that builds the worker's executor without the facts
+    # reader or the tool caller (every run with a tool step would fail on a
+    # wiring error), or reads the facts on another session than the run's.
+    from eneo.authentication.principal_types import PrincipalType
+    from eneo.mcp_servers.application.unattended_tool_call import UnattendedToolCaller
+    from eneo.mcp_servers.infrastructure.repo_impl.unattended_tool_facts_reader import (
+        UnattendedToolFactsReader,
+    )
+
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=SimpleNamespace(get_response=AsyncMock()),
+        )
+        await session.commit()
+
+    async def execute_after_bootstrap(executor, **kwargs):
+        assert isinstance(executor.tool_facts_reader, UnattendedToolFactsReader)
+        assert executor.tool_facts_reader._session is executor.session
+        assert isinstance(executor.tool_caller, UnattendedToolCaller)
+        assert executor._tool_input_deps().caller is executor.tool_caller
+        return {"status": "completed"}
+
+    monkeypatch.setattr(FlowRunExecutor, "execute_claimed", execute_after_bootstrap)
+    try:
+        result = await flow_runtime_tasks._execute_flow_run_async(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            principal_type=PrincipalType.USER,
+            principal_user_id=admin_user.id,
+            principal_service_id=None,
+            task_id=None,
+            retry_count=0,
+            invocation_deadline=None,
+        )
+        assert result == {"status": "completed"}
+    finally:
+        await flow_runtime_tasks.execution_heartbeats().stop()

@@ -375,6 +375,15 @@ class Settings(BaseSettings):
     flow_http_request_timeout_seconds: int = 30
     flow_http_max_timeout_seconds: int = 120
     flow_http_allow_private_networks: bool = False
+    # Private networks for the MCP servers whose tools flows call. On by default,
+    # unlike the HTTP setting above: only an instance administrator registers an
+    # MCP server, and a server on the internal network is the normal case, while
+    # an HTTP address is written by a flow author. Loopback, link-local and
+    # metadata addresses are refused whatever this says. The registered address
+    # is vetted before the call; the call follows no redirect; the name is
+    # resolved again by the MCP client when it connects (not a pinned
+    # connection).
+    flow_tool_allow_private_networks: bool = True
     # Threads that resolve host names for flow HTTP. A lookup that stalls holds
     # its thread, so this bounds how much name resolution a burst of unreachable
     # flow destinations can occupy; a lookup past it fails at once and is retried.

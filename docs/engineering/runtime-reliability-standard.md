@@ -157,6 +157,18 @@ retries, and terminalize an exhausted outcome-unknown claim without another
 send. This declared exception does not permit exactly-once language or a claim
 that receiver idempotency was verified.
 
+Revision 2026-10-12, by owner decision: a Flow step may take its input from one
+MCP tool call through the same chain as assistants: the instance administrator
+registers the server and approves its tools, the space administrator switches
+the server and its tools on, and the author picks a tool in a step. The
+per-tool "may be used in flows" mark was removed by the owner. A flow can
+therefore call a tool that changes something, a run that is started again calls
+it again, and Eneo does not prevent the repeated change. This is an explicit,
+owner-accepted exception to the rule above for mutating external effects, and
+`retryable` is false after a possible tool call. Still not supported: tools for
+a step's model, the AI Builder proposing tool steps, package export of a tool
+step, servers that forward the signed-in user's identity, and personal spaces.
+
 If a mutation lacks the required contract, reject or disable it at the narrowest
 reliable API, compile, publish, or execution boundary. Do not run it optimistically
 and add repair logic afterward.

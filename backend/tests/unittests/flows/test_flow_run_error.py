@@ -25,6 +25,7 @@ from eneo.flows.flow_run_error import (
     parse_flow_run_error,
 )
 from eneo.flows.transcription_config import SpeakerServiceGap
+from eneo.mcp_servers.domain.unattended_tool_refusal import UnattendedToolRefusal
 
 
 def test_flow_run_error_from_source_requires_public_error_code() -> None:
@@ -32,7 +33,7 @@ def test_flow_run_error_from_source_requires_public_error_code() -> None:
 
 
 def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
-    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 92
+    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 102
     assert FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[FlowApiErrorCode.RUN_ABANDONED] is False
     assert set(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == FLOW_RUN_TERMINAL_ERROR_CODES
     assert {
@@ -604,3 +605,77 @@ def test_an_unknown_speaker_service_gap_is_not_reported() -> None:
         FlowRunErrorDetails.from_budget_context({"speaker_service_gap": "other"})
         is None
     )
+
+
+def test_a_possible_tool_call_makes_a_retryable_code_not_retryable() -> None:
+    # Kills the mutant that reads retryable from the code alone: a new run
+    # after a tool step calls the tool again. A stored error without the fact
+    # reads as it did before the fact existed.
+    stored = {
+        "schema_version": 1,
+        "code": FlowApiErrorCode.PROVIDER_RATE_LIMITED.value,
+        "message": "Flow step 2 was rate-limited by the provider.",
+        "source": "executor_failed",
+    }
+
+    before = parse_flow_run_error(stored)
+    after = parse_flow_run_error({**stored, "details": {"tool_call_possible": True}})
+
+    assert before is not None and after is not None
+    assert (before.retryable, after.retryable) == (True, False)
+    assert after.code is FlowApiErrorCode.PROVIDER_RATE_LIMITED
+
+
+def test_a_stored_tool_refusal_the_enum_no_longer_has_reads_as_no_refusal() -> None:
+    # Kills the mutant that types the stored value by the MCP module's enum
+    # alone: when a value leaves the enum, every stored error that names it
+    # would lose its code, message and step.
+    error = parse_flow_run_error(
+        {
+            "schema_version": 1,
+            "code": FlowApiErrorCode.TYPED_IO_TOOL_NOT_ALLOWED.value,
+            "message": "Step 2: the tool is not marked for flows.",
+            "step_order": 2,
+            "details": {"tool_refusal": "tool_not_marked", "phase": "input_resolution"},
+        }
+    )
+
+    assert error is not None
+    assert (error.code, error.message, error.step_order) == (
+        FlowApiErrorCode.TYPED_IO_TOOL_NOT_ALLOWED,
+        "Step 2: the tool is not marked for flows.",
+        2,
+    )
+    assert error.details is not None
+    assert (error.details.tool_refusal, error.details.phase) == (
+        None,
+        "input_resolution",
+    )
+
+
+def test_the_tool_refusals_a_run_error_stores_are_these_twelve_values() -> None:
+    # Kills the mutant that renames a refusal in the MCP module's enum: the
+    # value is stored in run errors, so a rename orphans what is stored.
+    assert sorted(refusal.value for refusal in UnattendedToolRefusal) == [
+        "server_below_space_classification",
+        "server_disabled",
+        "server_forwards_identity",
+        "server_not_found",
+        "server_not_general",
+        "server_not_in_space",
+        "space_is_personal",
+        "tool_not_found",
+        "tool_removed_at_server",
+        "tool_switched_off",
+        "tool_switched_off_in_space",
+        "tool_waiting_for_review",
+    ]
+
+
+def test_a_tool_error_text_longer_than_the_detail_holds_is_cut() -> None:
+    # Kills the mutant that hands a context's text to the detail uncut: a
+    # longer text would fail the detail's own bound and with it the run's
+    # terminalization.
+    details = FlowRunErrorDetails.from_budget_context({"tool_error_text": "x" * 600})
+
+    assert details is not None and details.tool_error_text == "x" * 512

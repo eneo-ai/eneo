@@ -14,6 +14,7 @@ from eneo.flows.step_lineage import (
     resolve_reference_step_orders,
     resolve_step_input_orders,
     resolve_step_upstream_orders,
+    resolve_tool_argument_orders,
     resolve_upstream_step_orders,
 )
 from eneo.flows.template_reference_analyzer import (
@@ -717,6 +718,44 @@ def test_upstream_orders_of_a_tool_step_are_what_its_bound_arguments_read(
     )
 
     assert orders == expected
+
+
+@pytest.mark.parametrize(
+    ("input_source", "input_config", "expected"),
+    [
+        pytest.param(
+            FlowInputSource.TOOL,
+            {"tool": {**_TOOL_IDS, "arguments": {"days": "{{ step_2.output.text }}"}}},
+            [2],
+            id="the-bound-argument",
+        ),
+        pytest.param(FlowInputSource.TOOL, None, [1, 2, 3], id="unreadable"),
+        pytest.param(
+            FlowInputSource.PREVIOUS_STEP,
+            {"tool": {**_TOOL_IDS, "arguments": {"days": "{{ step_2.output.text }}"}}},
+            [],
+            id="another-source",
+        ),
+    ],
+)
+def test_tool_argument_orders_are_what_a_tool_step_sends_to_its_server(
+    input_source: FlowInputSource,
+    input_config: dict[str, object] | None,
+    expected: list[int],
+) -> None:
+    # Kills the mutants that read an unreadable tool configuration as "sends
+    # nothing" to the tool's server, or count a leftover tool configuration on
+    # a step that calls no tool.
+    assert (
+        resolve_tool_argument_orders(
+            input_source=input_source,
+            step_order=4,
+            input_config=input_config,
+            step_ref_mapping={},
+            max_prior_step_order=3,
+        )
+        == expected
+    )
 
 
 def test_a_tool_configuration_on_a_step_of_another_source_reads_nothing() -> None:

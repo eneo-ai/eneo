@@ -460,8 +460,23 @@ FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS=60
 # 6to4 (2002::/16), Teredo (2001::/32) and NAT64 well-known (64:ff9b::/96)
 # prefixes are refused either way; a network-specific NAT64 prefix is not
 # recognised. Only http(s) is used, redirects are not followed, and HTTP(S)_PROXY /
-# ALL_PROXY are ignored. Set on backend and worker.
+# ALL_PROXY are ignored by these requests. Set on backend and worker.
 FLOW_HTTP_ALLOW_PRIVATE_NETWORKS=false
+# A flow step that takes its input from an MCP tool may call a server on a
+# private network (the ranges above). On by default, unlike the HTTP setting:
+# only an instance administrator registers an MCP server, and internal servers
+# are the normal case. false allows servers on public addresses only. Loopback,
+# link-local and metadata addresses are refused either way. The registered
+# address is vetted before the call; the call follows no redirect; the name is
+# resolved again by the MCP client when it connects (not a pinned connection).
+# The MCP client makes the call and honours HTTP(S)_PROXY / ALL_PROXY, unlike
+# flow HTTP requests. Set on worker.
+FLOW_TOOL_ALLOW_PRIVATE_NETWORKS=true
+# Deadline for an MCP tool call, in seconds. For a flow step that takes its
+# input from a tool it bounds resolving the server's name and, separately, the
+# exchange with the server (connecting, initializing, the call, closing); the
+# step's own timeout can leave less.
+MCP_CLIENT_CALL_TIMEOUT_SECONDS=60
 # Threads that resolve host names for flow HTTP, separate from every other lookup
 # in the process. A stalled lookup keeps its thread until the resolver answers;
 # a lookup with no free thread fails at once and is retried later.

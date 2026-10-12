@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
@@ -39,6 +40,15 @@ class HttpAuditDeps:
     logger: Any
 
 
+@dataclass(frozen=True, slots=True)
+class AuditedToolCall:
+    """What an outbound call to an MCP server was for: the registered server
+    and the tool it was asked to run. The arguments are never part of it."""
+
+    mcp_server_id: UUID
+    tool_name: str
+
+
 async def audit_http_outbound(
     *,
     run: RuntimeAuditRun,
@@ -50,6 +60,7 @@ async def audit_http_outbound(
     error_message: str | None = None,
     status_code: int | None = None,
     duration_ms: float | None = None,
+    tool: AuditedToolCall | None = None,
     deps: HttpAuditDeps,
 ) -> None:
     if deps.audit_service is None:
@@ -73,6 +84,9 @@ async def audit_http_outbound(
             extra["status_code"] = status_code
         if duration_ms is not None:
             extra["duration_ms"] = round(duration_ms, 2)
+        if tool is not None:
+            extra["mcp_server_id"] = str(tool.mcp_server_id)
+            extra["tool_name"] = tool.tool_name
         actor_fields = deps.actor.audit_actor_fields()
         await deps.audit_service.log_async(
             tenant_id=run.tenant_id,

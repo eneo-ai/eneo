@@ -9,7 +9,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
-- **Last revised:** 2026-09-04
+- **Last revised:** 2026-10-12
 - **Decision owners:** Product, security, and architecture
 - **Scope:** Flow and Flow AI Builder launch behavior, destructive retention
   activation, and the portable-package platform boundary
@@ -315,6 +315,19 @@ WI-MKT-02.
   classification plus durable intent, receipt, approval, and recovery semantics.
 - **Revision rule:** Do not substitute the current admin approval flag or semantic
   heuristics for that contract.
+- **Revision (2026-10-12):** By owner decision of 2026-10-12, a Flow step may take its input from one MCP tool call
+  through the same chain as assistants: the instance administrator registers
+  the server and approves its tools, the space administrator switches the
+  server and its tools on, and the author picks a tool in a step. The per-tool
+  "may be used in flows" mark was removed by the owner. A flow can therefore
+  call a tool that changes something, a run that is started again calls it
+  again, and Eneo does not prevent the repeated change. This is an explicit,
+  owner-accepted exception to the rule for mutating external effects in the
+  [runtime reliability standard](../engineering/runtime-reliability-standard.md),
+  and `retryable` is false after a possible tool call. Still not supported:
+  tools for a step's model, the AI Builder proposing tool steps, package export
+  of a tool step, servers that forward the signed-in user's identity, and
+  personal spaces.
 
 ### 5. Attached templates require confirmed, transactional promotion
 

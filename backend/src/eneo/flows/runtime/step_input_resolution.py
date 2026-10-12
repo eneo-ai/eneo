@@ -12,6 +12,7 @@ from typing import (
     Callable,
     Final,
     NoReturn,
+    Protocol,
     Sequence,
     cast,
 )
@@ -83,7 +84,7 @@ from eneo.flows.input_binding_contract_rules import (
     source_ref_step_order,
     structured_projection_destination_path,
 )
-from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
+from eneo.flows.runtime.http_orchestration import FlowOutsideInputResolution
 from eneo.flows.runtime.input_files import (
     describe_files_by_requested_ids,
     ensure_input_file_budget,
@@ -97,6 +98,7 @@ from eneo.flows.runtime.transcription_runtime import (
     resolve_transcribe_and_attach_audio_input,
 )
 from eneo.flows.source_identity import RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD
+from eneo.flows.step_chain_rules import OUTSIDE_INPUT_SOURCES
 from eneo.flows.step_lineage import selected_source_step_order
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
@@ -120,6 +122,7 @@ if TYPE_CHECKING:
         FlowTranscribers,
         TranscriptSourcePreparation,
     )
+    from eneo.flows.variable_resolver import FlowVariableContext
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
     )
@@ -132,6 +135,12 @@ RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE: Final = (
 )
 
 
+class ResolveToolInputFn(Protocol):
+    def __call__(
+        self, *, step: RuntimeStep, run: FlowRun, context: FlowVariableContext
+    ) -> Awaitable[FlowOutsideInputResolution]: ...
+
+
 @dataclass(frozen=True)
 class StepInputResolutionDeps:
     apply_output_cap: ApplyOutputCapFn
@@ -140,7 +149,8 @@ class StepInputResolutionDeps:
         [TranscriptSourceReference, TranscriptSourcePreparation], None
     ]
     variable_resolver: Any
-    resolve_http_input_source_text: Callable[..., Awaitable[FlowHttpInputResolution]]
+    resolve_http_input_source_text: Callable[..., Awaitable[FlowOutsideInputResolution]]
+    resolve_tool_input: ResolveToolInputFn
     file_service: FileService
     transcribers: "FlowTranscribers | None"
     flow_repo: "FlowRepository"
@@ -194,13 +204,6 @@ async def resolve_step_input(
     attempt_no: int = 1,
     deps: StepInputResolutionDeps,
 ) -> StepInputValue:
-    if step.input_source == "tool":
-        # This runtime has no read of a tool's answer: the attempt fails typed
-        # before any other source is looked at.
-        raise TypedIOValidationException(
-            f"Step {step.step_order}: input_source 'tool' cannot be read at run time.",
-            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
-        )
     if step.step_order == 1 and step.input_source in {
         "previous_step",
         "all_previous_steps",
@@ -260,22 +263,25 @@ async def resolve_step_input(
             processing_ceiling_bytes=processing_ceiling_bytes,
         )
     structured: dict[str, Any] | list[Any] | None = None
-    http_edges: tuple[FlowResolvedInputEdge, ...] = ()
-    if step.input_source == "http_get":
-        http_resolution = await deps.resolve_http_input_source_text(
-            step=step,
-            run=run,
-            context=deps.variable_resolver.build_context_with_evidence(
-                run.input_payload_json,
-                prior_results,
-                current_step_order=step.step_order,
-                step_names_by_order=state.step_names_by_order if state else None,
-                step_ref_mapping=state.step_ref_mapping if state else None,
-            ),
+    outside_edges: tuple[FlowResolvedInputEdge, ...] = ()
+    if step.input_source in OUTSIDE_INPUT_SOURCES:
+        source_context = deps.variable_resolver.build_context_with_evidence(
+            run.input_payload_json,
+            prior_results,
+            current_step_order=step.step_order,
+            step_names_by_order=state.step_names_by_order if state else None,
+            step_ref_mapping=state.step_ref_mapping if state else None,
         )
-        source_text = http_resolution.text
-        structured = http_resolution.structured
-        http_edges = http_resolution.resolved_input_edges
+        outside_input = await (
+            deps.resolve_tool_input(step=step, run=run, context=source_context)
+            if step.input_source == "tool"
+            else deps.resolve_http_input_source_text(
+                step=step, run=run, context=source_context
+            )
+        )
+        source_text = outside_input.text
+        structured = outside_input.structured
+        outside_edges = outside_input.resolved_input_edges
     else:
         # Resolved below, once explicit underlag has been examined: underlag
         # is the whole step input, so the implicit source is read only for a
@@ -489,7 +495,7 @@ async def resolve_step_input(
             prior_results=prior_results,
             state=state,
             source_text=source_text,
-            http_edges=http_edges,
+            outside_edges=outside_edges,
         )
     )
     if used_question_binding:
@@ -629,10 +635,10 @@ def _implicit_input_source_edges(
     prior_results: list[FlowStepResult],
     state: RunExecutionState | None,
     source_text: str,
-    http_edges: tuple[FlowResolvedInputEdge, ...],
+    outside_edges: tuple[FlowResolvedInputEdge, ...],
 ) -> tuple[FlowResolvedInputEdge, ...]:
-    if step.input_source == "http_get":
-        return http_edges
+    if step.input_source in OUTSIDE_INPUT_SOURCES:
+        return outside_edges
     if step.input_source == "flow_input":
         payload = run.input_payload_json or {}
         text_value = payload.get("text")
@@ -1610,7 +1616,7 @@ async def _resolve_step_materials(
         inline_text += deps.variable_resolver.interpolate(
             template, interpolation_context
         )
-    elif step.input_source != "http_get":
+    elif step.input_source not in OUTSIDE_INPUT_SOURCES:
         inline_results, inline_state = _substitute_step_text(
             prior_results=list(results.values()),
             state=state,
@@ -2240,9 +2246,9 @@ def resolve_default_step_input_text(
             state=state,
             resolved_file_text=resolved_file_text,
         )
-    # HTTP text is already resolved; other implicit sources are read only
-    # after explicit underlag has been ruled out.
-    if step.input_source != "http_get":
+    # Text from outside the run is already resolved; other implicit sources
+    # are read only after explicit underlag has been ruled out.
+    if step.input_source not in OUTSIDE_INPUT_SOURCES:
         source_text = resolve_input_source_text(
             input_source=step.input_source,
             input_type=step.input_type,

@@ -673,7 +673,11 @@ class FlowStepCreateRequest(BaseModel):
             "declared run-form field, or a runtime variable. Publish does not "
             "judge whether a runtime variable that depends on the run's data "
             "(a transcript, an upload) has a value in a run. Any other "
-            "configuration is refused with `typed_io_tool_invalid_config`."
+            "configuration is refused with `typed_io_tool_invalid_config`. A "
+            "run calls the tool once per step attempt and takes its answer as "
+            "the step's input: for `input_type` `json` the structured "
+            "content, or text that is a JSON object or array; for `text` the "
+            "text."
         ),
     )
     input_type: FlowInputType

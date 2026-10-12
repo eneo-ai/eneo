@@ -131,9 +131,17 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   TYPED_IO_HTTP_RESPONSE_TOO_LARGE: "typed_io_http_response_too_large";
   TYPED_IO_HTTP_SSRF_BLOCKED: "typed_io_http_ssrf_blocked";
   TYPED_IO_HTTP_TIMEOUT: "typed_io_http_timeout";
+  TYPED_IO_TOOL_ANSWER_TOO_LARGE: "typed_io_tool_answer_too_large";
+  TYPED_IO_TOOL_CHANGED: "typed_io_tool_changed";
+  TYPED_IO_TOOL_CONNECTION_ERROR: "typed_io_tool_connection_error";
+  TYPED_IO_TOOL_DESTINATION_BLOCKED: "typed_io_tool_destination_blocked";
+  TYPED_IO_TOOL_INVALID_ARGUMENTS: "typed_io_tool_invalid_arguments";
   TYPED_IO_TOOL_INVALID_CONFIG: "typed_io_tool_invalid_config";
   TYPED_IO_TOOL_INVALID_SCHEMA: "typed_io_tool_invalid_schema";
+  TYPED_IO_TOOL_MALFORMED_ANSWER: "typed_io_tool_malformed_answer";
   TYPED_IO_TOOL_NOT_ALLOWED: "typed_io_tool_not_allowed";
+  TYPED_IO_TOOL_REPORTED_ERROR: "typed_io_tool_reported_error";
+  TYPED_IO_TOOL_TIMEOUT: "typed_io_tool_timeout";
   TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW: "typed_io_input_exceeds_model_window";
   TYPED_IO_INPUT_TOO_LARGE: "typed_io_input_too_large";
   TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT: "typed_io_structured_output_exceeds_limit";
@@ -354,9 +362,17 @@ export type FlowApiErrorCode =
   | "typed_io_http_response_too_large"
   | "typed_io_http_ssrf_blocked"
   | "typed_io_http_timeout"
+  | "typed_io_tool_answer_too_large"
+  | "typed_io_tool_changed"
+  | "typed_io_tool_connection_error"
+  | "typed_io_tool_destination_blocked"
+  | "typed_io_tool_invalid_arguments"
   | "typed_io_tool_invalid_config"
   | "typed_io_tool_invalid_schema"
+  | "typed_io_tool_malformed_answer"
   | "typed_io_tool_not_allowed"
+  | "typed_io_tool_reported_error"
+  | "typed_io_tool_timeout"
   | "typed_io_input_exceeds_model_window"
   | "typed_io_input_too_large"
   | "typed_io_structured_output_exceeds_limit"

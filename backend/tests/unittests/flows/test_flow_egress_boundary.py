@@ -26,8 +26,14 @@ as litellm or redis connects on its own, and weasyprint's URL fetcher is denied 
 the renderer, not here. Reviewing what a new allowlist entry can reach is part of
 adding it.
 
-One module connects to an endpoint a flow author cannot choose and is named
-below with its reason; the destination policy does not apply to it.
+Two modules are named below with their reasons: one connects to an endpoint
+a flow author cannot choose, and the destination policy does not apply to it;
+the other starts a child process of its own.
+
+A connection that another first-party module opens for flow code is not seen
+either. The call of an MCP tool for a step's input is one: the MCP module's
+client opens it. FIRST_PARTY_CONNECTORS names the flow modules that may import
+that caller, and the flow vets the server's address before each call.
 """
 
 from __future__ import annotations
@@ -51,6 +57,31 @@ NAMED_EXCEPTIONS = {
         "flow author. It stays outside the destination policy for now because a "
         "local speech service is a legitimate target; a follow-up decides its policy"
     ),
+    "flows/runtime/tool_argument_check.py": (
+        "starts its own child process (multiprocessing, spawn) and speaks to it over "
+        "a local socket pair (multiprocessing.connection); no network"
+    ),
+}
+
+# First-party modules whose call opens a connection outside the egress
+# package, and the only flow modules that may import each.
+FIRST_PARTY_CONNECTORS = {
+    "eneo.mcp_servers.application.unattended_tool_call": {
+        "flows/runtime/tasks.py": (
+            "builds the caller for the run's executor. The server is one an "
+            "instance administrator registered, never an address a flow author "
+            "wrote; flows/runtime/tool_input.py vets that server's address with "
+            "the destination policy before each call. That is a check of the "
+            "addresses the name has then, not a pinned connection: the MCP client "
+            "resolves the name again when it connects"
+        ),
+        "flows/runtime/tool_input.py": (
+            "the module that vets the address and then calls through the caller "
+            "the executor was given. It imports one number, the grace the caller "
+            "may take to report a spent budget, to keep that much of the step's "
+            "time back"
+        ),
+    },
 }
 
 # Third-party top-level packages flow code may import, with why they are not a
@@ -64,7 +95,8 @@ ALLOWED_THIRD_PARTY = {
     "httpx": "passive types and exceptions only, checked separately below",
     "jsonschema": (
         "validation; its own retrieval of a remote $ref is refused by the registry "
-        "in eneo.flows.output_processing, the only module that may import it"
+        "in eneo.flows.domain.schema_engine; only it and eneo.flows.output_processing may "
+        "import it"
     ),
     "litellm": "model provider SDK; the destination is the tenant's provider setting",
     "lxml": "XML, in memory",
@@ -75,9 +107,9 @@ ALLOWED_THIRD_PARTY = {
     "redis": "the operator's Redis; not a flow-author destination",
     "referencing": (
         "reference resolution for jsonschema. It has no network code: retrieval is a "
-        "callback the registry in eneo.flows.output_processing supplies and that "
-        "refuses every URI (test_schema_references); only that module may import it "
-        "(test_flow_architecture_guards)"
+        "callback the registry in eneo.flows.domain.schema_engine supplies and that "
+        "refuses every URI (test_schema_references); only that module and "
+        "eneo.flows.output_processing may import it (test_flow_architecture_guards)"
     ),
     "sqlalchemy": "the operator's database",
     "sse_starlette": "server-sent events the API serves",
@@ -124,7 +156,7 @@ FORBIDDEN_STDLIB = frozenset(
         "socketserver",
         "asyncore",
         "asynchat",
-        "multiprocessing.connection",
+        "multiprocessing",
         "urllib.request",
         "urllib.robotparser",
         "http.client",
@@ -306,6 +338,31 @@ def test_a_named_exception_still_exists_and_still_needs_it(relative: str):
     assert NAMED_EXCEPTIONS[relative]
 
 
+@pytest.mark.parametrize("connector", sorted(FIRST_PARTY_CONNECTORS))
+def test_a_first_party_connector_is_imported_only_by_its_named_modules(connector: str):
+    # Kills the mutant that calls an MCP tool from another flow module, past
+    # the address check in flows/runtime/tool_input.py.
+    importers = {
+        relative
+        for relative, source in _scanned_modules()
+        if connector in _imported_modules(source)
+    }
+    assert importers == set(FIRST_PARTY_CONNECTORS[connector])
+
+
+def _imported_modules(source: str) -> set[str]:
+    """Every dotted name an import statement of ``source`` can bind a module
+    from: ``import a.b``, ``from a import b`` and ``from a.b import c``."""
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module)
+            names.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return names
+
+
 def test_every_allowlisted_package_is_still_used():
     used: set[str] = set()
     for _relative_path, source in _scanned_modules():
@@ -357,6 +414,7 @@ def test_the_egress_package_is_where_the_flow_http_client_is_built():
         "import _socket",
         "import ctypes",
         "import multiprocessing.connection",
+        "import multiprocessing",
         "import httpx\nclient = httpx\nclient.AsyncClient()",
         "import os\nrunner = os\nrunner.system('curl x')",
         "import ftplib",

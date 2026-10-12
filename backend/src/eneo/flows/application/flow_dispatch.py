@@ -12,11 +12,12 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.database.database import sessionmanager
-from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.domain.flow import FlowRun, FlowRunStatus, FlowStepResultStatus
 from eneo.flows.domain.flow_run_recovery_policy import (
     FlowRunAbandonmentDeadlineExceeded,
 )
-from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
+from eneo.flows.enums import FlowInputSource, FlowRunLifecycleSource
 from eneo.flows.execution_backend import FlowExecutionDispatchRejected
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import flow_run_abandonment_refusal
@@ -25,12 +26,15 @@ from eneo.flows.flow_run_error import (
     FlowRunDispatchError,
     FlowRunDispatchErrorKind,
     FlowRunError,
+    after_possible_tool_call,
+    tool_call_possible,
 )
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunDispatchRedriveGenerationConflict,
 )
+from eneo.flows.published_runtime import load_published_definition
 from eneo.main.container.container import Container
-from eneo.main.exceptions import AuditLoggingUnavailableException
+from eneo.main.exceptions import AuditLoggingUnavailableException, BadRequestException
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +131,7 @@ async def dispatch_flow_run_recoverably_after_commit(
                     tenant_id=tenant_id,
                     target_status=FlowRunStatus.FAILED,
                     source=FlowRunLifecycleSource.DISPATCH_FAILURE,
-                    error=_dispatch_exhausted_error(),
+                    error=await _dispatch_exhausted_error(container, exhausted),
                 )
                 return FlowRunDispatchExhausted(run=terminalized.run)
 
@@ -216,7 +220,7 @@ async def dispatch_flow_run_recoverably_after_commit(
                         tenant_id=failed.tenant_id,
                         target_status=FlowRunStatus.FAILED,
                         source=FlowRunLifecycleSource.DISPATCH_FAILURE,
-                        error=_dispatch_exhausted_error(),
+                        error=await _dispatch_exhausted_error(container, failed),
                     )
                     failed = terminalized.run
             return FlowRunDispatchFailed(run=failed)
@@ -340,11 +344,57 @@ async def redrive_flow_run_recoverably_after_commit(
     )
 
 
-def _dispatch_exhausted_error() -> FlowRunError:
+async def _dispatch_exhausted_error(container: Container, run: FlowRun) -> FlowRunError:
+    """The error of a run whose dispatch is exhausted. A run that was taken up
+    after a review, or that a retry created with the completed steps of the
+    run it started from, has completed steps: when the run's frozen
+    definition makes one of them a tool step, a new run would call that tool
+    again, so the error is not retryable."""
+    code = FlowApiErrorCode.RUN_DISPATCH_FAILED
     return FlowRunError.from_source(
         FlowRunLifecycleSource.DISPATCH_FAILURE,
-        code=FlowApiErrorCode.RUN_DISPATCH_FAILED,
+        code=code,
         message=(
             "flow_dispatch_failed: Flow run dispatch exhausted its bounded attempts."
         ),
+        details=after_possible_tool_call(None, code=code)
+        if await _completed_a_tool_step(container, run)
+        else None,
+    )
+
+
+async def _completed_a_tool_step(container: Container, run: FlowRun) -> bool:
+    try:
+        definition = await load_published_definition(
+            flow_version_repo=container.flow_version_repo(),
+            flow_id=run.flow_id,
+            version=run.flow_version,
+            tenant_id=run.tenant_id,
+        )
+    # What reading a stored definition raises when it does not verify or
+    # parse (the checksum mismatch is a BadRequestException too).
+    except (BadRequestException, FlowRuntimeInvariantError):
+        # Raising would leave the run queued and stop the sweep at it every
+        # time; a definition that cannot be read cannot show that no tool step
+        # was completed.
+        logger.warning(
+            "Flow run dispatch failed and its definition cannot be read",
+            extra={"run_id": str(run.id), "tenant_id": str(run.tenant_id)},
+        )
+        return True
+    steps = await container.flow_run_repo().list_step_result_identities(
+        run_id=run.id, tenant_id=run.tenant_id
+    )
+    return tool_call_possible(
+        tool_step_orders=[
+            step.step_order
+            for step in definition.runtime_steps()
+            if FlowInputSource(step.input_source) is FlowInputSource.TOOL
+        ],
+        completed_step_orders={
+            step.step_order
+            for step in steps
+            if step.status == FlowStepResultStatus.COMPLETED
+        },
+        failing_step_order=None,
     )

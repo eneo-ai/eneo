@@ -92,13 +92,27 @@ class FlowResolvedInputHttpResponseSource(_FlowResolvedInputSelectedSource):
     kind: Literal["http_response"]
 
 
+class FlowResolvedInputToolAnswerSource(_FlowResolvedInputSelectedSource):
+    """The answer of the MCP tool a step called for its input: the server and
+    the tool by id, and the name the call used."""
+
+    kind: Literal["tool_answer"]
+    mcp_server_id: UUID = Field(description="The registered MCP server.")
+    tool_id: UUID = Field(description="The server's tool that was called.")
+    tool_name: str = Field(
+        min_length=1,
+        description="The name the call used: the one pinned when the flow was published.",
+    )
+
+
 FlowResolvedInputSource: TypeAlias = Annotated[
     FlowResolvedInputFlowInputSource
     | FlowResolvedInputStepResultSource
     | FlowResolvedInputSystemValueSource
     | FlowResolvedInputRuntimeSource
     | FlowResolvedInputRuntimeFileSource
-    | FlowResolvedInputHttpResponseSource,
+    | FlowResolvedInputHttpResponseSource
+    | FlowResolvedInputToolAnswerSource,
     Field(discriminator="kind"),
 ]
 

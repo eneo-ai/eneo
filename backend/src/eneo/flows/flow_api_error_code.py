@@ -144,9 +144,17 @@ class FlowApiErrorCode(StrEnum):
     TYPED_IO_HTTP_RESPONSE_TOO_LARGE = "typed_io_http_response_too_large"
     TYPED_IO_HTTP_SSRF_BLOCKED = "typed_io_http_ssrf_blocked"
     TYPED_IO_HTTP_TIMEOUT = "typed_io_http_timeout"
+    TYPED_IO_TOOL_ANSWER_TOO_LARGE = "typed_io_tool_answer_too_large"
+    TYPED_IO_TOOL_CHANGED = "typed_io_tool_changed"
+    TYPED_IO_TOOL_CONNECTION_ERROR = "typed_io_tool_connection_error"
+    TYPED_IO_TOOL_DESTINATION_BLOCKED = "typed_io_tool_destination_blocked"
+    TYPED_IO_TOOL_INVALID_ARGUMENTS = "typed_io_tool_invalid_arguments"
     TYPED_IO_TOOL_INVALID_CONFIG = "typed_io_tool_invalid_config"
     TYPED_IO_TOOL_INVALID_SCHEMA = "typed_io_tool_invalid_schema"
+    TYPED_IO_TOOL_MALFORMED_ANSWER = "typed_io_tool_malformed_answer"
     TYPED_IO_TOOL_NOT_ALLOWED = "typed_io_tool_not_allowed"
+    TYPED_IO_TOOL_REPORTED_ERROR = "typed_io_tool_reported_error"
+    TYPED_IO_TOOL_TIMEOUT = "typed_io_tool_timeout"
     TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW = "typed_io_input_exceeds_model_window"
     TYPED_IO_INPUT_TOO_LARGE = "typed_io_input_too_large"
     TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT = (
@@ -296,7 +304,17 @@ FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.TYPED_IO_HTTP_RESPONSE_TOO_LARGE,
         FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED,
         FlowApiErrorCode.TYPED_IO_HTTP_TIMEOUT,
+        FlowApiErrorCode.TYPED_IO_TOOL_ANSWER_TOO_LARGE,
+        FlowApiErrorCode.TYPED_IO_TOOL_CHANGED,
+        FlowApiErrorCode.TYPED_IO_TOOL_CONNECTION_ERROR,
+        FlowApiErrorCode.TYPED_IO_TOOL_DESTINATION_BLOCKED,
+        FlowApiErrorCode.TYPED_IO_TOOL_INVALID_ARGUMENTS,
         FlowApiErrorCode.TYPED_IO_TOOL_INVALID_CONFIG,
+        FlowApiErrorCode.TYPED_IO_TOOL_INVALID_SCHEMA,
+        FlowApiErrorCode.TYPED_IO_TOOL_MALFORMED_ANSWER,
+        FlowApiErrorCode.TYPED_IO_TOOL_NOT_ALLOWED,
+        FlowApiErrorCode.TYPED_IO_TOOL_REPORTED_ERROR,
+        FlowApiErrorCode.TYPED_IO_TOOL_TIMEOUT,
         FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW,
         FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE,
         FlowApiErrorCode.TYPED_IO_INVALID_FILE_TYPE,
@@ -363,8 +381,12 @@ FLOW_RUN_TERMINAL_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
     }
     | FLOW_TYPED_IO_ERROR_CODES
 )
-# A new logical run is safe only when provider work was not accepted and no
-# external effect was produced; lifecycle drift must revisit this allowlist.
+# The codes after which a new logical run repeats no accepted provider work.
+# The code alone does not say whether a tool was called: a run error the
+# executor writes at or after a tool step, and one the dispatcher writes for
+# a run that has completed a tool step, carries that as a typed fact
+# (FlowRunErrorDetails.tool_call_possible), and FlowRunError.retryable is this
+# entry and not that fact. Lifecycle drift must revisit this allowlist.
 FLOW_RUN_TERMINAL_ERROR_RETRYABILITY: dict[FlowApiErrorCode, bool] = {
     code: code
     in {

@@ -27,6 +27,7 @@ from eneo.flows.ai_builder.ai_builder_tools import (
     validate_propose_flow_tool_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+from eneo.flows.domain import schema_engine
 from eneo.flows.domain.flow import Flow, FlowRunStatus
 from eneo.flows.domain.flow_step_validation import FlowStepValidationError
 from eneo.flows.flow_authoring_spec import AssistantSpec, FlowDraftSpecCore, StepSpec
@@ -715,6 +716,10 @@ def _unevaluable_contracts(uri):
             "default": {"type": "unknown"},
             "properties": {"a": {"$ref": "#/default"}},
         },
+        "annotation-with-uncompilable-pattern": {
+            "default": {"patternProperties": {"(": {}}},
+            "properties": {"a": {"$ref": "#/default"}},
+        },
         "invalid-keyword-value": {"type": "object", "minLength": "x"},
     }
 
@@ -751,14 +756,14 @@ def test_recursion_limit_reached_inside_the_reference_engine_is_typed():
 
 
 def test_only_the_reference_engine_panic_is_reported_as_recursion(monkeypatch):
-    build = output_processing.build_schema_validator
+    build = schema_engine.build_schema_validator
 
     class Interrupted:
         def validate(self, instance):
             raise KeyboardInterrupt
 
     monkeypatch.setattr(
-        output_processing,
+        schema_engine,
         "build_schema_validator",
         lambda schema, **kwargs: (
             Interrupted() if schema == {"type": "object"} else build(schema, **kwargs)

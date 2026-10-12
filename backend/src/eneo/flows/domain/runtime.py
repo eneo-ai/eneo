@@ -226,6 +226,8 @@ class RunExecutionState:
     reviewed_results: Mapping[ReviewedResultKey, ReviewedResult] = field(
         default_factory=_empty_reviewed_results
     )
+    # The orders of the steps whose input is a tool's answer.
+    tool_step_orders: frozenset[int] = frozenset()
 
     def all_previous_text_before(self, step_order: int) -> str:
         segments: list[str] = []

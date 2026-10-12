@@ -211,20 +211,60 @@ def resolve_step_upstream_orders(
             output_mode=mode,
             step_order=step_order,
         )
-        if channel is None:
-            continue
-        if channel.sites is None:
-            return list(range(1, max_prior_step_order + 1))
-        for _, template in channel.sites:
+        if channel is not None:
             orders.update(
-                resolve_reference_step_orders(
-                    references=analyze_template(
-                        template, step_refs=step_ref_mapping, form_field_names=set()
-                    ),
-                    step_order=channel.context_step_order,
+                _channel_step_orders(
+                    channel,
+                    step_ref_mapping=step_ref_mapping,
                     max_prior_step_order=max_prior_step_order,
                 )
             )
+    return sorted(orders)
+
+
+def resolve_tool_argument_orders(
+    *,
+    input_source: FlowInputSource | str,
+    step_order: int,
+    input_config: Mapping[str, object] | None,
+    step_ref_mapping: dict[str, int],
+    max_prior_step_order: int,
+) -> list[int]:
+    """Resolve the prior steps whose output a ``tool`` step sends to the tool's
+    server: the steps its bound arguments read, and nothing its input or its
+    prompt reads. Empty for a step with another input source.
+
+    An unreadable tool configuration reads as every earlier step, as in
+    ``resolve_step_upstream_orders``.
+    """
+    if FlowInputSource(input_source) is not FlowInputSource.TOOL:
+        return []
+    return _channel_step_orders(
+        _tool_channel(input_config, step_order),
+        step_ref_mapping=step_ref_mapping,
+        max_prior_step_order=max_prior_step_order,
+    )
+
+
+def _channel_step_orders(
+    channel: ConfigChannel,
+    *,
+    step_ref_mapping: dict[str, int],
+    max_prior_step_order: int,
+) -> list[int]:
+    if channel.sites is None:
+        return list(range(1, max_prior_step_order + 1))
+    orders: set[int] = set()
+    for _, template in channel.sites:
+        orders.update(
+            resolve_reference_step_orders(
+                references=analyze_template(
+                    template, step_refs=step_ref_mapping, form_field_names=set()
+                ),
+                step_order=channel.context_step_order,
+                max_prior_step_order=max_prior_step_order,
+            )
+        )
     return sorted(orders)
 
 
@@ -259,7 +299,7 @@ def config_channel(
     if column == "output_config" and output_mode is FlowOutputMode.TEMPLATE_FILL:
         return ConfigChannel(column, _template_fill_sites(config), step_order)
     if column == "input_config" and input_source is FlowInputSource.TOOL:
-        return ConfigChannel(column, tool_reference_sites(config), step_order)
+        return _tool_channel(config, step_order)
     if not sends_http_config(column, input_source, output_mode, config):
         return None
     # A webhook is built once the step has answered, so its context is the
@@ -269,6 +309,12 @@ def config_channel(
         _http_config_sites(config),
         step_order + 1 if column == "output_config" else step_order,
     )
+
+
+def _tool_channel(
+    config: Mapping[str, object] | None, step_order: int
+) -> ConfigChannel:
+    return ConfigChannel("input_config", tool_reference_sites(config), step_order)
 
 
 def _template_fill_sites(

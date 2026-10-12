@@ -255,10 +255,17 @@ graph LR
 
 ## Flow external-effect boundary
 
-Flow and Flow AI Builder do not support MCP servers or tools at authoring,
-publish, runtime, or package boundaries. Eneo rejects MCP-bearing current
-assistants, persisted Builder plans, packages, and historical published
-definitions before it mutates Flow state or performs external work.
+A Flow step can take its input from one MCP tool call (`input_source` `tool`),
+through the chain assistants use: the instance administrator registers the
+server and approves its tools, the space administrator switches the server and
+its tools on, and the author picks a tool in a step. Eneo does not know whether
+a tool changes something: a run that is started again calls the tool again, and
+Eneo does not prevent the repeated change.
+
+A step's model gets no MCP tools: Eneo rejects MCP-bearing current assistants,
+persisted Builder plans, packages, and historical published definitions before
+it mutates Flow state or performs external work. The Flow AI Builder proposes
+no tool step, and package export refuses a flow that has one.
 
 Standalone assistants and conversations retain their separately owned MCP
 behavior. Flow accepts HTTP GET as an input source and sends terminal HTTP POST
