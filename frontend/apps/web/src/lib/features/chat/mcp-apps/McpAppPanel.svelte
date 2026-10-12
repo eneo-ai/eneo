@@ -6,6 +6,8 @@
   import type { PanelContents } from "$lib/features/file-preview/panelContents";
   import { m } from "$lib/paraglide/messages";
   import AppWindow from "@lucide/svelte/icons/app-window";
+  import Maximize2 from "@lucide/svelte/icons/maximize-2";
+  import Minimize2 from "@lucide/svelte/icons/minimize-2";
   import X from "@lucide/svelte/icons/x";
   import { getChatService } from "../ChatService.svelte";
   import type { McpAppPane } from "./McpAppPane.svelte";
@@ -38,6 +40,8 @@
   const closeLabel = $derived(
     covered ? m.mcp_app_view_close_to_file({ name: covered }) : m.close()
   );
+  // Over the conversation on a narrow screen the panel already has the whole width.
+  const maximisable = $derived(preview.besideConversation);
 </script>
 
 {#if found}
@@ -53,6 +57,22 @@
     <div class="flex min-w-0 flex-1 flex-col leading-tight">
       <PanelTitle {title} detail={subject ? tool : m.mcp_app_view_title()} {preview} {contents} />
     </div>
+    {#if maximisable}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-pressed={preview.maximised}
+        aria-label={preview.maximised ? m.file_preview_restore_size() : m.file_preview_maximise()}
+        title={preview.maximised ? m.file_preview_restore_size() : m.file_preview_maximise()}
+        onclick={() => (preview.maximised = !preview.maximised)}
+      >
+        {#if preview.maximised}
+          <Minimize2 aria-hidden="true" />
+        {:else}
+          <Maximize2 aria-hidden="true" />
+        {/if}
+      </Button>
+    {/if}
     <Button
       variant="ghost"
       size="icon-sm"

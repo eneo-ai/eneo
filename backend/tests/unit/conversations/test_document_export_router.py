@@ -22,6 +22,7 @@ def context():
     conversation = SimpleNamespace(id=uuid4())
     audit = SimpleNamespace(log_async=AsyncMock())
     container = SimpleNamespace(
+        session=lambda: None,
         user=lambda: user,
         tenant=lambda: None,
         session_service=lambda: SimpleNamespace(

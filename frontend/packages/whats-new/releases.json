@@ -19,6 +19,24 @@
           }
         },
         {
+          "id": "document-templates",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Word and PDF files follow your document template",
+            "sv": "Word- och PDF-filer följer er dokumentmall"
+          },
+          "body": {
+            "en": "Under Administration › Tools › File creation you can upload your organisation's Word templates and make one the default. Documents the assistants create as Word or PDF are written in the template's own styles, with its header, footer and logo, and PDFs are tagged for accessibility. An assistant can be set to another template or to Eneo's built-in one, which you can download and adapt in Word.",
+            "sv": "Under Administration › Verktyg › Filskapande kan du ladda upp organisationens Word-mallar och göra en till standard. Dokument som assistenterna skapar som Word eller PDF skrivs i mallens egna format, med dess sidhuvud, sidfot och logotyp, och PDF-filerna taggas för tillgänglighet. En assistent kan ställas in på en annan mall eller på Eneos inbyggda, som du kan ladda ner och anpassa i Word."
+          },
+          "showMe": {
+            "href": "/admin/tools",
+            "anchor": "admin-tools"
+          }
+        },
+        {
           "id": "intermediate-query-tables",
           "type": "improved",
           "area": "chat",

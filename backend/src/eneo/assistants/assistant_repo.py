@@ -23,6 +23,19 @@ from eneo.database.tables.assistant_table import (
 )
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import AssistantCapabilities
+from eneo.database.tables.document_templates_table import AssistantDocumentTemplates
+
+
+def _template_row(assistant: "Assistant") -> AssistantDocumentTemplates | None:
+    """A row only when the assistant departs from the organisation's default."""
+    choice = assistant.document_template
+    if choice.mode == "default":
+        return None
+    return AssistantDocumentTemplates(
+        mode=choice.mode, document_template_id=choice.template_id
+    )
+
+
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.help_assistant_assignment_history_table import (
     HelpAssistantAssignmentHistory,
@@ -723,6 +736,7 @@ class AssistantRepository:
             AssistantCapabilities(purpose=p)
             for p in sorted(set(assistant.enabled_capabilities))
         ]
+        entry_in_db.document_template_choice = _template_row(assistant)
         # Assign groups and websites
         await self._set_collections(entry_in_db, assistant.collections)
         await self._set_websites(entry_in_db, assistant.websites)
@@ -1032,6 +1046,7 @@ class AssistantRepository:
             AssistantCapabilities(purpose=p)
             for p in sorted(set(assistant.enabled_capabilities))
         ]
+        entry_in_db.document_template_choice = _template_row(assistant)
         # assign groups and websites
         await self._set_collections(entry_in_db, assistant.collections)
         await self._set_websites(entry_in_db, assistant.websites)

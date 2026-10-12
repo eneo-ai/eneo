@@ -12,9 +12,9 @@ export const documentConfigSchema = z
       .min(256 * 1024)
       .max(20 * 1024 * 1024)
       .default(10 * 1024 * 1024),
-    // Markdown characters per document; JSON-escaped Swedish text must stay under the
-    // runtime's request-body cap.
-    max_content_chars: z.number().int().min(5000).max(50_000).default(50_000),
+    // Markdown characters per document; the runtime's request-body cap follows this
+    // (DOCUMENT_MAX_CONTENT_CHARS), so JSON-escaped text always fits.
+    max_content_chars: z.number().int().min(5000).max(1_000_000).default(50_000),
     organisation_name: z.string().max(120).optional(),
   })
   .strict();

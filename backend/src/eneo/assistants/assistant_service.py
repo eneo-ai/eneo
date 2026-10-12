@@ -231,6 +231,7 @@ if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
+    from eneo.document_templates.domain import DocumentTemplateChoice
     from eneo.files.file_models import File
     from eneo.governance_policy.application.effective_config_service import (
         EffectiveConfigService,
@@ -1527,6 +1528,7 @@ class AssistantService:
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
         skill_binding_intents: list[SkillBindingIntent] | None = None,
+        document_template: "DocumentTemplateChoice | None" = None,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -1897,6 +1899,15 @@ class AssistantService:
                 space.security_classification,
             )
             assistant.enabled_capabilities = sorted(set(enabled_capabilities))
+
+        if document_template is not None:
+            from eneo.document_templates.repo import DocumentTemplateRepository
+            from eneo.document_templates.service import DocumentTemplateService
+
+            await DocumentTemplateService(
+                self.user, DocumentTemplateRepository(self.repo.session)
+            ).validate_choice(document_template)
+            assistant.document_template = document_template
 
         assistant.update(
             name=name,
@@ -3489,6 +3500,21 @@ class AssistantService:
             await with_live_bundled_tools(server, self._catalog_audit)
             for server in capability_mcp_servers
         ]
+        # The organisation's document template reaches the file-creation
+        # provider as a signed link minted for this turn.
+        document_template = None
+        db_session = getattr(self.repo, "session", None)
+        if db_session is not None and any(
+            server.purpose == "file_creation" for server in capability_mcp_servers
+        ):
+            from eneo.document_templates.service import resolve_document_template
+
+            document_template = await resolve_document_template(
+                db_session,
+                tenant_id=self.user.tenant_id,
+                assistant_id=assistant_to_ask.id,
+                choice=assistant_to_ask.document_template,
+            )
 
         try:
             response, datastore_result = await assistant_to_ask.ask(
@@ -3500,6 +3526,7 @@ class AssistantService:
                 stream=stream,
                 version=version,
                 capability_mcp_servers=capability_mcp_servers,
+                document_template=document_template,
                 require_tool_approval=require_tool_approval,
                 completion_model_override=completion_model_override,
                 model_kwargs_override=model_kwargs_override,

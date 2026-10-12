@@ -36,6 +36,10 @@ from eneo.completion_models.presentation.tenant_completion_models_router import 
 from eneo.conversations.conversations_router import router as conversations_router
 from eneo.crawler.crawl_run_router import router as crawl_run_router
 from eneo.dashboard.api.dashboard_router import router as dashboard_router
+from eneo.document_templates.router import (
+    download_router as document_template_download_router,
+)
+from eneo.document_templates.router import router as document_template_router
 from eneo.embedding_models.presentation.embedding_model_router import (
     router as embedding_models_router,
 )
@@ -536,6 +540,18 @@ router.include_router(
     prefix="/mcp-servers",
     tags=["mcp-servers"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    document_template_router,
+    prefix="/document-templates",
+    tags=["document-templates"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+# The tool runtime fetches a template through a signed link, with no user.
+router.include_router(
+    document_template_download_router,
+    prefix="/document-templates",
+    tags=["document-templates"],
 )
 # A view belongs to what a conversation shows, so an API key reaches the token
 # endpoint as it reaches conversations: with read access to assistants, and

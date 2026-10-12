@@ -1355,15 +1355,23 @@ class CrawlRunRepository:
                     )
                 )
                 .values(lease_expires_at=sa.func.now() + lease_duration)
-                .returning(
-                    CrawlAttempts.dispatch_id,
-                    CrawlAttempts.crawl_run_id,
-                )
+                .returning(CrawlAttempts.id)
             )
-        ).one_or_none()
+        ).scalar_one_or_none()
         if renewed is None:
             return False
-        dispatch_id, crawl_run_id = renewed
+        # Read the attempt's identities by column name. Unpacking the RETURNING
+        # row by position handed the run id and the dispatch id over swapped on
+        # CI, which recorded failure addresses against a run that does not exist.
+        identity = (
+            await self.session.execute(
+                sa.select(CrawlAttempts.dispatch_id, CrawlAttempts.crawl_run_id).where(
+                    CrawlAttempts.id == attempt_id
+                )
+            )
+        ).one()
+        dispatch_id = identity.dispatch_id
+        crawl_run_id = identity.crawl_run_id
         await self._record_failures(crawl_run_id, failures)
         progress_values = {
             name: value for name, value in progress.items() if value is not None

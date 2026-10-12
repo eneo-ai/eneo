@@ -11,6 +11,7 @@ from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.base_class import BaseCrossReference, BasePublic
 from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.document_templates_table import AssistantDocumentTemplates
 from eneo.database.tables.files_table import Files, file_usage
 from eneo.database.tables.icons_table import Icons
 from eneo.database.tables.integration_table import IntegrationKnowledge
@@ -24,6 +25,9 @@ from eneo.files.file_models import FileUsageKind
 class Assistants(BasePublic):
     capabilities: Mapped[list[AssistantCapabilities]] = relationship(
         lazy="selectin", cascade="all, delete-orphan"
+    )
+    document_template_choice: Mapped[Optional[AssistantDocumentTemplates]] = (
+        relationship(lazy="selectin", cascade="all, delete-orphan", uselist=False)
     )
     name: Mapped[str] = mapped_column()
     completion_model_kwargs: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
