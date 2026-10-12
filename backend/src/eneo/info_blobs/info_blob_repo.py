@@ -784,10 +784,12 @@ class InfoBlobRepository:
 
     async def get_by_website(self, website_id: UUID) -> list[InfoBlobInDB]:
         records = await self.session.scalars(
-            sa.select(InfoBlobs).where(
+            sa.select(InfoBlobs)
+            .where(
                 InfoBlobs.website_id == website_id,
                 active_info_blob_version(),
             )
+            .options(selectinload(InfoBlobs.website))
         )
         return [InfoBlobInDB.model_validate(record) for record in records]
 
