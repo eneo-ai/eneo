@@ -13,7 +13,8 @@ from eneo.flows.variable_resolver import decimal_number
 from eneo.main.exceptions import BadRequestException
 
 _STEP_REFERENCE_PATTERN = re.compile(r"^step_(\d+)$")
-_EXACT_TEMPLATE_EXPRESSION_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
+# A binding that is exactly one `{{ reference }}`; group 1 is the reference.
+EXACT_TEMPLATE_EXPRESSION_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
 TEMPLATE_FILL_RESOURCE_CONFIG_KEYS = frozenset(
     {"template_asset_id", "template_file_id"}
 )
@@ -95,7 +96,7 @@ def validate_template_fill_output_config(
             )
         if not binding.strip():
             continue
-        match = _EXACT_TEMPLATE_EXPRESSION_PATTERN.match(binding)
+        match = EXACT_TEMPLATE_EXPRESSION_PATTERN.match(binding)
         if match is None:
             raise FlowStepValidationError(
                 f"Step {step.step_order}: binding '{placeholder}' must be a single template expression like {{{{step_1.output.text}}}}.",

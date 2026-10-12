@@ -369,30 +369,41 @@ class FlowVariableResolver:
         edges: list[FlowResolvedInputEdge] = []
 
         def _replace(match: re.Match[str]) -> str:
-            expression = match.group(1).strip()
-            value, resolved_path = self._resolve_path_with_segments(context, expression)
-            source_match = context.source_for_path(resolved_path)
-            if source_match is None:
-                raise TypedIOValidationException(
-                    f"Resolved variable reference '{expression}' has no evidence source.",
-                    code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
-                )
-            descriptor, selector_tail = source_match
-            edges.append(
-                build_resolved_input_edge(
-                    binding_ref=f"{binding_ref}:{expression}",
-                    source=self._resolved_input_source(
-                        descriptor,
-                        selector_path=descriptor.selector_prefix + selector_tail,
-                    ),
-                    selected_value=value,
-                )
+            value, edge = self.resolve_reference_with_evidence(
+                match.group(1).strip(), context, binding_ref=binding_ref
             )
+            edges.append(edge)
             return self._to_prompt_string(value)
 
         return FlowVariableInterpolation(
             text=_TEMPLATE_VAR_PATTERN.sub(_replace, template),
             edges=merge_resolved_input_edges(edges),
+        )
+
+    def resolve_reference_with_evidence(
+        self,
+        expression: str,
+        context: FlowVariableContext,
+        *,
+        binding_ref: str,
+    ) -> tuple[object, FlowResolvedInputEdge]:
+        """The value one reference names, as it is (a list stays a list), and
+        the evidence edge of reading it."""
+        value, resolved_path = self._resolve_path_with_segments(context, expression)
+        source_match = context.source_for_path(resolved_path)
+        if source_match is None:
+            raise TypedIOValidationException(
+                f"Resolved variable reference '{expression}' has no evidence source.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            )
+        descriptor, selector_tail = source_match
+        return value, build_resolved_input_edge(
+            binding_ref=f"{binding_ref}:{expression}",
+            source=self._resolved_input_source(
+                descriptor,
+                selector_path=descriptor.selector_prefix + selector_tail,
+            ),
+            selected_value=value,
         )
 
     def resolve_path(self, context: dict[str, Any], path: str) -> Any:
