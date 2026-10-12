@@ -1184,9 +1184,13 @@ class SpaceRepository:
                 mcp_server_id=tool_db.mcp_server_id,
                 name=tool_db.name,
                 title=tool_db.title,
+                display_name=tool_db.display_name,
                 description=tool_db.description,
                 input_schema=tool_db.input_schema,
                 is_enabled_by_default=is_enabled,  # Effective status after all overrides
+                # The proxy hides a tool by its review state, so it travels with it.
+                requires_approval=tool_db.requires_approval,
+                removed_from_remote=tool_db.removed_from_remote,
                 created_at=tool_db.created_at,
                 updated_at=tool_db.updated_at,
             )
