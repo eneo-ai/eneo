@@ -16,6 +16,7 @@ from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import httpx
 import pytest
 from fastapi import FastAPI, Request, Response
 from mcp import types as mcp_types
@@ -47,7 +48,7 @@ from eneo.mcp_servers.presentation.models import (
     MCPServerPublic,
     MCPServerUpdate,
 )
-from tests.unit.mcp_test_server import serve_test_app
+from tests.unit.mcp_test_server import one_tool_app, serve_test_app
 
 # =============================================================================
 # P1: list_tools() error propagation
@@ -573,6 +574,118 @@ class TestMCPClientListToolsErrorPropagation:
             "tool_1",
             "tool_2",
         ]
+
+
+class TestMCPClientFollowsNoRedirect:
+    """A registered server that answers with a redirect is not followed."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("redirected", ["initialize", "tools/call"])
+    async def test_a_redirected_request_does_not_reach_the_target(
+        self, redirected: str
+    ) -> None:
+        # Kills the mutant that leaves the SDK's HTTP client following
+        # redirects: the request, with the server's credential headers, went
+        # on to an address nobody registered (and the call failed afterwards
+        # anyway, in the client's own response hook).
+        reached: list[str] = []
+        location = ""
+
+        def redirect() -> Response:
+            return Response(status_code=307, headers={"location": location})
+
+        async def elsewhere(request: Request) -> Response:
+            reached.append(request.method)
+            return Response(status_code=204)
+
+        if redirected == "initialize":
+            app = FastAPI()
+            app.post("/mcp")(redirect)
+        else:
+            app = one_tool_app(lambda _: redirect())
+        app.post("/elsewhere")(elsewhere)
+        server = MCPServer(tenant_id=uuid4(), name="redirecting", http_url="")
+        async with serve_test_app(app) as url:
+            server.http_url = url
+            origin = url.removesuffix("/mcp")
+            location = (
+                f"{origin.replace('//', '//user:secret@')}/elsewhere?t=secret#secret"
+            )
+            with pytest.raises(MCPClientError) as failure:
+                async with MCPClient(server, tool_call_timeout=5) as client:
+                    await client.call_tool("lookup", {})
+
+        assert reached == []
+        if redirected == "initialize":
+            # Kills the mutants that report the redirect as "reachable, but
+            # the handshake failed", or show the target's user info, query
+            # or fragment.
+            assert str(failure.value) == (
+                f"Server at {url} answered with a redirect (HTTP 307) to "
+                f"{origin}/elsewhere. Eneo does not follow redirects: register "
+                "the address the server redirects to."
+            )
+
+    @pytest.mark.asyncio
+    async def test_an_answer_that_only_looks_like_a_redirect_is_not_called_one(
+        self,
+    ) -> None:
+        # Kills the mutant that takes every 3xx status for a redirect: this
+        # one names no address, so there is nothing to register instead.
+        app = FastAPI()
+        app.post("/mcp")(lambda: Response(status_code=300))
+        async with serve_test_app(app) as url:
+            server = MCPServer(tenant_id=uuid4(), name="odd", http_url=url)
+            with pytest.raises(MCPClientError) as failure:
+                async with MCPClient(server):
+                    pass
+
+        assert str(failure.value) == (
+            f"Server at {url} is reachable (HTTP 300) but the MCP handshake failed."
+        )
+
+    @pytest.mark.parametrize(
+        ("location", "shown"),
+        [
+            ("/moved", "https://mcp.example.org/moved"),
+            ("//other.example/mcp?key=s3cret", "https://other.example/mcp"),
+            (
+                "http://u:pw@other.example:8443/mcp#part",
+                "http://other.example:8443/mcp",
+            ),
+            # The server chose the text and an administrator reads it: a line
+            # break stays encoded.
+            (
+                "/p%0ASend%20your%20password",
+                "https://mcp.example.org/p%0ASend%20your%20password",
+            ),
+            ("/" + "a" * 300, None),
+            ("http://host:not-a-port/x", None),
+            ("mailto:someone@example.org", None),
+            # What the registration would refuse, or read as another host,
+            # is no address to register.
+            ("http://?key=x", None),
+            ("http:/moved", None),
+            ("http://0x7f.1/x", None),
+            ("", None),
+            ("?again=1", None),
+        ],
+    )
+    def test_a_redirect_target_is_shown_only_as_an_address_to_register(
+        self, location: str, shown: str | None
+    ) -> None:
+        # Kills the mutants that show the target decoded (a line break and a
+        # sentence of the server's own in the administrator's message), of
+        # any length, in a scheme that cannot be registered, or when it is
+        # the registered address itself; and the one that lets a Location
+        # that is no URL turn the message into "unknown reasons".
+        response = httpx.Response(
+            307,
+            headers={"location": location},
+            request=httpx.Request("POST", "https://mcp.example.org/mcp"),
+        )
+
+        assert mcp_client_module._redirect_target(response) == shown
 
 
 class TestMCPToolCatalogPolicyValidation:

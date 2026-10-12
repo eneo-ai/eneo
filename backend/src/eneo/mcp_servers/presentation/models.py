@@ -13,6 +13,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
     MCP_TOOL_DEFINITION_HARD_MAX_BYTES,
 )
+from eneo.mcp_servers.domain.server_address import MCPServerAddress
 from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
 )
@@ -100,7 +101,7 @@ class MCPServerCreate(BaseModel):
     name: str
     # Required unless http_auth_type is "internal": a built-in provider's URL
     # is Eneo's own loopback endpoint and is set server-side.
-    http_url: Optional[AnyHttpUrl] = None
+    http_url: Optional[MCPServerAddress] = None
     http_auth_type: MCPServerAuthType = "none"
     purpose: MCPServerPurpose = "general"
     description: Optional[str] = None
@@ -146,7 +147,7 @@ class MCPServerUpdate(BaseModel):
     """DTO for updating an MCP server (admin only, uses Streamable HTTP transport)."""
 
     name: Optional[str] = None
-    http_url: Optional[AnyHttpUrl] = None
+    http_url: Optional[MCPServerAddress] = None
     http_auth_type: Optional[MCPServerAuthType] = None
     # Moving into a capability purpose saves the server as an inactive
     # provider; moving back to general makes it an ordinary enabled server.

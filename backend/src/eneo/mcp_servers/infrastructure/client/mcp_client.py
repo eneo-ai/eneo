@@ -33,7 +33,7 @@ from mcp.types import (
     ServerNotification,
     ToolListChangedNotification,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
@@ -43,6 +43,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, is_builtin_provider
+from eneo.mcp_servers.domain.server_address import MCPServerAddress
 
 logger = get_logger(__name__)
 
@@ -564,15 +565,16 @@ async def _open_streamable_http_client(
     tool_catalog_max_bytes: int,
     tool_answer_ceiling: _ToolAnswerCeiling | None = None,
     terminate_on_close: bool = True,
-    follow_redirects: bool = True,
 ) -> AsyncGenerator[MCPStreams]:
     timeout = httpx.Timeout(timeout_seconds, read=read_timeout_seconds)
     http_headers = {"Accept-Encoding": "identity", **headers}
     async with create_mcp_http_client(
         headers=http_headers, timeout=timeout
     ) as http_client:
-        # The SDK's client follows redirects; this is where a caller says no.
-        http_client.follow_redirects = follow_redirects
+        # The SDK's client follows redirects. No MCP client of Eneo does: a
+        # redirect would take the request, and credential headers with it,
+        # to an address that nobody registered.
+        http_client.follow_redirects = False
         wire_max_bytes = tool_catalog_max_bytes + MCP_TOOL_LIST_PROTOCOL_OVERHEAD_BYTES
         # This coarse pre-decode bound measures server-encoded HTTP/SSE bytes;
         # validate_tool_catalog later enforces the compact semantic definition
@@ -664,6 +666,45 @@ def _extract_error_message(exc: BaseException) -> str:
     return str(exc)
 
 
+# The longest redirect target an error message quotes; a longer one is left out.
+MCP_REDIRECT_TARGET_MAX_LENGTH = 200
+_REGISTERED_ADDRESS = TypeAdapter[MCPServerAddress](MCPServerAddress)
+
+
+def _address(url: httpx.URL) -> str:
+    """A URL without user info, query and fragment, still percent-encoded."""
+    path = url.raw_path.split(b"?", 1)[0].decode("ascii")
+    return f"{url.scheme}://{url.netloc.decode('ascii')}{path}"
+
+
+def _redirect_target(response: httpx.Response) -> str | None:
+    """Where a redirect points, when that is an address an administrator
+    can register instead as it is written; None otherwise.
+
+    The server chose this text and an administrator reads it, so it is shown
+    percent-encoded (no line break or control character can come through),
+    without user info, query and fragment, and of a bounded length. The type
+    that reads a registered address decides the rest: a text it refuses
+    (another scheme, no host) or reads as another address (a host taken from
+    the path, a number read as an IP address) names no target. Nor does the
+    address that was asked.
+    """
+    try:
+        target = response.url.join(response.headers["location"])
+    except httpx.InvalidURL:
+        return None
+    address = _address(target)
+    if len(address) > MCP_REDIRECT_TARGET_MAX_LENGTH:
+        return None
+    try:
+        registered = _REGISTERED_ADDRESS.validate_python(address)
+    except ValidationError:
+        return None
+    if str(registered) != address:
+        return None
+    return None if address == _address(response.url) else address
+
+
 async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
     """Quick HTTP request to diagnose the real error when MCP protocol fails.
 
@@ -700,6 +741,15 @@ async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
                     return (
                         "Authentication failed (401 Unauthorized). "
                         "Check your bearer token."
+                    )
+                if response.has_redirect_location:
+                    target = _redirect_target(response)
+                    return (
+                        f"Server at {url} answered with a redirect "
+                        f"(HTTP {response.status_code})"
+                        f"{f' to {target}' if target else ''}. Eneo does not "
+                        "follow redirects: register the address the server "
+                        "redirects to."
                     )
                 if response.status_code == 403:
                     return "Access denied (403 Forbidden). Check your credentials."
@@ -800,7 +850,6 @@ class MCPClient:
         identity_headers: dict[str, str] | None = None,
         tool_call_max_bytes: int | None = None,
         terminate_session_on_close: bool = True,
-        follow_redirects: bool = True,
     ):
         """
         Initialize MCP client.
@@ -823,11 +872,6 @@ class MCPClient:
                 answer the close waits for up to the transport's read
                 timeout. False for a caller that has to be done within its
                 time; the server's session then expires on its own.
-            follow_redirects: Whether a redirect the server answers with is
-                followed. False for a caller that vetted the server's address:
-                a redirect would take the request, and credential headers with
-                it, to an address nobody vetted. The request then fails like
-                any request the server fails.
             on_tools_list_changed: Fired (best-effort) when the server pushes a
                 ``notifications/tools/list_changed``. Progressive-discovery
                 servers emit this after a tool like ``load_tools`` activates new
@@ -849,7 +893,6 @@ class MCPClient:
             else None
         )
         self._terminate_session_on_close = terminate_session_on_close
-        self._follow_redirects = follow_redirects
         # Set when a tools/list_changed notification arrives on this session.
         # The proxy also re-lists the servers it just called, so this flag is a
         # protocol-correct optimization rather than the sole trigger.
@@ -987,7 +1030,6 @@ class MCPClient:
             tool_catalog_max_bytes=self.mcp_server.tool_catalog_max_bytes,
             tool_answer_ceiling=self._tool_answer_ceiling,
             terminate_on_close=self._terminate_session_on_close,
-            follow_redirects=self._follow_redirects,
         )
 
         streams = await streams_context.__aenter__()

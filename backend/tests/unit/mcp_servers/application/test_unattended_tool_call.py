@@ -209,31 +209,6 @@ async def test_a_stored_credential_that_cannot_be_read_is_a_failed_call(
     assert app.state.requests == []
 
 
-async def test_a_redirect_is_not_followed() -> None:
-    # Kills the mutants that leave the HTTP client following redirects: the
-    # caller's caller vetted the registered address only, and the request
-    # would go on, with credential headers, to wherever the server points. A
-    # 303 on purpose: the client would go on with a GET, which the hook that
-    # notes the waiting call lets through. (It cannot read the body of a
-    # redirected POST, so after a 307 the target gets no request either way.)
-    followed: list[str] = []
-
-    async def elsewhere(request: Request) -> Response:
-        followed.append(request.method)
-        return Response(status_code=204)
-
-    app = one_tool_app(
-        lambda _: Response(status_code=303, headers={"location": "/elsewhere"})
-    )
-    app.get("/elsewhere")(elsewhere)
-    async with serve_test_app(app) as url:
-        with pytest.raises(MCPClientError) as failure:
-            await _call(url)
-
-    assert type(failure.value) is MCPClientError
-    assert followed == []
-
-
 async def test_only_the_call_is_sent_and_the_tools_output_schema_is_not_applied() -> (
     None
 ):

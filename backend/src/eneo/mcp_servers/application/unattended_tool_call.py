@@ -128,8 +128,6 @@ class UnattendedToolCaller:
             tool_call_timeout=timeout_seconds,
             tool_call_max_bytes=max_answer_bytes,
             terminate_session_on_close=False,
-            # The caller's caller vets the server's address before the call.
-            follow_redirects=False,
         )
         # A task of its own: the client closes on the task that connected,
         # and it answers a cancellation during connect or close with a failed

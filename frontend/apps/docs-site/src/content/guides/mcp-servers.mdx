@@ -311,6 +311,7 @@ that the model should reuse the handle from earlier results.
 | Identity-scoped discovery fails or times out  | Omit that server's tools from this request               |
 | Catalog exceeds an admin limit                | Reject the entire catalog for this request; save nothing |
 | Admin cannot see a user-only tool during sync | Keep the existing tool; absence is not deletion evidence |
+| Server answers a request with a redirect      | Do not follow it; the request fails                      |
 
 ### Checklist for MCP server operators
 
@@ -319,6 +320,7 @@ that the model should reuse the handle from earlier results.
 - Keep tool names stable and treat description/schema changes as reviewed contract changes.
 - If state continuity matters, mint explicit handles in tool results, bind them to the forwarded identity, and expire them with a TTL.
 - Ensure Eneo can reach the endpoint within the configured connect and list-tools timeouts.
+- Serve the MCP endpoint at the registered URL itself. Eneo does not follow a redirect (for example from `http` to `https`, or to a path with a trailing slash), so that a request and its credentials never go to an address that nobody registered.
 
 ---
 
@@ -334,6 +336,7 @@ that the model should reuse the handle from earlier results.
 - Check that the URL is reachable from the Eneo backend (firewall, DNS)
 - If using authentication, verify the token is correct
 - The server must support **Streamable HTTP** transport
+- If the message says that the server answered with a redirect, register the address the server redirects to instead (the message names it when it is an `http` or `https` address of at most 200 characters that can be registered as it is written). Eneo does not follow redirects from an MCP server.
 
 ### Sync Shows No Tools
 

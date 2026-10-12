@@ -73,7 +73,9 @@ async def test_connect_configures_auth_and_sse_timeout_on_owned_client():
         "Accept-Encoding": "identity",
         "Authorization": "Bearer secret-token",
     }
-    assert kwargs["follow_redirects"] is True
+    # Whatever the SDK's factory asks for, the client that is used follows
+    # no redirect.
+    assert http_client.follow_redirects is False
     # Base timeout is the connect budget; read stays at the SDK's 300s SSE default.
     assert kwargs["timeout"].connect == 42
     assert kwargs["timeout"].read == 300
