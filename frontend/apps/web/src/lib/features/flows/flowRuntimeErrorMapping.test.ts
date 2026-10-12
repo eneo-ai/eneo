@@ -255,20 +255,29 @@ describe("flowRuntimeErrorMapping", () => {
     }
   });
 
-  it("maps missing template file content errors from readable backend text", () => {
-    const error = new EneoError(
-      "Selected template file has no binary content.",
+  it("takes the sentence for a template without file content from the code, not from the server's wording", () => {
+    const serverText =
+      "The selected DOCX template could not be read because the file content is missing.";
+    const coded = new EneoError(
+      serverText,
       "RESPONSE",
       400,
       0,
-      {},
+      { code: "flow_template_missing_content" },
       { endpoint: "GET@test" }
     );
+    const uncoded = new EneoError(serverText, "RESPONSE", 400, 0, {}, { endpoint: "GET@test" });
 
-    expect([
-      "The selected Word template could not be read because the file content is missing. Upload the template again.",
-      "Den valda Word-mallen kunde inte läsas eftersom filinnehållet saknas. Ladda upp mallen igen."
-    ]).toContain(getFlowRuntimeErrorMessage(error, "fallback"));
+    const previousLocale = getLocale();
+    setLocale("sv", { reload: false });
+    try {
+      expect(getFlowRuntimeErrorMessage(coded, "fallback")).toBe(
+        "Den valda Word-mallen kunde inte läsas eftersom filinnehållet saknas. Ladda upp mallen igen."
+      );
+      expect(getFlowRuntimeErrorMessage(uncoded, "fallback")).toBe("fallback");
+    } finally {
+      setLocale(previousLocale, { reload: false });
+    }
   });
 
   it("shows the caller's sentence instead of the server's English text for an uncatalogued error", () => {

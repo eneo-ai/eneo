@@ -269,12 +269,6 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_assistant_snapshot_resource_invalid: m.flow_error_flow_assistant_snapshot_resource_invalid
 } satisfies Record<FlowApiErrorCode, () => string>;
 
-const MISSING_TEMPLATE_CONTENT_PATTERNS = [
-  "selected template file has no binary content",
-  "published docx template file has no binary content",
-  "file content is missing"
-];
-
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -504,11 +498,6 @@ function resolveFlowApiErrorMessage(descriptor: FlowApiErrorDescriptor): string 
   return FLOW_API_ERROR_MESSAGES[descriptor.code]();
 }
 
-function matchesMissingTemplateContentError(readableMessage: string): boolean {
-  const normalized = readableMessage.toLowerCase();
-  return MISSING_TEMPLATE_CONTENT_PATTERNS.some((pattern) => normalized.includes(pattern));
-}
-
 /**
  * Refusals the flow endpoints send under a code outside the generated Flow API set.
  * The server words `stale_revision` in Swedish only, so it is said here in both languages.
@@ -535,10 +524,6 @@ export function getFlowRuntimeErrorMessage(error: unknown, fallbackMessage: stri
 
   const platformMessage = getErrorCodeMessage(error.code);
   if (platformMessage) return platformMessage;
-
-  if (matchesMissingTemplateContentError(error.getReadableMessage())) {
-    return getFlowRuntimeErrorMessageByCode("flow_template_missing_content") ?? fallbackMessage;
-  }
 
   return fallbackMessage;
 }
