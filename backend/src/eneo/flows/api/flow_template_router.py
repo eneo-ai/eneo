@@ -19,6 +19,7 @@ from fastapi import (
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -63,14 +64,13 @@ logger = logging.getLogger(__name__)
             description="Caller lacks permission or API key scope to list template assets for this flow.",
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Flow not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
     },
 )
@@ -113,20 +113,18 @@ async def list_flow_template_files(
             description="The selected file is not a valid DOCX template or is not safe to inspect.",
             message="Invalid DOCX template.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
-            code="bad_request",
         ),
         403: error_response(
             description="Forbidden: API key scope does not match flow space.",
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Flow or template file not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
     },
 )
@@ -182,14 +180,13 @@ async def inspect_flow_template(
             description="Forbidden: API key scope does not match flow space.",
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Flow not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         413: error_response(
             description="The uploaded template exceeds the allowed file size.",
@@ -200,7 +197,6 @@ async def inspect_flow_template(
                 "to review the object-content deployment policy."
             ),
             eneo_error_code=ErrorCodes.FILE_TOO_LARGE,
-            code="file_too_large",
         ),
         415: error_response(
             description=(
@@ -280,20 +276,19 @@ async def upload_flow_template_file(
             description="Forbidden: API key scope does not match flow space.",
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Flow or template asset not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         409: error_response(
             description="The template asset is still pinned by a published flow definition.",
             message="The DOCX template is used by a published flow definition and cannot be deleted.",
             eneo_error_code=ErrorCodes.CONFLICT,
-            code=FlowApiErrorCode.TEMPLATE_IN_USE.value,
+            code=FlowApiErrorCode.TEMPLATE_IN_USE,
         ),
     },
 )
@@ -362,14 +357,13 @@ async def delete_flow_template_file(
             description="Caller lacks permission or API key scope to access this flow template asset.",
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Flow or template asset not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         503: error_response(
             description=(

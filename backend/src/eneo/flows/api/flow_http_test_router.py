@@ -10,6 +10,7 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -80,7 +81,7 @@ router = APIRouter()
             description="Caller lacks permission to edit this flow.",
             message="Insufficient permissions.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "space_membership"},
         ),
         404: error_response(

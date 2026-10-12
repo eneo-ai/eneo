@@ -13,14 +13,16 @@ from uuid import UUID
 
 from fastapi import Request
 
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.auth_dependencies import ScopeFilter, get_scope_filter
 from eneo.flows.flow_access_policy import (
     FlowApiAction,
     require_flow_action,
 )
+from eneo.flows.flow_api_exceptions import FlowUnauthorizedException
 from eneo.flows.principal import FlowPrincipal
 from eneo.main.container.container import Container
-from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.main.exceptions import NotFoundException
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -48,9 +50,9 @@ class FlowSpaceAccessContext:
 def _raise_scope_mismatch(
     message: str = "API key space scope does not match requested flow.",
 ) -> NoReturn:
-    raise UnauthorizedException(
+    raise FlowUnauthorizedException(
         message,
-        code="insufficient_scope",
+        code=AccessDenialCode.INSUFFICIENT_SCOPE,
         context={"auth_layer": "api_key_scope"},
     )
 
@@ -113,15 +115,15 @@ async def enforce_flow_scope(
     space, actor = await _space_and_actor(container, flow.space_id)
 
     if not actor.can_read_flows():
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             "You do not have permission to access flows in this space.",
-            code="insufficient_space_permission",
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
     if not actor.can_read_flow(flow):
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             "You do not have permission to access this flow.",
-            code="insufficient_space_permission",
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
     return space

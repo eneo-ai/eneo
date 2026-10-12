@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
 
 from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.auth_models import (
     FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE,
 )
@@ -136,14 +137,13 @@ _RAW_REASON_REQUIRED_MESSAGE: Final[str] = (
             description=_FLOW_TRACE_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Run not found for this flow and tenant.",
             message="Flow run not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         503: error_response(
             description="Evidence audit logging is unavailable for this request.",
@@ -274,14 +274,13 @@ async def get_flow_run_evidence(
             description=_FLOW_TRACE_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Run or provider-call cursor not found in this scope.",
             message="Provider-call evidence cursor not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         503: error_response(
             description="Evidence audit logging is unavailable for this request.",
@@ -447,14 +446,13 @@ async def list_flow_run_provider_calls(
             description=_FLOW_EVIDENCE_EXPORT_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Run not found for this flow and tenant.",
             message="Flow run not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         503: error_response(
             description="Evidence audit logging is unavailable for this request.",

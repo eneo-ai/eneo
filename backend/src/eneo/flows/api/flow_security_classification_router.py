@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request, status
 
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -101,20 +102,18 @@ router = APIRouter(route_class=_CappedBodyRoute)
                 "space or tenant."
             ),
             eneo_error_code=ErrorCodes.BAD_REQUEST,
-            code="bad_request",
         ),
         403: error_response(
             description="Caller lacks permission to edit flows in this space.",
             message="You do not have permission to edit flows in this space.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_space_permission",
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         ),
         404: error_response(
             description="Flow not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         413: error_response(
             description=(

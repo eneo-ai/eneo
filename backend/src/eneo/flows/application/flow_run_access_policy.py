@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, TypeGuard, get_args
 from uuid import UUID
 
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.flows.domain.flow import FlowRun, FlowRunStatusSnapshot
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.domain.rag_evidence import PassageDisclosure
@@ -11,6 +12,7 @@ from eneo.flows.flow_access_policy import (
     user_can_perform_flow_action,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowUnauthorizedException
 from eneo.flows.flow_evidence_policy import (
     EvidenceCapabilityLevel,
     FlowEvidencePolicy,
@@ -22,7 +24,7 @@ from eneo.flows.flow_evidence_policy import (
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.principal import FlowPrincipal
-from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.main.exceptions import NotFoundException
 from eneo.roles.permissions import Permission
 from eneo.users.user import UserInDB
 
@@ -298,18 +300,18 @@ class FlowRunAccessPolicy:
             if access_kind in {"evidence_view", "evidence_export_redacted"}:
                 if user_can_perform_flow_action(self.user, FlowApiAction.TRACE_VIEW):
                     return
-                raise UnauthorizedException(
+                raise FlowUnauthorizedException(
                     "You do not have permission to view flow trace.",
-                    code="insufficient_tenant_permission",
+                    code=AccessDenialCode.INSUFFICIENT_TENANT_PERMISSION,
                     context={"auth_layer": "tenant_role"},
                 )
             if access_kind == "evidence_export_raw":
                 if not user_can_perform_flow_action(
                     self.user, FlowApiAction.TRACE_VIEW
                 ):
-                    raise UnauthorizedException(
+                    raise FlowUnauthorizedException(
                         "You do not have permission to view flow trace.",
-                        code="insufficient_tenant_permission",
+                        code=AccessDenialCode.INSUFFICIENT_TENANT_PERMISSION,
                         context={"auth_layer": "tenant_role"},
                     )
                 if classification_level < 3 or policy.allow_run_owner_raw_export_class3:
@@ -372,32 +374,32 @@ class FlowRunAccessPolicy:
 
     @staticmethod
     def deny_run_access(*, auth_layer: str) -> NoReturn:
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             "You do not have access to this flow run.",
-            code=FlowApiErrorCode.RUN_ACCESS_DENIED.value,
+            code=FlowApiErrorCode.RUN_ACCESS_DENIED,
             context={"auth_layer": auth_layer},
         )
 
     @staticmethod
     def deny_evidence_access(*, auth_layer: str, message: str) -> NoReturn:
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             message,
-            code=FlowApiErrorCode.RUN_EVIDENCE_FORBIDDEN.value,
+            code=FlowApiErrorCode.RUN_EVIDENCE_FORBIDDEN,
             context={"auth_layer": auth_layer},
         )
 
     @staticmethod
     def deny_evidence_export_disabled(*, auth_layer: str) -> NoReturn:
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             "Evidence export is turned off for this flow.",
-            code=FlowApiErrorCode.RUN_EVIDENCE_EXPORT_DISABLED.value,
+            code=FlowApiErrorCode.RUN_EVIDENCE_EXPORT_DISABLED,
             context={"auth_layer": auth_layer},
         )
 
     @staticmethod
     def deny_raw_export_access(*, auth_layer: str, message: str) -> NoReturn:
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             message,
-            code=FlowApiErrorCode.RUN_EVIDENCE_RAW_EXPORT_FORBIDDEN.value,
+            code=FlowApiErrorCode.RUN_EVIDENCE_RAW_EXPORT_FORBIDDEN,
             context={"auth_layer": auth_layer},
         )

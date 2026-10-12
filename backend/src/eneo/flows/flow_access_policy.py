@@ -5,9 +5,10 @@ from enum import Enum
 from typing import TYPE_CHECKING, Callable, NoReturn
 from uuid import UUID
 
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowUnauthorizedException
 from eneo.flows.principal import FlowPrincipal
-from eneo.main.exceptions import UnauthorizedException
 from eneo.roles.permissions import Permission, has_permission
 from eneo.users.user import UserInDB
 
@@ -278,9 +279,9 @@ def require_flow_action(
 
 
 def raise_insufficient_tenant_permission(message: str) -> None:
-    raise UnauthorizedException(
+    raise FlowUnauthorizedException(
         message,
-        code="insufficient_tenant_permission",
+        code=AccessDenialCode.INSUFFICIENT_TENANT_PERMISSION,
         context={"auth_layer": "tenant_role"},
     )
 
@@ -297,9 +298,9 @@ def raise_service_key_not_supported(
     if runtime_alternative is not None:
         context["runtime_endpoint_hint"] = runtime_alternative.as_error_context()
 
-    raise UnauthorizedException(
+    raise FlowUnauthorizedException(
         "This Flows endpoint requires a user principal. Service-key principals cannot use this action.",
-        code=FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value,
+        code=FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED,
         context=context,
     )
 

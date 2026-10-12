@@ -17,6 +17,7 @@ from fastapi import (
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -173,14 +174,13 @@ Service-key principals may use this endpoint for published-flow runtime only.
             description="Forbidden: API key scope does not match flow space.",
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description=f"Flow not found in tenant scope. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
     },
 )
@@ -247,20 +247,18 @@ through that Flow's runtime upload endpoint.
             description="Forbidden: API key scope does not match flow space.",
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description=f"Flow not found in tenant scope. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         413: error_response(
             description="Uploaded file exceeds the effective runtime-input limit.",
             message="Uploaded file exceeds effective flow limit of 26214400 bytes.",
             eneo_error_code=ErrorCodes.FILE_TOO_LARGE,
-            code="file_too_large",
         ),
         415: error_response(
             description="Unsupported media type for the selected runtime step.",
@@ -346,7 +344,7 @@ typed 409 conflict.
             description="Forbidden: API key scope does not match flow space.",
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
@@ -356,7 +354,6 @@ typed 409 conflict.
             ),
             message="Not found",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         409: error_response(
             description="Runtime file is already attached to persisted Flow run state.",

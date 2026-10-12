@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.domain.actor_types import ActorType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.principal import FlowPrincipal
 from eneo.main.container.container import Container
@@ -66,7 +67,7 @@ def error_response(
     description: str,
     message: str | None = None,
     eneo_error_code: ErrorCodes | None = None,
-    code: FlowApiErrorCode | str | None = None,
+    code: FlowApiErrorCode | AccessDenialCode | None = None,
     context: dict[str, object] | None = None,
     examples: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, Any]:
@@ -93,7 +94,7 @@ def error_response(
         "code": eneo_error_code.name.lower(),
     }
     if code is not None:
-        example["code"] = code.value if isinstance(code, FlowApiErrorCode) else code
+        example["code"] = code.value
     if context is not None:
         example["context"] = context
     return {

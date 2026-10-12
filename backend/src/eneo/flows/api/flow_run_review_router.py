@@ -19,6 +19,7 @@ from fastapi import (
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -113,14 +114,13 @@ router = APIRouter()
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Run or history baseline not found for this flow and tenant.",
             message="History not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         413: error_response(
             description="The baseline and first remaining revision exceed the history page byte limit.",
@@ -650,14 +650,13 @@ Service-key principals may resume approved checkpoints only for runs they own (k
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Run not found for this flow and tenant.",
             message="Flow run not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         503: error_response(
             description=(
@@ -782,14 +781,14 @@ async def get_active_flow_run_review_checkpoint(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="You do not have permission to review flows.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_tenant_permission",
+            code=AccessDenialCode.INSUFFICIENT_TENANT_PERMISSION,
             context={"auth_layer": "tenant_role"},
         ),
         404: error_response(
             description=f"Run or checkpoint not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Review checkpoint not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
+            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND,
         ),
     },
 )
@@ -866,14 +865,14 @@ async def edit_flow_run_review_checkpoint(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="You do not have permission to review flows.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_tenant_permission",
+            code=AccessDenialCode.INSUFFICIENT_TENANT_PERMISSION,
             context={"auth_layer": "tenant_role"},
         ),
         404: error_response(
             description=f"Run or checkpoint not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Review checkpoint not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
+            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND,
         ),
     },
 )
@@ -955,14 +954,14 @@ async def approve_flow_run_review_checkpoint(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="You do not have permission to review flows.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_tenant_permission",
+            code=AccessDenialCode.INSUFFICIENT_TENANT_PERMISSION,
             context={"auth_layer": "tenant_role"},
         ),
         404: error_response(
             description=f"Run or checkpoint not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Review checkpoint not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
+            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND,
         ),
     },
 )
@@ -1042,14 +1041,14 @@ async def reject_flow_run_review_checkpoint(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="You do not have permission to resume flows.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_tenant_permission",
+            code=AccessDenialCode.INSUFFICIENT_TENANT_PERMISSION,
             context={"auth_layer": "tenant_role"},
         ),
         404: error_response(
             description=f"Run or checkpoint not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Review checkpoint not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
+            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND,
         ),
     },
 )
@@ -1146,14 +1145,14 @@ async def resume_flow_run_review_checkpoint(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="You do not have permission to resume flows.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_tenant_permission",
+            code=AccessDenialCode.INSUFFICIENT_TENANT_PERMISSION,
             context={"auth_layer": "tenant_role"},
         ),
         404: error_response(
             description=f"Run or checkpoint not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Review checkpoint not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
+            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND,
         ),
     },
 )

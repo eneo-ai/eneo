@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import Request
 
 from eneo.actors.actors.space_actor import SpaceActor, SpaceRole
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_runtime_paths import (
     build_published_flow_runtime_endpoint_template,
@@ -17,10 +18,11 @@ from eneo.flows.flow_access_policy import (
     FlowApiAction,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowUnauthorizedException
 from eneo.flows.principal import FlowPrincipal
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
-from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.main.exceptions import NotFoundException
 from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
@@ -44,9 +46,9 @@ class PublishedFlowRuntimeAccess:
 
 
 def _raise_service_key_admin_required() -> NoReturn:
-    raise UnauthorizedException(
+    raise FlowUnauthorizedException(
         SERVICE_KEY_ADMIN_REQUIRED_MESSAGE,
-        code=FlowApiErrorCode.SERVICE_KEY_ADMIN_REQUIRED.value,
+        code=FlowApiErrorCode.SERVICE_KEY_ADMIN_REQUIRED,
         context={
             "auth_layer": "service_key_principal",
             "capability": "view_current_definition",
@@ -78,9 +80,9 @@ def _require_flow_reader_actor(
 ) -> SpaceActor:
     actor = access_context.actor
     if actor is None or not actor.can_read_flow(access_context.flow):
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             _FLOW_READ_PERMISSION_MESSAGE,
-            code="insufficient_space_permission",
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
     return actor
@@ -104,11 +106,11 @@ def _can_override_flow_owner(
     return actor.get_current_role() == SpaceRole.OWNER
 
 
-class FlowOwnerRequiredException(UnauthorizedException):
+class FlowOwnerRequiredException(FlowUnauthorizedException):
     def __init__(self) -> None:
         super().__init__(
             "You do not have permission to modify another member's draft flow.",
-            code=FlowApiErrorCode.OWNER_REQUIRED.value,
+            code=FlowApiErrorCode.OWNER_REQUIRED,
             context={"auth_layer": "flow_owner"},
         )
 
@@ -143,9 +145,9 @@ async def require_flow_current_definition_access(
     )
     actor = access_context.actor
     if actor is None:
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             _FLOW_READ_PERMISSION_MESSAGE,
-            code="insufficient_space_permission",
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
     _ensure_service_key_can_read_current_definition(
@@ -202,9 +204,9 @@ async def _require_flow_draft_mutation_access(
     )
     actor = access_context.actor
     if actor is None or not can_mutate(actor):
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             permission_message,
-            code="insufficient_space_permission",
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
     ensure_can_mutate_flow_draft(container, access_context)

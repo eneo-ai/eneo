@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.flows.domain.flow_run_recovery_policy import (
     FlowRunAbandonmentDeadlineExceeded,
     flow_run_abandonment_deadline,
@@ -9,6 +10,7 @@ from eneo.flows.flow_run_error import FlowRunAbandonmentFacts
 from eneo.main.exceptions import (
     BadRequestException,
     NotReadyException,
+    UnauthorizedException,
     ValidationException,
 )
 
@@ -23,6 +25,22 @@ class FlowBadRequestException(BadRequestException):
         message: str = "",
         *,
         code: FlowApiErrorCode,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message, code=code.value, context=context)
+        self.code = code
+
+
+class FlowUnauthorizedException(UnauthorizedException):
+    """Flow forbidden exception with code narrowed to its two owner enums."""
+
+    code: FlowApiErrorCode | AccessDenialCode
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: FlowApiErrorCode | AccessDenialCode,
         context: dict[str, object] | None = None,
     ) -> None:
         super().__init__(message, code=code.value, context=context)

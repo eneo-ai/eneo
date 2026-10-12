@@ -135,7 +135,6 @@ Poll the returned run using the existing run endpoint.
             description=f"The source flow, run or transcript is unavailable in tenant scope. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="The source flow, run or transcript is unavailable in tenant scope.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         429: error_response(
             description="Concurrent flow run limit reached.",

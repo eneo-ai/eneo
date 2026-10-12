@@ -82,7 +82,6 @@ shared input files remain available while the child references them.
             description=f"The source flow or run is unavailable in tenant scope. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="The source flow or run is unavailable in tenant scope.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         409: error_response(
             description="Source is not failed, its version is stale, or its prefix cannot be reused.",

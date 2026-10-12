@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request, status
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -39,7 +40,10 @@ from eneo.flows.api.flow_runtime_paths import (
 )
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_api_exceptions import (
+    FlowBadRequestException,
+    FlowUnauthorizedException,
+)
 from eneo.flows.flow_authoring_name import FlowNameTakenError
 from eneo.flows.flow_evidence_policy import flow_evidence_metadata_facts
 from eneo.flows.principal import FlowPrincipal
@@ -48,7 +52,6 @@ from eneo.main.container.container import Container
 from eneo.main.exceptions import (
     ConflictException,
     ErrorCodes,
-    UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, OffsetPaginatedResponse
 from eneo.server.dependencies.container import get_container
@@ -107,7 +110,7 @@ _FLOW_NAME_TAKEN_RESPONSE = error_response(
     description="Another active flow in the space already has this name.",
     message=_FLOW_NAME_TAKEN_MESSAGE,
     eneo_error_code=ErrorCodes.CONFLICT,
-    code=FlowApiErrorCode.FLOW_NAME_TAKEN.value,
+    code=FlowApiErrorCode.FLOW_NAME_TAKEN,
 )
 
 
@@ -160,13 +163,12 @@ def _evidence_export_change(
             description="The submitted draft flow definition is invalid.",
             message="Flow definition is invalid.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
-            code="bad_request",
         ),
         403: error_response(
             description=_FLOW_AUTHORING_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         409: _FLOW_NAME_TAKEN_RESPONSE,
@@ -193,9 +195,9 @@ async def create_flow(
         ),
     )
     if not access_context.actor.can_create_flows():
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             "You do not have permission to create flows in this space.",
-            code="insufficient_space_permission",
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
 
@@ -295,7 +297,7 @@ async def create_flow(
             description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
     },
@@ -346,9 +348,9 @@ async def list_flows(
             allow_service_key_principals=True,
         )
         if not access_context.actor.can_read_flows():
-            raise UnauthorizedException(
+            raise FlowUnauthorizedException(
                 "You do not have permission to access flows in this space.",
-                code="insufficient_space_permission",
+                code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
                 context={"auth_layer": "space_membership"},
             )
         spaces = {space_id: access_context.actor}
@@ -406,12 +408,12 @@ async def list_flows(
                 "`insufficient_space_permission` when the caller cannot read the flow."
             ),
             examples={
-                "insufficient_scope": {
+                AccessDenialCode.INSUFFICIENT_SCOPE.value: {
                     "summary": "API key scope mismatch",
                     "value": {
                         "message": "API key space scope does not match requested flow.",
                         "eneo_error_code": int(ErrorCodes.UNAUTHORIZED),
-                        "code": "insufficient_scope",
+                        "code": AccessDenialCode.INSUFFICIENT_SCOPE.value,
                         "context": {"auth_layer": "api_key_scope"},
                     },
                 },
@@ -442,7 +444,6 @@ async def list_flows(
             description="Flow not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
     },
 )
@@ -491,14 +492,13 @@ async def get_flow(
             ),
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Published flow not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
     },
 )
@@ -549,20 +549,18 @@ async def get_published_flow_runtime(
             description="The submitted draft flow update is invalid or the flow cannot be updated in its current state.",
             message="Flow update is invalid.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
-            code="bad_request",
         ),
         403: error_response(
             description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Flow not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         409: _FLOW_NAME_TAKEN_RESPONSE,
     },
@@ -665,14 +663,13 @@ async def update_flow(
             description=_FLOW_AUTHORING_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Flow not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
     },
 )
@@ -719,20 +716,18 @@ async def delete_flow(
             description="The flow cannot be published because its draft definition is incomplete or invalid.",
             message="Flow cannot be published in its current state.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
-            code="bad_request",
         ),
         403: error_response(
             description=_FLOW_AUTHORING_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Flow not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
     },
 )
@@ -779,20 +774,18 @@ async def publish_flow(
             description="The flow cannot be unpublished in its current state.",
             message="Flow cannot be unpublished in its current state.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
-            code="bad_request",
         ),
         403: error_response(
             description=_FLOW_AUTHORING_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Flow not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
     },
 )

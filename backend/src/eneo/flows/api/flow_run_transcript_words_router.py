@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Request, status
 
 from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -104,7 +105,7 @@ def _present_transcript_words(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
@@ -114,7 +115,6 @@ def _present_transcript_words(
             ),
             message="Flow run step transcript words not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         503: error_response(
             description="Required access audit logging is unavailable; no transcript words were returned.",

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Path, Request, status
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -83,14 +84,13 @@ reason, so a client can decide before recording whether to offer the preview.
             description="Forbidden: the caller may not run this flow.",
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Flow not found.",
             message="Not found",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         409: {
             **error_response(

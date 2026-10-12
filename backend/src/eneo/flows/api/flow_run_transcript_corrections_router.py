@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query, Request, status
 
 from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -81,14 +82,13 @@ router = APIRouter()
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Run or history baseline not found for this flow and tenant.",
             message="History not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         413: error_response(
             description="The baseline and first remaining revision exceed the history page byte limit.",
@@ -337,14 +337,13 @@ def _present_transcript_corrections(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Run not found for this flow and tenant.",
             message="Flow run not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         503: error_response(
             description="Required access audit logging is unavailable; no transcript corrections were returned.",
@@ -442,14 +441,13 @@ async def list_flow_run_transcript_corrections(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="You do not have permission to review flows.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_tenant_permission",
+            code=AccessDenialCode.INSUFFICIENT_TENANT_PERMISSION,
             context={"auth_layer": "tenant_role"},
         ),
         404: error_response(
             description=f"Run or step result not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Flow run step result not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         503: error_response(
             description="Required audit logging is unavailable; no correction changes were committed.",

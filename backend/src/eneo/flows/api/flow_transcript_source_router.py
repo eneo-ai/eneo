@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -125,20 +126,18 @@ TranscriptSourcePage = Annotated[
             description="The caller cannot access this run's content.",
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="The run or named step attempt does not exist.",
             message="Flow run step attempt not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         413: error_response(
             description="The encoded detail response exceeds its byte limit.",
             message="Transcript source detail exceeds the response size limit.",
             eneo_error_code=ErrorCodes.FILE_TOO_LARGE,
-            code="file_too_large",
         ),
         503: error_response(
             description="Required access audit logging is unavailable.",

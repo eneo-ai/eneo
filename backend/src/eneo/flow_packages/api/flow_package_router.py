@@ -26,6 +26,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.constants import MAX_ERROR_MESSAGE_LENGTH
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -95,6 +96,7 @@ from eneo.flows.flow_access_policy import (
     require_flow_action,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowUnauthorizedException
 from eneo.flows.flow_authoring_name import FlowNameTakenError
 from eneo.flows.flow_resource_bindings import FlowResourceBindingResolutionError
 from eneo.main.container.container import Container
@@ -103,7 +105,6 @@ from eneo.main.exceptions import (
     BadRequestException,
     ErrorCodes,
     FileTooLargeException,
-    UnauthorizedException,
 )
 from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError
@@ -242,7 +243,6 @@ async def validate_flow_package(
             description="Target space was not found in the current tenant.",
             message="Not found",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         413: error_response(
             description="The uploaded package exceeds the package upload size cap.",
@@ -278,9 +278,9 @@ async def create_flow_package_import_plan(
         scope_mismatch_message=openapi_examples.IMPORT_PLAN_SCOPE_MISMATCH_MESSAGE,
     )
     if not access_context.actor.can_edit_flows():
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             "You do not have permission to edit flows in this space.",
-            code="insufficient_space_permission",
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
 
@@ -359,7 +359,6 @@ async def create_flow_package_import_plan(
             description="Target space was not found in the current tenant.",
             message="Not found",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         409: error_response(
             description="A Flow with the imported name already exists in the target space.",
@@ -406,9 +405,9 @@ async def import_flow_package_as_draft(
         scope_mismatch_message=openapi_examples.IMPORT_PLAN_SCOPE_MISMATCH_MESSAGE,
     )
     if not access_context.actor.can_edit_flows():
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             "You do not have permission to edit flows in this space.",
-            code="insufficient_space_permission",
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
 
@@ -435,9 +434,9 @@ async def import_flow_package_as_draft(
         scope_mismatch_message=(openapi_examples.IMPORT_PLAN_SCOPE_MISMATCH_MESSAGE),
     )
     if not current_access_context.actor.can_edit_flows():
-        raise UnauthorizedException(
+        raise FlowUnauthorizedException(
             "You do not have permission to edit flows in this space.",
-            code="insufficient_space_permission",
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
     candidates = build_flow_package_import_planner_candidates_for_space(
@@ -610,7 +609,6 @@ def _replayed_install_result(
             description="Flow was not found in the current tenant.",
             message="Not found",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         413: error_response(
             description="The exported package exceeds the package export byte cap.",

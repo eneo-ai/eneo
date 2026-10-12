@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -295,13 +296,12 @@ principals can cancel only their own runs.
             description="Authentication is required to inspect Flow run capabilities.",
             message="Unauthenticated.",
             eneo_error_code=ErrorCodes.AUTHENTICATION_ERROR,
-            code="authentication_error",
         ),
         403: error_response(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
     },
@@ -331,13 +331,12 @@ async def get_flow_run_status_capabilities(
             description="Authentication is required to inspect Flow run capacity.",
             message="Unauthenticated.",
             eneo_error_code=ErrorCodes.AUTHENTICATION_ERROR,
-            code="authentication_error",
         ),
         403: error_response(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
     },
@@ -388,14 +387,13 @@ async def get_flow_run_capacity(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description=f"Flow not found in tenant scope. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         409: error_response(
             description="The live transcript is already bound to another file.",
@@ -572,14 +570,13 @@ async def create_flow_run(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Flow not found in tenant scope.",
             message="Flow not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
     },
 )
@@ -660,14 +657,13 @@ async def list_flow_runs(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Run not found for this flow and tenant.",
             message="Flow run not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
     },
 )
@@ -714,14 +710,13 @@ async def get_flow_run_status(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description="Run not found for this flow and tenant.",
             message="Flow run not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         503: error_response(
             description=(
@@ -816,14 +811,13 @@ async def get_flow_run(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description=f"Run not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Flow run not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
     },
 )
@@ -897,14 +891,13 @@ async def cancel_flow_run(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: error_response(
             description=f"Run not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
             message="Flow run not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
         ),
         409: error_response(
             description=(

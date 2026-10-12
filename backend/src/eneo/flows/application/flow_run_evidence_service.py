@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 from uuid import UUID
 
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.files.file_models import FileContentVariant, FileMetadata
 from eneo.files.file_repo import FileRepository
 from eneo.flows.api.flow_models import (
@@ -60,6 +61,7 @@ from eneo.flows.domain.rag_evidence_policy import (
     resolve_flow_rag_evidence_policy,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowUnauthorizedException
 from eneo.flows.flow_run_redaction import redact_payload
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallNotFoundError,
@@ -85,7 +87,6 @@ from eneo.main.exceptions import (
     FileTooLargeException,
     NotFoundException,
     ResourceGoneException,
-    UnauthorizedException,
 )
 from eneo.users.user import UserInDB
 
@@ -247,9 +248,9 @@ class FlowRunEvidenceService:
 
         file = await self.file_repo.get_by_id(file_id=file_id)
         if file.tenant_id != self.user.tenant_id:
-            raise UnauthorizedException(
+            raise FlowUnauthorizedException(
                 "You do not have access to this artifact.",
-                code="forbidden_action",
+                code=AccessDenialCode.FORBIDDEN_ACTION,
                 context={"auth_layer": "domain_policy"},
             )
         return file
@@ -284,9 +285,9 @@ class FlowRunEvidenceService:
 
         file = await self.file_repo.get_by_id(file_id=file_id)
         if file.tenant_id != self.user.tenant_id:
-            raise UnauthorizedException(
+            raise FlowUnauthorizedException(
                 "You do not have access to this file.",
-                code="forbidden_action",
+                code=AccessDenialCode.FORBIDDEN_ACTION,
                 context={"auth_layer": "domain_policy"},
             )
         references = await self.file_repo.get_content_references([file_id])

@@ -8,12 +8,14 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.flows.flow_access_policy import (
     FlowApiAction,
     require_flow_action,
     user_can_perform_flow_action,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowUnauthorizedException
 from eneo.main.exceptions import UnauthorizedException
 from eneo.roles.permissions import Permission
 
@@ -233,6 +235,20 @@ def test_builder_review_rejects_service_key_principals() -> None:
     assert (
         exc_info.value.code
         == FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value
+    )
+
+
+def test_a_refused_flow_action_keeps_its_typed_code() -> None:
+    with pytest.raises(FlowUnauthorizedException) as missing_permission:
+        require_flow_action(_user(Permission.FLOWS_VIEW), FlowApiAction.EDIT)
+    with pytest.raises(FlowUnauthorizedException) as service_key:
+        require_flow_action(_service_key_user(Permission.FLOWS), FlowApiAction.VIEW)
+
+    assert (
+        missing_permission.value.code is AccessDenialCode.INSUFFICIENT_TENANT_PERMISSION
+    )
+    assert (
+        service_key.value.code is FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED
     )
 
 
