@@ -342,8 +342,9 @@
         contentDisposition: "attachment"
       });
       window.open(url, "_blank");
-    } catch {
-      toast.error(m.flow_run_download_artifact_failed());
+    } catch (error) {
+      // A file removed or refused since this view loaded gets its own reason.
+      toast.error(getFlowRuntimeErrorMessage(error, m.flow_run_download_artifact_failed()));
     }
   }
 

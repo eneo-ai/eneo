@@ -1,8 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import type { Eneo, FlowGraph, FlowRunStep } from "@eneo/eneo-js";
+import { EneoError, type Eneo, type FlowGraph, type FlowRunStep } from "@eneo/eneo-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import FlowRunProgressPanel from "./FlowRunProgressPanel.svelte";
+
+vi.mock("$lib/components/toast", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() }
+}));
+import { toast } from "$lib/components/toast";
 
 function graphWith(status: string): FlowGraph {
   return {
@@ -71,6 +76,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 async function renderRunning(
@@ -86,6 +92,42 @@ async function renderRunning(
 }
 
 describe("FlowRunProgressPanel", () => {
+  // Kills two mutants: every failed download told by the fixed sentence (a
+  // file purged since the steps were read would look broken), and a failure
+  // without a known reason told by nothing.
+  it.each([
+    [
+      () =>
+        new EneoError("gone", "RESPONSE", 410, 9056, {
+          code: "flow_run_artifact_content_unavailable"
+        }),
+      m.flow_error_flow_run_artifact_content_unavailable
+    ],
+    [() => new Error("network"), m.flow_run_download_artifact_failed]
+  ])("tells a failed result file download by its reason (%#)", async (failure, sentence) => {
+    const graph = deferred<FlowGraph>();
+    const steps = deferred<FlowRunStep[]>();
+    const eneo = makeEneo([graph], [steps]);
+    eneo.flows.runs.artifactSignedUrl = vi.fn().mockRejectedValue(failure());
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(FlowRunProgressPanel, { props: props(eneo, 0) });
+    graph.resolve(graphWith("completed"));
+    steps.resolve([
+      {
+        ...stepsWith("completed", "Done")[0],
+        result_files: [{ file_id: "file-1", name: "Plan.pdf", availability: "available" }]
+      } as FlowRunStep
+    ]);
+
+    await fireEvent.click(
+      await screen.findByRole("button", {
+        name: m.flow_run_download_artifact({ name: "Plan.pdf" })
+      })
+    );
+
+    await waitFor(() => expect(toast.error).toHaveBeenLastCalledWith(sentence()));
+  });
+
   it("never lets an older background read roll back a fresher status", async () => {
     const [g0, g1, g2] = [deferred<FlowGraph>(), deferred<FlowGraph>(), deferred<FlowGraph>()];
     const [s0, s1] = [deferred<FlowRunStep[]>(), deferred<FlowRunStep[]>()];

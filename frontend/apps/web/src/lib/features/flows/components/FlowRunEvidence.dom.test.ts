@@ -10,6 +10,11 @@ import FlowRunEvidence from "./FlowRunEvidence.svelte";
 vi.mock("$lib/features/flows/FlowUserMode", () => ({
   getFlowUserMode: () => writable("user")
 }));
+vi.mock("$lib/components/toast", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() }
+}));
+import { EneoError } from "@eneo/eneo-js";
+import { toast } from "$lib/components/toast";
 
 afterEach(() => {
   cleanup();
@@ -81,6 +86,32 @@ function eneoReturning(evidence: FlowRunEvidenceWithTypedSteps): Eneo {
 }
 
 describe("FlowRunEvidence", () => {
+  it("tells a refused result file download by its own reason", async () => {
+    // Kills the mutant that answers every failed download with the fixed
+    // sentence: a file purged since this view loaded would look broken.
+    const evidence = evidenceWithBoundedSections();
+    evidence.result_files = [
+      { file_id: "file-1", name: "Plan.pdf", availability: "available" }
+    ] as FlowRunEvidenceWithTypedSteps["result_files"];
+    const eneo = eneoReturning(evidence);
+    eneo.flows.runs.artifactSignedUrl = vi.fn().mockRejectedValue(
+      new EneoError("gone", "RESPONSE", 410, 9056, {
+        code: "flow_run_artifact_content_unavailable"
+      })
+    );
+    render(FlowRunEvidence, { runId: "run-1", flowId: "flow-1", eneo, runStatus: "completed" });
+
+    await fireEvent.click(
+      await screen.findByRole("button", {
+        name: m.flow_run_download_artifact({ name: "Plan.pdf" })
+      })
+    );
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(m.flow_error_flow_run_artifact_content_unavailable())
+    );
+  });
+
   it("offers a retry when the evidence request fails, and loads on retry", async () => {
     const consoleError = vi.spyOn(console, "error");
     const evidence = vi
