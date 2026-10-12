@@ -204,13 +204,23 @@ function bandFace(part: Element, styles: Element | undefined, theme: Theme): Fac
   return face;
 }
 
-function relationTargets(rels: Element | undefined): Map<string, string> {
+/** A part's relationships by id: the target and whether it points outside the package. */
+export function relationEntries(
+  rels: Element | undefined,
+): Map<string, { target: string; external: boolean }> {
   return new Map(
     findAll(rels && rootElement(rels), "Relationship").map((relationship) => [
       attr(relationship, "Id") ?? "",
-      attr(relationship, "Target") ?? "",
+      {
+        target: attr(relationship, "Target") ?? "",
+        external: attr(relationship, "TargetMode") === "External",
+      },
     ]),
   );
+}
+
+function relationTargets(rels: Element | undefined): Map<string, string> {
+  return new Map([...relationEntries(rels)].map(([id, { target }]) => [id, target]));
 }
 
 /** The text of a header or footer paragraph, with page-number fields as counters and tabs as segment breaks. */

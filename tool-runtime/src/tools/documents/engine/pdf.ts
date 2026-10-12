@@ -4,6 +4,7 @@
 // footer and logo are read from that file (pdf-profile.ts). WeasyPrint runs as a Python
 // sidecar the runtime image installs; the child spawns it inside its own confinement with
 // the render directory as the only place it may read or write.
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -15,7 +16,9 @@ import { fitImage, type DocumentImages } from "./images";
 import { pdfProfile, profileCss } from "./pdf-profile";
 import { RenderError, type Rendered } from "./render";
 import { renderIntoTemplate } from "./word/apply";
+import { templateBodyHtml } from "./word/body-html";
 import { LANGUAGE_TAGS } from "./word/builtin";
+import { inspectTemplate, openWordTemplate } from "./word/inspect";
 
 /** The Python with WeasyPrint; the image installs it here, a developer may point elsewhere. */
 export const PDF_PYTHON = process.env.PDF_PYTHON ?? "/opt/pdf/bin/python3";
@@ -34,14 +37,58 @@ export async function renderPdf(
 ): Promise<Rendered> {
   if (!(await pdfAvailable()))
     throw new RenderError("PDF rendering is not installed on this runtime (WeasyPrint sidecar).");
-  // The Word rendering carries the template's filled header, footer and styles.
-  const docx = await renderIntoTemplate(options.template, document, {
-    images: options.images,
-    organisationName: options.organisationName,
-  });
+  const { directory, html, css } = await preparePdf(document, options);
+  await writeFile(join(directory, "document.html"), html, { mode: 0o600 });
+  await writeFile(join(directory, "document.css"), css, { mode: 0o600 });
+  const job = {
+    base_dir: directory,
+    html_path: join(directory, "document.html"),
+    css_path: join(directory, "document.css"),
+    output_path: join(directory, "output.pdf"),
+    pdf_variant: "pdf/ua-1",
+  };
+  await writeFile(join(directory, "job.json"), JSON.stringify(job), { mode: 0o600 });
+  const pages = await runSidecar(directory);
+  const buffer = await readFile(job.output_path);
+  if (buffer.subarray(0, 5).toString() !== "%PDF-")
+    throw new RenderError("The PDF renderer produced no document.");
+  return { buffer, pages };
+}
+
+/**
+ * The HTML and CSS the PDF is laid out from, with the images and template pictures written
+ * to a fresh render directory. The template is rendered to Word once with marker strings
+ * for the title and the content: that file gives the profile (page, fonts, header, footer)
+ * and the template's own body text around the content, filled; the content is rendered
+ * from Markdown and spliced in at its marker.
+ */
+export async function preparePdf(
+  document: Extract<DocumentSpec, { kind: "markdown" }>,
+  options: { template: Buffer; images: DocumentImages; organisationName?: string },
+): Promise<{ directory: string; html: string; css: string }> {
+  const markers = { content: `eneo-content-${randomUUID()}`, title: `eneo-title-${randomUUID()}` };
+  const docx = await renderIntoTemplate(
+    options.template,
+    { ...document, title: markers.title, content: markers.content },
+    { images: new Map(), organisationName: options.organisationName },
+  );
   const directory = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "eneo-pdf-"));
   await mkdir(join(directory, "cache"), { recursive: true, mode: 0o700 });
   const profile = await pdfProfile(docx, directory);
+  // A running title in the header or footer carries the marker; show the title there.
+  for (const band of [profile.header, profile.footer])
+    for (const segment of band?.segments ?? [])
+      segment.parts = segment.parts.map((part) =>
+        typeof part === "string" ? part.replaceAll(markers.title, document.title) : part,
+      );
+  const blocks = parseMarkdown(document.content);
+  const lead = !(blocks[0]?.type === "heading" && blocks[0].level === 1);
+  const zip = await openWordTemplate(docx);
+  const body = await templateBodyHtml(zip, (await inspectTemplate(zip)).styles, markers, {
+    title: document.title,
+    dropLeadTitle: !lead,
+    assetsDir: directory,
+  });
   // Figures are sized as in the Word file: to the page's content area, with room for a caption.
   const toPt = 72 / 25.4;
   const { page } = profile;
@@ -62,8 +109,6 @@ export async function renderPdf(
       heightPt: size.height,
     });
   }
-  const blocks = parseMarkdown(document.content);
-  const lead = !(blocks[0]?.type === "heading" && blocks[0].level === 1);
   const language = LANGUAGE_TAGS[document.language] ?? document.language;
   const html = renderHtml(blocks, {
     title: document.title,
@@ -73,22 +118,9 @@ export async function renderPdf(
     images,
     header: profile.header,
     footer: profile.footer,
+    body,
   });
-  await writeFile(join(directory, "document.html"), html, { mode: 0o600 });
-  await writeFile(join(directory, "document.css"), profileCss(profile), { mode: 0o600 });
-  const job = {
-    base_dir: directory,
-    html_path: join(directory, "document.html"),
-    css_path: join(directory, "document.css"),
-    output_path: join(directory, "output.pdf"),
-    pdf_variant: "pdf/ua-1",
-  };
-  await writeFile(join(directory, "job.json"), JSON.stringify(job), { mode: 0o600 });
-  const pages = await runSidecar(directory);
-  const buffer = await readFile(job.output_path);
-  if (buffer.subarray(0, 5).toString() !== "%PDF-")
-    throw new RenderError("The PDF renderer produced no document.");
-  return { buffer, pages };
+  return { directory, html, css: profileCss(profile) };
 }
 
 async function runSidecar(directory: string): Promise<number> {

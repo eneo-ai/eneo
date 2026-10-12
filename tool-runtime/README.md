@@ -52,8 +52,9 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
   `scripts/requirements-pdf.txt`); `PDF_PYTHON` points a developer machine at another
   interpreter, and PDF tests skip when none is found. The image ships DejaVu,
   Liberation, Carlito and Caladea, so Calibri and Cambria templates lay out as in Word;
-  other fonts fall back to the nearest of these. Text headers and footers and one logo
-  are reproduced; table-based or multi-column headers are not.
+  other fonts fall back to the nearest of these. Text headers and footers, one logo and
+  the template's own body text, tables and pictures around the content are reproduced;
+  table-based or multi-column headers are not.
 - `GET /health/live` and `GET /health/ready` are the health endpoints.
 
 ## Layout

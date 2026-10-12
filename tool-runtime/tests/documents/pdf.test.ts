@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Document, Footer, Header, ImageRun, Packer, Paragraph, TextRun, PageNumber } from "docx";
 import { renderHtml } from "../../src/tools/documents/engine/html";
 import { fontStack, pdfProfile, profileCss } from "../../src/tools/documents/engine/pdf-profile";
-import { pdfAvailable } from "../../src/tools/documents/engine/pdf";
+import { pdfAvailable, preparePdf } from "../../src/tools/documents/engine/pdf";
 import { renderDocument } from "../../src/tools/documents/engine/render";
 import { renderIntoTemplate } from "../../src/tools/documents/engine/word/apply";
 import { builtinTemplate } from "../../src/tools/documents/engine/word/builtin";
@@ -80,7 +80,13 @@ async function letterhead(): Promise<Buffer> {
                 ],
               }),
             },
-            children: [new Paragraph("{{content}}")],
+            children: [
+              new Paragraph({ children: [new TextRun("Dnr {{dnr}}")] }),
+              new Paragraph("{{content}}"),
+              new Paragraph({
+                children: [new TextRun({ text: "Beslutet kan överklagas.", italics: true })],
+              }),
+            ],
           },
         ],
       }),
@@ -221,6 +227,30 @@ describe("the profile read from the Word rendering", () => {
       { align: "left", parts: ["Beslut"] },
       { align: "right", parts: ["Page ", { counter: "page" }, " of ", { counter: "pages" }] },
     ]);
+  });
+});
+
+describe("the template body in the PDF", () => {
+  test("keeps the template's own text around the content, filled, and the title where it sits", async () => {
+    const { html } = await preparePdf(
+      { ...document, fields: { dnr: "KS 2026/7" } },
+      { template: await letterhead(), images: new Map(), organisationName: "Sundsvalls kommun" },
+    );
+    const main = html.slice(html.indexOf("<main"), html.indexOf("</main>"));
+    expect(main).toMatch(
+      /<p>Dnr KS 2026\/7<\/p>\n<h1 class="title">Beslut<\/h1>\n<h2>Ärendet<\/h2>[^]*<h2>Slut<\/h2>\n<p><em>Beslutet kan överklagas.<\/em><\/p>/,
+    );
+    expect(main.match(/<h1 class="title">/g)).toHaveLength(1);
+    // The running title in the header shows the title, not the marker.
+    expect(html).not.toMatch(/eneo-(title|content)-/);
+  });
+  test("a content starting with its own heading gets no second title", async () => {
+    const { html } = await preparePdf(
+      { ...document, content: "# Egen titel\n\nText.", fields: { dnr: "KS 2026/8" } },
+      { template: await letterhead(), images: new Map() },
+    );
+    expect(html).not.toContain('class="title"');
+    expect(html).toContain("<p>Dnr KS 2026/8</p>\n<h1>Egen titel</h1>");
   });
 });
 

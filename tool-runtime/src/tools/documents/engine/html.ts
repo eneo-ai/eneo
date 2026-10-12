@@ -5,6 +5,7 @@
 // http(s)/mailto links the parser admitted.
 import type { Block, Inline } from "../markdown/parse";
 import type { Face } from "./pdf-profile";
+import type { TemplateBody } from "./word/body-html";
 
 /** One line of a page header or footer: text with page counters, aligned in its margin box. */
 export type BandSegment = {
@@ -44,6 +45,8 @@ export type HtmlOptions = {
   images: Map<string, HtmlImage>;
   header?: Band;
   footer?: Band;
+  /** The template's own body around the content, already filled. */
+  body?: TemplateBody;
 };
 
 export function escapeHtml(text: string): string {
@@ -175,7 +178,13 @@ export function renderHtml(content: Block[], options: HtmlOptions): string {
   // Under a leading title (the h1), the content's highest heading becomes h2, so the
   // outline never skips a level, as accessibility checkers require.
   const shift = options.lead ? 2 - (minHeadingLevel(content) ?? 2) : 0;
-  const title = options.lead ? `<h1 class="title">${escapeHtml(options.title)}</h1>\n` : "";
+  // The template body shows the title where its author put it; otherwise it leads here.
+  const title =
+    options.lead && !options.body?.hasTitle
+      ? `<h1 class="title">${escapeHtml(options.title)}</h1>\n`
+      : "";
+  const before = options.body?.before ? `${options.body.before}\n` : "";
+  const after = options.body?.after ? `\n${options.body.after}` : "";
   return `<!DOCTYPE html>
 <html lang="${escapeHtml(options.language)}">
 <head>
@@ -188,7 +197,7 @@ ${options.author ? `<meta name="author" content="${escapeHtml(options.author)}">
 ${band("page-header", options.header)}
 ${band("page-footer", options.footer)}
 <main class="document">
-${title}${blocks(content, options, shift)}
+${before}${title}${blocks(content, options, shift)}${after}
 </main>
 </body>
 </html>
