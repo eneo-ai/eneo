@@ -593,6 +593,18 @@ class MCPAuthenticationError(MCPClientError):
     pass
 
 
+class MCPToolCallTimedOut(MCPClientError):
+    """Raised when a tool call did not finish within its time."""
+
+
+class MCPToolAnswerTooLarge(MCPClientError):
+    """Raised when a server sends more for a tool call than the caller accepts.
+
+    The response was stopped while it arrived: nothing of it was decoded, so
+    what it carried, the answer or something else, is not known.
+    """
+
+
 # Map exceptions to response codes
 # Set message to None to use the internal message
 # Set error codes in the range 9000 - 9999

@@ -11,15 +11,12 @@ Tests cover:
 
 import asyncio
 import json
-import socket
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-import uvicorn
 from fastapi import FastAPI, Request, Response
 from mcp import types as mcp_types
 from pydantic import ValidationError
@@ -50,39 +47,7 @@ from eneo.mcp_servers.presentation.models import (
     MCPServerPublic,
     MCPServerUpdate,
 )
-
-
-@asynccontextmanager
-async def _serve_test_app(app: FastAPI) -> AsyncIterator[str]:
-    """Run an ASGI app over a real local TCP socket for transport tests."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("127.0.0.1", 0))
-    sock.listen(128)
-    sock.setblocking(False)
-    host, port = sock.getsockname()
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            log_config=None,
-            lifespan="off",
-            access_log=False,
-            ws="none",
-        )
-    )
-    task = asyncio.create_task(server.serve(sockets=[sock]))
-    try:
-        for _ in range(100):
-            if server.started:
-                break
-            await asyncio.sleep(0.01)
-        else:
-            raise RuntimeError("test MCP server did not start")
-        yield f"http://{host}:{port}/mcp"
-    finally:
-        server.should_exit = True
-        await asyncio.wait_for(task, timeout=5)
-
+from tests.unit.mcp_test_server import serve_test_app
 
 # =============================================================================
 # P1: list_tools() error propagation
@@ -228,7 +193,7 @@ class TestMCPClientListToolsErrorPropagation:
                 )
             return Response(status_code=400)
 
-        async with _serve_test_app(app) as url:
+        async with serve_test_app(app) as url:
             server = MCPServer(
                 tenant_id=uuid4(),
                 name="bounded-test",
@@ -297,7 +262,7 @@ class TestMCPClientListToolsErrorPropagation:
                 headers={"Mcp-Session-Id": "control-session"},
             )
 
-        async with _serve_test_app(app) as url:
+        async with serve_test_app(app) as url:
             server = MCPServer(
                 tenant_id=uuid4(),
                 name="control-test",
@@ -355,7 +320,7 @@ class TestMCPClientListToolsErrorPropagation:
                 oversized_response(), media_type="application/octet-stream"
             )
 
-        async with _serve_test_app(app) as url:
+        async with serve_test_app(app) as url:
             client = MCPClient(
                 MCPServer(tenant_id=uuid4(), name="cleanup-test", http_url=url)
             )
@@ -395,7 +360,7 @@ class TestMCPClientListToolsErrorPropagation:
                 media_type="application/octet-stream",
             )
 
-        async with _serve_test_app(app) as url:
+        async with serve_test_app(app) as url:
             client = MCPClient(
                 MCPServer(tenant_id=uuid4(), name="diagnostic-test", http_url=url)
             )
@@ -496,7 +461,7 @@ class TestMCPClientListToolsErrorPropagation:
                 return StreamingResponse(streamed_response(), media_type=media_type)
             return Response(status_code=400)
 
-        async with _serve_test_app(app) as url:
+        async with serve_test_app(app) as url:
             server = MCPServer(
                 tenant_id=uuid4(),
                 name="count-test",
@@ -591,7 +556,7 @@ class TestMCPClientListToolsErrorPropagation:
                 )
             return Response(status_code=400)
 
-        async with _serve_test_app(app) as url:
+        async with serve_test_app(app) as url:
             server = MCPServer(
                 tenant_id=uuid4(),
                 name="syntax-test",
