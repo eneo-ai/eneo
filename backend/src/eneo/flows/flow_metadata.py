@@ -6,6 +6,8 @@ from typing import Literal, Mapping, TypeGuard, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_variable_definitions import (
     is_form_field_namespace_head,
     is_reserved_form_field_input_key,
@@ -149,14 +151,14 @@ def form_fields_in_display_order(
 def form_field_name_error(
     *,
     message: str,
-    code: str,
+    code: FlowApiErrorCode,
     index: int,
     field_name: str | None = None,
-) -> BadRequestException:
+) -> FlowBadRequestException:
     context: dict[str, object] = {"field_index": index}
     if field_name is not None:
         context["field_name"] = field_name
-    return BadRequestException(message, code=code, context=context)
+    return FlowBadRequestException(message, code=code, context=context)
 
 
 def validate_form_field_runtime_name(index: int, field_name: str) -> None:
@@ -167,7 +169,7 @@ def validate_form_field_runtime_name(index: int, field_name: str) -> None:
                 "as an Eneo variable namespace. Use a field name that describes the "
                 "value, for example 'kundnamn' or 'mötesdatum'."
             ),
-            code="flow_form_field_name_namespace_head",
+            code=FlowApiErrorCode.FORM_FIELD_NAME_NAMESPACE_HEAD,
             index=index,
             field_name=field_name,
         )
@@ -178,7 +180,7 @@ def validate_form_field_runtime_name(index: int, field_name: str) -> None:
                 "inside Eneo's runtime input payload. Use a more specific field name, "
                 "for example 'kundtext' or 'mötesdatum'."
             ),
-            code="flow_form_field_name_primary_input_key",
+            code=FlowApiErrorCode.FORM_FIELD_NAME_PRIMARY_INPUT_KEY,
             index=index,
             field_name=field_name,
         )
@@ -189,7 +191,7 @@ def validate_form_field_runtime_name(index: int, field_name: str) -> None:
                 "are reserved for Flow step aliases. Use a descriptive field name "
                 "instead."
             ),
-            code="flow_form_field_name_step_alias",
+            code=FlowApiErrorCode.FORM_FIELD_NAME_STEP_ALIAS,
             index=index,
             field_name=field_name,
         )
@@ -586,7 +588,7 @@ def _parse_field_name(
     if not isinstance(field_name, str) or not field_name.strip():
         raise form_field_name_error(
             message=f"Form field {index + 1} needs a name before the flow can be saved.",
-            code="flow_form_field_name_empty",
+            code=FlowApiErrorCode.FORM_FIELD_NAME_EMPTY,
             index=index,
         )
     stripped_field_name = field_name.strip()
@@ -598,7 +600,7 @@ def _parse_field_name(
                     f"Form field {index + 1} uses the name '{stripped_field_name}', "
                     "but another form field already uses that name. Use a unique field name."
                 ),
-                code="flow_form_field_name_duplicate",
+                code=FlowApiErrorCode.FORM_FIELD_NAME_DUPLICATE,
                 index=index,
                 field_name=stripped_field_name,
             )
@@ -609,7 +611,7 @@ def _parse_field_name(
                     "cannot contain dots because dots are used to read nested variables. "
                     "Use underscores instead, for example 'kund_namn'."
                 ),
-                code="flow_form_field_name_dot",
+                code=FlowApiErrorCode.FORM_FIELD_NAME_DOT,
                 index=index,
                 field_name=stripped_field_name,
             )
@@ -620,7 +622,7 @@ def _parse_field_name(
                     "should be plain names without {{ }}. Name the field first, then use "
                     "that field as a variable inside prompts, for example {{flow_input.kundnamn}}."
                 ),
-                code="flow_form_field_name_template_delimiters",
+                code=FlowApiErrorCode.FORM_FIELD_NAME_TEMPLATE_DELIMITERS,
                 index=index,
                 field_name=stripped_field_name,
             )

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Final, cast
 
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
@@ -129,12 +131,10 @@ def _parse_positive_int(value: Any, field_name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise BadRequestException(
             f"{field_name} must be an integer.",
-            code=f"{field_name}_invalid",
         )
     if value < 1:
         raise BadRequestException(
             f"{field_name} must be greater than zero.",
-            code=f"{field_name}_invalid",
         )
     return value
 
@@ -147,7 +147,6 @@ def validate_flow_runtime_policy_object(
     if not isinstance(policy, dict):
         raise BadRequestException(
             "flow_settings.runtime_policy must be an object",
-            code="flow_runtime_policy_invalid",
         )
 
     policy_dict = cast(dict[str, Any], policy)
@@ -155,7 +154,6 @@ def validate_flow_runtime_policy_object(
         if key not in FLOW_RUNTIME_POLICY_KEYS:
             raise BadRequestException(
                 f"Unsupported flow runtime policy field: {key}.",
-                code="flow_runtime_policy_unknown_field",
             )
     _validate_storage_version(policy_dict.get(FLOW_RUNTIME_POLICY_STORAGE_VERSION_KEY))
 
@@ -183,9 +181,9 @@ def validate_flow_runtime_policy_object(
 
     max_timeout = parsed.get(FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY)
     if isinstance(max_timeout, int) and max_timeout > hard_ceiling:
-        raise BadRequestException(
+        raise FlowBadRequestException(
             "max_step_timeout_seconds exceeds the deployment hard ceiling.",
-            code="tenant_max_exceeds_env_hard_ceiling",
+            code=FlowApiErrorCode.TENANT_MAX_EXCEEDS_ENV_HARD_CEILING,
             context={
                 "max_step_timeout_seconds": max_timeout,
                 "hard_ceiling_seconds": hard_ceiling,
@@ -195,9 +193,9 @@ def validate_flow_runtime_policy_object(
     default_timeout = parsed.get(FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY)
     effective_max = max_timeout if isinstance(max_timeout, int) else hard_ceiling
     if isinstance(default_timeout, int) and default_timeout > effective_max:
-        raise BadRequestException(
+        raise FlowBadRequestException(
             "default_step_timeout_seconds exceeds max_step_timeout_seconds.",
-            code="default_timeout_exceeds_tenant_max",
+            code=FlowApiErrorCode.DEFAULT_TIMEOUT_EXCEEDS_TENANT_MAX,
             context={
                 "default_step_timeout_seconds": default_timeout,
                 "max_step_timeout_seconds": effective_max,
@@ -333,9 +331,9 @@ def apply_flow_runtime_policy_patch(
             max_concurrent_runs, FLOW_RUNTIME_MAX_CONCURRENT_RUNS_KEY
         )
         if requested > run_capacity:
-            raise BadRequestException(
+            raise FlowBadRequestException(
                 "max_concurrent_runs exceeds the server capacity.",
-                code="max_concurrent_runs_exceeds_server_capacity",
+                code=FlowApiErrorCode.MAX_CONCURRENT_RUNS_EXCEEDS_SERVER_CAPACITY,
                 context={
                     "max_concurrent_runs": requested,
                     "max_concurrent_runs_capacity": run_capacity,
@@ -352,7 +350,6 @@ def apply_flow_runtime_policy_patch(
         if key not in FLOW_RUNTIME_POLICY_KEYS:
             raise BadRequestException(
                 f"Unsupported flow runtime policy field: {key}.",
-                code="flow_runtime_policy_unknown_field",
             )
         next_policy.pop(key, None)
 
@@ -383,7 +380,6 @@ def resolve_step_timeout_seconds(
     if parsed > policy.max_step_timeout_seconds:
         raise BadRequestException(
             "Step timeout exceeds the tenant runtime policy maximum.",
-            code="flow_step_timeout_exceeds_tenant_max",
             context={
                 "timeout_seconds": parsed,
                 "max_step_timeout_seconds": policy.max_step_timeout_seconds,
@@ -403,5 +399,4 @@ def _validate_storage_version(value: Any) -> None:
         return
     raise BadRequestException(
         "flow_settings.runtime_policy.version must be 1",
-        code="flow_runtime_policy_version_unsupported",
     )

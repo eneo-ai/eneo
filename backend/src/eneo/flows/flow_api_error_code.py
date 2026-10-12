@@ -231,6 +231,26 @@ class FlowApiErrorCode(StrEnum):
 
     ASSISTANT_SNAPSHOT_RESOURCE_INVALID = "flow_assistant_snapshot_resource_invalid"
 
+    MAPPED_EXECUTION_PUBLISHED_CEILING_REQUIRED = (
+        "flow_mapped_execution_published_ceiling_required"
+    )
+    SETTINGS_INVALID_PAYLOAD = "flow_settings_invalid_payload"
+    STEP_NAME_RESERVED_VARIABLE = "flow_step_name_reserved_variable"
+    STEP_NAME_STEP_ALIAS = "flow_step_name_step_alias"
+    TEMPLATE_TOO_LARGE = "flow_template_too_large"
+    DEFAULT_TIMEOUT_EXCEEDS_TENANT_MAX = "default_timeout_exceeds_tenant_max"
+    MAX_CONCURRENT_RUNS_EXCEEDS_SERVER_CAPACITY = (
+        "max_concurrent_runs_exceeds_server_capacity"
+    )
+    TENANT_MAX_EXCEEDS_ENV_HARD_CEILING = "tenant_max_exceeds_env_hard_ceiling"
+    FORM_FIELD_NAME_NAMESPACE_HEAD = "flow_form_field_name_namespace_head"
+    FORM_FIELD_NAME_PRIMARY_INPUT_KEY = "flow_form_field_name_primary_input_key"
+    FORM_FIELD_NAME_STEP_ALIAS = "flow_form_field_name_step_alias"
+    FORM_FIELD_NAME_EMPTY = "flow_form_field_name_empty"
+    FORM_FIELD_NAME_DUPLICATE = "flow_form_field_name_duplicate"
+    FORM_FIELD_NAME_DOT = "flow_form_field_name_dot"
+    FORM_FIELD_NAME_TEMPLATE_DELIMITERS = "flow_form_field_name_template_delimiters"
+
 
 FLOW_API_ERROR_CODES: tuple[FlowApiErrorCode, ...] = tuple(FlowApiErrorCode)
 FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(

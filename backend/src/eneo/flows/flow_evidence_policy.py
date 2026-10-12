@@ -115,7 +115,6 @@ def validate_flow_evidence_policy_object(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise BadRequestException(
             "flow_settings.evidence_policy must be an object",
-            code="flow_evidence_policy_invalid",
         )
 
     evidence_policy = cast(dict[str, Any], value)
@@ -133,7 +132,6 @@ def validate_flow_evidence_policy_object(value: Any) -> dict[str, Any]:
     if not isinstance(class3, dict):
         raise BadRequestException(
             "flow_settings.evidence_policy.classification_3 must be an object",
-            code="flow_evidence_policy_invalid",
         )
 
     class3_dict = cast(dict[str, Any], class3)
@@ -229,7 +227,6 @@ def _validate_bool_flag(value: Any, *, path: str) -> None:
     if not isinstance(value, bool):
         raise BadRequestException(
             f"{path} must be a boolean",
-            code="flow_evidence_policy_invalid",
         )
 
 
@@ -245,7 +242,6 @@ def _validate_storage_version(value: Any) -> None:
         return
     raise BadRequestException(
         "flow_settings.evidence_policy.version must be 1",
-        code="flow_evidence_policy_invalid",
     )
 
 
@@ -261,7 +257,6 @@ def _reject_unknown_fields(
     unknown = ", ".join(sorted(unknown_fields))
     raise BadRequestException(
         f"{path} contains unknown fields: {unknown}",
-        code="flow_evidence_policy_unknown_field",
     )
 
 

@@ -18253,7 +18253,22 @@ export interface components {
       | "flow_template_in_use"
       | "flow_template_download_audit_unavailable"
       | "flow_package_export_audit_unavailable"
-      | "flow_assistant_snapshot_resource_invalid";
+      | "flow_assistant_snapshot_resource_invalid"
+      | "flow_mapped_execution_published_ceiling_required"
+      | "flow_settings_invalid_payload"
+      | "flow_step_name_reserved_variable"
+      | "flow_step_name_step_alias"
+      | "flow_template_too_large"
+      | "default_timeout_exceeds_tenant_max"
+      | "max_concurrent_runs_exceeds_server_capacity"
+      | "tenant_max_exceeds_env_hard_ceiling"
+      | "flow_form_field_name_namespace_head"
+      | "flow_form_field_name_primary_input_key"
+      | "flow_form_field_name_step_alias"
+      | "flow_form_field_name_empty"
+      | "flow_form_field_name_duplicate"
+      | "flow_form_field_name_dot"
+      | "flow_form_field_name_template_delimiters";
     /**
      * FlowAssistantCreateRequest
      * @example {
@@ -26403,7 +26418,7 @@ export interface components {
       step_order: number;
       /**
        * Timeout Seconds
-       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Unset, the effective runtime policy's default applies (the organisation's flow runtime settings, else the deployment default); a value above that policy's maximum is refused with `flow_step_timeout_exceeds_tenant_max`. Exhaustion fails the run with `flow_step_timeout`.
+       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Unset, the effective runtime policy's default applies (the organisation's flow runtime settings, else the deployment default); a value above that policy's maximum fails the step with a validation error when it starts. Exhaustion fails the run with `flow_step_timeout`.
        */
       timeout_seconds?: number | null;
       /** User Description */
@@ -26678,7 +26693,7 @@ export interface components {
       step_order: number;
       /**
        * Timeout Seconds
-       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Unset, the effective runtime policy's default applies (the organisation's flow runtime settings, else the deployment default); a value above that policy's maximum is refused with `flow_step_timeout_exceeds_tenant_max`. Exhaustion fails the run with `flow_step_timeout`.
+       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Unset, the effective runtime policy's default applies (the organisation's flow runtime settings, else the deployment default); a value above that policy's maximum fails the step with a validation error when it starts. Exhaustion fails the run with `flow_step_timeout`.
        */
       timeout_seconds?: number | null;
       /** User Description */

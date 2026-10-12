@@ -105,13 +105,11 @@ def test_runtime_policy_storage_version_accepts_legacy_missing_and_current() -> 
 def test_runtime_policy_storage_version_rejects_unsupported_values(
     version: object,
 ) -> None:
-    with pytest.raises(BadRequestException) as exc_info:
+    with pytest.raises(BadRequestException, match="version must be 1"):
         validate_flow_runtime_policy_object(
             {"version": version, "default_step_timeout_seconds": 600},
             defaults=_settings(),
         )
-
-    assert exc_info.value.code == "flow_runtime_policy_version_unsupported"
 
 
 def test_resolve_runtime_policy_ignores_unsupported_storage_version() -> None:
@@ -197,7 +195,12 @@ def test_step_timeout_uses_policy_default_and_rejects_override_above_max() -> No
     with pytest.raises(BadRequestException) as exc_info:
         resolve_step_timeout_seconds(step_timeout_seconds=1500, policy=policy)
 
-    assert exc_info.value.code == "flow_step_timeout_exceeds_tenant_max"
+    # The worker turns this refusal into a run error with its own generic code.
+    assert exc_info.value.code is None
+    assert exc_info.value.context == {
+        "timeout_seconds": 1500,
+        "max_step_timeout_seconds": 1200,
+    }
 
 
 def test_invocation_ceiling_defines_the_effective_policy() -> None:
@@ -355,26 +358,22 @@ def test_patch_above_the_capacity_is_refused_with_the_bound() -> None:
 
 @pytest.mark.parametrize("value", [v for v in _NOT_A_POSITIVE_INT if v is not None])
 def test_patch_refuses_a_value_that_is_not_a_positive_integer(value: object) -> None:
-    with pytest.raises(BadRequestException) as exc_info:
+    with pytest.raises(BadRequestException, match="^max_concurrent_runs must be"):
         apply_flow_runtime_policy_patch(
             {},
             max_concurrent_runs=value,
             defaults=_settings(),  # type: ignore[arg-type]
         )
 
-    assert exc_info.value.code == "max_concurrent_runs_invalid"
-
 
 @pytest.mark.parametrize("value", [v for v in _NOT_A_POSITIVE_INT if v is not None])
 def test_stored_validation_refuses_a_value_that_is_not_a_positive_integer(
     value: object,
 ) -> None:
-    with pytest.raises(BadRequestException) as exc_info:
+    with pytest.raises(BadRequestException, match="^max_concurrent_runs must be"):
         validate_flow_runtime_policy_object(
             {"version": 1, "max_concurrent_runs": value}, defaults=_settings()
         )
-
-    assert exc_info.value.code == "max_concurrent_runs_invalid"
 
 
 def test_stored_validation_keeps_settings_loadable_after_the_capacity_is_lowered() -> (

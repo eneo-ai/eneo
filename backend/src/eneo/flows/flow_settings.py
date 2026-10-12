@@ -12,6 +12,8 @@ from eneo.flows.domain.rag_evidence_policy import (
 from eneo.flows.flow_ai_builder_budget_settings import (
     validate_ai_builder_budget_settings_object,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_document_limits import (
     validate_flow_document_render_limits_object,
 )
@@ -32,10 +34,6 @@ from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
-
-FLOW_SETTINGS_UNKNOWN_TOP_LEVEL_FIELD_CODE: Final[str] = (
-    "flow_settings_unknown_top_level_field"
-)
 
 FLOW_SETTINGS_INPUT_LIMITS_KEY: Final[str] = "input_limits"
 FLOW_SETTINGS_DOCUMENT_RENDER_LIMITS_KEY: Final[str] = "document_render_limits"
@@ -105,9 +103,9 @@ def validate_flow_settings_write(value: object | None) -> dict[str, Any]:
     if value is None:
         return {}
     if not isinstance(value, Mapping):
-        raise BadRequestException(
+        raise FlowBadRequestException(
             "flow_settings must be an object.",
-            code="flow_settings_invalid_payload",
+            code=FlowApiErrorCode.SETTINGS_INVALID_PAYLOAD,
         )
 
     settings = _copy_string_key_mapping(cast(Mapping[object, object], value))
@@ -116,16 +114,15 @@ def validate_flow_settings_write(value: object | None) -> dict[str, Any]:
         unknown = ", ".join(sorted(unknown_fields))
         raise BadRequestException(
             f"flow_settings contains unknown top-level fields: {unknown}",
-            code=FLOW_SETTINGS_UNKNOWN_TOP_LEVEL_FIELD_CODE,
         )
 
     input_limits = settings.get(FLOW_SETTINGS_INPUT_LIMITS_KEY)
     if isinstance(input_limits, Mapping) and RETIRED_FLOW_SIZE_KEYS.intersection(
         cast(Mapping[object, object], input_limits)
     ):
-        raise BadRequestException(
+        raise FlowBadRequestException(
             "File and audio sizes are managed in Admin > File storage, for all flows.",
-            code="flow_settings_invalid_payload",
+            code=FlowApiErrorCode.SETTINGS_INVALID_PAYLOAD,
         )
     evidence_policy = settings.get(FLOW_SETTINGS_EVIDENCE_POLICY_KEY)
     if isinstance(
@@ -133,10 +130,10 @@ def validate_flow_settings_write(value: object | None) -> dict[str, Any]:
     ) and RETIRED_FLOW_EVIDENCE_POLICY_KEYS.intersection(
         cast(Mapping[object, object], evidence_policy)
     ):
-        raise BadRequestException(
+        raise FlowBadRequestException(
             "Evidence export is each flow's own setting "
             "(metadata_json.evidence_policy.allow_export).",
-            code="flow_settings_invalid_payload",
+            code=FlowApiErrorCode.SETTINGS_INVALID_PAYLOAD,
         )
     normalized = normalize_flow_settings_object(settings)
     validate_flow_settings_object(normalized)
@@ -186,9 +183,9 @@ def _translate_value_error(validate: Callable[[], object]) -> None:
     try:
         validate()
     except ValueError as error:
-        raise BadRequestException(
+        raise FlowBadRequestException(
             str(error),
-            code="flow_settings_invalid_payload",
+            code=FlowApiErrorCode.SETTINGS_INVALID_PAYLOAD,
         ) from error
 
 

@@ -198,6 +198,21 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE: "flow_template_download_audit_unavailable";
   PACKAGE_EXPORT_AUDIT_UNAVAILABLE: "flow_package_export_audit_unavailable";
   ASSISTANT_SNAPSHOT_RESOURCE_INVALID: "flow_assistant_snapshot_resource_invalid";
+  MAPPED_EXECUTION_PUBLISHED_CEILING_REQUIRED: "flow_mapped_execution_published_ceiling_required";
+  SETTINGS_INVALID_PAYLOAD: "flow_settings_invalid_payload";
+  STEP_NAME_RESERVED_VARIABLE: "flow_step_name_reserved_variable";
+  STEP_NAME_STEP_ALIAS: "flow_step_name_step_alias";
+  TEMPLATE_TOO_LARGE: "flow_template_too_large";
+  DEFAULT_TIMEOUT_EXCEEDS_TENANT_MAX: "default_timeout_exceeds_tenant_max";
+  MAX_CONCURRENT_RUNS_EXCEEDS_SERVER_CAPACITY: "max_concurrent_runs_exceeds_server_capacity";
+  TENANT_MAX_EXCEEDS_ENV_HARD_CEILING: "tenant_max_exceeds_env_hard_ceiling";
+  FORM_FIELD_NAME_NAMESPACE_HEAD: "flow_form_field_name_namespace_head";
+  FORM_FIELD_NAME_PRIMARY_INPUT_KEY: "flow_form_field_name_primary_input_key";
+  FORM_FIELD_NAME_STEP_ALIAS: "flow_form_field_name_step_alias";
+  FORM_FIELD_NAME_EMPTY: "flow_form_field_name_empty";
+  FORM_FIELD_NAME_DUPLICATE: "flow_form_field_name_duplicate";
+  FORM_FIELD_NAME_DOT: "flow_form_field_name_dot";
+  FORM_FIELD_NAME_TEMPLATE_DELIMITERS: "flow_form_field_name_template_delimiters";
 }>;
 export type FlowApiErrorCode =
   | "flow_not_published"
@@ -397,5 +412,20 @@ export type FlowApiErrorCode =
   | "flow_template_in_use"
   | "flow_template_download_audit_unavailable"
   | "flow_package_export_audit_unavailable"
-  | "flow_assistant_snapshot_resource_invalid";
+  | "flow_assistant_snapshot_resource_invalid"
+  | "flow_mapped_execution_published_ceiling_required"
+  | "flow_settings_invalid_payload"
+  | "flow_step_name_reserved_variable"
+  | "flow_step_name_step_alias"
+  | "flow_template_too_large"
+  | "default_timeout_exceeds_tenant_max"
+  | "max_concurrent_runs_exceeds_server_capacity"
+  | "tenant_max_exceeds_env_hard_ceiling"
+  | "flow_form_field_name_namespace_head"
+  | "flow_form_field_name_primary_input_key"
+  | "flow_form_field_name_step_alias"
+  | "flow_form_field_name_empty"
+  | "flow_form_field_name_duplicate"
+  | "flow_form_field_name_dot"
+  | "flow_form_field_name_template_delimiters";
 export declare const FLOW_API_ERROR_CODES: readonly FlowApiErrorCode[];

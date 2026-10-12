@@ -49,8 +49,9 @@ DOCS_FLOW_ERROR_REFERENCE = (
 )
 FLOW_ERROR_CODE_PATTERN = re.compile(r"^flow_[a-z0-9_]+$")
 FLOW_GUIDE_BACKTICKED_TOKEN_PATTERN = re.compile(r"`((?:flow|typed_io)_[a-z0-9_]+)`")
+FLOW_ERROR_REFERENCE_CATALOG_HEADING = "\n## Catalog\n"
 FLOW_ERROR_REFERENCE_ROW_CODE_PATTERN = re.compile(
-    r"^\|[^|]*\|\s*`((?:flow|typed_io)_[a-z0-9_]+)`\s*\|", re.MULTILINE
+    r"^\|[^|]*\|\s*`([a-z][a-z0-9_]*)`\s*\|", re.MULTILINE
 )
 FLOW_GUIDE_NON_ERROR_CODE_TOKENS = {
     "flow_evidence": "resource permission name, not an error code",
@@ -528,9 +529,12 @@ def test_flow_api_guide_backticked_flow_codes_are_cataloged() -> None:
 
 
 def test_flow_error_reference_has_one_row_per_catalog_code() -> None:
-    row_codes = FLOW_ERROR_REFERENCE_ROW_CODE_PATTERN.findall(
-        DOCS_FLOW_ERROR_REFERENCE.read_text(encoding="utf-8")
+    # The tables above the catalogue list platform and socket codes in the
+    # same column, so only the catalogue's own rows are read.
+    _, _, catalog = DOCS_FLOW_ERROR_REFERENCE.read_text(encoding="utf-8").partition(
+        FLOW_ERROR_REFERENCE_CATALOG_HEADING
     )
+    row_codes = FLOW_ERROR_REFERENCE_ROW_CODE_PATTERN.findall(catalog)
 
     assert sorted(row_codes) == sorted(code.value for code in FLOW_API_ERROR_CODES)
 

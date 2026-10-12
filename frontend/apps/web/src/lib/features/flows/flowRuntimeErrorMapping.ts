@@ -266,7 +266,24 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_template_in_use: m.flow_error_flow_template_in_use,
   flow_template_download_audit_unavailable: m.flow_error_flow_template_download_audit_unavailable,
   flow_package_export_audit_unavailable: m.flow_error_flow_package_export_audit_unavailable,
-  flow_assistant_snapshot_resource_invalid: m.flow_error_flow_assistant_snapshot_resource_invalid
+  flow_assistant_snapshot_resource_invalid: m.flow_error_flow_assistant_snapshot_resource_invalid,
+  flow_settings_invalid_payload: m.flow_error_flow_settings_invalid_payload,
+  default_timeout_exceeds_tenant_max: m.flow_error_default_timeout_exceeds_tenant_max,
+  tenant_max_exceeds_env_hard_ceiling: m.flow_error_tenant_max_exceeds_env_hard_ceiling,
+  max_concurrent_runs_exceeds_server_capacity:
+    m.flow_error_max_concurrent_runs_exceeds_server_capacity,
+  flow_mapped_execution_published_ceiling_required:
+    m.flow_error_flow_mapped_execution_published_ceiling_required,
+  flow_step_name_reserved_variable: m.flow_error_flow_step_name_reserved_variable,
+  flow_step_name_step_alias: m.flow_error_flow_step_name_step_alias,
+  flow_form_field_name_namespace_head: m.flow_error_flow_form_field_name_namespace_head,
+  flow_form_field_name_primary_input_key: m.flow_error_flow_form_field_name_primary_input_key,
+  flow_form_field_name_step_alias: m.flow_error_flow_form_field_name_step_alias,
+  flow_form_field_name_empty: m.flow_error_flow_form_field_name_empty,
+  flow_form_field_name_duplicate: m.flow_error_flow_form_field_name_duplicate,
+  flow_form_field_name_dot: m.flow_error_flow_form_field_name_dot,
+  flow_form_field_name_template_delimiters: m.flow_error_flow_form_field_name_template_delimiters,
+  flow_template_too_large: m.flow_error_flow_template_too_large
 } satisfies Record<FlowApiErrorCode, () => string>;
 
 function isObject(value: unknown): value is Record<string, unknown> {

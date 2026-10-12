@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol, cast
 
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 from eneo.main.logging import get_logger
@@ -128,12 +129,10 @@ def _parse_positive_int(value: object, field_name: str) -> int:
     if type(value) is not int:
         raise BadRequestException(
             f"{field_name} must be an integer.",
-            code="flow_mapped_execution_policy_invalid",
         )
     if value < 1:
         raise BadRequestException(
             f"{field_name} must be greater than zero.",
-            code="flow_mapped_execution_policy_invalid",
         )
     return value
 
@@ -142,14 +141,12 @@ def validate_flow_mapped_execution_policy_object(policy: object) -> dict[str, An
     if not isinstance(policy, dict):
         raise BadRequestException(
             "flow_settings.mapped_execution must be an object.",
-            code="flow_mapped_execution_policy_invalid",
         )
     policy_dict = cast(dict[str, Any], policy)
     unknown = set(policy_dict) - MAPPED_EXECUTION_KEYS
     if unknown:
         raise BadRequestException(
             "Unsupported mapped execution policy fields: " + ", ".join(sorted(unknown)),
-            code="flow_mapped_execution_policy_unknown_field",
         )
     version = policy_dict.get(
         MAPPED_EXECUTION_VERSION_KEY, MAPPED_EXECUTION_STORAGE_VERSION
@@ -157,7 +154,6 @@ def validate_flow_mapped_execution_policy_object(policy: object) -> dict[str, An
     if type(version) is not int or version != MAPPED_EXECUTION_STORAGE_VERSION:
         raise BadRequestException(
             "flow_settings.mapped_execution.version must be 1.",
-            code="flow_mapped_execution_policy_version_unsupported",
         )
     # A present call-ceiling key holding null is an explicit organization
     # decision: it turns the ceiling off (blocking new mapped authoring)
@@ -175,7 +171,6 @@ def validate_flow_mapped_execution_policy_object(policy: object) -> dict[str, An
                     f"{MAPPED_EXECUTION_MAX_CALLS_KEY} must be at least "
                     f"{MAPPED_EXECUTION_MIN_CALL_CEILING}: one provider call "
                     "stays reserved for the native-JSON fallback.",
-                    code="flow_mapped_execution_policy_invalid",
                 )
     if MAPPED_EXECUTION_MAX_INPUT_TOKENS_KEY in policy_dict:
         stored_tokens = policy_dict[MAPPED_EXECUTION_MAX_INPUT_TOKENS_KEY]
@@ -183,7 +178,6 @@ def validate_flow_mapped_execution_policy_object(policy: object) -> dict[str, An
             raise BadRequestException(
                 f"{MAPPED_EXECUTION_MAX_INPUT_TOKENS_KEY} cannot be stored as "
                 "null; remove the key instead.",
-                code="flow_mapped_execution_policy_invalid",
             )
         _parse_positive_int(stored_tokens, MAPPED_EXECUTION_MAX_INPUT_TOKENS_KEY)
     return policy_dict
@@ -316,7 +310,6 @@ def apply_flow_mapped_execution_policy_patch(
         if field_name not in MAPPED_EXECUTION_BUSINESS_KEYS:
             raise BadRequestException(
                 f"Unsupported mapped execution policy field: {field_name}.",
-                code="flow_mapped_execution_policy_unknown_field",
             )
         next_policy.pop(field_name, None)
     if any(field_name in next_policy for field_name in MAPPED_EXECUTION_BUSINESS_KEYS):
@@ -375,9 +368,9 @@ def effective_mapped_cardinality(
     input_max_files: int | None = None,
 ) -> int:
     if published_max is None:
-        raise BadRequestException(
+        raise FlowBadRequestException(
             "Mapped execution requires an explicit published cardinality ceiling.",
-            code="flow_mapped_execution_published_ceiling_required",
+            code=FlowApiErrorCode.MAPPED_EXECUTION_PUBLISHED_CEILING_REQUIRED,
         )
     bounds = [published_max]
     policy_items = max_mapped_items_per_step(mapped_policy)

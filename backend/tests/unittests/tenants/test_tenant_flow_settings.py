@@ -4,7 +4,6 @@ import pytest
 from pydantic import ValidationError
 
 import eneo.flows.flow_settings as flow_settings_module
-from eneo.flows.flow_settings import FLOW_SETTINGS_UNKNOWN_TOP_LEVEL_FIELD_CODE
 from eneo.main.exceptions import BadRequestException
 from eneo.tenants.tenant import (
     TenantInDB,
@@ -61,13 +60,11 @@ def test_tenant_in_db_scrubs_unknown_top_level_flow_settings_keys():
 
 
 def test_tenant_update_rejects_unknown_top_level_flow_settings_keys():
-    with pytest.raises(BadRequestException) as exc_info:
+    with pytest.raises(BadRequestException, match="unknown top-level fields"):
         TenantUpdate(
             id=uuid4(),
             flow_settings={"evidence_polici": {"classification_3": {}}},
         )
-
-    assert exc_info.value.code == FLOW_SETTINGS_UNKNOWN_TOP_LEVEL_FIELD_CODE
 
 
 def test_tenant_update_keeps_internal_flow_settings_write_contract():

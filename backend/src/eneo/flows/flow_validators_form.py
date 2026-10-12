@@ -8,6 +8,7 @@ from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationView,
     flow_step_validation_views_from_flow_steps,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_metadata import (
     FlowFormSchemaParseMode,
     parse_flow_form_schema,
@@ -62,7 +63,7 @@ def validate_variable_alias_collisions_for_step_graph(
             raise FlowStepValidationError(
                 f"Step {step.step_order} is named '{raw_name}', but that name is reserved "
                 "for Eneo runtime variables. Rename the step to describe what it does.",
-                code="flow_step_name_reserved_variable",
+                code=FlowApiErrorCode.STEP_NAME_RESERVED_VARIABLE.value,
                 context={
                     "step_order": step.step_order,
                     "step_name": raw_name,
@@ -74,7 +75,7 @@ def validate_variable_alias_collisions_for_step_graph(
             raise FlowStepValidationError(
                 f"Step {step.step_order} is named '{raw_name}'. Names like step_1 are "
                 "reserved for automatic step variables. Rename the step to describe what it does.",
-                code="flow_step_name_step_alias",
+                code=FlowApiErrorCode.STEP_NAME_STEP_ALIAS.value,
                 context={"step_order": step.step_order, "step_name": raw_name},
                 step_order=step.step_order,
             )
