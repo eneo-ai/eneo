@@ -982,10 +982,8 @@ def build_form_field_changes(
 
 
 def _runtime_input_required(input_config: dict[str, Any] | None) -> bool:
-    runtime_input = _runtime_input_config(input_config)
-    if isinstance(runtime_input.get("required"), bool):
-        return cast(bool, runtime_input["required"])
-    return True
+    required = _runtime_input_config(input_config).get("required")
+    return required if isinstance(required, bool) else True
 
 
 def _runtime_input_max_files(input_config: dict[str, Any] | None) -> int | None:

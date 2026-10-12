@@ -194,10 +194,16 @@ class RepeatedErrorCodeFact(_FlowReviewFact):
     run_count: int
 
 
+StepShareKind = Literal["token_share", "latency_share"]
+# Each kind is also the name of the admission field that says whether a run's
+# measurement of it may be used.
+_STEP_SHARE_KINDS: tuple[StepShareKind, ...] = ("token_share", "latency_share")
+
+
 class StepShareFact(_FlowReviewFact):
     """A step's mean share of the run's tokens or wall time over completed runs."""
 
-    kind: Literal["token_share", "latency_share"]
+    kind: StepShareKind
     step_id: UUID
     step_order: int
     share: float = Field(ge=0.0, le=1.0)
@@ -1581,14 +1587,11 @@ def review_facts(
 
     # Token and latency share over the completed runs admitted for each.
     if len(ordered_steps) > 1:
-        for kind, family in (
-            ("token_share", "token_share"),
-            ("latency_share", "latency_share"),
-        ):
+        for kind in _STEP_SHARE_KINDS:
             shares: dict[UUID, list[float]] = defaultdict(list)
             for run_id in completed:
                 item = admission_by_run.get(run_id)
-                if item is None or getattr(item, family) != "admitted":
+                if item is None or getattr(item, kind) != "admitted":
                     continue
                 per_step = metrics_by_run.get(run_id, {})
                 measured = {
@@ -1618,7 +1621,7 @@ def review_facts(
                     facts.append(
                         StepShareFact(
                             finding_id=_id(kind, step.step_id),
-                            kind=kind,  # type: ignore[arg-type]
+                            kind=kind,
                             step_id=step.step_id,
                             step_order=step.step_order,
                             share=round(share, 3),
