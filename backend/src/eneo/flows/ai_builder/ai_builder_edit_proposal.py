@@ -92,6 +92,7 @@ from eneo.flows.ai_builder.ai_builder_validation_references import (
 )
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.application.flow_authoring_refusal import FlowAuthoringRefusalCode
 from eneo.flows.application.flow_draft_materialization import (
     invalid_existing_step_ref_reason,
 )
@@ -572,7 +573,7 @@ def _apply_server_owned_input_fields(
 
 
 def _format_edit_compilation_request_error(exc: BadRequestException) -> str:
-    if exc.code != "invalid_existing_step_ref":
+    if exc.code != FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF:
         return f"Failed to compile edit: {exc}"
     context = exc.context or {}
     missing_refs = context.get("missing_refs")

@@ -293,10 +293,10 @@ class FlowRuntimeFileService:
                 principal=self._principal(),
             )
             if not released:
-                raise NotFoundException(code="not_found")
+                raise NotFoundException()
             return await self.file_service.delete_file(file_id)
         except NotFoundException as exc:
-            raise NotFoundException(code="not_found") from exc
+            raise NotFoundException() from exc
         except IntegrityError as exc:
             # A run that has the file as an input refuses the release.
             if not is_runtime_file_attachment_integrity_error(exc):
@@ -414,7 +414,6 @@ class FlowRuntimeFileService:
         except FileTooLargeException as exc:
             raise FileTooLargeException(
                 f"Uploaded file exceeds effective flow limit of {max_size} bytes.",
-                code="file_too_large",
                 context={
                     "flow_id": str(flow_id),
                     "max_file_size_bytes": max_size,
@@ -452,7 +451,7 @@ class FlowRuntimeFileService:
             allowed_types = ", ".join(policy.accepted_mimetypes)
             raise FileNotSupportedException(
                 f"Detected file type '{sniffed_type}' is not allowed for flow input type '{policy.input_type.value}'. Allowed types: {allowed_types}.",
-                code="unsupported_media_type",
+                code=FlowApiErrorCode.UNSUPPORTED_MEDIA_TYPE.value,
                 context={
                     "flow_id": str(flow_id),
                     "input_type": policy.input_type.value,
@@ -466,7 +465,7 @@ class FlowRuntimeFileService:
             allowed_types = ", ".join(policy.accepted_mimetypes)
             raise FileNotSupportedException(
                 f"Unsupported file type '{received_type}' for flow input type '{policy.input_type.value}'. Allowed types: {allowed_types}.",
-                code="unsupported_media_type",
+                code=FlowApiErrorCode.UNSUPPORTED_MEDIA_TYPE.value,
                 context={
                     "flow_id": str(flow_id),
                     "input_type": policy.input_type.value,

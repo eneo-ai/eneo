@@ -339,10 +339,9 @@ class FlowRunEvidenceService:
             if after_revision is not None and after_revision > 1:
                 raise NotFoundException(
                     "Review history revision not found.",
-                    code="not_found",
                     context={"revision": after_revision},
                 )
-            raise NotFoundException("Review checkpoint not found.", code="not_found")
+            raise NotFoundException("Review checkpoint not found.")
         baseline = FlowRunReviewCheckpointEditBaselinePublic(
             revision=baseline_row.revision,
             payload_json=redact_payload(baseline_row.payload_json),
@@ -409,7 +408,6 @@ class FlowRunEvidenceService:
             if previous is None:
                 raise NotFoundException(
                     "Correction revision not found.",
-                    code="not_found",
                     context={"revision": after_revision},
                 )
             baseline = FlowTranscriptCorrectionRevisionBaselinePublic(
@@ -532,10 +530,7 @@ class FlowRunEvidenceService:
                 attempt_id=attempt_id,
             )
         except FlowProviderCallNotFoundError as exc:
-            raise NotFoundException(
-                "Provider-call evidence cursor not found.",
-                code="not_found",
-            ) from exc
+            raise NotFoundException("Provider-call evidence cursor not found.") from exc
 
     async def export_evidence_json(
         self,

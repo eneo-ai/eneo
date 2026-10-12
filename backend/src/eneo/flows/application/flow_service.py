@@ -35,6 +35,7 @@ from eneo.flows.domain.flow_step_validation import (
 from eneo.flows.domain.speaker_mapping_config import steps_require_speaker_labels
 from eneo.flows.domain.step_config import clean_inactive_step_config
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_authoring_transcription import (
     fill_default_speaker_service,
     kept_speaker_service_id,
@@ -1204,26 +1205,26 @@ class FlowService:
             if step.step_order in seen_orders:
                 raise BadRequestException(
                     "A step order can only appear once in a flow update.",
-                    code="duplicate_step_order",
+                    code=FlowGraphIssueCode.DUPLICATE_STEP_ORDER.value,
                 )
             seen_orders.add(step.step_order)
             if step.id is None:
                 if self._step_has_secret_sentinel(step):
-                    raise BadRequestException(
+                    raise FlowBadRequestException(
                         "Secret sentinel values require an existing draft step id.",
-                        code="sentinel_secret_requires_step_id",
+                        code=FlowApiErrorCode.SENTINEL_SECRET_REQUIRES_STEP_ID,
                     )
                 continue
             if step.id in seen_ids:
-                raise BadRequestException(
+                raise FlowBadRequestException(
                     "A draft step id can only appear once in a flow update.",
-                    code="duplicate_step_id",
+                    code=FlowApiErrorCode.DUPLICATE_STEP_ID,
                 )
             seen_ids.add(step.id)
             if step.id not in stored_ids:
-                raise BadRequestException(
+                raise FlowBadRequestException(
                     "Flow update references an unknown draft step id.",
-                    code="unknown_step_id",
+                    code=FlowApiErrorCode.UNKNOWN_STEP_ID,
                 )
 
     @classmethod

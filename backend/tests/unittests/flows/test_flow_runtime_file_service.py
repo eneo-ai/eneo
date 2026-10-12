@@ -1669,7 +1669,7 @@ async def test_delete_runtime_file_hides_file_without_flow_upload_binding() -> N
     with pytest.raises(NotFoundException) as exc_info:
         await service.delete_runtime_file(flow_id=flow.id, file_id=file_id)
 
-    assert exc_info.value.code == "not_found"
+    assert exc_info.value.code is None
     runtime_upload_repo.release_for_owner.assert_awaited_once()
     file_service.delete_file.assert_not_awaited()
 
@@ -1712,7 +1712,9 @@ async def test_delete_runtime_file_maps_missing_or_unowned_to_not_found() -> Non
     flow = _flow(step=_step(step_order=1, input_type="audio"))
     file_id = uuid4()
     flow_service.get_flow.return_value = flow
-    file_service.delete_file.side_effect = NotFoundException()
+    file_service.delete_file.side_effect = NotFoundException(
+        "File row not found.", code="file_row_missing"
+    )
     service = _service(
         flow_service=flow_service,
         file_service=file_service,
@@ -1723,7 +1725,8 @@ async def test_delete_runtime_file_maps_missing_or_unowned_to_not_found() -> Non
     with pytest.raises(NotFoundException) as exc_info:
         await service.delete_runtime_file(flow_id=flow.id, file_id=file_id)
 
-    assert exc_info.value.code == "not_found"
+    # The answer is the plain not_found, without the file service's own code.
+    assert exc_info.value.code is None
 
 
 @pytest.mark.parametrize("constraint_name", RUNTIME_ATTACHMENT_CONSTRAINTS)

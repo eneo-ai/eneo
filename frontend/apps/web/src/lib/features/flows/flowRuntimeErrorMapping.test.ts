@@ -309,7 +309,7 @@ describe("flowRuntimeErrorMapping", () => {
     const restore = getLocale();
     try {
       setLocale("en", { reload: false });
-      expect(getFlowRuntimeErrorMessage(error, "fallback")).toBe(m.flow_edit_stale_revision());
+      expect(getFlowRuntimeErrorMessage(error, "fallback")).toBe(m.flow_error_stale_revision());
       expect(getFlowRuntimeErrorMessage(error, "fallback")).toContain("Reload the page");
     } finally {
       setLocale(restore, { reload: false });

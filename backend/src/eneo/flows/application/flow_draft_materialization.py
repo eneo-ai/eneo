@@ -8,6 +8,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from eneo.flows.application.flow_authoring_refusal import (
+    FlowAuthoringRefusalCode,
+    FlowAuthoringRefusalException,
+)
 from eneo.flows.application.flow_authoring_snapshot import flow_step_to_authoring_spec
 from eneo.flows.domain.canonical_json_hash import json_values_differ
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
@@ -474,11 +478,11 @@ def _one_update_per_assistant(
             else []
         )
         if any(_update_key(by_ref.get(ref)) != _update_key(update) for ref in refs):
-            raise BadRequestException(
+            raise FlowAuthoringRefusalException(
                 "This change is to an assistant another step of the flow also "
                 "uses, so it would change that step too. Ask the Builder again "
                 "for the change.",
-                code="bad_request",
+                code=FlowAuthoringRefusalCode.ASSISTANT_SHARED_BY_STEPS,
                 context={"shared_by": sorted(refs)},
             )
         kept.append(update)
@@ -762,12 +766,12 @@ def _resolve_existing_step(
     resolved = existing_by_ref.get(step_spec.existing_step_ref)
     if resolved is None:
         valid_refs = sorted(existing_by_ref.keys())
-        raise BadRequestException(
+        raise FlowAuthoringRefusalException(
             (
                 f"existing_step_ref '{step_spec.existing_step_ref}' does not match "
                 f"any existing step. Valid refs: {valid_refs}"
             ),
-            code="invalid_existing_step_ref",
+            code=FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF,
             context={
                 "existing_step_ref": step_spec.existing_step_ref,
                 "valid_refs": valid_refs,
@@ -781,10 +785,10 @@ def _invalid_existing_step_ref(
     *,
     reason: InvalidExistingStepRefReason,
     **context: object,
-) -> BadRequestException:
-    return BadRequestException(
+) -> FlowAuthoringRefusalException:
+    return FlowAuthoringRefusalException(
         message,
-        code="invalid_existing_step_ref",
+        code=FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF,
         context={"reason": reason, **context},
     )
 
@@ -795,7 +799,7 @@ def invalid_existing_step_ref_reason(
     """Which rule ``error`` says was broken, when it is an invalid
     existing-step ref raised here with a reason; None for anything else."""
 
-    if error.code != "invalid_existing_step_ref":
+    if error.code != FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF:
         return None
     reason = (error.context or {}).get("reason")
     for known in _INVALID_EXISTING_STEP_REF_REASONS:

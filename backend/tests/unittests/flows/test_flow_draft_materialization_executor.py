@@ -8,6 +8,7 @@ import pytest
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
+from eneo.flows.application.flow_authoring_refusal import FlowAuthoringRefusalCode
 from eneo.flows.application.flow_draft_materialization import (
     ALL_ASSISTANT_FIELDS,
     FlowDraftAssistantToCreate,
@@ -571,7 +572,26 @@ async def test_unresolved_slot_binding_fails_before_mutation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_invalid_slot_ref_fails_before_mutation() -> None:
+@pytest.mark.parametrize(
+    ("assistant_spec", "code"),
+    [
+        (
+            AssistantSpec(
+                instructions="Use invalid refs.", model_ref="not-a-valid-ref"
+            ),
+            FlowAuthoringRefusalCode.INVALID_MODEL_REF,
+        ),
+        (
+            AssistantSpec(
+                instructions="Use invalid refs.", knowledge_refs=["not-a-valid-ref"]
+            ),
+            FlowAuthoringRefusalCode.INVALID_KB_REF,
+        ),
+    ],
+)
+async def test_invalid_slot_ref_fails_before_mutation(
+    assistant_spec: AssistantSpec, code: FlowAuthoringRefusalCode
+) -> None:
     service = _flow_service()
 
     with pytest.raises(BadRequestException) as error:
@@ -582,10 +602,7 @@ async def test_invalid_slot_ref_fails_before_mutation() -> None:
                 assistants_to_create=[
                     FlowDraftAssistantToCreate(
                         plan_step_ref="step_a",
-                        assistant_spec=AssistantSpec(
-                            instructions="Use invalid refs.",
-                            model_ref="not-a-valid-ref",
-                        ),
+                        assistant_spec=assistant_spec,
                     )
                 ],
                 compiled_steps=[_compiled_step()],
@@ -596,7 +613,7 @@ async def test_invalid_slot_ref_fails_before_mutation() -> None:
             binding_source=FlowResourceBindingSource.AI_BUILDER,
         )
 
-    assert error.value.code == "invalid_model_ref"
+    assert error.value.code is code
     service.create_flow.assert_not_called()
 
 

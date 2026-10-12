@@ -5,6 +5,10 @@ from typing import TYPE_CHECKING, assert_never
 from uuid import UUID, uuid4
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.flows.application.flow_authoring_refusal import (
+    FlowAuthoringRefusalCode,
+    FlowAuthoringRefusalException,
+)
 from eneo.flows.application.flow_draft_materialization import (
     ALL_ASSISTANT_FIELDS,
     AssistantField,
@@ -364,7 +368,6 @@ def build_flow_steps(
         if assistant_id is None:
             raise BadRequestException(
                 "Assistant id missing while building materialized flow steps.",
-                code="missing_materialized_assistant_id",
                 context={"plan_step_ref": compiled.plan_step_ref},
             )
         # A retained step is its saved row with the authored columns laid over
@@ -539,7 +542,7 @@ def _resolve_assistant_resource_update_fields(
                 expected_slot_kind=ResourceSlotKind.MODEL,
                 allowed_local_kinds=_MODEL_LOCAL_KINDS,
                 resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-                invalid_code="invalid_model_ref",
+                invalid_code=FlowAuthoringRefusalCode.INVALID_MODEL_REF,
                 invalid_message=f"Invalid model reference '{assistant_spec.model_ref}'.",
                 invalid_context={"model_ref": assistant_spec.model_ref},
             )
@@ -589,7 +592,7 @@ def _resolve_knowledge_refs(
                 ResourceSlotKind.KNOWLEDGE
             ),
             resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-            invalid_code="invalid_kb_ref",
+            invalid_code=FlowAuthoringRefusalCode.INVALID_KB_REF,
             invalid_message=f"Invalid knowledge base reference '{ref}'.",
             invalid_context={"knowledge_refs": knowledge_refs},
         )
@@ -615,7 +618,7 @@ def _resolve_materializer_resource_ref(
     expected_slot_kind: ResourceSlotKind,
     allowed_local_kinds: frozenset[LocalResourceKind],
     resource_bindings_by_slot_ref: Mapping[str, LocalResourceBinding],
-    invalid_code: str,
+    invalid_code: FlowAuthoringRefusalCode,
     invalid_message: str,
     invalid_context: dict[str, object],
 ) -> UUID:
@@ -636,7 +639,7 @@ def _resolve_materializer_resource_binding(
     expected_slot_kind: ResourceSlotKind,
     allowed_local_kinds: frozenset[LocalResourceKind],
     resource_bindings_by_slot_ref: Mapping[str, LocalResourceBinding],
-    invalid_code: str,
+    invalid_code: FlowAuthoringRefusalCode,
     invalid_message: str,
     invalid_context: dict[str, object],
 ) -> LocalResourceBinding:
@@ -649,27 +652,16 @@ def _resolve_materializer_resource_binding(
         )
         return resource_bindings_by_slot_ref[resource_ref.strip()]
     except FlowResourceBindingResolutionError as exc:
-        raise _slot_binding_bad_request(
-            exc,
-            invalid_code=invalid_code,
-            invalid_message=invalid_message,
-            invalid_context=invalid_context,
-        ) from exc
+        if exc.reason is FlowResourceBindingResolutionReason.INVALID_SLOT_REF:
+            raise FlowAuthoringRefusalException(
+                invalid_message, code=invalid_code, context=invalid_context
+            ) from exc
+        raise _slot_binding_bad_request(exc) from exc
 
 
 def _slot_binding_bad_request(
     error: FlowResourceBindingResolutionError,
-    *,
-    invalid_code: str | None = None,
-    invalid_message: str | None = None,
-    invalid_context: dict[str, object] | None = None,
 ) -> BadRequestException:
-    if error.reason is FlowResourceBindingResolutionReason.INVALID_SLOT_REF:
-        return BadRequestException(
-            invalid_message or str(error),
-            code=invalid_code or error.reason.value,
-            context=invalid_context or _bad_request_context(error),
-        )
     return BadRequestException(
         str(error),
         code=error.reason.value,

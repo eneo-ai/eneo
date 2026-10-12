@@ -86,10 +86,9 @@ class TranscriptionProviderError(OpenAIException):
         *,
         failure_kind: TranscriptionFailureKind = TranscriptionFailureKind.PROVIDER,
         service_reason: str | None = None,
-        code: str | None = None,
         details: dict[str, object] | None = None,
     ) -> None:
-        super().__init__(message, code=code, details=details)
+        super().__init__(message, details=details)
         self.failure_kind = failure_kind
         self.service_reason = (
             service_reason[:TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH]

@@ -168,10 +168,15 @@ async def inspect_flow_template(
     description="Upload a reusable DOCX template for Flow document assembly. This preserves the original DOCX file for placeholder inspection and deterministic template_fill steps. It is separate from flow input uploads and does not use the flow run input policy.",
     responses={
         400: error_response(
-            description="The uploaded file is not a valid DOCX template for Flow assembly.",
-            message="Only .docx files can be uploaded as Flow templates.",
+            description=(
+                "The uploaded file is not a usable DOCX template for Flow "
+                "assembly. The `code` is one of the `flow_template_*` codes of "
+                "the error reference, for example an invalid archive or a "
+                "template without content controls."
+            ),
+            message="The uploaded file is not a valid DOCX archive.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
-            code="bad_request",
+            code=FlowApiErrorCode.TEMPLATE_INVALID_ARCHIVE,
         ),
         403: error_response(
             description="Forbidden: API key scope does not match flow space.",
@@ -188,15 +193,23 @@ async def inspect_flow_template(
         ),
         413: error_response(
             description="The uploaded template exceeds the allowed file size.",
-            message="Uploaded file is too large.",
+            message=(
+                "File size limit exceeded: got 31457280 bytes (30.0 MB), maximum "
+                "allowed is 26214400 bytes (25.0 MB). The active limit is "
+                "session_file. Ask an administrator with the Storage permission "
+                "to review the object-content deployment policy."
+            ),
             eneo_error_code=ErrorCodes.FILE_TOO_LARGE,
             code="file_too_large",
         ),
         415: error_response(
-            description="The uploaded file is not a supported DOCX template.",
-            message="Only .docx files can be uploaded as Flow templates.",
+            description=(
+                "The uploaded file is not a .docx file, or it is a macro-enabled "
+                "Word file (`flow_template_macro_not_allowed`)."
+            ),
+            message="Only .docx files can be uploaded as flow templates.",
             eneo_error_code=ErrorCodes.FILE_NOT_SUPPORTED,
-            code="unsupported_media_type",
+            code=FlowApiErrorCode.TEMPLATE_UNSUPPORTED_EXTENSION,
         ),
     },
 )

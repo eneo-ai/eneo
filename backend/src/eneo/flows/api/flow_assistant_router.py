@@ -300,7 +300,7 @@ async def get_flow_assistant(
                 "ändring."
             ),
             eneo_error_code=ErrorCodes.BAD_REQUEST,
-            code="stale_revision",
+            code=FlowApiErrorCode.STALE_REVISION,
             context={
                 "flow_id": "00000000-0000-4000-8000-000000000001",
                 "expected_revision": 3,

@@ -213,7 +213,12 @@ export const FLOW_API_ERROR_CODE = Object.freeze({
   FORM_FIELD_NAME_EMPTY: "flow_form_field_name_empty",
   FORM_FIELD_NAME_DUPLICATE: "flow_form_field_name_duplicate",
   FORM_FIELD_NAME_DOT: "flow_form_field_name_dot",
-  FORM_FIELD_NAME_TEMPLATE_DELIMITERS: "flow_form_field_name_template_delimiters"
+  FORM_FIELD_NAME_TEMPLATE_DELIMITERS: "flow_form_field_name_template_delimiters",
+  STALE_REVISION: "stale_revision",
+  UNKNOWN_STEP_ID: "unknown_step_id",
+  DUPLICATE_STEP_ID: "duplicate_step_id",
+  SENTINEL_SECRET_REQUIRES_STEP_ID: "sentinel_secret_requires_step_id",
+  UNSUPPORTED_MEDIA_TYPE: "unsupported_media_type"
 });
 export const FLOW_API_ERROR_CODES = Object.freeze([
   "flow_not_published",
@@ -428,5 +433,10 @@ export const FLOW_API_ERROR_CODES = Object.freeze([
   "flow_form_field_name_empty",
   "flow_form_field_name_duplicate",
   "flow_form_field_name_dot",
-  "flow_form_field_name_template_delimiters"
+  "flow_form_field_name_template_delimiters",
+  "stale_revision",
+  "unknown_step_id",
+  "duplicate_step_id",
+  "sentinel_secret_requires_step_id",
+  "unsupported_media_type"
 ]);

@@ -258,15 +258,18 @@ through that Flow's runtime upload endpoint.
         ),
         413: error_response(
             description="Uploaded file exceeds the effective runtime-input limit.",
-            message="Uploaded file exceeds effective flow max size limit.",
+            message="Uploaded file exceeds effective flow limit of 26214400 bytes.",
             eneo_error_code=ErrorCodes.FILE_TOO_LARGE,
             code="file_too_large",
         ),
         415: error_response(
             description="Unsupported media type for the selected runtime step.",
-            message="Unsupported media type for the selected runtime step.",
+            message=(
+                "Unsupported file type 'application/pdf' for flow input type "
+                "'audio'. Allowed types: audio/mpeg, audio/wav."
+            ),
             eneo_error_code=ErrorCodes.FILE_NOT_SUPPORTED,
-            code="unsupported_media_type",
+            code=FlowApiErrorCode.UNSUPPORTED_MEDIA_TYPE,
         ),
     },
 )

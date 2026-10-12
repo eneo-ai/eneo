@@ -251,6 +251,12 @@ class FlowApiErrorCode(StrEnum):
     FORM_FIELD_NAME_DOT = "flow_form_field_name_dot"
     FORM_FIELD_NAME_TEMPLATE_DELIMITERS = "flow_form_field_name_template_delimiters"
 
+    STALE_REVISION = "stale_revision"
+    UNKNOWN_STEP_ID = "unknown_step_id"
+    DUPLICATE_STEP_ID = "duplicate_step_id"
+    SENTINEL_SECRET_REQUIRES_STEP_ID = "sentinel_secret_requires_step_id"
+    UNSUPPORTED_MEDIA_TYPE = "unsupported_media_type"
+
 
 FLOW_API_ERROR_CODES: tuple[FlowApiErrorCode, ...] = tuple(FlowApiErrorCode)
 FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(

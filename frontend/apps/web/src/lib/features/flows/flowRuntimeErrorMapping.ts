@@ -283,7 +283,12 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_form_field_name_duplicate: m.flow_error_flow_form_field_name_duplicate,
   flow_form_field_name_dot: m.flow_error_flow_form_field_name_dot,
   flow_form_field_name_template_delimiters: m.flow_error_flow_form_field_name_template_delimiters,
-  flow_template_too_large: m.flow_error_flow_template_too_large
+  flow_template_too_large: m.flow_error_flow_template_too_large,
+  stale_revision: m.flow_error_stale_revision,
+  unknown_step_id: m.flow_error_unknown_step_id,
+  duplicate_step_id: m.flow_error_duplicate_step_id,
+  sentinel_secret_requires_step_id: m.flow_error_sentinel_secret_requires_step_id,
+  unsupported_media_type: m.flow_error_unsupported_media_type
 } satisfies Record<FlowApiErrorCode, () => string>;
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -516,14 +521,6 @@ function resolveFlowApiErrorMessage(descriptor: FlowApiErrorDescriptor): string 
 }
 
 /**
- * Refusals the flow endpoints send under a code outside the generated Flow API set.
- * The server words `stale_revision` in Swedish only, so it is said here in both languages.
- */
-const FLOW_EDIT_REFUSAL_MESSAGES: Record<string, (() => string) | undefined> = {
-  stale_revision: () => m.flow_edit_stale_revision()
-};
-
-/**
  * The sentence to show for a failed Flow request, always in the reader's language:
  * the Flow error's own sentence, else the platform's sentence for the error code,
  * else what the caller says failed. The server's English text is never shown.
@@ -535,9 +532,6 @@ export function getFlowRuntimeErrorMessage(error: unknown, fallbackMessage: stri
 
   const descriptor = describeFlowApiError(error);
   if (descriptor) return resolveFlowApiErrorMessage(descriptor);
-
-  const editRefusal = FLOW_EDIT_REFUSAL_MESSAGES[getResponseCode(error) ?? ""];
-  if (editRefusal) return editRefusal();
 
   const platformMessage = getErrorCodeMessage(error.code);
   if (platformMessage) return platformMessage;

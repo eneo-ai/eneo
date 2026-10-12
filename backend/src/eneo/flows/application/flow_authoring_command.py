@@ -12,6 +12,10 @@ from eneo.flows.application.flow_authoring_origin_policy import (
     FlowAuthoringOriginPolicy,
     NoopFlowAuthoringOriginPolicy,
 )
+from eneo.flows.application.flow_authoring_refusal import (
+    FlowAuthoringRefusalCode,
+    FlowAuthoringRefusalException,
+)
 from eneo.flows.application.flow_draft_materialization import (
     AssistantField,
     FlowDraftChangeSet,
@@ -26,6 +30,8 @@ from eneo.flows.application.flow_draft_materialization_executor import (
 )
 from eneo.flows.application.flow_service import FlowService
 from eneo.flows.domain.flow import Flow
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
 )
@@ -35,7 +41,6 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from eneo.flows.flow_validators import validate_step_count
-from eneo.main.exceptions import BadRequestException
 
 if TYPE_CHECKING:
     from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
@@ -279,9 +284,9 @@ async def _load_current_flow(
 
     current_flow = await flow_service.get_flow(command.flow_id)
     if current_flow.space_id != command.space_id:
-        raise BadRequestException(
+        raise FlowAuthoringRefusalException(
             "Flow space does not match the authoring command space.",
-            code="flow_space_mismatch",
+            code=FlowAuthoringRefusalCode.FLOW_SPACE_MISMATCH,
             context={
                 "flow_id": str(command.flow_id),
                 "flow_space_id": str(current_flow.space_id),
@@ -289,19 +294,19 @@ async def _load_current_flow(
             },
         )
     if current_flow.published_version is not None:
-        raise BadRequestException(
+        raise FlowAuthoringRefusalException(
             "Flow is currently published. Unpublish the flow before applying changes.",
-            code="flow_is_published",
+            code=FlowAuthoringRefusalCode.FLOW_IS_PUBLISHED,
             context={
                 "flow_id": str(current_flow.id),
                 "published_version": current_flow.published_version,
             },
         )
     if current_flow.draft_revision != command.expected_revision:
-        raise BadRequestException(
+        raise FlowBadRequestException(
             "Flödet ändrades av en annan användare. "
             "Dina ändringar beräknas mot den nya versionen.",
-            code="stale_revision",
+            code=FlowApiErrorCode.STALE_REVISION,
             context={
                 "flow_id": str(command.flow_id),
                 "expected_revision": command.expected_revision,

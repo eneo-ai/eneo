@@ -19,6 +19,7 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.audit.domain.repositories.audit_log_repository import AuditLogRepository
 from eneo.flows.domain.step_config import clean_inactive_step_config
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_validators import (
     retained_contracts,
     validate_steps,
@@ -96,6 +97,6 @@ async def repair_flow_step_config(
     except NotFoundException:
         return "conflict"
     except BadRequestException as exc:
-        return "conflict" if exc.code == "stale_revision" else "failed"
+        return "conflict" if exc.code == FlowApiErrorCode.STALE_REVISION else "failed"
     except Exception:
         return "failed"

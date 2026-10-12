@@ -1739,6 +1739,41 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Upload a DOCX template within both archive limits.",
         user_action="Use a smaller or simpler Word template.",
     ),
+    FlowApiErrorCode.STALE_REVISION: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The flow draft changed after the revision the request was based on.",
+        consumer_action="Reload the flow and send the change again against the current draft.",
+        user_action="Reload the page and redo your latest change.",
+    ),
+    FlowApiErrorCode.UNKNOWN_STEP_ID: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The flow update names a step id that the stored draft does not have.",
+        consumer_action="Reload the flow and send only step ids from the current draft.",
+        user_action="Reload the page and redo your latest change.",
+    ),
+    FlowApiErrorCode.DUPLICATE_STEP_ID: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The flow update names the same step id more than once.",
+        consumer_action="Send each stored step id at most once in a flow update.",
+        user_action="Reload the page and redo your latest change.",
+    ),
+    FlowApiErrorCode.SENTINEL_SECRET_REQUIRES_STEP_ID: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A step without an id asks to keep a stored secret, which only an existing step has.",
+        consumer_action="Send the real secret for a step without an id, since the masked placeholder only keeps the secret of an existing step.",
+        user_action="Enter the secret value again for the new step.",
+    ),
+    FlowApiErrorCode.UNSUPPORTED_MEDIA_TYPE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The declared or detected type of the uploaded file is not accepted for the flow input.",
+        consumer_action="Upload a file whose type is in accepted_mimetypes; the 415 answer lists them and names received_type in its context.",
+        user_action="Choose a file of a type the flow accepts.",
+    ),
 }
 
 

@@ -304,7 +304,7 @@ describe("FlowEditor draft revision", () => {
     expect((await tabB.loadAssistant("assistant-1"))?.prompt?.text).toBe("Från flik B");
     // In the reader's language, not the server's Swedish-only sentence.
     expect(get(tabB.state.validationErrors).get("assistant:assistant-1")).toEqual([
-      m.flow_edit_stale_revision()
+      m.flow_error_stale_revision()
     ]);
     expect(get(tabB.state.resource).draft_revision).toBe(4);
 

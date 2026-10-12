@@ -173,7 +173,6 @@ class RemoteFlowTranscriber:
             )
             raise TranscriptionProviderError(
                 litellm_transport.PROVIDER_ERROR_MESSAGE,
-                code="provider_error",
                 details={"reason": "diarize_task_unsupported", "retryable": False},
             )
         return result
@@ -247,7 +246,6 @@ class RemoteFlowTranscriber:
                 # can quote credentials, so it is not chained.
                 poll_failure = TranscriptionProviderError(
                     f"External transcription poll failed: {error}.",
-                    code="provider_error",
                 ).with_traceback(error.__traceback__)
             except TranscriptionServiceError as error:
                 _raise_provider_error(error)
@@ -283,7 +281,6 @@ class RemoteFlowTranscriber:
                             default=TranscriptionFailureKind.PROVIDER,
                         ),
                         service_reason=seen.service_reason,
-                        code="provider_rejected_request",
                         details={
                             "reason": "provider_rejected_request",
                             "retryable": False,
@@ -300,7 +297,6 @@ class RemoteFlowTranscriber:
                             default=TranscriptionFailureKind.CANCELLED,
                         ),
                         service_reason=seen.service_reason,
-                        code="provider_error",
                         details={"reason": "provider_cancelled", "retryable": True},
                     )
                 await asyncio.sleep(self.poll_interval_seconds)
@@ -309,7 +305,6 @@ class RemoteFlowTranscriber:
             if consecutive_failures >= _MAX_CONSECUTIVE_POLL_FAILURES:
                 raise TranscriptionProviderError(
                     litellm_transport.PROVIDER_ERROR_MESSAGE,
-                    code="provider_error",
                     details={"reason": "provider_error", "retryable": True},
                 ) from poll_failure
             await asyncio.sleep(self.poll_interval_seconds)
@@ -657,7 +652,6 @@ def _raise_provider_error(error: TranscriptionServiceError) -> NoReturn:
             litellm_transport.INVALID_REQUEST_MESSAGE,
             failure_kind=TranscriptionFailureKind.INPUT,
             service_reason=error.service_reason,
-            code="provider_rejected_request",
             details={"reason": "provider_rejected_request", "retryable": False},
         ) from error
     # A lost answer after the upload began is an unknown outcome, never an
@@ -668,7 +662,6 @@ def _raise_provider_error(error: TranscriptionServiceError) -> NoReturn:
         litellm_transport.raise_provider_unavailable(error)
     raise TranscriptionProviderError(
         litellm_transport.PROVIDER_ERROR_MESSAGE,
-        code="provider_error",
         details={"reason": "provider_error", "retryable": True},
     ) from error
 

@@ -57,6 +57,8 @@ from eneo.flows.enums import (
     final_output_delivery,
     final_step_output_type,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_authoring_name import FlowNameTakenError
 from eneo.flows.flow_evidence_policy import (
     FlowHistoryAccessContext,
@@ -71,7 +73,7 @@ from eneo.flows.flow_resource_bindings import (
 )
 from eneo.flows.flow_review_policy import dump_flow_step_review_policy
 from eneo.flows.flow_run_step_inputs import primary_runtime_input_format
-from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.exceptions import NotFoundException
 
 
 @dataclass(frozen=True)
@@ -229,12 +231,12 @@ def _is_active_flow_name_violation(exc: IntegrityError) -> bool:
 
 def _stale_revision_error(
     *, flow_id: UUID, expected_revision: int
-) -> BadRequestException:
-    return BadRequestException(
+) -> FlowBadRequestException:
+    return FlowBadRequestException(
         "Flödet har ändrats sedan det lästes in, till exempel i en "
         "annan flik eller av en kollega. Ladda om sidan och gör om "
         "din senaste ändring.",
-        code="stale_revision",
+        code=FlowApiErrorCode.STALE_REVISION,
         context={"flow_id": str(flow_id), "expected_revision": expected_revision},
     )
 
@@ -1158,9 +1160,9 @@ class FlowRepository:
             if existing is None:
                 # FlowService owns update-id validation; this protects direct
                 # repository callers from treating stale ids as new rows.
-                raise BadRequestException(
+                raise FlowBadRequestException(
                     "Flow update references an unknown draft step id.",
-                    code="unknown_step_id",
+                    code=FlowApiErrorCode.UNKNOWN_STEP_ID,
                 )
             retained_steps.append((step, existing))
 

@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
+from eneo.flows.application.flow_authoring_refusal import (
+    FlowAuthoringRefusalCode,
+    FlowAuthoringRefusalException,
+)
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftChangeSet,
     FlowDraftCompiledStep,
@@ -84,9 +88,9 @@ def require_template_placeholder_contract(
         return
     missing = sorted(approved - actual)
     added = sorted(actual - approved)
-    raise BadRequestException(
+    raise FlowAuthoringRefusalException(
         "The selected DOCX template no longer matches the approved Flow plan. Generate a new proposal and approve it before applying.",
-        code="architecture_materialization_failed",
+        code=FlowAuthoringRefusalCode.ARCHITECTURE_MATERIALIZATION_FAILED,
         context={
             "reason": "template_placeholder_contract_changed",
             "approved_count": len(approved),
@@ -204,9 +208,9 @@ def _terminal_template_step(
         ):
             break
         return index, step
-    raise BadRequestException(
+    raise FlowAuthoringRefusalException(
         "The template attachment intent does not target the terminal template-fill step.",
-        code="architecture_materialization_failed",
+        code=FlowAuthoringRefusalCode.ARCHITECTURE_MATERIALIZATION_FAILED,
         context={"reason": "template_attachment_target_invalid"},
     )
 
@@ -217,9 +221,9 @@ def _approved_placeholder_names(
     output_config = terminal_step.output_config or {}
     raw_bindings = output_config.get("bindings")
     if not isinstance(raw_bindings, dict):
-        raise BadRequestException(
+        raise FlowAuthoringRefusalException(
             "The approved template-fill step is missing its placeholder binding contract. Generate a new proposal and try again.",
-            code="architecture_materialization_failed",
+            code=FlowAuthoringRefusalCode.ARCHITECTURE_MATERIALIZATION_FAILED,
             context={"reason": "template_binding_contract_missing"},
         )
     names: set[str] = set()
@@ -232,9 +236,9 @@ def _approved_placeholder_names(
         ):
             names.add(name)
             continue
-        raise BadRequestException(
+        raise FlowAuthoringRefusalException(
             "The approved template-fill step has an invalid placeholder binding contract. Generate a new proposal and try again.",
-            code="architecture_materialization_failed",
+            code=FlowAuthoringRefusalCode.ARCHITECTURE_MATERIALIZATION_FAILED,
             context={"reason": "template_binding_contract_invalid"},
         )
     return frozenset(names)

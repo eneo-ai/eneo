@@ -18268,7 +18268,12 @@ export interface components {
       | "flow_form_field_name_empty"
       | "flow_form_field_name_duplicate"
       | "flow_form_field_name_dot"
-      | "flow_form_field_name_template_delimiters";
+      | "flow_form_field_name_template_delimiters"
+      | "stale_revision"
+      | "unknown_step_id"
+      | "duplicate_step_id"
+      | "sentinel_secret_requires_step_id"
+      | "unsupported_media_type";
     /**
      * FlowAssistantCreateRequest
      * @example {
@@ -62007,7 +62012,7 @@ export interface operations {
            * @example {
            *       "code": "file_too_large",
            *       "eneo_error_code": 9015,
-           *       "message": "Uploaded file exceeds effective flow max size limit."
+           *       "message": "Uploaded file exceeds effective flow limit of 26214400 bytes."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -62023,7 +62028,7 @@ export interface operations {
            * @example {
            *       "code": "unsupported_media_type",
            *       "eneo_error_code": 9014,
-           *       "message": "Unsupported media type for the selected runtime step."
+           *       "message": "Unsupported file type 'application/pdf' for flow input type 'audio'. Allowed types: audio/mpeg, audio/wav."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -62132,7 +62137,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowTemplateAssetPublic"];
         };
       };
-      /** @description The uploaded file is not a valid DOCX template for Flow assembly. */
+      /** @description The uploaded file is not a usable DOCX template for Flow assembly. The `code` is one of the `flow_template_*` codes of the error reference, for example an invalid archive or a template without content controls. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -62140,9 +62145,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "bad_request",
+           *       "code": "flow_template_invalid_archive",
            *       "eneo_error_code": 9007,
-           *       "message": "Only .docx files can be uploaded as Flow templates."
+           *       "message": "The uploaded file is not a valid DOCX archive."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -62193,13 +62198,13 @@ export interface operations {
            * @example {
            *       "code": "file_too_large",
            *       "eneo_error_code": 9015,
-           *       "message": "Uploaded file is too large."
+           *       "message": "File size limit exceeded: got 31457280 bytes (30.0 MB), maximum allowed is 26214400 bytes (25.0 MB). The active limit is session_file. Ask an administrator with the Storage permission to review the object-content deployment policy."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description The uploaded file is not a supported DOCX template. */
+      /** @description The uploaded file is not a .docx file, or it is a macro-enabled Word file (`flow_template_macro_not_allowed`). */
       415: {
         headers: {
           [name: string]: unknown;
@@ -62207,9 +62212,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "unsupported_media_type",
+           *       "code": "flow_template_unsupported_extension",
            *       "eneo_error_code": 9014,
-           *       "message": "Only .docx files can be uploaded as Flow templates."
+           *       "message": "Only .docx files can be uploaded as flow templates."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
