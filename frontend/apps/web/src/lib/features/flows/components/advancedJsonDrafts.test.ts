@@ -10,7 +10,8 @@ import {
   clearHiddenFieldErrors,
   parseAdvancedJsonField,
   formatAdvancedJsonDraftField,
-  getErrorFields
+  getErrorFields,
+  type AdvancedJsonErrors
 } from "./advancedJsonDrafts";
 
 function makeStep(overrides: Partial<FlowStep> = {}): FlowStep {
@@ -183,7 +184,7 @@ describe("syncDraftsFromStepValues", () => {
       input_config: "",
       output_config: ""
     };
-    const errors = { input_contract: "some error" };
+    const errors: AdvancedJsonErrors = { input_contract: "syntax" };
     const result = syncDraftsFromStepValues(drafts, errors, step);
     expect(result).toBeNull(); // input_contract skipped due to error, others unchanged
   });
@@ -195,16 +196,16 @@ describe("syncDraftsFromStepValues", () => {
 
 describe("clearHiddenFieldErrors", () => {
   test("clears errors for hidden fields", () => {
-    const errors = { input_config: "some error", input_contract: "another" };
+    const errors: AdvancedJsonErrors = { input_config: "syntax", input_contract: "not_object" };
     const step = makeStep(); // standard step doesn't show input_config
     const result = clearHiddenFieldErrors(errors, step);
     expect(result).not.toBeNull();
     expect(result!.input_config).toBeUndefined();
-    expect(result!.input_contract).toBe("another");
+    expect(result!.input_contract).toBe("not_object");
   });
 
   test("returns null when no errors need clearing", () => {
-    const errors = { input_contract: "error" };
+    const errors: AdvancedJsonErrors = { input_contract: "syntax" };
     const step = makeStep(); // input_contract is visible
     expect(clearHiddenFieldErrors(errors, step)).toBeNull();
   });
@@ -225,27 +226,45 @@ describe("parseAdvancedJsonField", () => {
   test("parses valid JSON and clears error", () => {
     const result = parseAdvancedJsonField(
       emptyDrafts,
-      { input_contract: "old error" },
+      { input_contract: "syntax" },
       "input_contract",
       '{"type": "object"}'
     );
-    expect(result.parsed).toEqual({ type: "object" });
-    expect(result.parseError).toBeNull();
+    expect(result).toMatchObject({ parsed: { type: "object" }, problem: null });
     expect(result.errors.input_contract).toBeUndefined();
     expect(result.drafts.input_contract).toBe('{"type": "object"}');
   });
 
   test("sets error for invalid JSON", () => {
     const result = parseAdvancedJsonField(emptyDrafts, {}, "input_contract", "{invalid");
-    expect(result.parsed).toBeNull();
-    expect(result.parseError).toBeTruthy();
-    expect(result.errors.input_contract).toBeTruthy();
+    expect(result.problem).toBe("syntax");
+    expect(result).not.toHaveProperty("parsed");
+    expect(result.errors.input_contract).toBe("syntax");
   });
 
-  test("treats empty input as null value", () => {
-    const result = parseAdvancedJsonField(emptyDrafts, {}, "input_contract", "  ");
-    expect(result.parsed).toBeNull();
-    expect(result.parseError).toBeNull();
+  // Kills: storing whatever JSON.parse returns. The server keeps an object or
+  // nothing in these fields, so a list, number, text or boolean must stop here.
+  test.each(["[1, 2]", "42", '"text"', "true"])(
+    "refuses JSON that is not an object: %s",
+    (draft) => {
+      const result = parseAdvancedJsonField(emptyDrafts, {}, "output_config", draft);
+      expect(result.problem).toBe("not_object");
+      expect(result).not.toHaveProperty("parsed");
+      expect(result.errors.output_config).toBe("not_object");
+      expect(result.drafts.output_config).toBe(draft);
+    }
+  );
+
+  // Kills: counting the JSON word null as "not an object"; it empties the field.
+  test.each(["  ", "null"])("treats %j as an empty value", (draft) => {
+    const result = parseAdvancedJsonField(
+      emptyDrafts,
+      { input_contract: "not_object" },
+      "input_contract",
+      draft
+    );
+    expect(result).toMatchObject({ parsed: null, problem: null });
+    expect(result.errors.input_contract).toBeUndefined();
   });
 });
 
@@ -265,8 +284,7 @@ describe("formatAdvancedJsonDraftField", () => {
     );
 
     expect(result.formatted).toBe(true);
-    expect(result.parseError).toBeNull();
-    expect(result.parsed).toEqual({ type: "object", required: ["name"] });
+    expect(result).toMatchObject({ parsed: { type: "object", required: ["name"] }, problem: null });
     expect(result.drafts.output_contract).toBe(
       '{\n  "type": "object",\n  "required": [\n    "name"\n  ]\n}'
     );
@@ -280,9 +298,22 @@ describe("formatAdvancedJsonDraftField", () => {
     );
 
     expect(result.formatted).toBe(false);
-    expect(result.parseError).toBeTruthy();
+    expect(result.problem).toBe("syntax");
     expect(result.drafts.input_contract).toBe("{invalid");
-    expect(result.errors.input_contract).toBeTruthy();
+    expect(result.errors.input_contract).toBe("syntax");
+  });
+
+  // Kills: formatting on the value alone. An emptied or refused draft has
+  // nothing to lay out, and its text must stay as typed.
+  test.each(["null", "[1, 2]"])("leaves %j as typed", (draft) => {
+    const result = formatAdvancedJsonDraftField(
+      { ...emptyDrafts, output_config: draft },
+      {},
+      "output_config"
+    );
+
+    expect(result.formatted).toBe(false);
+    expect(result.drafts.output_config).toBe(draft);
   });
 });
 
@@ -292,7 +323,7 @@ describe("formatAdvancedJsonDraftField", () => {
 
 describe("getErrorFields", () => {
   test("returns fields with errors", () => {
-    expect(getErrorFields({ input_contract: "error", output_config: "error" })).toEqual([
+    expect(getErrorFields({ input_contract: "syntax", output_config: "not_object" })).toEqual([
       "input_contract",
       "output_config"
     ]);

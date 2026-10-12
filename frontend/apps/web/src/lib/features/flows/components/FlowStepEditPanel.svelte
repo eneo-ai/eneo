@@ -353,7 +353,7 @@
     advancedJsonDrafts = result.drafts;
     advancedJsonErrors = result.errors;
     emitAdvancedJsonValidationState();
-    if (result.parseError === null) {
+    if (result.problem === null) {
       updateStep(field, result.parsed);
     }
   }
@@ -363,7 +363,7 @@
     advancedJsonDrafts = result.drafts;
     advancedJsonErrors = result.errors;
     emitAdvancedJsonValidationState();
-    if (result.parseError === null) {
+    if (result.problem === null) {
       updateStep(field, result.parsed);
     }
   }
@@ -390,7 +390,7 @@
   // Step mutation helpers
   // ---------------------------------------------------------------------------
 
-  function updateStep(field: string, value: unknown) {
+  function updateStep<Field extends keyof FlowStep>(field: Field, value: FlowStep[Field]) {
     if (activeStep === null || activeIndex < 0) return;
     const updated = { ...activeStep, [field]: value };
     onStepChanged?.({ index: activeIndex, step: updated });
@@ -1310,10 +1310,7 @@
               onHttpConfigChange={(detail) =>
                 updateStep(
                   "output_config",
-                  preserveFlowCitationMode(
-                    detail.config as unknown as Record<string, unknown>,
-                    activeStep?.output_config ?? null
-                  )
+                  preserveFlowCitationMode(detail.config, activeStep?.output_config ?? null)
                 )}
               onCitationModeChange={(detail) => handleCitationModeChange(detail.value)}
               onSwitchToTemplateFill={() => handleOutputModeChange("template_fill")}

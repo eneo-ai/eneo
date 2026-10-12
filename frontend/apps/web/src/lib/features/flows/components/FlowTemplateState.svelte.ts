@@ -34,7 +34,7 @@ type TemplateFillContext = {
   steps: FlowStep[];
   formSchema: TemplateBindingFormSchema | undefined;
   getStep: () => FlowStep | null;
-  updateStep: (field: string, value: unknown) => void;
+  updateStep: <Field extends keyof FlowStep>(field: Field, value: FlowStep[Field]) => void;
 };
 
 /** What the template state needs from the step editor that hosts it. */

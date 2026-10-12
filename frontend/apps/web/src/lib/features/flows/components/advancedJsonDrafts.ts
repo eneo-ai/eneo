@@ -1,4 +1,5 @@
 import type { FlowStep } from "@eneo/eneo-js";
+import { isJsonObject, type JsonObject } from "../jsonObject";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -14,8 +15,15 @@ export const ADVANCED_JSON_FIELDS: AdvancedJsonField[] = [
   "output_config"
 ];
 
+/** Why a draft cannot be stored: it is not JSON, or it is JSON other than an object. */
+export type AdvancedJsonProblem = "syntax" | "not_object";
+
 export type AdvancedJsonDrafts = Record<AdvancedJsonField, string>;
-export type AdvancedJsonErrors = Partial<Record<AdvancedJsonField, string>>;
+export type AdvancedJsonErrors = Partial<Record<AdvancedJsonField, AdvancedJsonProblem>>;
+
+// A refused draft carries no value, so nothing can be stored from one.
+type AdvancedJsonReading =
+  { parsed: JsonObject | null; problem: null } | { problem: AdvancedJsonProblem };
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -114,63 +122,58 @@ export function clearHiddenFieldErrors(
   return changed ? nextErrors : null;
 }
 
+function readAdvancedJsonDraft(rawValue: string): AdvancedJsonReading {
+  if (rawValue.trim().length === 0) {
+    return { parsed: null, problem: null };
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(rawValue);
+  } catch {
+    return { problem: "syntax" };
+  }
+  if (value === null) {
+    return { parsed: null, problem: null };
+  }
+  // The server keeps an object or nothing in these fields. A list, a number or
+  // a text is valid JSON it refuses at save, far from the box it was typed in.
+  return isJsonObject(value) ? { parsed: value, problem: null } : { problem: "not_object" };
+}
+
 export function parseAdvancedJsonField(
   currentDrafts: AdvancedJsonDrafts,
   currentErrors: AdvancedJsonErrors,
   field: AdvancedJsonField,
   rawValue: string
-): {
-  drafts: AdvancedJsonDrafts;
-  errors: AdvancedJsonErrors;
-  parsed: unknown | null;
-  parseError: string | null;
-} {
+): AdvancedJsonReading & { drafts: AdvancedJsonDrafts; errors: AdvancedJsonErrors } {
   const drafts = { ...currentDrafts, [field]: rawValue };
-  const trimmed = rawValue.trim();
-
-  if (trimmed.length === 0) {
-    const errors = { ...currentErrors };
+  const reading = readAdvancedJsonDraft(rawValue);
+  const errors = { ...currentErrors };
+  if (reading.problem === null) {
     delete errors[field];
-    return { drafts, errors, parsed: null, parseError: null };
+  } else {
+    errors[field] = reading.problem;
   }
-
-  try {
-    const parsed = JSON.parse(rawValue);
-    const errors = { ...currentErrors };
-    delete errors[field];
-    return { drafts, errors, parsed, parseError: null };
-  } catch (error) {
-    const detail =
-      error instanceof Error && error.message.trim().length > 0
-        ? error.message
-        : "Invalid JSON syntax";
-    const parseError = detail;
-    const errors = { ...currentErrors, [field]: parseError };
-    return { drafts, errors, parsed: null, parseError };
-  }
+  return { ...reading, drafts, errors };
 }
 
 export function formatAdvancedJsonDraftField(
   currentDrafts: AdvancedJsonDrafts,
   currentErrors: AdvancedJsonErrors,
   field: AdvancedJsonField
-): {
+): AdvancedJsonReading & {
   drafts: AdvancedJsonDrafts;
   errors: AdvancedJsonErrors;
-  parsed: unknown | null;
-  parseError: string | null;
   formatted: boolean;
 } {
   const result = parseAdvancedJsonField(currentDrafts, currentErrors, field, currentDrafts[field]);
-  if (result.parseError !== null || result.parsed === null) {
+  if (result.problem !== null || result.parsed === null) {
     return { ...result, formatted: false };
   }
 
   return {
+    ...result,
     drafts: { ...result.drafts, [field]: formatAdvancedJson(result.parsed) },
-    errors: result.errors,
-    parsed: result.parsed,
-    parseError: null,
     formatted: true
   };
 }

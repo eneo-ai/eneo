@@ -5473,6 +5473,7 @@
   "flow_step_json_invalid": "The technical content in {fields} cannot be read. Fix it under Contracts and integrations in Advanced before publishing.",
   "flow_step_json_format": "Format JSON",
   "flow_step_json_parse_error": "The JSON cannot be parsed. Check commas, quotation marks, and closing brackets.",
+  "flow_step_json_not_object": "This must be a JSON object, written inside curly brackets.",
   "flow_step_knowledge_desc": "Connect a knowledge source to this step.",
   "flow_step_legacy_invalid_option": "Invalid option",
   "flow_step_option_invalid": "{label} (invalid option)",

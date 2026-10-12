@@ -5473,6 +5473,7 @@
   "flow_step_json_invalid": "Det tekniska innehållet i {fields} kan inte läsas. Rätta det under Kontrakt och integrationer i Avancerad innan du publicerar.",
   "flow_step_json_format": "Formatera JSON",
   "flow_step_json_parse_error": "JSON-formatet kan inte läsas. Kontrollera kommatecken, citattecken och avslutande klamrar.",
+  "flow_step_json_not_object": "Det här måste vara ett JSON-objekt, skrivet inom klammerparenteser.",
   "flow_step_knowledge_desc": "Koppla en kunskapskälla till steget.",
   "flow_step_legacy_invalid_option": "Ogiltigt val",
   "flow_step_option_invalid": "{label} (ogiltigt val)",

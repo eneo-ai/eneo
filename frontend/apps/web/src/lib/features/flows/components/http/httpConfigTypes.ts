@@ -40,14 +40,14 @@ export interface CustomHeader {
   secret: boolean;
 }
 
-export interface HttpAuthoredConfig {
+export type HttpAuthoredConfig = {
   url: string;
   auth: HttpAuth;
   timeout_seconds: number;
   body: HttpBody;
   custom_headers: CustomHeader[];
   response_format?: "text" | "json" | null;
-}
+};
 
 export type HttpDirection = "input" | "output";
 export type HttpMethod = "GET" | "POST";

@@ -3,7 +3,12 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import Braces from "@lucide/svelte/icons/braces";
-  import type { AdvancedJsonField } from "./advancedJsonDrafts";
+  import type { AdvancedJsonField, AdvancedJsonProblem } from "./advancedJsonDrafts";
+
+  const PROBLEM_SENTENCES: Record<AdvancedJsonProblem, () => string> = {
+    syntax: m.flow_step_json_parse_error,
+    not_object: m.flow_step_json_not_object
+  };
 
   let {
     field,
@@ -18,7 +23,7 @@
     field: AdvancedJsonField;
     stepOrder: number;
     value: string;
-    error?: string;
+    error?: AdvancedJsonProblem;
     isPublished: boolean;
     placeholder: string;
     onUpdate?: (detail: { field: AdvancedJsonField; value: string }) => void;
@@ -27,7 +32,7 @@
 
   const errorId = $derived(`flow-step-${stepOrder}-${field}-error`);
   const canFormat = $derived(!isPublished && value.trim().length > 0 && !error);
-  const errorMessage = $derived(error ? m.flow_step_json_parse_error() : null);
+  const errorMessage = $derived(error ? PROBLEM_SENTENCES[error]() : null);
 </script>
 
 <div class="mb-2 flex justify-end">
