@@ -429,7 +429,13 @@
 </ConfirmDialog>
 
 <ConfirmDialog
-  open={renaming !== null}
+  bind:open={
+    () => renaming !== null,
+    (open) => {
+      if (open) return;
+      renaming = null;
+    }
+  }
   title={m.document_template_rename()}
   confirmLabel={m.document_template_save()}
   pendingLabel={m.document_template_saving()}
@@ -449,7 +455,14 @@
 </ConfirmDialog>
 
 <ConfirmDialog
-  open={replacing !== null}
+  bind:open={
+    () => replacing !== null,
+    (open) => {
+      if (open) return;
+      replacing = null;
+      replaceFile = null;
+    }
+  }
   title={m.document_template_replace_file()}
   description={replacing?.name}
   confirmLabel={m.document_template_save()}
@@ -473,7 +486,13 @@
 </ConfirmDialog>
 
 <ConfirmDialog
-  open={deleting !== null}
+  bind:open={
+    () => deleting !== null,
+    (open) => {
+      if (open) return;
+      deleting = null;
+    }
+  }
   title={m.document_template_delete()}
   description={m.document_template_delete_confirmation()}
   confirmLabel={m.delete()}
