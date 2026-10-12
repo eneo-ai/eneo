@@ -100,14 +100,14 @@ const heading = (text: string) =>
   `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
 
 /** A template with content controls, in the shape Word (and Flows' standard templates) write. */
-async function controlTemplate(body: string): Promise<Buffer> {
+async function controlTemplate(body: string, header?: string): Promise<Buffer> {
   const packed = Buffer.from(
     await Packer.toBuffer(
       new Document({
         sections: [
           {
             headers: {
-              default: new Header({ children: [new Paragraph("Sundsvalls kommun")] }),
+              default: new Header({ children: [new Paragraph("HEADER")] }),
             },
             children: [new Paragraph("BODY")],
           },
@@ -118,6 +118,11 @@ async function controlTemplate(body: string): Promise<Buffer> {
   return rewrite(packed, {
     "word/document.xml": (xml) =>
       xml.replace(/<w:p><w:r><w:t[^>]*>BODY<\/w:t><\/w:r><\/w:p>/, body),
+    "word/header1.xml": (xml) =>
+      xml.replace(
+        /<w:p><w:r><w:t[^>]*>HEADER<\/w:t><\/w:r><\/w:p>/,
+        header ?? "<w:p><w:r><w:t>Sundsvalls kommun</w:t></w:r></w:p>",
+      ),
   });
 }
 const REPORT_BODY =
@@ -283,6 +288,24 @@ describe("rendering into templates", () => {
 });
 
 describe("filling templates", () => {
+  test("a control name that recurs is filled everywhere, in the header too", async () => {
+    const template = await controlTemplate(
+      DOCUMENT_BODY + `<w:p><w:r><w:t xml:space="preserve">Ärende: </w:t></w:r>${textControl("titel", "Titel", "Titel")}</w:p>`,
+      `<w:p>${textControl("titel", "Titel", "Titel")}</w:p>`,
+    );
+    const buffer = await renderIntoTemplate(
+      template,
+      { kind: "markdown", title: "Rapport om trygghet", language: "sv", content: "Text." },
+      { images: new Map(), organisationName: "Kommunen" },
+    );
+    const zip = await JSZip.loadAsync(buffer);
+    const body = await zip.file("word/document.xml")!.async("string");
+    const header = await zip.file("word/header1.xml")!.async("string");
+    expect(body.match(/Rapport om trygghet/g)).toHaveLength(2);
+    expect(header).toContain("Rapport om trygghet");
+    expect(header).not.toContain("<w:showingPlcHdr/>");
+  });
+
   test("rich controls take Markdown under their heading, empty values remove a control", async () => {
     const template = await controlTemplate(REPORT_BODY);
     const { buffer, placeholders } = await fillTemplateDocx(template, {

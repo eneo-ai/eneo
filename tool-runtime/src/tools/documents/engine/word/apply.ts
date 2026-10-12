@@ -130,8 +130,8 @@ async function patchTemplate(
   for (const part of documentParts) {
     const controls = controlsOf(part.root, part.location, styles.headingLevelOf);
     for (const fill of fills) {
-      if (fill.placeholder.syntax !== "control" || fill.placeholder.location !== part.location)
-        continue;
+      if (fill.placeholder.syntax !== "control") continue;
+      // A name may recur, in the body and in a header alike; every occurrence takes the value.
       for (const { placeholder, sdt } of controls) {
         if (placeholder.name !== fill.placeholder.name || !placeholder.supported) continue;
         if (fill.value === "") {
