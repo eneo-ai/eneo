@@ -978,7 +978,12 @@ def is_named_result_location_id(value: str) -> bool:
     if len(decoded) != 2:
         return False
     kind, segments = decoded
-    if kind not in {"exact", "unplaced"} or not isinstance(segments, list):
+    # The decoded text is whatever was written: only text can be a kind.
+    if (
+        not isinstance(kind, str)
+        or kind not in {"exact", "unplaced"}
+        or not isinstance(segments, list)
+    ):
         return False
     items = cast(list[object], segments)
     return (

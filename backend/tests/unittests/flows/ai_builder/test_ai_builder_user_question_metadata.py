@@ -727,6 +727,36 @@ def test_editing_rejects_an_unknown_opaque_location_id_exactly() -> None:
     }
 
 
+@pytest.mark.parametrize("name", ['[[],["x"]]', '[{},["x"]]'])
+def test_a_name_that_only_looks_like_a_location_id_is_a_name_the_user_added(
+    name: str,
+) -> None:
+    # Kills the mutant that looks the first element up among the id kinds
+    # without asking for text: a list or an object there raised TypeError out
+    # of the request instead of reading the text as a name the user typed.
+    events = _located_field("events")
+
+    prepared = prepare_user_question_metadata(
+        conversation=_disclosed_fields_conversation(named_content_fields=[events]),
+        message="",
+        question_answer={
+            "kind": "named_content_fields_edit",
+            "requirements_version": "a" * 64,
+            "field_names": [events.id, name],
+        },
+    )
+
+    assert prepared.metadata == {
+        "named_content_fields_edit": {
+            "schema_version": 1,
+            "requirements_version": "a" * 64,
+            "field_names": [events.id, name],
+            "added_field_names": [name],
+            "added_field_placements": {},
+        }
+    }
+
+
 def test_editing_the_field_list_records_the_set_the_user_left_standing() -> None:
     prepared = prepare_user_question_metadata(
         conversation=_disclosed_fields_conversation(),
