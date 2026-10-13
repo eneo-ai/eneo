@@ -60,8 +60,11 @@ The repository uses GitHub security features and CI to prevent regressions:
 - Temporary dependency mitigations belong in `frontend/patches/SECURITY.md`, with
   an owner, exact advisory, regression tests and review expiry. The audit retains
   the raw finding and only accepts the named mitigation after its tests pass.
-- Gitleaks exclusions use exact fingerprints for reviewed test credentials and
-  generated schema examples. They do not exclude entire directories or rules.
+- Gitleaks exclusions in `.gitleaks.toml` require both an exact file path and
+  an exact reviewed test credential or generated schema example. They apply
+  only to the named rule, survive squash commits and line moves, and do not
+  exclude entire files, directories or rules. The security workflow tests that
+  changed values and values outside their reviewed files are still detected.
   Release review includes a full-history audit and confirmation that any real
   historical credentials have been revoked; a diff scan cannot prove revocation.
 - CodeQL advanced setup is paused while maintainers evaluate a code-scanning

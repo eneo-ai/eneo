@@ -56,6 +56,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/security-tools
+      - name: Verify secret-scanning exclusions
+        run: node --test --test-concurrency=1 .github/scripts/gitleaks-policy.test.mjs
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - name: Scan source and workflows
         run: >-
