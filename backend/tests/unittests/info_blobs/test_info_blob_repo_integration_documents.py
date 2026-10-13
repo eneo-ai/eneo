@@ -6,9 +6,12 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.info_blobs.info_blob_repo import InfoBlobRepository, _document_matches
+
+ANCHOR = "https://contoso.sharepoint.com/sites/KS/Shared%20Documents/Protokoll"
 
 
 def _compiled(statement) -> str:
@@ -54,13 +57,13 @@ def session():
     return session
 
 
-async def test_page_filters_active_documents_of_the_item_on_title_or_url(session):
+async def test_page_filters_active_documents_of_the_item_on_title_or_path(session):
     knowledge_id = uuid4()
     record = _record(knowledge_id)
     session.scalars.return_value = [record]
 
     page = await InfoBlobRepository(session).get_integration_knowledge_page(
-        knowledge_id, q="50%_x", limit=50, offset=100
+        knowledge_id, q="50%_x", url_anchor=ANCHOR, limit=50, offset=100
     )
 
     assert page.total_count == 312
@@ -74,7 +77,10 @@ async def test_page_filters_active_documents_of_the_item_on_title_or_url(session
         assert f"info_blobs.integration_knowledge_id = '{knowledge_id}'" in sql
         assert "info_blobs.version_state = 'active'" in sql
         assert "info_blobs.title ILIKE '%50\\%\\_x%' ESCAPE '\\'" in sql
-        assert "info_blobs.url ILIKE '%50\\%\\_x%' ESCAPE '\\'" in sql
+        assert (
+            f"SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) "
+            "ILIKE '%50\\%\\_x%' ESCAPE '\\'"
+        ) in sql
     assert "count(*)" in totals_sql
     assert "coalesce(sum(info_blobs.size), 0)" in totals_sql
     assert "LIMIT 50 OFFSET 100" in page_sql
@@ -112,3 +118,54 @@ async def test_page_orders_by_the_requested_key_with_a_stable_tiebreak(
     page_sql = _compiled(session.scalars.await_args.args[0])
     assert expected in page_sql
     assert "ILIKE" not in page_sql
+
+
+@pytest.mark.parametrize(
+    "q, anchor, expected_url_matches",
+    [
+        (
+            "Årsmöte",
+            ANCHOR,
+            [
+                f"SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) ILIKE '%Årsmöte%'",
+                f"SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) "
+                "ILIKE '%\\%C3\\%85rsm\\%C3\\%B6te%'",
+            ],
+        ),
+        (
+            "Shared Documents",
+            ANCHOR,
+            [
+                f"SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) "
+                "ILIKE '%Shared Documents%'",
+                f"SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) "
+                "ILIKE '%Shared\\%20Documents%'",
+            ],
+        ),
+        # Nothing to encode: one URL match, below the anchor only, so the
+        # site name KS in /sites/KS cannot match every document of the item.
+        (
+            "KS",
+            ANCHOR,
+            [f"SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) ILIKE '%KS%'"],
+        ),
+        ("KS", None, ["info_blobs.url ILIKE '%KS%'"]),
+    ],
+    ids=[
+        "encoded Swedish folder",
+        "encoded space",
+        "site name below anchor",
+        "no anchor",
+    ],
+)
+def test_search_matches_the_title_and_the_url_below_the_item(
+    q, anchor, expected_url_matches
+):
+    sql = _compiled(sa.select(sa.literal(1)).where(_document_matches(q, anchor)))
+
+    assert f"info_blobs.title ILIKE '%{q}%'" in sql
+    for expected in expected_url_matches:
+        assert expected in sql
+    assert sql.count("ILIKE") == 1 + len(expected_url_matches)
+    if anchor:
+        assert "info_blobs.url ILIKE" not in sql

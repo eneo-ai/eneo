@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, List, Literal, TypeVar
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
@@ -96,11 +97,11 @@ class IntegrationDocumentsPage:
 
 
 IntegrationDocumentSort = Literal["name", "path", "size", "updated_at"]
-_SortKey = ColumnElement[Any] | InstrumentedAttribute[Any]
+_Column = ColumnElement[Any] | InstrumentedAttribute[Any]
 _LIKE_ESCAPE = "\\"
 
 
-def _contains(column: InstrumentedAttribute[Any], needle: str) -> ColumnElement[bool]:
+def _contains(column: _Column, needle: str) -> ColumnElement[bool]:
     escaped = (
         needle.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
         .replace("%", _LIKE_ESCAPE + "%")
@@ -109,7 +110,28 @@ def _contains(column: InstrumentedAttribute[Any], needle: str) -> ColumnElement[
     return column.ilike(f"%{escaped}%", escape=_LIKE_ESCAPE)
 
 
-def _document_sort_keys(sort: IntegrationDocumentSort) -> list[_SortKey]:
+def _document_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
+    """``q`` in the title, or in the URL below the item's own URL.
+
+    Document URLs are percent-encoded, so the encoded form of ``q`` is tried
+    as well. Only the part after ``url_anchor`` (the item's site, library or
+    folder URL) is searched, so a site named KS does not match every document
+    under /sites/KS. Items without a stored URL fall back to the whole URL.
+    """
+    path: _Column = (
+        sa.func.substring(InfoBlobs.url, len(url_anchor) + 1)
+        if url_anchor
+        else InfoBlobs.url
+    )
+    needles = [q]
+    if (encoded := quote(q, safe="/")) != q:
+        needles.append(encoded)
+    return sa.or_(
+        _contains(InfoBlobs.title, q), *(_contains(path, needle) for needle in needles)
+    )
+
+
+def _document_sort_keys(sort: IntegrationDocumentSort) -> list[_Column]:
     if sort == "name":
         return [InfoBlobs.title]
     if sort == "size":
@@ -1008,20 +1030,23 @@ class InfoBlobRepository:
         integration_knowledge_id: UUID,
         *,
         q: str | None = None,
+        url_anchor: str | None = None,
         sort: IntegrationDocumentSort = "path",
         descending: bool = False,
         limit: int,
         offset: int = 0,
     ) -> IntegrationDocumentsPage:
-        """Active documents of one item, filtered on title or URL, as one page."""
+        """Active documents of one item, filtered on title or path, as one page.
+
+        ``url_anchor`` is the item's own URL without a trailing slash; the
+        search covers the URL part after it.
+        """
         conditions: list[ColumnElement[bool]] = [
             InfoBlobs.integration_knowledge_id == integration_knowledge_id,
             active_info_blob_version(),
         ]
         if q:
-            conditions.append(
-                sa.or_(_contains(InfoBlobs.title, q), _contains(InfoBlobs.url, q))
-            )
+            conditions.append(_document_matches(q, url_anchor))
         totals = (
             await self.session.execute(
                 sa.select(
