@@ -183,6 +183,19 @@ class TestTokenScoping:
 
         assert assistant_id_from_token(token) == assistant_id
 
+    def test_scoped_token_carries_the_table_tools_claim_only_when_asked(self):
+        from eneo.internal_mcp.foundation import table_tools_from_token
+
+        with_tools = AuthService().create_scoped_mcp_token(
+            self._user(), assistant_id=uuid4(), table_tools=True
+        )
+        without = AuthService().create_scoped_mcp_token(
+            self._user(), assistant_id=uuid4()
+        )
+
+        assert table_tools_from_token(with_tools) is True
+        assert table_tools_from_token(without) is False
+
     def test_unscoped_access_token_is_rejected(self):
         token = AuthService().create_access_token_for_user(self._user())
 

@@ -129,6 +129,7 @@ class AuthService:
         *,
         assistant_id: UUID,
         mcp_server_id: UUID | None = None,
+        table_tools: bool = False,
         expires_in: int = 15,
     ) -> str:
         """Mint a short-lived access token for a loopback MCP server.
@@ -146,11 +147,15 @@ class AuthService:
 
         ``mcp_server_id`` is set for a built-in provider: the loopback tool
         reads its configuration from that ``mcp_servers`` row, so the row
-        cannot be chosen by the caller.
+        cannot be chosen by the caller. ``table_tools`` records that the
+        completion also attached the file-analysis tools, so the files server
+        can point spreadsheets at them instead of dumping their text.
         """
         claims: dict[str, object] = {"assistant_id": str(assistant_id)}
         if mcp_server_id is not None:
             claims["mcp_server_id"] = str(mcp_server_id)
+        if table_tools:
+            claims["table_tools"] = True
         return self.create_access_token_for_user(
             user,
             audience=INTERNAL_MCP_AUDIENCE,
