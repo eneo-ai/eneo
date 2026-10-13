@@ -84,16 +84,34 @@ def mock_tenant_app_service_account(mock_tenant_app):
     return mock_tenant_app
 
 
+def _size_ledger(repo: AsyncMock, initial: int) -> dict[str, int]:
+    """Stand in for the atomic UPDATE: the row's size lives here, not on entities."""
+    ledger = {"size": initial}
+
+    async def adjust_size(id, delta):
+        ledger["size"] = max(0, ledger["size"] + delta)
+        return ledger["size"]
+
+    repo.adjust_size = AsyncMock(side_effect=adjust_size)
+    return ledger
+
+
 @pytest.fixture
 def mock_dependencies(mock_user, mock_integration_knowledge):
     """Create all mock dependencies for SharePointContentService."""
+    integration_knowledge_repo = AsyncMock()
+
+    async def adjust_size(id, delta):
+        return max(0, mock_integration_knowledge.size + delta)
+
+    integration_knowledge_repo.adjust_size = AsyncMock(side_effect=adjust_size)
     return {
         "job_service": AsyncMock(),
         "oauth_token_repo": AsyncMock(),
         "user_integration_repo": AsyncMock(),
         "user": mock_user,
         "info_blob_service": AsyncMock(),
-        "integration_knowledge_repo": AsyncMock(),
+        "integration_knowledge_repo": integration_knowledge_repo,
         "oauth_token_service": AsyncMock(),
         "session": AsyncMock(),
         "tenant_sharepoint_app_repo": AsyncMock(),
@@ -346,9 +364,10 @@ class TestProcessInfoBlobSizeAccounting:
         )
 
         assert mock_integration_knowledge.size == 530
-        mock_dependencies["integration_knowledge_repo"].update.assert_called_once_with(
-            obj=mock_integration_knowledge
-        )
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].adjust_size.assert_awaited_once_with(mock_integration_knowledge.id, 30)
+        mock_dependencies["integration_knowledge_repo"].update.assert_not_called()
 
     async def test_does_not_change_size_when_existing_blob_size_is_unchanged(
         self, service, mock_dependencies, mock_integration_knowledge
@@ -382,6 +401,50 @@ class TestProcessInfoBlobSizeAccounting:
         )
 
         assert mock_integration_knowledge.size == 500
+        mock_dependencies["integration_knowledge_repo"].adjust_size.assert_not_called()
+        mock_dependencies["integration_knowledge_repo"].update.assert_not_called()
+
+    async def test_sequential_adjustments_from_stale_entity_copies_lose_nothing(
+        self, service, mock_dependencies, mock_user
+    ):
+        """Two copies of the row, each with a stale size, must both land."""
+        ledger = _size_ledger(mock_dependencies["integration_knowledge_repo"], 100)
+        knowledge_id = uuid4()
+        copy_a = MagicMock(id=knowledge_id, size=100)
+        copy_b = MagicMock(id=knowledge_id, size=100)
+
+        new_blob = MagicMock(id=uuid4(), size=30)
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=None
+        )
+        mock_dependencies[
+            "info_blob_service"
+        ].publish_info_blob_without_validation = AsyncMock(return_value=new_blob)
+        await service._process_info_blob(
+            title="New",
+            text="fresh text",
+            url="https://example.com/new",
+            integration_knowledge=copy_a,
+            sharepoint_item_id="item-new",
+        )
+
+        deleted_blob = MagicMock(size=40)
+        repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[deleted_blob]
+        )
+        await service._delete_local_sharepoint_item(
+            item_id="item-old",
+            item_name="old.docx",
+            integration_knowledge=copy_b,
+            integration_knowledge_id=knowledge_id,
+            stats=service._initialize_stats(),
+            reason="removed",
+        )
+
+        assert ledger["size"] == 90
+        assert copy_a.size == 130
+        assert copy_b.size == 90
         mock_dependencies["integration_knowledge_repo"].update.assert_not_called()
 
     async def test_skips_reembed_when_content_hash_unchanged(
@@ -2162,6 +2225,7 @@ class TestFullSyncReconciliation:
     ):
         ik = self._ik()
         ik.size = 100
+        ledger = _size_ledger(mock_dependencies["integration_knowledge_repo"], 100)
         indexed = [(uuid4(), "orphan-1")]
         deleted_blob = MagicMock()
         deleted_blob.size = 40
@@ -2187,9 +2251,7 @@ class TestFullSyncReconciliation:
             )
 
         assert ik.size == 60
-        mock_dependencies["integration_knowledge_repo"].update.assert_called_once_with(
-            obj=ik
-        )
+        assert ledger["size"] == 60
 
     async def test_skips_when_enumeration_fails(self, service, mock_dependencies):
         ik = self._ik()

@@ -1421,13 +1421,20 @@ class SharePointContentService:
             embedding_model=integration_knowledge.embedding_model,
         )
 
-        current_size = safe_int(getattr(integration_knowledge, "size", 0))
         new_blob_size = safe_int(getattr(info_blob, "size", 0))
-        size_delta = new_blob_size - previous_blob_size
-        if size_delta:
-            integration_knowledge.size = max(0, current_size + size_delta)
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+        await self._adjust_size(
+            integration_knowledge, new_blob_size - previous_blob_size
+        )
         return "embedded"
+
+    async def _adjust_size(
+        self, integration_knowledge: "IntegrationKnowledge", delta: int
+    ) -> None:
+        if not delta:
+            return
+        integration_knowledge.size = await self.integration_knowledge_repo.adjust_size(
+            integration_knowledge.id, delta
+        )
 
     @staticmethod
     def _count_outcome(
@@ -1466,11 +1473,10 @@ class SharePointContentService:
                 if blob is not None  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard
             ]
             if valid_deleted_blobs:
-                current_size = safe_int(getattr(integration_knowledge, "size", 0))
                 deleted_size = sum(
                     safe_int(getattr(blob, "size", 0)) for blob in valid_deleted_blobs
                 )
-                integration_knowledge.size = max(0, current_size - deleted_size)
+                await self._adjust_size(integration_knowledge, -deleted_size)
 
             deleted_count = len(valid_deleted_blobs)
             if deleted_count:
@@ -1800,9 +1806,8 @@ class SharePointContentService:
             len(orphans),
             integration_knowledge.id,
         )
-        deleted_count = 0
         for _blob_id, item_id in orphans:
-            deleted_count += await self._delete_local_sharepoint_item(
+            await self._delete_local_sharepoint_item(
                 item_id=item_id,
                 item_name=item_id,
                 integration_knowledge=integration_knowledge,
@@ -1810,8 +1815,6 @@ class SharePointContentService:
                 stats=stats,
                 reason="reconcile-orphan",
             )
-        if deleted_count:
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
     async def _fetch_and_process_content(
         self,

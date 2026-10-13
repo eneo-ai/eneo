@@ -23,6 +23,7 @@ from eneo.integration.infrastructure.mappers.integration_knowledge_mapper import
     IntegrationKnowledgeMapper,
 )
 from eneo.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
+from eneo.main.exceptions import NotFoundException
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -93,3 +94,20 @@ class IntegrationKnowledgeRepoImpl(
     @override
     async def remove(self, id: "UUID") -> None:
         await self.delete(id=id)
+
+    @override
+    async def adjust_size(self, id: "UUID", delta: int) -> int:
+        stmt = (
+            sa.update(self._db_model)
+            .where(self._db_model.id == id)
+            .values(
+                size=sa.func.greatest(
+                    0, sa.func.coalesce(self._db_model.size, 0) + delta
+                )
+            )
+            .returning(self._db_model.size)
+        )
+        new_size = await self.session.scalar(stmt)
+        if new_size is None:
+            raise NotFoundException(f"{self._db_model.__name__} not found")
+        return int(new_size)
