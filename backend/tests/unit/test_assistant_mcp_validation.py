@@ -40,6 +40,7 @@ def _build_assistant_service_with_mocks(*, is_personal=True, server_in_space=Fal
     )
     service.repo = SimpleNamespace(
         session=session,
+        lock=AsyncMock(),
         add_mcp_server=AsyncMock(),
     )
     service.user = SimpleNamespace(tenant_id=uuid4())

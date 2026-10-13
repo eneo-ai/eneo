@@ -3746,6 +3746,16 @@ class AssistantService:
         """Add an MCP server to an assistant."""
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assert space.id is not None
+        # Incremental additions share the update path's fit/row lock order.
+        # Reload after waiting so combined tool schemas are validated together.
+        await acquire_personal_default_fit_lock(
+            session=self.repo.session,
+            tenant_id=self.user.tenant_id,
+            shared=True,
+        )
+        await self.repo.lock(assistant_id, space.id)
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assert space.id is not None
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
