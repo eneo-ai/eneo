@@ -1,15 +1,11 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
-  import * as Table from "$lib/components/resource-table/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
-  import IntegrationNameCell from "../../IntegrationNameCell.svelte";
-  import IntegrationSyncStatusCell from "../../IntegrationSyncStatusCell.svelte";
-  import IntegrationActions from "../../IntegrationActions.svelte";
+  import IntegrationTreeTable from "../../IntegrationTreeTable.svelte";
   import SharePointWrapperActions from "../../SharePointWrapperActions.svelte";
   import SyncHistoryDialog from "../../SyncHistoryDialog.svelte";
-  import { integrationData } from "$lib/features/integrations/IntegrationData";
   import { m } from "$lib/paraglide/messages";
 
   let { data } = $props();
@@ -60,56 +56,6 @@
       selectedIntegrationForSyncHistory = null;
     }
   });
-
-  // Table setup
-  const table = Table.createWithStore(wrapperItems);
-
-  const viewModel = table.createViewModel([
-    table.column({
-      header: m.name(),
-      accessor: (item) => item,
-      cell: (item) => {
-        return Table.renderComponent(IntegrationNameCell, {
-          knowledge: item.value
-        });
-      }
-    }),
-
-    table.column({
-      header: m.status(),
-      accessor: (item) => item,
-      cell: (item) => {
-        return Table.renderComponent(IntegrationSyncStatusCell, {
-          knowledge: item.value,
-          onShowSyncHistory: () => handleSelectIntegration(item.value)
-        });
-      }
-    }),
-
-    table.column({
-      accessor: (item) => item,
-      header: m.link(),
-      cell: (item) => {
-        const labelKey = integrationData[item.value.integration_type].previewLinkLabel;
-        const translatedLabel =
-          (m as Record<string, ((...args: unknown[]) => string) | undefined>)[labelKey]?.() ??
-          labelKey;
-        return Table.renderComponent(Table.ButtonCell, {
-          link: item.value.url ?? "",
-          label: translatedLabel,
-          linkIsExternal: true
-        });
-      }
-    }),
-
-    table.columnActions({
-      cell: (item) => {
-        return Table.renderComponent(IntegrationActions, {
-          knowledgeItem: item.value
-        });
-      }
-    })
-  ]);
 </script>
 
 <svelte:head>
@@ -142,9 +88,11 @@
     </Page.Flex>
   </Page.Header>
   <Page.Main>
-    <Table.Root {viewModel} resourceName="integration">
-      <Table.Group></Table.Group>
-    </Table.Root>
+    <IntegrationTreeTable
+      items={$wrapperItems}
+      spaceRouteId={$currentSpace.routeId}
+      onShowSyncHistory={handleSelectIntegration}
+    />
     <SyncHistoryDialog
       knowledge={selectedIntegrationForSyncHistory}
       bind:open={showSyncHistoryDialog}
