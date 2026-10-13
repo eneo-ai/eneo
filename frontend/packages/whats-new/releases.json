@@ -191,6 +191,10 @@
           "body": {
             "en": "Under Admin > Integrations the SharePoint card shows whether the stored credentials still work, with Microsoft's error and guidance when they do not. A service account can be signed in again with one button, keeping the configuration and all imported knowledge.",
             "sv": "Under Administration > Integrationer visar SharePoint-kortet om de sparade inloggningsuppgifterna fortfarande fungerar, med Microsofts fel och en vägledning när de inte gör det. Ett tjänstekonto kan loggas in igen med en knapp, och konfigurationen och all importerad kunskap behålls."
+          },
+          "showMe": {
+            "href": "/admin/integrations",
+            "anchor": "admin-integrations"
           }
         },
         {

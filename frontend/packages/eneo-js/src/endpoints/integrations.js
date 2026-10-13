@@ -426,6 +426,20 @@ export function initIntegrations(client) {
         },
 
         /**
+         * Recreate every SharePoint subscription of the tenant, expired or not,
+         * so Graph posts to the currently configured public address.
+         * @returns {Promise<import("../types/schema").components["schemas"]["SubscriptionRenewalResult"]>}
+         * @throws {EneoError}
+         * */
+        recreateAllSubscriptions: async () => {
+          const endpoint = /** @type {any} */ (
+            "/api/v1/admin/sharepoint/subscriptions/recreate-all"
+          );
+          const res = await client.fetch(endpoint, { method: "post" });
+          return res;
+        },
+
+        /**
          * Recreate a specific SharePoint subscription
          * @param {{id: string}} subscription The subscription to recreate
          * @throws {EneoError}
@@ -441,6 +455,34 @@ export function initIntegrations(client) {
               }
             }
           );
+          return res;
+        },
+
+        /**
+         * Test the stored SharePoint app (tenant app or service account) with a
+         * full token round trip; the backend records the outcome as the app's
+         * credential health.
+         * @returns {Promise<import("../types/schema").components["schemas"]["TenantAppTestResult"]>}
+         * @throws {EneoError}
+         * */
+        testStoredConnection: async () => {
+          const options = /** @type {any} */ ({ method: "post" });
+          const res = await client.fetch("/api/v1/admin/sharepoint/app/test", options);
+          return res;
+        },
+
+        /**
+         * Test tenant-app credentials before saving them; nothing is stored.
+         * @param {{client_id: string, client_secret: string, tenant_domain: string, certificate_path?: string | null}} credentials
+         * @returns {Promise<import("../types/schema").components["schemas"]["TenantAppTestResult"]>}
+         * @throws {EneoError}
+         * */
+        testTenantAppCredentials: async (credentials) => {
+          const options = /** @type {any} */ ({
+            method: "post",
+            requestBody: { "application/json": credentials }
+          });
+          const res = await client.fetch("/api/v1/admin/sharepoint/app/test", options);
           return res;
         },
 

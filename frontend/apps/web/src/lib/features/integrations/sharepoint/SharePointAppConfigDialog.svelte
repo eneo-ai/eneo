@@ -136,13 +136,17 @@
     }
 
     try {
-      const data = await eneo.client.fetch("/api/v1/admin/sharepoint/app", { method: "get" });
-      if (data) applyExistingConfig(data);
+      await refreshStoredConfig();
     } catch (error) {
       configLoadFailed = true;
       toastError(error, m.sharepoint_config_load_error());
     }
   });
+
+  async function refreshStoredConfig() {
+    const data = await eneo.client.fetch("/api/v1/admin/sharepoint/app", { method: "get" });
+    if (data) applyExistingConfig(data);
+  }
 
   function buildCredentialsPayload(): TenantSharePointAppCreate {
     return {
@@ -166,13 +170,51 @@
     }
 
     try {
-      testResult = await eneo.client.fetch("/api/v1/admin/sharepoint/app/test", {
-        method: "post",
-        requestBody: { "application/json": buildCredentialsPayload() }
-      });
+      testResult =
+        await eneo.integrations.admin.sharepoint.testTenantAppCredentials(
+          buildCredentialsPayload()
+        );
     } catch (error) {
       toastError(error);
       testResult = { success: false, error_message: getErrorMessage(error) };
+    }
+  });
+
+  const testStoredConnection = createAsyncState(async () => {
+    if (!existingConfig) return;
+    testResult = null;
+
+    if (isFixtureSession) {
+      await sharePointFixtureDelay();
+      const failed = activeFixtureScenario === "connection_error";
+      testResult = failed
+        ? fixtureConnectionFailure()
+        : { success: true, details: m.sharepoint_setup_fixture_test_success_details() };
+      existingConfig = {
+        ...existingConfig,
+        auth_status: failed ? "error" : "ok",
+        last_auth_error: failed ? SHAREPOINT_SETUP_FIXTURE_TEST_ERROR : null,
+        last_auth_error_at: failed ? new Date().toISOString() : null,
+        last_auth_success_at: failed
+          ? existingConfig.last_auth_success_at
+          : new Date().toISOString()
+      };
+      return;
+    }
+
+    try {
+      testResult = await eneo.integrations.admin.sharepoint.testStoredConnection();
+    } catch (error) {
+      toastError(error);
+      testResult = { success: false, error_message: getErrorMessage(error) };
+      return;
+    }
+
+    // The backend records the outcome as credential health; reload so the badge reflects it.
+    try {
+      await refreshStoredConfig();
+    } catch (error) {
+      toastError(error, m.sharepoint_config_load_error());
     }
   });
 
@@ -322,6 +364,40 @@
   });
 </script>
 
+{#snippet testResultAlert(successTitle: string)}
+  {#if testResult}
+    {#if testResult.success}
+      <Alert.Root class="border-positive-default/40 bg-positive-default/10" role="status">
+        <CircleCheck class="text-positive-stronger!" aria-hidden="true" />
+        <Alert.Title>{successTitle}</Alert.Title>
+        {#if testResult.details}
+          <Alert.Description>{testResult.details}</Alert.Description>
+        {/if}
+      </Alert.Root>
+    {:else}
+      <Alert.Root variant="destructive" role="alert">
+        <TriangleAlert aria-hidden="true" />
+        <Alert.Title>{m.connection_failed()}</Alert.Title>
+        {#if testFailureText}
+          <Alert.Description>
+            {#if testFailureGuidance}
+              <p>{getMicrosoftAuthGuidanceText(testFailureGuidance)}</p>
+              <details class="mt-1">
+                <summary class="cursor-pointer text-xs hover:underline">
+                  {m.sharepoint_auth_error_details()}
+                </summary>
+                <p class="mt-1 text-xs break-words">{testFailureText}</p>
+              </details>
+            {:else}
+              <p class="break-words">{testFailureText}</p>
+            {/if}
+          </Alert.Description>
+        {/if}
+      </Alert.Root>
+    {/if}
+  {/if}
+{/snippet}
+
 <Dialog.Root bind:open={dialogOpen}>
   <Dialog.Content
     class="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[85dvh] sm:max-w-xl"
@@ -416,7 +492,28 @@
                 <SharePointAuthHealth config={existingConfig} />
               </dd>
             </dl>
+            <div
+              class="border-border mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3"
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={testStoredConnection.isLoading}
+                aria-describedby="sharepoint-stored-test-description"
+                onclick={testStoredConnection}
+              >
+                {#if testStoredConnection.isLoading}
+                  <LoaderCircle class="animate-spin" aria-hidden="true" />
+                {/if}
+                {testStoredConnection.isLoading ? m.testing() : m.test_connection()}
+              </Button>
+              <p id="sharepoint-stored-test-description" class="text-muted-foreground text-xs">
+                {m.sharepoint_stored_connection_description()}
+              </p>
+            </div>
           </div>
+
+          {@render testResultAlert(m.sharepoint_stored_connection_ok())}
 
           {#if isServiceAccountConfig}
             <p class="text-muted-foreground text-sm">{m.sharepoint_reauth_description()}</p>
@@ -537,37 +634,7 @@
             </Field.Description>
           </Field.Field>
 
-          {#if testResult}
-            {#if testResult.success}
-              <Alert.Root class="border-positive-default/40 bg-positive-default/10" role="status">
-                <CircleCheck class="text-positive-stronger!" aria-hidden="true" />
-                <Alert.Title>{m.connection_successful()}</Alert.Title>
-                {#if testResult.details}
-                  <Alert.Description>{testResult.details}</Alert.Description>
-                {/if}
-              </Alert.Root>
-            {:else}
-              <Alert.Root variant="destructive" role="alert">
-                <TriangleAlert aria-hidden="true" />
-                <Alert.Title>{m.connection_failed()}</Alert.Title>
-                {#if testFailureText}
-                  <Alert.Description>
-                    {#if testFailureGuidance}
-                      <p>{getMicrosoftAuthGuidanceText(testFailureGuidance)}</p>
-                      <details class="mt-1">
-                        <summary class="cursor-pointer text-xs hover:underline">
-                          {m.sharepoint_auth_error_details()}
-                        </summary>
-                        <p class="mt-1 text-xs break-words">{testFailureText}</p>
-                      </details>
-                    {:else}
-                      <p class="break-words">{testFailureText}</p>
-                    {/if}
-                  </Alert.Description>
-                {/if}
-              </Alert.Root>
-            {/if}
-          {/if}
+          {@render testResultAlert(m.connection_successful())}
         </div>
       {/if}
     </div>
