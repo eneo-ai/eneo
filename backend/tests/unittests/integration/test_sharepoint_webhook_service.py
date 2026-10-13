@@ -5,15 +5,35 @@ including ChangeKey deduplication, scope filtering, and job queuing.
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 
+from eneo.integration.domain.entities.sharepoint_subscription import (
+    SharePointSubscription,
+)
 from eneo.integration.infrastructure.sharepoint_webhook_service import (
     SharepointWebhookService,
 )
 from eneo.jobs.job_models import Task
+
+
+def _subscription(
+    *,
+    subscription_id: str = "sub-123",
+    site_id: str = "site-123",
+    drive_id: str = "drive-456",
+) -> SharePointSubscription:
+    return SharePointSubscription(
+        id=uuid4(),
+        user_integration_id=uuid4(),
+        site_id=site_id,
+        subscription_id=subscription_id,
+        drive_id=drive_id,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=10),
+    )
 
 
 @dataclass
@@ -27,6 +47,7 @@ class Setup:
     user_repo: AsyncMock
     change_key_service: AsyncMock
     sharepoint_subscription_repo: AsyncMock
+    subscription: SharePointSubscription
 
 
 @pytest.fixture
@@ -38,7 +59,12 @@ def setup():
     user_repo = AsyncMock()
     change_key_service = AsyncMock()
     sharepoint_subscription_repo = AsyncMock()
-    sharepoint_subscription_repo.get_by_subscription_id.return_value = None
+    subscription = _subscription()
+    sharepoint_subscription_repo.get_by_subscription_id.side_effect = (
+        lambda subscription_id: subscription
+        if subscription_id == subscription.subscription_id
+        else None
+    )
 
     service = SharepointWebhookService(
         session=session,
@@ -60,6 +86,7 @@ def setup():
         user_repo=user_repo,
         change_key_service=change_key_service,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
+        subscription=subscription,
     )
 
 
@@ -141,14 +168,15 @@ def mock_oauth_token():
 async def test_client_state_validation_accepts_valid(setup: Setup, mock_notification):
     """Notifications with correct client state are accepted."""
     # Set up mock responses
-    setup.service._fetch_knowledge_by_site = AsyncMock(return_value=[])
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
 
     notifications = {"value": [mock_notification]}
 
     await setup.service.handle_notifications(notifications)
 
-    # Verify _fetch_knowledge_by_site was called (notification was processed)
-    setup.service._fetch_knowledge_by_site.assert_called_once_with(site_id="site-123")
+    setup.service._fetch_knowledge_by_subscription.assert_called_once_with(
+        setup.subscription.id
+    )
 
 
 async def test_client_state_validation_rejects_invalid(setup: Setup, mock_notification):
@@ -157,14 +185,14 @@ async def test_client_state_validation_rejects_invalid(setup: Setup, mock_notifi
     mock_notification["clientState"] = "wrong-client-state"
 
     # Set up mock responses
-    setup.service._fetch_knowledge_by_site = AsyncMock(return_value=[])
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
 
     notifications = {"value": [mock_notification]}
 
     await setup.service.handle_notifications(notifications)
 
-    # Verify _fetch_knowledge_by_site was NOT called (notification was rejected)
-    setup.service._fetch_knowledge_by_site.assert_not_called()
+    # Verify _fetch_knowledge_by_subscription was NOT called (notification was rejected)
+    setup.service._fetch_knowledge_by_subscription.assert_not_called()
     setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
 
 
@@ -173,11 +201,11 @@ async def test_client_state_validation_rejects_malformed(
 ):
     """Non-string clientState values are rejected without crashing."""
     mock_notification["clientState"] = {"unexpected": "shape"}
-    setup.service._fetch_knowledge_by_site = AsyncMock(return_value=[])
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
 
     await setup.service.handle_notifications({"value": [mock_notification]})
 
-    setup.service._fetch_knowledge_by_site.assert_not_called()
+    setup.service._fetch_knowledge_by_subscription.assert_not_called()
     setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
 
 
@@ -186,13 +214,13 @@ async def test_rejects_all_when_client_state_not_configured(
 ):
     """Fail closed: with no configured secret, every notification is rejected."""
     setup.service.expected_client_state = ""
-    setup.service._fetch_knowledge_by_site = AsyncMock(return_value=[])
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
 
     notifications = {"value": [mock_notification]}
 
     await setup.service.handle_notifications(notifications)
 
-    setup.service._fetch_knowledge_by_site.assert_not_called()
+    setup.service._fetch_knowledge_by_subscription.assert_not_called()
     setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
 
 
@@ -200,19 +228,79 @@ async def test_valid_webhook_records_subscription_received(
     setup: Setup, mock_notification
 ):
     """Valid notifications update subscription webhook health."""
-    subscription = MagicMock()
-    setup.sharepoint_subscription_repo.get_by_subscription_id.return_value = (
-        subscription
-    )
-    setup.service._fetch_knowledge_by_site = AsyncMock(return_value=[])
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
 
     await setup.service.handle_notifications({"value": [mock_notification]})
 
     setup.sharepoint_subscription_repo.get_by_subscription_id.assert_called_once_with(
         "sub-123"
     )
-    subscription.mark_webhook_received.assert_called_once()
-    setup.sharepoint_subscription_repo.update.assert_called_once_with(subscription)
+    assert setup.subscription.last_webhook_received_at is not None
+    setup.sharepoint_subscription_repo.update.assert_called_once_with(
+        setup.subscription
+    )
+
+
+async def test_unknown_subscription_is_ignored(setup: Setup, mock_notification):
+    """A subscriptionId we never stored reaches no tenant's knowledge."""
+    mock_notification["subscriptionId"] = "sub-from-someone-else"
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
+
+    await setup.service.handle_notifications({"value": [mock_notification]})
+
+    setup.service._fetch_knowledge_by_subscription.assert_not_called()
+    setup.sharepoint_subscription_repo.update.assert_not_called()
+    setup.session.execute.assert_not_called()
+
+
+async def test_notification_without_subscription_id_is_ignored(
+    setup: Setup, mock_notification
+):
+    del mock_notification["subscriptionId"]
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
+
+    await setup.service.handle_notifications({"value": [mock_notification]})
+
+    setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
+    setup.service._fetch_knowledge_by_subscription.assert_not_called()
+
+
+async def test_knowledge_lookup_filters_on_the_subscription_row(setup: Setup):
+    """Only knowledge referencing the subscription is loaded, never by site id."""
+    result = MagicMock()
+    result.all.return_value = []
+    setup.session.execute.return_value = result
+
+    await setup.service._fetch_knowledge_by_subscription(setup.subscription.id)
+
+    statement = setup.session.execute.await_args.args[0]
+    sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    assert (
+        f"integration_knowledge.sharepoint_subscription_id = '{setup.subscription.id.hex}'"
+        in sql
+    )
+    where_clause = sql.split("WHERE", 1)[1]
+    assert "site_id" not in where_clause and "drive_id" not in where_clause
+
+
+async def test_changekey_dedupe_is_scoped_per_subscription(
+    setup: Setup, mock_notification
+):
+    """Two subscriptions on one site each see their own notification."""
+    other = _subscription(subscription_id="sub-999")
+    stored = {s.subscription_id: s for s in (setup.subscription, other)}
+    setup.sharepoint_subscription_repo.get_by_subscription_id.side_effect = (
+        lambda subscription_id: stored.get(subscription_id)
+    )
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
+    second = dict(mock_notification, subscriptionId="sub-999")
+
+    await setup.service.handle_notifications({"value": [mock_notification, second]})
+
+    assert setup.service._fetch_knowledge_by_subscription.await_args_list == [
+        ((setup.subscription.id,),),
+        ((other.id,),),
+    ]
 
 
 async def test_empty_notifications_handled_gracefully(setup: Setup):
@@ -245,7 +333,7 @@ async def test_changekey_deduplication_prevents_duplicate_processing(
     setup.change_key_service.update_change_key.return_value = None
 
     # Mock database responses
-    setup.service._fetch_knowledge_by_site = AsyncMock(
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(mock_knowledge_db, mock_user_integration_db)]
     )
     setup.oauth_token_repo.one_or_none.return_value = mock_oauth_token
@@ -307,7 +395,7 @@ async def test_changekey_deduplication_allows_new_changekeys(
     }
 
     # Mock database responses
-    setup.service._fetch_knowledge_by_site = AsyncMock(
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(mock_knowledge_db, mock_user_integration_db)]
     )
     setup.oauth_token_repo.one_or_none.return_value = mock_oauth_token
@@ -416,7 +504,7 @@ async def test_tenant_app_integration_uses_tenant_app_id(
 ):
     """Tenant app integrations use tenant_app_id, no OAuth token."""
     # Mock database responses
-    setup.service._fetch_knowledge_by_site = AsyncMock(
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(mock_knowledge_db, mock_tenant_app_integration_db)]
     )
 
@@ -465,7 +553,7 @@ async def test_user_oauth_integration_uses_oauth_token(
 ):
     """User OAuth integrations use OAuth token, no tenant_app_id."""
     # Mock database responses
-    setup.service._fetch_knowledge_by_site = AsyncMock(
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(mock_knowledge_db, mock_user_integration_db)]
     )
 
@@ -516,7 +604,7 @@ async def test_tenant_app_integration_uses_admin_user_for_job(
 ):
     """Tenant app integrations use tenant admin as job owner."""
     # Mock database responses
-    setup.service._fetch_knowledge_by_site = AsyncMock(
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(mock_knowledge_db, mock_tenant_app_integration_db)]
     )
 
@@ -553,7 +641,7 @@ async def test_missing_tenant_admin_skips_integration(
 ):
     """Missing tenant admin causes integration to be skipped with warning."""
     # Mock database responses
-    setup.service._fetch_knowledge_by_site = AsyncMock(
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(mock_knowledge_db, mock_tenant_app_integration_db)]
     )
 
@@ -585,7 +673,7 @@ async def test_missing_oauth_token_skips_integration(
 ):
     """Missing OAuth token causes integration to be skipped with warning."""
     # Mock database responses
-    setup.service._fetch_knowledge_by_site = AsyncMock(
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(mock_knowledge_db, mock_user_integration_db)]
     )
 
@@ -625,7 +713,7 @@ async def test_delta_sync_when_delta_token_exists(
     mock_knowledge_db.delta_token = "delta-token-123"
 
     # Mock database responses
-    setup.service._fetch_knowledge_by_site = AsyncMock(
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(mock_knowledge_db, mock_user_integration_db)]
     )
 
@@ -667,7 +755,7 @@ async def test_full_sync_when_no_delta_token(
     mock_knowledge_db.delta_token = None
 
     # Mock database responses
-    setup.service._fetch_knowledge_by_site = AsyncMock(
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(mock_knowledge_db, mock_user_integration_db)]
     )
 
@@ -696,62 +784,20 @@ async def test_full_sync_when_no_delta_token(
         assert call_args.kwargs["task"] == Task.PULL_SHAREPOINT_CONTENT
 
 
-def test_extract_site_id_from_resource_url(setup: Setup):
-    """Site ID extracted correctly from resource URL."""
-    notification = {"resource": "sites/site-abc-123/drives/drive-456/root"}
-
-    site_id = setup.service._extract_site_id_from_notification(notification)
-
-    assert site_id == "site-abc-123"
-
-
-def test_extract_site_id_from_resource_data_fallback(setup: Setup):
-    """Site ID extracted from resourceData if resource URL missing."""
-    notification = {"resourceData": {"siteId": "site-xyz-789"}}
-
-    site_id = setup.service._extract_site_id_from_notification(notification)
-
-    assert site_id == "site-xyz-789"
-
-
-def test_parse_site_id_from_various_formats(setup: Setup):
-    """_parse_site_id handles various resource URL formats."""
-    # Format 1: sites/{siteId}/drives/{driveId}/root
-    assert (
-        setup.service._parse_site_id("sites/site-123/drives/drive-456/root")
-        == "site-123"
+async def test_dedupe_key_is_derived_from_the_subscription(
+    setup: Setup, mock_notification
+):
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
+        return_value=[(MagicMock(), MagicMock())]
     )
+    setup.change_key_service.should_process.return_value = False
 
-    # Format 2: sites/{siteId}/lists/{listId}
-    assert setup.service._parse_site_id("sites/site-789/lists/list-012") == "site-789"
+    await setup.service.handle_notifications({"value": [mock_notification]})
 
-    # Invalid format
-    assert setup.service._parse_site_id("invalid/format") is None
-
-
-async def test_onedrive_notifications_use_drive_lookup(setup: Setup):
-    """Drive-scoped notifications must query integrations by drive_id."""
-    notification = {
-        "subscriptionId": "sub-123",
-        "clientState": "test-client-state-123",
-        "resource": "drives/drive-456/root",
-        "changeType": "updated",
-        "resourceData": {
-            "@odata.type": "#Microsoft.Graph.driveItem",
-            "id": "item-123",
-            "changeKey": "change-key-789",
-        },
-    }
-
-    setup.service._fetch_knowledge_by_drive = AsyncMock(return_value=[])
-    setup.service._fetch_knowledge_by_site = AsyncMock(return_value=[])
-
-    await setup.service.handle_notifications({"value": [notification]})
-
-    setup.service._fetch_knowledge_by_drive.assert_called_once_with(
-        drive_id="drive-456"
+    kwargs = setup.change_key_service.should_process.await_args.kwargs
+    assert kwargs["integration_knowledge_id"] == uuid5(
+        NAMESPACE_URL, f"subscription:{setup.subscription.id}"
     )
-    setup.service._fetch_knowledge_by_site.assert_not_called()
 
 
 async def test_onedrive_queued_job_contains_drive_id(
@@ -790,7 +836,10 @@ async def test_onedrive_queued_job_contains_drive_id(
         },
     }
 
-    setup.service._fetch_knowledge_by_drive = AsyncMock(
+    onedrive = _subscription(site_id="drive-456", drive_id="drive-456")
+    setup.sharepoint_subscription_repo.get_by_subscription_id.side_effect = None
+    setup.sharepoint_subscription_repo.get_by_subscription_id.return_value = onedrive
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(knowledge, user_integration)]
     )
     setup.oauth_token_repo.one_or_none.return_value = mock_oauth_token
