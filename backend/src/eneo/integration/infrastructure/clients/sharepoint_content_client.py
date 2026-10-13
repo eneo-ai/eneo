@@ -64,18 +64,6 @@ class IncompleteDownloadError(Exception):
     """
 
 
-class SharePointContentUnavailable(Exception):
-    """A download completed but yielded no text for a non-empty-file reason.
-
-    ``reason`` is the user-facing skip reason; ``str()`` drops the ``Error:``
-    prefix so callers that format ``f"Error: {e}"`` do not double it.
-    """
-
-    def __init__(self, reason: str):
-        self.reason = reason
-        super().__init__(reason.removeprefix("Error: "))
-
-
 class DeltaTokenExpiredException(Exception):
     """Raised when Microsoft Graph returns 410 Gone for an expired delta token."""
 
@@ -425,11 +413,15 @@ class SharePointContentClient(BaseClient):
                     f"({len(payload)} > {self.max_download_bytes} bytes)"
                 )
 
-        if content_length is not None and len(payload) != content_length:
-            raise IncompleteDownloadError(
-                f"Incomplete download of '{file_name}' "
-                f"({len(payload)} of {content_length} bytes)"
-            )
+        # aiohttp hands back the decompressed body while Content-Length counts
+        # the wire bytes, so the two only agree for an unencoded body.
+        encoding = response.headers.get("Content-Encoding", "").strip().lower()
+        if encoding in ("", "identity"):
+            if content_length is not None and len(payload) != content_length:
+                raise IncompleteDownloadError(
+                    f"Incomplete download of '{file_name}' "
+                    f"({len(payload)} of {content_length} bytes)"
+                )
 
         return bytes(payload)
 
@@ -725,29 +717,6 @@ class SharePointContentClient(BaseClient):
 
         return await self.get_default_drive_id(site_id)
 
-    async def get_documents_in_drive(self, site_id: str) -> list[SharePointItem]:
-        try:
-            drive_id = await self.get_default_drive_id(site_id)
-            if not drive_id:
-                logger.warning("No drive found for site %s", site_id)
-                return []
-
-            endpoint = f"v1.0/sites/{site_id}/drives/{drive_id}/root/children"
-            return await self._get_items(endpoint)
-        except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.can_refresh_token:
-                logger.info("SharePoint token expired, refreshing...")
-                await self.refresh_token()
-                drive_id = await self.get_default_drive_id(site_id)
-                if not drive_id:
-                    logger.warning("No drive found for site %s after refresh", site_id)
-                    return []
-                endpoint = f"v1.0/sites/{site_id}/drives/{drive_id}/root/children"
-                return await self._get_items(endpoint)
-            else:
-                logger.error(f"SharePoint API error: {e}")
-                raise
-
     async def get_file_metadata(self, drive_id: str, item_id: str) -> dict[str, Any]:
         """
         Get metadata for a SharePoint item (file or folder) by its ID.
@@ -864,21 +833,6 @@ class SharePointContentClient(BaseClient):
             download_url=download_url,
             file_name=file_name,
         )
-
-    async def get_file_content_by_id(
-        self, drive_id: str, item_id: str
-    ) -> tuple[str, str]:
-        """``(text, content_type)`` view of :meth:`get_file_extraction_by_id`.
-
-        An empty text means the parser found nothing in a complete download;
-        every other non-text outcome raises :class:`SharePointContentUnavailable`.
-        """
-        result = await self.get_file_extraction_by_id(drive_id, item_id)
-        if result.text is not None:
-            return result.text, result.content_type
-        if result.is_no_text:
-            return "", result.content_type
-        raise SharePointContentUnavailable(result.skip_reason or "")
 
     async def _get_delta_page(self, link: str) -> dict[str, Any]:
         """One delta page; drops the list item expansion if Graph rejects it.

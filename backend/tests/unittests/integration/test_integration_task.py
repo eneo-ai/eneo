@@ -28,6 +28,9 @@ class FakeRedis:
             self.ttls[key] = ex
         return True
 
+    async def get(self, key):
+        return self.store.get(key)
+
     async def delete(self, key):
         return 1 if self.store.pop(key, None) is not None else 0
 
@@ -55,11 +58,15 @@ def fake_redis(monkeypatch):
 
 
 @pytest.fixture
-def service(monkeypatch):
+def knowledge():
+    return MagicMock(id=KNOWLEDGE_ID, delta_token="delta-token")
+
+
+@pytest.fixture
+def service(monkeypatch, knowledge):
     service = AsyncMock()
     service.pull_content.return_value = "Imported 3 files"
     service.process_delta_changes.return_value = "Imported 1 file"
-    knowledge = MagicMock(id=KNOWLEDGE_ID)
     monkeypatch.setattr(
         integration_task,
         "_get_knowledge_with_retry",
@@ -70,9 +77,12 @@ def service(monkeypatch):
 
 
 @pytest.fixture
-def container(service):
+def container(service, knowledge):
     container = MagicMock()
     container.sharepoint_content_service.return_value = service
+    container.integration_knowledge_repo.return_value.one = AsyncMock(
+        return_value=knowledge
+    )
     return container
 
 
@@ -163,7 +173,7 @@ async def test_holder_released_before_retry_so_the_marker_is_drained_now(
     assert LOCK_KEY not in fake_redis.store
 
 
-async def test_failing_pending_pass_does_not_fail_the_owning_sync(
+async def test_failing_pending_pass_keeps_the_marker_for_the_next_sync(
     fake_redis, service, container, params
 ):
     fake_redis.store[PENDING_KEY] = "1"
@@ -172,4 +182,67 @@ async def test_failing_pending_pass_does_not_fail_the_owning_sync(
     result = await full_task(params, container)
 
     assert result == "Imported 3 files"
+    service.process_delta_changes.assert_awaited_once()
+    assert fake_redis.store[PENDING_KEY] == "1"
+    assert fake_redis.ttls[PENDING_KEY] == 3600
+    assert LOCK_KEY not in fake_redis.store
+
+
+async def test_drain_is_bounded_when_markers_keep_arriving(
+    fake_redis, service, container, params
+):
+    fake_redis.store[PENDING_KEY] = "1"
+
+    async def webhook_lands_during_every_pass(**_):
+        fake_redis.store[PENDING_KEY] = "1"
+        return "Imported 1 file"
+
+    service.process_delta_changes.side_effect = webhook_lands_during_every_pass
+
+    await delta_task(params, container)
+
+    assert service.process_delta_changes.await_count == 1 + 3
+    assert fake_redis.store[PENDING_KEY] == "1"
+    assert LOCK_KEY not in fake_redis.store
+
+
+async def test_full_sync_without_a_delta_token_does_not_run_a_second_full_sync(
+    fake_redis, service, container, params, knowledge
+):
+    fake_redis.store[PENDING_KEY] = "1"
+    knowledge.delta_token = None
+
+    result = await full_task(params, container)
+
+    assert result == "Imported 3 files"
+    service.pull_content.assert_awaited_once()
+    service.process_delta_changes.assert_not_called()
     assert PENDING_KEY not in fake_redis.store
+
+
+async def test_waiter_whose_marker_was_drained_has_nothing_to_prepare(
+    fake_redis, service, container, params, monkeypatch
+):
+    fake_redis.store[LOCK_KEY] = "someone-else"
+    original_set = fake_redis.set
+
+    async def holder_drains_then_releases(key, value, nx=False, ex=None):
+        acquired = await original_set(key, value, nx=nx, ex=ex)
+        if key == PENDING_KEY:
+            # The holder drains the marker we just left, then releases.
+            fake_redis.store.pop(PENDING_KEY)
+            fake_redis.store.pop(LOCK_KEY)
+        return acquired
+
+    monkeypatch.setattr(fake_redis, "set", holder_drains_then_releases)
+    monkeypatch.setattr(
+        integration_task,
+        "_validate_embedding_provider",
+        AsyncMock(side_effect=ValueError("provider inactive")),
+    )
+
+    result = await delta_task(params, container)
+
+    assert result.startswith("Skipped")
+    service.process_delta_changes.assert_not_called()
+    assert LOCK_KEY not in fake_redis.store
