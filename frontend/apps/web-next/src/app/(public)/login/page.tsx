@@ -60,7 +60,7 @@ export default async function LoginPage({
     (next ? `/auth/login?next=${encodeURIComponent(next)}` : "/auth/login");
 
   return (
-    <PublicPage title={t("welcome")}>
+    <PublicPage title={t("login")} description={t("login_description")}>
       {diagnostics && <LoginDiagnosticsAlert diagnostics={diagnostics} t={t} />}
       {message === "expired" && (
         <Alert>

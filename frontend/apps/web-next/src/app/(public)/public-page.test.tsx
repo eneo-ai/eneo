@@ -26,6 +26,20 @@ describe("PublicPage", () => {
     await expectNoAxeViolations(container, {});
   });
 
+  it("shows the word mark and the description without adding to the accessible outline", async () => {
+    const { container } = renderInApp(
+      <PublicPage title="Logga in" description="Logga in för att fortsätta till Eneo.">
+        <p>Formulär.</p>
+      </PublicPage>
+    );
+    // The mark is decorative: the h1 names the page, nothing else is a heading or an image.
+    expect(container.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getAllByRole("heading")).toHaveLength(1);
+    expect(screen.getByText("Logga in för att fortsätta till Eneo.")).toBeTruthy();
+    await expectNoAxeViolations(container, {});
+  });
+
   it("links the organisation's accessibility statement when it is configured", () => {
     env.ACCESSIBILITY_STATEMENT_URL = "https://www.sundsvall.se/tillganglighetsredogorelse";
     renderInApp(
