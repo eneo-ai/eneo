@@ -14,7 +14,7 @@ import { createRoot } from "react-dom/client";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Collapsible, CollapsibleGroup } from "@astryxdesign/core/Collapsible";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
@@ -339,77 +339,79 @@ function ResultView() {
         failure && <Banner status="error" container="section" title={text.failed} description={failure} />
       }
       footer={
-        <Collapsible trigger={<Text weight="medium">{text.details}</Text>} defaultIsOpen={false}>
-          <div className="eneo-details">
-            {draft && (
-              <>
-                <div className="eneo-fields">
-                  {Object.entries(draft).map(([key, field]) =>
-                    typeof field === "number" ? (
-                      <NumberInput
-                        key={key}
-                        label={key}
-                        value={field}
-                        onChange={(next: number | null) =>
-                          setDraft({ ...draft, [key]: next ?? 0 })
-                        }
-                      />
-                    ) : typeof field === "boolean" ? (
-                      <Switch
-                        key={key}
-                        label={key}
-                        value={field}
-                        onChange={(next) => setDraft({ ...draft, [key]: next })}
-                      />
-                    ) : (
-                      <TextInput
-                        key={key}
-                        label={key}
-                        value={field}
-                        onChange={(next: string) => setDraft({ ...draft, [key]: next })}
-                      />
-                    ),
-                  )}
-                </div>
-                <div className="eneo-actions">
-                  <Button
-                    variant="secondary"
-                    label={busy ? text.running : text.rerun}
-                    isLoading={busy}
-                    onClick={() => void rerun()}
-                  />
-                  {recomputed && <Button variant="ghost" label={text.reset} onClick={reset} />}
-                </div>
-              </>
-            )}
-            <Code
-              text={typeof args.code === "string" ? args.code : ""}
-              language="javascript"
-              label={text.code}
-              meta={typeof outcome?.duration_ms === "number" ? text.duration(outcome.duration_ms) : undefined}
-              lineNumbers
-              copy={{ label: text.copy, copied: text.copied }}
-            />
-            {args.input !== undefined && args.input !== null && !draft && (
+        <CollapsibleGroup hasDividers density="compact" className="eneo-footer">
+          <Collapsible value="details" trigger={text.details}>
+            <div className="eneo-details">
+              {draft && (
+                <>
+                  <div className="eneo-fields">
+                    {Object.entries(draft).map(([key, field]) =>
+                      typeof field === "number" ? (
+                        <NumberInput
+                          key={key}
+                          label={key}
+                          value={field}
+                          onChange={(next: number | null) =>
+                            setDraft({ ...draft, [key]: next ?? 0 })
+                          }
+                        />
+                      ) : typeof field === "boolean" ? (
+                        <Switch
+                          key={key}
+                          label={key}
+                          value={field}
+                          onChange={(next) => setDraft({ ...draft, [key]: next })}
+                        />
+                      ) : (
+                        <TextInput
+                          key={key}
+                          label={key}
+                          value={field}
+                          onChange={(next: string) => setDraft({ ...draft, [key]: next })}
+                        />
+                      ),
+                    )}
+                  </div>
+                  <div className="eneo-actions">
+                    <Button
+                      variant="secondary"
+                      label={busy ? text.running : text.rerun}
+                      isLoading={busy}
+                      onClick={() => void rerun()}
+                    />
+                    {recomputed && <Button variant="ghost" label={text.reset} onClick={reset} />}
+                  </div>
+                </>
+              )}
               <Code
-                text={JSON.stringify(args.input, null, 2)}
-                language="json"
-                label={text.input}
+                text={typeof args.code === "string" ? args.code : ""}
+                language="javascript"
+                label={text.code}
+                meta={typeof outcome?.duration_ms === "number" ? text.duration(outcome.duration_ms) : undefined}
+                lineNumbers
                 copy={{ label: text.copy, copied: text.copied }}
               />
-            )}
-            {outcome?.logs && outcome.logs.length > 0 && (
-              <Code
-                text={
-                  outcome.logs.join("\n") +
-                  (outcome.dropped_log_lines ? `\n… ${text.dropped(outcome.dropped_log_lines)}` : "")
-                }
-                label={text.logs}
-                copy={{ label: text.copy, copied: text.copied }}
-              />
-            )}
-          </div>
-        </Collapsible>
+              {args.input !== undefined && args.input !== null && !draft && (
+                <Code
+                  text={JSON.stringify(args.input, null, 2)}
+                  language="json"
+                  label={text.input}
+                  copy={{ label: text.copy, copied: text.copied }}
+                />
+              )}
+              {outcome?.logs && outcome.logs.length > 0 && (
+                <Code
+                  text={
+                    outcome.logs.join("\n") +
+                    (outcome.dropped_log_lines ? `\n… ${text.dropped(outcome.dropped_log_lines)}` : "")
+                  }
+                  label={text.logs}
+                  copy={{ label: text.copy, copied: text.copied }}
+                />
+              )}
+            </div>
+          </Collapsible>
+        </CollapsibleGroup>
       }
     >
       {table ? (
