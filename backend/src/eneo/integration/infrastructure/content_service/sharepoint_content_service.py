@@ -15,6 +15,7 @@ from eneo.integration.domain.entities.tenant_sharepoint_app import (
     TenantSharePointApp,
 )
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
+    AccessTokenProvider,
     DeltaTokenExpiredException,
     SharePointContentClient,
 )
@@ -70,6 +71,9 @@ if TYPE_CHECKING:
     )
     from eneo.integration.domain.repositories.user_integration_repo import (
         UserIntegrationRepository,
+    )
+    from eneo.integration.infrastructure.auth_service.org_token_provider import (
+        OrgTokenProvider,
     )
     from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
         ServiceAccountAuthService,
@@ -201,8 +205,10 @@ class SharePointContentService:
         service_account_auth_service: "ServiceAccountAuthService | None" = None,
         sync_log_repo: "SyncLogRepository | None" = None,
         change_key_service: "OfficeChangeKeyService | None" = None,
+        org_token_provider: "OrgTokenProvider | None" = None,
     ) -> None:
         super().__init__()
+        self.org_token_provider = org_token_provider
         self.job_service = job_service
         self.oauth_token_repo = oauth_token_repo
         self.user_integration_repo = user_integration_repo
@@ -250,6 +256,24 @@ class SharePointContentService:
 
         return access_token
 
+    async def _org_access_token(
+        self, tenant_app: TenantSharePointApp
+    ) -> tuple[str, Optional[AccessTokenProvider]]:
+        """An organisation token plus a re-acquire callback for long syncs.
+
+        The provider records credential health and lets the Graph client
+        re-acquire on 401; without one (legacy wiring) the token is minted
+        once and a sync longer than its lifetime fails.
+        """
+        if self.org_token_provider is not None:
+            access_token = await self.org_token_provider.get_access_token(tenant_app)
+            return access_token, self.org_token_provider.access_token_provider(
+                tenant_app
+            )
+        if tenant_app.is_service_account():
+            return await self._refresh_service_account_access_token(tenant_app), None
+        return await self.tenant_app_auth_service.get_access_token(tenant_app), None
+
     async def pull_content(
         self,
         token_id: Optional[UUID] = None,
@@ -274,24 +298,20 @@ class SharePointContentService:
                 )
                 if not tenant_app:
                     raise ValueError(f"Tenant app {tenant_app_id} not found")
-                # Use service account or tenant app auth based on auth_method
-                if tenant_app.is_service_account():
-                    access_token = await self._refresh_service_account_access_token(
-                        tenant_app
-                    )
-                    logger.info(
-                        f"Using service account auth for tenant_app {tenant_app_id}"
-                    )
-                else:
-                    access_token = await self.tenant_app_auth_service.get_access_token(
-                        tenant_app
-                    )
-                    logger.info(f"Using tenant app auth for tenant_app {tenant_app_id}")
+                access_token, access_token_provider = await self._org_access_token(
+                    tenant_app
+                )
+                logger.info(
+                    "Using %s auth for tenant_app %s",
+                    tenant_app.auth_method,
+                    tenant_app_id,
+                )
                 token = SimpleSharePointToken(access_token=access_token)
                 oauth_token_id = None
             elif token_id:
                 token = await self.oauth_token_repo.one(id=token_id)
                 oauth_token_id = token.id
+                access_token_provider = None
             else:
                 raise ValueError("Either token_id or tenant_app_id must be provided")
 
@@ -328,6 +348,7 @@ class SharePointContentService:
                 drive_id=resolved_drive_id,
                 resource_type=resource_type,
                 stats=stats,
+                access_token_provider=access_token_provider,
             )
             summary_stats = self._build_summary_stats(stats)
 
@@ -348,6 +369,7 @@ class SharePointContentService:
                         token_refresh_callback=(
                             self.token_refresh_callback if oauth_token_id else None
                         ),
+                        access_token_provider=access_token_provider,
                         include_list_item_fields=True,
                     ) as content_client:
                         actual_drive_id = resolved_drive_id
@@ -474,26 +496,20 @@ class SharePointContentService:
                 )
                 if not tenant_app:
                     raise ValueError(f"Tenant app {tenant_app_id} not found")
-                # Use service account or tenant app auth based on auth_method
-                if tenant_app.is_service_account():
-                    access_token = await self._refresh_service_account_access_token(
-                        tenant_app
-                    )
-                    logger.info(
-                        f"Using service account auth for delta sync tenant_app {tenant_app_id}"
-                    )
-                else:
-                    access_token = await self.tenant_app_auth_service.get_access_token(
-                        tenant_app
-                    )
-                    logger.info(
-                        f"Using tenant app auth for delta sync tenant_app {tenant_app_id}"
-                    )
+                access_token, access_token_provider = await self._org_access_token(
+                    tenant_app
+                )
+                logger.info(
+                    "Using %s auth for delta sync tenant_app %s",
+                    tenant_app.auth_method,
+                    tenant_app_id,
+                )
                 token = SimpleSharePointToken(access_token=access_token)
                 oauth_token_id = None
             elif token_id:
                 token = await self.oauth_token_repo.one(id=token_id)
                 oauth_token_id = token.id
+                access_token_provider = None
             else:
                 raise ValueError("Either token_id or tenant_app_id must be provided")
 
@@ -538,6 +554,7 @@ class SharePointContentService:
                 token_refresh_callback=(
                     self.token_refresh_callback if oauth_token_id else None
                 ),
+                access_token_provider=access_token_provider,
                 include_list_item_fields=True,
             ) as content_client:
                 actual_drive_id = resolved_drive_id
@@ -872,6 +889,7 @@ class SharePointContentService:
         drive_id: Optional[str],
         resource_type: str,
         stats: SyncStats,
+        access_token_provider: Optional[AccessTokenProvider] = None,
     ) -> SyncStats:
         """
         Process content from SharePoint site or OneDrive.
@@ -901,6 +919,7 @@ class SharePointContentService:
                 token_refresh_callback=(
                     self.token_refresh_callback if oauth_token_id else None
                 ),
+                access_token_provider=access_token_provider,
                 include_list_item_fields=True,
             ) as content_client:
                 actual_drive_id = drive_id

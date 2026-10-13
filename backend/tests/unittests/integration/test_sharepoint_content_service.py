@@ -313,6 +313,51 @@ class TestTokenHandling:
                 site_id="site-123",
             )
 
+    async def test_org_token_provider_supplies_token_and_reacquire_callback(
+        self, mock_dependencies, mock_tenant_app, mock_integration_knowledge
+    ):
+        provider = AsyncMock()
+        provider.get_access_token.return_value = "provider-token"
+        reacquire = AsyncMock(return_value="fresh-token")
+        provider.access_token_provider = MagicMock(return_value=reacquire)
+        svc = SharePointContentService(**mock_dependencies, org_token_provider=provider)
+        mock_dependencies[
+            "tenant_sharepoint_app_repo"
+        ].get_by_id.return_value = mock_tenant_app
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].one.return_value = mock_integration_knowledge
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get_default_drive_id.return_value = "drive-123"
+            mock_client.get_drive_root_children.return_value = []
+            mock_client.get_site_pages.return_value = {"value": []}
+            mock_client.initialize_delta_token.return_value = "delta-token"
+            mock_client_class.return_value = mock_client
+
+            await svc.pull_content(
+                tenant_app_id=mock_tenant_app.id,
+                integration_knowledge_id=mock_integration_knowledge.id,
+                site_id="site-123",
+            )
+
+        provider.get_access_token.assert_awaited_once_with(mock_tenant_app)
+        mock_dependencies[
+            "tenant_app_auth_service"
+        ].get_access_token.assert_not_called()
+        mock_dependencies[
+            "service_account_auth_service"
+        ].refresh_access_token.assert_not_called()
+        assert mock_client_class.call_args_list
+        for call in mock_client_class.call_args_list:
+            assert call.kwargs["api_token"] == "provider-token"
+            assert call.kwargs["access_token_provider"] is reacquire
+
 
 class TestInitializeStats:
     """Tests for _initialize_stats method."""
