@@ -20,6 +20,19 @@ TABULAR_INDEX_MAX_CHARS = 200_000
 # Rows per sheet kept in the index when the table exceeds the budget.
 TABULAR_INDEX_SAMPLE_ROWS = 50
 
+# The two non-prose forms a knowledge document is indexed under when its
+# original is retained for the table tools. Both templates and the recogniser
+# below use these lines, so a wording change cannot leave a consumer behind.
+LARGE_TABLE_MARKER = "Large table: "
+SAMPLE_NOTICE = (
+    "A sample of each sheet is indexed below; the complete file is available "
+    "to the table analysis tools."
+)
+PLACEHOLDER_NOTICE = (
+    "Row text could not be extracted; the file is available to the table "
+    "analysis tools."
+)
+
 
 @dataclass(frozen=True)
 class IndexedSheet:
@@ -49,8 +62,7 @@ def tabular_sample_text(filename: str, sheets: Sequence[IndexedSheet]) -> str:
     total_rows = sum(len(sheet.rows) for sheet in sheets)
     parts = [
         f"File: {filename}",
-        f"Large table: {total_rows} rows. A sample of each sheet is indexed "
-        "below; the complete file is available to the table analysis tools.",
+        f"{LARGE_TABLE_MARKER}{total_rows} rows. {SAMPLE_NOTICE}",
     ]
     for sheet in sheets:
         label = f'Sheet "{sheet.name}"' if sheet.name else "Table"
@@ -59,3 +71,19 @@ def tabular_sample_text(filename: str, sheets: Sequence[IndexedSheet]) -> str:
         lines.extend(sheet.rows[:TABULAR_INDEX_SAMPLE_ROWS])
         parts.append("\n".join(lines))
     return "\n\n".join(parts)[:TABULAR_INDEX_MAX_CHARS]
+
+
+def is_table_index_text(text: str) -> bool:
+    """Whether ``text`` is a table's index form rather than its content.
+
+    True for the schema-plus-sample of :func:`tabular_sample_text` and for the
+    header-only placeholder of an unreadable workbook. Such a document's rows
+    live in its retained original, so a reader wanting the data goes to the
+    table tools through the document's file reference instead of its text.
+    """
+    head = text.lstrip().splitlines()[:3]
+    return any(
+        line == PLACEHOLDER_NOTICE
+        or (line.startswith(LARGE_TABLE_MARKER) and line.endswith(SAMPLE_NOTICE))
+        for line in head
+    )

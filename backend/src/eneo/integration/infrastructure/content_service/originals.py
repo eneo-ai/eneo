@@ -14,6 +14,8 @@ import io
 from collections.abc import Iterator, Mapping
 from typing import Any
 
+from eneo.files.tabular_index import PLACEHOLDER_NOTICE
+
 # Extension -> media type of the originals a sync keeps. Growing this list is
 # the whole change needed to hand another kind of file to tools.
 RETAINED_ORIGINALS: Mapping[str, str] = {
@@ -57,12 +59,7 @@ def build_tabular_placeholder_text(filename: str, data: bytes) -> str:
     Indexed in place of the rows, so search still finds the file by name or
     column and the table tools open the original.
     """
-    lines = [
-        f"Spreadsheet: {filename}",
-        "Row text could not be extracted; the file is available to the table "
-        "analysis tools.",
-        "",
-    ]
+    lines = [f"Spreadsheet: {filename}", PLACEHOLDER_NOTICE, ""]
     try:
         for sheet, columns in _sheet_headers(filename, data):
             header = ", ".join(str(column) for column in columns) or "(no header row)"

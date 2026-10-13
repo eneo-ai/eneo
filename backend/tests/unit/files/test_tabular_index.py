@@ -6,7 +6,11 @@ from eneo.files.tabular_index import (
     IndexedSheet,
     delimited_index_text,
     fits_index_budget,
+    is_table_index_text,
     tabular_sample_text,
+)
+from eneo.integration.infrastructure.content_service.originals import (
+    build_tabular_placeholder_text,
 )
 
 
@@ -65,3 +69,29 @@ def test_delimited_file_over_budget_keeps_header_and_sample(monkeypatch):
     text = delimited_index_text("pairs.tsv", f"n\tdouble\n{rows}\n")
     assert text.startswith("File: pairs.tsv\n\nLarge table: 100 rows.")
     assert "Table (100 rows): n, double" in text
+
+
+class TestIsTableIndexText:
+    """The index forms whose rows live in the retained original, not the text."""
+
+    def test_schema_and_sample_is_recognised(self):
+        text = tabular_sample_text("big.xlsx", [_sheet("Sales", 5000)])
+        assert is_table_index_text(text)
+        assert is_table_index_text("  \n" + text)
+
+    def test_header_only_placeholder_is_recognised(self):
+        text = build_tabular_placeholder_text("broken.csv", b"id,name\n1,Ada\n")
+        assert text.startswith("Spreadsheet: broken.csv")
+        assert is_table_index_text(text)
+
+    def test_prose_and_whole_tables_are_content(self):
+        assert not is_table_index_text("Minutes of the board meeting, 2026-03-01.")
+        assert not is_table_index_text("id,name\n1,Ada\n2,Bo\n")
+        assert not is_table_index_text(
+            "File: small.xlsx\n\nSheet: Orders | id: 1 | amount: 10"
+        )
+        assert not is_table_index_text("")
+
+    def test_the_notice_deep_inside_a_document_does_not_count(self):
+        prose = "Line one\nLine two\nLine three\nLine four\n" + "Large table: 3 rows. "
+        assert not is_table_index_text(prose)
