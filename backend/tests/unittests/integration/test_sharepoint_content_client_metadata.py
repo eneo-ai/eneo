@@ -260,3 +260,54 @@ class TestAcceptedPaging:
 
         assert rows == [] and truncated is True
         assert client.client.get.await_count == 4  # 4 x 500 reaches the 2000-row budget
+
+
+class TestListFolderChildren:
+    async def test_stops_at_the_cap_and_reports_more(self):
+        client = _client(
+            include=False,
+            responses=[
+                {
+                    "value": [{"id": "1"}, {"id": "2"}],
+                    "@odata.nextLink": "https://g/next",
+                },
+                {"value": [{"id": "3"}]},
+            ],
+        )
+
+        items, truncated = await client.list_folder_children(
+            drive_id="d1", folder_id="root", max_items=2
+        )
+
+        assert [item["id"] for item in items] == ["1", "2"]
+        assert truncated is True
+        assert len(_urls(client)) == 1
+
+    async def test_follows_pages_under_the_cap_without_truncating(self):
+        client = _client(
+            include=False,
+            responses=[
+                {"value": [{"id": "1"}], "@odata.nextLink": "https://g/next"},
+                {"value": [{"id": "2"}]},
+            ],
+        )
+
+        items, truncated = await client.list_folder_children(
+            site_id="s1", drive_id="d1", folder_id="f1", max_items=10
+        )
+
+        assert [item["id"] for item in items] == ["1", "2"]
+        assert truncated is False
+        assert _urls(client)[0].startswith("v1.0/sites/s1/drives/d1/items/f1/children")
+
+    async def test_retries_without_the_expansion_when_graph_rejects_it(self):
+        client = _client(
+            include=True, responses=[_bad_request(), {"value": [{"id": "1"}]}]
+        )
+
+        items, truncated = await client.list_folder_children(
+            drive_id="d1", folder_id="f1", max_items=10
+        )
+
+        assert [item["id"] for item in items] == ["1"]
+        assert EXPAND in _urls(client)[0] and EXPAND not in _urls(client)[1]

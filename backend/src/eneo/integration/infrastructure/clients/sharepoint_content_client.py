@@ -243,9 +243,58 @@ class SharePointContentClient(BaseClient):
             next_link = cast(Optional[str], response.get("@odata.nextLink"))
             if len(rows) >= max_items:
                 return rows[:max_items], bool(next_link) or len(rows) > max_items
-            if next_link and scanned >= self.MAX_SCANNED_ROWS:
+            if next_link and scanned >= max(self.MAX_SCANNED_ROWS, max_items):
                 return rows, True
         return rows, False
+
+    async def _get_items_capped(
+        self, endpoint: str, *, max_items: int
+    ) -> tuple[list[SharePointItem], bool]:
+        """Capped paged listing with list item columns when enabled."""
+        try:
+            rows, truncated = await self._get_paged_items_capped(
+                self._with_item_expand(endpoint), max_items=max_items
+            )
+        except aiohttp.ClientResponseError as e:
+            if not self._disable_item_expand_after(e):
+                raise
+            rows, truncated = await self._get_paged_items_capped(
+                endpoint, max_items=max_items
+            )
+        return cast(list[SharePointItem], rows), truncated
+
+    async def list_folder_children(
+        self,
+        *,
+        drive_id: str,
+        folder_id: str,
+        site_id: Optional[str] = None,
+        max_items: int,
+    ) -> tuple[list[SharePointItem], bool]:
+        """Up to ``max_items`` children of a folder; True when more exist.
+
+        For the picker: a folder with thousands of items is cut off here and
+        reported as truncated, so people search instead of scrolling a list
+        Graph would take minutes to page through.
+        """
+        if site_id:
+            endpoint = (
+                f"v1.0/sites/{site_id}/drives/{drive_id}/items/{folder_id}/children"
+            )
+        elif folder_id == "root":
+            endpoint = f"v1.0/drives/{drive_id}/root/children"
+        else:
+            endpoint = f"v1.0/drives/{drive_id}/items/{folder_id}/children"
+        try:
+            return await self._get_items_capped(endpoint, max_items=max_items)
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.can_refresh_token:
+                logger.info(
+                    "Token expired while listing folder children, refreshing..."
+                )
+                await self.refresh_token()
+                return await self._get_items_capped(endpoint, max_items=max_items)
+            raise
 
     async def get_list_items_filtered(
         self,

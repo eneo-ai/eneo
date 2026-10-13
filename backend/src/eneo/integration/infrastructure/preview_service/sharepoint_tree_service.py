@@ -20,6 +20,7 @@ from eneo.integration.infrastructure.preview_service.sharepoint_search import (
     row_from_drive_item,
     row_from_list_item,
 )
+from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -35,10 +36,16 @@ class SharePointTreeService:
         self,
         token_refresh_callback: Optional[TokenRefreshCallback] = None,
         access_token_provider: Optional[AccessTokenProvider] = None,
+        max_items: Optional[int] = None,
     ) -> None:
         super().__init__()
         self.token_refresh_callback = token_refresh_callback
         self.access_token_provider = access_token_provider
+        self.max_items = (
+            max_items
+            if max_items is not None
+            else get_settings().sharepoint_browse_max_items
+        )
 
     async def get_folder_tree(
         self,
@@ -132,27 +139,18 @@ class SharePointTreeService:
                 },
             )
             try:
-                if site_id:
-                    items = await content_client.get_folder_items(
-                        site_id=site_id,
-                        drive_id=actual_drive_id,
-                        folder_id=folder_id,
-                    )
-                else:
-                    if folder_id == "root":
-                        items = await content_client.get_drive_root_children(
-                            actual_drive_id
-                        )
-                    else:
-                        items = await content_client.get_drive_folder_items(
-                            drive_id=actual_drive_id,
-                            folder_id=folder_id,
-                        )
+                items, truncated = await content_client.list_folder_children(
+                    site_id=site_id or None,
+                    drive_id=actual_drive_id,
+                    folder_id=folder_id,
+                    max_items=self.max_items,
+                )
                 logger.info(
                     "Folder items fetched",
                     extra={
                         "item_count": len(items),
                         "folder_id": folder_id,
+                        "truncated": truncated,
                     },
                 )
             except Exception as e:
@@ -239,6 +237,7 @@ class SharePointTreeService:
 
             result: Dict[str, Any] = {
                 "items": tree_items,
+                "truncated": truncated,
                 "current_path": folder_path or "/",
                 "parent_id": parent_id,
                 "drive_id": actual_drive_id,
