@@ -1,0 +1,315 @@
+"""Documents and skipped-file routes of a space's integration item, after authentication."""
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID, uuid4
+
+import pytest
+from dependency_injector import providers
+from fastapi import FastAPI
+from fastapi.routing import APIRoute
+from httpx import ASGITransport, AsyncClient
+
+from eneo.info_blobs.info_blob import InfoBlobInDBNoText
+from eneo.info_blobs.info_blob_repo import IntegrationDocumentsPage
+from eneo.integration.domain.entities.integration_knowledge import (
+    IntegrationKnowledge,
+)
+from eneo.integration.domain.entities.sync_log import SyncLog
+from eneo.main.container.container import Container
+from eneo.server.exception_handlers import add_exception_handlers
+from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
+from eneo.spaces.api.space_router import router
+from eneo.spaces.space import Space
+from eneo.users.user import UserInDB
+
+FOLDER = "https://contoso.sharepoint.com/sites/KS/Shared%20Documents/Protokoll"
+
+
+@dataclass
+class DocumentsAPI:
+    app: FastAPI
+    user: UserInDB
+    space: Space
+    knowledge: IntegrationKnowledge
+    info_blobs: AsyncMock
+    sync_logs: AsyncMock
+
+    def url(self, path: str = "", knowledge_id: UUID | None = None) -> str:
+        return (
+            f"/spaces/{self.space.id}/knowledge/integrations/"
+            f"{knowledge_id or self.knowledge.id}/documents/{path}"
+        )
+
+
+def _blob(knowledge_id: UUID, user: UserInDB, url: str, title: str):
+    return InfoBlobInDBNoText(
+        id=uuid4(),
+        url=url,
+        title=title,
+        embedding_model_id=uuid4(),
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        size=1000,
+        integration_knowledge_id=knowledge_id,
+        source_id=uuid4(),
+        version_state="active",
+        created_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 10, 13, tzinfo=timezone.utc),
+    )
+
+
+@pytest.fixture
+def documents_api(user: UserInDB) -> DocumentsAPI:
+    user = user.model_copy(deep=True)
+    user.roles = []
+    space = Space(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        tenant_space_id=uuid4(),
+        user_id=None,
+        name="Kommunstyrelsen",
+        description=None,
+        embedding_models=[],
+        completion_models=[],
+        transcription_models=[],
+        mcp_servers=[],
+        default_assistant=None,
+        assistants=[],
+        apps=[],
+        services=[],
+        websites=[],
+        collections=[],
+        integration_knowledge_list=[],
+        members={
+            user.id: SpaceMember(
+                id=user.id, email=user.email, role=SpaceRoleValue.VIEWER
+            )
+        },
+    )
+    knowledge = IntegrationKnowledge(
+        id=uuid4(),
+        name="Protokoll",
+        user_integration=MagicMock(),
+        embedding_model=MagicMock(),
+        tenant_id=user.tenant_id,
+        space_id=space.id,
+        url=FOLDER,
+        folder_path="/Protokoll",
+        selected_item_type="folder",
+        resource_type="site",
+    )
+    space.integration_knowledge_list = [knowledge]
+    space_repo = AsyncMock()
+    space_repo.one.return_value = space
+    info_blobs = AsyncMock()
+    info_blobs.get_integration_knowledge_page.return_value = IntegrationDocumentsPage(
+        items=[], total_count=0, total_size=0
+    )
+    sync_logs = AsyncMock()
+    sync_logs.get_by_integration_knowledge.return_value = []
+
+    # Production DI for the service and actor policy; only the edges are
+    # replaced, so missing wiring fails here too.
+    container = Container(
+        user=providers.Object(user),
+        space_repo=providers.Object(space_repo),
+        info_blob_repo=providers.Object(info_blobs),
+        sync_log_repo=providers.Object(sync_logs),
+        user_integration_repo=providers.Object(AsyncMock()),
+        tenant_integration_repo=providers.Object(AsyncMock()),
+        tenant_sharepoint_app_repo=providers.Object(AsyncMock()),
+        oauth_token_repo=providers.Object(AsyncMock()),
+        integration_knowledge_repo=providers.Object(AsyncMock()),
+        embedding_model_repo2=providers.Object(AsyncMock()),
+        job_service=providers.Object(AsyncMock()),
+        sharepoint_subscription_service=providers.Object(AsyncMock()),
+    )
+    app = FastAPI()
+    app.include_router(router, prefix="/spaces")
+    add_exception_handlers(app)
+    for route in router.routes:
+        if isinstance(route, APIRoute):
+            for dependency in route.dependant.dependencies:
+                if (
+                    getattr(dependency.call, "__name__", "")
+                    == "_get_container_with_user"
+                ):
+                    app.dependency_overrides[dependency.call] = lambda: container
+    return DocumentsAPI(app, user, space, knowledge, info_blobs, sync_logs)
+
+
+async def _get(api: DocumentsAPI, url: str, **params):
+    async with AsyncClient(
+        transport=ASGITransport(app=api.app), base_url="http://test"
+    ) as client:
+        return await client.get(url, params=params)
+
+
+async def test_documents_page_lists_the_item_with_relative_paths(documents_api):
+    api = documents_api
+    nested = _blob(
+        api.knowledge.id, api.user, f"{FOLDER}/Bilagor/2026/KS-1.pdf", "KS-1.pdf"
+    )
+    direct = _blob(api.knowledge.id, api.user, f"{FOLDER}/KS-2.pdf", "KS-2.pdf")
+    api.info_blobs.get_integration_knowledge_page.return_value = (
+        IntegrationDocumentsPage(
+            items=[nested, direct], total_count=312, total_size=123456
+        )
+    )
+
+    response = await _get(api, api.url(), limit=50, offset=50)
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["total_count"] == 312
+    assert data["total_size"] == 123456
+    assert (data["limit"], data["offset"]) == (50, 50)
+    assert [(item["title"], item["relative_path"]) for item in data["items"]] == [
+        ("KS-1.pdf", "Bilagor/2026"),
+        ("KS-2.pdf", ""),
+    ]
+    assert data["items"][0] == {
+        "id": str(nested.id),
+        "title": "KS-1.pdf",
+        "relative_path": "Bilagor/2026",
+        "url": nested.url,
+        "size": 1000,
+        "updated_at": "2026-10-13T00:00:00Z",
+        "source_metadata": [],
+    }
+    api.info_blobs.get_integration_knowledge_page.assert_awaited_once_with(
+        api.knowledge.id, q=None, sort="path", descending=False, limit=50, offset=50
+    )
+
+
+async def test_documents_page_defaults_to_the_first_fifty_by_path(documents_api):
+    api = documents_api
+
+    response = await _get(api, api.url())
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "items": [],
+        "total_count": 0,
+        "limit": 50,
+        "offset": 0,
+        "total_size": 0,
+    }
+    api.info_blobs.get_integration_knowledge_page.assert_awaited_once_with(
+        api.knowledge.id, q=None, sort="path", descending=False, limit=50, offset=0
+    )
+
+
+async def test_documents_page_passes_search_and_sort_to_the_query(documents_api):
+    api = documents_api
+
+    response = await _get(api, api.url(), q="bilagor", sort="size", order="desc")
+
+    assert response.status_code == 200, response.text
+    api.info_blobs.get_integration_knowledge_page.assert_awaited_once_with(
+        api.knowledge.id,
+        q="bilagor",
+        sort="size",
+        descending=True,
+        limit=50,
+        offset=0,
+    )
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"sort": "created_at"},
+        {"order": "down"},
+        {"limit": 0},
+        {"limit": 101},
+        {"offset": -1},
+        {"q": "x" * 201},
+    ],
+)
+async def test_documents_page_rejects_malformed_queries(documents_api, params):
+    api = documents_api
+
+    response = await _get(api, api.url(), **params)
+
+    assert response.status_code == 422, response.text
+    api.info_blobs.get_integration_knowledge_page.assert_not_awaited()
+
+
+@pytest.mark.parametrize("path", ["", "skipped/"])
+async def test_item_outside_the_space_is_not_found(documents_api, path):
+    api = documents_api
+
+    response = await _get(api, api.url(path, knowledge_id=uuid4()))
+
+    assert response.status_code == 404, response.text
+    api.info_blobs.get_integration_knowledge_page.assert_not_awaited()
+    api.sync_logs.get_by_integration_knowledge.assert_not_awaited()
+
+
+@pytest.mark.parametrize("path", ["", "skipped/"])
+async def test_non_member_is_refused_before_the_item_is_looked_up(documents_api, path):
+    api = documents_api
+    api.space.members = {}
+
+    response = await _get(api, api.url(path, knowledge_id=uuid4()))
+
+    assert response.status_code == 403, response.text
+    api.info_blobs.get_integration_knowledge_page.assert_not_awaited()
+    api.sync_logs.get_by_integration_knowledge.assert_not_awaited()
+
+
+async def test_distributed_item_is_readable_from_the_receiving_space(documents_api):
+    api = documents_api
+    api.knowledge.space_id = uuid4()
+
+    response = await _get(api, api.url())
+
+    assert response.status_code == 200, response.text
+
+
+async def test_skipped_documents_come_from_the_newest_sync_log(documents_api):
+    api = documents_api
+    api.sync_logs.get_by_integration_knowledge.return_value = [
+        SyncLog(
+            integration_knowledge_id=api.knowledge.id,
+            sync_type="full",
+            status="success",
+            started_at=datetime(2026, 10, 13, 7, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 10, 13, 8, tzinfo=timezone.utc),
+            metadata={
+                "skipped_details": [{"file": "scan.pdf", "reason": "No text layer"}],
+                "skipped_total": 17,
+                "skipped_truncated": True,
+            },
+        )
+    ]
+
+    response = await _get(api, api.url("skipped/"))
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "items": [{"file": "scan.pdf", "reason": "No text layer"}],
+        "total": 17,
+        "truncated": True,
+        "synced_at": "2026-10-13T08:00:00Z",
+    }
+    api.sync_logs.get_by_integration_knowledge.assert_awaited_once_with(
+        api.knowledge.id, tenant_id=api.user.tenant_id, limit=1
+    )
+
+
+async def test_skipped_documents_without_a_sync_log_is_empty(documents_api):
+    api = documents_api
+
+    response = await _get(api, api.url("skipped/"))
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "items": [],
+        "total": 0,
+        "truncated": False,
+        "synced_at": None,
+    }
