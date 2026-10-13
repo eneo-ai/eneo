@@ -7645,7 +7645,7 @@ export interface paths {
     put?: never;
     /**
      * Test SharePoint app credentials
-     * @description Test if the provided SharePoint app credentials are valid by attempting to acquire an access token. This does not save the credentials. Requires admin role.
+     * @description With a body: test the given tenant-app credentials by acquiring an access token, without saving them. Without a body: do a full token round trip with the stored app (client credentials for tenant apps, the refresh token for service accounts) and record the outcome as the app's credential health. Requires admin role.
      */
     post: operations["test_sharepoint_app_credentials_api_v1_admin_sharepoint_app_test_post"];
     delete?: never;
@@ -7688,6 +7688,26 @@ export interface paths {
      * @description Recreate all expired SharePoint webhook subscriptions for the tenant. This is useful after server downtime > 24h when subscriptions have expired. Preserves all integration relationships - assistants continue to work. Requires admin role.
      */
     post: operations["renew_expired_subscriptions_api_v1_admin_sharepoint_subscriptions_renew_expired_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/sharepoint/subscriptions/recreate-all": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Recreate every SharePoint subscription of the tenant
+     * @description Recreate all of the tenant's SharePoint webhook subscriptions in place, whether expired or not, so Graph posts to the currently configured notification URL. Use it after the public origin changed. Preserves all integration relationships. Requires admin role.
+     */
+    post: operations["recreate_all_subscriptions_api_v1_admin_sharepoint_subscriptions_recreate_all_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -12840,11 +12860,27 @@ export interface components {
     };
     /** CreateSpaceIntegrationKnowledge */
     CreateSpaceIntegrationKnowledge: {
+      /** Key */
+      key?: string | null;
+      /** Folder Id */
+      folder_id?: string | null;
+      /** Folder Path */
+      folder_path?: string | null;
+      /** Selected Item Type */
+      selected_item_type?: ("file" | "folder" | "site_root") | null;
+      /**
+       * Resource Type
+       * @default site
+       */
+      resource_type?: ("site" | "onedrive") | null;
       /** Name */
       name: string;
       embedding_model: components["schemas"]["ModelId"];
       /** Url */
       url: string;
+    };
+    /** CreateSpaceIntegrationKnowledgeBatchItem */
+    CreateSpaceIntegrationKnowledgeBatchItem: {
       /** Key */
       key?: string | null;
       /** Folder Id */
@@ -12852,32 +12888,16 @@ export interface components {
       /** Folder Path */
       folder_path?: string | null;
       /** Selected Item Type */
-      selected_item_type?: string | null;
+      selected_item_type?: ("file" | "folder" | "site_root") | null;
       /**
        * Resource Type
        * @default site
        */
-      resource_type?: string | null;
-    };
-    /** CreateSpaceIntegrationKnowledgeBatchItem */
-    CreateSpaceIntegrationKnowledgeBatchItem: {
+      resource_type?: ("site" | "onedrive") | null;
       /** Name */
       name: string;
       /** Url */
       url: string;
-      /** Key */
-      key?: string | null;
-      /** Folder Id */
-      folder_id?: string | null;
-      /** Folder Path */
-      folder_path?: string | null;
-      /** Selected Item Type */
-      selected_item_type?: string | null;
-      /**
-       * Resource Type
-       * @default site
-       */
-      resource_type?: string | null;
     };
     /** CreateSpaceIntegrationKnowledgeBatchRequest */
     CreateSpaceIntegrationKnowledgeBatchRequest: {
@@ -19916,6 +19936,11 @@ export interface components {
     SharePointFixtureTreeResponse: {
       /** Items */
       items: components["schemas"]["SharePointTreeItem"][];
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated?: boolean;
       /** Current Path */
       current_path: string;
       /** Parent Id */
@@ -20054,6 +20079,11 @@ export interface components {
     SharePointTreeResponse: {
       /** Items */
       items: components["schemas"]["SharePointTreeItem"][];
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated?: boolean;
       /** Current Path */
       current_path: string;
       /** Parent Id */
@@ -21230,10 +21260,18 @@ export interface components {
       pages_processed?: number;
       /** Folders Processed */
       folders_processed?: number;
+      /** Unchanged Items */
+      unchanged_items?: number;
       /** Skipped Items */
       skipped_items?: number;
+      /** Skipped Total */
+      skipped_total?: number;
+      /** Skipped Truncated */
+      skipped_truncated?: boolean;
       /** Skipped Details */
       skipped_details?: components["schemas"]["SkippedDetail"][];
+      /** Reconcile Warning */
+      reconcile_warning?: string;
       /** Trigger */
       trigger?: string;
       /** Recovery */
@@ -49932,6 +49970,17 @@ export interface operations {
           };
         };
       };
+      /** @description Body is not a JSON notification object or exceeds 256 KB. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            detail: string;
+          };
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -50081,9 +50130,9 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody: {
+    requestBody?: {
       content: {
-        "application/json": components["schemas"]["TenantSharePointAppCreate"];
+        "application/json": components["schemas"]["TenantSharePointAppCreate"] | null;
       };
     };
     responses: {
@@ -50095,6 +50144,13 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["TenantAppTestResult"];
         };
+      };
+      /** @description No SharePoint app is configured to test */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Authentication required */
       401: {
@@ -50165,6 +50221,40 @@ export interface operations {
     requestBody?: never;
     responses: {
       /** @description Renewal operation completed (check result for details) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SubscriptionRenewalResult"];
+        };
+      };
+      /** @description Authentication required */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  recreate_all_subscriptions_api_v1_admin_sharepoint_subscriptions_recreate_all_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Recreation completed (check result for details) */
       200: {
         headers: {
           [name: string]: unknown;

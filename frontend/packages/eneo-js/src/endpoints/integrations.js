@@ -432,10 +432,9 @@ export function initIntegrations(client) {
          * @throws {EneoError}
          * */
         recreateAllSubscriptions: async () => {
-          const endpoint = /** @type {any} */ (
-            "/api/v1/admin/sharepoint/subscriptions/recreate-all"
-          );
-          const res = await client.fetch(endpoint, { method: "post" });
+          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/recreate-all", {
+            method: "post"
+          });
           return res;
         },
 
@@ -466,8 +465,9 @@ export function initIntegrations(client) {
          * @throws {EneoError}
          * */
         testStoredConnection: async () => {
-          const options = /** @type {any} */ ({ method: "post" });
-          const res = await client.fetch("/api/v1/admin/sharepoint/app/test", options);
+          const res = await client.fetch("/api/v1/admin/sharepoint/app/test", {
+            method: "post"
+          });
           return res;
         },
 
