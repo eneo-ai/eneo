@@ -122,6 +122,9 @@ describe("SharePointSetupFixtureLauncher", () => {
     await page.getByRole("button", { name: "test_connection" }).click();
 
     await expect.element(page.getByText("connection_failed")).toBeVisible();
+    // The bad-secret code maps to guidance; the raw Entra text sits behind the details.
+    await expect.element(page.getByText("sharepoint_auth_guidance_invalid_client")).toBeVisible();
+    await page.getByText("sharepoint_auth_error_details").click();
     await expect.element(page.getByText(/AADSTS7000215/)).toBeVisible();
 
     expect(apiFetch).not.toHaveBeenCalled();

@@ -22,7 +22,10 @@
   import { getErrorMessage, toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import SharePointAuthHealth from "./SharePointAuthHealth.svelte";
   import SharePointFixtureBanner from "./SharePointFixtureBanner.svelte";
+  import { classifyMicrosoftAuthError, type MicrosoftAuthGuidance } from "./microsoftAuthErrors";
+  import { followServiceAccountSignIn } from "./serviceAccountAuth";
   import {
     createSharePointSetupFixtureConfig,
     isSharePointSetupFixtureScenario,
@@ -72,6 +75,24 @@
   let credentialsComplete = $derived(
     clientId.trim().length > 0 && clientSecret.trim().length > 0 && tenantDomain.trim().length > 0
   );
+  let isServiceAccountConfig = $derived(existingConfig?.auth_method === "service_account");
+  let testFailureText = $derived(
+    testResult && !testResult.success
+      ? [testResult.error_message, testResult.details].filter(Boolean).join(" ")
+      : ""
+  );
+  let testFailureGuidance = $derived(classifyMicrosoftAuthError(testFailureText));
+
+  function getGuidanceText(kind: MicrosoftAuthGuidance): string {
+    switch (kind) {
+      case "invalid_client":
+        return m.sharepoint_auth_guidance_invalid_client();
+      case "interaction_required":
+        return m.sharepoint_auth_guidance_interaction_required();
+      case "invalid_grant":
+        return m.sharepoint_auth_guidance_invalid_grant();
+    }
+  }
 
   function getSetupScenarioLabel(scenario: SharePointSetupFixtureScenario): string {
     switch (scenario) {
@@ -265,11 +286,31 @@
         }
       );
 
-      sessionStorage.setItem(
-        "sharepoint_service_account_oauth",
-        JSON.stringify({ state: result.state })
+      followServiceAccountSignIn(result);
+    } catch (error) {
+      toastError(error);
+    }
+  });
+
+  const reauthServiceAccount = createAsyncState(async () => {
+    if (!existingConfig) return;
+
+    if (isFixtureSession) {
+      await sharePointFixtureDelay(700);
+      existingConfig = {
+        ...existingConfig,
+        auth_status: "ok",
+        last_auth_error: null,
+        last_auth_success_at: new Date().toISOString()
+      };
+      toast.success(m.sharepoint_fixture_simulated_saved());
+      return;
+    }
+
+    try {
+      followServiceAccountSignIn(
+        await eneo.integrations.admin.sharepoint.restartServiceAccountAuth()
       );
-      window.location.href = result.auth_url;
     } catch (error) {
       toastError(error);
     }
@@ -381,8 +422,16 @@
                   <Badge variant="destructive">{m.inactive()}</Badge>
                 {/if}
               </dd>
+              <dt class="text-muted-foreground">{m.sharepoint_credentials()}</dt>
+              <dd>
+                <SharePointAuthHealth config={existingConfig} />
+              </dd>
             </dl>
           </div>
+
+          {#if isServiceAccountConfig}
+            <p class="text-muted-foreground text-sm">{m.sharepoint_reauth_description()}</p>
+          {/if}
 
           {#if isUpdatingSecret}
             <Field.Field>
@@ -512,10 +561,19 @@
               <Alert.Root variant="destructive" role="alert">
                 <TriangleAlert aria-hidden="true" />
                 <Alert.Title>{m.connection_failed()}</Alert.Title>
-                {#if testResult.error_message || testResult.details}
+                {#if testFailureText}
                   <Alert.Description>
-                    {testResult.error_message ?? ""}
-                    {testResult.details ?? ""}
+                    {#if testFailureGuidance}
+                      <p>{getGuidanceText(testFailureGuidance)}</p>
+                      <details class="mt-1">
+                        <summary class="cursor-pointer text-xs hover:underline">
+                          {m.sharepoint_auth_error_details()}
+                        </summary>
+                        <p class="mt-1 text-xs break-words">{testFailureText}</p>
+                      </details>
+                    {:else}
+                      <p class="break-words">{testFailureText}</p>
+                    {/if}
                   </Alert.Description>
                 {/if}
               </Alert.Root>
@@ -554,6 +612,21 @@
           {updateSecret.isLoading ? m.saving() : m.save()}
         </Button>
       {:else if existingConfig}
+        {#if isServiceAccountConfig}
+          <Button
+            variant="outline"
+            class="w-full sm:w-auto"
+            disabled={reauthServiceAccount.isLoading}
+            onclick={reauthServiceAccount}
+          >
+            {#if reauthServiceAccount.isLoading}
+              <LoaderCircle class="animate-spin" aria-hidden="true" />
+            {/if}
+            {reauthServiceAccount.isLoading
+              ? m.redirecting()
+              : m.sharepoint_reauth_with_microsoft()}
+          </Button>
+        {/if}
         <Button
           variant="outline"
           class="w-full sm:w-auto"
