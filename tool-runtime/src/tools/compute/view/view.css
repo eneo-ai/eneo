@@ -7,14 +7,21 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* The code behind the result: tabs over one panel, under the footer's row. */
 .eneo-details {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-3);
-  padding-bottom: var(--spacing-2);
+  border-top: 1px solid var(--color-border);
 }
-.eneo-details h3 {
-  margin: 0;
+.eneo-details > [role="tablist"] {
+  padding: 0 var(--spacing-3);
+}
+.eneo-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  padding: var(--spacing-3);
+  background: var(--color-background-muted);
 }
 /* The fields of an editable input, two to a row where there is room. */
 .eneo-fields {
@@ -29,14 +36,8 @@
   align-items: center;
   gap: var(--spacing-2);
 }
-:root[data-mode="fullscreen"] [data-view="compute-result"] .eneo-rows,
-:root[data-mode="fullscreen"] [data-view="compute-result"] .eneo-code {
+:root[data-mode="fullscreen"] [data-view="compute-result"] .eneo-rows {
   flex: 1 0 20rem;
   min-height: 20rem;
   max-height: none;
-}
-/* The disclosure under the result: its own row, set off from the rows above it. */
-.eneo-footer {
-  padding: 0 var(--spacing-3);
-  border-top: 1px solid var(--color-border);
 }

@@ -14,24 +14,30 @@ import { createRoot } from "react-dom/client";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible, CollapsibleGroup } from "@astryxdesign/core/Collapsible";
+import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Switch } from "@astryxdesign/core/Switch";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Table, useTableSortable, type TableSortState } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { Toolbar } from "@astryxdesign/core/Toolbar";
 import {
-  Code,
   TableRows,
   ViewFrame,
+  chevronDownIcon,
+  chevronUpIcon,
+  codeIcon,
   columnWidth,
   copyText,
   filterRows,
   pick,
+  playIcon,
   sortRows,
   toTsv,
+  undoIcon,
   useHost,
   type ToolResult,
 } from "../../../views/kit";
@@ -79,9 +85,13 @@ const TEXTS = {
     copy: "Kopiera",
     copied: "Kopierat",
     details: "Visa kod",
+    hideDetails: "Dölj kod",
+    detailsLabel: "Koden bakom resultatet",
     code: "Kod",
     input: "Indata",
     logs: "Logg",
+    language: "JavaScript",
+    rerunNote: "Samma kod körs igen med värdena ovan. Svaret i chatten ändras inte.",
     dropped: (n: number) => (n === 1 ? "1 rad utelämnad" : `${n} rader utelämnade`),
     duration: (ms: number) => `Kördes på ${ms} ms`,
     rerun: "Beräkna igen",
@@ -106,9 +116,13 @@ const TEXTS = {
     copy: "Copy",
     copied: "Copied",
     details: "Show code",
+    hideDetails: "Hide code",
+    detailsLabel: "The code behind the result",
     code: "Code",
     input: "Input",
     logs: "Logs",
+    language: "JavaScript",
+    rerunNote: "The same code runs again with the values above. The answer in the chat stays as it is.",
     dropped: (n: number) => (n === 1 ? "1 line dropped" : `${n} lines dropped`),
     duration: (ms: number) => `Ran in ${ms} ms`,
     rerun: "Run again",
@@ -158,6 +172,8 @@ function ResultView() {
   const [filter, setFilter] = useState("");
   const [drawn, setDrawn] = useState(ROWS_PER_PAGE);
   const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState("code");
 
   const host = useHost("eneo-compute-result", {
     onInput: (input) => {
@@ -296,6 +312,13 @@ function ResultView() {
     );
   };
 
+  const fullscreen = host.context.displayMode === "fullscreen";
+  const logs =
+    outcome?.logs && outcome.logs.length > 0
+      ? outcome.logs.join("\n") +
+        (outcome.dropped_log_lines ? `\n… ${text.dropped(outcome.dropped_log_lines)}` : "")
+      : undefined;
+
   const title =
     typeof args.title === "string" && args.title.trim()
       ? args.title.trim()
@@ -314,7 +337,6 @@ function ResultView() {
       title={title}
       controls={
         <>
-          {recomputed && <Badge label={text.recomputed} />}
           {table && (
             <TextInput
               label={text.filter}
@@ -339,79 +361,120 @@ function ResultView() {
         failure && <Banner status="error" container="section" title={text.failed} description={failure} />
       }
       footer={
-        <CollapsibleGroup hasDividers density="compact" className="eneo-footer">
-          <Collapsible value="details" trigger={text.details}>
-            <div className="eneo-details">
-              {draft && (
+        <>
+          <Toolbar
+            label={text.detailsLabel}
+            dividers={["top"]}
+            startContent={
+              recomputed ? (
                 <>
-                  <div className="eneo-fields">
-                    {Object.entries(draft).map(([key, field]) =>
-                      typeof field === "number" ? (
-                        <NumberInput
-                          key={key}
-                          label={key}
-                          value={field}
-                          onChange={(next: number | null) =>
-                            setDraft({ ...draft, [key]: next ?? 0 })
-                          }
-                        />
-                      ) : typeof field === "boolean" ? (
-                        <Switch
-                          key={key}
-                          label={key}
-                          value={field}
-                          onChange={(next) => setDraft({ ...draft, [key]: next })}
-                        />
-                      ) : (
-                        <TextInput
-                          key={key}
-                          label={key}
-                          value={field}
-                          onChange={(next: string) => setDraft({ ...draft, [key]: next })}
-                        />
-                      ),
-                    )}
-                  </div>
-                  <div className="eneo-actions">
-                    <Button
-                      variant="secondary"
-                      label={busy ? text.running : text.rerun}
-                      isLoading={busy}
-                      onClick={() => void rerun()}
-                    />
-                    {recomputed && <Button variant="ghost" label={text.reset} onClick={reset} />}
-                  </div>
+                  <Badge label={text.recomputed} />
+                  <Button variant="ghost" size="sm" label={text.reset} icon={undoIcon} onClick={reset} />
                 </>
-              )}
-              <Code
-                text={typeof args.code === "string" ? args.code : ""}
-                language="javascript"
-                label={text.code}
-                meta={typeof outcome?.duration_ms === "number" ? text.duration(outcome.duration_ms) : undefined}
-                lineNumbers
-                copy={{ label: text.copy, copied: text.copied }}
+              ) : typeof outcome?.duration_ms === "number" ? (
+                <Text type="supporting" color="secondary">
+                  {text.duration(outcome.duration_ms)}
+                </Text>
+              ) : undefined
+            }
+            endContent={
+              <Button
+                variant="ghost"
+                label={open ? text.hideDetails : text.details}
+                icon={codeIcon}
+                endContent={open ? chevronUpIcon : chevronDownIcon}
+                aria-expanded={open}
+                onClick={() => setOpen((value) => !value)}
               />
-              {args.input !== undefined && args.input !== null && !draft && (
-                <Code
-                  text={JSON.stringify(args.input, null, 2)}
-                  language="json"
-                  label={text.input}
-                  copy={{ label: text.copy, copied: text.copied }}
-                />
-              )}
-              {outcome?.logs && outcome.logs.length > 0 && (
-                <Code
-                  text={
-                    outcome.logs.join("\n") +
-                    (outcome.dropped_log_lines ? `\n… ${text.dropped(outcome.dropped_log_lines)}` : "")
-                  }
-                  label={text.logs}
-                  copy={{ label: text.copy, copied: text.copied }}
-                />
-              )}
+            }
+          />
+          {open && (
+            <div className="eneo-details">
+              <TabList value={tab} onChange={setTab} size="sm" hasDivider aria-label={text.detailsLabel}>
+                <Tab value="code" label={text.code} />
+                <Tab value="input" label={text.input} />
+                {logs && <Tab value="logs" label={text.logs} />}
+              </TabList>
+              <div className="eneo-panel" role="tabpanel">
+                {tab === "code" && (
+                  <CodeBlock
+                    code={typeof args.code === "string" ? args.code : ""}
+                    language="javascript"
+                    title={text.language}
+                    hasLanguageLabel={false}
+                    hasLineNumbers
+                    size="sm"
+                    width="100%"
+                    maxHeight={fullscreen ? undefined : 288}
+                  />
+                )}
+                {tab === "input" &&
+                  (draft ? (
+                    <>
+                      <div className="eneo-fields">
+                        {Object.entries(draft).map(([key, field]) =>
+                          typeof field === "number" ? (
+                            <NumberInput
+                              key={key}
+                              label={key}
+                              value={field}
+                              onChange={(next: number | null) =>
+                                setDraft({ ...draft, [key]: next ?? 0 })
+                              }
+                            />
+                          ) : typeof field === "boolean" ? (
+                            <Switch
+                              key={key}
+                              label={key}
+                              value={field}
+                              onChange={(next) => setDraft({ ...draft, [key]: next })}
+                            />
+                          ) : (
+                            <TextInput
+                              key={key}
+                              label={key}
+                              value={field}
+                              onChange={(next: string) => setDraft({ ...draft, [key]: next })}
+                            />
+                          ),
+                        )}
+                      </div>
+                      <div className="eneo-actions">
+                        <Button
+                          variant="secondary"
+                          label={busy ? text.running : text.rerun}
+                          icon={playIcon}
+                          isLoading={busy}
+                          onClick={() => void rerun()}
+                        />
+                        <Text type="supporting" color="secondary">
+                          {text.rerunNote}
+                        </Text>
+                      </div>
+                    </>
+                  ) : (
+                    <CodeBlock
+                      code={JSON.stringify(args.input ?? null, null, 2)}
+                      language="json"
+                      hasLanguageLabel={false}
+                      size="sm"
+                      width="100%"
+                      maxHeight={fullscreen ? undefined : 288}
+                    />
+                  ))}
+                {tab === "logs" && logs && (
+                  <CodeBlock
+                    code={logs}
+                    hasLanguageLabel={false}
+                    size="sm"
+                    width="100%"
+                    maxHeight={fullscreen ? undefined : 288}
+                  />
+                )}
+              </div>
             </div>
-          </Collapsible>
-        </CollapsibleGroup>
+          )}
+        </>
       }
     >
       {table ? (
@@ -466,7 +529,15 @@ function ResultView() {
           scrollWrapper={TableRows}
         />
       ) : typeof value === "object" && value !== null ? (
-        <Code text={JSON.stringify(value, null, 2)} language="json" />
+        <CodeBlock
+          code={JSON.stringify(value, null, 2)}
+          language="json"
+          hasLanguageLabel={false}
+          hasCopyButton={false}
+          container="section"
+          size="sm"
+          width="100%"
+        />
       ) : (
         <div className="eneo-value">{value === null || value === undefined ? "null" : shownCell(value)}</div>
       )}

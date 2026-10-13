@@ -40,7 +40,6 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
     "decimal.js": "10.6.0",
-    "highlight.js": "11.11.1",
     "pdf-lib": "1.17.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
