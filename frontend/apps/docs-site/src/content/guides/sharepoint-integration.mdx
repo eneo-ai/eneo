@@ -227,7 +227,7 @@ The SharePoint card on the integrations page, and the **Current Configuration** 
 - **Credential problem** – the last attempt was refused. Eneo shows short guidance for the common Microsoft errors (a wrong or expired client secret, a sign-in Microsoft requires to be repeated, a saved sign-in that is no longer valid), when it failed, and the Microsoft error text under **Technical details**.
 - **Credentials not verified yet** – the credentials have not been used since they were saved.
 
-The health is recorded every time Eneo acquires a token with the stored app – with the client credentials for a tenant app, with the stored refresh token for a service account. That happens during imports, synchronization, browsing in the import dialog and webhook renewal, so a broken secret or a revoked service-account sign-in becomes visible on the integrations page instead of only in job logs. An administrator can also force a check of the stored credentials for either method through the admin API by calling `POST /api/v1/admin/sharepoint/app/test` without a request body; the outcome is recorded in the same way.
+The health is recorded every time Eneo acquires a token with the stored app – with the client credentials for a tenant app, with the stored refresh token for a service account. That happens during imports, synchronization, browsing in the import dialog and webhook renewal, so a broken secret or a revoked service-account sign-in becomes visible on the integrations page instead of only in job logs. To check the stored credentials right away, open the configuration dialog and click **Test Connection** in the **Current Configuration** view; it tests the stored credentials for either method with Microsoft and updates the credential status. A script can do the same through the admin API by calling `POST /api/v1/admin/sharepoint/app/test` without a request body; the outcome is recorded in the same way.
 
 For a service account with a credential problem, the card also offers **Sign in again with Microsoft**. See [Re-authenticating the Service Account](#re-authenticating-the-service-account).
 
@@ -417,14 +417,16 @@ Each imported item in a space's knowledge list also shows its own webhook status
 
 A subscription is registered with the webhook address that was current when it was created. If `PUBLIC_ORIGIN` or `SHAREPOINT_WEBHOOK_NOTIFICATION_URL` changes, for example when Eneo moves to a new domain, Eneo notices the difference at the next renewal or synchronization and recreates the subscription with the new address instead of renewing it. Until then, Microsoft keeps posting to the old address.
 
-To switch every subscription immediately, an administrator can call the admin API after restarting the backend with the new address, using a tenant API key with admin permission (see the [API overview](/docs/api)):
+To switch every subscription immediately, restart the backend with the new address, then open **Admin** → **Integrations** → **Manage Webhooks** and click **Recreate all subscriptions**. After confirmation, every subscription is removed at Microsoft and created again with the current address, expired or not; imported knowledge and assistants are not affected. The result shows how many subscriptions were recreated and how many failed.
+
+A script can do the same through the admin API, using a tenant API key with admin permission (see the [API overview](/docs/api)):
 
 ```bash
 curl -X POST "https://your-eneo-domain.com/api/v1/admin/sharepoint/subscriptions/recreate-all" \
   -H "X-API-Key: sk_..."
 ```
 
-The endpoint recreates all of the tenant's subscriptions in place, expired or not, and returns how many were recreated and how many failed. There is no button for it in the UI.
+The endpoint recreates all of the tenant's subscriptions in place and returns how many were recreated and how many failed.
 
 ### Network Configuration for Webhooks
 

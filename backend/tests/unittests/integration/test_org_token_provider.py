@@ -125,6 +125,47 @@ class TestSuccess:
         assert written["last_auth_success_at"] == app.last_auth_success_at
         repo.update.assert_not_awaited()
 
+    @pytest.mark.parametrize(
+        "previous, rotated, persisted",
+        [
+            pytest.param({}, False, True, id="first-success"),
+            pytest.param(
+                {"last_auth_success_at": _NOW - timedelta(minutes=1)},
+                False,
+                False,
+                id="fresh-stamp",
+            ),
+            pytest.param(
+                {"last_auth_success_at": _NOW - timedelta(minutes=1)},
+                True,
+                True,
+                id="fresh-stamp-but-rotated",
+            ),
+        ],
+    )
+    async def test_service_account_success_writes_the_row_only_when_it_changes(
+        self, previous, rotated, persisted
+    ):
+        account_auth = AsyncMock()
+        account_auth.refresh_access_token.return_value = {
+            "access_token": "at",
+            "refresh_token": "refresh-2" if rotated else "refresh-1",
+        }
+        provider, repo = _provider(account_auth=account_auth)
+        app = _app(AUTH_METHOD_SERVICE_ACCOUNT, **previous)
+        sessions = _FakeSessionManager()
+
+        with patch(f"{_MODULE}.sessionmanager", sessions):
+            assert await provider.get_access_token(app) == "at"
+
+        assert app.auth_status == "ok"
+        assert len(sessions.updates()) == (1 if persisted else 0)
+        if rotated:
+            (update,) = sessions.updates()
+            params = update.compile().params
+            assert params["service_account_refresh_token_encrypted"] == "enc:refresh-2"
+        repo.update.assert_not_awaited()
+
     async def test_service_account_rotation_without_encryption_uses_the_callers_repo(
         self,
     ):

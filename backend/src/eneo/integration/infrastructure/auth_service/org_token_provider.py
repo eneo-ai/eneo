@@ -189,10 +189,10 @@ class OrgTokenProvider:
                 )
                 if rotated:
                     app.update_refresh_token(new_refresh_token)
-                # Every service-account call is a real token round trip and may
-                # have rotated the refresh token.
-                self._mark_success(app)
-                await self._persist_success(app, rotated=rotated)
+                # A rotated refresh token must reach the row, or the next
+                # acquisition uses one Microsoft has already retired.
+                if self._mark_success(app) or rotated:
+                    await self._persist_success(app, rotated=rotated)
             else:
                 access_token = await self.tenant_app_auth_service.get_access_token(
                     app, force_refresh=force_refresh

@@ -145,7 +145,10 @@ class SharePointContentClient(BaseClient):
                 self.update_token(access_token)
                 return {"access_token": access_token}
 
-            assert self.token_refresh_callback is not None and self.token_id is not None
+            if self.token_refresh_callback is None or self.token_id is None:
+                raise ValueError(
+                    "Cannot refresh token: missing token_refresh_callback or token_id"
+                )
             token_data = await self.token_refresh_callback(self.token_id)
             if not token_data or "access_token" not in token_data:
                 raise ValueError("Token refresh callback returned invalid token data")

@@ -155,6 +155,8 @@ class TestNoTextIsNotAFailure:
         assert NO_TEXT_REASONS == {NO_TEXT_LAYER_REASON, EMPTY_CONTENT_REASON}
         assert ExtractionResult.error("x").is_no_text is False
         assert ExtractionResult.skipped("Unsupported file type (x)").is_no_text is False
+        with pytest.raises(ValueError, match="no-text reason"):
+            ExtractionResult.no_text("Error: Corrupt or malformed file")
 
 
 class TestUnsupportedFormatsNeverProduceGarbage:
