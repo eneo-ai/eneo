@@ -12,6 +12,7 @@ VARIANTS = (
     "backend-debian-wheels",
     "backend-debian-system",
     "backend-wolfi",
+    "backend-wolfi-wheels",
     "frontend-debian",
     "frontend-chainguard",
 )

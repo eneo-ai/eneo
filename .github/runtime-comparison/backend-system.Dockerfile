@@ -7,7 +7,7 @@ RUN python -m pip uninstall -y pip setuptools wheel
 FROM runtime-base AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /usr/local/bin/uv
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libxml2-dev libxslt1-dev && rm -rf /var/lib/apt/lists/*
+    build-essential libxml2-dev libxslt1-dev zlib1g-dev && rm -rf /var/lib/apt/lists/*
 ENV UV_NO_BINARY_PACKAGE=lxml
 
 # Set uv optimizations

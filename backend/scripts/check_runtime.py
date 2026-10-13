@@ -28,6 +28,10 @@ def main(*, portable: bool = False) -> None:
     )
     # Comparison builds exercise behavior on Debian too. Version numbers alone
     # do not describe distribution backports; scanners retain that evidence.
+    soundfile_version = None
+    if portable and importlib.util.find_spec("soundfile") is not None:
+        soundfile = importlib.import_module("soundfile")
+        soundfile_version = soundfile.__libsndfile_version__
     mappings = Path("/proc/self/maps").read_text()
     if not portable:
         assert etree.LIBXML_VERSION >= (2, 15, 4)
@@ -43,6 +47,7 @@ def main(*, portable: bool = False) -> None:
     print(
         json.dumps(
             {
+                "soundfile_libsndfile": soundfile_version,
                 "libxml2": etree.LIBXML_VERSION,
                 "libxslt": etree.LIBXSLT_VERSION,
                 "expat": xml.parsers.expat.EXPAT_VERSION,

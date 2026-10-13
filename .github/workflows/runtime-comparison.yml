@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 defaults:
   run:
@@ -18,39 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  databases:
-    name: Freeze scanner databases
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - run: bash .github/actions/scan-application-image/install.sh
-      - name: Download one database snapshot for every candidate
-        env:
-          TRIVY_CACHE_DIR: ${{ runner.temp }}/scanner-databases/trivy
-          GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/scanner-databases/grype
-        run: |
-          mkdir -p "$RUNNER_TEMP/scanner-databases"
-          trivy image --download-db-only
-          grype db update
-          trivy --version > "$RUNNER_TEMP/scanner-databases/trivy-version.txt"
-          grype version > "$RUNNER_TEMP/scanner-databases/grype-version.txt"
-          grype db status > "$RUNNER_TEMP/scanner-databases/grype-db-status.txt"
-          cd "$RUNNER_TEMP/scanner-databases"
-          find . -type f -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/database-checksums.txt"
-          mv "$RUNNER_TEMP/database-checksums.txt" checksums.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: scanner-databases
-          path: ${{ runner.temp }}/scanner-databases
-          retention-days: 14
-          include-hidden-files: true
-
   compare:
     name: Compare ${{ matrix.variant }}
-    needs: databases
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
@@ -71,6 +41,9 @@ jobs:
           - variant: backend-wolfi
             kind: backend
             dockerfile: backend/Dockerfile
+          - variant: backend-wolfi-wheels
+            kind: backend
+            dockerfile: .github/runtime-comparison/backend-wolfi-wheels.Dockerfile
           - variant: frontend-debian
             kind: frontend
             dockerfile: .github/runtime-comparison/frontend-debian.Dockerfile
@@ -83,7 +56,10 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          # Preserve the original experiment's exact database bytes on reruns.
           name: scanner-databases
+          run-id: 38366957420
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           path: ${{ runner.temp }}/scanner-databases
       - name: Verify shared scanner database bytes
         run: cd "$RUNNER_TEMP/scanner-databases" && sha256sum --check checksums.txt
@@ -94,6 +70,17 @@ jobs:
           for file in backend/pyproject.toml backend/uv.lock backend/src/eneo/files/audio.py; do
             git show "d30550781a1d2bd0812e64b4164a8c329aba3969:$file" > "$file"
           done
+      - name: Isolate wheel versus system lxml on Wolfi too
+        if: matrix.variant == 'backend-wolfi-wheels'
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          source = Path("backend/Dockerfile").read_text()
+          original = "    UV_PYTHON_DOWNLOADS=never " + chr(92) + "\n    UV_NO_BINARY_PACKAGE=lxml"
+          assert source.count(original) == 1
+          Path(".github/runtime-comparison/backend-wolfi-wheels.Dockerfile").write_text(
+              source.replace(original, "    UV_PYTHON_DOWNLOADS=never"))
+          PYCODE
       - name: Add swap for frontend image build
         if: matrix.kind == 'frontend'
         run: |
