@@ -1,13 +1,15 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import type { FlowStep } from "@eneo/eneo-js";
+import { EneoError, type FlowStep } from "@eneo/eneo-js";
 import { readable } from "svelte/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
+import { flowStepFixture } from "$lib/features/flows/flowStepTestFixture";
 
 import {
   describeClassificationRefusal,
   getValidationIssueMessage,
+  parseServerValidationIdentity,
   type ClassificationRefusal
 } from "$lib/features/flows/flowStepValidationMessages";
 
@@ -103,6 +105,69 @@ describe("FlowValidationBanner server issues", () => {
     const raw = screen.getAllByText(RAW_FLOW_SENTENCE);
     expect(raw).toHaveLength(1);
     expect(raw[0].closest('[data-slot="collapsible-content"]')).not.toBeNull();
+  });
+});
+
+describe("FlowValidationBanner tool refusals", () => {
+  const RAW_TOOL_SENTENCE = "Step 3: the server's own English sentence.";
+
+  function renderRefusal(code: string, context: Record<string, unknown>) {
+    const identity = parseServerValidationIdentity(
+      new EneoError(RAW_TOOL_SENTENCE, "RESPONSE", 400, 0, {
+        message: RAW_TOOL_SENTENCE,
+        eneo_error_code: 0,
+        code,
+        context: { step_order: 3, ...context }
+      })
+    );
+    render(FlowValidationBanner, {
+      errors: new Map([
+        [`flow:server:${identity?.code}:${identity?.stepOrder}`, [RAW_TOOL_SENTENCE]]
+      ]),
+      steps: [flowStepFixture({ id: "step-3", step_order: 3 })],
+      repairIssue: identity,
+      onNavigateToStep: () => undefined,
+      isExpanded: true
+    });
+  }
+
+  // Kills: the banner shows the code's generic sentence whatever `context.refusal`
+  // says; a refusal value outside the enum is looked up as if it were one of its.
+  it.each([
+    { refusal: "server_disabled", sentence: () => m.flow_tool_refusal_server_disabled() },
+    {
+      refusal: "tool_switched_off_in_space",
+      sentence: () => m.flow_tool_refusal_tool_switched_off_in_space()
+    },
+    {
+      refusal: "a_level_this_client_lacks",
+      sentence: () => m.flow_error_typed_io_tool_not_allowed()
+    }
+  ])("says on the step which level refuses the tool: $refusal", ({ refusal, sentence }) => {
+    renderRefusal("typed_io_tool_not_allowed", {
+      refusal,
+      mcp_server_id: "server-1",
+      tool_id: "tool-1"
+    });
+
+    expect(screen.getByText(sentence())).toBeTruthy();
+    // Kills: the refusal is shown flow-wide, without the action that opens its step.
+    expect(screen.getByRole("button", { name: m.flow_validation_go_to_step() })).toBeTruthy();
+  });
+
+  // Kills: an argument problem shows the code's generic sentence, or a sentence
+  // chosen without the problem or without the argument's name.
+  it("names the argument a refused tool configuration is about", () => {
+    renderRefusal("typed_io_tool_invalid_config", {
+      issue_code: "flow_step_invalid",
+      field: "input_config.tool.arguments.query",
+      argument: "query",
+      problem: "composed_text"
+    });
+
+    expect(
+      screen.getByText(m.flow_tool_argument_composed_text({ argument: "query" }))
+    ).toBeTruthy();
   });
 });
 

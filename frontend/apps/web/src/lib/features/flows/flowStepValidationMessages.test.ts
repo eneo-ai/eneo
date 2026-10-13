@@ -2,8 +2,10 @@ import { EneoError } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import { securityClassName } from "./flowClassificationNames";
+import type { UnattendedToolRefusal } from "./flowToolRefusal";
 import {
   describeClassificationRefusal,
+  describeToolStepRefusal,
   getValidationIssueMessage,
   parseServerValidationIdentity,
   parseValidationError,
@@ -67,6 +69,59 @@ describe("parseServerValidationIdentity", () => {
     });
     expect(parseServerValidationIdentity(error)).toBeNull();
     expect(parseServerValidationIdentity({})).toBeNull();
+  });
+});
+
+describe("tool step refusals", () => {
+  const identity = (code: string, context: Record<string, unknown>) =>
+    parseServerValidationIdentity({ response: { code, context: { step_order: 3, ...context } } });
+
+  // Kills: two refusal levels, two configuration fields or two argument
+  // problems share a sentence; a level, field or problem has none of its own.
+  it("gives every refusal level, configuration field and argument problem its own sentence", () => {
+    const levels: Record<UnattendedToolRefusal, true> = {
+      server_not_found: true,
+      server_disabled: true,
+      server_not_general: true,
+      server_forwards_identity: true,
+      tool_not_found: true,
+      tool_removed_at_server: true,
+      tool_waiting_for_review: true,
+      tool_switched_off: true,
+      space_is_personal: true,
+      server_not_in_space: true,
+      tool_switched_off_in_space: true,
+      server_below_space_classification: true
+    };
+    const fields = ["input_type", "output_mode", "input_config.runtime_input", "input_config.tool"];
+    const problems = [
+      "composed_text",
+      "nested_reference",
+      "step_not_earlier",
+      "unknown_reference",
+      "missing_required"
+    ];
+    const facts = [
+      ...Object.keys(levels).map((refusal) => identity("typed_io_tool_not_allowed", { refusal })),
+      ...fields.map((field) => identity("typed_io_tool_invalid_config", { field })),
+      ...problems.map((problem) =>
+        identity("typed_io_tool_invalid_config", { argument: "query", problem })
+      )
+    ];
+
+    const sentences = facts.flatMap((fact) =>
+      fact?.toolRefusal ? [describeToolStepRefusal(fact.toolRefusal)] : []
+    );
+    expect(new Set(sentences).size).toBe(21);
+  });
+
+  // Kills: the invalid-schema refusal, which carries no issue_code, is not
+  // routed to its step.
+  it("routes the invalid-schema refusal by its code", () => {
+    expect(identity("typed_io_tool_invalid_schema", {})).toMatchObject({
+      code: "typed_io_tool_invalid_schema",
+      stepOrder: 3
+    });
   });
 });
 

@@ -24,9 +24,9 @@
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import {
     describeClassificationRefusal,
+    describeToolStepRefusal,
     getValidationIssueMessage,
     parseValidationError,
-    type ClassificationRefusal,
     type parseServerValidationIdentity,
     type ParsedValidationError
   } from "$lib/features/flows/flowStepValidationMessages";
@@ -97,16 +97,18 @@
         const step = steps.find((s) => s.step_order === parsed.stepOrder);
         const translated = getValidationIssueMessage(parsed.code);
         const raw = parsed.detail;
-        const refusal = classificationRefusalFor(key, parsed);
-        const message = refusal
-          ? describeClassificationRefusal(refusal, {
+        const refusal = serverIssueFor(key, parsed);
+        const message = refusal?.classification
+          ? describeClassificationRefusal(refusal.classification, {
               stepLabel: stepLabelFor,
               modelName: modelNameFor,
               className: (level) => securityClassName(classifications, level)
             })
-          : translated !== parsed.code
-            ? translated
-            : (raw ?? parsed.code);
+          : refusal?.toolRefusal
+            ? describeToolStepRefusal(refusal.toolRefusal)
+            : translated !== parsed.code
+              ? translated
+              : (raw ?? parsed.code);
         return {
           key,
           stepOrder: parsed.stepOrder,
@@ -160,18 +162,18 @@
     }
   }
 
-  /** The facts of the latest server refusal when they belong to this very issue. */
-  function classificationRefusalFor(
+  /** The latest server refusal, with its facts, when it is this very issue. */
+  function serverIssueFor(
     key: string,
     issue: Extract<ParsedValidationError, { kind: "step" }>
-  ): ClassificationRefusal | undefined {
+  ): typeof repairIssue {
     if (
       !key.startsWith("flow:server:") ||
       repairIssue?.code !== issue.code ||
       repairIssue.stepOrder !== issue.stepOrder
     )
-      return undefined;
-    return repairIssue.classification;
+      return null;
+    return repairIssue;
   }
 
   function stepLabelFor(stepOrder: number): string {
@@ -210,10 +212,9 @@
     issue: Extract<ParsedValidationError, { kind: "step" }>,
     step: FlowStep
   ): ReferenceRepair[] {
+    const serverIssue = serverIssueFor(key, issue);
     if (
-      !key.startsWith("flow:server:") ||
-      repairIssue?.code !== issue.code ||
-      repairIssue.stepOrder !== issue.stepOrder ||
+      !serverIssue ||
       ![
         "flow_input_binding_invalid_step_reference",
         "flow_input_binding_unknown_step_order",
@@ -221,7 +222,7 @@
       ].includes(issue.code)
     )
       return [];
-    return repairsForStep(step, repairIssue);
+    return repairsForStep(step, serverIssue);
   }
 
   function optionLabel(option: FlowInputMaterialOption): string {

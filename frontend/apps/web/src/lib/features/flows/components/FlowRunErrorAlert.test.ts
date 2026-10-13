@@ -216,4 +216,36 @@ describe("FlowRunErrorAlert", () => {
     expect(body).not.toContain(m.flow_error_flow_step_execution_failed());
     expect(body).not.toContain(m.flow_error_flow_review_policy_invalid());
   });
+
+  // Kills: the run view shows the code's generic sentence whatever `details.tool_refusal`
+  // says; the tool's own text has no label, or is rendered as markup.
+  it("says which level refused the tool and shows the tool's own error text as text", () => {
+    const failed = (
+      code: FlowRunError["code"],
+      details: FlowRunError["details"],
+      errorCode: string = code
+    ) =>
+      render(FlowRunErrorAlert, {
+        props: { error: runError({ code, details }), errorCode, message: "Step 2 failed." }
+      }).body;
+
+    expect(
+      failed(FLOW_API_ERROR_CODE.TYPED_IO_TOOL_NOT_ALLOWED, { tool_refusal: "server_not_in_space" })
+    ).toContain(m.flow_tool_refusal_server_not_in_space());
+
+    const reported = failed(FLOW_API_ERROR_CODE.TYPED_IO_TOOL_REPORTED_ERROR, {
+      tool_error_text: "No case <b>4711</b>"
+    });
+    expect(reported).toContain(m.flow_run_error_tool_text_label());
+    // Svelte escapes the opening bracket of text, which is what stops a tag.
+    expect(reported).toContain("No case &lt;b>4711&lt;/b>");
+    // Kills: a step that failed with another code shows the tool text of the run's error.
+    expect(
+      failed(
+        FLOW_API_ERROR_CODE.TYPED_IO_TOOL_REPORTED_ERROR,
+        { tool_error_text: "No case" },
+        FLOW_API_ERROR_CODE.STEP_EXECUTION_FAILED
+      )
+    ).not.toContain(m.flow_run_error_tool_text_label());
+  });
 });

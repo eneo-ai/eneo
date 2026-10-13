@@ -34,17 +34,25 @@
   const isReviewPolicyError = $derived(isReviewPolicyInvalidRunError(error));
   const localizedStepErrorMessage = $derived(getFlowRuntimeErrorMessageByCode(errorCode));
   const localizedRunErrorMessage = $derived(getFlowRunErrorMessage(error));
-  const localizedErrorMessage = $derived(localizedStepErrorMessage ?? localizedRunErrorMessage);
+  // The run error is about this alert's failure unless the step failed with a
+  // code of its own. Its sentence then comes first: it is chosen with facts
+  // the bare code lacks, such as which level refused a tool.
+  const runErrorIsThisFailure = $derived(
+    error != null && (errorCode === null || errorCode === error.code)
+  );
+  const localizedErrorMessage = $derived(
+    runErrorIsThisFailure
+      ? (localizedRunErrorMessage ?? localizedStepErrorMessage)
+      : (localizedStepErrorMessage ?? localizedRunErrorMessage)
+  );
+  const runErrorFacts = $derived(runErrorIsThisFailure ? (error?.details ?? null) : null);
   // A step that ran out of its time budget reports where it was and what it
   // had finished; those facts replace the generic catalog sentence so the
   // provider caveat is only shown when a request really was interrupted.
   const stepTimeoutFacts = $derived(
-    error?.code === FLOW_API_ERROR_CODE.STEP_TIMEOUT &&
-      error.details &&
-      (errorCode === null || errorCode === error.code)
-      ? error.details
-      : null
+    error?.code === FLOW_API_ERROR_CODE.STEP_TIMEOUT ? runErrorFacts : null
   );
+  const toolErrorText = $derived(runErrorFacts?.tool_error_text || null);
   const stepTimeoutPhaseLabels: Record<string, () => string> = {
     input_resolution: () => m.flow_run_error_phase_input_resolution(),
     transcription: () => m.flow_run_error_phase_transcription(),
@@ -129,6 +137,13 @@
       <span>{localizedErrorMessage}</span>
     {:else}
       <span>{m.flow_run_error_desc()}</span>
+    {/if}
+
+    {#if toolErrorText}
+      <div class="flex flex-col gap-1">
+        <span class="font-medium">{m.flow_run_error_tool_text_label()}</span>
+        <span class="break-words whitespace-pre-wrap">{toolErrorText}</span>
+      </div>
     {/if}
 
     {#if onrepair}

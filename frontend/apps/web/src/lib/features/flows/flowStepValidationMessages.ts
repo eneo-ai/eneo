@@ -1,4 +1,10 @@
+import { FLOW_API_ERROR_CODE } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
+import {
+  isUnattendedToolRefusal,
+  toolRefusalSentence,
+  type UnattendedToolRefusal
+} from "./flowToolRefusal";
 
 const CODE_TO_MESSAGE: Record<string, () => string> = {
   typed_io_duplicate_step_order: () => m.flow_validation_msg_duplicate_step_order(),
@@ -74,7 +80,13 @@ const CODE_TO_MESSAGE: Record<string, () => string> = {
   flow_step_output_classification_write_down: () =>
     m.flow_error_flow_step_output_classification_write_down(),
   flow_step_tool_arguments_classification_write_down: () =>
-    m.flow_error_flow_step_tool_arguments_classification_write_down()
+    m.flow_error_flow_step_tool_arguments_classification_write_down(),
+  // The refusals of a step that takes its input from a tool. Their facts, when
+  // the server sends them, choose a sentence that says what to change
+  // (describeToolStepRefusal).
+  typed_io_tool_not_allowed: () => m.flow_error_typed_io_tool_not_allowed(),
+  typed_io_tool_invalid_config: () => m.flow_error_typed_io_tool_invalid_config(),
+  typed_io_tool_invalid_schema: () => m.flow_error_typed_io_tool_invalid_schema()
 };
 
 export function getValidationIssueMessage(code: string): string {
@@ -201,9 +213,92 @@ export function describeClassificationRefusal(
   return `${why} ${modelState} ${choice}`;
 }
 
+// Publish raises these outside the step-graph check, so they carry no
+// `context.issue_code`; a refused configuration carries the graph check's
+// generic one. The typed error code is their identity.
+const TOOL_STEP_REFUSAL_CODES: readonly string[] = [
+  FLOW_API_ERROR_CODE.TYPED_IO_TOOL_NOT_ALLOWED,
+  FLOW_API_ERROR_CODE.TYPED_IO_TOOL_INVALID_CONFIG,
+  FLOW_API_ERROR_CODE.TYPED_IO_TOOL_INVALID_SCHEMA
+];
+
+const TOOL_ARGUMENT_SENTENCES = {
+  composed_text: m.flow_tool_argument_composed_text,
+  nested_reference: m.flow_tool_argument_nested_reference,
+  step_not_earlier: m.flow_tool_argument_step_not_earlier,
+  unknown_reference: m.flow_tool_argument_unknown_reference,
+  missing_required: m.flow_tool_argument_missing_required
+};
+type ToolArgumentProblem = keyof typeof TOOL_ARGUMENT_SENTENCES;
+
+function isToolArgumentProblem(value: unknown): value is ToolArgumentProblem {
+  return typeof value === "string" && Object.hasOwn(TOOL_ARGUMENT_SENTENCES, value);
+}
+
+const TOOL_CONFIG_FIELD = "input_config.tool";
+const TOOL_CONFIG_SENTENCES = {
+  input_type: m.flow_tool_config_input_type,
+  output_mode: m.flow_tool_config_output_mode,
+  "input_config.runtime_input": m.flow_tool_config_uploads,
+  [TOOL_CONFIG_FIELD]: m.flow_tool_config_unreadable
+};
+type ToolConfigField = keyof typeof TOOL_CONFIG_SENTENCES;
+
+function isToolConfigField(value: string): value is ToolConfigField {
+  return Object.hasOwn(TOOL_CONFIG_SENTENCES, value);
+}
+
+/** What the server's facts say a tool step is refused for. */
+type ToolStepRefusal =
+  | { kind: "not_allowed"; refusal: UnattendedToolRefusal }
+  | { kind: "config"; field: ToolConfigField }
+  | { kind: "argument"; argument: string; problem: ToolArgumentProblem };
+
+/**
+ * The facts of a tool step's refusal, or undefined when the payload lacks
+ * them or holds a value this client does not know: the caller then shows the
+ * code's generic sentence.
+ */
+function readToolStepRefusal(
+  code: string,
+  context: Record<string, unknown>
+): ToolStepRefusal | undefined {
+  if (code === FLOW_API_ERROR_CODE.TYPED_IO_TOOL_NOT_ALLOWED) {
+    return isUnattendedToolRefusal(context.refusal)
+      ? { kind: "not_allowed", refusal: context.refusal }
+      : undefined;
+  }
+  if (code !== FLOW_API_ERROR_CODE.TYPED_IO_TOOL_INVALID_CONFIG) return undefined;
+  const { field, argument, problem } = context;
+  if (argument !== undefined) {
+    return typeof argument === "string" && argument && isToolArgumentProblem(problem)
+      ? { kind: "argument", argument, problem }
+      : undefined;
+  }
+  if (typeof field !== "string") return undefined;
+  if (isToolConfigField(field)) return { kind: "config", field };
+  // A value inside the tool configuration that cannot be read is named by its path.
+  return field.startsWith(`${TOOL_CONFIG_FIELD}.`)
+    ? { kind: "config", field: TOOL_CONFIG_FIELD }
+    : undefined;
+}
+
+/** The sentence for a tool step's refusal: what is wrong and what to change. */
+export function describeToolStepRefusal(refusal: ToolStepRefusal): string {
+  switch (refusal.kind) {
+    case "not_allowed":
+      return toolRefusalSentence(refusal.refusal);
+    case "config":
+      return TOOL_CONFIG_SENTENCES[refusal.field]();
+    case "argument":
+      return TOOL_ARGUMENT_SENTENCES[refusal.problem]({ argument: refusal.argument });
+  }
+}
+
 /**
  * Structured identity of a server-side validation failure, read from the
- * error payload the backend now emits (context.issue_code + step_order).
+ * error payload the backend emits: context.issue_code + step_order, or one of
+ * the tool step refusal codes.
  */
 export function parseServerValidationIdentity(error: { response?: unknown }): {
   code: string;
@@ -211,11 +306,12 @@ export function parseServerValidationIdentity(error: { response?: unknown }): {
   field: string | null;
   reference: string | null;
   classification?: ClassificationRefusal;
+  toolRefusal?: ToolStepRefusal;
 } | null {
-  // The backend's GeneralError body arrives as EneoError.response;
-  // context.issue_code is the one validation discriminator — a symbolic
-  // top-level code alone is NOT treated as validation, so unrelated domain
-  // errors are never misrouted into the banner.
+  // The backend's GeneralError body arrives as EneoError.response. Apart from
+  // the tool step refusal codes, context.issue_code is the one validation
+  // discriminator: any other symbolic top-level code alone is NOT treated as
+  // validation, so unrelated domain errors are never misrouted into the banner.
   const response =
     typeof error.response === "object" && error.response !== null
       ? (error.response as Record<string, unknown>)
@@ -226,15 +322,28 @@ export function parseServerValidationIdentity(error: { response?: unknown }): {
       ? (response.context as Record<string, unknown>)
       : null;
   if (!context) return null;
+  const toolCode =
+    typeof response.code === "string" && TOOL_STEP_REFUSAL_CODES.includes(response.code)
+      ? response.code
+      : null;
   const code =
-    typeof context.issue_code === "string" && context.issue_code ? context.issue_code : null;
+    toolCode ??
+    (typeof context.issue_code === "string" && context.issue_code ? context.issue_code : null);
   if (!code) return null;
   const stepOrder = typeof context.step_order === "number" ? context.step_order : null;
   const field = typeof context.field === "string" && context.field ? context.field : null;
   const reference =
     typeof context.reference === "string" && context.reference ? context.reference : null;
   const classification = readClassificationRefusal(code, context);
-  return { code, stepOrder, field, reference, ...(classification ? { classification } : {}) };
+  const toolRefusal = readToolStepRefusal(code, context);
+  return {
+    code,
+    stepOrder,
+    field,
+    reference,
+    ...(classification ? { classification } : {}),
+    ...(toolRefusal ? { toolRefusal } : {})
+  };
 }
 
 /**

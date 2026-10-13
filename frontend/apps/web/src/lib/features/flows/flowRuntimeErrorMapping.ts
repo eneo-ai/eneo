@@ -7,6 +7,11 @@ import {
 import type { FlowRunError as FlowRunErrorContract } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { getErrorCodeMessage } from "$lib/core/errors/getErrorMessage";
+import {
+  isUnattendedToolRefusal,
+  toolRefusalSentence,
+  type UnattendedToolRefusal
+} from "./flowToolRefusal";
 
 export { FLOW_API_ERROR_CODE, FLOW_API_ERROR_CODES };
 export type { FlowApiErrorCode };
@@ -29,6 +34,8 @@ export type FlowApiErrorContext = {
   hint?: string;
   /** Why a run could not identify speakers (not_chosen, picked_unavailable). */
   speaker_service_gap?: string;
+  /** Which level refused the tool of a step that takes its input from one. */
+  tool_refusal?: UnattendedToolRefusal;
 };
 
 export type FlowApiErrorDescriptor = {
@@ -506,10 +513,10 @@ export function describeFlowRunError(error: unknown): FlowApiErrorDescriptor | n
     context.step_order = stepOrder;
   }
 
-  const gap = isObject(error.details)
-    ? readOptionalString(error.details.speaker_service_gap)
-    : undefined;
+  const details = isObject(error.details) ? error.details : {};
+  const gap = readOptionalString(details.speaker_service_gap);
   if (gap) context.speaker_service_gap = gap;
+  if (isUnattendedToolRefusal(details.tool_refusal)) context.tool_refusal = details.tool_refusal;
 
   return descriptorForCode(readOptionalString(error.code), context);
 }
@@ -531,6 +538,13 @@ function resolveFlowApiErrorMessage(descriptor: FlowApiErrorDescriptor): string 
     if (descriptor.context.speaker_service_gap === "picked_unavailable") {
       return m.flow_speaker_service_gap_picked_unavailable();
     }
+  }
+  // The code says the tool was refused; the level says why and who can change it.
+  if (
+    descriptor.code === FLOW_API_ERROR_CODE.TYPED_IO_TOOL_NOT_ALLOWED &&
+    descriptor.context.tool_refusal
+  ) {
+    return toolRefusalSentence(descriptor.context.tool_refusal);
   }
   return FLOW_API_ERROR_MESSAGES[descriptor.code]();
 }
