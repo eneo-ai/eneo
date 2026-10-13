@@ -33,6 +33,7 @@ from eneo.model_providers.domain.model_provider_service import (
 )
 from eneo.model_providers.infrastructure import provider_connection_probe
 from eneo.model_providers.presentation.model_provider_router import (
+    get_audit_service,
     get_model_provider_service,
     router,
 )
@@ -300,6 +301,9 @@ def _client(service: Any, *, admin: bool = True) -> TestClient:
     app.dependency_overrides[get_current_active_user] = current_user
     app.dependency_overrides[get_session_with_transaction] = lambda: MagicMock()
     app.dependency_overrides[get_model_provider_service] = lambda: service
+    # The audited create/update routes resolve their audit service through the
+    # authenticated container; these tests only exercise the provider routes.
+    app.dependency_overrides[get_audit_service] = lambda: AsyncMock()
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -307,6 +311,8 @@ def _fake_service(provider: ModelProvider, check: ConnectionCheck) -> MagicMock:
     service = MagicMock()
     provider.connection_check = check
     service.check_connection = AsyncMock(return_value=(provider, check))
+    # The audited update snapshots the provider before editing it.
+    service.get_by_id = AsyncMock(return_value=provider)
     service.update = AsyncMock(return_value=provider)
     service.create = AsyncMock(return_value=provider)
     service.masked_api_key = MagicMock(return_value="...cret")

@@ -10,3 +10,7 @@ bbe9d6a5b5a8cbaf86013f2b7c5a9dda09b72673:backend/tests/unittests/model_providers
 4763c9c6966227045bbd1c4f0683a8c9e7b4d6fb:frontend/apps/web-next/src/lib/api/schema.d.ts:generic-api-key:17405
 4763c9c6966227045bbd1c4f0683a8c9e7b4d6fb:frontend/apps/web-next/src/lib/api/schema.d.ts:generic-api-key:19762
 4763c9c6966227045bbd1c4f0683a8c9e7b4d6fb:frontend/apps/web-next/src/lib/api/schema.d.ts:generic-api-key:22424
+
+# develop's outbound-headers test: "sk-test-12345678" in a request the route refuses
+# before any key is used. Reached by the push-event scan through the merge commit.
+f9d6818ffc3efdfdb9ae5406494522f6b115007e:backend/tests/integration/test_model_provider_outbound_headers.py:generic-api-key:246
