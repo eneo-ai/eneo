@@ -184,7 +184,7 @@ A PDF follows the same template: the runtime renders the Word file, reads its pa
 Adding a capability requires:
 
 - backend: the `CapabilityPurpose` type and `CAPABILITY_PURPOSES` list, `MCPServerPurpose`, the matching `Permission` and its description in `permissions_mapper.py`, the predefined roles in `predefined_roles.yml`, and the purpose CHECK constraints in `capabilities_table.py`;
-- a migration that replaces the three purpose constraints and decides which existing roles get the permission (`202610011000` grants `file_analysis` and `file_creation` to the predefined User, AI Configurator and Owner roles; `202610011200` grants `charts` to no existing role, so administrators opt roles in);
+- a migration that replaces the three purpose constraints and decides which existing roles get the permission (`202610081000` grants `file_analysis` and `file_creation` to the predefined User, AI Configurator and Owner roles; `202610081100` added `charts` with no grant, and `202610091100` and `202610131400` then granted it to the same three roles, so upgraded and new tenants agree);
 - frontend: the `capabilities.ts` descriptor, `CAPABILITY_STEPS` in `internalToolLabels.ts`, `permission-labels.ts`, `permission-groups.ts` and the Paraglide messages; the JSDoc unions in `packages/eneo-js/src/endpoints/*.js`, and a regenerated `schema.d.ts`;
 - for a capability that delivers files, its types in `GENERATED_FILE_TYPES_BY_PURPOSE`;
 - for a bundled provider, an entry in `BUNDLED_TOOLS` naming its purpose and whether it needs forwarded identity.
