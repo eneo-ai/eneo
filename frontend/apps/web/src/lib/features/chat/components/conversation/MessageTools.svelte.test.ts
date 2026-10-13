@@ -7,19 +7,24 @@ import { m } from "$lib/paraglide/messages";
 const scene = vi.hoisted(() => ({
   partner: {} as Record<string, unknown>,
   message: {} as Record<string, unknown>,
-  isLoading: false
+  isLoading: false,
+  isLast: true
 }));
 
 vi.mock("$lib/core/AppContext", () => ({ getAppContext: () => ({ settings: {} }) }));
 vi.mock("$lib/features/chat/ChatService.svelte", () => ({
   getChatService: () => ({ partner: scene.partner })
 }));
+// Each render snapshots the scene, so two messages can share one page.
 vi.mock("$lib/features/chat/MessageContext.svelte", () => ({
-  getMessageContext: () => ({
-    current: () => scene.message as unknown as ConversationMessage,
-    isLast: () => true,
-    isLoading: () => scene.isLoading
-  })
+  getMessageContext: () => {
+    const { message, isLast, isLoading } = scene;
+    return {
+      current: () => message as unknown as ConversationMessage,
+      isLast: () => isLast,
+      isLoading: () => isLoading
+    };
+  }
 }));
 vi.mock("$lib/features/knowledge/FaviconUrlService.svelte", () => ({
   getFaviconUrlService: () => ({ getFavicon: () => "" })
@@ -30,15 +35,18 @@ import MessageTools from "./MessageTools.svelte";
 function show({
   partner,
   references = [],
-  isLoading = false
+  isLoading = false,
+  isLast = true
 }: {
   partner: Record<string, unknown>;
   references?: Array<{ id: string; metadata: { url?: string; title?: string } }>;
   isLoading?: boolean;
+  isLast?: boolean;
 }) {
   scene.partner = partner;
   scene.message = { answer: "Svar.", references, mcp_tool_references: [] };
   scene.isLoading = isLoading;
+  scene.isLast = isLast;
   return render(MessageTools);
 }
 
@@ -68,6 +76,14 @@ describe("MessageTools knowledge notice", () => {
   ] as const)("stays silent while %s", async (_label, options) => {
     show(options);
     expect(page.getByText(m.chat_no_sources_found()).query()).toBeNull();
+  });
+
+  it("keeps an earlier message's notice while a newer reply streams", async () => {
+    show({ partner: injectAssistant, isLoading: true, isLast: false });
+    show({ partner: injectAssistant, isLoading: true, isLast: true });
+
+    await expect.element(page.getByRole("status")).toHaveTextContent(m.chat_no_sources_found());
+    expect(page.getByText(m.chat_no_sources_found()).elements()).toHaveLength(1);
   });
 
   it("shows the references toggle instead when the reply cites sources", async () => {

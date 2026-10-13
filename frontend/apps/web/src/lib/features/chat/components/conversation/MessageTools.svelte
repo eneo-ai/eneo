@@ -86,7 +86,8 @@
       hasKnowledge: hasKnowledgeSources(getPartnerKnowledgeSources(chat.partner)),
       knowledgeMode: getPartnerKnowledgeMode(chat.partner),
       referenceCount: totalRefs,
-      isLoading: isLoading()
+      // isLoading is conversation-wide; only the streaming answer is undecided.
+      isLoading: isLoading() && isLast()
     })
   );
 
