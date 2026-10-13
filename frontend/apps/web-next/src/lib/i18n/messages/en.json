@@ -906,6 +906,7 @@
   "tool_edit_image_done": "Edited image",
   "internal_files_server": "Attachments",
   "internal_tool_steps_count": "{count} steps",
+  "tool_step_open_view": "Show {name} in the panel",
   "mcp_internal_server_hint": "Built-in Eneo tool, always active",
   "mcp_internal_tools_always_active": "Always active",
   "knowledge_mode_tool_hint": "The assistant searches these sources when a question calls for it.",

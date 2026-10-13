@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getCapability } from "$lib/features/mcp/capabilities";
 import {
   capabilityProviderDetail,
   internalReadFileId,
@@ -7,7 +8,9 @@ import {
   isInternalToolCall,
   isSkillActivation,
   serverDisplayName,
-  toolDisplayName
+  toolDisplayName,
+  toolStepIcon,
+  toolStepKind
 } from "./internalToolLabels";
 
 /**
@@ -165,5 +168,47 @@ describe("Eneo's own servers", () => {
     expect(isInternalToolCall({ server_name: "knowledge" })).toBe(true);
     expect(isInternalToolCall({ server_name: "knowledge", is_internal: null })).toBe(true);
     expect(serverDisplayName("knowledge")).not.toBe("knowledge");
+  });
+});
+
+/**
+ * A function step is any capability call, whichever provider served it: the
+ * assistant did work. A context step is a lookup on one of Eneo's own
+ * servers. Anything else keeps the external card.
+ */
+describe("toolStepKind", () => {
+  it("makes a capability call a function step whichever provider served it", () => {
+    expect(toolStepKind({ server_name: "GDM Safe Search", purpose: "web_search" })).toBe(
+      "function"
+    );
+    expect(toolStepKind({ server_name: "Diagram", purpose: "charts", is_bundled: true })).toBe(
+      "function"
+    );
+    expect(
+      toolStepKind({
+        server_name: "image_generation",
+        purpose: "image_generation",
+        is_internal: true
+      })
+    ).toBe("function");
+  });
+
+  it("keeps lookups on Eneo's own servers as context steps", () => {
+    expect(toolStepKind({ server_name: "knowledge" })).toBe("context");
+    expect(toolStepKind({ server_name: "files", is_internal: true })).toBe("context");
+    expect(toolStepKind({ server_name: "skills", is_internal: true })).toBe("context");
+  });
+
+  it("keeps general external servers external, whatever they are named", () => {
+    expect(toolStepKind({ server_name: "Jira", purpose: "general" })).toBe("external");
+    expect(toolStepKind({ server_name: "knowledge", is_internal: false })).toBe("external");
+  });
+});
+
+describe("toolStepIcon", () => {
+  it("gives a function step its capability's icon and every other step none", () => {
+    expect(toolStepIcon("charts")).toBe(getCapability("charts")?.icon);
+    expect(toolStepIcon("general")).toBeNull();
+    expect(toolStepIcon(null)).toBeNull();
   });
 });

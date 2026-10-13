@@ -6,17 +6,10 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import {
-    Globe,
-    KeyRound,
-    Package,
-    Shield,
-    ShieldCheck,
-    Sparkles,
-    UsersRound
-  } from "@lucide/svelte";
+  import { Globe, KeyRound, Shield, ShieldCheck, UsersRound } from "@lucide/svelte";
   import { getCapability } from "$lib/features/mcp/capabilities";
   import { bundledIdentity } from "$lib/features/mcp/bundled";
+  import { SOURCE_KINDS } from "$lib/features/mcp/sourceKind";
 
   type Props = {
     mcpServer: {
@@ -63,15 +56,15 @@
       case "bundled":
         // Bundled tool runtime: shipped with Eneo, credential from the deployment.
         return {
-          label: m.mcp_auth_bundled(),
-          icon: Package,
+          label: SOURCE_KINDS.bundled.label(),
+          icon: SOURCE_KINDS.bundled.icon,
           classes: "bg-accent-dimmer text-accent-stronger"
         };
       case "internal":
         // Built-in provider: Eneo's own loopback server, no stored credentials.
         return {
-          label: m.mcp_auth_internal(),
-          icon: Sparkles,
+          label: SOURCE_KINDS.internal.label(),
+          icon: SOURCE_KINDS.internal.icon,
           classes: "bg-accent-dimmer text-accent-stronger"
         };
       default:

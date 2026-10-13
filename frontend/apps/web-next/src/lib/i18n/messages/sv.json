@@ -904,6 +904,7 @@
   "tool_edit_image_done": "Redigerade bild",
   "internal_files_server": "Bilagor",
   "internal_tool_steps_count": "{count} steg",
+  "tool_step_open_view": "Visa {name} i panelen",
   "mcp_internal_server_hint": "Inbyggt Eneo-verktyg, alltid aktivt",
   "mcp_internal_tools_always_active": "Alltid aktiva",
   "knowledge_mode_tool_hint": "Assistenten söker i dessa källor när frågan kräver det.",
