@@ -182,7 +182,6 @@ Each event is a standard SSE frame whose `event` field names the payload type an
 | `text` | `SSEText` | `answer` (a text delta) and `references` (knowledge chunks used). Concatenate the deltas to form the full answer. |
 | `reasoning` | `SSEReasoning` | `reasoning`, a chunk of the model's thinking text. |
 | `image` | `SSEFiles` | `generated_files`, files produced by the model. |
-| `eneo_event` | `SSEEneoEvent` | `eneo_event_type`, currently `generating_image`. |
 | `tool_call` | `SSEToolCall` | `tools` being executed (server, tool name, arguments, `tool_call_id`, status) and `mcp_tool_references`. Tool results are omitted from the stream; fetch them with `GET /api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/`. |
 | `tool_approval_required` | `SSEToolApprovalRequired` | `approval_id` and the pending `tools`. Only with `require_tool_approval: true`. |
 | `tool_approval_timeout` | `SSEToolApprovalTimeout` | `approval_id` and the `tools` whose approval expired. |
@@ -248,7 +247,8 @@ console.log(conversation.session_id, conversation.answer);
 - `DELETE /api/v1/conversations/{session_id}/` deletes it (`204`).
 - `PATCH /api/v1/conversations/{session_id}/name/` renames it with `{"name": "..."}`.
 - `POST /api/v1/conversations/{session_id}/title/` generates a title with the model.
-- `POST /api/v1/conversations/{session_id}/feedback/` records feedback.
+- `POST /api/v1/conversations/{session_id}/feedback/` records feedback on the whole conversation.
+- `PUT /api/v1/conversations/{session_id}/messages/{message_id}/feedback/` rates one answer with `{"value": 1}` (good) or `{"value": -1}` (bad) and an optional `"text"` comment, replacing an earlier rating of that answer. `DELETE` on the same path clears it (`204`). Each message in a conversation carries its rating as `feedback`.
 - `POST /api/v1/conversations/preflight` estimates the token cost of the next message before sending it.
 
 ---

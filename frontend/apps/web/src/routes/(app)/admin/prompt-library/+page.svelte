@@ -13,7 +13,6 @@
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
-  import { EneoError } from "@eneo/eneo-js";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { Plus, Trash2, Search } from "@lucide/svelte";
@@ -48,12 +47,8 @@
       confirmDelete = null;
       await invalidate("admin:prompt-library");
     } catch (error) {
-      // A prompt in use has no reason code of its own yet, so the status is
-      // still the only discriminator here.
-      const conflict = error instanceof EneoError && error.status === 409;
-      deleteError = conflict
-        ? m.governance_prompts_delete_conflict()
-        : getErrorMessage(error, m.governance_prompts_delete_error());
+      // A prompt the governance uses answers with its own code (9069).
+      deleteError = getErrorMessage(error, m.governance_prompts_delete_error());
     } finally {
       isDeleting = false;
     }

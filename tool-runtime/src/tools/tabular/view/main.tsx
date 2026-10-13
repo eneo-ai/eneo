@@ -21,11 +21,15 @@ import {
   TableRows,
   ViewFrame,
   columnWidth,
+  copyText,
+  filterRows,
   pick,
+  sortRows,
+  toTsv,
   useHost,
   type ToolResult,
 } from "../../../views/kit";
-import { filterRows, pageSql, showsTable, sortRows, toTsv } from "./paging";
+import { pageSql, showsTable } from "./paging";
 import "./view.css";
 
 /** Rows drawn at once; a longer result is read on from with the button. */
@@ -258,17 +262,7 @@ function QueryResultView() {
   }, [columns, visible, format]);
 
   const copy = async () => {
-    const tsv = toTsv(columns, visible);
-    try {
-      await navigator.clipboard.writeText(tsv);
-    } catch {
-      // A frame without clipboard permission still has the old way.
-      const area = Object.assign(document.createElement("textarea"), { value: tsv });
-      document.body.append(area);
-      area.select();
-      document.execCommand("copy");
-      area.remove();
-    }
+    await copyText(toTsv(columns, visible));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };

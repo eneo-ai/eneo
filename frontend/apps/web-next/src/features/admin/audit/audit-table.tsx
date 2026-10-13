@@ -1,0 +1,212 @@
+"use client";
+
+import { useClipboard } from "@astryxdesign/core/hooks";
+import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { Fragment, useState } from "react";
+import { ClientTime } from "@/components/composites/client-time";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from "@/components/ui/table";
+import { toast } from "@/lib/toast";
+import { actionLabel, type AuditLog } from "./audit";
+
+export function AuditTable({ logs }: { logs: AuditLog[] }) {
+  const t = useTranslations();
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  return (
+    <div className="overflow-x-auto">
+      <Table aria-label={t("audit_logs")}>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-8" />
+            <TableHead className="whitespace-nowrap">{t("audit_timestamp")}</TableHead>
+            <TableHead>{t("action")}</TableHead>
+            <TableHead>{t("audit_actor")}</TableHead>
+            <TableHead>{t("description")}</TableHead>
+            <TableHead>{t("audit_outcome")}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {logs.map((log) => {
+            const isOpen = expanded.has(log.id);
+            return (
+              <Fragment key={log.id}>
+                {/* Clicking the row is a pointer shortcut for the details button in
+                    its first cell, which keyboards and screen readers use. */}
+                <TableRow className="cursor-pointer" onClick={() => toggle(log.id)}>
+                  <TableCell className="w-8">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-6"
+                      aria-label={t("audit_full_details")}
+                      aria-expanded={isOpen}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggle(log.id);
+                      }}
+                    >
+                      {isOpen ? (
+                        <ChevronDown className="size-4" />
+                      ) : (
+                        <ChevronRight className="size-4" />
+                      )}
+                    </Button>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                    <ClientTime value={log.timestamp} format="date_time" />
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{actionLabel(t, log.action)}</Badge>
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    <span className="text-muted-foreground">
+                      {t(`audit_actor_${log.actor_type}`)}
+                    </span>
+                    {log.actor_id && (
+                      <span className="ml-1 font-mono text-xs">{log.actor_id.slice(0, 8)}</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="max-w-md truncate text-sm" title={log.description}>
+                    {log.description}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className={
+                        log.outcome === "success"
+                          ? "border-success/40 text-success"
+                          : "border-destructive/40 text-destructive"
+                      }
+                    >
+                      {log.outcome === "success"
+                        ? t("audit_outcome_success")
+                        : t("audit_outcome_failure")}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+                {isOpen && <AuditDetailRow log={log} t={t} />}
+              </Fragment>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function AuditDetailRow({ log, t }: { log: AuditLog; t: ReturnType<typeof useTranslations> }) {
+  const hasMetadata = log.metadata && Object.keys(log.metadata).length > 0;
+  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+
+  const copyMetadata = async () => {
+    if (!(await copy(JSON.stringify(log.metadata, null, 2)))) toast.error(t("chat_copy_failed"));
+  };
+
+  return (
+    <TableRow className="bg-muted/30 hover:bg-muted/30">
+      <TableCell />
+      <TableCell colSpan={5} className="py-3">
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+          <Field label={t("audit_actor")} value={log.actor_id} mono />
+          <Field label={t("audit_entity")} value={`${log.entity_type} · ${log.entity_id}`} mono />
+          <Field
+            label={t("audit_ip_address")}
+            value={log.ip_address}
+            mono
+            fallback={t("audit_not_recorded")}
+          />
+          <Field
+            label={t("audit_request_id")}
+            value={log.request_id}
+            mono
+            fallback={t("audit_not_recorded")}
+          />
+          <Field
+            label={t("audit_user_agent")}
+            value={log.user_agent}
+            fallback={t("audit_not_recorded")}
+            className="sm:col-span-2"
+          />
+          {log.error_message && (
+            <Field
+              label={t("audit_error_message")}
+              value={log.error_message}
+              className="text-destructive sm:col-span-2"
+            />
+          )}
+        </dl>
+
+        {hasMetadata && (
+          <div className="mt-3">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-muted-foreground text-xs font-medium">
+                {t("audit_metadata_json")}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                onClick={() => void copyMetadata()}
+              >
+                {isCopied ? <Check className="size-3" /> : <Copy className="size-3" />}
+                {isCopied ? t("audit_json_copied") : t("audit_copy_json")}
+              </Button>
+            </div>
+            {/* A scroll area without focusable content: focusable, so it scrolls by keyboard. */}
+            <pre
+              role="region"
+              aria-label={t("audit_metadata_json")}
+              tabIndex={0}
+              className="bg-background focus-visible:outline-ring max-h-64 overflow-auto rounded-md border p-3 font-mono text-xs focus-visible:outline-2 focus-visible:outline-offset-2"
+            >
+              {JSON.stringify(log.metadata, null, 2)}
+            </pre>
+          </div>
+        )}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function Field({
+  label,
+  value,
+  mono,
+  fallback,
+  className
+}: {
+  label: string;
+  value?: string | null;
+  mono?: boolean;
+  fallback?: string;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <dt className="text-muted-foreground text-xs">{label}</dt>
+      <dd
+        className={`break-all ${mono ? "font-mono text-xs" : ""} ${value ? "" : "text-muted-foreground"}`}
+      >
+        {value || fallback || "—"}
+      </dd>
+    </div>
+  );
+}

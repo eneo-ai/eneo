@@ -3,11 +3,15 @@
  * own: shown in the UI language from the tool the row serves, never from the
  * row's stored name and description, which the backend seeds in English.
  */
-import { Calculator, ChartColumn, type Globe } from "@lucide/svelte";
+import type { Globe } from "@lucide/svelte";
 import { m } from "$lib/paraglide/messages";
 import { getCapability } from "./capabilities";
 
-/** The general (per-space) servers the runtime offers, by their tool key. */
+/**
+ * General (per-space) servers the runtime offers, by their tool key. Every
+ * runtime tool is a function today; these entries only name rows added while
+ * the tool was still a general server, which keep working until retired.
+ */
 export const BUNDLED_SERVERS: Record<
   string,
   { label: () => string; description: () => string; icon: typeof Globe }
@@ -15,12 +19,14 @@ export const BUNDLED_SERVERS: Record<
   compute: {
     label: m.tools_bundled_compute,
     description: m.tools_bundled_compute_description,
-    icon: Calculator
+    // The compute function's glyph, so the admin list and the chat agree.
+    icon: getCapability("compute")!.icon
   },
   charts: {
     label: m.tools_bundled_charts,
     description: m.tools_bundled_charts_description,
-    icon: ChartColumn
+    // The charts function's glyph, so the admin list and the chat agree.
+    icon: getCapability("charts")!.icon
   }
 };
 

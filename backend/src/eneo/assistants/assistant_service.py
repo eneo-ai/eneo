@@ -2503,9 +2503,6 @@ class AssistantService:
                             chunk.generated_file = image_file
                             yield chunk
 
-                        if chunk.response_type == ResponseType.ENEO_EVENT:
-                            yield chunk
-
                         if chunk.response_type == ResponseType.TOOL_CALL_DELTA:
                             # Shown while the call is written; the complete
                             # arguments are persisted from its TOOL_CALL chunk.
@@ -3457,11 +3454,19 @@ class AssistantService:
         # per completion, minted only when some server actually attaches.
         scoped_token: str | None = None
 
+        # The files server points spreadsheets at the table tools when the
+        # file-analysis provider is attached to this turn.
+        table_tools_attached = any(
+            server.purpose == "file_analysis" for server in capability_mcp_servers
+        )
+
         def mint_scoped_token() -> str:
             nonlocal scoped_token
             if scoped_token is None:
                 scoped_token = self.auth_service.create_scoped_mcp_token(
-                    self.user, assistant_id=assistant_to_ask.id
+                    self.user,
+                    assistant_id=assistant_to_ask.id,
+                    table_tools=table_tools_attached,
                 )
             return scoped_token
 
@@ -3519,6 +3524,7 @@ class AssistantService:
                 token=mint_scoped_token(),
                 tenant_id=self.user.tenant_id,
                 attachment_labels=attachment_labels,
+                table_tools=table_tools_attached,
             )
             logger.info(
                 "[FILES] assistant=%s files tool attached "

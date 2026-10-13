@@ -5,7 +5,11 @@
 */
 
 import { m } from "$lib/paraglide/messages";
-import { getCapability, type CapabilityPurpose } from "$lib/features/mcp/capabilities";
+import {
+  getCapability,
+  type CapabilityDescriptor,
+  type CapabilityPurpose
+} from "$lib/features/mcp/capabilities";
 import { referencedFileId } from "./fileReference";
 
 type ToolArgs = Record<string, unknown> | undefined;
@@ -163,6 +167,10 @@ const CAPABILITY_STEPS: Record<
   file_creation: {
     running: () => m.tool_file_creation(),
     done: () => m.tool_file_creation_done()
+  },
+  compute: {
+    running: () => m.tool_compute(),
+    done: () => m.tool_compute_done()
   }
 };
 
@@ -207,13 +215,39 @@ export function isInternalToolCall(call: ToolCallLike): boolean {
 }
 
 /**
+ * How a tool call reads in the chat. A `function` step is a capability call
+ * (a chart, a file analysis, a web search), whichever provider served it: the
+ * assistant did work and may have produced something, so the step carries the
+ * function's icon and leads to the result. A `context` step is a lookup on
+ * one of Eneo's own loopback servers (knowledge, files, a Skill): a plain
+ * line. Everything else ran on a general external server and keeps its card.
+ * Rows persisted before `purpose` existed fall back to the server name alone.
+ */
+export type ToolStepKind = "context" | "function" | "external";
+
+export function toolStepKind(call: ToolCallLike): ToolStepKind {
+  if (capabilityPurpose(call.purpose) !== null) return "function";
+  return isInternalToolCall(call) ? "context" : "external";
+}
+
+/**
+ * The function's icon for a function step, the same glyph the admin and
+ * settings surfaces show for that capability; null for every other step.
+ */
+export function toolStepIcon(
+  purpose: string | null | undefined
+): CapabilityDescriptor["icon"] | null {
+  const capability = capabilityPurpose(purpose);
+  return capability ? (getCapability(capability)?.icon ?? null) : null;
+}
+
+/**
  * Whether a tool call renders as a built-in step (slim line, localized
  * labels) rather than as an external tool card: capability calls whichever
- * provider served them, and calls on Eneo's own loopback servers. Rows
- * persisted before `purpose` existed fall back to the server name alone.
+ * provider served them, and calls on Eneo's own loopback servers.
  */
 export function isBuiltinToolCall(call: ToolCallLike): boolean {
-  return capabilityPurpose(call.purpose) !== null || isInternalToolCall(call);
+  return toolStepKind(call) !== "external";
 }
 
 /**

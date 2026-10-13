@@ -40,6 +40,7 @@ CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = (
     "file_analysis",
     "file_creation",
     "charts",
+    "compute",
 )
 
 # Purposes whose providers deliver files. A binary embedded resource of one
@@ -69,6 +70,9 @@ GENERATED_FILE_TYPES_BY_PURPOSE: dict[str, frozenset[str]] = {
     # A full query result, so large data moves between tools as a file
     # instead of through the model.
     "file_analysis": frozenset({CSV_MIME_TYPE}),
+    # A tabular calculation result, exported so charts, spreadsheets and
+    # documents can take it as a source file.
+    "compute": frozenset({CSV_MIME_TYPE}),
 }
 _GENERATED_FILE_EXTENSIONS: dict[str, str] = {
     DOCX_MIME_TYPE: "docx",
@@ -138,7 +142,7 @@ class BundledToolSpec:
 
 
 BUNDLED_TOOLS: dict[str, BundledToolSpec] = {
-    "compute": BundledToolSpec(purpose=GENERAL_PURPOSE, forward_identity=False),
+    "compute": BundledToolSpec(purpose="compute", forward_identity=False),
     "charts": BundledToolSpec(purpose="charts", forward_identity=False),
     "file-analysis": BundledToolSpec(purpose="file_analysis", forward_identity=True),
     "file-creation": BundledToolSpec(purpose="file_creation", forward_identity=False),
@@ -497,25 +501,3 @@ class MCPServer(Entity):
         return self.audience == AUDIENCE_GROUPS and any(
             group_id in user_group_ids for group_id in self.user_group_ids
         )
-
-
-class MCPServerSettings(Entity):
-    """Domain entity for MCP server settings (tenant-scoped configuration)."""
-
-    def __init__(
-        self,
-        tenant_id: UUID,
-        mcp_server_id: UUID,
-        is_org_enabled: bool = True,
-        env_vars: Optional[dict[str, Any]] = None,
-        mcp_server: Optional[MCPServer] = None,
-        id: Optional[UUID] = None,
-        created_at: Optional[datetime] = None,
-        updated_at: Optional[datetime] = None,
-    ):
-        super().__init__(id=id, created_at=created_at, updated_at=updated_at)
-        self.tenant_id = tenant_id
-        self.mcp_server_id = mcp_server_id
-        self.is_org_enabled = is_org_enabled
-        self.env_vars = env_vars
-        self.mcp_server = mcp_server

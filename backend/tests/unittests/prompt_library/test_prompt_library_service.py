@@ -6,8 +6,8 @@ import pytest
 
 from eneo.main.exceptions import (
     BadRequestException,
-    NameCollisionException,
     NotFoundException,
+    PromptInUseException,
     UnauthorizedException,
 )
 from eneo.prompt_library.application.prompt_library_service import (
@@ -229,7 +229,8 @@ async def test_delete_blocked_when_policy_uses_prompt():
         governance_policy_repo=policy_repo,
     )
 
-    with pytest.raises(NameCollisionException):
+    # Its own error, not NameCollisionException: nothing is taken by name.
+    with pytest.raises(PromptInUseException):
         await service.delete_entry(target.id)
     repo.delete.assert_not_awaited()
 

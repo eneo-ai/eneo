@@ -1,0 +1,252 @@
+{
+  "name": "cancelled-mid-stream",
+  "description": "The stream ended after a text delta: no text-end, no finish, no [DONE]. The client's own stop() makes this an abort (status 'ready', onFinish isAbort); a connection that closes like this without the client asking is a failure (status 'error').",
+  "terminal": "truncated",
+  "events": [
+    {
+      "type": "start",
+      "messageId": "22222222-2222-2222-2222-222222222222"
+    },
+    {
+      "type": "data-session",
+      "data": {
+        "session_id": "11111111-1111-1111-1111-111111111111",
+        "completion_model": {
+          "created_at": null,
+          "updated_at": null,
+          "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          "name": "mock-model",
+          "nickname": "Mock",
+          "family": null,
+          "max_input_tokens": 10000,
+          "max_output_tokens": 4000,
+          "is_deprecated": false,
+          "nr_billion_parameters": null,
+          "hf_link": null,
+          "stability": null,
+          "hosting": null,
+          "open_source": null,
+          "description": null,
+          "deployment_name": null,
+          "org": null,
+          "vision": false,
+          "reasoning": false,
+          "supports_tool_calling": false,
+          "base_url": null,
+          "litellm_model_name": null,
+          "model_kwargs_capabilities": null,
+          "input_cost_per_token": null,
+          "output_cost_per_token": null,
+          "is_org_enabled": false,
+          "is_org_default": false,
+          "tenant_id": null,
+          "provider_id": null,
+          "provider_type": null,
+          "migrated_to_model_id": null,
+          "can_access": false,
+          "is_locked": true,
+          "lock_reason": null,
+          "credential_provider": null,
+          "security_classification": null,
+          "provider_name": null,
+          "deprecation_date": null,
+          "token_limit": 10000,
+          "supported_model_kwargs": {
+            "temperature": {
+              "supported": true,
+              "control": "slider",
+              "minimum": 0.0,
+              "maximum": 2.0,
+              "step": 0.01,
+              "options": null
+            },
+            "top_p": {
+              "supported": false,
+              "control": null,
+              "minimum": null,
+              "maximum": null,
+              "step": null,
+              "options": null
+            },
+            "reasoning_effort": {
+              "supported": false,
+              "control": null,
+              "minimum": null,
+              "maximum": null,
+              "step": null,
+              "options": null
+            },
+            "verbosity": {
+              "supported": false,
+              "control": null,
+              "minimum": null,
+              "maximum": null,
+              "step": null,
+              "options": null
+            },
+            "presence_penalty": {
+              "supported": false,
+              "control": null,
+              "minimum": null,
+              "maximum": null,
+              "step": null,
+              "options": null
+            },
+            "frequency_penalty": {
+              "supported": false,
+              "control": null,
+              "minimum": null,
+              "maximum": null,
+              "step": null,
+              "options": null
+            },
+            "top_k": {
+              "supported": false,
+              "control": null,
+              "minimum": null,
+              "maximum": null,
+              "step": null,
+              "options": null
+            }
+          }
+        },
+        "files": [],
+        "web_search_references": [],
+        "mcp_tool_references": [],
+        "answering_assistant": null
+      }
+    },
+    {
+      "type": "text-start",
+      "id": "text-0"
+    },
+    {
+      "type": "text-delta",
+      "id": "text-0",
+      "delta": "Hello"
+    }
+  ],
+  "ui": {
+    "status": "error",
+    "message": {
+      "id": "22222222-2222-2222-2222-222222222222",
+      "role": "assistant",
+      "parts": [
+        {
+          "type": "data-session",
+          "data": {
+            "session_id": "11111111-1111-1111-1111-111111111111",
+            "completion_model": {
+              "created_at": null,
+              "updated_at": null,
+              "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+              "name": "mock-model",
+              "nickname": "Mock",
+              "family": null,
+              "max_input_tokens": 10000,
+              "max_output_tokens": 4000,
+              "is_deprecated": false,
+              "nr_billion_parameters": null,
+              "hf_link": null,
+              "stability": null,
+              "hosting": null,
+              "open_source": null,
+              "description": null,
+              "deployment_name": null,
+              "org": null,
+              "vision": false,
+              "reasoning": false,
+              "supports_tool_calling": false,
+              "base_url": null,
+              "litellm_model_name": null,
+              "model_kwargs_capabilities": null,
+              "input_cost_per_token": null,
+              "output_cost_per_token": null,
+              "is_org_enabled": false,
+              "is_org_default": false,
+              "tenant_id": null,
+              "provider_id": null,
+              "provider_type": null,
+              "migrated_to_model_id": null,
+              "can_access": false,
+              "is_locked": true,
+              "lock_reason": null,
+              "credential_provider": null,
+              "security_classification": null,
+              "provider_name": null,
+              "deprecation_date": null,
+              "token_limit": 10000,
+              "supported_model_kwargs": {
+                "temperature": {
+                  "supported": true,
+                  "control": "slider",
+                  "minimum": 0.0,
+                  "maximum": 2.0,
+                  "step": 0.01,
+                  "options": null
+                },
+                "top_p": {
+                  "supported": false,
+                  "control": null,
+                  "minimum": null,
+                  "maximum": null,
+                  "step": null,
+                  "options": null
+                },
+                "reasoning_effort": {
+                  "supported": false,
+                  "control": null,
+                  "minimum": null,
+                  "maximum": null,
+                  "step": null,
+                  "options": null
+                },
+                "verbosity": {
+                  "supported": false,
+                  "control": null,
+                  "minimum": null,
+                  "maximum": null,
+                  "step": null,
+                  "options": null
+                },
+                "presence_penalty": {
+                  "supported": false,
+                  "control": null,
+                  "minimum": null,
+                  "maximum": null,
+                  "step": null,
+                  "options": null
+                },
+                "frequency_penalty": {
+                  "supported": false,
+                  "control": null,
+                  "minimum": null,
+                  "maximum": null,
+                  "step": null,
+                  "options": null
+                },
+                "top_k": {
+                  "supported": false,
+                  "control": null,
+                  "minimum": null,
+                  "maximum": null,
+                  "step": null,
+                  "options": null
+                }
+              }
+            },
+            "files": [],
+            "web_search_references": [],
+            "mcp_tool_references": [],
+            "answering_assistant": null
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hello",
+          "state": "streaming"
+        }
+      ]
+    }
+  }
+}

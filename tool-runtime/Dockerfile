@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 COPY tsconfig.json ./
 COPY scripts ./scripts
 COPY src ./src
-RUN bun run build:views
+RUN bun run build:views && bun run build:prelude
 
 # landrun confines every sandbox child with Landlock before it starts (see src/sandbox.ts).
 # Built from source at a pinned version, which the Go checksum database verifies; keep it in

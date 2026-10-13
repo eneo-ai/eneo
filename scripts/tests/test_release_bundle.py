@@ -40,7 +40,8 @@ class ReleaseTests(unittest.TestCase):
             c: release.REGISTRY + c + "@sha256:" + "b" * 64 for c in release.COMPONENTS
         }
         result = release.bundle("2.3.0", "a" * 40, images)
-        self.assertEqual(len(result["images"]), 3)
+        self.assertEqual(len(result["images"]), 4)
+        self.assertIn("web-next", result["images"])
         for bad in [{}, {**images, "backend": release.REGISTRY + "backend:latest"}]:
             with self.assertRaises(ValueError):
                 release.bundle("2.3.0", "a" * 40, bad)
@@ -228,9 +229,10 @@ class ComposeTests(unittest.TestCase):
                 "docker-compose.yml",
                 "docker-compose.tool-runtime.yml",
                 "docker-compose.without-tools.yml",
+                "docker-compose.web-next.yml",
             ):
                 shutil.copy(ROOT / "docs/deployment" / name, root / name)
-            for name in ("backend", "frontend", "db"):
+            for name in ("backend", "frontend", "db", "web_next"):
                 (root / f"env_{name}.env").write_text("")
             images = {
                 c: release.REGISTRY + c + "@sha256:" + "b" * 64
@@ -272,6 +274,20 @@ class ComposeTests(unittest.TestCase):
             self.assertEqual(
                 omitted["services"]["backend"]["environment"]["TOOL_RUNTIME_URL"], ""
             )
+            # The beta overlay adds nothing until its profile is enabled, and
+            # then runs the bundle's web-next image against the same backend.
+            env["WEB_NEXT_HOST"] = "beta.example.com"
+            self.assertNotIn(
+                "web-next", config("docker-compose.web-next.yml")["services"]
+            )
+            env["COMPOSE_PROFILES"] = "web-next"
+            beta = config("docker-compose.web-next.yml")["services"]["web-next"]
+            del env["COMPOSE_PROFILES"]
+            self.assertEqual(beta["image"], images["web-next"])
+            self.assertEqual(
+                beta["environment"]["ENEO_BACKEND_URL"], "http://backend:8000"
+            )
+            self.assertIn("backend", beta["depends_on"])
             env["FILE_REFERENCE_BASE_URL"] = "http://custom-backend:8000"
             custom = config()["services"]
             self.assertEqual(

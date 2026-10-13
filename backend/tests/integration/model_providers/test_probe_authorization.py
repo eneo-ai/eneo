@@ -1,4 +1,8 @@
-"""Only tenant admins may call a model provider with its stored credentials."""
+"""Only tenant admins may call a model provider with its stored credentials.
+
+Connection-check and its legacy /test adapter are covered through the real
+service in test_provider_connection_check.py.
+"""
 
 from uuid import uuid4
 
@@ -34,7 +38,6 @@ async def tenant_tokens(db_container, patch_auth_service_jwt):
     ("method", "path", "body", "service_method", "result"),
     [
         ("GET", "models", None, "list_available_models", []),
-        ("POST", "test", None, "test_connection", {"success": True}),
         (
             "POST",
             "validate-model",

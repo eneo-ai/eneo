@@ -133,6 +133,23 @@ class TestBuildFilesMcpServer:
         assert "readable here" in description
         assert description.startswith("Read the text content")
 
+    async def test_table_tools_suffix_binds_spreadsheets_to_the_table_tools(self):
+        server = await build_files_mcp_server(
+            token="tok",
+            tenant_id=uuid4(),
+            attachment_labels=["budget.xlsx"],
+            table_tools=True,
+        )
+        read = next(t for t in server.tools if t.name == "read_file")
+        assert "inspect_table" in (read.description or "")
+        assert "raw=true" in (read.description or "")
+
+        without = await build_files_mcp_server(
+            token="tok", tenant_id=uuid4(), attachment_labels=["budget.xlsx"]
+        )
+        read = next(t for t in without.tools if t.name == "read_file")
+        assert "unless raw=true" not in (read.description or "")
+
     async def test_no_suffix_without_attachment_labels(self):
         server = await build_files_mcp_server(token="tok", tenant_id=uuid4())
 
@@ -254,6 +271,47 @@ class TestReadFileAuthorization:
         assert content[0].text == (
             "File: policy.pdf (application/pdf)\n\nWaste is collected every other week."
         )
+
+    @pytest.mark.asyncio
+    async def test_a_table_is_pointed_at_the_table_tools_when_they_are_attached(
+        self, monkeypatch
+    ):
+        tenant_id = uuid4()
+        file = _file(
+            tenant_id=tenant_id,
+            name="budget.xlsx",
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            text="Sheet: Utfall | Förvaltning: Barn | Budget: 1",
+        )
+        url = _signed_url(file.id, tenant_id=tenant_id)
+        _patch_tool_context(monkeypatch, file=file, user_tenant_id=tenant_id)
+        monkeypatch.setattr(
+            "eneo.internal_mcp.files._table_tools_offered", lambda ctx: True
+        )
+
+        content = await read_file(url, ctx=None)
+        assert "inspect_table" in content[0].text
+        assert "Budget" not in content[0].text
+
+        # Asked for the text itself, the file is read as any other.
+        content = await read_file(url, ctx=None, raw=True)
+        assert content[0].text.endswith("Sheet: Utfall | Förvaltning: Barn | Budget: 1")
+
+    @pytest.mark.asyncio
+    async def test_a_table_is_read_when_no_table_tools_are_attached(self, monkeypatch):
+        tenant_id = uuid4()
+        file = _file(
+            tenant_id=tenant_id, name="budget.csv", mimetype="text/csv", text="a,b"
+        )
+        url = _signed_url(file.id, tenant_id=tenant_id)
+        _patch_tool_context(monkeypatch, file=file, user_tenant_id=tenant_id)
+        monkeypatch.setattr(
+            "eneo.internal_mcp.files._table_tools_offered", lambda ctx: False
+        )
+
+        content = await read_file(url, ctx=None)
+
+        assert content[0].text == "File: budget.csv (text/csv)\n\na,b"
 
     @pytest.mark.asyncio
     async def test_unexpected_repository_error_propagates(self, monkeypatch):

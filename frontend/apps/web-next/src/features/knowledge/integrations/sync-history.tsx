@@ -1,0 +1,219 @@
+"use client";
+
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Check, History, Loader2, X } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
+import { browserApi } from "@/lib/api/browser";
+import { formatDuration } from "@/lib/format";
+import { ClientTime } from "@/components/composites/client-time";
+import { LoadingState } from "@/components/composites/loading-state";
+import { ListError } from "@/components/composites/query-state";
+import type { IntegrationKnowledge } from "../knowledge";
+import { syncLogsQueryOptions, type SyncLog } from "./queries";
+
+type Translate = (key: string, params?: Record<string, string>) => string;
+
+function syncSummary(log: SyncLog, t: Translate): string {
+  const parts: string[] = [];
+  if (log.files_processed > 0)
+    parts.push(t("file_s_synced", { count: String(log.files_processed) }));
+  if (log.files_deleted > 0) parts.push(t("file_s_deleted", { count: String(log.files_deleted) }));
+  if (log.pages_processed > 0)
+    parts.push(t("page_s_synced", { count: String(log.pages_processed) }));
+  if (log.skipped_items > 0) parts.push(t("item_s_skipped", { count: String(log.skipped_items) }));
+  return parts.length > 0 ? parts.join(", ") : t("no_changes");
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const className =
+    status === "success"
+      ? "bg-success/10 text-success"
+      : status === "error"
+        ? "bg-destructive/10 text-destructive"
+        : "bg-warning/10 text-warning";
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>{status}</span>
+  );
+}
+
+function SyncLogEntry({ log }: { log: SyncLog }) {
+  const t = useTranslations();
+  return (
+    <div className="rounded-lg border p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          {log.status === "success" ? (
+            <Check className="text-success size-4 shrink-0" />
+          ) : log.status === "error" ? (
+            <X className="text-destructive size-4 shrink-0" />
+          ) : (
+            <Loader2 className="text-warning size-4 shrink-0 animate-spin" />
+          )}
+          <span className="text-sm font-medium">
+            {log.sync_type === "full" ? t("full_sync") : t("delta_sync")}
+          </span>
+          <StatusBadge status={log.status} />
+        </div>
+        <span className="text-muted-foreground shrink-0 text-xs">
+          <ClientTime value={log.started_at} format="date_time" />
+        </span>
+      </div>
+      <div className="text-muted-foreground mb-1 text-xs">{syncSummary(log, t)}</div>
+      {log.skipped_items > 0 && log.skipped_details.length > 0 && (
+        <details className="mb-1">
+          <summary className="text-warning cursor-pointer text-xs hover:underline">
+            {t("item_s_skipped", { count: String(log.skipped_items) })}
+          </summary>
+          <ul className="text-muted-foreground mt-1 ml-4 flex flex-col gap-0.5 text-xs">
+            {log.skipped_details.map((detail) => (
+              <li key={detail.file} className="flex min-w-0 gap-1">
+                <span className="max-w-[200px] truncate font-medium" title={detail.file}>
+                  {detail.file}
+                </span>
+                <span>—</span>
+                <span className="truncate">{detail.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <div className="text-muted-foreground flex items-center gap-4 text-xs">
+        <span>
+          {t("duration")}:{" "}
+          {log.completed_at ? formatDuration(log.started_at, log.completed_at) : "—"}
+        </span>
+        {log.error_message && (
+          <span className="text-destructive font-medium">
+            {t("error")}: {log.error_message}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Paginated sync history for one integration knowledge item; open while
+ * `item` is set. Keyed remount resets the page when the item changes.
+ */
+export function SyncHistoryDialog({
+  item,
+  onOpenChange
+}: {
+  item: IntegrationKnowledge | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={item !== null} onOpenChange={onOpenChange}>
+      {item && <SyncHistoryContent key={item.id} item={item} />}
+    </Dialog>
+  );
+}
+
+function SyncHistoryContent({ item }: { item: IntegrationKnowledge }) {
+  const t = useTranslations();
+  const [page, setPage] = useState(1);
+
+  const { data, isPending, isError, error, isFetching, refetch } = useQuery({
+    ...syncLogsQueryOptions(browserApi, item.id, page),
+    placeholderData: keepPreviousData
+  });
+
+  const logs = data?.items ?? [];
+  const totalPages = data?.total_pages ?? 1;
+  const successful = logs.filter((log) => log.status === "success");
+
+  return (
+    <DialogContent className="max-w-2xl">
+      <DialogHeader>
+        <DialogTitle>
+          {t("sync_history")} — {item.name}
+        </DialogTitle>
+      </DialogHeader>
+      <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1">
+        {isPending ? (
+          <LoadingState rows={4} />
+        ) : isError ? (
+          <ListError error={error} isRetrying={isFetching} onRetry={() => void refetch()} />
+        ) : logs.length === 0 ? (
+          <div className="text-muted-foreground flex flex-col items-center gap-2 py-8">
+            <History className="size-6 opacity-50" />
+            <p className="text-sm">{t("integration_sync_summary_none")}</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col gap-2 rounded-lg border p-4 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold">{t("overall_statistics")}</span>
+                <span className="text-muted-foreground text-xs">
+                  {t("total_syncs")}: {data.total_count}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+                <Stat label={t("page")} value={`${page} / ${totalPages}`} />
+                <Stat label={t("total_syncs")} value={String(successful.length)} />
+                <Stat
+                  label={t("files_synced")}
+                  value={String(sum(successful, (log) => log.files_processed))}
+                />
+                <Stat
+                  label={t("files_deleted")}
+                  value={String(sum(successful, (log) => log.files_deleted))}
+                />
+                <Stat
+                  label={t("pages_synced")}
+                  value={String(sum(successful, (log) => log.pages_processed))}
+                />
+              </div>
+            </div>
+            {logs.map((log) => (
+              <SyncLogEntry key={log.id} log={log} />
+            ))}
+          </>
+        )}
+      </div>
+      {totalPages > 1 && (
+        <DialogFooter className="sm:justify-start">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page <= 1}
+            onClick={() => setPage((current) => current - 1)}
+          >
+            {t("previous")}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page >= totalPages}
+            onClick={() => setPage((current) => current + 1)}
+          >
+            {t("next")}
+          </Button>
+        </DialogFooter>
+      )}
+    </DialogContent>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between">
+      <span className="text-muted-foreground">{label}:</span>
+      <span className="font-medium">{value}</span>
+    </div>
+  );
+}
+
+function sum(logs: SyncLog[], pick: (log: SyncLog) => number): number {
+  return logs.reduce((total, log) => total + pick(log), 0);
+}

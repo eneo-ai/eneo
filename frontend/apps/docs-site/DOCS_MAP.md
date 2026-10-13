@@ -24,6 +24,7 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 | `backend/src/eneo/spaces/**`, resource repositories, `sysadmin/stored_model_configuration.py` (write ownership and invalid model-options repair) | `docs/architecture.mdx#space-persistence-ownership`, `docs/api.mdx#inspect-and-repair-invalid-model-options` |
 | `.devcontainer/**`, `backend/pyproject.toml`, `backend/run.sh`, `frontend/package.json`, `Taskfile.yml`                                          | `docs/getting-started.mdx`, `docs/INSTALLATION.md` (root)                                                    |
 | `backend/alembic/versions/**` (breaking migrations, data migrations)                                                                             | `guides/upgrade-*.mdx`, `docs/architecture.mdx` (data model)                                                 |
+| `backend/src/eneo/database/tables/**`, `backend/tests/integration/test_database_schema.py` (registered tables and migrated-schema checks)        | `docs/architecture.mdx` (database schema check)                                                              |
 | `docs/deployment/docker-compose.modules.yml`, `docs/deployment/env_module*.template`, `docs/deployment/MODULES.md`                               | `docs/module-authentication.mdx`, `guides/deployment.mdx`                                                    |
 
 ## Authentication and identity
@@ -86,7 +87,7 @@ placement, file references, MCP Apps or native document behaviour.
 
 | Code                                                                                                                                                                                                                   | Pages                               |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `.github/workflows/ci.yml`, `.github/workflows/dependency-review.yml`, `.github/dependabot.yml`, `docs/SECURITY.md`                                                                                                    | `contributing/security.mdx`         |
+| `.github/workflows/ci.yml`, `.github/workflows/security.yml`, `.github/workflows/dependency-review.yml`, `.github/dependabot.yml`, `docs/SECURITY.md`                                                                  | `contributing/security.mdx`         |
 | `.github/workflows/export-roadmap.yml`, `.github/workflows/add-to-project.yml`, `.github/workflows/pr-labels.yml`, `.github/scripts/**`, `scripts/export_github_roadmap.mjs`, `.github/ISSUE_TEMPLATE/**`, `AGENTS.md` | `contributing/project-roadmap.mdx`  |
 | `docs/CONTRIBUTING.md`, `docs/DEPLOYMENT_WORKFLOW.md`, `docs/CODE_QUALITY.md`                                                                                                                                          | `contributing/index.mdx`            |
 | `frontend/apps/docs-site/**` (the site itself)                                                                                                                                                                         | `frontend/apps/docs-site/README.md` |

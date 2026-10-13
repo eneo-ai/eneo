@@ -10,8 +10,6 @@ roles:
       - web_search
       - image_generation
       - file_analysis
-      - file_creation
-      - charts
 
   - name: 'AI Configurator'
     permissions:
@@ -29,8 +27,6 @@ roles:
       - web_search
       - image_generation
       - file_analysis
-      - file_creation
-      - charts
 
   - name: 'Owner'
     permissions:
@@ -57,3 +53,4 @@ roles:
       - file_analysis
       - file_creation
       - charts
+      - compute

@@ -190,7 +190,7 @@ export function initConversations(client) {
      * @param {string} params.question Question to ask
      * @param {{id: string}[] | undefined} params.files Files to pass on
      * @param {boolean} [params.requireToolApproval] Should tool calls require user approval before execution? Defaults to false
-     * @param {("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts")[]} [params.disabledCapabilities] Capability purposes disabled for this request
+     * @param {("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute")[]} [params.disabledCapabilities] Capability purposes disabled for this request
      * @param {string[]} [params.disabledMcpServerIds] MCP server ids the user switched off for this message
      * @param {{assistants: {id: string; handle: string}[]} | undefined} [params.tools] Tool use
      * @param {Object} [params.callbacks]
@@ -198,7 +198,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.Text) => void} [params.callbacks.onText] Callback to run when a new token/word of the answer is received
      * @param {(data: import("../types/resources").SSE.Reasoning) => void} [params.callbacks.onReasoning] Callback to run when a chunk of the model's reasoning/thinking text is received
      * @param {(data: import("../types/resources").SSE.Files) => void} [params.callbacks.onImage] Callback to run when generated files of the answer is received
-     * @param {(data: import("../types/resources").SSE.Eneo | import("../types/resources").SSE.TokenUsage) => void} [params.callbacks.onEneoEvent] Callback to run when an eneo or token-usage event is received
+     * @param {(data: import("../types/resources").SSE.TokenUsage) => void} [params.callbacks.onEneoEvent] Callback to run when a token-usage event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
      * @param {(data: import("../types/resources").SSE.ToolCallDelta) => void} [params.callbacks.onToolCallDelta] Callback to run when the next piece of a pending tool call's arguments is received
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
@@ -296,7 +296,6 @@ export function initConversations(client) {
                   callbacks?.onImage?.(data);
                   break;
 
-                case "eneo_event":
                 case "token_usage":
                   callbacks?.onEneoEvent?.(data);
                   break;

@@ -1,0 +1,166 @@
+import { describe, expect, it } from "vitest";
+import { mapSessionMessages } from "./map-session";
+import type { Schema } from "@/lib/api/models";
+
+type PersistedMessage = Schema<"Message">;
+
+const baseMessage: PersistedMessage = {
+  id: "m1",
+  question: "What is Eneo?",
+  answer: "An AI platform.",
+  references: [],
+  files: [],
+  generated_files: [],
+  tools: { assistants: [] }
+};
+
+describe("mapSessionMessages", () => {
+  it("maps a question/answer pair to user + assistant messages", () => {
+    const messages = mapSessionMessages([baseMessage]);
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      id: "m1-q",
+      role: "user",
+      parts: [{ type: "text", text: "What is Eneo?" }]
+    });
+    expect(messages[1]).toMatchObject({ id: "m1", role: "assistant" });
+    expect(messages[1]!.parts.at(-1)).toEqual({ type: "text", text: "An AI platform." });
+  });
+
+  it("restores each answer's stored rating, and none where it was not rated", () => {
+    const messages = mapSessionMessages([
+      { ...baseMessage, id: "m1", feedback: { value: -1, text: "Fel paragraf" } },
+      { ...baseMessage, id: "m2", feedback: null },
+      { ...baseMessage, id: "m3" }
+    ]);
+
+    const answers = messages.filter((message) => message.role === "assistant");
+    expect(answers.map((message) => message.metadata?.feedback)).toEqual([-1, null, null]);
+    // Ratings belong to answers; the user's messages carry none.
+    expect(messages[0]!.metadata).not.toHaveProperty("feedback");
+  });
+
+  it("maps references to source-document parts before the answer text", () => {
+    const messages = mapSessionMessages([
+      {
+        ...baseMessage,
+        references: [
+          {
+            id: "blob-1",
+            metadata: { title: "Doc title", embedding_model_id: "e", size: 1 }
+          } as PersistedMessage["references"][number]
+        ]
+      }
+    ]);
+
+    const parts = messages[1]!.parts;
+    expect(parts[0]).toMatchObject({
+      type: "source-document",
+      sourceId: "blob-1",
+      title: "Doc title"
+    });
+  });
+
+  it("maps persisted tool calls to dynamic-tool parts with error states", () => {
+    const messages = mapSessionMessages([
+      {
+        ...baseMessage,
+        tool_calls: [
+          {
+            server_name: "files",
+            tool_name: "read_file",
+            tool_call_id: "call-1",
+            arguments: { path: "a.txt" },
+            result_status: "succeeded"
+          },
+          {
+            server_name: "files",
+            tool_name: "write_file",
+            tool_call_id: "call-2",
+            result_status: "failed"
+          },
+          {
+            server_name: "Image Inc",
+            tool_name: "draw",
+            title: "Draw an image",
+            purpose: "image_generation",
+            tool_call_id: "call-3",
+            result_status: "succeeded"
+          }
+        ]
+      }
+    ]);
+
+    const parts = messages[1]!.parts;
+    expect(parts[0]).toMatchObject({
+      type: "dynamic-tool",
+      toolName: "read_file",
+      toolCallId: "call-1",
+      providerMetadata: { eneo: { server_name: "files" } },
+      state: "output-available"
+    });
+    expect(parts[1]).toMatchObject({
+      type: "dynamic-tool",
+      toolCallId: "call-2",
+      state: "output-error",
+      errorText: "failed"
+    });
+    expect(parts[2]).toMatchObject({
+      type: "dynamic-tool",
+      providerMetadata: {
+        eneo: { server_name: "Image Inc", title: "Draw an image", purpose: "image_generation" }
+      }
+    });
+  });
+
+  it("carries attachments, generated files and tokens in metadata", () => {
+    const file = { id: "f1", name: "a.pdf", mimetype: "application/pdf", size: 5 };
+    const messages = mapSessionMessages([
+      {
+        ...baseMessage,
+        files: [file as PersistedMessage["files"][number]],
+        generated_files: [file as PersistedMessage["files"][number]],
+        num_tokens_question: 12,
+        num_tokens_answer: 34
+      }
+    ]);
+
+    expect(messages[0]!.metadata?.files?.[0]?.name).toBe("a.pdf");
+    expect(messages[1]!.metadata?.generatedFiles?.[0]?.name).toBe("a.pdf");
+    expect(messages[1]!.metadata?.tokens).toEqual({ prompt: 12, completion: 34 });
+  });
+
+  it("carries persisted MCP resource references in assistant metadata", () => {
+    const mcpReference = {
+      id: "abcd1234-0000-0000-0000-000000000000",
+      uri: "mcp://files/a.md",
+      mime_type: "text/markdown",
+      content: "snippet",
+      meta: { title: "A file" },
+      tool_call_id: "call-1",
+      mcp_tool_name: "files__read_file"
+    } as NonNullable<PersistedMessage["mcp_tool_references"]>[number];
+
+    const messages = mapSessionMessages([
+      {
+        ...baseMessage,
+        mcp_tool_references: [mcpReference]
+      }
+    ]);
+
+    expect(messages[1]!.metadata?.mcpToolReferences).toEqual([mcpReference]);
+  });
+
+  it("is lenient about missing ids and unknown data", () => {
+    const messages = mapSessionMessages([
+      { ...baseMessage, id: null, references: [{} as never] },
+      { ...baseMessage, id: undefined as never }
+    ]);
+
+    expect(messages).toHaveLength(4);
+    expect(messages[0]!.id).toBe("history-0-q");
+    // The empty reference is skipped, not thrown on.
+    expect(messages[1]!.parts).toHaveLength(1);
+  });
+});
