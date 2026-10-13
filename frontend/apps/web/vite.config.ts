@@ -20,6 +20,8 @@ export default defineConfig({
     target: browserTarget
   },
   optimizeDeps: {
+    // Pre-bundled up front so the first axe test does not trigger a Vite reload mid-run.
+    include: ["axe-core"],
     esbuildOptions: {
       target: browserTarget
     }
