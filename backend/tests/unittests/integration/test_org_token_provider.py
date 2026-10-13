@@ -9,6 +9,7 @@ from uuid import uuid4
 import httpx
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.exc import OperationalError
 
 from eneo.integration.domain.entities.tenant_sharepoint_app import (
     AUTH_METHOD_SERVICE_ACCOUNT,
@@ -54,8 +55,9 @@ def _token_error(status: int, body: dict[str, str]) -> httpx.HTTPStatusError:
 class _FakeSessionManager:
     """Stands in for the database session manager used by the health writer."""
 
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(self, *, fail: bool = False, lock_timeout: bool = False) -> None:
         self.fail = fail
+        self.lock_timeout = lock_timeout
         self.statements: list[object] = []
 
     @asynccontextmanager
@@ -63,24 +65,35 @@ class _FakeSessionManager:
         if self.fail:
             raise RuntimeError("no connection")
         session = MagicMock()
-        session.execute = AsyncMock(
-            side_effect=lambda stmt: self.statements.append(stmt)
-        )
+        session.execute = AsyncMock(side_effect=self._execute)
         session.begin = asynccontextmanager(self._begin)
         yield session
+
+    async def _execute(self, stmt):
+        self.statements.append(stmt)
+        if self.lock_timeout and isinstance(stmt, sa.Update):
+            raise OperationalError(
+                "UPDATE", {}, Exception("canceling statement due to lock timeout")
+            )
 
     async def _begin(self):
         yield
 
+    def updates(self) -> list[sa.Update]:
+        return [stmt for stmt in self.statements if isinstance(stmt, sa.Update)]
 
-def _provider(app_auth=None, account_auth=None):
+
+def _provider(app_auth=None, account_auth=None, *, encryption=True):
     repo = AsyncMock()
     repo.update.side_effect = lambda obj: obj
+    encryption_service = MagicMock()
+    encryption_service.encrypt.side_effect = lambda value: f"enc:{value}"
     return (
         OrgTokenProvider(
             tenant_app_repo=repo,
             tenant_app_auth_service=app_auth or AsyncMock(),
             service_account_auth_service=account_auth or AsyncMock(),
+            encryption_service=encryption_service if encryption else None,
         ),
         repo,
     )
@@ -97,12 +110,37 @@ class TestSuccess:
         app = _app(
             AUTH_METHOD_SERVICE_ACCOUNT, last_auth_error="old", last_auth_error_at=_NOW
         )
+        sessions = _FakeSessionManager()
 
-        assert await provider.get_access_token(app) == "at"
+        with patch(f"{_MODULE}.sessionmanager", sessions):
+            assert await provider.get_access_token(app) == "at"
 
         assert app.auth_status == "ok"
         assert app.last_auth_error is None
         assert app.service_account_refresh_token == "refresh-2"
+        (update,) = sessions.updates()
+        written = update.compile().params
+        assert written["service_account_refresh_token_encrypted"] == "enc:refresh-2"
+        assert written["last_auth_error"] is None
+        assert written["last_auth_success_at"] == app.last_auth_success_at
+        repo.update.assert_not_awaited()
+
+    async def test_service_account_rotation_without_encryption_uses_the_callers_repo(
+        self,
+    ):
+        account_auth = AsyncMock()
+        account_auth.refresh_access_token.return_value = {
+            "access_token": "at",
+            "refresh_token": "refresh-2",
+        }
+        provider, repo = _provider(account_auth=account_auth, encryption=False)
+        app = _app(AUTH_METHOD_SERVICE_ACCOUNT)
+        sessions = _FakeSessionManager()
+
+        with patch(f"{_MODULE}.sessionmanager", sessions):
+            assert await provider.get_access_token(app) == "at"
+
+        assert sessions.statements == []
         repo.update.assert_awaited_once_with(app)
 
     @pytest.mark.parametrize(
@@ -133,12 +171,31 @@ class TestSuccess:
         app_auth.get_access_token.return_value = "at"
         provider, repo = _provider(app_auth=app_auth)
         app = _app(**previous)
+        sessions = _FakeSessionManager()
 
-        assert await provider.get_access_token(app, force_refresh=True) == "at"
+        with patch(f"{_MODULE}.sessionmanager", sessions):
+            assert await provider.get_access_token(app, force_refresh=True) == "at"
 
         app_auth.get_access_token.assert_awaited_once_with(app, force_refresh=True)
         assert app.auth_status == "ok"
-        assert repo.update.await_count == (1 if persisted else 0)
+        assert len(sessions.updates()) == (1 if persisted else 0)
+        repo.update.assert_not_awaited()
+
+    async def test_success_write_falls_back_to_the_callers_transaction_on_lock_timeout(
+        self,
+    ):
+        app_auth = AsyncMock()
+        app_auth.get_access_token.return_value = "at"
+        provider, repo = _provider(app_auth=app_auth)
+        app = _app()
+        sessions = _FakeSessionManager(lock_timeout=True)
+
+        with patch(f"{_MODULE}.sessionmanager", sessions):
+            assert await provider.get_access_token(app) == "at"
+
+        assert len(sessions.updates()) == 1
+        assert app.auth_status == "ok"
+        repo.update.assert_awaited_once_with(app)
 
 
 class TestFailure:
@@ -196,7 +253,14 @@ class TestFailure:
         assert update.table.name == "tenant_sharepoint_apps"
         repo.update.assert_not_awaited()
 
-    async def test_failure_write_falls_back_to_the_callers_transaction(self):
+    @pytest.mark.parametrize(
+        "sessions",
+        [
+            pytest.param(_FakeSessionManager(fail=True), id="no-connection"),
+            pytest.param(_FakeSessionManager(lock_timeout=True), id="lock-timeout"),
+        ],
+    )
+    async def test_failure_write_falls_back_to_the_callers_transaction(self, sessions):
         app_auth = AsyncMock()
         app_auth.get_access_token.side_effect = _token_error(
             400, {"error": "invalid_client"}
@@ -204,7 +268,7 @@ class TestFailure:
         provider, repo = _provider(app_auth=app_auth)
         app = _app()
 
-        with patch(f"{_MODULE}.sessionmanager", _FakeSessionManager(fail=True)):
+        with patch(f"{_MODULE}.sessionmanager", sessions):
             with pytest.raises(SharePointCredentialsInvalidError):
                 await provider.get_access_token(app)
 
@@ -258,7 +322,8 @@ class TestTestConnection:
         provider, _ = _provider(account_auth=account_auth)
         app = _app(AUTH_METHOD_SERVICE_ACCOUNT)
 
-        assert await provider.test_connection(app) == (True, None)
+        with patch(f"{_MODULE}.sessionmanager", _FakeSessionManager()):
+            assert await provider.test_connection(app) == (True, None)
         assert app.auth_status == "ok"
 
 
@@ -268,5 +333,6 @@ async def test_access_token_provider_forces_a_fresh_token():
     provider, _ = _provider(app_auth=app_auth)
     app = _app(last_auth_success_at=_NOW)
 
-    assert await provider.access_token_provider(app)() == "fresh"
+    with patch(f"{_MODULE}.sessionmanager", _FakeSessionManager()):
+        assert await provider.access_token_provider(app)() == "fresh"
     app_auth.get_access_token.assert_awaited_once_with(app, force_refresh=True)

@@ -1459,6 +1459,7 @@ class Container(containers.DeclarativeContainer):
         tenant_app_repo=tenant_sharepoint_app_repo,
         tenant_app_auth_service=tenant_app_auth_service,
         service_account_auth_service=service_account_auth_service,
+        encryption_service=encryption_service,
     )
 
     oauth2_service = providers.Factory(

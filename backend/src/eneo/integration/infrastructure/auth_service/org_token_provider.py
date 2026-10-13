@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
         TenantAppAuthService,
     )
+    from eneo.settings.encryption_service import EncryptionService
 
 logger = get_logger(__name__)
 
@@ -101,20 +102,26 @@ def describe_credential_failure(exc: BaseException) -> Optional[str]:
 
 
 async def persist_auth_health(
-    app: TenantSharePointApp, *, fallback_repo: TenantAppWriter
+    app: TenantSharePointApp,
+    *,
+    fallback_repo: TenantAppWriter,
+    extra_values: Optional[dict[str, object]] = None,
 ) -> None:
     """Write the app's health columns so they survive the caller's rollback.
 
     A credential failure usually ends the request or job with an error, which
     rolls back its transaction. The columns are therefore written on their own
-    connection. If that connection cannot lock the row within a short timeout
-    (the caller's transaction already updated it), the write falls back to the
-    caller's transaction instead of waiting on itself.
+    connection. Successes take the same path so the caller's transaction never
+    holds the row, which would otherwise make a later failure write in that
+    transaction wait out the lock timeout. If the own connection cannot lock
+    the row within a short timeout, the write falls back to the caller's
+    transaction instead of waiting on itself.
     """
-    values = {
+    values: dict[str, object] = {
         "last_auth_error": app.last_auth_error,
         "last_auth_error_at": app.last_auth_error_at,
         "last_auth_success_at": app.last_auth_success_at,
+        **(extra_values or {}),
     }
     try:
         async with sessionmanager.session() as session, session.begin():
@@ -152,11 +159,13 @@ class OrgTokenProvider:
         tenant_app_repo: TenantAppWriter,
         tenant_app_auth_service: "TenantAppAuthService",
         service_account_auth_service: "ServiceAccountAuthService",
+        encryption_service: Optional["EncryptionService"] = None,
     ) -> None:
         super().__init__()
         self.tenant_app_repo = tenant_app_repo
         self.tenant_app_auth_service = tenant_app_auth_service
         self.service_account_auth_service = service_account_auth_service
+        self.encryption_service = encryption_service
 
     async def get_access_token(
         self, app: TenantSharePointApp, *, force_refresh: bool = False
@@ -174,21 +183,22 @@ class OrgTokenProvider:
                 )
                 access_token = token_data["access_token"]
                 new_refresh_token = token_data.get("refresh_token")
-                if (
+                rotated = bool(
                     new_refresh_token
                     and new_refresh_token != app.service_account_refresh_token
-                ):
-                    app.update_refresh_token(new_refresh_token)
-                self._mark_success(app)
+                )
+                if rotated:
+                    app.update_refresh_token(cast(str, new_refresh_token))
                 # Every service-account call is a real token round trip and may
                 # have rotated the refresh token.
-                await self.tenant_app_repo.update(app)
+                self._mark_success(app)
+                await self._persist_success(app, rotated=rotated)
             else:
                 access_token = await self.tenant_app_auth_service.get_access_token(
                     app, force_refresh=force_refresh
                 )
                 if self._mark_success(app):
-                    await self.tenant_app_repo.update(app)
+                    await self._persist_success(app, rotated=False)
         except Exception as exc:
             detail = describe_credential_failure(exc)
             if detail is None:
@@ -230,6 +240,21 @@ class OrgTokenProvider:
         changed = app.auth_status != AUTH_STATUS_OK
         app.mark_auth_success(now)
         return stale or changed
+
+    async def _persist_success(
+        self, app: TenantSharePointApp, *, rotated: bool
+    ) -> None:
+        extra: dict[str, object] = {}
+        if rotated:
+            if self.encryption_service is None or not app.service_account_refresh_token:
+                await self.tenant_app_repo.update(app)
+                return
+            extra["service_account_refresh_token_encrypted"] = (
+                self.encryption_service.encrypt(app.service_account_refresh_token)
+            )
+        await persist_auth_health(
+            app, fallback_repo=self.tenant_app_repo, extra_values=extra
+        )
 
     async def _record_failure(self, app: TenantSharePointApp, detail: str) -> None:
         app.mark_auth_failure(detail, datetime.now(timezone.utc))
