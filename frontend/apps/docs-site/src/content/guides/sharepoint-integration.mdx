@@ -60,13 +60,19 @@ SHAREPOINT_WEBHOOK_NOTIFICATION_URL=https://your-eneo-domain.com/api/v1/integrat
 
 If neither variable is set, imports still work but no webhook subscriptions are created, so changes in SharePoint are not synchronized.
 
-You can also tune the maximum file size that Eneo downloads from SharePoint/OneDrive:
+You can also tune the maximum file size that Eneo downloads from SharePoint/OneDrive, and how many items the import dialog lists for one folder:
 
 ```bash
 # Optional: Max file size in bytes
 # Default: 52428800 (50 MB)
 SHAREPOINT_MAX_DOWNLOAD_BYTES=52428800
+
+# Optional: Most items the import dialog lists for a single folder
+# Default: 2000
+SHAREPOINT_BROWSE_MAX_ITEMS=2000
 ```
+
+Both values must be greater than zero. A folder with more items than `SHAREPOINT_BROWSE_MAX_ITEMS` is listed up to the cap and the import dialog shows a notice for that folder; the search in the dialog still reaches the remaining files.
 
 After setting these variables, restart the backend service.
 
@@ -109,7 +115,7 @@ The "My teams" category uses only the signed-in user's direct group IDs and each
 
 These permissions are **only required if you choose the Tenant App authentication method** for shared spaces. If you use Service Account (recommended), you do not need application permissions.
 
-> **Warning:** Application permissions grant access to **all SharePoint sites in the entire organization**. Microsoft does not provide a way to limit application permissions to specific sites. If you want to restrict access to specific sites, use the Service Account method instead.
+> **Warning:** Application permissions grant access to **all SharePoint sites in the entire organization**. Microsoft's `Sites.Selected` permission can limit an application to chosen sites, but Eneo cannot use it: Eneo lists the available sites through Microsoft Graph's site search, which requires `Sites.Read.All`. If you want to restrict access to specific sites, use the Service Account method instead.
 
 - `Files.Read.All` – read files across the entire organization
 - `Sites.Read.All` – read all SharePoint sites
@@ -174,7 +180,7 @@ With the tenant app method, Eneo uses application permissions that grant access 
 **Disadvantages:**
 
 - **No granular access control** – the application can read all files across all SharePoint sites in the organization
-- Microsoft does not provide any mechanism to restrict which sites an application with application permissions can access – it's all or nothing
+- Eneo does not support Microsoft's `Sites.Selected` permission, so there is no way to restrict which sites the application can read – it's all or nothing
 - Requires a Microsoft Entra ID administrator to approve application permissions
 - May not comply with data minimization requirements in some organizations
 
@@ -207,11 +213,23 @@ Fill in the form with the credentials from Microsoft Entra ID:
 
 **For service account:** Select "Service Account" and click "Sign in with Microsoft". You will be redirected to Microsoft's login where you log in with the service account. After login, the configuration is saved automatically.
 
-**For tenant app:** Select "Tenant App", click "Test Connection" to verify the credentials work, then click "Save".
+**For tenant app:** Select "Tenant App", click "Test Connection" to verify the credentials work, then click "Save". The test acquires a token with the credentials you entered without saving them.
 
 ### Verify
 
 When the configuration is saved, the status displays as "Organization Configured" on the integrations page. Users can now start importing from SharePoint in their shared spaces.
+
+### Credential Health
+
+The SharePoint card on the integrations page, and the **Current Configuration** view in the configuration dialog, show whether the stored credentials still work:
+
+- **Credentials verified** – Microsoft accepted the credentials the last time Eneo used them. The time of the last successful sign-in is shown.
+- **Credential problem** – the last attempt was refused. Eneo shows short guidance for the common Microsoft errors (a wrong or expired client secret, a sign-in Microsoft requires to be repeated, a saved sign-in that is no longer valid), when it failed, and the Microsoft error text under **Technical details**.
+- **Credentials not verified yet** – the credentials have not been used since they were saved.
+
+The health is recorded every time Eneo acquires a token with the stored app – with the client credentials for a tenant app, with the stored refresh token for a service account. That happens during imports, synchronization, browsing in the import dialog and webhook renewal, so a broken secret or a revoked service-account sign-in becomes visible on the integrations page instead of only in job logs. An administrator can also force a check of the stored credentials for either method through the admin API by calling `POST /api/v1/admin/sharepoint/app/test` without a request body; the outcome is recorded in the same way.
+
+For a service account with a credential problem, the card also offers **Sign in again with Microsoft**. See [Re-authenticating the Service Account](#re-authenticating-the-service-account).
 
 ---
 
@@ -267,13 +285,22 @@ Your OAuth token is stored securely and refreshed automatically using the `offli
 
 ### Supported File Types
 
-Eneo can process the following file types from SharePoint:
+Files from SharePoint are read with the same parsers and extraction limits as files uploaded directly to Eneo, so a PDF with tables or a spreadsheet yields the same text whichever way it arrives:
 
-- **Documents**: PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx)
-- **Text files**: Plain text, Markdown, CSV
+- **Documents**: PDF, Word (.docx, .docm), Excel (.xlsx, .xlsm, .xls), PowerPoint (.pptx, .pptm)
+- **Text files**: Plain text, Markdown, CSV/TSV, JSON, XML, HTML, YAML, logs and reStructuredText
 - **Web content**: SharePoint pages (text content only)
 
-Files that cannot be processed (images, videos, executables) are skipped during import.
+Everything else is skipped with a reason that the [sync history](#sync-status-and-history) shows next to the file name:
+
+- **Unsupported file type (…)** – images, video, audio, archives, executables, fonts, and Office family formats without a parser. Legacy Word and PowerPoint files are named with a hint, for example _Unsupported file type (legacy Word .doc, save as .docx)_; OneNote, Outlook `.msg`, rich text `.rtf` and OpenDocument files are also unsupported. These files are not downloaded.
+- **No text layer (scanned document; OCR is not supported)** – a PDF whose pages carry no characters. Eneo does not run OCR.
+- **Empty or unreadable content** – a file or SharePoint page with nothing in it, or a workbook with no cell content.
+- **Exceeds extraction limit (…)** – more PDF pages or more text than the extraction limits allow.
+- **File too large (exceeds 50 MB limit)** – larger than `SHAREPOINT_MAX_DOWNLOAD_BYTES`.
+- **Error: …** – the download failed, or the file is corrupt or password-protected.
+
+A skipped file never produces garbage text in the knowledge. Only the two "no text" outcomes remove a previously indexed copy of the same file, because the parser read the complete file and found nothing. A failed download, a corrupt file or an extraction error keeps the copy Eneo already has, so a transient problem cannot empty an item. A SharePoint page without text is skipped the same way and does not fail the sync.
 
 ### Document Properties (Library Columns)
 
@@ -303,7 +330,24 @@ Large SharePoint folders may take time to fully import. Eneo processes files in 
 
 By default, files larger than **50 MB** are skipped during import/sync to protect worker memory usage. You can change this limit with `SHAREPOINT_MAX_DOWNLOAD_BYTES`.
 
-Transient throttling from Microsoft Graph (HTTP 429/503) during large imports is retried automatically with backoff; persistent failures appear in the **Jobs** panel.
+The folder tree in the import dialog lists at most `SHAREPOINT_BROWSE_MAX_ITEMS` items per folder (2,000 by default). A folder above the cap shows the notice _Not every item in this folder is shown. Use the search to find the rest._ The tree is keyboard operable: the arrow keys move between items and expand or collapse folders, Home and End jump to the first and last item, Space ticks or unticks the item and Enter expands it.
+
+Transient throttling from Microsoft Graph (HTTP 429/503) during large imports is retried automatically with backoff; persistent failures appear in the **Jobs** panel and on the item's [sync status](#sync-status-and-history) in the knowledge list.
+
+### Sync Status and History
+
+Each SharePoint item in a space's **Knowledge** list shows how its last synchronization went:
+
+- A status badge: **Never synced**, **Synced**, **Sync failed** or **Empty** (the last sync succeeded but no document is indexed, for example because every file was skipped).
+- The number of indexed documents.
+- **Last synced:** the time of the last successful synchronization. It moves on every successful run, also when nothing had changed, so a healthy item never looks stale. An item that has only ever failed shows **Last attempt:** instead.
+- For a failed sync, **Show error** reveals the error text.
+
+A site-level row that groups several imported items shows the combined picture: **Sync failed** with each failing item named if any of them failed, otherwise the documents of all items added up. Its actions menu has **Resync all items**, which queues a full synchronization of every item under the site; a single item has **Full Sync** in its own menu.
+
+The timeline link opens the **Sync History** dialog, which lists every synchronization with its type (full or delta), result, duration and a summary of what happened: files synced, files deleted, pages synced, items unchanged and items skipped. Unchanged items are files Eneo had already indexed in the same version, so nothing was re-processed; they are counted separately from skipped files. The skipped list names each file with its exact reason (see [Supported File Types](#supported-file-types)). At most 50 skipped files are listed per run; when more were skipped the list ends with _and N more_. A **Reconciliation warning** appears when a full synchronization could not safely clean up documents that no longer exist in SharePoint, either because the site could not be listed completely or because the number of missing documents was above the safety cap; the documents are kept, and the next successful full synchronization tries again.
+
+Items whose last sync failed or indexed nothing are also flagged when you pick knowledge for an assistant. In the chat, an assistant whose knowledge is inserted into every message shows _No sources found in the knowledge_ under an answer that used no sources, so an empty or broken source does not pass unnoticed.
 
 ### Removing an Imported Folder
 
@@ -355,15 +399,32 @@ When a user imports a SharePoint folder, Eneo creates a webhook subscription wit
 
 Webhook subscriptions have a maximum lifetime of approximately 29 days according to Microsoft's limitations. Eneo has a background job that runs every 12 hours and automatically renews subscriptions that are approaching expiration (within 48 hours). Under normal circumstances, administrators don't need to manage this manually.
 
+Each notification from Microsoft names the subscription it belongs to. Eneo matches it against the subscriptions it has stored and ignores notifications for unknown subscriptions or with the wrong `clientState`, so a stale subscription from an earlier installation cannot trigger synchronization.
+
 ### Managing Webhooks
 
-Under **Admin** → **Integrations** → **Manage webhooks** you can see all active subscriptions and their status:
+Under **Admin** → **Integrations** → **Manage Webhooks** you can see all subscriptions with their site, owner, expiry time and health:
 
-- **Active**: The subscription is working normally
-- **Expiring soon**: The subscription expires within 48 hours and will be renewed automatically on the next run
-- **Expired**: The subscription has expired and needs to be recreated
+- **Webhook Active**: The subscription is working normally
+- **Webhook Expiring Soon**: The subscription expires within 48 hours and will be renewed automatically on the next run
+- **Webhook Expired**: The subscription has expired. It is recreated automatically at the next synchronization of the item or the next run of the renewal job, because Microsoft refuses to extend an expired subscription.
 
-If webhooks have stopped working, for example after an extended outage where the background job couldn't run, you can click **Renew expired** to manually recreate all expired subscriptions.
+The health column shows **Healthy**, **No webhook yet** (no notification has arrived so far) or the number of renewal failures with the last failure text. Each row has **Renew**, and the **Renew All Expired** button recreates every expired subscription at once, for example after an extended outage where the background job couldn't run.
+
+Each imported item in a space's knowledge list also shows its own webhook status next to its sync status.
+
+### When Eneo's Public Address Changes
+
+A subscription is registered with the webhook address that was current when it was created. If `PUBLIC_ORIGIN` or `SHAREPOINT_WEBHOOK_NOTIFICATION_URL` changes, for example when Eneo moves to a new domain, Eneo notices the difference at the next renewal or synchronization and recreates the subscription with the new address instead of renewing it. Until then, Microsoft keeps posting to the old address.
+
+To switch every subscription immediately, an administrator can call the admin API after restarting the backend with the new address, using a tenant API key with admin permission (see the [API overview](/docs/api)):
+
+```bash
+curl -X POST "https://your-eneo-domain.com/api/v1/admin/sharepoint/subscriptions/recreate-all" \
+  -H "X-API-Key: sk_..."
+```
+
+The endpoint recreates all of the tenant's subscriptions in place, expired or not, and returns how many were recreated and how many failed. There is no button for it in the UI.
 
 ### Network Configuration for Webhooks
 
@@ -384,7 +445,7 @@ If Eneo is directly accessible on a public URL without an authenticating proxy, 
 
 If changes in SharePoint aren't synchronizing:
 
-1. Check webhook status in the admin panel
+1. Check the item's webhook status in the space's knowledge list and the subscription list under **Admin** → **Integrations** → **Manage Webhooks**
 2. Verify that Eneo's domain is reachable via HTTPS from the internet
 3. Check that the firewall allows incoming traffic from Microsoft's IP addresses
 4. If using an API gateway, verify that the webhook endpoints are accessible without authentication
@@ -395,9 +456,9 @@ If changes in SharePoint aren't synchronizing:
 
 ### Authentication Fails
 
-If connection testing fails, check:
+If connection testing fails, or the integrations page shows **Credential problem**, read the guidance and the Microsoft error under **Technical details**, then check:
 
-- That client ID and client secret are correctly copied from Azure Portal
+- That client ID and client secret are correctly copied from Azure Portal (the secret's _value_, not its ID)
 - That the client secret hasn't expired (they have limited validity periods)
 - That admin consent has been granted for all permissions
 - That the correct permission type is used (delegated for service account, application for tenant app)
@@ -430,8 +491,11 @@ If the interactive service-account sign-in fails with a Microsoft (AADSTS) error
 
 If imported files aren't updating:
 
-- Check webhook status in the admin panel
-- Verify that the service account (when using service account method) still has access to the files
+- Look at the item's status badge in the space's **Knowledge** list. **Sync failed** with **Show error** tells you why the last run failed; **Synced** with an old **Last synced** time means no run has happened, so check the webhook status on the item and under **Admin** → **Integrations** → **Manage Webhooks**.
+- Open the **Sync History** dialog to see what the last runs did. A file that is missing from the knowledge is usually listed as skipped with its reason, for example an unsupported format or a scanned PDF without a text layer.
+- Check the credential health on the integrations page. A **Credential problem** stops every import and synchronization until the secret is updated or the service account signs in again.
+- Verify that the service account (when using service account method) still has access to the files.
+- Run **Full Sync** on the item, or **Resync all items** on the site row, to re-process everything.
 
 ### Site Not Visible in Eneo
 
@@ -496,16 +560,15 @@ The solution is the same as above: create a new secret in Microsoft Entra ID and
 
 This section only applies to the Service Account method. The service account stores a long-lived OAuth refresh token captured when the administrator signed in. Unlike the client secret, this token has no fixed expiration date shown in Azure Portal, but it can stop working if the service account's password is changed, a Conditional Access policy revokes it, or the account is inactive for an extended period (roughly 90 days).
 
-Eneo refreshes this token automatically as it is used, but there is no proactive renewal. If the refresh token becomes invalid, imports and background synchronization stop and the failures surface only as errors in the **Jobs** panel and in webhook status — there is no automatic re-authentication.
+Eneo refreshes this token automatically as it is used, but there is no proactive renewal. If the refresh token becomes invalid, imports and background synchronization stop. The failure is shown as a **Credential problem** on the SharePoint card under **Admin** → **Integrations**, with Microsoft's error text and guidance, and the affected items show **Sync failed** in their spaces — there is no automatic re-authentication.
 
-To restore access, an administrator re-runs the sign-in:
+To restore access, an administrator signs in again with the service account. The existing configuration is kept; you do not enter the client ID or secret again:
 
 1. Navigate to **Admin** → **Integrations**
-2. Click **Configure** under SharePoint
-3. With **Service Account** selected, click **Sign in with Microsoft**
-4. Log in again with the service account
+2. Click **Sign in again with Microsoft** on the SharePoint card (shown when the credential health reports a problem), or click **Configure** and use the same button in the **Current Configuration** view, where it is always available for a service account
+3. Log in with the service account at Microsoft; you are returned to Eneo and the configuration is updated
 
-Imported knowledge and existing webhook subscriptions are unaffected — only the authentication is renewed.
+Imported knowledge and existing webhook subscriptions are unaffected — only the authentication is renewed. Conditional Access or multi-factor requirements that block the sign-in are reported as guidance on the card; see [Service Account Sign-in Is Blocked](#service-account-sign-in-is-blocked).
 
 ---
 
@@ -519,5 +582,7 @@ To switch method:
 
 1. Navigate to **Admin** → **Integrations**
 2. Click **Configure** under SharePoint
-3. Click **Remove integration** and confirm
+3. Click **Delete SharePoint App**, type the confirmation word and confirm
 4. Configure the integration again with the new method
+
+Switching is the only case that requires deleting the app. Rotating the client secret (**Update Secret**) and signing in again with the service account (**Sign in again with Microsoft**) keep the configuration and the imported knowledge.
