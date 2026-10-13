@@ -16,8 +16,8 @@ ENV NODE_OPTIONS=--max-old-space-size=8192
 # Install dependencies with Bun (uses frozen lockfile)
 RUN bun install --frozen-lockfile
 
-# Build the shipped Svelte app and its UI package.
-RUN bun run --filter @eneo/ui build && bun run --filter @eneo/web build
+# The workspace build script owns the shipped Svelte/UI build sequence.
+RUN bun run build
 
 # Stage 2: Production runtime using Node.js
 # Required ENV vars, see README.md

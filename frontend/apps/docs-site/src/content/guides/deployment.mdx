@@ -1283,15 +1283,28 @@ Python 3.11. Svelte uses Node 22 in both build and runtime, with maintained C/C+
 libraries and no runtime shell or package manager. This consolidates patching
 and makes the libraries used at runtime visible to the image scanners.
 
-This selection is not evidence that Debian cannot be operated securely. The
-earlier work tried updated Debian Trixie images before selecting Wolfi; it did
-not retain a complete comparison proving a distribution change was the only
-solution. The previously combined branch passed image scans and runtime checks
-in [CI](https://github.com/eneo-ai/eneo/actions/runs/37310384063), but that result
-is historical evidence, not validation of every later rebuild. The independent
-runtime PR must pass its own checks before release. Retaining Debian with patched
-system libraries and controlled wheel contents remains a viable alternative to
-evaluate if the operational cost of changing distribution is unacceptable.
+The [13 October 2026 CI comparison](https://github.com/eneo-ai/eneo/actions/runs/38368355113)
+rebuilt updated Debian Trixie and Wolfi/Chainguard candidates with the same
+scanner binaries and a checksummed vulnerability-database snapshot. Updating
+Debian, removing runtime packaging tools and applying the audio/dependency
+changes still left HIGH/CRITICAL findings in its native packages. Debian's
+FFmpeg also failed the Speex duration fixture that passed on Wolfi. These are
+results for the tested images, not proof that every finding is exploitable in
+Eneo or that Debian cannot be operated securely.
+
+The comparison also checked the libraries actually loaded by Python. The lxml
+wheel loaded libxml2 2.14.6 even on an otherwise clean-scanning Wolfi image;
+system-built lxml on Wolfi loaded 2.15.4. Building against Debian's system
+libraries instead loaded 2.9.14. This supports keeping the maintained native
+library inventory and its runtime checks together, rather than deciding from
+scanner totals alone. Python remained on 3.11 in every backend candidate: a
+Python upgrade is separate from updating these native libraries.
+
+The decision and retained evidence are recorded in
+[the repository security policy](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md#runtime-selection-evidence).
+Debian remains an alternative if its native packages are patched and the same
+behavior and security checks pass. The comparison does not validate future
+rebuilds; every publication must pass the current checks.
 
 ### Upgrade and rollback
 

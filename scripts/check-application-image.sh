@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Exercise the shipped artifact, with no provider credentials or external network.
 set -euo pipefail
-kind=${1:?backend, frontend or web-next}
+kind=${1:?backend or frontend}
 image=${2:?candidate image}
 repo=$(cd "$(dirname "$0")/.." && pwd)
 if [[ "$kind" == backend ]]; then
@@ -20,7 +20,7 @@ if [[ "$kind" == backend ]]; then
     "$image" /tmp/check_runtime.py
   exit 0
 fi
-case "$kind" in frontend|web-next) ;; *) echo "Unknown application: $kind" >&2; exit 2 ;; esac
+case "$kind" in frontend) ;; *) echo "Unknown application: $kind" >&2; exit 2 ;; esac
 container=
 cleanup() {
   status=$?
@@ -32,10 +32,9 @@ cleanup() {
 trap cleanup EXIT
 container=$(docker run -d --network none --cap-drop ALL --security-opt no-new-privileges \
   --memory 1g --cpus 1 \
-  -e ORIGIN=http://localhost:3000 -e APP_ORIGIN=http://localhost:3000 \
+  -e ORIGIN=http://localhost:3000 \
   -e ENEO_BACKEND_URL=http://127.0.0.1:8123 -e ENEO_BACKEND_SERVER_URL=http://127.0.0.1:8123 \
-  -e JWT_SECRET=image-test-secret-not-for-production \
-  -e SESSION_SECRET=image-test-session-secret-not-for-production "$image")
+  -e JWT_SECRET=image-test-secret-not-for-production "$image")
 ready=0
 for _ in $(seq 1 40); do
   if docker exec "$container" node -e \
@@ -48,8 +47,3 @@ done
 [[ "$ready" == 1 ]]
 docker exec "$container" node -e \
   "if(process.versions.node.split('.')[0]!=='22')process.exit(1);console.log(JSON.stringify(process.versions))"
-if [[ "$kind" == web-next ]]; then
-  # Exercises Sharp, the image endpoint and its on-disk cache as the runtime UID.
-  docker exec "$container" node -e \
-    "fetch('http://127.0.0.1:3000/_next/image?url=%2Feneo_pwa_logo.png&w=64&q=75').then(async r=>{if(!r.ok||!r.headers.get('content-type')?.startsWith('image/')||(await r.arrayBuffer()).byteLength===0)process.exit(1)}).catch(()=>process.exit(1))"
-fi

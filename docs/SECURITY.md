@@ -182,6 +182,74 @@ Do not dismiss alerts just to reduce the count. Dismiss only with a clear reason
 such as "vulnerable code not used", "false positive", or "tolerable risk", and
 record an expiry date or follow-up issue.
 
+## Runtime selection evidence
+
+The [13 October 2026 comparison](https://github.com/eneo-ai/eneo/actions/runs/38368355113)
+is an isolated CI experiment on `fix/runtime-debian-comparison`, not a production
+workflow or a publication. It uses #1040's original runtime proposal
+`e077d89dcd77ebaffec69719f513cd5b3e719570`; the minimal backend restores the
+lock/audio owner from its base `d30550781a1d2bd0812e64b4164a8c329aba3969`.
+All candidates use Python 3.11 or Node 22 and the same checksum-pinned Trivy
+0.75.0 / Grype 0.117.0 binaries and database bytes. The database artifact comes
+from [the first run](https://github.com/eneo-ai/eneo/actions/runs/38366957420).
+That run exposed a missing `zlib1g-dev` build dependency in the Debian source
+candidate; the completed comparison corrects it rather than counting a build
+failure as evidence against Debian.
+
+| Candidate | Trivy HIGH / CRITICAL | Grype HIGH / CRITICAL | Behavior checks |
+| --- | --- | --- | --- |
+| Debian Trixie, original lock/audio | 217 / 1 | 289 / 11 | Fails new audio contracts |
+| Debian Trixie, PR lock/audio, lxml wheel | 215 / 1 | 287 / 11 | Speex duration fails |
+| Debian Trixie, PR lock/audio, system lxml | 215 / 1 | 287 / 11 | Speex duration fails |
+| Wolfi, PR lock/audio, system lxml | 0 / 0 | 0 / 0 | Pass |
+| Wolfi, PR lock/audio, lxml wheel | 0 / 0 | 0 / 0 | Pass; native-library policy not satisfied |
+| Svelte, updated Node 22 / Debian Trixie | 43 / 0 | 54 / 0 | Pass |
+| Svelte, Node 22 / Chainguard glibc-dynamic | 0 / 0 | 0 / 0 | Pass |
+
+Counts are package/advisory matches, not unique vulnerabilities or verified
+exploit paths. The comparison deliberately separates runtime behavior from
+Wolfi-specific version/path assertions; the production native-library checks
+remain enforced. Read `runtime-comparison-summary` for unique advisory counts
+and per-package `findings.csv`. Each `comparison-*` artifact retains raw reports,
+build/runtime logs, source/database checksums and the exact local image ID.
+Candidate artifacts are retained for 30 days, the summary for 90 days and the
+frozen databases for 14 days; after expiry a new experiment must record a new
+snapshot rather than claim to reproduce these bytes.
+
+The resulting scope is:
+
+- Keep the maintained backend and frontend runtimes. Trixie with OS upgrades
+  and unused packaging tools removed did not satisfy the same scanner policy.
+  For example, Debian still lists its tested libxml2 package as affected by
+  [CVE-2026-86138](https://security-tracker.debian.org/tracker/CVE-2026-86138),
+  fixed upstream in 2.15.4. Some other findings are lower risk in Debian's
+  assessment; no scanner count is a substitute for reachability analysis.
+- Keep system-built lxml on Wolfi. Both wheel candidates actually loaded
+  libxml2 2.14.6 / libxslt 1.1.43, whereas Wolfi's system build loaded 2.15.4 /
+  1.1.45. The wheel variant's zero scanner findings did not establish that its
+  statically bundled library contained the upstream XML fixes. Debian's system
+  build loaded libxml2 2.9.14 / libxslt 1.1.35; system linking alone is not a fix.
+- Keep FFmpeg as the audio owner and its cancellation/format tests. The original
+  soundfile wheel loaded its own libsndfile 1.2.0 and failed high-rate and
+  multichannel output checks. On updated Debian the PR audio code passed the
+  other tests but the Speex fixture decoded to 2.52 s instead of 1.25 s; the
+  Wolfi candidate passed all five tests. This fixture result does not establish
+  which individual FFmpeg component causes the difference.
+- Keep scanner/publication gates and runtime inventory checks. Do not remove
+  metadata, exclude unfixed findings or relax native checks to obtain green
+  results. Keep the experiment and unshipped Next-specific checks out of the
+  production change; the existing frontend workspace script owns the build.
+- Leave the Python minor upgrade separate. Changing the interpreter would not
+  update the FFmpeg packages or the native libraries carried inside wheels.
+
+This comparison isolates the runtime changes from the original PR. Later
+`develop` dependency fixes are retained in #1040's merge commit `c8175b96ec`;
+[its ordinary CI](https://github.com/eneo-ai/eneo/actions/runs/38366716104) also
+passed the selected backend/frontend image scans and runtime checks. New
+commits and publications require their own checks. Nothing in this experiment
+was deployed; staging upload/transcription and API/worker validation remain
+part of release acceptance.
+
 ## New Alert Workflow
 
 For each new alert:
