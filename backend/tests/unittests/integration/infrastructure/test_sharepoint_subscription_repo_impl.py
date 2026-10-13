@@ -51,10 +51,31 @@ def _subscription() -> SharePointSubscription:
     )
 
 
-async def test_unique_violation_becomes_a_domain_error_inside_a_savepoint():
-    session, savepoints = _session(
-        IntegrityError("INSERT", {}, Exception("uq_sharepoint_subscription_user_site"))
-    )
+class _DriverError(Exception):
+    def __init__(self, message: str, constraint_name: str | None = None) -> None:
+        super().__init__(message)
+        self.constraint_name = constraint_name
+
+
+@pytest.mark.parametrize(
+    "driver_error",
+    [
+        pytest.param(
+            Exception(
+                'duplicate key value violates unique constraint "uq_sharepoint_subscription_user_site"'
+            ),
+            id="message",
+        ),
+        pytest.param(
+            _DriverError("duplicate key", "uq_sharepoint_subscription_user_site"),
+            id="constraint-name",
+        ),
+    ],
+)
+async def test_unique_violation_becomes_a_domain_error_inside_a_savepoint(
+    driver_error,
+):
+    session, savepoints = _session(IntegrityError("INSERT", {}, driver_error))
     repo = SharePointSubscriptionRepositoryImpl(
         session=session, mapper=SharePointSubscriptionMapper()
     )
@@ -67,11 +88,58 @@ async def test_unique_violation_becomes_a_domain_error_inside_a_savepoint():
     assert savepoints == ["begin", "rollback"]
 
 
-async def test_other_database_errors_propagate_unchanged():
-    session, _ = _session(RuntimeError("connection lost"))
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(RuntimeError("connection lost"), id="connection"),
+        pytest.param(
+            IntegrityError(
+                "INSERT",
+                {},
+                _DriverError(
+                    'insert or update on table "sharepoint_subscriptions" violates '
+                    'foreign key constraint "fk_user_integration"',
+                    "sharepoint_subscriptions_user_integration_id_fkey",
+                ),
+            ),
+            id="foreign-key",
+        ),
+        pytest.param(
+            IntegrityError("INSERT", {}, Exception('null value in column "site_id"')),
+            id="not-null",
+        ),
+    ],
+)
+async def test_other_database_errors_propagate_unchanged(error):
+    session, savepoints = _session(error)
     repo = SharePointSubscriptionRepositoryImpl(
         session=session, mapper=SharePointSubscriptionMapper()
     )
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(type(error)):
         await repo.add(_subscription())
+    assert savepoints == ["begin", "rollback"]
+
+
+async def test_relinking_targets_only_unlinked_rows_of_the_same_resource():
+    result = MagicMock(rowcount=2)
+    session, _ = _session(None)
+    session.execute = AsyncMock(return_value=result)
+    repo = SharePointSubscriptionRepositoryImpl(
+        session=session, mapper=SharePointSubscriptionMapper()
+    )
+    subscription = _subscription()
+    subscription.id = uuid4()
+
+    assert await repo.link_unreferenced_knowledge(subscription) == 2
+
+    statement = session.execute.await_args.args[0]
+    sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    assert "UPDATE integration_knowledge" in sql
+    assert f"sharepoint_subscription_id='{subscription.id.hex}'" in sql
+    assert "sharepoint_subscription_id IS NULL" in sql
+    assert f"user_integration_id = '{subscription.user_integration_id.hex}'" in sql
+    assert (
+        "coalesce(integration_knowledge.site_id, integration_knowledge.drive_id) = 'site-1'"
+        in sql
+    )

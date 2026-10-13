@@ -27,6 +27,9 @@ from eneo.integration.presentation.validation import (
     FOLDER_PATH_PATTERN,
     GRAPH_ID_MAX_LENGTH,
     GRAPH_ID_PATTERN,
+    INTEGRATION_KEY_PATTERN,
+    SELECTED_ITEM_TYPE_MAX_LENGTH,
+    SELECTED_ITEM_TYPE_PATTERN,
     validate_folder_path,
 )
 from eneo.jobs.job_models import JobPublic
@@ -361,7 +364,7 @@ class _IntegrationKnowledgeSelection(BaseModel):
 
     # Site id for SharePoint, drive id for OneDrive, space key for Confluence.
     key: Optional[str] = Field(
-        None, max_length=GRAPH_ID_MAX_LENGTH, pattern=GRAPH_ID_PATTERN
+        None, max_length=GRAPH_ID_MAX_LENGTH, pattern=INTEGRATION_KEY_PATTERN
     )
     folder_id: Optional[str] = Field(
         None, max_length=GRAPH_ID_MAX_LENGTH, pattern=GRAPH_ID_PATTERN
@@ -369,7 +372,11 @@ class _IntegrationKnowledgeSelection(BaseModel):
     folder_path: Optional[str] = Field(
         None, max_length=FOLDER_PATH_MAX_LENGTH, pattern=FOLDER_PATH_PATTERN
     )
-    selected_item_type: Optional[Literal["file", "folder", "site_root"]] = None
+    selected_item_type: Optional[str] = Field(
+        None,
+        max_length=SELECTED_ITEM_TYPE_MAX_LENGTH,
+        pattern=SELECTED_ITEM_TYPE_PATTERN,
+    )
     resource_type: Optional[Literal["site", "onedrive"]] = "site"
 
     @field_validator("folder_path")

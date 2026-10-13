@@ -66,6 +66,18 @@ def upgrade() -> None:
         sa.Column("notification_url", sa.Text(), nullable=True),
     )
 
+    # Webhooks route by this foreign key; knowledge rows whose subscription
+    # link was never written (OneDrive rows keep the drive id in drive_id, and
+    # their subscription stores it as site_id) would otherwise never sync.
+    op.execute(
+        "UPDATE integration_knowledge AS ik "
+        "SET sharepoint_subscription_id = s.id "
+        "FROM sharepoint_subscriptions AS s "
+        "WHERE ik.sharepoint_subscription_id IS NULL "
+        "AND s.user_integration_id = ik.user_integration_id "
+        "AND s.site_id = COALESCE(ik.site_id, ik.drive_id)"
+    )
+
 
 def downgrade() -> None:
     op.drop_column("sharepoint_subscriptions", "notification_url")

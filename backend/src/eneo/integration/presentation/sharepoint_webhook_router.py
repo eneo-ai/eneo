@@ -3,6 +3,7 @@ from typing import Annotated, Optional, cast
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -131,7 +132,9 @@ async def sharepoint_webhook_validation(validationToken: Optional[str] = None):
 )
 async def sharepoint_webhook(
     request: Request,
-    container: Annotated[Container, Depends(get_container(with_user=False))],
+    container: Annotated[
+        Container, Depends(get_container(with_user=False, with_transaction=False))
+    ],
     validationToken: Optional[str] = None,
 ):
     if validationToken:
@@ -174,7 +177,11 @@ async def sharepoint_webhook(
             first.get("changeType"),
         )
 
-    service = container.sharepoint_webhook_service()
-    await service.handle_notifications(payload)
+    # The transaction opens only for a validated notification body, so junk
+    # posted at the public URL costs no database connection.
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        service = container.sharepoint_webhook_service()
+        await service.handle_notifications(payload)
 
     return JSONResponse(status_code=202, content={"status": "acknowledged"})

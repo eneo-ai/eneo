@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from eneo.integration.infrastructure import oauth_token_service as module
 from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
@@ -175,6 +176,30 @@ class TestCrossWorkerRefreshLease:
 
         assert result.access_token == "refreshed"
         confluence.refresh_access_token.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(RedisConnectionError("refused"), id="redis-error"),
+            pytest.param(OSError("network down"), id="socket-error"),
+        ],
+    )
+    async def test_redis_outage_still_refreshes_exactly_once(self, token, error):
+        svc, repo, confluence, redis, _ = _leased_service(
+            token, busy_rounds=0, fresh_access="unused"
+        )
+        redis.set = AsyncMock(side_effect=error)
+
+        with (
+            patch(_REFRESH, new=AsyncMock(return_value=True)),
+            patch(_RELEASE, new=AsyncMock(return_value=True)) as release,
+        ):
+            result = await svc.refresh_and_update_token(token_id=uuid4())
+
+        assert result.access_token == "refreshed"
+        confluence.refresh_access_token.assert_awaited_once()
+        repo.update.assert_awaited_once()
+        release.assert_not_awaited()
 
     def test_container_wires_the_redis_client(self):
         assert "redis_client" in Container.oauth_token_service.kwargs

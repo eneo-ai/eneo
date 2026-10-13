@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -11,13 +12,25 @@ logger = logging.getLogger(__name__)
 DEFAULT_AUTH_TIMEOUT = 30.0
 
 
+def credentials_fingerprint(app: TenantSharePointApp) -> str:
+    """Identifies the credential set a token was minted with, never the secret."""
+    material = "\x00".join((app.tenant_domain, app.client_id, app.client_secret))
+    return hashlib.sha256(material.encode()).hexdigest()
+
+
 class TenantAppToken:
     """Token obtained via client credentials flow (application permissions)."""
 
-    def __init__(self, access_token: str, expires_at: datetime) -> None:
+    def __init__(
+        self,
+        access_token: str,
+        expires_at: datetime,
+        credentials_fingerprint: str = "",
+    ) -> None:
         super().__init__()
         self.access_token = access_token
         self.expires_at = expires_at
+        self.credentials_fingerprint = credentials_fingerprint
 
     def is_expired(self) -> bool:
         """Check if token has expired."""
@@ -58,10 +71,17 @@ class TenantAppAuthService:
             httpx.HTTPStatusError: If token acquisition fails
         """
         cache_key = str(app.id)
+        fingerprint = credentials_fingerprint(app)
 
+        # The cache is per process, so a reconfigured secret cannot be cleared
+        # from every API and worker process; a token minted with other
+        # credentials is simply never a hit.
         if not force_refresh and cache_key in self._token_cache:
             cached_token = self._token_cache[cache_key]
-            if not cached_token.is_expiring_soon():
+            if (
+                cached_token.credentials_fingerprint == fingerprint
+                and not cached_token.is_expiring_soon()
+            ):
                 logger.debug(f"Using cached token for app {app.id}")
                 return cached_token.access_token
 
@@ -117,7 +137,9 @@ class TenantAppAuthService:
                     )
 
                     return TenantAppToken(
-                        access_token=access_token, expires_at=expires_at
+                        access_token=access_token,
+                        expires_at=expires_at,
+                        credentials_fingerprint=credentials_fingerprint(app),
                     )
                 else:
                     logger.error(

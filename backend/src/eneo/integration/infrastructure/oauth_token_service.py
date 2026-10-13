@@ -1,6 +1,9 @@
 import asyncio
+from contextlib import AsyncExitStack
 from time import monotonic
 from typing import TYPE_CHECKING, Optional
+
+from redis.exceptions import RedisError
 
 from eneo.main.logging import get_logger
 from eneo.worker.redis.lease import redis_lease
@@ -96,12 +99,26 @@ class OauthTokenService:
             deadline = monotonic() + _REFRESH_LEASE_WAIT_SECONDS
             lease_key = f"{_REFRESH_LEASE_PREFIX}{token_id}"
             while True:
-                async with redis_lease(
-                    self.redis_client,
-                    lease_key,
-                    ttl_seconds=_REFRESH_LEASE_TTL_SECONDS,
-                    log_lock_key=False,
-                ) as acquired:
+                async with AsyncExitStack() as stack:
+                    try:
+                        acquired = await stack.enter_async_context(
+                            redis_lease(
+                                self.redis_client,
+                                lease_key,
+                                ttl_seconds=_REFRESH_LEASE_TTL_SECONDS,
+                                log_lock_key=False,
+                            )
+                        )
+                    except (RedisError, OSError) as exc:
+                        # A Redis outage must not take user integrations down
+                        # with it; the process lock still serialises this host.
+                        logger.warning(
+                            "Redis unavailable for the refresh lease of OAuth token "
+                            "%s (%s); refreshing under the process lock only",
+                            token_id,
+                            exc,
+                        )
+                        return await self._refresh_and_store(token)
                     if acquired:
                         if waited:
                             fresh = await self.oauth_token_repo.one_fresh(token.id)

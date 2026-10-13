@@ -28,6 +28,7 @@ from eneo.integration.infrastructure.detached_tasks import pending_detached_task
 from eneo.integration.infrastructure.sharepoint_subscription_service import (
     SharePointSubscriptionService,
 )
+from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.roles.permissions import Permission
 from tests.fixtures import TEST_USER
@@ -2090,3 +2091,41 @@ class TestTriggerFullSync:
                 space_id=space.id,
                 integration_knowledge_id=knowledge.id,
             )
+
+
+class TestOrgTokenProviderWiring:
+    def _service(self, **overrides):
+        fields = dict(
+            job_service=AsyncMock(),
+            user=TEST_USER,
+            oauth_token_repo=AsyncMock(),
+            space_repo=AsyncMock(),
+            integration_knowledge_repo=AsyncMock(),
+            embedding_model_repo=AsyncMock(),
+            user_integration_service=AsyncMock(),
+            actor_manager=MagicMock(),
+            sharepoint_subscription_service=AsyncMock(),
+            tenant_sharepoint_app_repo=AsyncMock(),
+            tenant_app_auth_service=AsyncMock(),
+        )
+        fields.update(overrides)
+        return IntegrationKnowledgeService(**fields)
+
+    async def test_container_provided_token_provider_is_used(self):
+        provider = AsyncMock()
+        provider.get_access_token.return_value = "from-provider"
+        tenant_app_auth_service = AsyncMock()
+        service = self._service(
+            tenant_app_auth_service=tenant_app_auth_service,
+            org_token_provider=provider,
+        )
+        app = MagicMock()
+
+        assert await service._get_tenant_app_access_token(app) == "from-provider"
+
+        provider.get_access_token.assert_awaited_once_with(app)
+        tenant_app_auth_service.get_access_token.assert_not_awaited()
+
+    def test_container_wires_the_token_provider(self):
+        assert "org_token_provider" in Container.integration_knowledge_service.kwargs
+        assert "encryption_service" in Container.org_token_provider.kwargs

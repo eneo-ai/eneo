@@ -3,6 +3,7 @@ from __future__ import annotations
 import socket
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 import aiohttp
@@ -25,6 +26,20 @@ from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def normalize_notification_url(url: str) -> str:
+    """The form two spellings of one webhook URL share.
+
+    Scheme and host are case-insensitive and a trailing slash does not change
+    which route Eneo serves, so neither may count as drift; path case and the
+    query string do.
+    """
+    parts = urlsplit(url.strip())
+    path = parts.path.rstrip("/")
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), path, parts.query, "")
+    )
 
 
 def _resource_label(site_id: Optional[str], drive_id: Optional[str] = None) -> str:
@@ -79,7 +94,8 @@ class SharePointSubscriptionService:
         return bool(
             self.notification_url
             and subscription.notification_url is not None
-            and subscription.notification_url != self.notification_url
+            and normalize_notification_url(subscription.notification_url)
+            != normalize_notification_url(self.notification_url)
         )
 
     async def ensure_subscription_for_site(
