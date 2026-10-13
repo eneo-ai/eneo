@@ -1211,6 +1211,7 @@
   "resync_all_wrapper": "Resync all items",
   "confirm_resync_all_wrapper": "This will run a full resync of all {count} items in \"{wrapperName}\". All content will be reprocessed, which may take a while. Are you sure?",
   "resync_all_wrapper_partial_failure": "{failed} of {total} items could not be queued",
+  "resync_all_wrapper_queued": "Resync queued for {count} items",
   "sync_now": "Sync now",
   "not_synced": "Not synced yet",
   "sync_selected": "Sync selected ({count})",
