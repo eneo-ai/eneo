@@ -109,6 +109,9 @@ async def pull_confluence_content(
 # item's ChangeKey the next identical notification is treated as a duplicate.
 SHAREPOINT_SYNC_PENDING_TTL_SECONDS = 3600
 _PENDING_RETRY_DELAY_SECONDS = 1.0
+# Markers that keep arriving faster than passes complete are left for the
+# next sync rather than holding the lease indefinitely.
+_PENDING_DRAIN_MAX_PASSES = 3
 
 
 def _lock_key(knowledge_id: str) -> str:
@@ -158,29 +161,54 @@ async def _run_delta(
 async def _drain_pending_delta(
     redis_client: "redis.Redis",
     knowledge_id_str: str,
+    container: "Container",
     service: "SharePointContentService",
     params: "SharepointContentTaskParam",
-    knowledge: "IntegrationKnowledge",
 ) -> str | None:
-    """Run the delta pass a skipped task asked for, while still holding the lease."""
-    if not await redis_client.delete(_pending_key(knowledge_id_str)):
-        return None
-    logger.info(
-        "Running pending delta pass for knowledge %s requested while the sync "
-        "lease was held",
-        knowledge_id_str,
-    )
-    try:
-        return await _run_delta(service, params, knowledge)
-    except Exception:
-        # The service has already recorded the failure on the knowledge; the
-        # result of the sync that owned the lease still stands.
-        logger.error(
-            "Pending delta pass failed for knowledge %s",
-            knowledge_id_str,
-            exc_info=True,
+    """Run the delta passes skipped tasks asked for, while still holding the lease.
+
+    The knowledge is re-read before each pass: the sync that owned the lease
+    may have initialised the delta token, and a knowledge still without one
+    has just been fully synced, so a delta pass would only start a second
+    full sync. The marker is dropped in that case.
+    """
+    result: str | None = None
+    for _ in range(_PENDING_DRAIN_MAX_PASSES):
+        if not await redis_client.delete(_pending_key(knowledge_id_str)):
+            break
+        knowledge = await container.integration_knowledge_repo().one(
+            id=params.integration_knowledge_id
         )
-        return None
+        if not knowledge.delta_token:
+            logger.info(
+                "Dropping pending delta marker for knowledge %s: no delta token, "
+                "the full sync that just ran covers the change",
+                knowledge_id_str,
+            )
+            break
+        logger.info(
+            "Running pending delta pass for knowledge %s requested while the sync "
+            "lease was held",
+            knowledge_id_str,
+        )
+        try:
+            result = await _run_delta(service, params, knowledge)
+        except Exception:
+            # The service has already recorded the failure on the knowledge; the
+            # result of the sync that owned the lease still stands. The marker
+            # goes back so the change is retried by the next sync, not lost.
+            logger.error(
+                "Pending delta pass failed for knowledge %s",
+                knowledge_id_str,
+                exc_info=True,
+            )
+            await redis_client.set(
+                _pending_key(knowledge_id_str),
+                "1",
+                ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+            )
+            break
+    return result
 
 
 @worker.task(channel_type=ChannelType.PULL_SHAREPOINT_CONTENT)
@@ -220,7 +248,7 @@ async def pull_sharepoint_content(
 
                 logger.info(f"Completed full sync for knowledge {knowledge_id_str}")
                 await _drain_pending_delta(
-                    redis_client, knowledge_id_str, service, params, knowledge
+                    redis_client, knowledge_id_str, container, service, params
                 )
                 return result
         finally:
@@ -258,7 +286,7 @@ async def sync_sharepoint_delta(
                     )
                     result = await _run_delta(service, params, knowledge)
                     await _drain_pending_delta(
-                        redis_client, knowledge_id_str, service, params, knowledge
+                        redis_client, knowledge_id_str, container, service, params
                     )
                     return result
 
@@ -278,12 +306,13 @@ async def sync_sharepoint_delta(
             async with redis_lease(
                 redis_client, lock_key, ttl_seconds=SHAREPOINT_SYNC_LOCK_TTL_SECONDS
             ) as acquired:
-                if acquired:
-                    knowledge, service = await _prepare_sharepoint_sync(
-                        container, params
-                    )
+                # The marker is checked first: when the holder drained it there
+                # is nothing to do, and preparing a sync (embedding validation)
+                # must not be what fails this job.
+                if acquired and await redis_client.get(_pending_key(knowledge_id_str)):
+                    _, service = await _prepare_sharepoint_sync(container, params)
                     drained = await _drain_pending_delta(
-                        redis_client, knowledge_id_str, service, params, knowledge
+                        redis_client, knowledge_id_str, container, service, params
                     )
                     if drained is not None:
                         return drained
