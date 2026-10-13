@@ -94,6 +94,28 @@ def service(mock_subscription_repo, mock_oauth_token_service):
         )
 
 
+@pytest.mark.parametrize(
+    "stored_url, drifted",
+    [
+        pytest.param("https://example.com/webhook/", False, id="same"),
+        pytest.param("https://example.com/webhook", False, id="no-trailing-slash"),
+        pytest.param("HTTPS://Example.COM/webhook/", False, id="scheme-host-case"),
+        pytest.param("https://example.com:443/webhook/", True, id="explicit-port"),
+        pytest.param("https://example.com/Webhook/", True, id="path-case"),
+        pytest.param("https://example.com/webhook/?v=2", True, id="query"),
+        pytest.param("http://example.com/webhook/", True, id="scheme"),
+        pytest.param("https://old-origin/webhook/", True, id="host"),
+        pytest.param(None, False, id="legacy-unknown"),
+    ],
+)
+def test_notification_url_drift_ignores_spelling_differences(
+    service, mock_subscription, stored_url, drifted
+):
+    mock_subscription.notification_url = stored_url
+
+    assert service.notification_url_drifted(mock_subscription) is drifted
+
+
 class TestEnsureSubscriptionForSite:
     """Tests for ensure_subscription_for_site method."""
 
