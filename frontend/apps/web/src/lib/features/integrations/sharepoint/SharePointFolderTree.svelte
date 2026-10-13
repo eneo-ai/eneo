@@ -238,6 +238,14 @@
     });
   }
 
+  // focusin bubbles through nested treeitems, so the key is read from the
+  // focused element rather than from each item's own handler.
+  function handleTreeFocusIn(event: FocusEvent) {
+    const target = event.target as HTMLElement | null;
+    const key = target?.closest<HTMLElement>("[data-tree-key]")?.dataset.treeKey;
+    if (key) focusedKey = key;
+  }
+
   function handleTreeKeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement | null;
     const item = target?.closest<HTMLElement>("[data-tree-key]");
@@ -523,6 +531,7 @@
           class="flex flex-col"
           bind:this={treeElement}
           onkeydown={handleTreeKeydown}
+          onfocusin={handleTreeFocusIn}
         >
           {#each rootItems as item (buildSharePointSelectionKey(item))}
             <SharePointFolderTreeNode
@@ -531,7 +540,6 @@
               {selectedPaths}
               ancestorSelected={siteRootSelected}
               {activeKey}
-              onFocusKey={(key) => (focusedKey = key)}
               {onToggleSelect}
               onToggleExpanded={toggleNodeExpanded}
               onRetryLoad={retryNodeLoad}

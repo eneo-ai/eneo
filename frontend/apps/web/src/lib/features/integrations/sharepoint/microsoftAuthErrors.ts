@@ -1,3 +1,5 @@
+import { m } from "$lib/paraglide/messages";
+
 export type MicrosoftAuthGuidance = "invalid_client" | "interaction_required" | "invalid_grant";
 
 // AADSTS50076 arrives inside an invalid_grant envelope, so the more specific
@@ -17,4 +19,15 @@ export function classifyMicrosoftAuthError(
     if (pattern.test(message)) return guidance;
   }
   return null;
+}
+
+export function getMicrosoftAuthGuidanceText(kind: MicrosoftAuthGuidance): string {
+  switch (kind) {
+    case "invalid_client":
+      return m.sharepoint_auth_guidance_invalid_client();
+    case "interaction_required":
+      return m.sharepoint_auth_guidance_interaction_required();
+    case "invalid_grant":
+      return m.sharepoint_auth_guidance_invalid_grant();
+  }
 }

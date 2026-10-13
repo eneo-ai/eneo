@@ -24,7 +24,7 @@
   import { toast } from "$lib/components/toast";
   import SharePointAuthHealth from "./SharePointAuthHealth.svelte";
   import SharePointFixtureBanner from "./SharePointFixtureBanner.svelte";
-  import { classifyMicrosoftAuthError, type MicrosoftAuthGuidance } from "./microsoftAuthErrors";
+  import { classifyMicrosoftAuthError, getMicrosoftAuthGuidanceText } from "./microsoftAuthErrors";
   import { followServiceAccountSignIn } from "./serviceAccountAuth";
   import {
     createSharePointSetupFixtureConfig,
@@ -82,17 +82,6 @@
       : ""
   );
   let testFailureGuidance = $derived(classifyMicrosoftAuthError(testFailureText));
-
-  function getGuidanceText(kind: MicrosoftAuthGuidance): string {
-    switch (kind) {
-      case "invalid_client":
-        return m.sharepoint_auth_guidance_invalid_client();
-      case "interaction_required":
-        return m.sharepoint_auth_guidance_interaction_required();
-      case "invalid_grant":
-        return m.sharepoint_auth_guidance_invalid_grant();
-    }
-  }
 
   function getSetupScenarioLabel(scenario: SharePointSetupFixtureScenario): string {
     switch (scenario) {
@@ -564,7 +553,7 @@
                 {#if testFailureText}
                   <Alert.Description>
                     {#if testFailureGuidance}
-                      <p>{getGuidanceText(testFailureGuidance)}</p>
+                      <p>{getMicrosoftAuthGuidanceText(testFailureGuidance)}</p>
                       <details class="mt-1">
                         <summary class="cursor-pointer text-xs hover:underline">
                           {m.sharepoint_auth_error_details()}

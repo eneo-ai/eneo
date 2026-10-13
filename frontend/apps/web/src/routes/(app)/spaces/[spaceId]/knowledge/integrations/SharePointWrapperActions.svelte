@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { IconEdit } from "@eneo/icons/edit";
@@ -41,7 +42,10 @@
   );
   let canResync = $derived(canEdit && resyncableItems.length > 0);
 
+  // Never throws: a throw would keep the dialog open and a second confirm
+  // would queue the items that already succeeded once more.
   async function resyncAll() {
+    const total = resyncableItems.length;
     const results = await Promise.allSettled(
       resyncableItems.map((knowledge) =>
         eneo.integrations.knowledge.triggerFullSync({ knowledge, space: $currentSpace })
@@ -50,9 +54,9 @@
     refreshCurrentSpace();
     const failed = results.filter((result) => result.status === "rejected").length;
     if (failed > 0) {
-      throw new Error(
-        m.resync_all_wrapper_partial_failure({ failed, total: resyncableItems.length })
-      );
+      toast.error(m.resync_all_wrapper_partial_failure({ failed, total }));
+    } else {
+      toast.success(m.resync_all_wrapper_queued({ count: total }));
     }
   }
 
