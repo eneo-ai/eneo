@@ -87,6 +87,18 @@ describe("labels", () => {
     ).toBeNull();
     expect(capabilityProviderDetail({ server_name: "Jira", purpose: null })).toBeNull();
   });
+
+  it("shows no provider for a server built into Eneo, as for Eneo's own servers", () => {
+    const bundled = {
+      server_name: "Ask a file",
+      purpose: "file_analysis",
+      is_internal: false,
+      is_bundled: true
+    };
+    expect(capabilityProviderDetail(bundled)).toBeNull();
+    expect(capabilityProviderDetail({ ...bundled, is_bundled: false })).toBe("Ask a file");
+    expect(capabilityProviderDetail({ ...bundled, is_bundled: null })).toBe("Ask a file");
+  });
 });
 
 /**

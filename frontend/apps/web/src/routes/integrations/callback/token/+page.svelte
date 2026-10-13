@@ -71,7 +71,12 @@
   function handlePopupFlow(code: string | null, state: string | null, rawParams: string): void {
     const opener = window.opener;
     if (opener) {
-      opener.postMessage({ type: MESSAGE_TYPE, code, state, params: rawParams }, "*");
+      // The integration page only accepts callbacks from its own origin. Keep
+      // OAuth credentials inside that origin even when a foreign site opened us.
+      opener.postMessage(
+        { type: MESSAGE_TYPE, code, state, params: rawParams },
+        window.location.origin
+      );
       status = "popup_complete";
       window.close();
     }

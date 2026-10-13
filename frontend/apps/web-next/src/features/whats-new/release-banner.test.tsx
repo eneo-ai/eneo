@@ -14,6 +14,23 @@ const put = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { PUT: put, DELETE: vi.fn() } }));
 // The tour itself needs the real pages; here it reports them as unavailable.
 vi.mock("./tour", () => ({ runTour: vi.fn(() => Promise.resolve("unavailable")) }));
+// The tour button exists only for a release with a `showMe` entry; whether the
+// catalog's latest release has one changes from release to release, so the
+// test guarantees one instead of depending on the current notes.
+vi.mock("@eneo/whats-new", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eneo/whats-new")>();
+  const release = actual.latestRelease()!;
+  const tourEntry = actual.visibleEntries(release, false)[0]!;
+  const withTour = {
+    ...release,
+    entries: release.entries.map((entry) =>
+      entry === tourEntry
+        ? { ...entry, showMe: { href: "/whats-new", anchor: "whats-new" } }
+        : entry
+    )
+  };
+  return { ...actual, latestRelease: () => withTour };
+});
 
 const latest = latestRelease()!;
 const count = visibleEntries(latest, false).length;

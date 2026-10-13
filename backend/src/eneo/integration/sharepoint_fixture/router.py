@@ -7,9 +7,13 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.integration.infrastructure.preview_service.sharepoint_search import (
+    parse_filter_params,
+)
 from eneo.integration.sharepoint_fixture.models import (
     SharePointFixturePreviewResponse,
     SharePointFixtureScenario,
+    SharePointFixtureSearchResponse,
     SharePointFixtureTreeResponse,
 )
 from eneo.integration.sharepoint_fixture.service import SharePointFixtureService
@@ -78,4 +82,34 @@ async def get_sharepoint_fixture_tree(
         drive_id=drive_id,
         folder_id=folder_id,
         folder_path=folder_path,
+    )
+
+
+@router.get(
+    "/{scenario}/search/",
+    response_model=SharePointFixtureSearchResponse,
+    description=(
+        "Search a development-only SharePoint fixture by text and column values. "
+        "No Microsoft Graph request is made. Requires SHAREPOINT_FIXTURE_MODE_ENABLED=true."
+    ),
+    responses=responses.get_responses([400, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Synthetic fixtures only; require_sharepoint_fixture_mode hides these outside explicitly enabled development mode.",
+)
+async def search_sharepoint_fixture(
+    scenario: SharePointFixtureScenario,
+    site_id: Annotated[Optional[str], Query()] = None,
+    drive_id: Annotated[Optional[str], Query()] = None,
+    q: Annotated[str, Query()] = "",
+    filter: Annotated[list[str], Query()] = [],
+) -> SharePointFixtureSearchResponse:
+    return _fixture_service.get_search(
+        scenario,
+        site_id=site_id,
+        drive_id=drive_id,
+        text=q,
+        filters=parse_filter_params(filter),
     )

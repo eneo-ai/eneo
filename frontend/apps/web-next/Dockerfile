@@ -50,6 +50,10 @@ WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
+# Release identity, set by the publication workflow like the other components.
+ARG APP_VERSION=0.0.0-dev
+ARG APP_REVISION=unknown
+ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}
 
 # Standalone output bundles the minimal server + traced node_modules.
 COPY --from=builder --chown=node:node /repo/apps/web-next/.next/standalone ./

@@ -1,11 +1,13 @@
 # Optional overlay for docker-compose.yml: both UIs share the existing backend,
-# workers, database and storage. Use the same release tag for all three images.
+# workers, database and storage. The beta image comes from the same release
+# bundle (release.env) as the other components, so the images always match.
 # Configure env_web_next.env from env_web_next.template and set WEB_NEXT_HOST
-# and WEB_NEXT_TAG in the deployment's .env. The beta starts only with its profile.
-# docker compose -f docker-compose.yml -f docker-compose.web-next.yml --profile web-next up -d
+# in the deployment's .env. The beta starts only with its profile.
+# docker compose --env-file .env --env-file release.env \
+#   -f docker-compose.yml -f docker-compose.web-next.yml --profile web-next up -d
 services:
   web-next:
-    image: ghcr.io/eneo-ai/eneo-web-next:${WEB_NEXT_TAG:?Set the matching backend release tag}
+    image: ${ENEO_WEB_NEXT_IMAGE:-ghcr.io/eneo-ai/eneo-web-next:${ENEO_VERSION:?Select one Eneo release or use release.env}}
     profiles: [web-next]
     restart: unless-stopped
     init: true

@@ -14,7 +14,6 @@ from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.files_table import Files
 from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
@@ -29,7 +28,12 @@ from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUs
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.unused_file_cleanup import delete_unused_root_files
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.mcp_apps.application.current_views import show_current_views
+from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
+    McpAppViewRepo,
+)
 from eneo.questions.question import MessageFeedback
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import (
@@ -102,6 +106,15 @@ class SessionRepository:
             for info_blob in question.info_blobs
         ]
         await InfoBlobRepository(self.session).hydrate_original_availability(info_blobs)
+        await show_current_views(
+            (
+                call
+                for session in sessions
+                for question in session.questions
+                for call in question.tool_calls or []
+            ),
+            McpAppViewRepo(self.session),
+        )
         if self.file_content_loader is None:
             if any(
                 question.questions_files
@@ -959,30 +972,21 @@ class SessionRepository:
         return sessions
 
     async def delete(self, id: UUID) -> SessionInDB | None:
-        """Delete a session and the generated files only its answers owned.
+        """Delete a session and the Files nothing else uses anymore.
 
         Questions and their file links cascade with the session, but the
-        ``files`` rows do not: a tool-generated image (linked with type
-        ``assistant``) has no other owner surface, so it is removed here once
-        nothing else references it. Uploads are left alone; the user manages
-        those.
+        ``files`` rows do not. Uploads and tool-generated images that only
+        this conversation used are deleted with it; a File still used by
+        another conversation, Assistant, App or App run is kept.
         """
-        generated_file_ids = list(
+        file_ids = list(
             await self.session.scalars(
                 sa.select(QuestionsFiles.file_id)
                 .join(Questions, Questions.id == QuestionsFiles.question_id)
-                .where(Questions.session_id == id, QuestionsFiles.type == "assistant")
+                .where(Questions.session_id == id)
+                .distinct()
             )
         )
         deleted = await self.delegate.delete(id)
-        if generated_file_ids:
-            still_referenced = sa.select(QuestionsFiles.file_id).where(
-                QuestionsFiles.file_id.in_(generated_file_ids)
-            )
-            await self.session.execute(
-                sa.delete(Files).where(
-                    Files.id.in_(generated_file_ids),
-                    Files.id.not_in(still_referenced),
-                )
-            )
+        await delete_unused_root_files(self.session, file_ids)
         return await self._hydrate_optional(deleted)

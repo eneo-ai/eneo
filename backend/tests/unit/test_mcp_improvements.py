@@ -25,6 +25,7 @@ from mcp import types as mcp_types
 from pydantic import ValidationError
 from starlette.responses import JSONResponse, StreamingResponse
 
+from eneo.files.model_file_references import FILE_HANDLE_INSTRUCTION
 from eneo.main.exceptions import (
     BadRequestException,
     MCPAuthenticationError,
@@ -41,6 +42,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
 )
 from eneo.mcp_servers.infrastructure.client import mcp_client as mcp_client_module
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    STRUCTURED_CONTENT_MAX_BYTES,
     MCPClient,
     MCPClientError,
 )
@@ -170,6 +172,69 @@ class TestMCPClientListToolsErrorPropagation:
                     description="x" * 128,
                     inputSchema={"type": "object"},
                     annotations=None,
+                )
+            ]
+        )
+
+        with pytest.raises(MCPClientError, match="definition exceeds"):
+            await client.list_tools()
+
+    @pytest.mark.asyncio
+    async def test_list_tools_captures_tool_meta(self):
+        ui_meta = {
+            "io.modelcontextprotocol/ui": {"resourceUri": "ui://weather/dashboard"}
+        }
+        mock_server = MagicMock()
+        mock_server.name = "test-server"
+        mock_server.tool_catalog_max_count = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT
+        mock_server.tool_catalog_max_bytes = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
+        mock_server.tool_definition_max_bytes = MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES
+        client = MCPClient(mock_server)
+        client.session = AsyncMock()
+        client.session.list_tools.return_value = SimpleNamespace(
+            tools=[
+                SimpleNamespace(
+                    name="with_meta",
+                    title=None,
+                    description=None,
+                    inputSchema={"type": "object"},
+                    annotations=None,
+                    meta=ui_meta,
+                ),
+                SimpleNamespace(
+                    name="without_meta",
+                    title=None,
+                    description=None,
+                    inputSchema={"type": "object"},
+                    annotations=None,
+                ),
+            ]
+        )
+
+        tools = await client.list_tools()
+
+        by_name = {tool["name"]: tool for tool in tools}
+        assert by_name["with_meta"]["meta"] == ui_meta
+        assert by_name["without_meta"]["meta"] is None
+
+    @pytest.mark.asyncio
+    async def test_list_tools_meta_counts_toward_definition_budget(self):
+        mock_server = MagicMock()
+        mock_server.name = "test-server"
+        mock_server.tool_catalog_max_count = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT
+        mock_server.tool_catalog_max_bytes = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
+        mock_server.tool_definition_max_bytes = 256
+        client = MCPClient(mock_server)
+        client.session = AsyncMock()
+        client.session.list_tools.return_value = SimpleNamespace(
+            tools=[
+                SimpleNamespace(
+                    name="meta_heavy",
+                    title=None,
+                    description=None,
+                    inputSchema={"type": "object"},
+                    annotations=None,
+                    meta={"padding": "x" * 512},
                 )
             ]
         )
@@ -729,6 +794,45 @@ class TestMCPClientAuthenticationErrorMapping:
 
         assert "meta" not in result
 
+    async def test_call_tool_keeps_structured_content_whole(self):
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "none"
+
+        client = MCPClient(server)
+        client.session = AsyncMock()
+        client.session.call_tool.return_value = SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="12 degrees")],
+            isError=False,
+            meta=None,
+            structuredContent={"temperature": 12},
+        )
+
+        result = await client.call_tool("tool", {})
+
+        assert result["structured_content"] == {"temperature": 12}
+
+    async def test_call_tool_drops_oversized_structured_content_entirely(self):
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "none"
+
+        client = MCPClient(server)
+        client.session = AsyncMock()
+        client.session.call_tool.return_value = SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="done")],
+            isError=False,
+            meta=None,
+            structuredContent={"rows": "x" * STRUCTURED_CONTENT_MAX_BYTES},
+        )
+
+        result = await client.call_tool("tool", {})
+
+        assert "structured_content" not in result
+        assert result["content"] == [{"type": "text", "text": "done"}]
+
     @pytest.mark.asyncio
     async def test_non_auth_upstream_error_does_not_map_to_authentication_error(self):
         server = MagicMock()
@@ -854,7 +958,10 @@ class TestMCPProxySessionToolCollision:
             # The registered tool should be from server1
             tools = proxy.get_tools_for_llm()
             assert len(tools) == 1
-            assert tools[0]["function"]["description"] == "First server's list"
+            assert (
+                tools[0]["function"]["description"]
+                == FILE_HANDLE_INSTRUCTION + "\n\n" + "First server's list"
+            )
 
             # Warning should have been logged
             mock_logger.warning.assert_called()
@@ -901,7 +1008,10 @@ class TestMCPProxySessionToolCollision:
 
             # First one wins
             tools = proxy.get_tools_for_llm()
-            assert tools[0]["function"]["description"] == "Dot version"
+            assert (
+                tools[0]["function"]["description"]
+                == FILE_HANDLE_INSTRUCTION + "\n\n" + "Dot version"
+            )
 
             # Warning logged
             mock_logger.warning.assert_called()
@@ -931,19 +1041,25 @@ class TestMCPProxySessionToolDisplayName:
         [tool] = self._proxy("Ladda upp filer").get_tools_for_llm()
 
         assert tool["function"]["name"] == "files__ingest_urls"
-        assert tool["function"]["description"] == (
+        assert tool["function"]["description"] == FILE_HANDLE_INSTRUCTION + "\n\n" + (
             'Display name: "Ladda upp filer".\nFetch files from HTTPS links.'
         )
 
     def test_description_is_untouched_without_a_title(self):
         [tool] = self._proxy(None).get_tools_for_llm()
 
-        assert tool["function"]["description"] == "Fetch files from HTTPS links."
+        assert (
+            tool["function"]["description"]
+            == FILE_HANDLE_INSTRUCTION + "\n\n" + "Fetch files from HTTPS links."
+        )
 
     def test_title_equal_to_the_tool_name_adds_nothing(self):
         [tool] = self._proxy("ingest_urls").get_tools_for_llm()
 
-        assert tool["function"]["description"] == "Fetch files from HTTPS links."
+        assert (
+            tool["function"]["description"]
+            == FILE_HANDLE_INSTRUCTION + "\n\n" + "Fetch files from HTTPS links."
+        )
 
 
 # =============================================================================

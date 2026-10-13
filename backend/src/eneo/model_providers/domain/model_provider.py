@@ -15,6 +15,10 @@ from eneo.model_providers.domain.provider_api import (
 if TYPE_CHECKING:
     from eneo.database.tables.model_providers_table import ModelProviders
 
+# Returned in place of a secret header value or fallback. Never a real value;
+# a write that submits it back is rejected (see ModelProviderService).
+MASKED_HEADER_VALUE = "********"
+
 
 class ModelProvider:
     """Domain entity for a tenant-specific AI model provider instance."""
@@ -32,6 +36,7 @@ class ModelProvider:
         updated_at: datetime,
         key_expires_on: date | None = None,
         connection_check: ConnectionCheck | None = None,
+        outbound_headers: list[dict[str, Any]] | None = None,
     ):
         super().__init__()
         self.id = id
@@ -47,6 +52,8 @@ class ModelProvider:
         self.key_expires_on = key_expires_on
         # The latest check against the stored credentials; None until one runs.
         self.connection_check = connection_check
+        # Stored form: `secret` entries hold encrypted value/fallback.
+        self.outbound_headers = outbound_headers or []
 
     @classmethod
     def create_from_db(cls, provider_db: "ModelProviders") -> "ModelProvider":
@@ -75,6 +82,7 @@ class ModelProvider:
             updated_at=provider_db.updated_at,
             key_expires_on=provider_db.key_expires_on,
             connection_check=connection_check,
+            outbound_headers=provider_db.outbound_headers,
         )
 
     @property
@@ -104,9 +112,30 @@ class ModelProvider:
                 else None
             ),
             "connection_check_supported": self.connection_check_supported,
+            "outbound_headers": [
+                _public_header(header) for header in self.outbound_headers
+            ],
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             # Credentials are not included; the stored API key may be
             # ciphertext, so its display hint comes from
             # ModelProviderService.masked_api_key.
         }
+
+
+def _public_header(header: dict[str, Any]) -> dict[str, Any]:
+    """A stored header as an admin may see it: secret value and fallback masked."""
+    secret = bool(header.get("secret"))
+    fallback = header.get("fallback")
+    return {
+        "id": header["id"],
+        "name": header["name"],
+        "value": MASKED_HEADER_VALUE if secret else header["value"],
+        "encoding": header.get("encoding", "percent"),
+        "secret": secret,
+        "on_missing": header.get("on_missing", "omit"),
+        "fallback": (
+            None if fallback is None else MASKED_HEADER_VALUE if secret else fallback
+        ),
+        "classification": header.get("classification"),
+    }

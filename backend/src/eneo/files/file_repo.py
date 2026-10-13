@@ -292,6 +292,15 @@ def project_file_info(
     )
     if primary is None:
         raise NotFoundException(f"File {file.id} has no durable content")
+    original = next(
+        (
+            reference
+            for variant in original_download_variants(file.file_type)
+            for reference in references
+            if reference.variant is variant
+        ),
+        None,
+    )
     return FileInfo(
         id=file.id,
         created_at=file.created_at,
@@ -299,6 +308,7 @@ def project_file_info(
         name=file.name,
         checksum=primary.sha256.hex(),
         size=primary.size_bytes,
+        original_size=original.size_bytes if original is not None else None,
         mimetype=project_file_media_type(file, primary),
         file_type=file.file_type,
         user_id=file.user_id,

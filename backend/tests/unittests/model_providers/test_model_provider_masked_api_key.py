@@ -57,6 +57,7 @@ async def test_encrypted_key_is_masked_from_its_plaintext():
         ),
         user=admin,
         service=service,
+        audit=AsyncMock(),
     )
     stored = repository.create.await_args.args[0]
     repository.all = AsyncMock(return_value=[stored])

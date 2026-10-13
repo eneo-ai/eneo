@@ -375,6 +375,12 @@ async def _ui_message_chunks(
                     emitted_tool_chunks.add(key)
                     yield chunk_dict
 
+        elif response_type == ResponseType.TOOL_CALL_DELTA:
+            # The argument text of a call still being written. The v3 stream
+            # renders calls from their TOOL_CALL snapshots, which carry the
+            # complete arguments, so the deltas add nothing here.
+            continue
+
         elif response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
             assert completion.approval_id is not None
             tools = list(completion.tool_calls_metadata or [])

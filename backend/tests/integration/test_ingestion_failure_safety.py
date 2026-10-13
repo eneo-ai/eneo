@@ -252,7 +252,7 @@ async def _seed_transcription_attempt(
             "retained quota",
             b"audio rejected by retained quota",
             None,
-            JobFailureCode.QUOTA_EXCEEDED,
+            JobFailureCode.TENANT_QUOTA_EXCEEDED,
         ),
         (
             "worker storage ceiling",
@@ -362,7 +362,7 @@ async def test_upload_failure_preserves_committed_prior_knowledge(
         monkeypatch.setattr(
             Datastore,
             "_chunk_text",
-            lambda self, info_blob: (_ for _ in ()).throw(
+            lambda self, info_blob, embedding_model: (_ for _ in ()).throw(
                 RuntimeError("chunking failed")
             ),
         )

@@ -185,15 +185,22 @@ class ModelInUseException(Exception):
 
 
 class QuotaExceededException(Exception):
-    pass
+    """A storage quota refused the write.
+
+    Subclasses name which limit was hit so the 403 payload's ``code`` and the
+    job failure code let the client say whether the organisation or the user
+    has to act.
+    """
+
+    code: str | None = None
 
 
 class TenantQuotaExceededException(QuotaExceededException):
-    pass
+    code = "tenant_quota_exceeded"
 
 
 class UserQuotaExceededException(QuotaExceededException):
-    pass
+    code = "user_quota_exceeded"
 
 
 class UniqueException(Exception):

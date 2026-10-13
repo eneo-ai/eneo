@@ -6,7 +6,11 @@ const put = vi.hoisted(() => vi.fn());
 const remove = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { PUT: put, DELETE: remove } }));
 
+import { latestRelease } from "@eneo/whats-new";
 import { WhatsNewProvider, useWhatsNew } from "./whats-new-provider";
+
+// The announcement is whatever the catalog's latest release is.
+const latestVersion = latestRelease()!.version;
 
 function Probe() {
   const state = useWhatsNew();
@@ -23,7 +27,9 @@ function Probe() {
 beforeEach(() => {
   put.mockImplementation((path: string) =>
     Promise.resolve({
-      data: path.endsWith("/seen/") ? { seen_version: "2.2.0" } : { announced_version: "2.2.0" },
+      data: path.endsWith("/seen/")
+        ? { seen_version: latestVersion }
+        : { announced_version: latestVersion },
       response: new Response("{}", { status: 200 })
     })
   );
@@ -42,7 +48,7 @@ describe("What's new markers", () => {
       </WhatsNewProvider>
     );
     expect(screen.getByTestId("unseen").textContent).toBe("true");
-    expect(screen.getByTestId("announcement").textContent).toBe("2.2.0");
+    expect(screen.getByTestId("announcement").textContent).toBe(latestVersion);
     fireEvent.click(screen.getByText("Announced"));
     await waitFor(() => expect(screen.getByTestId("announcement").textContent).toBe("none"));
     expect(screen.getByTestId("unseen").textContent).toBe("true");

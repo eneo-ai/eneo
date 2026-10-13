@@ -15,6 +15,7 @@ from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
 )
+from eneo.document_templates.models import DocumentTemplateChoicePublic
 from eneo.files.file_models import (
     AcceptedFileType,
     FileRestrictions,
@@ -247,6 +248,10 @@ class AssistantAssembler:
                 for tool_id, is_enabled in assistant.mcp_tools
             ],
             enabled_capabilities=assistant.enabled_capabilities,
+            document_template=DocumentTemplateChoicePublic(
+                mode=assistant.document_template.mode,
+                template_id=assistant.document_template.template_id,
+            ),
             available_capabilities=assistant.available_capabilities,
             completion_model=completion_model,
             completion_model_kwargs=assistant.completion_model_kwargs,

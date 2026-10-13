@@ -1,5 +1,6 @@
 import asyncio
 import json
+from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -38,8 +39,10 @@ def _persisted_tool_size_bytes(tool: MCPServerTool) -> int:
                 "title": tool.title,
                 "description": tool.description,
                 "input_schema": tool.input_schema,
+                "meta": tool.meta,
                 "pending_description": tool.pending_description,
                 "pending_input_schema": tool.pending_input_schema,
+                "pending_meta": tool.pending_meta,
             },
             ensure_ascii=False,
             separators=(",", ":"),
@@ -49,6 +52,78 @@ def _persisted_tool_size_bytes(tool: MCPServerTool) -> int:
 
 
 MCP_TOOL_CATALOG_STAGE_TIMEOUT_SECONDS = 2.0
+
+
+def _json_or_null(value: Any) -> Any:
+    return sa.null() if value is None else value
+
+
+async def store_own_catalog(
+    mcp_server_id: UUID, tenant_id: UUID, tool_defs: list[dict[str, Any]]
+) -> None:
+    """Make a server's rows the definitions Eneo's own runtime serves.
+
+    For a server built into Eneo only: its definitions are Eneo's code, so
+    they are stored as approved, a tool the runtime no longer has is removed,
+    and the administrator's decisions on a tool that stays (enabled, display
+    name) are kept. Runs in a short transaction of its own under the same
+    per-server lock as staged observations.
+    """
+    rows = [
+        {
+            "mcp_server_id": mcp_server_id,
+            "name": tool_def["name"],
+            "title": tool_def.get("title"),
+            "description": tool_def.get("description"),
+            # A missing schema or metadata is SQL NULL, not the JSON value null.
+            "input_schema": _json_or_null(tool_def.get("input_schema")),
+            "meta": _json_or_null(tool_def.get("meta")),
+            "ui_resource_sha256": tool_def.get("ui_resource_sha256"),
+        }
+        for tool_def in tool_defs
+    ]
+    async with asyncio.timeout(MCP_TOOL_CATALOG_STAGE_TIMEOUT_SECONDS):
+        async with sessionmanager.session() as session, session.begin():
+            locked = await session.scalar(
+                select(MCPServersTable.id)
+                .where(
+                    MCPServersTable.id == mcp_server_id,
+                    MCPServersTable.tenant_id == tenant_id,
+                )
+                # Excludes other writers of this catalog without waiting on a
+                # request that merely refers to the server row.
+                .with_for_update(key_share=True)
+            )
+            if locked is None:
+                raise ValueError("MCP server not found for its catalog")
+            if rows:
+                excluded = insert(MCPServerToolsTable).excluded
+                await session.execute(
+                    insert(MCPServerToolsTable)
+                    .values(rows)
+                    .on_conflict_do_update(
+                        index_elements=["mcp_server_id", "name"],
+                        set_={
+                            "title": excluded.title,
+                            "description": excluded.description,
+                            "input_schema": excluded.input_schema,
+                            "meta": excluded.meta,
+                            "ui_resource_sha256": excluded.ui_resource_sha256,
+                            "pending_description": sa.null(),
+                            "pending_input_schema": sa.null(),
+                            "pending_meta": sa.null(),
+                            "pending_ui_resource_sha256": sa.null(),
+                            "requires_approval": False,
+                            "removed_from_remote": False,
+                        },
+                    )
+                )
+            await session.execute(
+                sa.delete(MCPServerToolsTable).where(
+                    MCPServerToolsTable.mcp_server_id == mcp_server_id,
+                    MCPServerToolsTable.name.not_in([row["name"] for row in rows]),
+                )
+            )
 
 
 class MCPServerToolRepoImpl(
@@ -190,10 +265,14 @@ class MCPServerToolRepoImpl(
             if not existing.has_definition_drift(
                 description=observed.pending_description,
                 input_schema=observed.pending_input_schema,
+                meta=observed.pending_meta,
+                ui_resource_sha256=observed.pending_ui_resource_sha256,
             ):
                 continue
             existing.pending_description = observed.pending_description
             existing.pending_input_schema = observed.pending_input_schema
+            existing.pending_meta = observed.pending_meta
+            existing.pending_ui_resource_sha256 = observed.pending_ui_resource_sha256
             existing.requires_approval = True
             existing.removed_from_remote = False
 
@@ -217,6 +296,8 @@ class MCPServerToolRepoImpl(
                 set_={
                     "pending_description": excluded.pending_description,
                     "pending_input_schema": excluded.pending_input_schema,
+                    "pending_meta": excluded.pending_meta,
+                    "pending_ui_resource_sha256": excluded.pending_ui_resource_sha256,
                     "requires_approval": True,
                     "removed_from_remote": False,
                 },
@@ -228,6 +309,15 @@ class MCPServerToolRepoImpl(
                         ),
                         self._db_model.input_schema.is_distinct_from(
                             excluded.pending_input_schema
+                        ),
+                        self._db_model.meta.is_distinct_from(excluded.pending_meta),
+                        # An observation that did not read the view carries no
+                        # hash and so says nothing about the view's content.
+                        sa.and_(
+                            excluded.pending_ui_resource_sha256.is_not(None),
+                            self._db_model.ui_resource_sha256.is_distinct_from(
+                                excluded.pending_ui_resource_sha256
+                            ),
                         ),
                     ),
                 ),
@@ -253,6 +343,7 @@ class MCPServerToolRepoImpl(
                     "title": db_dict["title"],
                     "description": db_dict["description"],
                     "input_schema": db_dict["input_schema"],
+                    "meta": db_dict["meta"],
                     "is_enabled_by_default": db_dict["is_enabled_by_default"],
                 },
             )

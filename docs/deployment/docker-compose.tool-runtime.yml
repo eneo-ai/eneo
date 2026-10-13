@@ -1,0 +1,4 @@
+# Compatibility shim for the first unified release. The standard stack now includes
+# tool-runtime. Existing -f ... --profile tool-runtime commands still work.
+# Remove this overlay from deployment commands; see TOOL_RUNTIME.md.
+services: {}

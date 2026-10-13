@@ -260,6 +260,35 @@ async def test_reasoning_precedes_text():
 
 
 @pytest.mark.asyncio
+async def test_tool_call_argument_deltas_are_silently_skipped(caplog):
+    """The call is rendered from its TOOL_CALL snapshot, which carries the
+    complete arguments; the deltas written before it produce no part and no
+    warning about an unsupported response type."""
+    completions = [
+        Completion(response_type=ResponseType.TOOL_CALL_DELTA, text='{"pa'),
+        Completion(response_type=ResponseType.TOOL_CALL_DELTA, text='th": "a.txt"}'),
+        Completion(
+            response_type=ResponseType.TOOL_CALL, tool_calls_metadata=[_tool("pending")]
+        ),
+        Completion(response_type=ResponseType.TEXT, text="Done"),
+    ]
+
+    chunks = await _collect(_response(completions))
+    types = [chunk["type"] for chunk in chunks]
+
+    assert types == [
+        "start",
+        "data-session",
+        "tool-input-available",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+    ]
+    assert "Unsupported response type" not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_reasoning_only_closes_without_text():
     completions = [
         Completion(response_type=ResponseType.REASONING, reasoning_content="hmm"),

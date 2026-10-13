@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from eneo.groups_legacy.api.group_models import GroupInDBBase
 from eneo.main.models import InDB
@@ -55,6 +55,24 @@ class PreparedKnowledgeOriginal(CapturedKnowledgeOriginal):
             raise ValueError("inline originals cannot carry object publication")
 
 
+SourceMetadataKind = Literal["text", "choice", "date", "number", "boolean", "url"]
+
+
+class SourceMetadataEntry(BaseModel):
+    """One document property from the source system, e.g. a SharePoint column.
+
+    ``name`` is the source's stable identifier for the property, ``label`` the
+    human readable name the source shows, ``value`` the normalised value as
+    text (a list for multi-value properties). ``kind`` lets presentation format
+    dates and booleans without re-parsing the value.
+    """
+
+    name: str = Field(min_length=1, max_length=255)
+    label: str = Field(min_length=1, max_length=255)
+    value: str | list[str]
+    kind: SourceMetadataKind = "text"
+
+
 class InfoBlobBase(BaseModel):
     text: str
 
@@ -78,6 +96,7 @@ class InfoBlobAdd(InfoBlobBase, InfoBlobMetadataUpsertPublic):
     integration_knowledge_id: Optional[UUID] = None
     content_hash: Optional[bytes] = None
     sharepoint_item_id: Optional[str] = None
+    source_metadata: Optional[list[SourceMetadataEntry]] = None
 
     @model_validator(mode="after")
     def require_one_of_group_id_and_website_id(self) -> "InfoBlobAdd":
@@ -112,6 +131,7 @@ class InfoBlobUpdatePublic(BaseModel):
 class InfoBlobUpdate(InfoBlobMetadataUpsertPublic):
     id: UUID
     user_id: UUID
+    source_metadata: Optional[list[SourceMetadataEntry]] = None
 
 
 class InfoBlobInDBNoText(InDB):
@@ -126,6 +146,7 @@ class InfoBlobInDBNoText(InDB):
     website_id: Optional[UUID] = None
     integration_knowledge_id: Optional[UUID] = None
     sharepoint_item_id: Optional[str] = None
+    source_metadata: Optional[list[SourceMetadataEntry]] = None
     content_hash: Optional[bytes] = None
     source_id: UUID
     version_state: str
@@ -154,6 +175,16 @@ class InfoBlobPublicNoText(InDB):
     group_id: Optional[UUID] = None
     website_id: Optional[UUID] = None
     original_available: bool
+    # Properties the source system keeps about the document (SharePoint
+    # columns). Empty for sources without such properties.
+    source_metadata: list[SourceMetadataEntry] = []
+
+    @field_validator("source_metadata", mode="before")
+    @classmethod
+    def _none_as_empty(cls, value: object) -> object:
+        # Stored as NULL for sources without properties; the API always
+        # answers with a list so clients need no null check.
+        return [] if value is None else value
 
 
 class InfoBlobAskAssistantPublic(InfoBlobPublicNoText):
@@ -199,6 +230,7 @@ class InfoBlobChunkInDB(InDB, InfoBlobChunkWithEmbedding):
 
 class InfoBlobChunkInDBWithScore(InDB, InfoBlobChunk):
     info_blob_title: Optional[str]
+    info_blob_source_metadata: list[SourceMetadataEntry] = []
     score: float
 
 

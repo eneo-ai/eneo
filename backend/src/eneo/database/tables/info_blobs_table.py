@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import (
@@ -12,6 +12,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine.default import DefaultExecutionContext
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql.elements import ColumnElement
@@ -107,6 +108,13 @@ class InfoBlobs(BasePublic):
         ForeignKey(IntegrationKnowledge.id, ondelete="CASCADE"), index=True
     )
     sharepoint_item_id: Mapped[Optional[str]] = mapped_column()
+    # Ordered [{name, label, value, kind}] entries from the source system's own
+    # document properties (SharePoint library columns). NULL when the source has
+    # none. Kept as a list, not an object, because JSONB does not preserve key
+    # order and the column order is meaningful to the people who defined it.
+    source_metadata: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     # relationships
     group: Mapped[CollectionsTable] = relationship()

@@ -229,14 +229,22 @@ measured in **tokens**, not characters:
 - **Chunk size**: 200 tokens
 - **Overlap**: 40 tokens
 
-Tokens are counted with LiteLLM's model-aware tokenizer, falling back to a
+The same setting applies to every path: uploaded files, Confluence and SharePoint
+syncs, and crawled pages. If the embedding model's registered `max_input` (in
+tokens) is smaller than the chunk size, chunks are capped so that they fit
+`max_input`, including the `passage:` prefix E5 models receive, and the overlap
+is scaled down in proportion; this is logged once per process and model. A model
+registered without `max_input` is not capped, which is also logged.
+
+Tokens are counted with LiteLLM's tokenizer, falling back to a
 four-characters-per-token estimate if counting fails.
 
 <Callout type="info">
-  The splitter reads `CHUNK_SIZE` and `CHUNK_OVERLAP` from the worker's
-  environment if they are set, but they are not part of the deployment
-  templates and changing them only affects documents processed afterwards.
-  Existing chunks are not rebuilt.
+  `CHUNK_SIZE` and `CHUNK_OVERLAP` are read from the environment if they are
+  set. Set them on both the API and the worker: the worker chunks with them, and
+  the API uses the same values to decide how many chunks to retrieve. They are
+  not part of the deployment templates, and changing them only affects documents
+  processed afterwards. Existing chunks are not rebuilt.
 </Callout>
 
 ### 3. Embedding

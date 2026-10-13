@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import TIMESTAMP, CheckConstraint, Date, ForeignKey, UniqueConstraint
@@ -28,6 +28,10 @@ class ModelProviders(BasePublic):
     config: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )  # Additional config like endpoints
+    # Configured outbound HTTP headers. A dedicated column rather than a key in
+    # `config`, which is unencrypted and returned to admins verbatim; `secret`
+    # entries hold encrypted value/fallback. NULL: no headers configured.
+    outbound_headers: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(JSONB)
     is_active: Mapped[bool] = mapped_column(nullable=False, server_default="true")
     # Admin-entered: few provider APIs report when a key expires.
     key_expires_on: Mapped[date | None] = mapped_column(Date, nullable=True)

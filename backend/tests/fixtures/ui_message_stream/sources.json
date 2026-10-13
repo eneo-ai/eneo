@@ -135,6 +135,7 @@
           "group_id": null,
           "website_id": null,
           "original_available": true,
+          "source_metadata": [],
           "score": 0.87
         }
       }
@@ -172,6 +173,7 @@
           "group_id": null,
           "website_id": null,
           "original_available": true,
+          "source_metadata": [],
           "score": 0.87
         }
       }
@@ -332,6 +334,7 @@
               "group_id": null,
               "website_id": null,
               "original_available": true,
+              "source_metadata": [],
               "score": 0.87
             }
           }
@@ -360,6 +363,7 @@
               "group_id": null,
               "website_id": null,
               "original_available": true,
+              "source_metadata": [],
               "score": 0.87
             }
           }

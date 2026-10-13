@@ -101,6 +101,12 @@ def _service_with_datastore():
     return ReferencesService(AsyncMock(), datastore), datastore
 
 
+def _embedding_model(max_input: int | None = 8191) -> MagicMock:
+    embedding_model = MagicMock(max_input=max_input)
+    embedding_model.name = "model"
+    return embedding_model
+
+
 def _patch_min_score(monkeypatch, min_score):
     monkeypatch.setattr(
         "eneo.assistants.references.get_settings",
@@ -118,9 +124,9 @@ async def test_inject_retrieval_applies_configured_relevance_floor(
 
     await service._query_datastore_if_groups_or_websites(
         "question",
-        collections=[MagicMock(embedding_model=MagicMock())],
+        collections=[MagicMock(embedding_model=_embedding_model())],
         websites=[],
-        num_chunks=10,
+        context_window_tokens=10_000,
         version=version,
     )
 
@@ -134,9 +140,9 @@ async def test_relevance_floor_is_off_when_unset(monkeypatch):
 
     await service._query_datastore_if_groups_or_websites(
         "question",
-        collections=[MagicMock(embedding_model=MagicMock())],
+        collections=[MagicMock(embedding_model=_embedding_model())],
         websites=[],
-        num_chunks=10,
+        context_window_tokens=10_000,
         version=2,
     )
 
@@ -199,3 +205,49 @@ async def test_info_blob_references_skip_repository_for_empty_chunks():
 
     repository.get_by_ids.assert_not_awaited()
     repository.hydrate_original_availability.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("context_window_tokens", "max_input", "expected_limit"),
+    [
+        (100_000, 8191, 250),  # 200-token chunks: today's count
+        (100_000, 100, 500),  # the model clamps chunks to 100, so twice as many fit
+        (100, 8191, 1),  # a window below one chunk still searches
+    ],
+)
+async def test_version_2_fetches_enough_chunks_to_fill_half_the_context(
+    monkeypatch, context_window_tokens, max_input, expected_limit
+):
+    from eneo.embedding_models.domain import chunking
+
+    monkeypatch.setattr(chunking.settings, "chunk_size", 200)
+    monkeypatch.setattr(chunking.settings, "chunk_overlap", 40)
+    _patch_min_score(monkeypatch, None)
+    service, datastore = _service_with_datastore()
+    await service._query_datastore_if_groups_or_websites(
+        "question",
+        collections=[MagicMock(embedding_model=_embedding_model(max_input))],
+        websites=[],
+        context_window_tokens=context_window_tokens,
+        version=2,
+    )
+
+    assert datastore.semantic_search.await_args.kwargs["num_chunks"] == expected_limit
+
+
+@pytest.mark.asyncio
+async def test_version_1_keeps_its_fixed_candidate_count(monkeypatch):
+    _patch_min_score(monkeypatch, None)
+    service, datastore = _service_with_datastore()
+
+    await service._query_datastore_if_groups_or_websites(
+        "question",
+        collections=[MagicMock(embedding_model=_embedding_model())],
+        websites=[],
+        context_window_tokens=100_000,
+        version=1,
+    )
+
+    kwargs = datastore.semantic_search.await_args.kwargs
+    assert (kwargs["num_chunks"], kwargs["autocut_cutoff"]) == (30, 3)

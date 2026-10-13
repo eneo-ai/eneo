@@ -26,7 +26,11 @@ import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import type { AssistantSkillBindingInput, AssistantSkillBindingSummary, Eneo } from "@eneo/eneo-js";
 import type { SkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 import { disabledToolIdsForSelectedServers } from "./mcpPolicy";
-import { CAPABILITIES, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
+import {
+  CAPABILITIES,
+  isCapabilityPurpose,
+  type CapabilityPurpose
+} from "$lib/features/mcp/capabilities";
 
 type ModelSelection = { selected: boolean; isDefault: boolean };
 type CompletionModel = {
@@ -71,7 +75,7 @@ type PromptOption = { id: string; name: string; description?: string | null };
 type PolicyModel = { completion_model_id: string; is_default: boolean };
 type PolicyMcpServer = { mcp_server_id: string; is_default_enabled: boolean };
 type PolicyCapability = {
-  purpose: "web_search" | "image_generation";
+  purpose: CapabilityPurpose;
   is_default_enabled?: boolean;
 };
 type Policy = {

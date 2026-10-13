@@ -80,6 +80,7 @@ class ModelProviderRepository:
                 provider_type=provider.provider_type,
                 credentials=provider.credentials,
                 config=provider.config,
+                outbound_headers=provider.outbound_headers or None,
                 is_active=provider.is_active,
                 key_expires_on=provider.key_expires_on,
             )
@@ -113,6 +114,8 @@ class ModelProviderRepository:
         provider_db.provider_type = provider.provider_type
         provider_db.credentials = provider.credentials
         provider_db.config = provider.config
+        # A new list each time: the JSONB column has no mutation tracking.
+        provider_db.outbound_headers = list(provider.outbound_headers) or None
         provider_db.is_active = provider.is_active
         provider_db.key_expires_on = provider.key_expires_on
         if clear_connection_check:

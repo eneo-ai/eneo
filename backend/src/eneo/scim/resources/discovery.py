@@ -9,6 +9,7 @@ from eneo.scim.auth import require_scim_auth
 from eneo.scim.constants import (
     SCIM_BULK_MAX_OPERATIONS,
     SCIM_BULK_MAX_PAYLOAD_BYTES,
+    SCIM_ENTERPRISE_USER_URN,
     SCIM_FILTER_MAX_RESULTS,
 )
 from eneo.scim.openapi import scim_responses
@@ -121,6 +122,76 @@ _USER_SCHEMA = {
     ],
 }
 
+
+def _enterprise_string(name: str) -> dict[str, object]:
+    return {
+        "name": name,
+        "type": "string",
+        "multiValued": False,
+        "required": False,
+        "caseExact": False,
+        "mutability": "readWrite",
+        "returned": "default",
+        "uniqueness": "none",
+    }
+
+
+# RFC 7643 §4.3 / §8.7.1. Advertised because it is persisted: discovery must
+# stay truthful about what Eneo retains.
+_ENTERPRISE_USER_SCHEMA = {
+    "id": SCIM_ENTERPRISE_USER_URN,
+    "name": "EnterpriseUser",
+    "description": "Enterprise User",
+    "attributes": [
+        _enterprise_string("employeeNumber"),
+        _enterprise_string("costCenter"),
+        _enterprise_string("organization"),
+        _enterprise_string("division"),
+        _enterprise_string("department"),
+        {
+            "name": "manager",
+            "type": "complex",
+            "multiValued": False,
+            "required": False,
+            "mutability": "readWrite",
+            "returned": "default",
+            "subAttributes": [
+                {
+                    "name": "value",
+                    "type": "string",
+                    "multiValued": False,
+                    "required": False,
+                    "caseExact": False,
+                    "mutability": "readWrite",
+                    "returned": "default",
+                    "uniqueness": "none",
+                },
+                {
+                    "name": "$ref",
+                    "type": "reference",
+                    "referenceTypes": ["User"],
+                    "multiValued": False,
+                    "required": False,
+                    "caseExact": False,
+                    "mutability": "readWrite",
+                    "returned": "default",
+                    "uniqueness": "none",
+                },
+                {
+                    "name": "displayName",
+                    "type": "string",
+                    "multiValued": False,
+                    "required": False,
+                    "caseExact": False,
+                    "mutability": "readOnly",
+                    "returned": "default",
+                    "uniqueness": "none",
+                },
+            ],
+        },
+    ],
+}
+
 _GROUP_SCHEMA = {
     "id": "urn:ietf:params:scim:schemas:core:2.0:Group",
     "name": "Group",
@@ -186,7 +257,7 @@ _GROUP_SCHEMA = {
     reason="The SCIM token authorizes provisioning only within its bound tenant.",
 )
 async def schemas() -> ListResponse:
-    resources = [_USER_SCHEMA, _GROUP_SCHEMA]
+    resources = [_USER_SCHEMA, _ENTERPRISE_USER_SCHEMA, _GROUP_SCHEMA]
     return ListResponse(
         totalResults=len(resources), itemsPerPage=len(resources), Resources=resources
     )
@@ -210,6 +281,9 @@ async def resource_types() -> ListResponse:
             "name": "User",
             "endpoint": "/Users",
             "schema": "urn:ietf:params:scim:schemas:core:2.0:User",
+            "schemaExtensions": [
+                {"schema": SCIM_ENTERPRISE_USER_URN, "required": False}
+            ],
             "meta": {"resourceType": "ResourceType"},
         },
         {
