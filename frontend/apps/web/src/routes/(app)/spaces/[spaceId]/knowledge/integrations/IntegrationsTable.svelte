@@ -11,6 +11,7 @@
   import { integrationData } from "$lib/features/integrations/IntegrationData";
   import { m } from "$lib/paraglide/messages";
   import { SvelteMap } from "svelte/reactivity";
+  import { integrationDocumentsHref } from "$lib/features/integrations/integrationDocuments";
 
   interface Props {
     onSelectIntegrationForSyncHistory?: (integration: IntegrationKnowledge) => void;
@@ -232,7 +233,8 @@
           });
         }
         return Table.renderComponent(IntegrationNameCell, {
-          knowledge: di.item
+          knowledge: di.item,
+          href: integrationDocumentsHref($currentSpace.routeId, di.item.id)
         });
       }
     }),
@@ -247,6 +249,7 @@
         }
         return Table.renderComponent(IntegrationSyncStatusCell, {
           knowledge: di.item,
+          documentsHref: integrationDocumentsHref($currentSpace.routeId, di.item.id),
           onShowSyncHistory: onSelectIntegrationForSyncHistory
             ? () => onSelectIntegrationForSyncHistory(di.item)
             : undefined
