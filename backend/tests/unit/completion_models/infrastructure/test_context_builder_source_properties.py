@@ -158,3 +158,62 @@ def test_many_overlapping_chunks_fit_an_exact_budget_without_quadratic_tokenizat
     assert prompt.knowledge == full.knowledge
     assert prompt.get_tokens_of_knowledge() == count_tokens(prompt.knowledge or "")
     assert processed_characters < 20 * sum(len(chunk.text) for chunk in chunks)
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_a_passage_that_does_not_fit_does_not_block_smaller_ones_after_it(
+    version: int,
+):
+    first = RetrievedChunk("First passage.", 0, uuid4())
+    large = RetrievedChunk(" ".join(f"word{i}" for i in range(200)), 0, uuid4())
+    third = RetrievedChunk("Third passage.", 0, uuid4())
+    expected = _Prompt(version=version)
+    expected.add_knowledge([first, third], max_tokens=10_000)
+    # Room to spare for the small passages, far from enough for the large one.
+    # Once a rendering has shown an overflow, later passages are admitted on
+    # the conservative estimate alone, so an exact budget would be too tight.
+    budget = count_tokens(expected.knowledge or "") + count_tokens(large.text) // 2
+    prompt = _Prompt(version=version)
+
+    prompt.add_knowledge([first, large, third], max_tokens=budget)
+
+    assert prompt.knowledge == expected.knowledge
+    assert "word0" not in (prompt.knowledge or "")
+    assert prompt.get_tokens_of_knowledge() == count_tokens(prompt.knowledge or "")
+
+
+def test_equal_passages_fill_the_budget_in_ranking_order():
+    chunks = [RetrievedChunk(f"Passage number {i}.", 0, uuid4()) for i in range(6)]
+    expected = _Prompt(version=2)
+    expected.add_knowledge(chunks[:3], max_tokens=10_000)
+    prompt = _Prompt(version=2)
+
+    prompt.add_knowledge(chunks, max_tokens=count_tokens(expected.knowledge or ""))
+
+    assert prompt.knowledge == expected.knowledge
+
+
+def test_rejected_candidates_do_not_rerender_the_selection(monkeypatch):
+    chunks = [RetrievedChunk(f"Passage number {i}.", 0, uuid4()) for i in range(600)]
+    expected = _Prompt(version=2)
+    expected.add_knowledge(chunks[:50], max_tokens=100_000)
+    processed_characters = 0
+
+    def measured_count(text: str, model_name: str = "") -> int:
+        nonlocal processed_characters
+        processed_characters += len(text)
+        return count_tokens(text, model_name)
+
+    monkeypatch.setattr(context_builder, "count_tokens", measured_count)
+    prompt = _Prompt(version=2)
+
+    prompt.add_knowledge(chunks, max_tokens=count_tokens(expected.knowledge or ""))
+
+    assert prompt.knowledge == expected.knowledge
+    # Every candidate is estimated once; the selection is rendered at the
+    # boundary, not once per rejected candidate.
+    assert processed_characters < 10 * sum(
+        len(chunk.text)
+        + len(_source_header(chunk.info_blob_title, chunk.info_blob_id, []))
+        for chunk in chunks
+    )
