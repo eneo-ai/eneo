@@ -27,3 +27,15 @@ the same tested patch is installed by the frozen Bun install in both Dockerfiles
 The resolutions for xmldom, PostCSS, Mermaid and sharp select published fixes
 where upstream parents still pin vulnerable versions. Revisit those overrides
 when the parents accept the fixed releases; do not widen them across API majors.
+
+## katex 0.16.x — GHSA-238p-pmpm-9mq7
+
+Reviewed 2026-10-13. Exception expires 2026-12-01 (CI fails after that date).
+Low severity (CVSS 2.1): KaTeX reads inherited `Object.prototype` properties as
+settings, so it only matters on a page that already has prototype pollution.
+The fixed release is 0.18.2, but every dependent (rehype-katex, @streamdown/math,
+mermaid, nextra, micromark-extension-math) still pins `^0.16`, so a root
+resolution would run them against a version they have not released for.
+No patch is installed; `scripts/audit-dependencies.mjs` accepts exactly this
+advisory until the dependents move or the date passes. All other advisories
+still fail.
