@@ -241,6 +241,29 @@ async def test_a_catalog_that_cannot_be_stored_does_not_fail_the_answer(monkeypa
     assert [tool.name for tool in live.tools] == ["query_table", "export_table"]
 
 
+async def test_a_catalog_that_could_not_be_stored_is_tried_again(monkeypatch, stored):
+    _runtime(monkeypatch, [LIVE])
+    server = _server()
+    attempts = 0
+    store = bundled_tools.store_own_catalog
+
+    async def flaky(mcp_server_id, tenant_id, tool_defs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("runtime restarting")
+        await store(mcp_server_id, tenant_id, tool_defs)
+
+    monkeypatch.setattr(bundled_tools, "store_own_catalog", flaky)
+
+    await with_live_bundled_tools(server)
+    await with_live_bundled_tools(server)
+    await with_live_bundled_tools(server)
+
+    assert attempts == 2
+    assert [server_id for server_id, _ in stored] == [server.id]
+
+
 async def test_a_stored_catalog_is_audited_as_the_systems_own_change(monkeypatch):
     _runtime(monkeypatch, [LIVE])
     server = _server()

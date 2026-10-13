@@ -170,17 +170,19 @@ async def keep_stored_catalog_current(
     """Store ``catalog`` as the server's rows when they differ from it.
 
     Returns the hash of each view stored now, by tool name, so the answer
-    that found the difference already shows the view. Tried once per catalog
-    and process; a failure is logged and the answer goes on with what the
-    rows hold. What was stored is written to the audit log.
+    that found the difference already shows the view. Done once per catalog
+    and process; a failure is logged, the answer goes on with what the rows
+    hold, and the next answer tries again, so a runtime restarting under a
+    sync does not leave its views unstored until Eneo restarts. What was
+    stored is written to the audit log.
     """
     fingerprint = hashlib.sha256(
         json.dumps(catalog, sort_keys=True, default=str).encode()
     ).hexdigest()
     if _kept.get(server.id) == fingerprint:
         return {}
-    _kept[server.id] = fingerprint
     if not stored_rows_differ(server, catalog):
+        _kept[server.id] = fingerprint
         return {}
 
     # The cached catalog is shared by every tenant; the hashes go on a copy.
@@ -200,6 +202,7 @@ async def keep_stored_catalog_current(
             exc,
         )
         return {}
+    _kept[server.id] = fingerprint
     logger.info("Stored the bundled runtime's current catalog for '%s'", server.name)
     view_hashes = {
         tool_def["name"]: tool_def["ui_resource_sha256"]
