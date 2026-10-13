@@ -311,19 +311,15 @@ export function initIntegrations(client) {
             ([, value]) => value !== undefined && value !== ""
           )
         );
-        // The schema does not know this endpoint yet; the casts go once it is regenerated.
-        const options = /** @type {any} */ ({
-          method: "get",
-          params: {
-            path: { id, integration_knowledge_id },
-            query
-          }
-        });
         const res = await client.fetch(
-          /** @type {any} */ (
-            "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/"
-          ),
-          options
+          "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/",
+          {
+            method: "get",
+            params: {
+              path: { id, integration_knowledge_id },
+              query
+            }
+          }
         );
         return res;
       },
@@ -340,17 +336,14 @@ export function initIntegrations(client) {
       listSkippedDocuments: async ({ knowledge, space }) => {
         const { id: integration_knowledge_id } = knowledge;
         const { id } = space;
-        const options = /** @type {any} */ ({
-          method: "get",
-          params: {
-            path: { id, integration_knowledge_id }
-          }
-        });
         const res = await client.fetch(
-          /** @type {any} */ (
-            "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/skipped/"
-          ),
-          options
+          "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/skipped/",
+          {
+            method: "get",
+            params: {
+              path: { id, integration_knowledge_id }
+            }
+          }
         );
         return res;
       },
