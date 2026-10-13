@@ -205,7 +205,8 @@ export type FlowDocumentRenderLimits = {
 export type AIBuilderBudgetSettings = components["schemas"]["AIBuilderBudgetSettingsPublic"];
 export type AIBuilderBudgetSettingsUpdate = components["schemas"]["AIBuilderBudgetSettingsUpdate"];
 export type WhatsNewState = components["schemas"]["WhatsNewStatePublic"];
-export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
+// The API has one website shape; there is no sparse schema to name.
+export type WebsiteSparse = components["schemas"]["WebsitePublic"];
 export type Space = components["schemas"]["SpacePublic"];
 export type SpaceSparse = components["schemas"]["SpaceSparse"];
 export type Dashboard = components["schemas"]["Dashboard"];
