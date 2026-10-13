@@ -85,9 +85,11 @@ export function skippedDocumentsNotListed(skipped: IntegrationSkippedDocuments):
 export type PageRange = { from: number; to: number; total: number };
 
 /** The 1-based positions of the page's rows, for "Showing 1–50 of 312". */
-export function documentsPageRange(
-  page: Pick<IntegrationDocumentsPage, "items" | "offset" | "total_count">
-): PageRange {
+export function documentsPageRange(page: {
+  items: unknown[];
+  offset: number;
+  total_count: number;
+}): PageRange {
   const total = Math.max(0, page.total_count);
   if (page.items.length === 0 || total === 0) return { from: 0, to: 0, total };
   const from = page.offset + 1;
