@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 
+from eneo.files.extraction_limits import FileExtractionLimits
 from eneo.files.text import (
     CorruptFileError,
     EncryptedFileError,
@@ -25,6 +26,31 @@ from eneo.files.text import (
     TextSanitizer,
     UnsupportedFormatError,
 )
+
+
+def _text_pdf(path: Path, page_texts: list[str]) -> Path:
+    page_ids = [3 + 2 * index for index in range(len(page_texts))]
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    font_id = page_ids[-1] + 2
+    objects = [
+        "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+        f"2 0 obj<</Type/Pages/Kids[{kids}]/Count {len(page_texts)}>>endobj",
+        f"{font_id} 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj",
+    ]
+    for page_id, text in zip(page_ids, page_texts):
+        stream = f"BT /F1 12 Tf 40 700 Td ({text}) Tj ET"
+        objects.append(
+            f"{page_id} 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
+            f"/Resources<</Font<</F1 {font_id} 0 R>>>>"
+            f"/Contents {page_id + 1} 0 R>>endobj"
+        )
+        objects.append(
+            f"{page_id + 1} 0 obj<</Length {len(stream)}>>stream\n"
+            f"{stream}\nendstream\nendobj"
+        )
+    body = "\n".join(objects)
+    path.write_bytes(f"%PDF-1.4\n{body}\ntrailer<</Root 1 0 R>>\n%%EOF".encode())
+    return path
 
 
 class TestTextSanitizer:
@@ -186,6 +212,35 @@ class TestTextExtractorPDF:
 
             assert "[PAGE 1]\nFirst page" in result
             assert "[PAGE 2]\nSecond page" in result
+
+    def test_extract_from_pdf_releases_each_page(self):
+        """Each page's parsed objects are released once its text is read."""
+        with patch("eneo.files.text.pdfplumber.open") as mock_open:
+            pages = [MagicMock(page_number=number) for number in (1, 2)]
+            for page in pages:
+                page.extract_text.return_value = "text"
+                page.find_tables.return_value = []
+            mock_open.return_value.__enter__ = MagicMock(
+                return_value=MagicMock(pages=pages)
+            )
+            mock_open.return_value.__exit__ = MagicMock(return_value=False)
+
+            TextExtractor.extract_from_pdf(Path("dummy.pdf"))
+
+            for page in pages:
+                page.close.assert_called_once_with()
+
+    def test_extract_from_pdf_over_layout_budget_reads_text_layer(self, tmp_path):
+        """PDFs longer than the layout budget keep their text and page markers."""
+        path = _text_pdf(tmp_path / "long.pdf", ["First page", "Second page"])
+
+        within_budget = TextExtractor.extract_from_pdf(path)
+        over_budget = TextExtractor.extract_from_pdf(
+            path, limits=FileExtractionLimits(pdf_layout_max_pages=1)
+        )
+
+        assert within_budget == "[PAGE 1]\nFirst page\n\n[PAGE 2]\nSecond page"
+        assert over_budget == within_budget
 
     def test_extract_from_pdf_renders_tables_as_markdown(self):
         """Tables should be appended as markdown, with table text excluded

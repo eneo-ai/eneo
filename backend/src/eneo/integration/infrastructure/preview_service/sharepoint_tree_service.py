@@ -1,9 +1,23 @@
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional, cast
 from uuid import UUID
 
 from eneo.integration.domain.entities.oauth_token import SharePointToken
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     SharePointContentClient,
+)
+from eneo.integration.infrastructure.content_service.sharepoint_metadata import (
+    SharePointColumnCatalog,
+    extract_source_metadata,
+)
+from eneo.integration.infrastructure.preview_service.sharepoint_search import (
+    MAX_SEARCH_RESULTS,
+    build_odata_filter,
+    clean_search_text,
+    drive_item_matches_filters,
+    filter_columns,
+    list_item_matches_filters,
+    row_from_drive_item,
+    row_from_list_item,
 )
 from eneo.main.logging import get_logger
 
@@ -63,6 +77,10 @@ class SharePointTreeService:
             api_token=token.access_token,
             token_id=token.id,
             token_refresh_callback=self.token_refresh_callback,
+            # Files in the picker show the library columns that will follow
+            # them on import, so people can see what is searchable before
+            # choosing.
+            include_list_item_fields=True,
         ) as content_client:
             actual_drive_id = drive_id
             if not actual_drive_id and site_id:
@@ -146,6 +164,16 @@ class SharePointTreeService:
                     f"Failed to fetch folder items for folder {folder_id}: {str(e)}"
                 ) from e
 
+            # The root listing always needs the columns (they drive the filter
+            # menu); a subfolder only when it holds files whose properties are
+            # read, so opening folder after folder does not repeat the request.
+            has_files = any(item.get("folder") is None for item in items)
+            catalog = (
+                await self._column_catalog(content_client, actual_drive_id)
+                if folder_id == "root" or has_files
+                else SharePointColumnCatalog()
+            )
+
             tree_items: List[Dict[str, Any]] = []
             for item in items:
                 item_name = item.get("name", "")
@@ -167,6 +195,13 @@ class SharePointTreeService:
                     "size": size,
                     "modified": modified,
                     "web_url": web_url,
+                    "source_metadata": (
+                        []
+                        if is_folder
+                        else extract_source_metadata(
+                            cast(Dict[str, Any], item), catalog
+                        )
+                    ),
                 }
                 tree_items.append(tree_item)
 
@@ -203,6 +238,7 @@ class SharePointTreeService:
                 "parent_id": parent_id,
                 "drive_id": actual_drive_id,
                 "site_id": site_id,
+                "columns": filter_columns(catalog),
             }
 
             logger.info(
@@ -215,3 +251,120 @@ class SharePointTreeService:
             )
 
             return result
+
+    async def search_library(
+        self,
+        token: SharePointToken,
+        site_id: Optional[str] = None,
+        drive_id: Optional[str] = None,
+        text: str = "",
+        filters: Optional[Dict[str, str]] = None,
+        max_items: int = MAX_SEARCH_RESULTS,
+    ) -> Dict[str, Any]:
+        """Files anywhere in the library matching ``text`` and column ``filters``.
+
+        Free text always uses Graph's drive search, including document content.
+        Column filters refine those hits using their expanded fields. Filters
+        alone use Graph's list query. Only accepted files count toward the cap.
+        """
+        if not site_id and not drive_id:
+            raise ValueError("Either site_id or drive_id must be provided")
+        text = clean_search_text(text)
+        filters = {k: v for k, v in (filters or {}).items() if v.strip()}
+        if not text and not filters:
+            return {
+                "items": [],
+                "truncated": False,
+                "drive_id": drive_id,
+                "site_id": site_id,
+            }
+
+        async with SharePointContentClient(
+            base_url=token.base_url,
+            api_token=token.access_token,
+            token_id=token.id,
+            token_refresh_callback=self.token_refresh_callback,
+            include_list_item_fields=True,
+        ) as content_client:
+            actual_drive_id = drive_id
+            if not actual_drive_id and site_id:
+                actual_drive_id = await content_client.get_default_drive_id(site_id)
+            if not actual_drive_id:
+                raise ValueError("Could not resolve drive ID")
+
+            catalog = await self._column_catalog(content_client, actual_drive_id)
+            odata_filter, _ = build_odata_filter(catalog, filters)
+
+            rows: List[Dict[str, Any]] = []
+            truncated = False
+            if text:
+
+                def accept_drive_item(raw: dict[str, object]) -> bool:
+                    return row_from_drive_item(
+                        raw, catalog
+                    ) is not None and drive_item_matches_filters(raw, catalog, filters)
+
+                raw_rows, truncated = await content_client.search_drive_items(
+                    actual_drive_id, text, max_items=max_items, accept=accept_drive_item
+                )
+            else:
+
+                def accept_list_item(raw: dict[str, object]) -> bool:
+                    return row_from_list_item(
+                        raw, catalog
+                    ) is not None and list_item_matches_filters(raw, catalog, filters)
+
+                raw_rows, truncated = await content_client.get_list_items_filtered(
+                    actual_drive_id,
+                    odata_filter,
+                    max_items=max_items,
+                    accept=accept_list_item,
+                )
+            for raw in raw_rows:
+                row = (
+                    row_from_drive_item(raw, catalog)
+                    if text
+                    else row_from_list_item(raw, catalog)
+                )
+                if row is not None:
+                    rows.append(row)
+
+            logger.info(
+                "SharePoint library search done",
+                extra={
+                    "drive_id": actual_drive_id,
+                    "filters": sorted(filters),
+                    "has_text": bool(text),
+                    "result_count": len(rows),
+                    "truncated": truncated,
+                },
+            )
+            return {
+                "items": rows,
+                "truncated": truncated,
+                "drive_id": actual_drive_id,
+                "site_id": site_id,
+            }
+
+    @staticmethod
+    async def _column_catalog(
+        content_client: SharePointContentClient, drive_id: str
+    ) -> SharePointColumnCatalog:
+        """The library's admitted columns; empty when they cannot be read.
+
+        Browsing must not fail because a drive has no backing list (personal
+        OneDrive) or the token lacks list access: the tree is simply shown
+        without properties, as the import would store it.
+        """
+        if not content_client.list_item_fields_enabled:
+            return SharePointColumnCatalog()
+        try:
+            definitions = await content_client.get_list_columns(drive_id)
+        except Exception as e:  # noqa: BLE001 - enrichment only
+            logger.warning(
+                "Could not read library columns for drive %s while browsing: %s",
+                drive_id,
+                e,
+            )
+            return SharePointColumnCatalog()
+        return SharePointColumnCatalog.from_graph(definitions)

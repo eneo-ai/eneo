@@ -179,6 +179,9 @@ class MCPServerTools(BasePublic):
     display_name: Mapped[Optional[str]] = mapped_column(Text)
     description: Mapped[Optional[str]] = mapped_column(Text)
     input_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    meta: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    # SHA-256 of the approved MCP App view HTML; only that stored view is served.
+    ui_resource_sha256: Mapped[Optional[str]] = mapped_column(String(64))
     is_enabled_by_default: Mapped[bool] = mapped_column(
         Boolean, server_default="True", nullable=False
     )
@@ -186,6 +189,8 @@ class MCPServerTools(BasePublic):
     # Pending changes for tool sync approval
     pending_description: Mapped[Optional[str]] = mapped_column(Text)
     pending_input_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    pending_meta: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    pending_ui_resource_sha256: Mapped[Optional[str]] = mapped_column(String(64))
     requires_approval: Mapped[bool] = mapped_column(
         Boolean, server_default="false", nullable=False
     )

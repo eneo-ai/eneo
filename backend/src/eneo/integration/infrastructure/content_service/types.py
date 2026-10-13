@@ -31,6 +31,10 @@ class GraphParentReference(TypedDict, total=False):
     path: str
 
 
+class GraphListItem(TypedDict, total=False):
+    fields: dict[str, object]
+
+
 class SharePointItem(TypedDict, total=False):
     id: str
     name: str
@@ -45,6 +49,7 @@ class SharePointItem(TypedDict, total=False):
     description: str
     createdDateTime: str
     lastModifiedDateTime: str
+    listItem: GraphListItem
 
 
 class SyncStats(TypedDict):

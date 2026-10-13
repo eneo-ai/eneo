@@ -19,7 +19,11 @@ async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
     await repo._hydrate_sessions(
         [
             SimpleNamespace(
-                questions=[SimpleNamespace(info_blobs=blobs, questions_files=[])]
+                questions=[
+                    SimpleNamespace(
+                        info_blobs=blobs, questions_files=[], tool_calls=None
+                    )
+                ]
             )
         ]
     )
@@ -30,7 +34,9 @@ async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
 async def test_update_hydrates_info_blob_availability(monkeypatch):
     blob = MagicMock()
     updated = SimpleNamespace(
-        questions=[SimpleNamespace(info_blobs=[blob], questions_files=[])]
+        questions=[
+            SimpleNamespace(info_blobs=[blob], questions_files=[], tool_calls=None)
+        ]
     )
     hydrate = AsyncMock()
     monkeypatch.setattr(

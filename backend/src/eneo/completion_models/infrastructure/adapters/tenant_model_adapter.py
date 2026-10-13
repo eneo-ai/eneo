@@ -25,7 +25,7 @@ from typing_extensions import override
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
-    GeneratedImage,
+    GeneratedFile,
     McpToolReference,
     ModelKwargs,
     ResponseType,
@@ -33,6 +33,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
     function_definition_to_tool,
 )
+from eneo.authentication.signed_urls import redact_reference_tokens_in_json
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
     InvalidSkillToolCallError,
@@ -55,12 +56,18 @@ from eneo.completion_models.infrastructure.message_payload import (
 from eneo.completion_models.infrastructure.static_prompts import (
     MCP_TOOL_REFERENCES_INSTRUCTION,
 )
+from eneo.files.model_file_references import file_handle
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
+)
+from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+    ProviderOutboundHeaders,
+    apply_outbound_headers,
+    mask_outbound_headers,
 )
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
@@ -80,6 +87,11 @@ THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 # persisted tool-result text; the bytes themselves become a generated file.
 MCP_IMAGE_PLACEHOLDER_TEMPLATE = (
     "[Image {index} ({mime_type}) was generated and is shown to the user.]"
+)
+# The same for a generated document or spreadsheet (an admitted binary
+# resource); the user opens or downloads it from the answer.
+MCP_FILE_PLACEHOLDER_TEMPLATE = (
+    "[File {index} ({filename}) was created and is shown to the user with your answer.]"
 )
 
 # Markdown image token: ![alt](url "optional title"). Captures the url only.
@@ -135,7 +147,7 @@ def _build_tool_result_with_references(
     tool_call_id: Optional[str],
     mcp_tool_name: Optional[str],
     existing_prefixes: set[str],
-) -> tuple[str, str, list[McpToolReference], list[GeneratedImage]]:
+) -> tuple[str, str, list[McpToolReference], list[GeneratedFile]]:
     """Build LLM-facing and user-facing tool result texts; capture resource refs.
 
     Two texts are produced because they serve different audiences:
@@ -162,15 +174,21 @@ def _build_tool_result_with_references(
     that emits both an inline ``![](url)`` and a ``resource_link`` for the same
     object renders it once (inline wins).
 
-    ``image`` blocks (base64 bytes) become ``GeneratedImage`` values that the
-    ask path persists as generated files. The base64 never reaches the model
-    or the persisted result text; both see a short placeholder instead.
+    ``image`` blocks (base64 bytes) and ``file`` blocks (binary resources the
+    proxy admitted from a document or spreadsheet provider) become
+    ``GeneratedFile`` values that the ask path persists as generated files.
+    The base64 never reaches the model or the persisted result text; both see
+    a short placeholder instead.
     """
     text_parts: list[str] = []
     resource_texts: list[str] = []
     llm_blocks: list[str] = []
     refs: list[McpToolReference] = []
-    images: list[GeneratedImage] = []
+    images: list[GeneratedFile] = []
+    # Placeholders number images and documents separately ("Image N",
+    # "File N"); replay appends reference urls in the same numbering.
+    pictures = 0
+    documents = 0
 
     # Inline Markdown wins. Collect every image url already embedded in any
     # text/resource block so a resource_link for the same object is suppressed
@@ -217,17 +235,39 @@ def _build_tool_result_with_references(
             if not data:
                 continue
             images.append(
-                GeneratedImage(
+                GeneratedFile(
                     data=data,
                     mime_type=mime_type,
                     tool_call_id=tool_call_id,
                     mcp_tool_name=mcp_tool_name,
                 )
             )
+            pictures += 1
             text_parts.append(
                 MCP_IMAGE_PLACEHOLDER_TEMPLATE.format(
-                    index=len(images), mime_type=mime_type
+                    index=pictures, mime_type=mime_type
                 )
+            )
+        elif block_type == "file":
+            try:
+                data = base64.b64decode(ci.get("data") or "", validate=True)
+            except (binascii.Error, ValueError):
+                continue
+            if not data:
+                continue
+            filename = ci.get("filename") or "document"
+            images.append(
+                GeneratedFile(
+                    data=data,
+                    mime_type=ci.get("mime_type") or "application/octet-stream",
+                    tool_call_id=tool_call_id,
+                    mcp_tool_name=mcp_tool_name,
+                    filename=filename,
+                )
+            )
+            documents += 1
+            text_parts.append(
+                MCP_FILE_PLACEHOLDER_TEMPLATE.format(index=documents, filename=filename)
             )
         elif block_type == "resource_link":
             # Typed image block (MCP spec, 2025-11-25). Display-only: it carries
@@ -273,6 +313,88 @@ def _build_tool_result_with_references(
     llm_segments = [seg for seg in (upstream_text, *llm_blocks) if seg]
     llm_text = "\n".join(llm_segments) + "\n\n" + MCP_TOOL_REFERENCES_INSTRUCTION
     return llm_text, display_text, refs, images
+
+
+class _GeneratedFileChunks:
+    """The FILES chunks of one tool result, and the reference lines they earn.
+
+    The consumer saves each file when its chunk is yielded and the service
+    then sets ``reference_url`` on that same chunk. Lines follow the result's
+    "[Image N ...]" and "[File N ...]" placeholders, like history replay.
+    """
+
+    def __init__(self, files: list[GeneratedFile]) -> None:
+        self.chunks = [
+            Completion(response_type=ResponseType.FILES, image=file) for file in files
+        ]
+
+    def append_references(self, text: str) -> str:
+        lines: list[str] = []
+        pictures = documents = 0
+        for chunk in self.chunks:
+            assert chunk.image is not None
+            if chunk.image.filename is None:
+                pictures += 1
+                label = f"Image {pictures}"
+            else:
+                documents += 1
+                label = f"File {documents}"
+            if chunk.reference_url and chunk.generated_file is not None:
+                lines.append(
+                    f"File reference for {label}: {file_handle(chunk.generated_file.id)}"
+                )
+        return "\n".join([text, *lines]) if text else "\n".join(lines)
+
+
+class _ArgumentDeltas:
+    """The argument text of pending tool calls, handed out in pieces.
+
+    A client shows what a call still being written will do (the text of a
+    document) from these pieces. Each piece is cut from the redacted text so
+    far, so a signed reference token is never sent. A call whose redacted
+    text stops extending what was already sent gets no further pieces.
+    """
+
+    # Smaller pieces wait for more text: one event per provider token would
+    # rescan a long document's arguments thousands of times.
+    _MIN_PIECE = 32
+
+    def __init__(self) -> None:
+        self._sent: dict[int, str] = {}
+        self._seen: dict[int, int] = {}
+        self._stopped: set[int] = set()
+
+    def next(self, index: int, arguments: str, *, flush: bool = False) -> str | None:
+        """The text of call ``index`` not yet handed out, or None to wait."""
+        if index in self._stopped:
+            return None
+        unseen = len(arguments) - self._seen.get(index, 0)
+        if unseen <= 0 or (unseen < self._MIN_PIECE and not flush):
+            return None
+        self._seen[index] = len(arguments)
+        sent = self._sent.get(index, "")
+        redacted = redact_reference_tokens_in_json(arguments)
+        if not redacted.startswith(sent):
+            self._stopped.add(index)
+            return None
+        self._sent[index] = redacted
+        return redacted[len(sent) :] or None
+
+
+async def _has_app_view(mcp_proxy: Any, prefixed_tool_name: str) -> bool:
+    """Whether the tool has an approved MCP App view.
+
+    Stub proxies without ``approved_app_view`` and every lookup failure read
+    as no view.
+    """
+    lookup = getattr(mcp_proxy, "approved_app_view", None)
+    if lookup is None:
+        return False
+    try:
+        return await lookup(prefixed_tool_name) is not None
+    except Exception:
+        logger.warning("Failed to resolve MCP app view for %s", prefixed_tool_name)
+        return False
 
 
 class _LiteLLMUsageDetails(Protocol):
@@ -450,6 +572,9 @@ class TenantModelAdapter(CompletionModelAdapter):
 
     MAX_TOOL_ROUNDS = 10
 
+    # Class-level default so adapters built without __init__ (tests) send none.
+    outbound_headers: ProviderOutboundHeaders | None = None
+
     # Tool-result payload for calls refused because the round budget ran out.
     # The forced follow-up runs with tool_choice="none", so the model must
     # produce a final answer from what it already gathered instead of the
@@ -466,6 +591,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         model: "CompletionModel",
         credential_resolver: TenantModelCredentialResolver,
         provider_type: str,
+        outbound_headers: ProviderOutboundHeaders | None = None,
     ):
         """
         Initialize adapter with tenant model.
@@ -474,6 +600,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             model: Tenant completion model (must have provider_id)
             credential_resolver: Resolver for tenant provider credentials
             provider_type: LiteLLM provider type (e.g., "openai", "azure", "anthropic")
+            outbound_headers: The provider's configured headers for the acting user
 
         Raises:
             ValueError: If model is not a tenant model
@@ -488,6 +615,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         self.litellm_model = model.get_model_route(provider_type=provider_type)
         self.provider_type = provider_type
+        self.outbound_headers = outbound_headers
 
     def _record_provider_unavailable(self, *, phase: str, exc: BaseException) -> None:
         span = trace.get_current_span()
@@ -528,8 +656,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         ) from exc
 
     def _mask_sensitive_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Return copy of params with masked API key for safe logging."""
-        safe_params = params.copy()
+        """Return copy of params with masked API key and header values for safe logging."""
+        safe_params = mask_outbound_headers(params.copy())
         if "api_key" in safe_params:
             key = safe_params["api_key"]
             safe_params["api_key"] = f"...{key[-4:]}" if len(key) > 4 else "***"
@@ -545,6 +673,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             "api_type",
             "organization",
             "deployment_name",
+            "extra_headers",
         }
 
         try:
@@ -1133,6 +1262,10 @@ class TenantModelAdapter(CompletionModelAdapter):
         # Merge with additional kwargs
         kwargs.update(additional_kwargs)
 
+        # Last, so the destination check sees the final api_base. Every
+        # _acompletion_call site spreads these kwargs, tool rounds included.
+        apply_outbound_headers(kwargs, self.outbound_headers)
+
         return kwargs
 
     @override
@@ -1237,7 +1370,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 tool_round = 0
                 seen_prefixes: set[str] = set()
                 captured_refs: list[McpToolReference] = []
-                captured_images: list[GeneratedImage] = []
+                captured_images: list[GeneratedFile] = []
                 collected_tool_metadata: list[ToolCallMetadata] = (
                     self._always_active_skill_metadata(skill_runtime)
                 )
@@ -1426,6 +1559,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                             mcp_tool_name=call.name,
                             existing_prefixes=seen_prefixes,
                         )
+                        has_app_view = not result.get(
+                            "is_error"
+                        ) and await _has_app_view(mcp_proxy, call.name)
                         captured_refs.extend(refs_for_call)
                         captured_images.extend(images_for_call)
                         result_status = "succeeded"
@@ -1435,6 +1571,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                             display_text = llm_text
                             result_status = "failed"
+                        assert mcp_proxy is not None
+                        llm_text = mcp_proxy.model_result_text(llm_text)
                         messages.append(
                             {
                                 "role": "tool",
@@ -1464,7 +1602,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 mcp_tool_name=call.name,
                                 purpose=mcp_proxy.get_tool_purpose(call.name),
                                 is_internal=mcp_proxy.is_internal_tool(call.name),
+                                is_bundled=mcp_proxy.is_bundled_tool(call.name),
                                 meta=result.get("meta") or None,
+                                structured_content=(
+                                    result.get("structured_content")
+                                    if has_app_view
+                                    else None
+                                ),
                             )
                         )
                     if not await _follow_up_completion():
@@ -1681,6 +1825,9 @@ class TenantModelAdapter(CompletionModelAdapter):
             def _tool_is_internal(name: str) -> bool:
                 return mcp_proxy.is_internal_tool(name) if mcp_proxy else False
 
+            def _tool_is_bundled(name: str) -> bool:
+                return mcp_proxy.is_bundled_tool(name) if mcp_proxy else False
+
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
                 def __init__(self) -> None:
@@ -1719,6 +1866,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 inside_thinking = False
                 thinking_stripped = False
                 pending_emitted: set[int] = set()
+                argument_deltas = _ArgumentDeltas()
                 request_prompt_tokens = 0
                 provider_reported_prompt_tokens = False
                 request_completion_tokens = 0
@@ -1830,8 +1978,26 @@ class TenantModelAdapter(CompletionModelAdapter):
                                             mcp_tool_name=name,
                                             purpose=_tool_purpose(name),
                                             is_internal=_tool_is_internal(name),
+                                            is_bundled=_tool_is_bundled(name),
                                         )
                                     ],
+                                )
+
+                        # Forward the arguments of announced calls as they are
+                        # written, so a client can show them before the call runs.
+                        for idx in sorted(
+                            {tc_delta.index for tc_delta in delta.tool_calls}
+                            & pending_emitted
+                        ):
+                            acc = res.tool_calls_acc[idx]
+                            piece = argument_deltas.next(
+                                idx, acc["function"]["arguments"]
+                            )
+                            if piece:
+                                yield Completion(
+                                    response_type=ResponseType.TOOL_CALL_DELTA,
+                                    tool_call_id=acc["id"],
+                                    arguments_delta=piece,
                                 )
 
                     # Handle text content with thinking-block stripping
@@ -1871,6 +2037,18 @@ class TenantModelAdapter(CompletionModelAdapter):
                             if cleaned:
                                 yield Completion(text=cleaned)
                         buffer = ""
+
+                for idx in sorted(pending_emitted):
+                    acc = res.tool_calls_acc[idx]
+                    piece = argument_deltas.next(
+                        idx, acc["function"]["arguments"], flush=True
+                    )
+                    if piece:
+                        yield Completion(
+                            response_type=ResponseType.TOOL_CALL_DELTA,
+                            tool_call_id=acc["id"],
+                            arguments_delta=piece,
+                        )
 
                 if provider_reported_prompt_tokens:
                     res.cumulative_input_tokens += request_prompt_tokens
@@ -2016,6 +2194,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         result_status="deferred",
                                         purpose=_tool_purpose(call.name),
                                         is_internal=_tool_is_internal(call.name),
+                                        is_bundled=_tool_is_bundled(call.name),
                                         result=json.dumps(
                                             {
                                                 "deferred": True,
@@ -2091,6 +2270,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 mcp_tool_name=name,
                                 purpose=mcp_proxy.get_tool_purpose(name),
                                 is_internal=mcp_proxy.is_internal_tool(name),
+                                is_bundled=mcp_proxy.is_bundled_tool(name),
                             )
                         )
                     tool_args_by_call_id: dict[str, dict[str, Any] | None] = {}
@@ -2182,6 +2362,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         mcp_tool_name=tm.mcp_tool_name,
                                         purpose=tm.purpose,
                                         is_internal=tm.is_internal,
+                                        is_bundled=tm.is_bundled,
                                     )
                                     for tm in approval_metadata
                                 ],
@@ -2211,6 +2392,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     mcp_tool_name=tm.mcp_tool_name,
                                     purpose=tm.purpose,
                                     is_internal=tm.is_internal,
+                                    is_bundled=tm.is_bundled,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -2241,6 +2423,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     mcp_tool_name=tm.mcp_tool_name,
                                     purpose=tm.purpose,
                                     is_internal=tm.is_internal,
+                                    is_bundled=tm.is_bundled,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -2297,14 +2480,19 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 mcp_tool_name=tc["function"]["name"],
                                 existing_prefixes=seen_prefixes,
                             )
+                            has_app_view = not result_data.get(
+                                "is_error"
+                            ) and await _has_app_view(mcp_proxy, tc["function"]["name"])
                             captured_refs.extend(refs_for_call)
-                            # Generated images ride their own chunks so the
+                            # Generated files ride their own chunks so the
                             # ask path can persist each as a file before the
                             # tool-call metadata that references it arrives.
-                            for image in images_for_call:
-                                yield Completion(
-                                    response_type=ResponseType.FILES, image=image
-                                )
+                            # Once saved, a chunk carries the file's reference
+                            # URL. Only its stable handle reaches the model so it
+                            # can pass the file to another tool in this turn.
+                            generated = _GeneratedFileChunks(images_for_call)
+                            for chunk in generated.chunks:
+                                yield chunk
                             result_status = "succeeded"
                             if result_data.get("is_error"):
                                 error_payload = json.dumps(
@@ -2313,6 +2501,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 llm_text = error_payload
                                 display_text = error_payload
                                 result_status = "failed"
+                            else:
+                                llm_text = generated.append_references(llm_text)
+                            llm_text = mcp_proxy.model_result_text(llm_text)
                             messages.append(
                                 {
                                     "role": "tool",
@@ -2351,7 +2542,15 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     is_internal=mcp_proxy.is_internal_tool(
                                         tc["function"]["name"]
                                     ),
+                                    is_bundled=mcp_proxy.is_bundled_tool(
+                                        tc["function"]["name"]
+                                    ),
                                     meta=result_data.get("meta") or None,
+                                    structured_content=(
+                                        result_data.get("structured_content")
+                                        if has_app_view
+                                        else None
+                                    ),
                                 )
                             )
 
@@ -2411,6 +2610,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     tc["function"]["name"]
                                 ),
                                 is_internal=mcp_proxy.is_internal_tool(
+                                    tc["function"]["name"]
+                                ),
+                                is_bundled=mcp_proxy.is_bundled_tool(
                                     tc["function"]["name"]
                                 ),
                             )
@@ -2511,6 +2713,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     mcp_tool_name=name,
                                     purpose=_tool_purpose(name),
                                     is_internal=_tool_is_internal(name),
+                                    is_bundled=_tool_is_bundled(name),
                                 )
                             )
                         yield Completion(

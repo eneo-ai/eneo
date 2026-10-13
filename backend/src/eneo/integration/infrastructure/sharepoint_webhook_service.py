@@ -439,7 +439,8 @@ class SharepointWebhookService:
         if not admins:
             raise Exception(f"No admin users found for tenant {tenant_id}")
 
-        # Return the first admin (any admin will do for job creation)
+        # The oldest admin, the same one every time: the job runs as this user,
+        # so a provider's outbound headers carry this admin's attributes.
         return admins[0]
 
     async def _fetch_knowledge_by_site(

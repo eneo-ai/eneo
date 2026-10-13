@@ -28,6 +28,11 @@ services:
       # HTTPS-only default. Container env wins over backend/.env, so override
       # this from the host environment if you need to test the refusal.
       - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
+      # Bundled tool runtime, run inside this container like the backend
+      # (cd tool-runtime && bun run dev). Both processes read the same token;
+      # Admin > Tools offers "Add bundled compute" at this URL.
+      - TOOL_RUNTIME_URL=${TOOL_RUNTIME_URL:-http://localhost:3010}
+      - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:-local-development-only-tool-runtime-token}
     volumes:
       - ../:/workspace
       # Isolate .venv from host to prevent host-side uv/python from corrupting it

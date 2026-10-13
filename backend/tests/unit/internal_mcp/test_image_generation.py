@@ -33,9 +33,13 @@ from eneo.internal_mcp.image_generation import (
 )
 from eneo.internal_mcp.registry import internal_mcp_mounts
 from eneo.main.config import get_settings
-from eneo.main.exceptions import OpenAIException
+from eneo.main.exceptions import OpenAIException, ProviderRejectedRequestException
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.model_providers.domain.outbound_headers import OutboundHeader
 from eneo.model_providers.infrastructure import litellm_transport
+from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+    ProviderOutboundHeaders,
+)
 
 DEFAULTS = {"default_size": "1024x1024", "default_quality": "high"}
 
@@ -477,6 +481,7 @@ class TestGenerateImageReferences:
         provider = SimpleNamespace(
             provider_type="openai",
             create_credential_resolver=lambda _enc: None,
+            create_outbound_headers=lambda _enc, _user: None,
         )
         monkeypatch.setattr(
             image_generation,
@@ -504,3 +509,52 @@ class TestGenerateImageReferences:
         assert loaded == [["https://x/1"]]
         assert generate.await_args.kwargs["reference_images"] == [b"ref"]
         assert generate.await_args.kwargs["prompt"] == "make it blue"
+
+
+class TestGenerateImageOutboundHeaders:
+    async def test_configured_headers_block_the_request_before_it_is_sent(
+        self, monkeypatch
+    ):
+        # LiteLLM's image routes are not verified to forward extra_headers, so
+        # a provider with headers configured must never be called without them.
+        tenant_id = uuid4()
+        server = MCPServer(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            name="Images",
+            http_url="http://localhost/internal-mcp/image_generation/mcp",
+            http_auth_type="internal",
+            purpose="image_generation",
+            is_enabled=True,
+            image_model_id=uuid4(),
+        )
+        _patch_tool_context(monkeypatch, server=server, tenant_id=tenant_id)
+        headers = ProviderOutboundHeaders(
+            provider_id=uuid4(),
+            provider_type="hosted_vllm",
+            headers=(OutboundHeader(id="1", name="X-Org-Unit", value="eu-north"),),
+            user=None,
+        )
+        provider = SimpleNamespace(
+            provider_type="hosted_vllm",
+            create_credential_resolver=lambda _enc: None,
+            create_outbound_headers=lambda _enc, _user: headers,
+        )
+        monkeypatch.setattr(
+            image_generation,
+            "load_active_litellm_provider",
+            AsyncMock(return_value=provider),
+        )
+        load_references = AsyncMock()
+        generate = AsyncMock()
+        monkeypatch.setattr(image_generation, "load_reference_images", load_references)
+        monkeypatch.setattr(image_generation, "generate_with_litellm", generate)
+
+        with pytest.raises(ProviderRejectedRequestException) as exc_info:
+            await generate_image("a cat", object(), reference_images=["https://x/1"])
+
+        assert exc_info.value.code == "outbound_headers_blocked"
+        assert exc_info.value.details is not None
+        assert exc_info.value.details["reason"] == "image_generation_unsupported"
+        load_references.assert_not_awaited()
+        generate.assert_not_awaited()

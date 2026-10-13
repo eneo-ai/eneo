@@ -7,6 +7,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from typing_extensions import TypedDict
 
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import get_current_active_user
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -15,27 +19,51 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.database.database import AsyncSession, get_session_with_transaction
 from eneo.main.config import get_settings
+from eneo.main.container.container import Container
+from eneo.main.exceptions import NotFoundException
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
+from eneo.model_providers.domain.model_provider import ModelProvider
 from eneo.model_providers.domain.model_provider_service import (
     LITELLM_MODE_TO_OUR_MODE,
     ModelProviderService,
+    normalize_destination,
     per_image_cost,
+)
+from eneo.model_providers.domain.outbound_header_destinations import (
+    without_credentials,
+)
+from eneo.model_providers.domain.outbound_header_writes import (
+    OutboundHeaderWrite,
+    header_audit_changes,
+)
+from eneo.model_providers.domain.outbound_headers import (
+    MAX_HEADERS,
+    REGISTRY,
+    SUPPORTED_PROVIDER_TYPES,
 )
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
 from eneo.model_providers.presentation.model_provider_models import (
+    DynamicValuePublic,
     FavoriteProvidersUpdate,
     ModelProviderCreate,
     ModelProviderPublic,
     ModelProviderUpdate,
+    OutboundHeaderInput,
+    OutboundHeaderOptions,
+    OutboundHeaderPreview,
+    OutboundHeaderPreviewItem,
+    OutboundHeaderPreviewRequest,
     ValidateModelRequest,
 )
 from eneo.roles.permissions import Permission
+from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.provider_field_config import (
     DEFAULT_FIELDS,
+    PROVIDER_ALIASES,
     PROVIDER_FIELD_DEFINITIONS,
     FieldDefinition,
     get_canonical_provider_type,
@@ -43,6 +71,7 @@ from eneo.tenants.provider_field_config import (
 )
 from eneo.tenants.tenant_repo import TenantRepository
 from eneo.users.user import UserInDB
+from eneo.users.user_repo import UsersRepository
 
 router = APIRouter()
 
@@ -126,6 +155,87 @@ def get_model_provider_service(
 
 
 ServiceDep = Annotated[ModelProviderService, Depends(get_model_provider_service)]
+
+
+def get_audit_service(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> AuditService:
+    # The container's service honours the tenant's audit configuration.
+    return container.audit_service()
+
+
+AuditDep = Annotated[AuditService, Depends(get_audit_service)]
+
+
+def _header_writes(items: list[OutboundHeaderInput]) -> list[OutboundHeaderWrite]:
+    # `value`/`fallback` presence, not their truthiness, is what distinguishes
+    # "keep the stored value" from "replace" or "clear".
+    return [
+        OutboundHeaderWrite(
+            id=item.id,
+            name=item.name,
+            encoding=item.encoding,
+            secret=item.secret,
+            on_missing=item.on_missing,
+            value=item.value,
+            value_supplied="value" in item.model_fields_set,
+            fallback=item.fallback,
+            fallback_supplied="fallback" in item.model_fields_set,
+        )
+        for item in items
+    ]
+
+
+async def _audit_header_changes(
+    audit: AuditService,
+    user: UserInDB,
+    service: ModelProviderService,
+    before: ModelProvider | None,
+    after: ModelProvider,
+) -> None:
+    """Record header configuration changes, and any destination change on a
+    provider that carries headers: repointing the endpoint re-aims every header
+    without touching the header configuration."""
+    changes = header_audit_changes(
+        before.outbound_headers if before else [],
+        after.outbound_headers,
+        decrypt=service.read_header_secret,
+    )
+    if changes is not None:
+        await audit.log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.MODEL_PROVIDER_HEADERS_UPDATED,
+            entity_type=EntityType.MODEL_PROVIDER,
+            entity_id=after.id,
+            description=f"Updated outbound headers of model provider '{after.name}'",
+            metadata=AuditMetadata.standard(actor=user, target=after, changes=changes),
+        )
+    if before is None or not (before.outbound_headers or after.outbound_headers):
+        return
+    # Credentials are only refused while headers exist, so an endpoint on the
+    # other side of the edit that added or cleared them may still carry some.
+    old_endpoint = without_credentials(service.request_endpoint(before))
+    new_endpoint = without_credentials(service.request_endpoint(after))
+    # Compared as the secret re-entry rule compares them: another spelling of
+    # the same destination is not a move.
+    if normalize_destination(old_endpoint) != normalize_destination(new_endpoint):
+        await audit.log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.MODEL_PROVIDER_DESTINATION_CHANGED,
+            entity_type=EntityType.MODEL_PROVIDER,
+            entity_id=after.id,
+            description=(
+                f"Changed the endpoint of model provider '{after.name}', "
+                "which sends outbound headers"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=after,
+                changes={"endpoint": {"old": old_endpoint, "new": new_endpoint}},
+            ),
+        )
 
 
 @router.get(
@@ -410,6 +520,47 @@ async def get_model_defaults(
 
 
 @router.get(
+    "/outbound-headers/options/",
+    response_model=OutboundHeaderOptions,
+    description=(
+        "Metadata for the outbound header editor: the dynamic values a header "
+        "value may use, and the provider types that support outbound headers."
+    ),
+    responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="The outbound header editor is part of organization provider configuration, which requires admin permission.",
+)
+async def get_outbound_header_options(user: CurrentUser) -> OutboundHeaderOptions:
+    return OutboundHeaderOptions(
+        dynamic_values=[
+            DynamicValuePublic(
+                token=value.token,
+                source=value.source,
+                attribute=value.attribute,
+                classification=value.classification,
+            )
+            for value in REGISTRY.values()
+        ],
+        # Aliases included (e.g. "vllm"), so a client can check a stored
+        # provider_type without knowing the alias table.
+        supported_provider_types=sorted(
+            {
+                *SUPPORTED_PROVIDER_TYPES,
+                *(
+                    alias
+                    for alias, canonical in PROVIDER_ALIASES.items()
+                    if canonical in SUPPORTED_PROVIDER_TYPES
+                ),
+            }
+        ),
+        max_headers=MAX_HEADERS,
+    )
+
+
+@router.get(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
     responses=responses.get_responses([403, 404, 503]),
@@ -444,6 +595,7 @@ async def create_provider(
     data: ModelProviderCreate,
     user: CurrentUser,
     service: ServiceDep,
+    audit: AuditDep,
 ) -> ModelProviderPublic:
     """Create a new model provider."""
     provider = await service.create(
@@ -453,7 +605,9 @@ async def create_provider(
         credentials=data.credentials,
         config=data.config,
         is_active=data.is_active,
+        outbound_headers=_header_writes(data.outbound_headers),
     )
+    await _audit_header_changes(audit, user, service, None, provider)
     return ModelProviderPublic(**provider.to_dict())
 
 
@@ -473,16 +627,99 @@ async def update_provider(
     data: ModelProviderUpdate,
     user: CurrentUser,
     service: ServiceDep,
+    audit: AuditDep,
 ) -> ModelProviderPublic:
     """Update an existing model provider."""
+    # Locked before the snapshot, as the update itself locks: the audit then
+    # compares against the state this edit replaces, not one a concurrent edit
+    # has since committed over.
+    before = await service.get_by_id(provider_id, for_update=True)
     provider = await service.update(
         provider_id=provider_id,
         name=data.name,
         credentials=data.credentials,
         config=data.config,
         is_active=data.is_active,
+        outbound_headers=(
+            _header_writes(data.outbound_headers)
+            if data.outbound_headers is not None
+            else None
+        ),
     )
+    await _audit_header_changes(audit, user, service, before, provider)
     return ModelProviderPublic(**provider.to_dict())
+
+
+@router.post(
+    "/{provider_id}/outbound-headers/preview/",
+    response_model=OutboundHeaderPreview,
+    description=(
+        "Resolve the provider's outbound headers for a user in this tenant, "
+        "without sending anything. A secret header returns its state only."
+    ),
+    responses=responses.get_responses([403, 404, 503]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Previewing resolves another user's provisioned attributes, which requires admin permission.",
+)
+async def preview_outbound_headers(
+    provider_id: UUID,
+    body: OutboundHeaderPreviewRequest,
+    user: CurrentUser,
+    service: ServiceDep,
+    session: SessionDep,
+    audit: AuditDep,
+) -> OutboundHeaderPreview:
+    target = await UsersRepository(session).get_user_by_id_and_tenant_id(
+        body.user_id, user.tenant_id
+    )
+    if target is None:
+        raise NotFoundException("User not found")
+    provider = await service.get_by_id(provider_id)
+    outcomes, problem, blocked, blocked_reason = await service.preview_outbound_headers(
+        provider, target
+    )
+    # The first surface through which a tenant admin reads another user's
+    # provisioned attributes, hence audited: actor, target user, provider —
+    # never the values.
+    await audit.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MODEL_PROVIDER_HEADERS_PREVIEWED,
+        entity_type=EntityType.MODEL_PROVIDER,
+        entity_id=provider.id,
+        description=f"Previewed outbound headers of model provider '{provider.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=provider,
+            extra={"previewed_user_id": str(target.id)},
+        ),
+    )
+    return OutboundHeaderPreview(
+        user_id=target.id,
+        destination_problem=problem,
+        blocked=blocked,
+        blocked_reason=blocked_reason,
+        headers=[
+            # A secret header is status only: no value, no fallback, no partial.
+            OutboundHeaderPreviewItem(
+                name=outcome.name, secret=True, state=outcome.state
+            )
+            if outcome.secret
+            else OutboundHeaderPreviewItem(
+                name=outcome.name,
+                secret=False,
+                state=outcome.state,
+                value=outcome.wire_value,
+                policy=outcome.policy,
+                reason=outcome.reason,
+                missing_dynamic_values=list(outcome.missing_tokens),
+            )
+            for outcome in outcomes
+        ],
+    )
 
 
 @router.get(

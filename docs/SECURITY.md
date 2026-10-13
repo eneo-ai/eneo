@@ -58,8 +58,10 @@ The repository uses GitHub security features and CI to prevent regressions:
   the image. The shared `.github/actions/scan-application-image` gate keeps both
   raw reports. Grype also checks upstream NVD/CPE records for APK packages;
   Trivy's Wolfi feed alone does not detect unfixed vulnerabilities. CI scans its
-  locally built candidates; the weekly Application image security workflow
-  rechecks published develop images.
+  locally built candidates; `.github/workflows/application_image.yml` scans and
+  exercises the publication candidate before the attested push and refuses a
+  pushed image whose layers differ from that candidate; the weekly Application
+  image security workflow rechecks published develop images.
 - The Svelte runtime copies the builder's official Node 22 binary and license into
   a digest-pinned Chainguard `glibc-dynamic` image with maintained C/C++ libraries.
   It has no shell or package manager; probes execute `node` directly. Backend

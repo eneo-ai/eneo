@@ -8,6 +8,7 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.mcp_servers.application.runtime_status import runtime_status
 from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
@@ -22,10 +23,13 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.main.container.container import Container
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
 from eneo.mcp_servers.application.mcp_server_service import ToolChange
 from eneo.mcp_servers.presentation.models import (
+    BundledServerCreate,
+    BundledToolList,
+    BundledToolPublic,
     CapabilityActivationResponse,
     MCPConnectionStatus,
     MCPServerCreate,
@@ -41,6 +45,7 @@ from eneo.mcp_servers.presentation.models import (
     MCPServerToolSyncResponse,
     MCPServerToolUpdate,
     MCPServerUpdate,
+    MCPToolViewPublic,
     ToolChangePublic,
     ToolReviewRequest,
     ToolReviewResponse,
@@ -278,6 +283,114 @@ async def update_tenant_tool_enabled(
     )
 
     return assembler.from_domain_to_model(tool)
+
+
+# ============================================================================
+# Bundled tool runtime (MUST come before /{id}/ routes)
+# ============================================================================
+
+
+@router.get(
+    "/bundled/",
+    response_model=BundledToolList,
+    responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
+async def get_bundled_tools(container: Container = _WITH_USER):
+    """List the bundled tool runtime's servers and whether they are added."""
+    service = container.mcp_server_service()
+    tools = await service.list_bundled_tools()
+    return BundledToolList(
+        runtime=await runtime_status(),
+        items=[
+            BundledToolPublic(
+                tool=tool.tool,
+                purpose=tool.purpose,
+                available=tool.available,
+                mcp_server_id=tool.mcp_server_id,
+            )
+            for tool in tools
+        ],
+    )
+
+
+@router.post(
+    "/bundled/{tool}/",
+    description=(
+        "Add a server of the bundled tool runtime to this tenant (admin only). "
+        "Its URL and credential come from the deployment; its tools are then "
+        "reviewed and enabled like any other server's."
+    ),
+    response_model=MCPServerCreateResponse,
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
+async def create_bundled_mcp_server(
+    tool: str,
+    data: BundledServerCreate,
+    container: Container = _WITH_USER,
+    _user_for_creation: None = Depends(require_user_for_creation),
+):
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_assembler()
+    activate = data.activate
+
+    result = await service.create_bundled_mcp_server(tool, activate=activate)
+    if not result.connection.success:
+        raise BadRequestException(
+            result.connection.error_message
+            or "Failed to connect to the bundled tool runtime"
+        )
+
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVER_CREATED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=result.server.id,
+        description=f"Added bundled MCP server '{result.server.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user, target=result.server, extra={"bundled_tool": tool}
+        ),
+    )
+    if activate:
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.MCP_SERVER_ENABLED,
+            entity_type=EntityType.MCP_SERVER,
+            entity_id=result.server.id,
+            description=f"Activated {result.server.purpose} provider",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=result.server,
+                extra={
+                    "purpose": result.server.purpose,
+                    "deactivated_server_ids": [
+                        str(i) for i in result.deactivated_server_ids or []
+                    ],
+                },
+            ),
+        )
+
+    return MCPServerCreateResponse(
+        server=assembler.from_domain_to_model(result.server),
+        connection=MCPConnectionStatus(
+            success=result.connection.success,
+            tools_discovered=result.connection.tools_discovered,
+            error_message=result.connection.error_message,
+        ),
+    )
 
 
 # ============================================================================
@@ -732,6 +845,38 @@ async def get_mcp_server_tools(
     return assembler.to_paginated_response(tools)
 
 
+@router.get(
+    "/{id}/tools/{tool_id}/view/",
+    response_model=MCPToolViewPublic,
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
+async def get_mcp_tool_view(
+    id: UUID,
+    tool_id: UUID,
+    container: Container = _WITH_USER,
+):
+    """What a tool's interactive view may do: its size, the hosts it may reach
+    and the permissions it asks for. Describes the view awaiting approval when
+    there is one, otherwise the approved view."""
+    facts = await container.mcp_server_service().describe_tool_view(id, tool_id)
+    if facts is None:
+        raise NotFoundException("The tool has no interactive view")
+    return MCPToolViewPublic(
+        uri=facts.uri,
+        pending=facts.pending,
+        size_bytes=facts.size_bytes,
+        connect_domains=facts.domains["connectDomains"],
+        resource_domains=facts.domains["resourceDomains"],
+        frame_domains=facts.domains["frameDomains"],
+        permissions=facts.permissions,
+    )
+
+
 @router.post(
     "/{id}/tools/sync/",
     description="Sync tools from remote MCP server (admin only).",
@@ -772,8 +917,12 @@ async def sync_mcp_server_tools(
             change_type=change.change_type,
             current_description=change.current_description,
             current_input_schema=change.current_input_schema,
+            current_meta=change.current_meta,
+            current_ui_resource_sha256=change.current_ui_resource_sha256,
             pending_description=change.pending_description,
             pending_input_schema=change.pending_input_schema,
+            pending_meta=change.pending_meta,
+            pending_ui_resource_sha256=change.pending_ui_resource_sha256,
         )
 
     return MCPServerToolSyncResponse(
@@ -829,7 +978,15 @@ async def approve_tool_changes(
         metadata=AuditMetadata.standard(
             actor=user,
             target=mcp_server,
-            extra={"approved_tool_ids": [str(tid) for tid in data.tool_ids]},
+            extra={
+                "approved_tool_ids": [str(tid) for tid in data.tool_ids],
+                # The interactive view each approval put in force, by its hash.
+                "approved_view_hashes": {
+                    str(tool.id): tool.ui_resource_sha256
+                    for tool in approved
+                    if tool.ui_resource_sha256
+                },
+            },
         ),
     )
 
@@ -922,7 +1079,19 @@ async def approve_all_tool_changes(
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
         description=f"Approved all tool changes on MCP server '{mcp_server.name}'",
-        metadata=AuditMetadata.standard(actor=user, target=mcp_server),
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=mcp_server,
+            extra={
+                "approved_tool_ids": [str(tool.id) for tool in approved],
+                # The interactive view each approval put in force, by its hash.
+                "approved_view_hashes": {
+                    str(tool.id): tool.ui_resource_sha256
+                    for tool in approved
+                    if tool.ui_resource_sha256
+                },
+            },
+        ),
     )
 
     return ToolReviewResponse(

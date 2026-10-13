@@ -4,7 +4,9 @@ import { Callout } from "nextra/components";
 
 Eneo is a modular monolith: one FastAPI backend, one SvelteKit frontend, one
 background worker that runs the same backend image, PostgreSQL with pgvector,
-and Redis. Everything is deployed with Docker Compose behind Traefik.
+and Redis. The bundled tool runtime runs Eneo-maintained compute and file tools
+in a separate container. Docker Compose supplies the reference deployment;
+Traefik fronts the application, while the runtime stays on the private network.
 
 ## High-Level Overview
 
@@ -22,9 +24,115 @@ and Redis. Everything is deployed with Docker Compose behind Traefik.
 | Worker        | ARQ (Redis-backed async task queue)                    | Same backend image, `RUN_AS_WORKER=true`   |
 | Database      | PostgreSQL 16 with pgvector                            | `pgvector/pgvector:pg16`                   |
 | Cache/queue   | Redis 7                                                | `redis:7-alpine`                           |
+| Tool runtime | Bun, isolated job processes, QuickJS and DuckDB | `ghcr.io/eneo-ai/eneo-tool-runtime`, private network |
 | AI providers  | LiteLLM transport to per-tenant configured providers   | Outbound HTTPS from backend and worker     |
 
 ---
+
+## Skills, Functions, tools and views
+
+These features separate instructions, access, execution and presentation. A
+Function can use the bundled runtime, but the two are not interchangeable.
+
+| Part | Owns | Does not supply |
+| --- | --- | --- |
+| **Skill** | Reusable Markdown instructions pinned to an exact revision | Executable scripts, tool installation or permission grants |
+| **Function** | Saved purpose such as `file_analysis` or `charts`; provider selection under organisation and user controls | A particular implementation or a guarantee of every native UI operation |
+| **General MCP integration** | Approved domain tools attached through Space and Assistant configuration | A new Function merely because it uses MCP |
+| **Internal MCP server** | Backend-owned knowledge, attachment reading or image-model calls | A host for heavy file processing or arbitrary compute |
+| **Bundled tool runtime** | Eneo-maintained isolated calculations, tabular analysis, charts and file creation | A plugin host or durable document store |
+| **MCP App** | A tool's interactive result view, such as a query table or chart | An editable saved document or unrestricted access to Eneo |
+| **Native document workspace and previews** | File display, streaming drafts, assistant-driven revisions, version navigation and export controls | Direct rich-text or spreadsheet cell editing |
+
+**Eneo Apps** that builders configure in Spaces are separate from **MCP Apps**.
+The former are application resources that can bind Skills; the latter are
+interactive HTML views attached to MCP tools.
+
+```mermaid
+flowchart TD
+  S["Pinned Skill instructions"] --> A["Assistant and model"]
+  F["Enabled Functions"] --> R["Resolve eligible provider for this user"]
+  R --> P["MCP proxy and allowed tools"]
+  G["Configured general MCP integrations"] --> P
+  I["Request-scoped knowledge and file tools"] --> P
+  P --> A
+  A --> C["Approved tool call"]
+  C --> E["Internal, bundled or external provider"]
+  E --> O["MCP result"]
+  O --> T["Text for the answer"]
+  O --> V["Interactive MCP App"]
+  O --> D["Validate and save generated files in Eneo"]
+  D --> N["Native workspace or file preview"]
+  D --> H["File reference for a later tool call"]
+  H --> C
+```
+
+### Why these boundaries exist
+
+- **Instruction reuse is independent of authority.** Loading a Skill changes
+  the model's context. Existing role, Space, Assistant, classification and
+  tool-approval checks still decide what it may call. Instruction-only Skills
+  avoid adding another execution environment or tool registry. A Skill can
+  describe how to use an available compute tool without carrying executable
+  code itself.
+- **Saved intent survives provider changes.** Assistants store Function
+  purposes, and Eneo resolves an eligible group provider or tenant default at
+  request time. Disabling a provider can make a Function unavailable, but
+  does not erase its selection. Native operations may require a narrower
+  tool contract: exporting a Markdown document uses `create_document`, so
+  generic file-creation capability alone is insufficient.
+- **Processing is isolated from the chat API.** QuickJS, DuckDB, workbook
+  parsing and document rendering belong in the separate runtime. Thin
+  backend-owned operations remain loopback MCP tools. Both use the same
+  proxy; domain-specific integrations remain independently operated servers.
+  See [Built-in Tool Servers](/docs/builtin-tool-servers) for the placement rule.
+- **Files connect tools without shared provider storage.** The model receives
+  credential-free `file_ref` handles. Eneo resolves them against the current
+  authorised file map into signed download URLs just before dispatch.
+  Providers retain ordinary MCP URL inputs. Eneo validates and owns accepted
+  output files; the runtime's disposable cache cannot grant file access.
+- **Presentation follows the result.** A saved file uses Eneo's native preview;
+  tool-specific interaction uses an MCP App. Native previews need no app
+  content origin. Apps use the official MCP Apps SDK in a separate-origin
+  sandbox with approved HTML and policy. External view updates need catalog
+  approval; bundled views follow Eneo's release and are refreshed automatically
+  with an audit record. Catalog approval and per-call consent are separate.
+
+### A spreadsheet-to-report workflow
+
+An optional Skill can supply the organisation's analysis procedure. **Ask a
+file** inspects an uploaded workbook and queries the dataset; its result may
+appear as an interactive table. **Charts** can consume a query export by file
+reference. **Create a file** writes a report, whose draft and saved file appear
+in the native workspace. A follow-up edit creates another file version.
+
+Opening the workbook itself uses a native preview, not the query-result app.
+Filtering the app changes its view of the result; it does not rewrite the
+workbook or tell the model about that interaction. App-originated tool calls
+remain scoped to the originating server and authorised files, and their
+results are not added to the model's conversation. A message offered by an app
+goes into the composer for the user to send.
+
+### Saved state and failure boundaries
+
+| State or operation | Behaviour |
+| --- | --- |
+| Skill revision and Function selection | Saved configuration; provider changes do not update a Skill pin or erase Function intent |
+| Generated document revision | A new saved file; conversation tool calls link revisions through `revises` and generated file IDs |
+| Streaming document draft | A preview of in-progress tool arguments; successful file delivery establishes the saved result |
+| App filters, loaded rows and chart zoom | Preserved when moving the same frame between inline and expanded display; not guaranteed across reloads |
+| Markdown export to Word/PDF | Renders the selected saved text through a compatible current provider without another model response; download bytes are not saved as a version |
+| Runtime unavailable | Its tool calls can fail; ordinary chat and already-saved native previews do not depend on runtime readiness |
+| MCP Apps disabled | Native previews still work; bundled table tools return data and charts fall back to PNG |
+| View approval revoked or originating tool disabled | An already-open app loses tool access when the host rechecks its next request |
+
+The native workspace and expanded apps share one panel. Opening a file moves
+the expanded app inline; expanding an app covers the open file, which is shown
+again when the app returns inline.
+
+For user workflows and limitations, see [Functions](/guides/capabilities#tools-files-and-views).
+For Skill authoring, see [Skills](/guides/skills). For view approval, isolation
+and deployment, see [MCP Servers](/guides/mcp-servers#interactive-tool-views).
 
 ## Core Components
 
@@ -112,7 +220,7 @@ backend/
     ├── object_content/          # Durable content control plane and S3 adapter
     ├── embedding_models/  completion_models/  transcription_models/
     ├── model_providers/  ai_models/  tenant_models/  token_usage/
-    ├── mcp_servers/  internal_mcp/  skills/  apps/  services/  workflows/
+    ├── mcp_servers/  internal_mcp/  mcp_apps/  skills/  apps/  services/  workflows/
     ├── integration/             # SharePoint and Confluence knowledge sources
     ├── audit/  data_retention/  jobs/  limits/  modules/  observability/
     └── ...
@@ -124,8 +232,8 @@ backend/
   reference deployment). Swagger UI is served at `/docs` and the schema at
   `/openapi.json`, both at the root.
 - SCIM provisioning is a separate ASGI app mounted at `/scim/v2`.
-- Loopback MCP servers for knowledge search and attachment reading are mounted
-  on the same process.
+- Loopback MCP servers for knowledge search, attachment reading and image
+  generation are mounted on the same process.
 - Middleware adds a request context, an `X-Trace-Id` response header, CORS
   whose origins are matched against the `allowed_origins` table, and
   OpenTelemetry instrumentation.
@@ -527,8 +635,17 @@ services in this order, gated by health checks:
 4. `frontend` starts.
 
 Networks: `proxy_tier` (Traefik, frontend, backend, worker; internet-facing),
-`data_net` (PostgreSQL and Redis; internal only), and `module_net` (Traefik and
-backend; reserved for optional module containers).
+`data_net` (PostgreSQL and Redis; internal only), `module_net` (Traefik and
+backend; reserved for optional module containers), and `tool_runtime_net`
+(backend, general worker and bundled runtime; internal only).
+
+The runtime starts as a separate service, without gating backend readiness.
+It exposes port 3010 only on the private network and has no database, Redis or
+internet route in the reference deployment. The separate MCP App content
+hostname routes view content to the backend, not to the runtime. See the
+[tool runtime operator guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/TOOL_RUNTIME.md)
+and [MCP Apps deployment guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/MCP_APPS.md)
+for configuration.
 
 Optional overlays:
 

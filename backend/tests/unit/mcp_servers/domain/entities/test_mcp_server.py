@@ -132,3 +132,9 @@ class TestIsInternal:
         server = self._server(http_auth_type="internal", purpose="image_generation")
         server.http_auth_type = "bearer"
         assert server.is_internal is False
+
+    def test_bundled_rows_are_built_into_eneo_whatever_their_name(self):
+        bundled = self._server(name="Fråga fil", http_auth_type="bundled")
+        assert bundled.is_bundled is True
+        assert bundled.is_internal is False
+        assert self._server(name="Built into Eneo").is_bundled is False

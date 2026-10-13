@@ -76,6 +76,8 @@ from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
 from eneo.database.database import AsyncSession
+from eneo.document_templates.repo import DocumentTemplateRepository
+from eneo.document_templates.service import DocumentTemplateService
 from eneo.embedding_models.application.embedding_model_crud_service import (
     EmbeddingModelCRUDService,
 )
@@ -258,6 +260,9 @@ from eneo.limits.limit_service import LimitService
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
+    McpAppViewRepo,
+)
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
@@ -741,6 +746,7 @@ class Container(containers.DeclarativeContainer):
     mcp_server_tool_repo = providers.Factory(
         MCPServerToolRepoImpl, session=session, mapper=mcp_server_tool_mapper
     )
+    mcp_app_view_repo = providers.Factory(McpAppViewRepo, session=session)
 
     sync_log_repo = providers.Factory(
         SyncLogRepoImpl, session=session, mapper=sync_log_mapper
@@ -838,6 +844,9 @@ class Container(containers.DeclarativeContainer):
         session=session,
         user=user,
     )
+    document_template_repo = providers.Factory(
+        DocumentTemplateRepository, session=session
+    )
 
     # Audit logging
     audit_log_repo = providers.Factory(
@@ -886,6 +895,7 @@ class Container(containers.DeclarativeContainer):
     create_embeddings_service = providers.Factory(
         CreateEmbeddingsService,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,
@@ -992,6 +1002,9 @@ class Container(containers.DeclarativeContainer):
         user=user,
         repo=security_classification_repo,
         tenant_service=tenant_service,
+    )
+    document_template_service = providers.Factory(
+        DocumentTemplateService, user=user, repo=document_template_repo
     )
     api_key_scope_revoker = providers.Factory(
         ApiKeyScopeRevoker,
@@ -1410,6 +1423,7 @@ class Container(containers.DeclarativeContainer):
         encryption_service=encryption_service,
         user_groups_repo=user_groups_repo,
         image_model_repo=image_model_repo,
+        app_view_repo=mcp_app_view_repo,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,
@@ -1624,6 +1638,7 @@ class Container(containers.DeclarativeContainer):
         Transcriber,
         file_service=file_service,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,

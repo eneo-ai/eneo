@@ -227,6 +227,8 @@ CONVERSATIONS_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "chat",
         "leave_feedback",
+        # Reads a document of the conversation in another format; stores nothing.
+        "export_conversation_document",
     }
 )
 
@@ -243,6 +245,9 @@ FILES_READ_OVERRIDES: frozenset[str] = frozenset(
         "generate_original_signed_url",
     }
 )
+
+# A link to a tool's view is read access to what a conversation shows.
+MCP_APPS_READ_OVERRIDES: frozenset[str] = frozenset({"mint_app_view_token"})
 
 
 def require_resource_permission_for_method(

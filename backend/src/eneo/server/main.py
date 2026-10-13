@@ -785,7 +785,9 @@ def get_application():
         reason="Deployment health probes and version discovery are intentionally public.",
     )
     async def get_version():
-        return VersionResponse(version=get_settings().app_version)
+        return VersionResponse(
+            version=get_settings().app_version, revision=get_settings().app_revision
+        )
 
     _registered_endpoints = (
         http_exception_handler,

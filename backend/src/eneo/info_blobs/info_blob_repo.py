@@ -516,6 +516,11 @@ class InfoBlobRepository:
                     if info_blob.website_id is not None and info_blob.url
                     else None
                 ),
+                source_metadata=(
+                    [entry.model_dump() for entry in info_blob.source_metadata]
+                    if info_blob.source_metadata
+                    else None
+                ),
             )
             .returning(InfoBlobs.id)
         )

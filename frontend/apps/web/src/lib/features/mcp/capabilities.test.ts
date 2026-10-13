@@ -5,7 +5,13 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("$lib/paraglide/messages", () => ({
   m: new Proxy({}, { get: (_target, key) => () => String(key) })
 }));
-vi.mock("@lucide/svelte", () => ({ Globe: "Globe", Image: "Image" }));
+vi.mock("@lucide/svelte", () => ({
+  ChartColumn: "ChartColumn",
+  FilePlus: "FilePlus",
+  FileSearch: "FileSearch",
+  Globe: "Globe",
+  Image: "Image"
+}));
 
 import {
   CAPABILITIES,
@@ -17,16 +23,20 @@ import {
 } from "./capabilities";
 
 describe("capability descriptors", () => {
-  it("lists web search before image generation", () => {
+  it("lists the capabilities in the order admins and chats show them", () => {
     expect(CAPABILITIES.map((capability) => capability.purpose)).toEqual([
       "web_search",
-      "image_generation"
+      "image_generation",
+      "file_analysis",
+      "file_creation",
+      "charts"
     ]);
   });
 
   it("offers a built-in provider for image generation only", () => {
     expect(hasBuiltinProvider("image_generation")).toBe(true);
     expect(hasBuiltinProvider("web_search")).toBe(false);
+    expect(hasBuiltinProvider("file_analysis")).toBe(false);
     expect(hasBuiltinProvider("general")).toBe(false);
     expect(hasBuiltinProvider(null)).toBe(false);
     expect(hasBuiltinProvider(undefined)).toBe(false);
@@ -35,10 +45,15 @@ describe("capability descriptors", () => {
   it("gives every capability an icon and non-empty messages", () => {
     for (const capability of CAPABILITIES) {
       expect(capability.icon).toBeTruthy();
-      const { purpose, icon, builtinProvider, ...messages } = capability;
+      const { purpose, icon, builtinProvider, guide, ...messages } = capability;
       void purpose;
       void icon;
       void builtinProvider;
+      if (guide) {
+        expect(guide.hint().length).toBeGreaterThan(0);
+        expect(guide.label().length).toBeGreaterThan(0);
+        expect(guide.url.startsWith("https://docs.eneo.ai/")).toBe(true);
+      }
       for (const [key, message] of Object.entries(messages)) {
         expect(typeof message, `${capability.purpose}.${key}`).toBe("function");
         expect(message().length, `${capability.purpose}.${key}`).toBeGreaterThan(0);

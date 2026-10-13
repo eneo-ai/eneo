@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.database.tables.base_class import BaseCrossReference, BasePublic
+from eneo.database.tables.files_table import file_usage
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 
@@ -407,7 +408,9 @@ class FileContentReferences(BaseCrossReference):
     )
 
     file_id: Mapped[UUID] = mapped_column(
-        ForeignKey("files.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("files.id", ondelete="CASCADE"),
+        nullable=False,
+        info=file_usage(None),
     )
     content_id: Mapped[UUID] = mapped_column(
         ForeignKey(ObjectContents.id, ondelete="RESTRICT"), nullable=False

@@ -33,6 +33,10 @@ When this check fails, update the dependency to a safe version, remove it, or do
 Backend and Svelte Docker candidates run the same Trivy/Grype gate and runtime
 checks in CI and before publication. HIGH/CRITICAL findings, including unfixed
 ones, block publication; raw reports remain available as workflow artifacts.
+Publication builds each component as a local candidate, scans and exercises it,
+and only then pushes the attested image from the same build cache. The push is
+refused if the published layers differ from the scanned candidate, and the
+release bundle is assembled only from images that passed this gate.
 The Application image security workflow also rechecks published develop images
 weekly and on manual dispatch. A failure there is a maintenance signal; it does
 not prevent a remediation PR from building and checking its own candidate.

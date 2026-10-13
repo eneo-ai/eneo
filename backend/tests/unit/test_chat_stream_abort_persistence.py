@@ -27,6 +27,7 @@ import pytest
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
+    GeneratedFile,
     McpToolReference,
     ResponseType,
     TokenUsage,
@@ -1126,6 +1127,69 @@ async def test_streaming_handle_response_skips_partial_save_when_no_content():
         "no partial-save should be scheduled when no content was streamed; "
         "the placeholder row already captures the user's question"
     )
+
+
+@pytest.mark.asyncio
+async def test_streaming_abort_links_files_a_tool_already_produced():
+    """A file a tool produced before the model failed is linked to the question
+    by the partial save, so it is never orphaned (invisible, never re-offered,
+    never deleted with the conversation), even when no answer text streamed."""
+
+    async def file_then_error_stream():
+        yield Completion(
+            response_type=ResponseType.FILES,
+            image=GeneratedFile(
+                data=b"%PDF-1.7", mime_type="application/pdf", tool_call_id="call-1"
+            ),
+        )
+        raise RuntimeError("upstream LLM unreachable")
+
+    response = SimpleNamespace(
+        completion=file_then_error_stream(),
+        total_token_count=0,
+        usage=None,
+        extended_logging=None,
+    )
+    datastore_result = SimpleNamespace(info_blobs=[], no_duplicate_chunks=[])
+    saved = SimpleNamespace(id=uuid4())
+    svc = _make_assistant_service_for_streaming(AsyncMock())
+    svc._save_generated_image = AsyncMock(return_value=saved)
+
+    persist_calls: list[dict[str, object]] = []
+
+    async def tracking_persist(**kwargs: object) -> None:
+        persist_calls.append(kwargs)
+
+    with patch.object(
+        session_service_module,
+        "persist_partial_question_answer",
+        tracking_persist,
+    ):
+        from eneo.assistants.assistant_service import AssistantService
+
+        gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=datastore_result,
+            question="make a report",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=True,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+            **_skill_runtime_args(),
+        )
+
+        with pytest.raises(RuntimeError, match="upstream LLM unreachable"):
+            async for _ in gen:
+                pass
+
+        await asyncio.sleep(0)
+
+    assert len(persist_calls) == 1
+    assert persist_calls[0]["generated_files"] == [saved]
+    assert persist_calls[0]["answer"] == ""
 
 
 @pytest.mark.asyncio

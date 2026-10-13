@@ -2,9 +2,11 @@ import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
+import { CAPABILITIES } from "$lib/features/mcp/capabilities";
 
 const api = vi.hoisted(() => ({
   mcpServers: {
+    createBundled: vi.fn(async () => ({})),
     create: vi.fn(async (_payload: Record<string, unknown>) => ({})),
     update: vi.fn(async () => ({})),
     activate: vi.fn(async () => ({})),
@@ -106,12 +108,13 @@ function source(overrides: Record<string, unknown> = {}) {
     ...overrides
   };
 }
-function pageData(items: ReturnType<typeof source>[]) {
+function pageData(items: ReturnType<typeof source>[], bundled: Record<string, unknown>[] = []) {
   return {
     eneo: api,
     mcpSettings: { items },
     securityClassifications: { security_classifications: [] },
-    providers: []
+    providers: [],
+    bundled: { items: bundled }
   } as never;
 }
 function show(items: ReturnType<typeof source>[] = []) {
@@ -140,6 +143,20 @@ describe("Tools capability configuration", () => {
         })
       )
       .toBeVisible();
+  });
+
+  it("offers Charts as a function and adds its bundled provider through Turn on", async () => {
+    render(ToolsPage, {
+      data: pageData(
+        [],
+        [{ tool: "charts", purpose: "charts", available: true, mcp_server_id: null }]
+      )
+    });
+    await expect
+      .element(page.getByRole("heading", { name: m.charts(), exact: true }))
+      .toBeVisible();
+    await page.getByRole("button", { name: m.tools_builtin_turn_on(), exact: true }).click();
+    expect(api.mcpServers.createBundled).toHaveBeenCalledWith({ tool: "charts", activate: true });
   });
 
   it("expands and collapses configured tools for a model-backed image source", async () => {
@@ -279,7 +296,8 @@ describe("Tools capability configuration", () => {
     show([source({ audience: "groups", user_groups: [{ id: "group", name: "Design team" }] })]);
     await expect.element(page.getByText("Design team")).toBeVisible();
     await expect.element(page.getByText(m.tools_group_override())).toBeVisible();
-    expect(page.getByText(m.tools_no_default()).elements().length).toBe(2);
+    // No capability card has a default provider: group-only setup does not count as one.
+    expect(page.getByText(m.tools_no_default()).elements().length).toBe(CAPABILITIES.length);
   });
 
   it("hides function connections by default and reveals only external ones on request", async () => {

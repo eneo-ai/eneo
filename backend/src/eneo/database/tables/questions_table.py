@@ -10,12 +10,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.base_class import BaseCrossReference, BasePublic
-from eneo.database.tables.files_table import Files
+from eneo.database.tables.files_table import Files, file_usage
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.logging_table import logging_table
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.tenant_table import Tenants
+from eneo.files.file_models import FileUsageKind
 
 if TYPE_CHECKING:
     from eneo.database.tables.mcp_tool_references_table import McpToolReference
@@ -110,7 +111,9 @@ class QuestionsFiles(BaseCrossReference):
         ForeignKey(Questions.id, ondelete="CASCADE"), primary_key=True
     )
     file_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Files.id, ondelete="CASCADE"), primary_key=True
+        ForeignKey(Files.id, ondelete="CASCADE"),
+        primary_key=True,
+        info=file_usage(FileUsageKind.CHAT_ATTACHMENT),
     )
     type: Mapped[str] = mapped_column()
 

@@ -35,6 +35,22 @@ URL_SIGNING_KEY_MINIMUM_BYTES = 32
 JWT_EXPIRY_TIME_MAXIMUM_MINUTES = 30 * 24 * 60
 
 
+def _same_origin(first: str, second: str) -> bool:
+    """Whether two URLs share scheme, host and port (default ports included)."""
+
+    def origin(url: str) -> tuple[str, str, int | None]:
+        parts = urlparse(url.strip())
+        scheme = parts.scheme.lower()
+        default_port = {"http": 80, "https": 443}.get(scheme)
+        try:
+            port = parts.port or default_port
+        except ValueError:
+            port = default_port
+        return scheme, (parts.hostname or "").lower(), port
+
+    return origin(first) == origin(second)
+
+
 def validate_public_origin(origin: str | None) -> str | None:
     """
     Validate and normalize public origin.
@@ -230,6 +246,7 @@ class Settings(BaseSettings):
     )
 
     app_version: str = _set_app_version()
+    app_revision: str = "unknown"
 
     # Environment setting (development, staging, production)
     # Controls error detail exposure in API responses
@@ -305,8 +322,25 @@ class Settings(BaseSettings):
     # Image content blocks admitted from a single tool result; the rest are
     # dropped with a notice so one call cannot flood the file store.
     mcp_tool_image_max_count: int = 4
+    # Generated documents (DOCX, PDF, XLSX) a document or spreadsheet provider
+    # returns as embedded binary resources: largest accepted file and how many
+    # one tool result may carry. Larger or further ones are dropped with a
+    # notice to the model.
+    mcp_tool_file_max_bytes: int = 20 * 1024 * 1024
+    mcp_tool_file_max_count: int = 4
     mcp_circuit_breaker_failure_threshold: int = 5
     mcp_circuit_breaker_cooldown_seconds: int = 60
+
+    # MCP Apps (io.modelcontextprotocol/ui): interactive HTML views declared
+    # by MCP tools and rendered in sandboxed iframes in assistant chat.
+    mcp_apps_enabled: bool = False
+    # Origin the view HTML is served from. Must be a DIFFERENT origin than
+    # public_origin for real browser isolation; dev may point at the backend
+    # directly (e.g. http://localhost:8123). Views refuse to render while unset.
+    mcp_app_content_base_url: Optional[str] = None
+    # Ceiling for one decoded ui:// HTML resource.
+    mcp_app_resource_max_bytes: int = 2 * 1024 * 1024
+    mcp_app_view_token_expiry_seconds: int = 3600
 
     # Database connection pool configuration
     # Why: Controls PostgreSQL connection pooling behavior for SQLAlchemy async engine
@@ -476,8 +510,9 @@ class Settings(BaseSettings):
     # Signed file references (original-download URLs surfaced to the LLM so it
     # can hand them to URL-accepting MCP tools).
     # Expiry of the minted URL; clamped to the original-download token maximum
-    # (1 hour) at mint time.
-    file_reference_url_expiry_seconds: int = 3600
+    # (1 hour) at mint time. Links are minted again on every request, so one
+    # only has to outlast its own turn, tool-approval wait included.
+    file_reference_url_expiry_seconds: int = 900
     # Base URL used to build the signed download links handed to MCP tools.
     # Defaults to public_origin, but a remote tool (server-to-server) often needs
     # a different, internally-reachable host than the browser-facing origin (e.g.
@@ -490,6 +525,14 @@ class Settings(BaseSettings):
     # /internal-mcp) during a completion. Must be reachable from within the
     # backend process/container. Dev default is the local server.
     internal_mcp_base_url: str = "http://localhost:8123"
+
+    # Bundled tool runtime (tool-runtime/ in this repository): an isolated
+    # container in the standard stack that serves Eneo-maintained MCP tools.
+    # Unset where a deployment omits it. When the URL is set, Admin > Tools
+    # offers to add its servers; the token is the shared bearer both sides are
+    # configured with and is never stored in the DB.
+    tool_runtime_url: Optional[str] = None
+    tool_runtime_token: Optional[str] = None
 
     # Relevance floor (cosine similarity, -1..1) for inject-mode knowledge
     # retrieval: chunks scoring below it are dropped instead of injected.
@@ -550,6 +593,30 @@ class Settings(BaseSettings):
 
     # Tenant credential management
     tenant_credentials_enabled: bool = False
+
+    # Endpoints that configured outbound provider headers may be sent to, as a
+    # JSON list of URLs (e.g. ["https://gateway.internal/v1"]). Empty (default):
+    # any explicitly configured provider endpoint. See
+    # model_providers/domain/outbound_header_destinations.py for matching.
+    outbound_headers_allowed_destinations: list[str] = []
+
+    @field_validator("outbound_headers_allowed_destinations")
+    @classmethod
+    def validate_outbound_headers_allowed_destinations(cls, v: list[str]) -> list[str]:
+        from eneo.model_providers.domain.outbound_header_destinations import (
+            InvalidDestination,
+            parse_destination,
+        )
+
+        for index, entry in enumerate(v):
+            try:
+                parse_destination(entry)
+            except InvalidDestination as exc:
+                # The entry is not echoed: a malformed URL may carry credentials.
+                raise ValueError(
+                    f"OUTBOUND_HEADERS_ALLOWED_DESTINATIONS entry {index}: {exc}"
+                ) from exc
+        return v
 
     @field_validator("export_dir", mode="before")
     @classmethod
@@ -887,6 +954,20 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
+        if self.mcp_tool_file_max_bytes <= 0:
+            logging.error(
+                "MCP_TOOL_FILE_MAX_BYTES must be greater than zero. Current value: %s",
+                self.mcp_tool_file_max_bytes,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_file_max_count <= 0:
+            logging.error(
+                "MCP_TOOL_FILE_MAX_COUNT must be greater than zero. Current value: %s",
+                self.mcp_tool_file_max_count,
+            )
+            sys.exit(1)
+
         if self.mcp_circuit_breaker_failure_threshold <= 0:
             logging.error(
                 "MCP_CIRCUIT_BREAKER_FAILURE_THRESHOLD must be greater than zero. Current value: %s",
@@ -898,6 +979,41 @@ class Settings(BaseSettings):
             logging.error(
                 "MCP_CIRCUIT_BREAKER_COOLDOWN_SECONDS must be greater than zero. Current value: %s",
                 self.mcp_circuit_breaker_cooldown_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_app_resource_max_bytes <= 0:
+            logging.error(
+                "MCP_APP_RESOURCE_MAX_BYTES must be greater than zero. Current value: %s",
+                self.mcp_app_resource_max_bytes,
+            )
+            sys.exit(1)
+
+        # The upper bound is the token's maximum lifetime (signed_urls).
+        if not 0 < self.mcp_app_view_token_expiry_seconds <= 3600:
+            logging.error(
+                "MCP_APP_VIEW_TOKEN_EXPIRY_SECONDS must be between 1 and 3600. Current value: %s",
+                self.mcp_app_view_token_expiry_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_apps_enabled and not self.mcp_app_content_base_url:
+            logging.warning(
+                "MCP_APPS_ENABLED is set without MCP_APP_CONTENT_BASE_URL; "
+                "app views will not render until the content origin is configured."
+            )
+
+        # Views are another party's HTML; served from Eneo's own address they
+        # would not be isolated from it.
+        if (
+            self.mcp_app_content_base_url
+            and self.public_origin
+            and _same_origin(self.mcp_app_content_base_url, self.public_origin)
+        ):
+            logging.error(
+                "MCP_APP_CONTENT_BASE_URL must be a different origin than "
+                "PUBLIC_ORIGIN. Current value: %s",
+                self.mcp_app_content_base_url,
             )
             sys.exit(1)
 

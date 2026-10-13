@@ -3,7 +3,10 @@ import time
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from eneo.embedding_models.domain.chunking import build_text_splitter
+from eneo.embedding_models.domain.chunking import (
+    build_text_splitter,
+    effective_chunk_config,
+)
 from eneo.embedding_models.infrastructure.adapters.base import (
     PartialEmbeddingBatchError,
 )
@@ -15,10 +18,12 @@ from eneo.info_blobs.info_blob import (
     InfoBlobInDB,
 )
 from eneo.info_blobs.info_blob_chunk_repo import InfoBlobChunkRepo
+from eneo.info_blobs.source_metadata import build_source_header
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.main.logging import get_logger
+from eneo.tokens.token_utils import count_tokens
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -30,6 +35,11 @@ if TYPE_CHECKING:
     from eneo.websites.domain.website import Website
 
 logger = get_logger(__name__)
+
+
+# Share of a chunk's token budget the source metadata header may take when it
+# is prepended for embedding. The rest stays for the chunk's own text.
+SOURCE_HEADER_BUDGET_SHARE = 0.25
 
 
 def autocut(y_values: list[float], cutoff: int = 2) -> int:
@@ -78,10 +88,34 @@ class Datastore:
         self.chunk_repo = info_blob_chunk_repo
         self.create_embeddings_service = create_embeddings_service
 
+    @staticmethod
+    def _source_header(
+        info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"
+    ) -> str:
+        """Title and source properties prepended to every chunk for embedding.
+
+        Stored chunk text stays the document's own words: the header is only
+        part of what the embedding model sees, so a query about a document's
+        kind or subject area can find it, while excerpts shown to people and
+        the model remain clean. Empty for documents without source metadata.
+        """
+        if not info_blob.source_metadata:
+            return ""
+        config = effective_chunk_config(embedding_model)
+        return build_source_header(
+            title=info_blob.title,
+            entries=info_blob.source_metadata,
+            token_budget=int(config.chunk_size * SOURCE_HEADER_BUDGET_SHARE),
+            count_tokens=count_tokens,
+        )
+
     def _chunk_text(
         self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"
     ) -> list[InfoBlobChunk]:
-        splitter = build_text_splitter(embedding_model)
+        header = self._source_header(info_blob, embedding_model)
+        splitter = build_text_splitter(
+            embedding_model, reserved_tokens=count_tokens(header) if header else 0
+        )
 
         info_blob_chunks = [
             InfoBlobChunk(
@@ -120,6 +154,7 @@ class Datastore:
 
     async def add(self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"):
         logger.debug("Chunking text.")
+        header = self._source_header(info_blob, embedding_model)
         info_blob_chunks = await asyncio.to_thread(
             self._chunk_text, info_blob, embedding_model
         )
@@ -130,13 +165,30 @@ class Datastore:
             )
 
         logger.debug(f"Embedding {len(info_blob_chunks)} info-blob chunks.")
+        embedding_inputs = (
+            [
+                chunk.model_copy(update={"text": header + chunk.text})
+                for chunk in info_blob_chunks
+            ]
+            if header
+            else info_blob_chunks
+        )
         try:
             chunk_embedding_list = await self.create_embeddings_service.get_embeddings(
-                model=embedding_model, chunks=info_blob_chunks
+                model=embedding_model, chunks=embedding_inputs
             )
         except PartialEmbeddingBatchError as error:
             error.completed.close()
             raise error.cause from None
+
+        if header:
+            # Pair each embedding back with the chunk whose text we store: the
+            # header belongs to the vector, not to the excerpt.
+            by_chunk_no = {chunk.chunk_no: chunk for chunk in info_blob_chunks}
+            stored = ChunkEmbeddingList()
+            for embedded, embedding in chunk_embedding_list:
+                stored.add([by_chunk_no[embedded.chunk_no]], [embedding])
+            chunk_embedding_list = stored
 
         logger.debug(f"Adding {len(info_blob_chunks)} info-blob chunks to datastore.")
         await self._add(chunk_embedding_list)

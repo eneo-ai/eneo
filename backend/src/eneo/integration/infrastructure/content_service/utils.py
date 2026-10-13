@@ -353,8 +353,16 @@ def extract_text_from_pdf(binary_data: bytes) -> str:
     import pdfplumber
 
     try:
+        page_texts: list[str] = []
         with pdfplumber.open(io.BytesIO(binary_data)) as pdf:
-            extracted_text = " ".join(page.extract_text() or "" for page in pdf.pages)
+            for page in pdf.pages:
+                try:
+                    page_texts.append(page.extract_text() or "")
+                finally:
+                    # Release the parsed page; pdfplumber otherwise keeps every
+                    # page's objects in memory until the document closes.
+                    page.close()
+        extracted_text = " ".join(page_texts)
 
         # Remove null bytes (cause PostgreSQL UTF-8 encoding errors)
         sanitized = extracted_text.replace("\x00", "")
