@@ -357,11 +357,15 @@ class SharePointContentClient(BaseClient):
                     f"({len(payload)} > {self.max_download_bytes} bytes)"
                 )
 
-        if content_length is not None and len(payload) != content_length:
-            raise IncompleteDownloadError(
-                f"Incomplete download of '{file_name}' "
-                f"({len(payload)} of {content_length} bytes)"
-            )
+        # aiohttp hands back the decompressed body while Content-Length counts
+        # the wire bytes, so the two only agree for an unencoded body.
+        encoding = response.headers.get("Content-Encoding", "").strip().lower()
+        if encoding in ("", "identity"):
+            if content_length is not None and len(payload) != content_length:
+                raise IncompleteDownloadError(
+                    f"Incomplete download of '{file_name}' "
+                    f"({len(payload)} of {content_length} bytes)"
+                )
 
         return bytes(payload)
 

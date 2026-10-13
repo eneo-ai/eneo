@@ -1,3 +1,4 @@
+import gzip
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -7,10 +8,7 @@ from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     SharePointContentUnavailable,
 )
 from eneo.integration.infrastructure.content_service.utils import ExtractionResult
-from tests.unittests.integration.test_sharepoint_content_extraction import (
-    OCTET,
-    docx_bytes,
-)
+from tests.unittests.integration.sharepoint_fixtures import OCTET, docx_bytes
 
 
 @pytest.mark.asyncio
@@ -124,15 +122,15 @@ class TestFileDownloadExtraction:
             OCTET,
         )
 
+    @pytest.mark.parametrize("encoding", [None, "identity"])
     async def test_truncated_download_is_a_failure_not_an_empty_file(
-        self, client: SharePointContentClient
+        self, client: SharePointContentClient, encoding: str | None
     ):
         payload = docx_bytes("Downloaded body")
-        _serve(
-            client,
-            [payload[: len(payload) // 2]],
-            **{"Content-Length": str(len(payload))},
-        )
+        headers = {"Content-Length": str(len(payload))}
+        if encoding:
+            headers["Content-Encoding"] = encoding
+        _serve(client, [payload[: len(payload) // 2]], **headers)
 
         result = await client.get_file_extraction_by_id("drive", "item")
 
@@ -147,6 +145,24 @@ class TestFileDownloadExtraction:
         with pytest.raises(SharePointContentUnavailable) as exc_info:
             await client.get_file_content_by_id("drive", "item")
         assert str(exc_info.value).startswith("Incomplete download of 'report.docx'")
+
+    @pytest.mark.parametrize("encoding", ["gzip", "br", "deflate", "GZIP"])
+    async def test_decompressed_body_is_not_measured_against_the_wire_length(
+        self, client: SharePointContentClient, encoding: str
+    ):
+        payload = docx_bytes("Compressed on the wire")
+        wire_length = len(gzip.compress(payload))
+        assert wire_length != len(payload)
+        _serve(
+            client,
+            [payload],
+            **{"Content-Length": str(wire_length), "Content-Encoding": encoding},
+        )
+
+        result = await client.get_file_extraction_by_id("drive", "item")
+
+        assert result.failed is False
+        assert result.text is not None and "Compressed on the wire" in result.text
 
     async def test_download_without_content_length_is_trusted(
         self, client: SharePointContentClient
