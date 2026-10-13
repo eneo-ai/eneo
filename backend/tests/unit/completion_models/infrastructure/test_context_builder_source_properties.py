@@ -217,3 +217,25 @@ def test_rejected_candidates_do_not_rerender_the_selection(monkeypatch):
         + len(_source_header(chunk.info_blob_title, chunk.info_blob_id, []))
         for chunk in chunks
     )
+
+
+def test_adjacent_passages_after_an_overflow_still_fill_an_exact_budget():
+    source_id = uuid4()
+    words = [f"word{i}" for i in range(40)]
+    adjacent = [
+        RetrievedChunk(" ".join(words[8 * i : 8 * i + 10]), i, source_id)
+        for i in range(3)
+    ]
+    large = RetrievedChunk(" ".join(f"other{i}" for i in range(200)), 0, uuid4())
+    expected = _Prompt(version=2)
+    expected.add_knowledge(adjacent, max_tokens=10_000)
+    prompt = _Prompt(version=2)
+
+    prompt.add_knowledge(
+        [adjacent[0], large, adjacent[1], adjacent[2]],
+        max_tokens=count_tokens(expected.knowledge or ""),
+    )
+
+    # The overlap between the second and third passage is only credited by a
+    # rendering; the overflow on the large passage must not switch it off.
+    assert prompt.knowledge == expected.knowledge

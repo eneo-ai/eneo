@@ -474,9 +474,11 @@ class _Prompt:
                 # of a potentially very large retrieval candidate set. A chunk
                 # that does not fit is left out and the loop goes on, because
                 # a cheaper chunk further down the ranking may still fit. Once
-                # a rendering has shown an overflow, later rejections are taken
-                # from the estimate alone, so the list is never rendered once
-                # per rejected chunk.
+                # a rendering has shown an overflow, that verdict holds until
+                # the selection changes: later rejections come from the
+                # estimate alone, so the list is never rendered once per
+                # rejected chunk, and an accepted chunk reopens the boundary
+                # check, so overlap and shared headers keep being credited.
                 if overflow_rendered:
                     continue
                 candidate = self._render_reconstructed_chunks([*selected, chunk])
@@ -487,6 +489,7 @@ class _Prompt:
             selected.append(chunk)
             numbers.add(chunk.chunk_no)
             estimated_tokens = candidate_tokens
+            overflow_rendered = False
 
         # Tokenization at joined boundaries can differ from the running sum.
         # The stored cost and final admission always use the actual rendering.
