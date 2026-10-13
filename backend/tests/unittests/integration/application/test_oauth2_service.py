@@ -26,6 +26,7 @@ from eneo.integration.infrastructure.auth_service.confluence_auth_service import
 from eneo.integration.infrastructure.auth_service.sharepoint_auth_service import (
     SharepointAuthService,
 )
+from eneo.main.config import set_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.roles.permissions import Permission
@@ -46,7 +47,19 @@ class OAuthFlow:
 
 
 @pytest.fixture(params=["sharepoint", "confluence"])
-async def oauth_flow(request, integration_access, authenticated_integration_app):
+async def oauth_flow(
+    request, integration_access, authenticated_integration_app, test_settings
+):
+    set_settings(
+        test_settings.model_copy(
+            update={
+                "oauth_callback_url": "https://app.example/integrations/callback/token/",
+                "oauth_callback_urls": [
+                    "https://beta.example/integrations/callback/token/"
+                ],
+            }
+        )
+    )
     case = integration_access
     own = case.integration.tenant_integration
     own.integration.integration_type = request.param
@@ -158,6 +171,7 @@ async def test_personal_oauth_completes_in_own_tenant_and_state_cannot_be_replay
     assert json.loads(next(iter(flow.states.values()))) == {
         "user_id": str(flow.service.user.id),
         "tenant_integration_id": str(flow.own.id),
+        "redirect_uri": "https://app.example/integrations/callback/token/",
     }
     body = {
         "tenant_integration_id": str(flow.own.id),
@@ -178,14 +192,22 @@ async def test_personal_oauth_completes_in_own_tenant_and_state_cannot_be_replay
     assert flow.states == {}
     if flow.own.integration_type == "sharepoint":
         flow.provider.gen_auth_url.assert_awaited_once_with(
-            state, tenant_id=flow.service.user.tenant_id
+            state,
+            tenant_id=flow.service.user.tenant_id,
+            redirect_uri="https://app.example/integrations/callback/token/",
         )
         flow.provider.exchange_token.assert_awaited_once_with(
-            "test-code", tenant_id=flow.service.user.tenant_id
+            "test-code",
+            tenant_id=flow.service.user.tenant_id,
+            redirect_uri="https://app.example/integrations/callback/token/",
         )
     else:
-        flow.provider.gen_auth_url.assert_awaited_once_with(state)
-        flow.provider.exchange_token.assert_awaited_once_with("test-code")
+        flow.provider.gen_auth_url.assert_awaited_once_with(
+            state, redirect_uri="https://app.example/integrations/callback/token/"
+        )
+        flow.provider.exchange_token.assert_awaited_once_with(
+            "test-code", redirect_uri="https://app.example/integrations/callback/token/"
+        )
     flow.unused_provider.gen_auth_url.assert_not_awaited()
     flow.unused_provider.exchange_token.assert_not_awaited()
 
@@ -319,3 +341,45 @@ async def test_callback_does_not_reuse_existing_foreign_connection(oauth_flow):
     assert flow.tokens == []
     flow.provider.exchange_token.assert_not_awaited()
     flow.audit.log_async.assert_not_awaited()
+
+
+async def test_registered_beta_callback_survives_the_entire_oauth_flow(oauth_flow):
+    flow = oauth_flow
+    callback = "https://beta.example/integrations/callback/token/"
+    started = await flow.client.get(
+        f"/integrations/auth/{flow.own.id}/url/", params={"redirect_uri": callback}
+    )
+    assert started.status_code == 200
+    assert flow.provider.gen_auth_url.call_args.kwargs["redirect_uri"] == callback
+    response = await flow.client.post(
+        "/integrations/auth/callback/token/",
+        json={
+            "tenant_integration_id": str(flow.own.id),
+            "auth_code": "test-code",
+            "state": started.json()["state"],
+        },
+    )
+    assert response.status_code == 200
+    assert flow.provider.exchange_token.call_args.kwargs["redirect_uri"] == callback
+    assert flow.states == {}
+
+
+@pytest.mark.parametrize(
+    "callback",
+    [
+        "https://attacker.example/integrations/callback/token/",
+        "https://beta.example.attacker.example/integrations/callback/token/",
+        "https://beta.example/integrations/callback/token/?redirect=evil",
+        "https://beta.example/integrations/callback/token",
+    ],
+)
+async def test_unregistered_callback_is_rejected_before_oauth_starts(
+    oauth_flow, callback
+):
+    flow = oauth_flow
+    response = await flow.client.get(
+        f"/integrations/auth/{flow.own.id}/url/", params={"redirect_uri": callback}
+    )
+    assert response.status_code == 400
+    assert flow.states == {}
+    flow.provider.gen_auth_url.assert_not_awaited()

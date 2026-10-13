@@ -24,6 +24,21 @@ function getEnvValue(key: string, defaultValue?: string): string | undefined {
   return value;
 }
 
+/** Runtime opt-in destination; never expose a script URL or embedded credentials. */
+export function getNewAppUrl(): string | undefined {
+  const value = getEnvValue("NEW_APP_URL");
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) {
+      return undefined;
+    }
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
 export function getBackendUrl(): string | undefined {
   return getEnvValue("ENEO_BACKEND_URL");
 }
@@ -66,6 +81,7 @@ export function getEnvironmentConfig() {
     // feedbackFormUrl,
     integrationRequestFormUrl,
     helpCenterUrl,
+    newAppUrl: getNewAppUrl(),
     frontendVersion,
     gitInfo
   });

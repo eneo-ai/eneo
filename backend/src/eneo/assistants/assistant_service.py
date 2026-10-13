@@ -2442,9 +2442,6 @@ class AssistantService:
                             chunk.generated_file = image_file
                             yield chunk
 
-                        if chunk.response_type == ResponseType.ENEO_EVENT:
-                            yield chunk
-
                         if chunk.response_type == ResponseType.TOOL_CALL_DELTA:
                             # Shown while the call is written; the complete
                             # arguments are persisted from its TOOL_CALL chunk.

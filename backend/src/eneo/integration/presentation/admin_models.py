@@ -168,6 +168,10 @@ class SubscriptionRenewalResult(BaseModel):
 class ServiceAccountAuthStart(BaseModel):
     """Request model to start service account OAuth flow."""
 
+    redirect_uri: str | None = Field(
+        default=None, description="An exact operator-registered OAuth callback URL."
+    )
+
     client_id: str = Field(
         ...,
         description="Microsoft Entra ID Application (Client) ID",
