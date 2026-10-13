@@ -80,3 +80,65 @@ test("testing unsaved tenant-app credentials posts them as the body", async () =
     }
   ]);
 });
+
+test("listing an item's documents sends only the query parameters that are set", async () => {
+  const calls = [];
+  const integrations = initIntegrations({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return { items: [], total_count: 0, limit: 50, offset: 0, total_size: 0 };
+    }
+  });
+
+  const page = await integrations.knowledge.listDocuments({
+    knowledge: { id: "ik-1" },
+    space: { id: "space-1" },
+    q: "",
+    sort: "updated_at",
+    order: "desc",
+    limit: 50,
+    offset: 100
+  });
+
+  assert.equal(page.total_count, 0);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/",
+      request: {
+        method: "get",
+        params: {
+          path: { id: "space-1", integration_knowledge_id: "ik-1" },
+          query: { sort: "updated_at", order: "desc", limit: 50, offset: 100 }
+        }
+      }
+    }
+  ]);
+});
+
+test("listing an item's skipped documents reads the skipped endpoint", async () => {
+  const calls = [];
+  const skipped = { items: [{ file: "scan.pdf", reason: "No text layer" }], total: 1 };
+  const integrations = initIntegrations({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return skipped;
+    }
+  });
+
+  const result = await integrations.knowledge.listSkippedDocuments({
+    knowledge: { id: "ik-1" },
+    space: { id: "space-1" }
+  });
+
+  assert.deepEqual(result, skipped);
+  assert.deepEqual(calls, [
+    {
+      endpoint:
+        "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/skipped/",
+      request: {
+        method: "get",
+        params: { path: { id: "space-1", integration_knowledge_id: "ik-1" } }
+      }
+    }
+  ]);
+});
