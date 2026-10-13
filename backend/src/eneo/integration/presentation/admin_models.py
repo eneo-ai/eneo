@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -60,6 +60,18 @@ class TenantSharePointAppPublic(BaseModel):
         description="Email of the service account (only for service_account auth method)",
     )
     certificate_path: Optional[str]
+    auth_status: Literal["ok", "error", "unknown"] = Field(
+        "unknown",
+        description=(
+            "Credential health: 'error' when the latest token acquisition or "
+            "refresh failed, 'ok' after a success, 'unknown' before either."
+        ),
+    )
+    last_auth_error: Optional[str] = Field(
+        None, description="Message from the most recent credential failure"
+    )
+    last_auth_error_at: Optional[datetime] = None
+    last_auth_success_at: Optional[datetime] = None
     created_by: Optional[UUID]
     created_at: datetime
     updated_at: datetime

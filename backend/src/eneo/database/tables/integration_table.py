@@ -127,6 +127,17 @@ class IntegrationKnowledge(BasePublic):
     last_sync_summary: Mapped[Optional[Dict[str, int]]] = mapped_column(
         JSONB, nullable=True
     )
+    # Outcome of the most recent sync attempt: 'never' | 'success' | 'error'.
+    # last_synced_at is the last *successful* completion; last_sync_attempted_at
+    # moves on every attempt so a failing integration is distinguishable from
+    # one that simply had nothing to do.
+    last_sync_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="never"
+    )
+    last_sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_sync_attempted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     site_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sharepoint_subscription_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("sharepoint_subscriptions.id", ondelete="SET NULL"), nullable=True

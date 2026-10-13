@@ -171,8 +171,22 @@ class SharePointSearchResponse(BaseModel):
 
 class IntegrationKnowledgeMetaData(BaseModel):
     size: int
+    document_count: int = Field(
+        0, description="Number of documents currently indexed for this knowledge"
+    )
     last_sync_summary: Optional[Dict[str, Any]] = None
-    last_synced_at: Optional[datetime] = None
+    last_synced_at: Optional[datetime] = Field(
+        None, description="When the last successful sync completed"
+    )
+    last_sync_status: Literal["never", "success", "error"] = Field(
+        "never", description="Outcome of the most recent sync attempt"
+    )
+    last_sync_error: Optional[str] = Field(
+        None, description="Error message from the most recent failed sync"
+    )
+    last_sync_attempted_at: Optional[datetime] = Field(
+        None, description="When the most recent sync attempt started"
+    )
     sharepoint_subscription_expires_at: Optional[datetime] = Field(
         None,
         description="When the SharePoint webhook subscription expires (only for SharePoint integrations)",

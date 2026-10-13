@@ -1,7 +1,7 @@
 import json
 import secrets
 from datetime import datetime
-from typing import Annotated, Optional, cast
+from typing import TYPE_CHECKING, Annotated, Literal, Optional, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
@@ -43,6 +43,11 @@ from eneo.server.dependencies.container import get_container
 from eneo.settings.encryption_service import EncryptionService
 from eneo.users.user import UserInDB
 
+if TYPE_CHECKING:
+    from eneo.integration.domain.entities.tenant_sharepoint_app import (
+        TenantSharePointApp,
+    )
+
 logger = get_logger(__name__)
 router = APIRouter()
 
@@ -69,6 +74,29 @@ def _require_timestamp(value: datetime | None, field_name: str) -> datetime:
     if value is None:
         raise ValueError(f"{field_name} is missing")
     return value
+
+
+def _to_app_public(
+    app: "TenantSharePointApp", encryption_service: EncryptionService
+) -> TenantSharePointAppPublic:
+    return TenantSharePointAppPublic(
+        id=app.id,
+        tenant_id=app.tenant_id,
+        client_id=app.client_id,
+        client_secret_masked=encryption_service.mask_secret(app.client_secret),
+        tenant_domain=app.tenant_domain,
+        is_active=app.is_active,
+        auth_method=app.auth_method,
+        service_account_email=app.service_account_email,
+        certificate_path=app.certificate_path,
+        auth_status=cast(Literal["ok", "error", "unknown"], app.auth_status),
+        last_auth_error=app.last_auth_error,
+        last_auth_error_at=app.last_auth_error_at,
+        last_auth_success_at=app.last_auth_success_at,
+        created_by=app.created_by,
+        created_at=_require_timestamp(app.created_at, "app.created_at"),
+        updated_at=_require_timestamp(app.updated_at, "app.updated_at"),
+    )
 
 
 def _to_subscription_public(
@@ -378,20 +406,7 @@ async def configure_sharepoint_app(
                     f"Created new person-independent tenant_app integration for tenant {tenant_id}"
                 )
 
-        return TenantSharePointAppPublic(
-            id=app.id,
-            tenant_id=app.tenant_id,
-            client_id=app.client_id,
-            client_secret_masked=encryption_service.mask_secret(app.client_secret),
-            tenant_domain=app.tenant_domain,
-            is_active=app.is_active,
-            auth_method=app.auth_method,
-            service_account_email=app.service_account_email,
-            certificate_path=app.certificate_path,
-            created_by=app.created_by,
-            created_at=_require_timestamp(app.created_at, "app.created_at"),
-            updated_at=_require_timestamp(app.updated_at, "app.updated_at"),
-        )
+        return _to_app_public(app, encryption_service)
 
     except HTTPException:
         raise
@@ -444,20 +459,7 @@ async def get_sharepoint_app(
         if not app:
             return None
 
-        return TenantSharePointAppPublic(
-            id=app.id,
-            tenant_id=app.tenant_id,
-            client_id=app.client_id,
-            client_secret_masked=encryption_service.mask_secret(app.client_secret),
-            tenant_domain=app.tenant_domain,
-            is_active=app.is_active,
-            auth_method=app.auth_method,
-            service_account_email=app.service_account_email,
-            certificate_path=app.certificate_path,
-            created_by=app.created_by,
-            created_at=_require_timestamp(app.created_at, "app.created_at"),
-            updated_at=_require_timestamp(app.updated_at, "app.updated_at"),
-        )
+        return _to_app_public(app, encryption_service)
 
     except Exception as e:
         logger.error(f"Failed to get SharePoint app: {e}")
@@ -1040,6 +1042,70 @@ async def start_service_account_auth(
 
 
 @router.post(
+    "/sharepoint/service-account/auth/reauth",
+    response_model=ServiceAccountAuthStartResponse,
+    summary="Restart the service account sign-in with the stored app credentials",
+    description=(
+        "Start a new Microsoft sign-in for the already configured service "
+        "account, reusing the stored client ID, secret and tenant domain. Use it "
+        "when the refresh token has expired or been revoked, or when the service "
+        "account password changed. Imported knowledge is kept. Requires admin role."
+    ),
+    responses={
+        200: {"description": "OAuth authorization URL generated"},
+        400: {"description": "No service account is configured"},
+        401: {"description": "Authentication required"},
+        403: {"description": "Admin permissions required"},
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
+async def restart_service_account_auth(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> ServiceAccountAuthStartResponse:
+    user = container.user()
+    _require_sharepoint_webhook_client_state()
+
+    tenant_app_service: TenantSharePointAppService = (
+        container.tenant_sharepoint_app_service()
+    )
+    app = await tenant_app_service.get_active_app_for_tenant(user.tenant_id)
+    if app is None or not app.is_service_account():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active service account is configured for this organization.",
+        )
+
+    state = secrets.token_urlsafe(32)
+    await _store_oauth_state(
+        state,
+        {
+            "client_id": app.client_id,
+            "client_secret": app.client_secret,
+            "tenant_domain": app.tenant_domain,
+            "tenant_id": str(user.tenant_id),
+            "user_id": str(user.id),
+        },
+    )
+    auth_result = ServiceAccountAuthService().gen_auth_url(
+        state=state,
+        client_id=app.client_id,
+        client_secret=app.client_secret,
+        tenant_domain=app.tenant_domain,
+    )
+    logger.info(
+        f"Restarted service account OAuth flow for tenant {user.tenant_id} "
+        f"by user {user.id}"
+    )
+    return ServiceAccountAuthStartResponse(
+        auth_url=auth_result["auth_url"], state=state
+    )
+
+
+@router.post(
     "/sharepoint/service-account/auth/callback",
     response_model=TenantSharePointAppPublic,
     status_code=201,
@@ -1192,20 +1258,7 @@ async def service_account_auth_callback(
             f"({token_result.email}) by user {user.id}"
         )
 
-        return TenantSharePointAppPublic(
-            id=app.id,
-            tenant_id=app.tenant_id,
-            client_id=app.client_id,
-            client_secret_masked=encryption_service.mask_secret(app.client_secret),
-            tenant_domain=app.tenant_domain,
-            is_active=app.is_active,
-            auth_method=app.auth_method,
-            service_account_email=app.service_account_email,
-            certificate_path=app.certificate_path,
-            created_by=app.created_by,
-            created_at=_require_timestamp(app.created_at, "app.created_at"),
-            updated_at=_require_timestamp(app.updated_at, "app.updated_at"),
-        )
+        return _to_app_public(app, encryption_service)
 
     except HTTPException:
         raise
