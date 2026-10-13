@@ -51,6 +51,7 @@ async def test_classification_dry_run_reports_unavailable_capability_without_rem
     from eneo.mcp_servers.domain.capabilities import CapabilityAvailability
 
     assistant = SimpleNamespace(
+        id=uuid4(),
         enabled_capabilities=["image_generation"],
         completion_model=None,
         embedding_model_id=None,
@@ -65,6 +66,7 @@ async def test_classification_dry_run_reports_unavailable_capability_without_rem
         transcription_models=[],
         mcp_servers=[],
         assistants=[assistant],
+        default_assistant=None,
         group_chats=[],
         apps=[],
         services=[],
@@ -94,3 +96,66 @@ async def test_classification_dry_run_reports_unavailable_capability_without_rem
     assert result.affected_capabilities == ["image_generation"]
     assert result.space.enabled_capabilities == ["image_generation"]
     assert result.space.assistants == [assistant]
+    assert result.space.available_capabilities[0].available is True
+    assert result.affected_assistant_ids == frozenset({assistant.id})
+    space.update.assert_not_called()
+
+
+async def test_impact_preview_keeps_every_resource_list_and_accounts_for_default_seats():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    unsafe = SimpleNamespace(id=uuid4(), security_classification="low")
+    safe = SimpleNamespace(id=uuid4(), security_classification="high")
+    default = SimpleNamespace(
+        id=uuid4(),
+        completion_model=unsafe,
+        enabled_capabilities=[],
+        embedding_model_id=None,
+    )
+    assistant = SimpleNamespace(
+        id=uuid4(),
+        completion_model=safe,
+        enabled_capabilities=[],
+        embedding_model_id=None,
+    )
+    chat = SimpleNamespace(id=uuid4(), get_assistants=lambda: [default])
+    app = SimpleNamespace(id=uuid4(), completion_model=unsafe, transcription_model=None)
+    service_item = SimpleNamespace(id=uuid4(), completion_model=safe, groups=[])
+    space = SimpleNamespace(
+        default_assistant=default,
+        assistants=[assistant],
+        group_chats=[chat],
+        apps=[app],
+        services=[service_item],
+        completion_models=[unsafe, safe],
+        embedding_models=[],
+        transcription_models=[],
+        mcp_servers=[],
+        enabled_capabilities=[],
+        available_capabilities=[],
+        security_classification=None,
+    )
+    original = {
+        key: list(value)
+        for key, value in vars(space).items()
+        if isinstance(value, list)
+    }
+    service = _service()
+    service.get_space = AsyncMock(return_value=space)
+    service._get_actor = Mock(return_value=SimpleNamespace(can_edit_space=lambda: True))
+    service.security_classification_service = SimpleNamespace(
+        get_security_classification=AsyncMock(
+            return_value=SimpleNamespace(
+                is_greater_than=lambda classification: classification == "low"
+            )
+        )
+    )
+    result = await service.security_classification_impact_analysis(uuid4(), uuid4())
+    assert result.affected_group_chat_ids == frozenset({chat.id})
+    assert result.affected_app_ids == frozenset({app.id})
+    assert result.affected_service_ids == frozenset()
+    assert space.security_classification is None
+    assert {
+        key: value for key, value in vars(space).items() if isinstance(value, list)
+    } == original
