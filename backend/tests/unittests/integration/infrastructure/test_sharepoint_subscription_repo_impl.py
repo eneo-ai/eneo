@@ -75,3 +75,27 @@ async def test_other_database_errors_propagate_unchanged():
 
     with pytest.raises(RuntimeError):
         await repo.add(_subscription())
+
+
+async def test_relinking_targets_only_unlinked_rows_of_the_same_resource():
+    result = MagicMock(rowcount=2)
+    session, _ = _session(None)
+    session.execute = AsyncMock(return_value=result)
+    repo = SharePointSubscriptionRepositoryImpl(
+        session=session, mapper=SharePointSubscriptionMapper()
+    )
+    subscription = _subscription()
+    subscription.id = uuid4()
+
+    assert await repo.link_unreferenced_knowledge(subscription) == 2
+
+    statement = session.execute.await_args.args[0]
+    sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    assert "UPDATE integration_knowledge" in sql
+    assert f"sharepoint_subscription_id='{subscription.id.hex}'" in sql
+    assert "sharepoint_subscription_id IS NULL" in sql
+    assert f"user_integration_id = '{subscription.user_integration_id.hex}'" in sql
+    assert (
+        "coalesce(integration_knowledge.site_id, integration_knowledge.drive_id) = 'site-1'"
+        in sql
+    )

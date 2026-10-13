@@ -104,3 +104,14 @@ class SharePointSubscriptionRepository(ABC):
         Used to determine if subscription can be safely deleted (0 references).
         """
         ...
+
+    @abstractmethod
+    async def link_unreferenced_knowledge(
+        self, subscription: "SharePointSubscription"
+    ) -> int:
+        """Point knowledge rows for the subscription's resource at it.
+
+        Rows of the same user integration and site (or OneDrive drive) whose
+        link is still NULL get it; returns how many rows were linked.
+        """
+        ...

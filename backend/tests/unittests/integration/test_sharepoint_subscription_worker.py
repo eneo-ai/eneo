@@ -393,6 +393,9 @@ class TestRenewExpiringSubscriptions:
         mock_container.sharepoint_subscription_service().renew_subscription = AsyncMock(
             return_value=True
         )
+        mock_container.sharepoint_subscription_repo().link_unreferenced_knowledge = (
+            AsyncMock(return_value=2)
+        )
 
         # Patch sessionmanager and worker._create_container
         with patch(
@@ -409,6 +412,9 @@ class TestRenewExpiringSubscriptions:
         assert result["renewed"] == 1
         assert result["failed"] == 0
         mock_container.sharepoint_subscription_service().renew_subscription.assert_called_once()
+        mock_container.sharepoint_subscription_repo().link_unreferenced_knowledge.assert_awaited_once_with(
+            subscription
+        )
 
     @pytest.mark.asyncio
     async def test_returns_early_when_no_expiring_subscriptions(self, mock_container):
@@ -535,6 +541,7 @@ class TestRenewExpiringSubscriptions:
         mock_container.sharepoint_subscription_repo().update.assert_called_once_with(
             subscription
         )
+        mock_container.sharepoint_subscription_repo().link_unreferenced_knowledge.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_refreshes_token_before_renewal_savepoint(self, mock_container):

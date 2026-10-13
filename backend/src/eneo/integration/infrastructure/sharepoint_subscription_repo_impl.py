@@ -6,6 +6,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from typing_extensions import override
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeDBModel,
 )
@@ -187,3 +188,24 @@ class SharePointSubscriptionRepositoryImpl(
         count = result.scalar_one()
 
         return count
+
+    @override
+    async def link_unreferenced_knowledge(
+        self, subscription: SharePointSubscription
+    ) -> int:
+        stmt = (
+            sa.update(IntegrationKnowledgeDBModel)
+            .where(
+                IntegrationKnowledgeDBModel.sharepoint_subscription_id.is_(None),
+                IntegrationKnowledgeDBModel.user_integration_id
+                == subscription.user_integration_id,
+                sa.func.coalesce(
+                    IntegrationKnowledgeDBModel.site_id,
+                    IntegrationKnowledgeDBModel.drive_id,
+                )
+                == subscription.site_id,
+            )
+            .values(sharepoint_subscription_id=subscription.id)
+        )
+        result = await self.session.execute(stmt)
+        return affected_row_count(result)

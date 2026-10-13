@@ -183,6 +183,17 @@ async def renew_expiring_subscriptions(container: Container):
                     raise RuntimeError(
                         f"Renewal returned false for subscription {subscription.subscription_id}"
                     )
+                # Knowledge rows whose link was lost at import only receive
+                # webhooks once they point at the live subscription again.
+                linked = await container.sharepoint_subscription_repo().link_unreferenced_knowledge(
+                    subscription
+                )
+                if linked:
+                    logger.info(
+                        "Linked %d knowledge row(s) to SharePoint subscription %s",
+                        linked,
+                        subscription.subscription_id,
+                    )
             renewed_count += 1
 
         except Exception as exc:
