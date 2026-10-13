@@ -93,7 +93,8 @@ class ExtractionResult:
 
     @classmethod
     def no_text(cls, reason: str, content_type: str = "") -> "ExtractionResult":
-        assert reason in NO_TEXT_REASONS
+        if reason not in NO_TEXT_REASONS:
+            raise ValueError(f"Not a no-text reason: {reason}")
         return cls(skip_reason=reason, content_type=content_type)
 
     @classmethod

@@ -435,10 +435,10 @@ class SharePointContentService:
 
         The worker commits on a soft failure (see
         ``_schedule_post_commit_change_keys``), so the status written here is what
-        the UI shows. A fresh read keeps half-applied in-memory state (a delta
-        token that was never confirmed, a stale size) out of the row. Each
-        write is attempted on its own so a broken status row still leaves a
-        sync log, and neither can replace the exception being recorded.
+        the UI shows. The row is read again in this session so the status write
+        does not depend on the caller still holding an entity copy. Each write
+        is attempted on its own so a broken status row still leaves a sync log,
+        and neither can replace the exception being recorded.
         """
         if integration_knowledge_id is None:
             return
@@ -1511,7 +1511,8 @@ class SharePointContentService:
     ) -> None:
         # Only a parser that ran to completion on a complete download and
         # found nothing may remove the local copy; see NO_TEXT_REASONS.
-        assert reason in NO_TEXT_REASONS, reason
+        if reason not in NO_TEXT_REASONS:
+            raise ValueError(f"Not a no-text reason: {reason}")
         stats["skipped_items"] += 1
         stats["skipped_details"].append({"file": item_name, "reason": reason})
         await self._delete_local_sharepoint_item(

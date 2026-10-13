@@ -1973,7 +1973,7 @@ class TestGetFileContent:
     async def test_delete_helper_refuses_non_positive_reasons(
         self, service, mock_integration_knowledge
     ):
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError, match="no-text reason"):
             await service._delete_local_blob_for_unextractable_item(
                 item_id="item-1",
                 item_name="a.pdf",
