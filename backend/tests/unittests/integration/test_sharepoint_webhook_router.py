@@ -39,6 +39,7 @@ class WebhookApi:
 @pytest.fixture
 async def api():
     session = AsyncMock()
+    session.begin = MagicMock()
     subscription = SharePointSubscription(
         id=uuid4(),
         user_integration_id=uuid4(),
@@ -68,6 +69,7 @@ async def api():
         )
 
     container = MagicMock()
+    container.session.return_value = session
     container.sharepoint_webhook_service.return_value = service
     app = FastAPI()
     app.include_router(router, prefix="/integrations")
@@ -88,6 +90,34 @@ async def api():
             yield WebhookApi(
                 client, service, session, subscription_repo, subscription, job_service
             )
+
+
+def test_the_webhook_opens_no_transaction_before_the_body_is_read():
+    for route in router.routes:
+        if isinstance(route, APIRoute) and route.path.endswith("/webhook/"):
+            if "POST" in route.methods:
+                names = {
+                    getattr(sub.call, "__name__", "")
+                    for dependency in route.dependant.dependencies
+                    for sub in dependency.dependencies
+                }
+                assert "get_session" in names
+                assert "get_session_with_transaction" not in names
+                return
+    raise AssertionError("POST webhook route not found")
+
+
+async def test_a_body_exactly_at_the_cap_is_accepted(api):
+    body = (
+        b'{"value":[]' + b" " * (MAX_WEBHOOK_BODY_BYTES - len(b'{"value":[]}')) + b"}"
+    )
+    assert len(body) == MAX_WEBHOOK_BODY_BYTES
+
+    response = await api.client.post(
+        WEBHOOK, content=body, headers={"content-type": "application/json"}
+    )
+
+    assert response.status_code == 202
 
 
 def _notification(subscription_id: str = "sub-known") -> dict[str, object]:
@@ -163,6 +193,7 @@ async def test_bad_bodies_are_refused_before_any_lookup(api, body, headers):
     assert response.status_code == 400
     assert "detail" in response.json()
     api.subscription_repo.get_by_subscription_id.assert_not_called()
+    api.session.begin.assert_not_called()
     api.session.execute.assert_not_called()
 
 
@@ -186,6 +217,7 @@ async def test_valid_notification_queues_exactly_the_referencing_knowledge(api):
     response = await api.client.post(WEBHOOK, json={"value": [_notification()]})
 
     assert response.status_code == 202
+    api.session.begin.assert_called_once()
     statement = api.session.execute.await_args.args[0]
     sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
     assert f"sharepoint_subscription_id = '{api.subscription.id.hex}'" in sql
