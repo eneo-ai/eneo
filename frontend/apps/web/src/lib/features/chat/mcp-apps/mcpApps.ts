@@ -37,6 +37,9 @@ export function appViewTitle(call: McpAppCall | null | undefined): string {
   if (call?.is_bundled === true && call.tool_name === "create_chart") {
     return m.mcp_app_chart_title();
   }
+  if (call?.is_bundled === true && call.tool_name === "run_javascript") {
+    return m.mcp_app_compute_title();
+  }
   return call?.title || call?.tool_name || m.mcp_app_view_title();
 }
 

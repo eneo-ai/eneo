@@ -28,7 +28,14 @@ const MEMBERS: Record<Exclude<PermissionGroupId, "other">, readonly string[]> = 
   chat: ["personal_chat", "group_chats", "shared_spaces"],
   // The functions assistants offer (Admin > Tools > Functions); each is a permission of its
   // own, so a new function is visible here instead of lost among the chat rights.
-  functions: ["web_search", "image_generation", "file_analysis", "file_creation", "charts"],
+  functions: [
+    "web_search",
+    "image_generation",
+    "file_analysis",
+    "file_creation",
+    "charts",
+    "compute"
+  ],
   build: ["assistants", "apps", "services", "skills", "skills_management", "AI"],
   knowledge: ["collections", "websites", "integrations"],
   insight: ["insights", "assistant_debug"],

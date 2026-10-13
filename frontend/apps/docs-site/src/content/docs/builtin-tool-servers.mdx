@@ -185,7 +185,7 @@ Compose stack, sharing the frontend/backend release version and source revision.
 
 | Endpoint | Tools | Registered as |
 |---|---|---|
-| `/mcp/compute` | `run_javascript` | general server (**Compute**, built into Eneo) |
+| `/mcp/compute` | `run_javascript` | `compute` source (**Compute** function, built into Eneo) |
 | `/mcp/charts` | `create_chart` | `charts` source (**Charts** function, built into Eneo) |
 | `/mcp/file-analysis` | `inspect_table`, `query_table`, `assert_table` | `file_analysis` source (**Ask a file** function, built into Eneo) |
 | `/mcp/file-creation` | `create_document`, `edit_document`, `fill_template`, `create_spreadsheet` | `file_creation` source (**Create a file** function, built into Eneo) |
@@ -214,8 +214,10 @@ How it differs from a loopback server, and from an independently operated one:
   checks never serve stale content.
   Outputs return as standard embedded resources (documents, CSV exports) or
   image blocks (chart exports); interactive charts return validated chart data
-  in `structuredContent` for a self-contained MCP App. The app uses the official
-  `App` SDK and ECharts, with no network access. The runtime keeps no output copies.
+  in `structuredContent` for a self-contained MCP App, and query and compute
+  results carry their rows there for the table and result views. The apps use
+  the official `App` SDK (and ECharts for charts), with no network access. The
+  runtime keeps no output copies.
 - **No private state.** No database, no console, no registration sync. A
   disposable shared-budget cache of original bytes and parsed sheets is keyed by tenant, user and content hash
   and never stands in for the access check.

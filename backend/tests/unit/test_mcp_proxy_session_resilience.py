@@ -1533,6 +1533,31 @@ class TestTruncateToolResult:
             },
         ]
 
+    def test_csv_export_from_a_compute_provider_becomes_a_file(self):
+        result = {
+            "content": [
+                {"type": "text", "text": '{"ok": true}'},
+                {
+                    "type": "resource",
+                    "uri": "eneo-tool-runtime://compute/1/resultat.csv",
+                    "mime_type": "text/csv",
+                    "blob": "YSxiCjEsMg==",
+                },
+            ],
+            "is_error": False,
+        }
+
+        admitted = MCPProxySession([])._truncate_tool_result(  # pyright: ignore[reportPrivateUsage]
+            result, "compute"
+        )
+
+        assert admitted["content"][1] == {
+            "type": "file",
+            "data": "YSxiCjEsMg==",
+            "mime_type": "text/csv",
+            "filename": "resultat.csv",
+        }
+
     def test_blobs_from_other_servers_or_of_other_types_are_stripped(self):
         resource = {
             "type": "resource",

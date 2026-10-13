@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { REQUIRE_CONFINEMENT } from "../src/child";
 import { computeConfigSchema } from "../src/tools/compute/config";
 import { tabularConfigSchema } from "../src/tools/tabular/config";
-import { confinement, runIsolated } from "../src/sandbox";
+import { confinement, jobPaths, runIsolated } from "../src/sandbox";
 
 const config = computeConfigSchema.parse({});
 
@@ -33,6 +33,30 @@ describe("sandbox child", () => {
       10_000,
     );
     expect(outcome).toMatchObject({ ok: true, result: 42 });
+  });
+
+  test("writes a compute export into the directory the parent made for it", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "eneo-sandbox-export-"));
+    try {
+      const outputPath = join(directory, "result.csv");
+      const job = {
+        kind: "compute" as const,
+        code: "return [{ a: 1, b: 'x' }, { a: 2, b: 'y' }];",
+        input: null,
+        export: { outputPath, rowLimit: 10, maxBytes: 1024 * 1024 },
+      };
+      // The child may write there and nowhere else beyond its private directory.
+      expect(jobPaths(job)).toEqual({ write: [directory] });
+      expect(jobPaths({ ...job, export: undefined })).toEqual({});
+      const outcome = await runIsolated({ job, config }, 10_000);
+      expect(outcome).toMatchObject({
+        ok: true,
+        export: { columns: ["a", "b"], rows: 2, truncated: false, preview_rows: 2 },
+      });
+      expect(await Bun.file(outputPath).text()).toBe("a,b\r\n1,x\r\n2,y\r\n");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   test("the guest cannot reach host APIs even inside the child", async () => {

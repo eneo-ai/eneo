@@ -53,3 +53,4 @@ roles:
       - file_analysis
       - file_creation
       - charts
+      - compute
