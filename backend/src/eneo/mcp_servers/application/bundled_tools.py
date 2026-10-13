@@ -57,7 +57,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 # How long one process trusts a listed catalog before asking the runtime again.
-CATALOG_TTL_SECONDS = 300.0
 _catalogs: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 # The catalog each server's rows were last brought in line with, so a server
 # whose rows are current costs one lookup per answer.
@@ -79,7 +78,10 @@ async def live_bundled_catalog(server: MCPServer) -> list[dict[str, Any]] | None
     endpoint = endpoint_url(server)
     cached = _catalogs.get(endpoint)
     now = time.monotonic()
-    if cached is not None and now - cached[0] < CATALOG_TTL_SECONDS:
+    if (
+        cached is not None
+        and now - cached[0] < get_settings().bundled_catalog_ttl_seconds
+    ):
         return cached[1]
     try:
         async with MCPClient(server) as client:

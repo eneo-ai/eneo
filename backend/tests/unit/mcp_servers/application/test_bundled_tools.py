@@ -143,6 +143,21 @@ async def test_catalog_is_listed_once_per_endpoint_until_it_expires(monkeypatch)
     assert len(calls) == 2
 
 
+async def test_catalog_is_listed_again_once_its_ttl_has_passed(monkeypatch):
+    calls = _runtime(monkeypatch, [LIVE, LIVE])
+    monkeypatch.setattr(
+        bundled_tools,
+        "get_settings",
+        lambda: SimpleNamespace(mcp_apps_enabled=False, bundled_catalog_ttl_seconds=0),
+    )
+    server = _server()
+
+    await with_live_bundled_tools(server)
+    await with_live_bundled_tools(server)
+
+    assert len(calls) == 2
+
+
 async def test_unreachable_runtime_keeps_the_persisted_snapshot(monkeypatch):
     _runtime(monkeypatch, [MCPClientError("connection refused")])
     server = _server()
@@ -199,7 +214,7 @@ async def test_a_view_stored_now_is_shown_with_this_answer(monkeypatch, stored):
     monkeypatch.setattr(
         bundled_tools,
         "get_settings",
-        lambda: SimpleNamespace(mcp_apps_enabled=True),
+        lambda: SimpleNamespace(mcp_apps_enabled=True, bundled_catalog_ttl_seconds=300),
     )
 
     class _Session:

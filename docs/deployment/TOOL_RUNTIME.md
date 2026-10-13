@@ -319,7 +319,9 @@ cannot be replaced reliably, so the Word original is needed.
 
 The runtime's tools are Eneo's own code, so they are trusted like a built-in
 provider's. A completion lists the running runtime's catalog (cached per
-backend process for five minutes) and keeps only the administrator's per-tool
+backend process for `BUNDLED_CATALOG_TTL_SECONDS`, 300 by default; a
+development install sets it to a few seconds so a rebuilt view reaches chats
+at once) and keeps only the administrator's per-tool
 decisions (enabled, display name) from the stored rows, so a new runtime image
 is in use as soon as it runs; nobody has to press **Sync tools**. Pressing it
 still refreshes the stored rows the admin pages show, and the changes are
