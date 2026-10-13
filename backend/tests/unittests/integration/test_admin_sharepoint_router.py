@@ -26,6 +26,7 @@ from eneo.integration.presentation.admin_sharepoint_router import (
     _require_sharepoint_webhook_client_state,
     _store_oauth_state,
     list_sharepoint_subscriptions,
+    recreate_all_subscriptions,
     recreate_subscription,
     renew_expired_subscriptions,
     restart_service_account_auth,
@@ -370,3 +371,38 @@ def test_require_sharepoint_webhook_client_state_returns_trimmed_value():
         result = _require_sharepoint_webhook_client_state()
 
     assert result == "webhook-secret"
+
+
+@pytest.mark.asyncio
+async def test_recreate_all_recreates_every_tenant_subscription_and_reports_failures():
+    container, user = _build_container_with_admin_user()
+    healthy, broken = MagicMock(id=uuid4()), MagicMock(id=uuid4())
+    for sub in (healthy, broken):
+        sub.is_expired.return_value = False
+        sub.site_id, sub.drive_id = "site", "drive"
+    subscription_repo = AsyncMock()
+    subscription_repo.list_by_tenant.return_value = [healthy, broken]
+    container.sharepoint_subscription_repo.return_value = subscription_repo
+    integration = MagicMock()
+    integration.auth_type = "user_oauth"
+    integration.tenant_integration.tenant_id = user.tenant_id
+    container.user_integration_repo.return_value.one_or_none = AsyncMock(
+        return_value=integration
+    )
+    subscription_service = AsyncMock()
+    subscription_service.recreate_expired_subscription.side_effect = [True, False]
+    container.sharepoint_subscription_service.return_value = subscription_service
+
+    with patch(
+        f"{_ROUTER}._get_sharepoint_token_for_user_integration",
+        new=AsyncMock(return_value=MagicMock(access_token="t")),
+    ):
+        result = await recreate_all_subscriptions(container=container)
+
+    subscription_repo.list_by_tenant.assert_awaited_once_with(user.tenant_id)
+    assert [
+        call.kwargs["subscription"]
+        for call in subscription_service.recreate_expired_subscription.await_args_list
+    ] == [healthy, broken]
+    assert (result.total_subscriptions, result.recreated, result.failed) == (2, 1, 1)
+    assert str(broken.id) in result.errors[0]

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID, uuid4
 
@@ -14,6 +13,7 @@ from eneo.integration.domain.entities.oauth_token import OauthToken
 from eneo.integration.infrastructure.content_service.types import (
     SharePointTokenProtocol,
 )
+from eneo.integration.infrastructure.detached_tasks import run_after_commit
 from eneo.integration.presentation.models import (
     ConfluenceContentTaskParam,
     IntegrationType,
@@ -546,45 +546,19 @@ class IntegrationKnowledgeService:
         # Delete from database FIRST (within transaction)
         await self.integration_knowledge_repo.remove(id=knowledge.id)
 
-        # Cleanup Microsoft Graph subscription AFTER the database transaction completes
-        # Using fire-and-forget to avoid blocking the HTTP response
+        # The Graph call runs after this transaction commits, on a session of
+        # its own: the request session is closed by then, and the reference
+        # count must see the deleted row. A failure here is retried by the
+        # daily orphan cleanup job.
         if subscription_cleanup_info:
-            asyncio.create_task(
-                self._cleanup_subscription_async(
-                    subscription_id=subscription_cleanup_info["subscription_id"],
-                    token=_as_sharepoint_token(subscription_cleanup_info["token"]),
-                )
-            )
-
-    async def _cleanup_subscription_async(
-        self,
-        subscription_id: UUID,
-        token: SharePointTokenProtocol,
-    ) -> None:
-        """Clean up Microsoft Graph subscription asynchronously.
-
-        This runs as a fire-and-forget task AFTER the database transaction
-        has completed. This prevents HTTP calls to Microsoft Graph from
-        blocking the database connection pool.
-        """
-        try:
-            await self.sharepoint_subscription_service.delete_subscription_if_unused(
-                subscription_id=subscription_id,
-                token=token,
-            )
-            logger.info(
-                "Cleaned up subscription %s (if no longer referenced)",
-                subscription_id,
-            )
-        except Exception as exc:
-            # Log but don't raise - this is fire-and-forget
-            # The subscription will be cleaned up by the orphan cleanup cron job if needed
-            logger.warning(
-                "Failed to cleanup subscription %s: %s "
-                "(will be retried by daily orphan cleanup cron job at 02:00 UTC)",
-                subscription_id,
-                exc,
-                exc_info=True,
+            cleanup_subscription_id = subscription_cleanup_info["subscription_id"]
+            cleanup_token = _as_sharepoint_token(subscription_cleanup_info["token"])
+            run_after_commit(
+                self.space_repo.session,
+                lambda: self.sharepoint_subscription_service.delete_subscription_if_unused_detached(
+                    subscription_id=cleanup_subscription_id,
+                    token=cleanup_token,
+                ),
             )
 
     async def trigger_full_sync(

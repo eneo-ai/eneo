@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, List, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 from typing_extensions import override
 
 from eneo.database.tables.integration_table import (
@@ -18,6 +19,7 @@ from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
 from eneo.integration.domain.repositories.sharepoint_subscription_repo import (
+    SharePointSubscriptionExists,
     SharePointSubscriptionRepository,
 )
 from eneo.integration.infrastructure.mappers.sharepoint_subscription_mapper import (
@@ -43,6 +45,18 @@ class SharePointSubscriptionRepositoryImpl(
         super().__init__(
             session=session, model=SharePointSubscriptionDBModel, mapper=mapper
         )
+
+    @override
+    async def add(self, obj: SharePointSubscription) -> SharePointSubscription:
+        # The insert runs in a SAVEPOINT so a unique violation leaves the
+        # caller's transaction usable for the re-read.
+        try:
+            async with self.session.begin_nested():
+                return await super().add(obj)
+        except IntegrityError as exc:
+            raise SharePointSubscriptionExists(
+                obj.user_integration_id, obj.site_id
+            ) from exc
 
     @override
     async def get_by_user_and_site(

@@ -855,6 +855,83 @@ async def renew_expired_subscriptions(
 
 
 @router.post(
+    "/sharepoint/subscriptions/recreate-all",
+    response_model=SubscriptionRenewalResult,
+    summary="Recreate every SharePoint subscription of the tenant",
+    description=(
+        "Recreate all of the tenant's SharePoint webhook subscriptions in place, "
+        "whether expired or not, so Graph posts to the currently configured "
+        "notification URL. Use it after the public origin changed. Preserves "
+        "all integration relationships. Requires admin role."
+    ),
+    responses={
+        200: {"description": "Recreation completed (check result for details)"},
+        401: {"description": "Authentication required"},
+        403: {"description": "Admin permissions required"},
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
+async def recreate_all_subscriptions(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> SubscriptionRenewalResult:
+    user = container.user()
+    subscription_repo = container.sharepoint_subscription_repo()
+    subscription_service = container.sharepoint_subscription_service()
+    user_integration_repo = container.user_integration_repo()
+
+    subscriptions = await subscription_repo.list_by_tenant(user.tenant_id)
+    logger.info(
+        f"Admin {user.id} initiated recreation of {len(subscriptions)} subscriptions "
+        f"for tenant {user.tenant_id}"
+    )
+
+    recreated = 0
+    failed = 0
+    errors: list[str] = []
+    for sub in subscriptions:
+        try:
+            user_integration = await user_integration_repo.one_or_none(
+                id=sub.user_integration_id
+            )
+            if (
+                user_integration is None
+                or user_integration.tenant_integration.tenant_id != user.tenant_id
+            ):
+                raise ValueError(
+                    f"User integration {sub.user_integration_id} not found"
+                )
+            token = await _get_sharepoint_token_for_user_integration(
+                user_integration=user_integration, container=container
+            )
+            if await subscription_service.recreate_expired_subscription(
+                subscription=sub,
+                token=token,
+                is_onedrive=_is_onedrive_subscription(sub),
+            ):
+                recreated += 1
+            else:
+                raise RuntimeError("Graph did not accept the new subscription")
+        except Exception as exc:
+            logger.error(
+                f"Error recreating subscription {sub.id}: {exc}", exc_info=True
+            )
+            failed += 1
+            errors.append(f"Subscription {sub.id}: {exc}")
+
+    return SubscriptionRenewalResult(
+        total_subscriptions=len(subscriptions),
+        expired_count=sum(1 for sub in subscriptions if sub.is_expired()),
+        recreated=recreated,
+        failed=failed,
+        errors=errors,
+    )
+
+
+@router.post(
     "/sharepoint/subscriptions/{subscription_id}/recreate",
     response_model=SharePointSubscriptionPublic,
     summary="Recreate a specific SharePoint subscription",

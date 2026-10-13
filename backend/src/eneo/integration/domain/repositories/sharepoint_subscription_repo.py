@@ -9,6 +9,18 @@ if TYPE_CHECKING:
     )
 
 
+class SharePointSubscriptionExists(Exception):
+    """A subscription for this (user integration, site) was stored concurrently."""
+
+    def __init__(self, user_integration_id: UUID, site_id: str) -> None:
+        super().__init__(
+            f"Subscription already exists for user integration {user_integration_id} "
+            f"and site {site_id}"
+        )
+        self.user_integration_id = user_integration_id
+        self.site_id = site_id
+
+
 class SharePointSubscriptionRepository(ABC):
     """Repository for managing SharePoint webhook subscriptions."""
 
