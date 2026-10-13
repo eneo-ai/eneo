@@ -67,6 +67,7 @@
         "@vitest/browser": "4.1.11",
         "@vitest/browser-playwright": "4.1.11",
         "@vitest/coverage-v8": "4.1.11",
+        "axe-core": "4.12.1",
         "bits-ui": "^2.18.1",
         "clsx": "^2.1.1",
         "docx-preview": "^0.4.1",

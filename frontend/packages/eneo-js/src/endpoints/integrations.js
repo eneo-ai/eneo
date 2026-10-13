@@ -442,6 +442,19 @@ export function initIntegrations(client) {
             }
           );
           return res;
+        },
+
+        /**
+         * Restart the Microsoft sign-in for the configured service account.
+         * Keeps the app and its imported knowledge; the existing callback completes it.
+         * @returns {Promise<{auth_url: string, state: string}>}
+         * @throws {EneoError}
+         * */
+        restartServiceAccountAuth: async () => {
+          const res = await client.fetch("/api/v1/admin/sharepoint/service-account/auth/reauth", {
+            method: "post"
+          });
+          return res;
         }
       }
     }
