@@ -426,6 +426,19 @@ export function initIntegrations(client) {
         },
 
         /**
+         * Recreate every SharePoint subscription of the tenant, expired or not,
+         * so Graph posts to the currently configured public address.
+         * @returns {Promise<import("../types/schema").components["schemas"]["SubscriptionRenewalResult"]>}
+         * @throws {EneoError}
+         * */
+        recreateAllSubscriptions: async () => {
+          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/recreate-all", {
+            method: "post"
+          });
+          return res;
+        },
+
+        /**
          * Recreate a specific SharePoint subscription
          * @param {{id: string}} subscription The subscription to recreate
          * @throws {EneoError}
@@ -441,6 +454,20 @@ export function initIntegrations(client) {
               }
             }
           );
+          return res;
+        },
+
+        /**
+         * Test the stored SharePoint app (tenant app or service account) with a
+         * full token round trip; the backend records the outcome as the app's
+         * credential health.
+         * @returns {Promise<import("../types/schema").components["schemas"]["TenantAppTestResult"]>}
+         * @throws {EneoError}
+         * */
+        testStoredConnection: async () => {
+          const res = await client.fetch("/api/v1/admin/sharepoint/app/test", {
+            method: "post"
+          });
           return res;
         },
 

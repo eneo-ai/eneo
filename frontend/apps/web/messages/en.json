@@ -1832,6 +1832,8 @@
   "sharepoint_auth_guidance_invalid_client": "The client secret is wrong or has expired. Create a new secret in Entra ID and enter its value, not its ID.",
   "sharepoint_auth_guidance_interaction_required": "Microsoft requires the service account to sign in again, for example because of multi-factor authentication or a conditional access policy.",
   "sharepoint_auth_guidance_invalid_grant": "The saved sign-in is no longer valid. Sign in again with the service account.",
+  "sharepoint_stored_connection_ok": "The connection works",
+  "sharepoint_stored_connection_description": "Tests the stored credentials with Microsoft and updates the credential status.",
   "sharepoint_credentials": "Credentials",
   "redirecting": "Redirecting...",
   "service_account_configured": "Service Account Configured!",

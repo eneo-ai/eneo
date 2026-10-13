@@ -1865,6 +1865,8 @@
   "sharepoint_auth_guidance_invalid_client": "Klienthemligheten är fel eller har gått ut. Skapa en ny hemlighet i Entra ID och ange dess värde, inte dess ID.",
   "sharepoint_auth_guidance_interaction_required": "Microsoft kräver att tjänstekontot loggar in igen, till exempel på grund av multifaktorautentisering eller en villkorlig åtkomstpolicy.",
   "sharepoint_auth_guidance_invalid_grant": "Den sparade inloggningen gäller inte längre. Logga in igen med tjänstekontot.",
+  "sharepoint_stored_connection_ok": "Anslutningen fungerar",
+  "sharepoint_stored_connection_description": "Testar de sparade inloggningsuppgifterna mot Microsoft och uppdaterar inloggningsstatusen.",
   "sharepoint_credentials": "Inloggningsuppgifter",
   "redirecting": "Omdirigerar...",
   "service_account_configured": "Tjänstekonto konfigurerat!",
