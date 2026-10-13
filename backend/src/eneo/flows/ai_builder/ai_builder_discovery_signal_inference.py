@@ -114,8 +114,8 @@ _COMPARISON_REQUEST_MARKERS = (
 def mentions_comparison_request(text: str) -> bool:
     """Whether the user's own words ask for a comparison or validation.
 
-    Read by the profile (comparison intent) and by the interaction policy: a
-    brief that speaks of comparing is asked how, never assumed not to.
+    Read by the interaction policy: a brief that speaks of comparing is asked
+    how, never assumed not to.
     """
 
     return contains_any_token_prefix(text, _COMPARISON_REQUEST_MARKERS)

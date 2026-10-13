@@ -5,6 +5,9 @@ from uuid import uuid4
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
+from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
+    build_flow_discovery_defaults,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
@@ -284,10 +287,7 @@ class TestEditScopePolicy:
 
         request_window = build_active_request_window(
             conversation,
-            flow_defaults=build_discovery_profile(
-                conversation[:1],
-                flow=flow,
-            ).flow_defaults,
+            flow_defaults=build_flow_discovery_defaults(flow),
         )
 
         assert "word dokument istället för en pdf" in request_window.text

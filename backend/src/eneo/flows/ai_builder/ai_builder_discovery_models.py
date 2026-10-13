@@ -25,13 +25,6 @@ from eneo.flows.ai_builder.question_catalog import QuestionExposure
 
 DiscoverySeverity = Literal["blocking", "info"]
 DiscoveryLanguage = Literal["sv", "en"]
-ReferenceSourceStatus = Literal[
-    "not_requested",
-    "missing",
-    "same_run_sources",
-    "existing_flow_or_knowledge",
-    "unclear",
-]
 
 
 @dataclass(frozen=True)
@@ -70,12 +63,6 @@ class BackendQuestion:
     assistant_text: str
 
 
-@dataclass(frozen=True, slots=True)
-class ReferenceSourceResolution:
-    status: ReferenceSourceStatus
-    reason: str
-
-
 @dataclass(frozen=True)
 class DiscoveryAnalysis:
     issues: tuple[DiscoveryIssue, ...]
@@ -98,7 +85,6 @@ class DiscoveryProfile:
     language: DiscoveryLanguage
     text: str
     answers: dict[str, set[str]]
-    flow_defaults: dict[str, set[str]]
     capabilities: "FlowCapabilityProfile"
     edit_scope: "EditScopeResolution"
     input_intent: InputIntentResolution
@@ -106,8 +92,6 @@ class DiscoveryProfile:
     planning_state: PlanningState
     flow: Flow | None
     edit_mode: bool
-    comparison_requested: bool
-    reference_source: ReferenceSourceResolution
     document_like_input: bool
     audio_like_input: bool
     final_output_text_or_docx: bool

@@ -10,6 +10,9 @@ from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
+from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
+    mentions_comparison_request,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -84,16 +87,8 @@ def _resolved_slot(
 
 
 def test_comparison_request_recognizes_swedish_compound_inflection() -> None:
-    profile = build_discovery_profile(
-        [
-            ConversationMessage(
-                role="user",
-                content="Jag vill ha ett jämförelseflöde.",
-            )
-        ]
-    )
-
-    assert profile.comparison_requested is True
+    # Mutant: match whole words instead of word beginnings.
+    assert mentions_comparison_request("Jag vill ha ett jämförelseflöde.") is True
 
 
 def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities() -> (

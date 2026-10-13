@@ -9,10 +9,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryLanguage,
     DiscoveryProfile,
-    ReferenceSourceResolution,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
-    mentions_comparison_request,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
@@ -60,43 +56,6 @@ _PROFILE_DEFAULT_ANSWER_SOURCES: frozenset[SlotSource] = frozenset(
         "flow_default",
         "policy_default",
     }
-)
-
-
-_DOCUMENT_PACKAGE_PHRASES: tuple[str, ...] = (
-    "dokumentpaket",
-    "document package",
-    "flera relaterade pdf",
-    "multiple related pdf",
-    "flera dokument i samma ärende",
-    "multiple documents for the same case",
-)
-
-
-_SAME_RUN_REFERENCE_MARKERS = (
-    "same run",
-    "samma körning",
-    "ladda upp flera pdf",
-    "ladda upp flera pdf:er",
-    "ladda upp flera dokument",
-    "upload multiple pdf",
-    "upload several pdf",
-    "upload multiple documents",
-    *_DOCUMENT_PACKAGE_PHRASES,
-)
-
-_EXISTING_REFERENCE_MARKERS = (
-    "earlier saved",
-    "tidigare sparade",
-    "previous material",
-    "tidigare material",
-    "knowledge base",
-    "kunskapsbas",
-    "schema",
-    "regler",
-    "rules",
-    "checklista",
-    "checklist",
 )
 
 
@@ -199,20 +158,10 @@ def build_discovery_profile(
         active_answer_signals=active_answers,
         active_explicit_question_ids=active_explicit_question_ids,
     )
-    comparison_requested = _comparison_requested(
-        text=text,
-        planning_state=planning_state,
-    )
-    reference_source = resolve_reference_source(
-        text=text,
-        answers=answers,
-        comparison_requested=comparison_requested,
-    )
     return DiscoveryProfile(
         language=resolve_discovery_language(conversation, text),
         text=text,
         answers=answers,
-        flow_defaults=flow_defaults,
         capabilities=capabilities,
         edit_scope=edit_scope,
         input_intent=input_intent,
@@ -220,8 +169,6 @@ def build_discovery_profile(
         planning_state=planning_state,
         flow=flow,
         edit_mode=flow is not None,
-        comparison_requested=comparison_requested,
-        reference_source=reference_source,
         document_like_input=input_intent.document_runtime_input_requested
         or "documents" in default_input_modes,
         audio_like_input=input_intent.audio_requested or "audio" in default_input_modes,
@@ -230,67 +177,6 @@ def build_discovery_profile(
             or output_intent.content_shape == "structured_report"
             or bool(default_output_mode)
         ),
-    )
-
-
-def _comparison_requested(
-    *,
-    text: str,
-    planning_state: PlanningState,
-) -> bool:
-    if mentions_comparison_request(text):
-        return True
-    goal = planning_state.resolved_slots.get("post_processing_goal")
-    return goal is not None and goal.value == "compare_or_validate"
-
-
-def resolve_reference_source(
-    *,
-    text: str,
-    answers: dict[str, set[str]],
-    comparison_requested: bool,
-) -> ReferenceSourceResolution:
-    if not comparison_requested:
-        return ReferenceSourceResolution(
-            status="not_requested",
-            reason="comparison_or_validation_not_requested",
-        )
-
-    comparison_scope = answers.get("comparison_scope", set())
-    if comparison_scope:
-        if comparison_scope.intersection({"same_run_compare"}):
-            return ReferenceSourceResolution(
-                status="same_run_sources",
-                reason="comparison_scope_answer_same_run",
-            )
-        if "compare_previous_material" in comparison_scope:
-            return ReferenceSourceResolution(
-                status="existing_flow_or_knowledge",
-                reason="comparison_scope_answer_existing_material",
-            )
-        if "no_direct_compare" in comparison_scope:
-            return ReferenceSourceResolution(
-                status="not_requested",
-                reason="comparison_scope_answer_no_direct_compare",
-            )
-        return ReferenceSourceResolution(
-            status="unclear",
-            reason="comparison_scope_answer_unclear",
-        )
-
-    if contains_any_phrase(text, _SAME_RUN_REFERENCE_MARKERS):
-        return ReferenceSourceResolution(
-            status="same_run_sources",
-            reason="same_run_reference_text",
-        )
-    if contains_any_phrase(text, _EXISTING_REFERENCE_MARKERS):
-        return ReferenceSourceResolution(
-            status="existing_flow_or_knowledge",
-            reason="existing_reference_text",
-        )
-    return ReferenceSourceResolution(
-        status="missing",
-        reason="comparison_requested_without_reference_source",
     )
 
 
