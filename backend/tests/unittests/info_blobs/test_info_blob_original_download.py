@@ -316,6 +316,7 @@ def test_original_download_openapi_declares_json_error_contracts():
         "Content-Disposition",
         "Content-Length",
         "Repr-Digest",
+        "ETag",
     }
 
     for status in ("401", "403", "404", "409", "503"):

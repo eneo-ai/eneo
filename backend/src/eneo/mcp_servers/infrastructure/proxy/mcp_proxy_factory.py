@@ -62,6 +62,7 @@ class MCPProxySessionFactory:
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
         app_view_repo: "McpAppViewRepo | None" = None,
         for_view: bool = False,
+        tenant_id: UUID | None = None,
     ) -> MCPProxySession:
         """
         Create a new MCPProxySession for the given servers.
@@ -72,6 +73,8 @@ class MCPProxySessionFactory:
                 never fetches views.
             for_view: The caller is one of a server's views, not the model; it
                 is offered the tools the server makes visible to its views.
+            tenant_id: The tenant whose signed original links a tool result may
+                introduce into the conversation's reference map.
 
         Returns:
             Configured MCPProxySession instance
@@ -95,6 +98,7 @@ class MCPProxySessionFactory:
         return MCPProxySession(
             mcp_servers=mcp_servers,
             auth_credentials_map=auth_map,
+            tenant_id=tenant_id,
             identity_headers=identity_headers,
             mcp_server_tool_repo=mcp_server_tool_repo,
             app_view_repo=app_view_repo,

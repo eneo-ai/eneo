@@ -9292,6 +9292,7 @@ export interface components {
       | "integration_connected"
       | "integration_disconnected"
       | "integration_knowledge_created"
+      | "integration_knowledge_updated"
       | "integration_knowledge_deleted"
       | "integration_knowledge_synced"
       | "completion_model_created"
@@ -15116,6 +15117,8 @@ export interface components {
       wrapper_id?: string | null;
       /** Wrapper Name */
       wrapper_name?: string | null;
+      /** @default index_and_tool */
+      tabular_policy?: components["schemas"]["TabularPolicy"];
       /** Permissions */
       permissions?: components["schemas"]["ResourcePermission"][];
       metadata: components["schemas"]["IntegrationKnowledgeMetaData"];
@@ -15278,6 +15281,12 @@ export interface components {
      * @enum {string}
      */
     KnowledgeMode: "tool" | "inject";
+    /**
+     * TabularPolicy
+     * @description How a knowledge source's spreadsheet files reach an assistant.
+     * @enum {string}
+     */
+    TabularPolicy: "index_and_tool" | "tool_only";
     /** Limit */
     Limit: {
       /** Max Files */
@@ -22136,6 +22145,8 @@ export interface components {
       } | null;
       /** Generated File Ids */
       generated_file_ids?: string[] | null;
+      /** Referenced File Ids */
+      referenced_file_ids?: string[] | null;
       /** Structured Content */
       structured_content?: {
         [key: string]: unknown;
@@ -22465,7 +22476,8 @@ export interface components {
     /** UpdateIntegrationKnowledgeRequest */
     UpdateIntegrationKnowledgeRequest: {
       /** Name */
-      name: string;
+      name?: string | null;
+      tabular_policy?: components["schemas"]["TabularPolicy"] | null;
     };
     /** UpdateIntegrationKnowledgeWrapperRequest */
     UpdateIntegrationKnowledgeWrapperRequest: {
@@ -26929,7 +26941,9 @@ export interface operations {
       query: {
         token: string;
       };
-      header?: never;
+      header?: {
+        "if-none-match"?: string | null;
+      };
       path: {
         id: string;
       };
@@ -26946,11 +26960,20 @@ export interface operations {
           "Content-Length"?: number;
           /** @description SHA-256 digest of the original representation */
           "Repr-Digest"?: string;
+          /** @description Content digest for If-None-Match revalidation */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
           "*/*": string;
         };
+      };
+      /** @description Access revalidated; original content is unchanged */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Unauthorized */
       401: {
@@ -30204,6 +30227,8 @@ export interface operations {
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Referenced File Ids */
+                    referenced_file_ids?: string[] | null;
                     /** Structured Content */
                     structured_content?: {
                       [key: string]: unknown;
@@ -30275,6 +30300,8 @@ export interface operations {
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Referenced File Ids */
+                    referenced_file_ids?: string[] | null;
                     /** Structured Content */
                     structured_content?: {
                       [key: string]: unknown;
@@ -30346,6 +30373,8 @@ export interface operations {
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Referenced File Ids */
+                    referenced_file_ids?: string[] | null;
                     /** Structured Content */
                     structured_content?: {
                       [key: string]: unknown;

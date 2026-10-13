@@ -390,6 +390,18 @@ class Assistant(Entity):
             "narrow instead of widen, pass a source_id or a document_id as "
             "'within' to knowledge__search_knowledge: it then searches only "
             "that source or that document.\n"
+            "8. Some knowledge results come with a 'File reference' entry "
+            "(filename, mimetype, file_ref eneo-file:...): the document's "
+            "original file. When the question needs computation, filtering, "
+            "sorting, aggregation or a chart over a spreadsheet or CSV "
+            "document, do not calculate from text excerpts: pass that "
+            "file_ref (with the filename) to the table tools (inspect_table, "
+            "then query_table or assert_table) or to create_chart or "
+            "create_spreadsheet, exactly as for an attached file. Documents "
+            "listed as matching by title have no searchable passages; open "
+            "them this way, or with knowledge__read_source for their "
+            "description. Prose documents are read with "
+            "knowledge__read_source.\n"
             "Knowledge sources:\n" + "\n".join(lines)
         )
 

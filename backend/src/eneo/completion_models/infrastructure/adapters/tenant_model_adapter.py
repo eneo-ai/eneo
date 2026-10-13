@@ -5,11 +5,11 @@ import binascii
 import json
 import re
 import uuid
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
-    AsyncIterator,
     Literal,
     NoReturn,
     Optional,
@@ -18,6 +18,7 @@ from typing import (
     cast,
 )
 from urllib.parse import urlsplit, urlunsplit
+from uuid import UUID
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -142,12 +143,16 @@ def _mint_ref_id(existing_prefixes: set[str]) -> uuid.UUID:
     return ref_id
 
 
+ReferenceLinkVerifier = Callable[[str], "tuple[str, UUID] | None"]
+
+
 def _build_tool_result_with_references(
     content_list: list[dict[str, Any]],
-    tool_call_id: Optional[str],
-    mcp_tool_name: Optional[str],
+    tool_call_id: str | None,
+    mcp_tool_name: str | None,
     existing_prefixes: set[str],
-) -> tuple[str, str, list[McpToolReference], list[GeneratedFile]]:
+    verify_reference_link: ReferenceLinkVerifier | None = None,
+) -> tuple[str, str, list[McpToolReference], list[GeneratedFile], dict[UUID, str]]:
     """Build LLM-facing and user-facing tool result texts; capture resource refs.
 
     Two texts are produced because they serve different audiences:
@@ -179,12 +184,21 @@ def _build_tool_result_with_references(
     ``GeneratedFile`` values that the ask path persists as generated files.
     The base64 never reaches the model or the persisted result text; both see
     a short placeholder instead.
+
+    A non-image ``resource_link`` whose URL ``verify_reference_link`` accepts
+    as an Eneo-signed original (a knowledge document a tool hands over) is
+    returned in the admitted map for the proxy's reference allow-list and is
+    shown to the model as a credential-free file reference entry, the same
+    shape as an attachment's. The link itself never reaches the model or the
+    persisted result; the reference row keeps a credential-free uri.
     """
     text_parts: list[str] = []
     resource_texts: list[str] = []
     llm_blocks: list[str] = []
+    reference_lines: list[str] = []
     refs: list[McpToolReference] = []
     images: list[GeneratedFile] = []
+    admitted: dict[UUID, str] = {}
     # Placeholders number images and documents separately ("Image N",
     # "File N"); replay appends reference urls in the same numbering.
     pictures = 0
@@ -270,12 +284,48 @@ def _build_tool_result_with_references(
                 MCP_FILE_PLACEHOLDER_TEMPLATE.format(index=documents, filename=filename)
             )
         elif block_type == "resource_link":
+            uri = ci.get("uri") or ""
+            mime = ci.get("mime_type") or ""
+            verified = (
+                verify_reference_link(uri)
+                if uri and verify_reference_link is not None
+                else None
+            )
+            if verified is not None:
+                kind, resource_id = verified
+                link_meta = dict(ci.get("meta") or {})
+                filename = ci.get("name") or link_meta.get("title") or "document"
+                admitted[resource_id] = uri
+                reference_lines.append(
+                    "File reference: "
+                    + json.dumps(
+                        {
+                            "kind": "document",
+                            "filename": filename,
+                            "mimetype": mime or None,
+                            "file_ref": file_handle(resource_id),
+                            "document_id": link_meta.get("info_blob_id")
+                            or str(resource_id),
+                        }
+                    )
+                )
+                refs.append(
+                    McpToolReference(
+                        id=_mint_ref_id(existing_prefixes),
+                        tool_call_id=tool_call_id,
+                        mcp_tool_name=mcp_tool_name,
+                        uri=f"eneo://{'info-blob' if kind == 'info_blob' else 'file'}/{resource_id}",
+                        mime_type=mime or None,
+                        content=None,
+                        meta={**link_meta, "filename": filename},
+                        order=len(refs),
+                    )
+                )
+                continue
             # Typed image block (MCP spec, 2025-11-25). Display-only: it carries
             # no citable text, so it rides the structured channel (the
             # McpToolReference row the frontend renders as a thumbnail) and is
             # not added to the LLM-facing text.
-            uri = ci.get("uri") or ""
-            mime = ci.get("mime_type") or ""
             if not uri or not mime.startswith("image/"):
                 # Scope: only image resource_links get a display surface today.
                 continue
@@ -305,14 +355,16 @@ def _build_tool_result_with_references(
 
     upstream_text = "".join(text_parts)
     if not refs:
-        return upstream_text, upstream_text, refs, images
+        return upstream_text, upstream_text, refs, images, admitted
 
     display_text = "\n\n".join(
         seg.strip() for seg in (upstream_text, *resource_texts) if seg.strip()
     )
-    llm_segments = [seg for seg in (upstream_text, *llm_blocks) if seg]
+    llm_segments = [
+        seg for seg in (upstream_text, *llm_blocks, *reference_lines) if seg
+    ]
     llm_text = "\n".join(llm_segments) + "\n\n" + MCP_TOOL_REFERENCES_INSTRUCTION
-    return llm_text, display_text, refs, images
+    return llm_text, display_text, refs, images, admitted
 
 
 class _GeneratedFileChunks:
@@ -1548,17 +1600,24 @@ class TenantModelAdapter(CompletionModelAdapter):
                         content_list = cast(
                             list[dict[str, Any]], result.get("content") or []
                         )
+                        assert mcp_proxy is not None
                         (
                             llm_text,
                             display_text,
                             refs_for_call,
                             images_for_call,
+                            admitted_references,
                         ) = _build_tool_result_with_references(
                             content_list=content_list,
                             tool_call_id=call.call_id,
                             mcp_tool_name=call.name,
                             existing_prefixes=seen_prefixes,
+                            verify_reference_link=mcp_proxy.verify_reference_link,
                         )
+                        # Admit before the result reaches the model so the
+                        # next call may pass the handle on.
+                        if admitted_references:
+                            mcp_proxy.allow_file_references(admitted_references)
                         has_app_view = not result.get(
                             "is_error"
                         ) and await _has_app_view(mcp_proxy, call.name)
@@ -1604,6 +1663,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 is_internal=mcp_proxy.is_internal_tool(call.name),
                                 is_bundled=mcp_proxy.is_bundled_tool(call.name),
                                 meta=result.get("meta") or None,
+                                referenced_file_ids=list(admitted_references) or None,
                                 structured_content=(
                                     result.get("structured_content")
                                     if has_app_view
@@ -2474,12 +2534,18 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 display_text,
                                 refs_for_call,
                                 images_for_call,
+                                admitted_references,
                             ) = _build_tool_result_with_references(
                                 content_list=content_list,
                                 tool_call_id=tc["id"],
                                 mcp_tool_name=tc["function"]["name"],
                                 existing_prefixes=seen_prefixes,
+                                verify_reference_link=mcp_proxy.verify_reference_link,
                             )
+                            # Admit before the result reaches the model so the
+                            # next call may pass the handle on.
+                            if admitted_references:
+                                mcp_proxy.allow_file_references(admitted_references)
                             has_app_view = not result_data.get(
                                 "is_error"
                             ) and await _has_app_view(mcp_proxy, tc["function"]["name"])
@@ -2546,6 +2612,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         tc["function"]["name"]
                                     ),
                                     meta=result_data.get("meta") or None,
+                                    referenced_file_ids=(
+                                        list(admitted_references) or None
+                                    ),
                                     structured_content=(
                                         result_data.get("structured_content")
                                         if has_app_view

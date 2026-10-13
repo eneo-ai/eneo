@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
 )
+from eneo.integration.domain.tabular_policy import DEFAULT_TABULAR_POLICY
 from eneo.integration.presentation.models import (
     IntegrationKnowledgeMetaData,
     IntegrationKnowledgePublic,
@@ -59,6 +60,7 @@ class IntegrationKnowledgeAssembler:
             selected_item_type=getattr(item, "selected_item_type", None),
             wrapper_id=getattr(item, "wrapper_id", None),
             wrapper_name=getattr(item, "wrapper_name", None),
+            tabular_policy=getattr(item, "tabular_policy", DEFAULT_TABULAR_POLICY),
             metadata=IntegrationKnowledgeMetaData(
                 size=item.size,
                 last_sync_summary=getattr(item, "last_sync_summary", None),

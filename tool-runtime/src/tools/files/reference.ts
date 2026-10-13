@@ -7,8 +7,9 @@ import type { DownloadPolicy } from "../tabular/config";
 import { downloadFile } from "../tabular/download";
 import type { CallContext } from "../types";
 
-// Eneo's signed original-download link: /api/v1/files/{id}/original/download/?token=…
-const FILE_PATH = /^\/api\/v1\/files\/([0-9a-f-]{36})\/original\/download\/?$/;
+// Eneo's signed original-download link for a conversation file or a knowledge
+// document: /api/v1/{files|info-blobs}/{id}/original/download/?token=…
+const FILE_PATH = /^\/api\/v1\/(?:files|info-blobs)\/([0-9a-f-]{36})\/original\/download\/?$/;
 // Eneo's signed link to a document template of the organisation's library.
 const TEMPLATE_PATH = /^\/api\/v1\/document-templates\/[0-9a-f-]{36}\/original\/download\/?$/;
 

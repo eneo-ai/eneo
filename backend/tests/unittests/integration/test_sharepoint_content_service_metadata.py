@@ -15,6 +15,9 @@ from eneo.integration.infrastructure.content_service.sharepoint_metadata import 
     SharePointColumnCatalog,
     source_metadata_fingerprint,
 )
+from eneo.integration.infrastructure.content_service.types import (
+    SharePointFileContent,
+)
 
 COLUMNS = [{"name": "Dokumenttyp", "displayName": "Dokumenttyp", "choice": {}}]
 ITEM = {"id": "i1", "listItem": {"fields": {"Dokumenttyp": "Rutin"}}}
@@ -472,7 +475,11 @@ class TestDeltaMetadata:
                 "new-token",
             )
         )
-        client.get_file_content_by_id = AsyncMock(return_value=("Body", None))
+        client.get_file_content_by_id = AsyncMock(
+            return_value=SharePointFileContent(
+                text="Body", content_type="", file_name=""
+            )
+        )
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
 

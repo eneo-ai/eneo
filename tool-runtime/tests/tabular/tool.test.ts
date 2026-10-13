@@ -166,6 +166,30 @@ describe("file references", () => {
     expect(downloads.calls).toHaveLength(1);
   });
 
+  test("accepts a signed link to a knowledge document's original", async () => {
+    const { tool, downloads } = setup("knowledge");
+    const knowledgeUrl = (id: string, tail = "/original/download/?token=signed") =>
+      `${ORIGIN}/api/v1/info-blobs/${id}${tail}`;
+    for (const bad of [
+      knowledgeUrl(FILE_A, "/original/?token=x"),
+      knowledgeUrl(FILE_A, "/original/download/"),
+      `${ORIGIN}/api/v1/knowledge/${FILE_A}/original/download/?token=x`,
+    ])
+      await expect(
+        tool("inspect_table").execute(
+          { files: [{ url: bad, filename: "a.csv" }] },
+          alice,
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_URL" });
+    expect(downloads.calls).toEqual([]);
+    await tool("inspect_table").execute(
+      { files: [{ url: knowledgeUrl(FILE_A), filename: "a.csv" }] },
+      alice,
+    );
+    expect(downloads.calls).toHaveLength(1);
+    expect(downloads.calls[0]).toContain(`/api/v1/info-blobs/${FILE_A}/original/download/`);
+  });
+
   test("a link copied from history explains itself instead of failing as expired", async () => {
     const { tool, downloads } = setup("stale");
     await expect(

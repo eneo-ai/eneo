@@ -19,7 +19,9 @@ from uuid import UUID
 
 from eneo.authentication.signed_urls import (
     reference_file_ids,
+    reference_kinds,
     use_current_file_references,
+    verify_eneo_original_reference,
 )
 from eneo.files.model_file_references import (
     FILE_HANDLE_INSTRUCTION,
@@ -84,6 +86,11 @@ REFERENCE_URL_VALID_NOTICE = (
     "url, the tool runs somewhere that cannot reach this deployment's file "
     "references: tell the user that the tool cannot access the file from where "
     "it runs."
+)
+KNOWLEDGE_REFERENCE_VALID_NOTICE = (
+    "The file reference is valid; this tool could not use it. The document "
+    "is a knowledge source: its text is available through "
+    "knowledge__read_source with the document_id from the knowledge result."
 )
 # Returned instead of calling the tool when its arguments carry a signed link to
 # a file this request minted no reference for.
@@ -156,6 +163,7 @@ class MCPProxySession:
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
         app_view_repo: "McpAppViewRepo | None" = None,
         for_view: bool = False,
+        tenant_id: UUID | None = None,
     ):
         """
         Initialize proxy session.
@@ -176,6 +184,9 @@ class MCPProxySession:
         # Who calls through this session: the model, or one of a server's
         # views. Each is offered only the tools its server makes visible to it.
         self._for_view = for_view
+        # The tenant whose signed original links a tool result may introduce
+        # into this conversation's reference map. None admits nothing.
+        self._tenant_id = tenant_id
         # Stored MCP App views. A proxy built without the repo (the
         # prepare-only path) resolves no views.
         self._app_view_repo = app_view_repo
@@ -211,7 +222,7 @@ class MCPProxySession:
         self._reference_file_ids: set[UUID] = set()
         self._reference_urls: dict[UUID, str] = {}
         # The document template file-creation calls render with (set per turn).
-        self._document_template: "DocumentTemplateReference | None" = None
+        self._document_template: DocumentTemplateReference | None = None
 
         # Build tool registry from DB (no connections needed)
         self._tool_registry: dict[str, tuple[MCPServer, str, str | None]] = {}
@@ -1120,6 +1131,17 @@ class MCPProxySession:
         if isinstance(file_ids, Mapping):
             self._reference_urls.update(cast(Mapping[UUID, str], file_ids))
 
+    def verify_reference_link(self, url: str) -> tuple[str, UUID] | None:
+        """The kind and id behind ``url`` when it is this tenant's signed original.
+
+        For links that arrive in a tool result rather than from the trusted
+        completion layer. A link that is not Eneo-signed, names another
+        resource than its path, or belongs to another tenant is not admitted.
+        """
+        if self._tenant_id is None:
+            return None
+        return verify_eneo_original_reference(url, tenant_id=self._tenant_id)
+
     def _files_read_file_entry(self) -> tuple[str, str | None] | None:
         """Prefixed name + title of the loopback read_file, when registered.
 
@@ -1151,6 +1173,10 @@ class MCPProxySession:
         """
         if not reference_file_ids(arguments, include_redacted=True):
             return ""
+        if reference_kinds(arguments) == {"info_blob"}:
+            # A knowledge document's original: its text is behind the
+            # knowledge tools, not the attachment reader.
+            return KNOWLEDGE_REFERENCE_VALID_NOTICE
         entry = self._files_read_file_entry()
         if entry is None:
             return REFERENCE_URL_VALID_NOTICE

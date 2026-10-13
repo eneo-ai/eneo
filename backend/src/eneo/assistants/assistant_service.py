@@ -2487,6 +2487,10 @@ class AssistantService:
                                             existing.result = tc.result
                                         if tc.meta is not None:
                                             existing.meta = tc.meta
+                                        if tc.referenced_file_ids is not None:
+                                            existing.referenced_file_ids = (
+                                                tc.referenced_file_ids
+                                            )
                                         if tc.structured_content is not None:
                                             existing.structured_content = (
                                                 tc.structured_content
@@ -2515,6 +2519,7 @@ class AssistantService:
                                                 is_internal=tc.is_internal,
                                                 is_bundled=tc.is_bundled,
                                                 meta=tc.meta,
+                                                referenced_file_ids=tc.referenced_file_ids,
                                                 structured_content=tc.structured_content,
                                                 app_view=tc.app_view,
                                             )
@@ -2812,6 +2817,7 @@ class AssistantService:
                             is_internal=tc.is_internal,
                             is_bundled=tc.is_bundled,
                             meta=tc.meta,
+                            referenced_file_ids=tc.referenced_file_ids,
                             structured_content=tc.structured_content,
                             app_view=tc.app_view,
                         )

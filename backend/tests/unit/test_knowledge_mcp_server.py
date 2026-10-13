@@ -7,10 +7,11 @@ into MCP content blocks that the citation pipeline consumes.
 
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from mcp.types import TextContent
 
 from eneo.authentication.auth_service import AuthService
 from eneo.info_blobs.info_blob_repo import InfoBlobListing
@@ -46,6 +47,16 @@ from eneo.internal_mcp.knowledge import (
 )
 from eneo.main.exceptions import AuthenticationException, NotFoundException
 from tests.fixtures import TEST_USER
+
+
+async def _no_title_matches(**_kwargs):
+    """Repo double: no document matches the query by title."""
+    return []
+
+
+async def _no_originals(_ids):
+    """Repo double: none of the documents has a retained original."""
+    return {}
 
 
 def _chunk(**overrides):
@@ -84,9 +95,13 @@ def _patch_read_source_context(monkeypatch, *, blob=None, repo_error=None):
 
         container = SimpleNamespace(
             assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
-            info_blob_repo=lambda: SimpleNamespace(get=get_blob),
+            info_blob_repo=lambda: SimpleNamespace(
+                find_titles_by_sources=_no_title_matches,
+                get_originals=_no_originals,
+                get=get_blob,
+            ),
         )
-        yield container, SimpleNamespace(), assistant_id
+        yield container, SimpleNamespace(tenant_id=uuid4()), assistant_id
 
     monkeypatch.setattr(
         "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
@@ -504,13 +519,17 @@ def _patch_search_context(
 
         container = SimpleNamespace(
             assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
-            info_blob_repo=lambda: SimpleNamespace(get=get_blob),
+            info_blob_repo=lambda: SimpleNamespace(
+                find_titles_by_sources=_no_title_matches,
+                get_originals=_no_originals,
+                get=get_blob,
+            ),
             info_blob_chunk_repo=lambda: SimpleNamespace(
                 get_adjacent_chunks=get_adjacent_chunks
             ),
             datastore=lambda: SimpleNamespace(semantic_search=semantic_search),
         )
-        yield container, SimpleNamespace(), uuid4()
+        yield container, SimpleNamespace(tenant_id=uuid4()), uuid4()
 
     monkeypatch.setattr(
         "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
@@ -954,11 +973,14 @@ def _patch_describe_context(monkeypatch, assistant, *, listings=(), excerpts=())
         container = SimpleNamespace(
             assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
             info_blob_repo=lambda: SimpleNamespace(
-                count_by_sources=count_by_sources, list_by_sources=list_by_sources
+                find_titles_by_sources=_no_title_matches,
+                get_originals=_no_originals,
+                count_by_sources=count_by_sources,
+                list_by_sources=list_by_sources,
             ),
             info_blob_chunk_repo=lambda: SimpleNamespace(sample_evenly=sample_evenly),
         )
-        yield container, SimpleNamespace(), uuid4()
+        yield container, SimpleNamespace(tenant_id=uuid4()), uuid4()
 
     monkeypatch.setattr(
         "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
@@ -1065,3 +1087,196 @@ class TestPickEmbeddingModel:
             collections=[], websites=[], integration_knowledge_list=[]
         )
         assert _pick_embedding_model(assistant) is None
+
+
+class TestOriginalLinks:
+    """Documents with a retained original come with a signed link for tools."""
+
+    XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    def _original(self, tenant_id):
+        from eneo.info_blobs.info_blob_repo import InfoBlobOriginal
+        from eneo.object_content.content import ContentAccessClass, ContentState
+
+        return InfoBlobOriginal(
+            content_id=uuid4(),
+            tenant_id=tenant_id,
+            sha256=b"\x01" * 32,
+            access_class=ContentAccessClass.PRIVATE_RESOURCE,
+            state=ContentState.AVAILABLE,
+            original_filename="sales.xlsx",
+            media_type=self.XLSX,
+        )
+
+    def _patch(self, monkeypatch, *, blob, originals, title_matches=(), base_url):
+        tenant_id = uuid4()
+        user = SimpleNamespace(
+            id=uuid4(), tenant_id=tenant_id, username="u", email="u@e"
+        )
+        audit = AsyncMock()
+        assistant = SimpleNamespace(
+            collections=[
+                SimpleNamespace(
+                    id=blob.group_id, name="Sales", embedding_model=MagicMock()
+                )
+            ],
+            websites=[],
+            integration_knowledge_list=[],
+        )
+
+        async def get_assistant(_id):
+            return assistant, []
+
+        async def get_blob(_id):
+            return blob
+
+        async def get_originals(ids):
+            return {
+                blob_id: original
+                for blob_id, original in originals.items()
+                if blob_id in ids
+            }
+
+        async def find_titles(**_kwargs):
+            return list(title_matches)
+
+        async def semantic_search(query, **kwargs):
+            return []
+
+        @asynccontextmanager
+        async def fake_context(_ctx):
+            container = SimpleNamespace(
+                assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
+                info_blob_repo=lambda: SimpleNamespace(
+                    get=get_blob,
+                    get_originals=get_originals,
+                    find_titles_by_sources=find_titles,
+                ),
+                info_blob_chunk_repo=lambda: SimpleNamespace(),
+                datastore=lambda: SimpleNamespace(semantic_search=semantic_search),
+                audit_service=lambda: SimpleNamespace(log_async=audit),
+            )
+            yield container, user, uuid4()
+
+        monkeypatch.setattr(
+            "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
+        )
+        monkeypatch.setattr(
+            "eneo.internal_mcp.knowledge.file_reference_base_url",
+            lambda settings: base_url,
+        )
+        return tenant_id, audit
+
+    @pytest.mark.asyncio
+    async def test_read_source_links_the_original_and_audits_the_mint(
+        self, monkeypatch
+    ):
+        from mcp.types import ResourceLink
+
+        from eneo.authentication.signed_urls import verify_eneo_original_reference
+
+        blob = SimpleNamespace(
+            id=uuid4(),
+            group_id=uuid4(),
+            website_id=None,
+            integration_knowledge_id=None,
+            title="Sales 2026",
+            text="Spreadsheet: sales.xlsx",
+        )
+        tenant_id, audit = self._patch(
+            monkeypatch, blob=blob, originals={}, base_url="https://eneo.example"
+        )
+        # Bind the original to the tenant the context yields.
+        original = self._original(tenant_id)
+        monkeypatch.setattr(
+            "eneo.internal_mcp.knowledge.file_reference_base_url",
+            lambda settings: "https://eneo.example",
+        )
+        tenant_id, audit = self._patch(
+            monkeypatch,
+            blob=blob,
+            originals={blob.id: original},
+            base_url="https://eneo.example",
+        )
+
+        content = await read_source(str(blob.id), ctx=None)
+
+        link = content[-1]
+        assert isinstance(link, ResourceLink)
+        assert link.name == "sales.xlsx" and link.mimeType == self.XLSX
+        assert verify_eneo_original_reference(str(link.uri), tenant_id=tenant_id) == (
+            "info_blob",
+            blob.id,
+        )
+        assert link.meta == {"info_blob_id": str(blob.id), "title": "Sales 2026"}
+        audit.assert_awaited_once()
+        assert audit.await_args.kwargs["entity_id"] == blob.id
+
+    @pytest.mark.asyncio
+    async def test_no_link_without_a_reference_base_url_or_an_original(
+        self, monkeypatch
+    ):
+        from mcp.types import ResourceLink
+
+        blob = SimpleNamespace(
+            id=uuid4(),
+            group_id=uuid4(),
+            website_id=None,
+            integration_knowledge_id=None,
+            title="Prose",
+            text="Minutes",
+        )
+        tenant_id, audit = self._patch(
+            monkeypatch, blob=blob, originals={}, base_url=None
+        )
+        self._patch(
+            monkeypatch,
+            blob=blob,
+            originals={blob.id: self._original(tenant_id)},
+            base_url=None,
+        )
+        content = await read_source(str(blob.id), ctx=None)
+        assert not any(isinstance(block, ResourceLink) for block in content)
+
+        _, audit = self._patch(
+            monkeypatch, blob=blob, originals={}, base_url="https://eneo.example"
+        )
+        content = await read_source(str(blob.id), ctx=None)
+        assert not any(isinstance(block, ResourceLink) for block in content)
+        audit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_search_lists_title_matches_with_their_originals(self, monkeypatch):
+        from mcp.types import ResourceLink
+
+        blob = SimpleNamespace(
+            id=uuid4(),
+            group_id=uuid4(),
+            website_id=None,
+            integration_knowledge_id=None,
+            title="sales.xlsx",
+            text="Spreadsheet: sales.xlsx",
+        )
+        listing = InfoBlobListing(id=blob.id, title="sales.xlsx", url=None)
+        tenant_id, _ = self._patch(
+            monkeypatch,
+            blob=blob,
+            originals={},
+            title_matches=[listing],
+            base_url="https://eneo.example",
+        )
+        self._patch(
+            monkeypatch,
+            blob=blob,
+            originals={blob.id: self._original(tenant_id)},
+            title_matches=[listing],
+            base_url="https://eneo.example",
+        )
+
+        content = await search_knowledge("sum of sales", ctx=None)
+
+        texts = [block.text for block in content if isinstance(block, TextContent)]
+        assert any("title matches the query" in text for text in texts)
+        assert any(f"- sales.xlsx  document_id: {blob.id}" in text for text in texts)
+        links = [block for block in content if isinstance(block, ResourceLink)]
+        assert [link.name for link in links] == ["sales.xlsx"]

@@ -20,6 +20,9 @@ from eneo.integration.infrastructure.content_service.sharepoint_content_service 
     SimpleSharePointToken,
     extract_text_from_canvas_layout,
 )
+from eneo.integration.infrastructure.content_service.types import (
+    SharePointFileContent,
+)
 
 
 @pytest.fixture
@@ -533,7 +536,7 @@ class TestProcessInfoBlobSizeAccounting:
         ).digest()
         upserted: list = []
 
-        async def publish(info_blob, *, embedding_model):
+        async def publish(info_blob, *, embedding_model, **_kwargs):
             upserted.append(info_blob)
             return updated_blob
 
@@ -1325,9 +1328,8 @@ class TestDeltaChangesProcessing:
                 ],
                 "new-delta-token",
             )
-            mock_client.get_file_content_by_id.return_value = (
-                "[No readable text found]",
-                None,
+            mock_client.get_file_content_by_id.return_value = SharePointFileContent(
+                text="[No readable text found]", content_type="", file_name=""
             )
             mock_client_class.return_value = mock_client
 
@@ -1586,9 +1588,10 @@ class TestOneDriveFolderTraversal:
         )
 
         mock_client = AsyncMock()
-        mock_client.get_file_content_by_id.return_value = (
-            "[Could not extract text from PowerPoint presentation]",
-            None,
+        mock_client.get_file_content_by_id.return_value = SharePointFileContent(
+            text="[Could not extract text from PowerPoint presentation]",
+            content_type="",
+            file_name="",
         )
         stats = service._initialize_stats()
 
@@ -1786,9 +1789,8 @@ class TestSyncLogging:
                 }
             ]
             mock_client.get_site_pages.return_value = {"value": []}
-            mock_client.get_file_content_by_id.return_value = (
-                "File content",
-                "text/plain",
+            mock_client.get_file_content_by_id.return_value = SharePointFileContent(
+                text="File content", content_type="text/plain", file_name=""
             )
             mock_client.initialize_delta_token.return_value = "delta-token"
             mock_client_class.return_value = mock_client
