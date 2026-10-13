@@ -110,7 +110,6 @@ class SessionResponse(BaseModel):
 
 
 class EneoEventType(str, Enum):
-    GENERATING_IMAGE = "generating_image"
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
@@ -137,10 +136,6 @@ class SSEFiles(SSEBase):
     # The tool call that produced the file, when one did; history carries the
     # same link as `generated_file_ids` on the tool call.
     tool_call_id: Optional[str] = None
-
-
-class SSEEneoEvent(SSEBase):
-    eneo_event_type: EneoEventType
 
 
 class SSEToolCall(SSEBase):
@@ -282,7 +277,6 @@ class ToolApprovalResponse(BaseModel):
 SSE_MODELS = [
     SSEText,
     SSEReasoning,
-    SSEEneoEvent,
     SSEToolCall,
     SSEToolCallDelta,
     SSEToolApprovalRequired,

@@ -46,7 +46,6 @@ class TokenUsage(BaseModel):
 class ResponseType(str, Enum):
     TEXT = "text"
     REASONING = "reasoning"
-    ENEO_EVENT = "eneo_event"
     TOOL_CALL = "tool_call"
     TOOL_CALL_DELTA = "tool_call_delta"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"

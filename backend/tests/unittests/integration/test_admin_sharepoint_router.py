@@ -264,6 +264,9 @@ async def test_reauth_state_carries_no_secret_and_callback_reuses_stored_app():
     tenant_app_service.configure_service_account.return_value = app
     container.tenant_sharepoint_app_service.return_value = tenant_app_service
     settings = MagicMock(sharepoint_webhook_client_state="secret")
+    settings.integration_callback_uri.return_value = (
+        "https://eneo.example/integrations/callback/token/"
+    )
 
     with (
         patch(f"{_ROUTER}.get_settings", return_value=settings),
@@ -278,6 +281,7 @@ async def test_reauth_state_carries_no_secret_and_callback_reuses_stored_app():
             "reauth": "1",
             "tenant_id": str(user.tenant_id),
             "user_id": str(user.id),
+            "redirect_uri": "https://eneo.example/integrations/callback/token/",
         }
 
         auth_cls.return_value.exchange_token = AsyncMock(
@@ -306,6 +310,7 @@ async def test_reauth_state_carries_no_secret_and_callback_reuses_stored_app():
         client_id="stored-client-id",
         client_secret="stored-client-secret",
         tenant_domain="contoso.onmicrosoft.com",
+        redirect_uri="https://eneo.example/integrations/callback/token/",
     )
     configure_kwargs = tenant_app_service.configure_service_account.await_args.kwargs
     assert configure_kwargs["client_secret"] == "stored-client-secret"

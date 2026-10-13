@@ -37,7 +37,6 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.database.database import AsyncSession
 from eneo.document_templates.domain import DocumentTemplateChoice
-from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
 from eneo.main.models import (
@@ -1291,7 +1290,6 @@ async def transfer_assistant_to_space(
     response_model=PaginatedResponse[PromptSparse],
     description="List the prompt history for an assistant.",
     responses=responses.get_responses([404]),
-    include_in_schema=get_settings().dev,
 )
 @endpoint_access(
     authentication=Authentication.USER,

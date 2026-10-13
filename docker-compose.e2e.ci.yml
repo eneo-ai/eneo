@@ -88,8 +88,11 @@ services:
       MCP_APP_CONTENT_BASE_URL: ${E2E_APP_CONTENT_ORIGIN:-http://127.0.0.1:8124}
       PUBLIC_ORIGIN: http://localhost:4173
       REDIS_PORT: "6379"
-      # No encryption → seeded provider credentials are plaintext (no real keys).
-      ENCRYPTION_KEY: ""
+      # Credentials are encrypted as in production, so providers can be added
+      # (the backend refuses to store a key without encryption). A fixed,
+      # public test key (CI's backend jobs use it too) that guards only the
+      # stack's dummy keys; e2e/seed.py encrypts the seeded provider's with it.
+      ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
       TENANT_CREDENTIALS_ENABLED: "false"
       FEDERATION_ENABLED: "false"
       FEDERATION_PER_TENANT_ENABLED: "false"
@@ -127,7 +130,7 @@ services:
         set -e
         export PATH="/app/.venv/bin:$$PATH"
         python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
-        python /e2e/seed.py          # seed mock completion model
+        python /e2e/seed.py          # seed mock completion + embedding models
         exec gunicorn src.eneo.server.main:app \
           --workers 1 --worker-class uvicorn.workers.UvicornWorker \
           --keep-alive 75 --bind 0.0.0.0:8000

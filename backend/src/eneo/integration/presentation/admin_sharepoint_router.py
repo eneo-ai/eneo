@@ -28,6 +28,7 @@ from eneo.integration.presentation.admin_models import (
     ServiceAccountAuthCallback,
     ServiceAccountAuthStart,
     ServiceAccountAuthStartResponse,
+    ServiceAccountReauthStart,
     SharePointSubscriptionPublic,
     SubscriptionRenewalResult,
     TenantAppTestResult,
@@ -1088,6 +1089,13 @@ async def start_service_account_auth(
         user = container.user()
         _require_sharepoint_webhook_client_state()
 
+        try:
+            redirect_uri = get_settings().integration_callback_uri(
+                app_config.redirect_uri
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
         # Generate a secure state token
         state = secrets.token_urlsafe(32)
 
@@ -1102,6 +1110,7 @@ async def start_service_account_auth(
                 "tenant_domain": app_config.tenant_domain,
                 "tenant_id": str(user.tenant_id),
                 "user_id": str(user.id),
+                "redirect_uri": redirect_uri,
             },
         )
 
@@ -1112,6 +1121,7 @@ async def start_service_account_auth(
             client_id=app_config.client_id,
             client_secret=app_config.client_secret,
             tenant_domain=app_config.tenant_domain,
+            redirect_uri=redirect_uri,
         )
 
         logger.info(
@@ -1158,9 +1168,16 @@ async def start_service_account_auth(
 )
 async def restart_service_account_auth(
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    body: Annotated[Optional[ServiceAccountReauthStart], Body()] = None,
 ) -> ServiceAccountAuthStartResponse:
     user = container.user()
     _require_sharepoint_webhook_client_state()
+    try:
+        redirect_uri = get_settings().integration_callback_uri(
+            body.redirect_uri if body else None
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     tenant_app_service: TenantSharePointAppService = (
         container.tenant_sharepoint_app_service()
@@ -1182,6 +1199,7 @@ async def restart_service_account_auth(
             "reauth": "1",
             "tenant_id": str(user.tenant_id),
             "user_id": str(user.id),
+            "redirect_uri": redirect_uri,
         },
     )
     auth_result = ServiceAccountAuthService().gen_auth_url(
@@ -1189,6 +1207,7 @@ async def restart_service_account_auth(
         client_id=app.client_id,
         client_secret=app.client_secret,
         tenant_domain=app.tenant_domain,
+        redirect_uri=redirect_uri,
     )
     logger.info(
         f"Restarted service account OAuth flow for tenant {user.tenant_id} "
@@ -1276,6 +1295,7 @@ async def service_account_auth_callback(
             client_id=client_id,
             client_secret=client_secret,
             tenant_domain=tenant_domain,
+            redirect_uri=stored_state.get("redirect_uri"),
         )
 
         app = await tenant_app_service.configure_service_account(

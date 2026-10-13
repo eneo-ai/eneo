@@ -106,3 +106,8 @@ SHOW_WEB_SEARCH=true
 # ----------------------------------------------------------------------------
 NODE_ENV=production
 LOGLEVEL=INFO
+
+# Optional invitation to the separately deployed Next beta (restart to apply).
+# Default is off. The destination must be a valid HTTP(S) URL.
+SHOW_NEW_APP_BANNER=false
+NEW_APP_URL=

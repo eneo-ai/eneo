@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = "http://127.0.0.1:8124"
 RUNTIME = "http://127.0.0.1:8310"
+WEB_NEXT = "http://127.0.0.1:8135"
 
 
 def request(url, payload=None, headers=None, raw=False):
@@ -103,6 +104,18 @@ def main():
             "JWT_SECRET": backend["environment"]["JWT_SECRET"],
         },
     }
+    # The optional Next beta ships in the bundle; it must at least start and
+    # answer its health probe against this release's backend.
+    config["services"]["web-next"] = {
+        "image": bundle["images"]["web-next"],
+        "networks": ["e2e"],
+        "ports": ["127.0.0.1:8135:3000"],
+        "environment": {
+            "ENEO_BACKEND_URL": "http://e2e-backend:8000",
+            "APP_ORIGIN": WEB_NEXT,
+            "SESSION_SECRET": secrets.token_hex(32),
+        },
+    }
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "compose.json"
         path.write_text(json.dumps(config))
@@ -124,6 +137,7 @@ def main():
                         "version": bundle["version"],
                         "revision": bundle["revision"],
                     }
+                    request(WEB_NEXT + "/healthz", raw=True)
                     break
                 except (OSError, AssertionError):
                     if attempt == 59:
@@ -239,7 +253,7 @@ def main():
             assert status["runtime"]["state"] == "ready"
             assert "version_mismatch" not in status["runtime"]["warnings"]
             print(
-                "Verified frontend, backend, runtime, compute, signed-file analysis, chart, and document."
+                "Verified frontend, Next beta, backend, runtime, compute, signed-file analysis, chart, and document."
             )
         finally:
             subprocess.run(

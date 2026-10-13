@@ -180,6 +180,10 @@ class SubscriptionRenewalResult(BaseModel):
 class ServiceAccountAuthStart(BaseModel):
     """Request model to start service account OAuth flow."""
 
+    redirect_uri: str | None = Field(
+        default=None, description="An exact operator-registered OAuth callback URL."
+    )
+
     client_id: str = Field(
         ...,
         description="Microsoft Entra ID Application (Client) ID",
@@ -194,6 +198,14 @@ class ServiceAccountAuthStart(BaseModel):
         ...,
         description="Microsoft Entra ID Tenant Domain (e.g., contoso.onmicrosoft.com)",
         json_schema_extra={"example": "contoso.onmicrosoft.com"},
+    )
+
+
+class ServiceAccountReauthStart(BaseModel):
+    """Request model to restart the service account sign-in with stored credentials."""
+
+    redirect_uri: str | None = Field(
+        default=None, description="An exact operator-registered OAuth callback URL."
     )
 
 

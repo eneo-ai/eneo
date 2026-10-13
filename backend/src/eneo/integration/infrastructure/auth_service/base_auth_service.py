@@ -20,7 +20,11 @@ class TokenResponse(TypedDict):
 class BaseOauthService(ABC):
     @abstractmethod
     async def gen_auth_url(
-        self, state: Optional[str] = None, tenant_id: Optional[UUID] = None
+        self,
+        state: Optional[str] = None,
+        tenant_id: Optional[UUID] = None,
+        *,
+        redirect_uri: str | None = None,
     ) -> dict[str, str]: ...
     @abstractmethod
     async def get_resources(
@@ -28,7 +32,11 @@ class BaseOauthService(ABC):
     ) -> list[OAuthResource]: ...
     @abstractmethod
     async def exchange_token(
-        self, auth_code: str, tenant_id: Optional[UUID] = None
+        self,
+        auth_code: str,
+        tenant_id: Optional[UUID] = None,
+        *,
+        redirect_uri: str | None = None,
     ) -> TokenResponse | None: ...
     @abstractmethod
     async def refresh_access_token(
