@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Final, Literal, Optional
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
@@ -8,9 +8,10 @@ from eneo.base.base_entity import Entity
 AUTH_METHOD_TENANT_APP = "tenant_app"
 AUTH_METHOD_SERVICE_ACCOUNT = "service_account"
 
-AUTH_STATUS_OK = "ok"
-AUTH_STATUS_ERROR = "error"
-AUTH_STATUS_UNKNOWN = "unknown"
+AuthStatus = Literal["ok", "error", "unknown"]
+AUTH_STATUS_OK: Final = "ok"
+AUTH_STATUS_ERROR: Final = "error"
+AUTH_STATUS_UNKNOWN: Final = "unknown"
 _MAX_AUTH_ERROR_LENGTH = 1000
 
 
@@ -90,7 +91,7 @@ class TenantSharePointApp(Entity):
         self.service_account_email = email
 
     @property
-    def auth_status(self) -> str:
+    def auth_status(self) -> AuthStatus:
         """'ok' | 'error' | 'unknown', derived from the latest credential outcome."""
         if self.last_auth_error_at is not None and (
             self.last_auth_success_at is None

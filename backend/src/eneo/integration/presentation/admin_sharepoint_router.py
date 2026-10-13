@@ -1,7 +1,7 @@
 import json
 import secrets
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Literal, Optional, cast
+from typing import TYPE_CHECKING, Annotated, Optional, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
@@ -89,7 +89,7 @@ def _to_app_public(
         auth_method=app.auth_method,
         service_account_email=app.service_account_email,
         certificate_path=app.certificate_path,
-        auth_status=cast(Literal["ok", "error", "unknown"], app.auth_status),
+        auth_status=app.auth_status,
         last_auth_error=app.last_auth_error,
         last_auth_error_at=app.last_auth_error_at,
         last_auth_success_at=app.last_auth_success_at,
