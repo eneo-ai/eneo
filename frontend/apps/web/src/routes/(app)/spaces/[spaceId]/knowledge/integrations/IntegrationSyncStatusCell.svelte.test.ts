@@ -131,6 +131,15 @@ describe("IntegrationSyncStatusCell", () => {
     });
     await expect.element(trigger).toBeVisible();
     expect((trigger.element() as HTMLElement).tabIndex).toBe(0);
+
+    await userEvent.keyboard("{Tab}");
+    expect(document.activeElement).toBe(trigger.element());
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-tooltip-content]")).toHaveTextContent(
+        m.sharepoint_webhook_none_tooltip()
+      )
+    );
+    expect(trigger.element().hasAttribute("aria-describedby")).toBe(false);
   });
 
   it("has no axe violations in the error state", async () => {

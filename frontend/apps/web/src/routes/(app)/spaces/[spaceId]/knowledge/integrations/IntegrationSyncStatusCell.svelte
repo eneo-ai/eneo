@@ -195,14 +195,22 @@
 
   {#if subscriptionStatus}
     <Tooltip.Root>
-      <Tooltip.Trigger
-        class="focus-visible:ring-stronger flex w-fit cursor-default items-center gap-1 rounded text-left focus-visible:ring-2 focus-visible:outline-none {getSubscriptionStatusClass(
-          subscriptionStatus
-        )}"
-      >
-        <span class="truncate">{getSubscriptionStatusLabel(subscriptionStatus)}</span>
-        <Info class="size-3.5 shrink-0" aria-hidden="true" />
-        <span class="sr-only">{getSubscriptionExplanation(subscriptionStatus)}</span>
+      <Tooltip.Trigger>
+        <!-- The explanation is part of the name, so the open tooltip must not
+             also describe the trigger with the same text. -->
+        {#snippet child({ props })}
+          <button
+            {...props}
+            aria-describedby={undefined}
+            class="focus-visible:ring-stronger flex w-fit cursor-default items-center gap-1 rounded text-left focus-visible:ring-2 focus-visible:outline-none {getSubscriptionStatusClass(
+              subscriptionStatus
+            )}"
+          >
+            <span class="truncate">{getSubscriptionStatusLabel(subscriptionStatus)}</span>
+            <Info class="size-3.5 shrink-0" aria-hidden="true" />
+            <span class="sr-only">{getSubscriptionExplanation(subscriptionStatus)}</span>
+          </button>
+        {/snippet}
       </Tooltip.Trigger>
       <Tooltip.Content>{getSubscriptionExplanation(subscriptionStatus)}</Tooltip.Content>
     </Tooltip.Root>
