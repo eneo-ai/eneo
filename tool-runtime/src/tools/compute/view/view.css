@@ -7,18 +7,6 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* Code, input, logs and a value with no better shape: monospace, scrolling, never wider. */
-.eneo-code {
-  margin: 0;
-  padding: var(--spacing-2) var(--spacing-3);
-  max-height: 21rem;
-  overflow: auto;
-  font-family: var(--font-family-mono, ui-monospace, monospace);
-  font-size: var(--font-size-body-sm, 0.8125rem);
-  line-height: 1.5;
-  white-space: pre;
-  tab-size: 2;
-}
 .eneo-details {
   display: flex;
   flex-direction: column;

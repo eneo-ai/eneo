@@ -118,6 +118,9 @@ as shipped, and they share one kit in `src/views/kit/`:
   context, and the tool's input and result as they arrive.
 - `TableRows` and `columnWidth` give an Astryx `Table` scrolling rows under
   headings that stay in place.
+- `Code` is a block of code, input or logs: a header with its name and a copy
+  button over a bordered, scrolling area, with JavaScript and JSON highlighted
+  (highlight.js, bundled) in the theme's text colours.
 
 A view lives next to its tool (`src/tools/<tool>/view/`: `index.html`,
 `main.tsx`, and `index.ts`, which loads the built page). To add one, write

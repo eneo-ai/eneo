@@ -23,6 +23,7 @@ import { Table, useTableSortable, type TableSortState } from "@astryxdesign/core
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import {
+  Code,
   TableRows,
   ViewFrame,
   columnWidth,
@@ -381,33 +382,31 @@ function ResultView() {
                 </div>
               </>
             )}
-            <Text type="supporting" weight="medium">
-              {text.code}
-            </Text>
-            <pre className="eneo-code">{typeof args.code === "string" ? args.code : ""}</pre>
+            <Code
+              text={typeof args.code === "string" ? args.code : ""}
+              language="javascript"
+              label={text.code}
+              meta={typeof outcome?.duration_ms === "number" ? text.duration(outcome.duration_ms) : undefined}
+              lineNumbers
+              copy={{ label: text.copy, copied: text.copied }}
+            />
             {args.input !== undefined && args.input !== null && !draft && (
-              <>
-                <Text type="supporting" weight="medium">
-                  {text.input}
-                </Text>
-                <pre className="eneo-code">{JSON.stringify(args.input, null, 2)}</pre>
-              </>
+              <Code
+                text={JSON.stringify(args.input, null, 2)}
+                language="json"
+                label={text.input}
+                copy={{ label: text.copy, copied: text.copied }}
+              />
             )}
             {outcome?.logs && outcome.logs.length > 0 && (
-              <>
-                <Text type="supporting" weight="medium">
-                  {text.logs}
-                </Text>
-                <pre className="eneo-code">
-                  {outcome.logs.join("\n")}
-                  {outcome.dropped_log_lines ? `\n… ${text.dropped(outcome.dropped_log_lines)}` : ""}
-                </pre>
-              </>
-            )}
-            {typeof outcome?.duration_ms === "number" && (
-              <Text type="supporting" color="secondary">
-                {text.duration(outcome.duration_ms)}
-              </Text>
+              <Code
+                text={
+                  outcome.logs.join("\n") +
+                  (outcome.dropped_log_lines ? `\n… ${text.dropped(outcome.dropped_log_lines)}` : "")
+                }
+                label={text.logs}
+                copy={{ label: text.copy, copied: text.copied }}
+              />
             )}
           </div>
         </Collapsible>
@@ -465,7 +464,7 @@ function ResultView() {
           scrollWrapper={TableRows}
         />
       ) : typeof value === "object" && value !== null ? (
-        <pre className="eneo-code">{JSON.stringify(value, null, 2)}</pre>
+        <Code text={JSON.stringify(value, null, 2)} language="json" />
       ) : (
         <div className="eneo-value">{value === null || value === undefined ? "null" : shownCell(value)}</div>
       )}

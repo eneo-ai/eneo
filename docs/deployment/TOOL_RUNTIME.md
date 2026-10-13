@@ -124,7 +124,8 @@ the table view. Where Eneo shows tool views, a returned table of several rows
 appears under the answer, sortable, filterable and copyable; `display: "result"`
 shows a value of any shape (a number, a key/value list or JSON) when the user
 asked to see the result; `display: "none"` hides the view for intermediate
-steps. The code, input and logs sit behind a "Visa kod" disclosure. When the
+steps. The code, input and logs sit behind a "Visa kod" disclosure, the code
+and input highlighted and each block with its own copy button. When the
 input is a flat set of values, the reader can edit them and run the same code
 again from the view; that call goes through Eneo like any other tool call and
 follows the user's automatic-tools preference, and nothing reaches the

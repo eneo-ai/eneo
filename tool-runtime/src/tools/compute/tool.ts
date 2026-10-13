@@ -36,7 +36,7 @@ export function computeTools(
       .json()
       .optional()
       .describe(
-        "Optional JSON value (object, array, string, number) made available to the code as the global input. Put data here rather than inlining large literals in the code.",
+        "Optional JSON value (object, array, string, number) made available to the code as the global input. Put data here rather than inlining large literals in the code. Prefer a flat object of the numbers, strings and booleans the user might want to change (amounts, rates, years) and read them from input in the code: the user then gets fields to edit them and a button to run the code again.",
       ),
     export: z
       .boolean()

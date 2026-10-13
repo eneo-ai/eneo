@@ -5,7 +5,9 @@ import "@astryxdesign/theme-neutral/theme.css";
 import "./kit.css";
 
 export { copyText } from "./clipboard";
+export { Code } from "./Code";
 export { columnWidth } from "./columns";
 export { ViewFrame, TableRows } from "./Frame";
 export { pick, useHost, useViewHost, type Host, type ToolResult } from "./host";
+export { highlight, type CodeLanguage } from "./highlight";
 export { filterRows, sortRows, toTsv } from "./rows";
