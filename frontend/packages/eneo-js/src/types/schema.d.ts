@@ -4987,6 +4987,46 @@ export interface paths {
     patch: operations["update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch"];
     trace?: never;
   };
+  "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Integration Knowledge Documents
+     * @description List the indexed documents of an integration knowledge item, with their folder relative to the imported item.
+     */
+    get: operations["get_integration_knowledge_documents_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__documents__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/skipped/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Integration Knowledge Skipped Documents
+     * @description Files the latest sync of an integration knowledge item skipped, with the reason for each.
+     */
+    get: operations["get_integration_knowledge_skipped_documents_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__documents_skipped__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/sync/": {
     parameters: {
       query?: never;
@@ -15373,6 +15413,54 @@ export interface components {
       description: string;
       integration_type: components["schemas"]["IntegrationType"];
     };
+    /** IntegrationDocumentItem */
+    IntegrationDocumentItem: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Title */
+      title: string;
+      /**
+       * Relative Path
+       * @description Folders between the imported item and the document, URL-decoded and without the file name; empty for the item itself.
+       */
+      relative_path: string;
+      /**
+       * Url
+       * @description Web URL of the source document
+       */
+      url?: string | null;
+      /** Size */
+      size: number;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
+    };
+    /** IntegrationDocumentsPage */
+    IntegrationDocumentsPage: {
+      /** Items */
+      items: components["schemas"]["IntegrationDocumentItem"][];
+      /**
+       * Total Count
+       * @description Documents matching the query
+       */
+      total_count: number;
+      /** Limit */
+      limit: number;
+      /** Offset */
+      offset: number;
+      /**
+       * Total Size
+       * @description Summed size of the matching documents
+       */
+      total_size: number;
+    };
     /** IntegrationKnowledgeMetaData */
     IntegrationKnowledgeMetaData: {
       /** Size */
@@ -15498,6 +15586,36 @@ export interface components {
       items: components["schemas"]["IntegrationPreviewData"][];
       /** Count */
       readonly count: number;
+    };
+    /** IntegrationSkippedDocument */
+    IntegrationSkippedDocument: {
+      /** File */
+      file: string;
+      /** Reason */
+      reason: string;
+    };
+    /**
+     * IntegrationSkippedDocuments
+     * @description Files the latest sync of an item did not index.
+     */
+    IntegrationSkippedDocuments: {
+      /** Items */
+      items: components["schemas"]["IntegrationSkippedDocument"][];
+      /**
+       * Total
+       * @description Skipped files, including those not listed
+       */
+      total: number;
+      /**
+       * Truncated
+       * @description True when the stored list was capped
+       */
+      truncated: boolean;
+      /**
+       * Synced At
+       * @description When the sync the list comes from finished or started
+       */
+      synced_at?: string | null;
     };
     /**
      * IntegrationType
@@ -42213,6 +42331,113 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_integration_knowledge_documents_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__documents__get: {
+    parameters: {
+      query?: {
+        /** @description Matches the title or the path */
+        q?: string | null;
+        sort?: "name" | "path" | "size" | "updated_at";
+        order?: "asc" | "desc";
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        id: string;
+        integration_knowledge_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IntegrationDocumentsPage"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_integration_knowledge_skipped_documents_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__documents_skipped__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        integration_knowledge_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IntegrationSkippedDocuments"];
         };
       };
       /** @description Forbidden */
