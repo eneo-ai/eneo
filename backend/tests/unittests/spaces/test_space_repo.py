@@ -21,8 +21,6 @@ def repo(session):
         user=MagicMock(),
         factory=MagicMock(),
         file_content_loader=MagicMock(),
-        app_repo=None,
-        assistant_repo=AsyncMock(),
         completion_model_repo=AsyncMock(),
         transcription_model_repo=AsyncMock(),
         embedding_model_repo=AsyncMock(),
