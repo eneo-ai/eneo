@@ -2876,3 +2876,161 @@ class TestFullSyncUsesStoredDrive:
         assert listed_drives == {"drive-stored"}
         client.get_documents_in_drive.assert_not_called()
         client.get_default_drive_id.assert_not_called()
+
+
+class TestDeltaFolderScopeOrdering:
+    """Scope decisions use the scope folder's newest path, whatever Graph's order."""
+
+    @pytest.fixture
+    def folder_scoped(self, mock_integration_knowledge):
+        mock_integration_knowledge.delta_token = "existing-delta-token-123"
+        mock_integration_knowledge.drive_id = "drive-123"
+        mock_integration_knowledge.selected_item_type = "folder"
+        mock_integration_knowledge.folder_id = "folder-a"
+        mock_integration_knowledge.folder_path = "/Documents/A"
+        return mock_integration_knowledge
+
+    async def _run_delta(
+        self, service, mock_dependencies, mock_oauth_token, ik, changes
+    ):
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            client = _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(return_value=(changes, "new-token")),
+                get_file_content_by_id=AsyncMock(return_value=("text", "text/plain")),
+            )
+            result = await service.process_delta_changes(
+                token_id=mock_oauth_token.id,
+                integration_knowledge_id=ik.id,
+                site_id="site-123",
+                drive_id="drive-123",
+            )
+        return client, result
+
+    async def test_descendant_listed_before_renamed_scope_folder_stays_in_scope(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        changes = [
+            {
+                "id": "nested-1",
+                "name": "nested.docx",
+                "webUrl": "https://x/nested.docx",
+                "parentReference": {
+                    "id": "sub-folder",
+                    "path": "/drives/drive-123/root:/Documents/A renamed/Sub",
+                },
+            },
+            {
+                "id": "folder-a",
+                "name": "A renamed",
+                "folder": {},
+                "parentReference": {
+                    "id": "documents-folder",
+                    "path": "/drives/drive-123/root:/Documents",
+                },
+            },
+        ]
+
+        client, result = await self._run_delta(
+            service, mock_dependencies, mock_oauth_token, folder_scoped, changes
+        )
+
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
+        client.get_file_content_by_id.assert_awaited_once_with(
+            drive_id="drive-123", item_id="nested-1"
+        )
+        assert folder_scoped.folder_path == "/Documents/A renamed"
+        assert "1 file" in result
+
+    async def test_folder_moved_into_scope_indexes_its_unindexed_files(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        changes = [
+            {
+                "id": "folder-x",
+                "name": "X",
+                "folder": {},
+                "parentReference": {
+                    "id": "folder-a",
+                    "path": "/drives/drive-123/root:/Documents/A",
+                },
+            },
+            {
+                "id": "x-new",
+                "name": "created-with-folder.docx",
+                "webUrl": "https://x/created.docx",
+                "parentReference": {
+                    "id": "folder-x",
+                    "path": "/drives/drive-123/root:/Documents/A/X",
+                },
+            },
+        ]
+        descendants = [
+            {"id": "x-1", "name": "one.docx", "webUrl": "https://x/one.docx"},
+            {"id": "x-2", "name": "two.docx", "webUrl": "https://x/two.docx"},
+            {"id": "x-new", "name": "created-with-folder.docx"},
+        ]
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), "x-2")]
+        )
+
+        with patch.object(
+            service,
+            "_enumerate_authoritative_items",
+            AsyncMock(return_value=descendants),
+        ) as enumerate_items:
+            client, result = await self._run_delta(
+                service, mock_dependencies, mock_oauth_token, folder_scoped, changes
+            )
+
+        assert enumerate_items.await_args.kwargs["folder_id"] == "folder-x"
+        fetched = [
+            call.kwargs["item_id"]
+            for call in client.get_file_content_by_id.await_args_list
+        ]
+        # x-2 is already indexed; x-new arrives as its own delta entry (once).
+        assert sorted(fetched) == ["x-1", "x-new"]
+        assert "2 files" in result
+        assert "1 folder scanned" in result
+
+    async def test_unlistable_folder_entering_scope_is_reported_not_fatal(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        changes = [
+            {
+                "id": "folder-x",
+                "name": "X",
+                "folder": {},
+                "parentReference": {"id": "folder-a"},
+            }
+        ]
+
+        with patch.object(
+            service,
+            "_enumerate_authoritative_items",
+            AsyncMock(side_effect=RuntimeError("throttled")),
+        ):
+            _, result = await self._run_delta(
+                service, mock_dependencies, mock_oauth_token, folder_scoped, changes
+            )
+
+        assert folder_scoped.last_sync_summary["skipped_items"] == 1
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.status == "success"
+        assert sync_log.metadata["skipped_details"] == [
+            {"file": "X", "reason": "Could not list folder contents: throttled"}
+        ]
+        assert "1 item skipped" in result

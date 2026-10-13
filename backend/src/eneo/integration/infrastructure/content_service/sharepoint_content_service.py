@@ -631,22 +631,33 @@ class SharePointContentService:
                 # the Redis ChangeKey cache only after the DB transaction commits.
                 # See _schedule_post_commit_change_keys for why.
                 pending_change_keys: list[tuple[UUID, str, str]] = []
+                change_ids = {
+                    change_id for change in changes if (change_id := change.get("id"))
+                }
+                if (
+                    integration_knowledge.selected_item_type == "folder"
+                    and integration_knowledge.folder_id
+                ):
+                    # Graph orders delta entries arbitrarily, so a descendant can
+                    # arrive before the renamed/moved scope folder itself. Refresh
+                    # the scope path first or that descendant is classified against
+                    # the stale path and its blob deleted as out of scope.
+                    refreshed_scope_path = self._scope_folder_path_from_changes(
+                        changes, integration_knowledge.folder_id
+                    )
+                    if refreshed_scope_path:
+                        scope_folder_path = refreshed_scope_path
+                        integration_knowledge.folder_path = refreshed_scope_path
+                        folder_scope_path_unresolved = False
+
                 for item in changes:
                     item_name = item.get("name", "")
                     item_id = item.get("id")
                     is_deleted = has_graph_facet(item, "deleted")
                     is_folder = has_graph_facet(item, "folder")
-                    source_metadata: Optional[list[SourceMetadataEntry]] = []
-                    if not is_deleted and not is_folder:
-                        source_metadata = await self._source_metadata_for(
-                            content_client, actual_drive_id, item
-                        )
-                    change_key = self._change_key_with_metadata(
-                        item.get("cTag"), source_metadata, title=item_name
-                    )
 
                     logger.debug(
-                        f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder}, changeKey={change_key})"
+                        f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder})"
                     )
 
                     if not item_id:
@@ -724,15 +735,9 @@ class SharePointContentService:
 
                     if (
                         is_folder
-                        and item_id
                         and integration_knowledge.selected_item_type == "folder"
                     ):
                         known_subfolder_ids.add(item_id)
-                        if item_id == integration_knowledge.folder_id:
-                            updated_folder_path = self._folder_path_from_item(item)
-                            if updated_folder_path:
-                                scope_folder_path = updated_folder_path
-                                integration_knowledge.folder_path = updated_folder_path
 
                     if is_deleted:
                         # Delete the corresponding info_blob if it exists
@@ -748,91 +753,35 @@ class SharePointContentService:
 
                     if is_folder:
                         stats["folders_processed"] += 1
-                        continue
-
-                    should_process = True
-                    if self.change_key_service and item_id and change_key:
-                        should_process = await self.change_key_service.should_process(
-                            integration_knowledge_id=resolved_integration_knowledge_id,
-                            item_id=item_id,
-                            change_key=change_key,
-                        )
-
-                    if not should_process:
-                        logger.info(
-                            f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
-                        )
-                        stats["unchanged_items"] += 1
-                        continue
-
-                    unsupported_reason = unsupported_file_reason(item_name)
-                    if unsupported_reason:
-                        stats["skipped_items"] += 1
-                        stats["skipped_details"].append(
-                            {"file": item_name, "reason": unsupported_reason}
-                        )
-                        continue
-
-                    web_url = item.get("webUrl", "")
-
-                    try:
-                        content, _ = await content_client.get_file_content_by_id(
-                            drive_id=actual_drive_id,
-                            item_id=item_id,
-                        )
-
-                        if content and not is_unextractable_content(content):
-                            outcome = await self._process_info_blob(
-                                title=item_name,
-                                text=content,
-                                url=web_url,
-                                integration_knowledge=integration_knowledge,
-                                sharepoint_item_id=item_id,
-                                source_metadata=source_metadata,
-                            )
-                            self._count_outcome(stats, outcome, item_name)
-
-                            # Defer the ChangeKey cache write until after commit so a
-                            # rolled-back sync re-processes the item instead of skipping it.
-                            if self.change_key_service and item_id and change_key:
-                                pending_change_keys.append(
-                                    (
-                                        resolved_integration_knowledge_id,
-                                        item_id,
-                                        change_key,
-                                    )
-                                )
-                        else:
-                            await self._delete_local_blob_for_unextractable_item(
-                                item_id=item_id,
-                                item_name=item_name,
+                        if (
+                            integration_knowledge.selected_item_type == "folder"
+                            and item_id != integration_knowledge.folder_id
+                        ):
+                            await self._index_folder_subtree_entering_scope(
+                                content_client=content_client,
+                                resource_type=integration_knowledge.resource_type
+                                or "site",
+                                site_id=resolved_site_id,
+                                drive_id=actual_drive_id,
+                                folder_id=item_id,
+                                folder_name=item_name,
                                 integration_knowledge=integration_knowledge,
                                 integration_knowledge_id=resolved_integration_knowledge_id,
                                 stats=stats,
+                                pending_change_keys=pending_change_keys,
+                                change_ids=change_ids,
                             )
+                        continue
 
-                    except ValueError as e:
-                        if "exceeds max download size" in str(e):
-                            reason = "File too large (exceeds 50 MB limit)"
-                        else:
-                            reason = f"Error: {e}"
-                        logger.error(
-                            f"Error processing changed file {item_name}: {e}",
-                            exc_info=True,
-                        )
-                        stats["skipped_items"] += 1
-                        stats["skipped_details"].append(
-                            {"file": item_name, "reason": reason}
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Error processing changed file {item_name}: {e}",
-                            exc_info=True,
-                        )
-                        stats["skipped_items"] += 1
-                        stats["skipped_details"].append(
-                            {"file": item_name, "reason": f"Error: {e}"}
-                        )
+                    await self._sync_changed_file(
+                        content_client=content_client,
+                        drive_id=actual_drive_id,
+                        item=item,
+                        integration_knowledge=integration_knowledge,
+                        integration_knowledge_id=resolved_integration_knowledge_id,
+                        stats=stats,
+                        pending_change_keys=pending_change_keys,
+                    )
 
                 integration_knowledge.delta_token = new_delta_token
 
@@ -1600,6 +1549,179 @@ class SharePointContentService:
                 reason="out-of-scope-subtree",
             )
 
+    def _scope_folder_path_from_changes(
+        self, changes: list[SharePointItem], scope_folder_id: str
+    ) -> Optional[str]:
+        for item in changes:
+            if item.get("id") != scope_folder_id or has_graph_facet(item, "deleted"):
+                continue
+            return self._folder_path_from_item(item)
+        return None
+
+    async def _sync_changed_file(
+        self,
+        *,
+        content_client: SharePointContentClient,
+        drive_id: str,
+        item: SharePointItem,
+        integration_knowledge: "IntegrationKnowledge",
+        integration_knowledge_id: UUID,
+        stats: SyncStats,
+        pending_change_keys: list[tuple[UUID, str, str]],
+    ) -> None:
+        """Index one changed file; every failure is counted, none propagates."""
+        item_name = item.get("name", "")
+        item_id = require_text(item.get("id"), "item id")
+        source_metadata = await self._source_metadata_for(
+            content_client, drive_id, item
+        )
+        change_key = self._change_key_with_metadata(
+            item.get("cTag"), source_metadata, title=item_name
+        )
+
+        if self.change_key_service and change_key:
+            should_process = await self.change_key_service.should_process(
+                integration_knowledge_id=integration_knowledge_id,
+                item_id=item_id,
+                change_key=change_key,
+            )
+            if not should_process:
+                logger.info(
+                    f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
+                )
+                stats["unchanged_items"] += 1
+                return
+
+        unsupported_reason = unsupported_file_reason(item_name)
+        if unsupported_reason:
+            stats["skipped_items"] += 1
+            stats["skipped_details"].append(
+                {"file": item_name, "reason": unsupported_reason}
+            )
+            return
+
+        try:
+            content, _ = await content_client.get_file_content_by_id(
+                drive_id=drive_id,
+                item_id=item_id,
+            )
+
+            if content and not is_unextractable_content(content):
+                outcome = await self._process_info_blob(
+                    title=item_name,
+                    text=content,
+                    url=item.get("webUrl", ""),
+                    integration_knowledge=integration_knowledge,
+                    sharepoint_item_id=item_id,
+                    source_metadata=source_metadata,
+                )
+                self._count_outcome(stats, outcome, item_name)
+
+                # Defer the ChangeKey cache write until after commit so a
+                # rolled-back sync re-processes the item instead of skipping it.
+                if self.change_key_service and change_key:
+                    pending_change_keys.append(
+                        (integration_knowledge_id, item_id, change_key)
+                    )
+            else:
+                await self._delete_local_blob_for_unextractable_item(
+                    item_id=item_id,
+                    item_name=item_name,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=integration_knowledge_id,
+                    stats=stats,
+                )
+
+        except ValueError as e:
+            if "exceeds max download size" in str(e):
+                reason = "File too large (exceeds 50 MB limit)"
+            else:
+                reason = f"Error: {e}"
+            logger.error(
+                f"Error processing changed file {item_name}: {e}", exc_info=True
+            )
+            stats["skipped_items"] += 1
+            stats["skipped_details"].append({"file": item_name, "reason": reason})
+        except Exception as e:
+            logger.error(
+                f"Error processing changed file {item_name}: {e}", exc_info=True
+            )
+            stats["skipped_items"] += 1
+            stats["skipped_details"].append(
+                {"file": item_name, "reason": f"Error: {e}"}
+            )
+
+    async def _index_folder_subtree_entering_scope(
+        self,
+        *,
+        content_client: SharePointContentClient,
+        resource_type: str,
+        site_id: Optional[str],
+        drive_id: str,
+        folder_id: str,
+        folder_name: str,
+        integration_knowledge: "IntegrationKnowledge",
+        integration_knowledge_id: UUID,
+        stats: SyncStats,
+        pending_change_keys: list[tuple[UUID, str, str]],
+        change_ids: set[str],
+    ) -> None:
+        """Index the files of a folder that entered the selected scope.
+
+        Graph re-emits only the moved folder, not its unchanged children, so a
+        folder dragged into scope would otherwise never get its files indexed.
+        Children that are already indexed (a rename inside scope) or that arrive
+        as their own entries in this change set (a freshly created folder) are
+        left to the ordinary path.
+        """
+        try:
+            descendants = await self._enumerate_authoritative_items(
+                client=content_client,
+                resource_type=resource_type,
+                site_id=site_id,
+                drive_id=drive_id,
+                folder_id=folder_id,
+            )
+            indexed = await self.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge(
+                integration_knowledge_id=integration_knowledge_id
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not list folder %s (%s) entering scope; its files will be "
+                "picked up by the next full sync: %s",
+                folder_name,
+                folder_id,
+                exc,
+                exc_info=True,
+            )
+            stats["skipped_items"] += 1
+            stats["skipped_details"].append(
+                {
+                    "file": folder_name,
+                    "reason": f"Could not list folder contents: {exc}",
+                }
+            )
+            return
+
+        indexed_ids = {item_id for _, item_id in indexed}
+        for descendant in descendants:
+            descendant_id = descendant.get("id")
+            if (
+                not descendant_id
+                or descendant_id in indexed_ids
+                or descendant_id in change_ids
+            ):
+                continue
+            await self._sync_changed_file(
+                content_client=content_client,
+                drive_id=drive_id,
+                item=descendant,
+                integration_knowledge=integration_knowledge,
+                integration_knowledge_id=integration_knowledge_id,
+                stats=stats,
+                pending_change_keys=pending_change_keys,
+            )
+
     def _schedule_post_commit_change_keys(
         self, pending: list[tuple[UUID, str, str]]
     ) -> None:
@@ -1666,13 +1788,31 @@ class SharePointContentService:
         drive_id: str,
         folder_id: Optional[str],
     ) -> set[str]:
-        """Strictly enumerate every in-scope file (and page) item id.
+        items = await self._enumerate_authoritative_items(
+            client=client,
+            resource_type=resource_type,
+            site_id=site_id,
+            drive_id=drive_id,
+            folder_id=folder_id,
+        )
+        return {item_id for item in items if (item_id := item.get("id"))}
+
+    async def _enumerate_authoritative_items(
+        self,
+        *,
+        client: SharePointContentClient,
+        resource_type: str,
+        site_id: Optional[str],
+        drive_id: str,
+        folder_id: Optional[str],
+    ) -> list[SharePointItem]:
+        """Strictly enumerate every in-scope file (and page) item.
 
         Unlike _collect_files_recursive, this propagates listing errors instead of
         swallowing them: an incomplete enumeration must NOT be treated as the
         authoritative set during reconciliation, or it would delete valid blobs.
         """
-        item_ids: set[str] = set()
+        items: list[SharePointItem] = []
 
         async def _walk(current_folder_id: Optional[str]) -> None:
             if resource_type == "onedrive":
@@ -1698,19 +1838,16 @@ class SharePointContentService:
                     if item_id:
                         await _walk(item_id)
                 elif item_id:
-                    item_ids.add(item_id)
+                    items.append(item)
 
         await _walk(folder_id)
 
         # Site pages live alongside drive documents for site-root SharePoint scopes.
         if resource_type != "onedrive" and site_id and folder_id is None:
             pages = await client.get_site_pages(site_id=site_id)
-            for page in pages.get("value", []):
-                page_id = page.get("id")
-                if page_id:
-                    item_ids.add(page_id)
+            items.extend(page for page in pages.get("value", []) if page.get("id"))
 
-        return item_ids
+        return items
 
     async def _reconcile_indexed_blobs(
         self,
