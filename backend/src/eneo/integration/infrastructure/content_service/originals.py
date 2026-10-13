@@ -12,8 +12,7 @@ from __future__ import annotations
 import csv
 import io
 from collections.abc import Iterator, Mapping
-
-from openpyxl import load_workbook
+from typing import Any
 
 # Extension -> media type of the originals a sync keeps. Growing this list is
 # the whole change needed to hand another kind of file to tools.
@@ -79,15 +78,22 @@ def _sheet_headers(
     filename: str, data: bytes
 ) -> Iterator[tuple[str | None, list[str]]]:
     if _extension(filename) == "xlsx":
-        workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        import pandas
+
+        # Same reader as the text extractors (calamine ships with the service;
+        # openpyxl is a test-only dependency). pandas-stubs do not type the
+        # ExcelFile-based calls, so go through an untyped handle.
+        pd: Any = pandas
+        xls = pd.ExcelFile(io.BytesIO(data), engine="calamine")
         try:
-            for sheet in workbook.worksheets[:_PLACEHOLDER_MAX_SHEETS]:
-                first_row = next(
-                    sheet.iter_rows(min_row=1, max_row=1, values_only=True), ()
+            for sheet in list(xls.sheet_names)[:_PLACEHOLDER_MAX_SHEETS]:
+                frame = pd.read_excel(
+                    xls, sheet_name=sheet, header=None, nrows=1, engine="calamine"
                 )
-                yield sheet.title, [str(cell) for cell in first_row if cell is not None]
+                first_row = [] if frame.empty else list(frame.iloc[0])
+                yield str(sheet), [str(cell) for cell in first_row if pd.notna(cell)]
         finally:
-            workbook.close()
+            xls.close()
         return
     delimiter = "\t" if _extension(filename) == "tsv" else ","
     first_line = (
