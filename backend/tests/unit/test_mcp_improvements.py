@@ -27,7 +27,6 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from eneo.files.model_file_references import FILE_HANDLE_INSTRUCTION
 from eneo.main.exceptions import (
-    BadRequestException,
     MCPAuthenticationError,
     NotFoundException,
     UnauthorizedException,
@@ -1319,109 +1318,5 @@ class TestMCPServerURLValidation:
         assert dto.http_url == "192.168.1.100:8080"
 
 
-# =============================================================================
-# P6: Tool ownership validation in space updates
-# =============================================================================
-
-
-class TestSpaceRepoToolOwnershipValidation:
-    """Test that _set_mcp_tools validates tool ownership."""
-
-    @pytest.mark.asyncio
-    async def test_rejects_invalid_tool_ids(self):
-        """Should raise BadRequestException for tool IDs not belonging to selected servers."""
-        from eneo.spaces.space_repo import SpaceRepository
-
-        # Create mock session with query support
-        mock_session = AsyncMock()
-
-        # When querying for valid tools, return empty (no valid tools)
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = []
-        mock_session.execute.return_value = mock_result
-
-        # Create minimal repo (we'll call _set_mcp_tools directly)
-        repo = object.__new__(SpaceRepository)
-        repo.session = mock_session
-
-        mock_space_in_db = MagicMock()
-        mock_space_in_db.id = uuid4()
-
-        invalid_tool_id = uuid4()
-        valid_server_id = uuid4()
-
-        # Call _set_mcp_tools with a tool that doesn't belong to any selected server
-        with pytest.raises(BadRequestException) as exc_info:
-            await repo._set_mcp_tools(
-                mock_space_in_db,
-                tool_settings=[(invalid_tool_id, True)],
-                valid_server_ids=[valid_server_id],
-            )
-
-        assert "Invalid tool IDs" in str(exc_info.value)
-        assert str(invalid_tool_id) in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_accepts_valid_tool_ids(self):
-        """Should accept tool IDs that belong to selected servers."""
-        from eneo.spaces.space_repo import SpaceRepository
-
-        valid_tool_id = uuid4()
-        valid_server_id = uuid4()
-
-        # Create mock session
-        mock_session = AsyncMock()
-
-        # First execute: DELETE existing settings
-        # Second execute: SELECT valid tools (returns our tool)
-        # Third execute: INSERT new settings
-        call_count = [0]
-
-        async def mock_execute(stmt):
-            call_count[0] += 1
-            if call_count[0] == 2:  # Second call is the validation query
-                mock_result = MagicMock()
-                mock_result.fetchall.return_value = [(valid_tool_id,)]
-                return mock_result
-            return MagicMock()
-
-        mock_session.execute = mock_execute
-
-        repo = object.__new__(SpaceRepository)
-        repo.session = mock_session
-
-        mock_space_in_db = MagicMock()
-        mock_space_in_db.id = uuid4()
-
-        # Should NOT raise - tool is valid
-        await repo._set_mcp_tools(
-            mock_space_in_db,
-            tool_settings=[(valid_tool_id, True)],
-            valid_server_ids=[valid_server_id],
-        )
-
-        # Verify all three queries were executed (delete, select, insert)
-        assert call_count[0] == 3
-
-    @pytest.mark.asyncio
-    async def test_empty_tool_settings_skips_validation(self):
-        """Should handle empty tool settings without error."""
-        from eneo.spaces.space_repo import SpaceRepository
-
-        mock_session = AsyncMock()
-
-        repo = object.__new__(SpaceRepository)
-        repo.session = mock_session
-
-        mock_space_in_db = MagicMock()
-        mock_space_in_db.id = uuid4()
-
-        # Should not raise - empty list
-        await repo._set_mcp_tools(
-            mock_space_in_db,
-            tool_settings=[],
-            valid_server_ids=[],
-        )
-
-        # Only DELETE should have been called
-        assert mock_session.execute.call_count == 1
+# Persistence ownership/override cases execute real rows in
+# spaces/test_space_write_ownership.py.

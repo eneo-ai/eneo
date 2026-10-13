@@ -24,6 +24,7 @@ from eneo.assistants.assistant_repo import (
     AssistantRepository,
     PersonalDefaultValidationInput,
 )
+from eneo.assistants.assistant_update import AssistantUpdate
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.authentication.auth_service import AuthService
@@ -764,8 +765,8 @@ class AssistantService:
             )
 
             assistant.enabled_capabilities = sorted(set(enabled_capabilities or []))
-            space.add_assistant(assistant)
-            refreshed_space = await self.space_repo.update(space)
+            await self._add_assistant_to_space(space, assistant)
+            refreshed_space = await self.space_service.get_space(space.id)
             assistant = refreshed_space.get_assistant(assistant.id)
 
         else:
@@ -783,6 +784,19 @@ class AssistantService:
         )
 
         return assistant, permissions  # type: ignore[return-value]
+
+    async def _add_assistant_to_space(
+        self, space: "Space", assistant: Assistant
+    ) -> None:
+        assert space.id is not None
+        model = assistant.completion_model
+        enable_model = model is not None and not space.is_completion_model_in_space(
+            model.id
+        )
+        space.add_assistant(assistant)
+        if enable_model and model is not None:
+            await self.space_repo.enable_completion_model(space.id, model.id)
+        await self.repo.add(assistant)
 
     async def _create_from_template(
         self,
@@ -848,8 +862,8 @@ class AssistantService:
         # without leaving an invalid row behind.
         await self._validate_attachments_fit(assistant, space=space)
 
-        space.add_assistant(assistant)
-        refreshed_space = await self.space_repo.update(space)
+        await self._add_assistant_to_space(space, assistant)
+        refreshed_space = await self.space_service.get_space(space.id)
         assistant = refreshed_space.get_assistant(assistant.id)
 
         return assistant
@@ -1495,7 +1509,7 @@ class AssistantService:
 
         if cm and not space.is_completion_model_in_space(cm.id):
             space.add_completion_model(cm)
-            await self.space_repo.update(space)
+            await self.space_repo.enable_completion_model(space.id, cm.id)
 
         return self.factory.create_assistant(
             name=name,
@@ -1533,6 +1547,17 @@ class AssistantService:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
 
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        # Partial writes must validate against the latest committed model,
+        # prompt and attachments. Take the fit token before the parent row lock,
+        # matching governance lock order, and hold both until the request commits.
+        await acquire_personal_default_fit_lock(
+            session=self.repo.session,
+            tenant_id=self.user.tenant_id,
+            shared=True,
+        )
+        assert space.id is not None
+        await self.repo.lock(assistant_id, space.id)
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
@@ -1870,10 +1895,6 @@ class AssistantService:
                 )
             )
 
-        # Store MCP server IDs and tool settings for repository to handle.
-        setattr(assistant, "_mcp_server_ids", mcp_server_ids)
-        setattr(assistant, "_mcp_tool_settings", mcp_tools)
-
         if enabled_capabilities is not None:
             from eneo.mcp_servers.application.capability_resolver import (
                 validate_capability_additions,
@@ -1984,7 +2005,45 @@ class AssistantService:
                 mcp_servers_override=mcp_servers_for_validation,
             )
 
-        refreshed_space = await self.space_repo.update(space)
+        await self.repo.apply_update(
+            assistant_id,
+            assistant.space_id,
+            AssistantUpdate(
+                name=name if name is not None else NOT_PROVIDED,
+                completion_model_id=completion_model_id
+                if completion_model_id is not None
+                else NOT_PROVIDED,
+                completion_model_kwargs=completion_model_kwargs
+                if completion_model_kwargs is not None
+                else NOT_PROVIDED,
+                logging_enabled=logging_enabled
+                if logging_enabled is not None
+                else NOT_PROVIDED,
+                collection_ids=groups,
+                website_ids=websites,
+                integration_knowledge_ids=integration_knowledge_ids,
+                mcp_server_ids=mcp_server_ids,
+                mcp_tools=mcp_tools,
+                enabled_capabilities=enabled_capabilities,
+                attachments=attachments,
+                description=description,
+                insight_enabled=insight_enabled
+                if insight_enabled is not None
+                else NOT_PROVIDED,
+                inline_file_text=inline_file_text
+                if inline_file_text is not None
+                else NOT_PROVIDED,
+                knowledge_mode=knowledge_mode
+                if knowledge_mode is not None
+                else NOT_PROVIDED,
+                data_retention_days=data_retention_days,
+                metadata_json=metadata_json,
+                icon_id=icon_id,
+                prompt=prompt_obj,
+                document_template=document_template,
+            ),
+        )
+        refreshed_space = await self.space_service.get_space(assistant.space_id)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 
         # TODO: Review how we get the permissions to the presentation layer
@@ -2289,6 +2348,9 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
         icon_id = assistant.icon_id
 
+        if assistant.is_default:
+            raise BadRequestException("The default assistant cannot be deleted")
+
         if self.api_key_scope_revoker is not None:
             try:
                 await self.api_key_scope_revoker.revoke_scope(
@@ -2303,8 +2365,7 @@ class AssistantService:
                     extra={"assistant_id": str(assistant_id)},
                 )
 
-        space.remove_assistant(assistant)
-        await self.space_repo.update(space)
+        await self.repo.delete(assistant_id, space.id)
 
         if icon_id:
             await self.icon_repo.delete(icon_id)
@@ -3647,7 +3708,9 @@ class AssistantService:
 
         assistant.update(published=publish)
 
-        await self.space_repo.update(space)
+        await self.repo.apply_update(
+            assistant_id, space.id, AssistantUpdate(published=publish)
+        )
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions: list[ResourcePermission] = actor.get_assistant_permissions(
@@ -3681,6 +3744,16 @@ class AssistantService:
         mcp_server_id: UUID,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         """Add an MCP server to an assistant."""
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assert space.id is not None
+        # Incremental additions share the update path's fit/row lock order.
+        # Reload after waiting so combined tool schemas are validated together.
+        await acquire_personal_default_fit_lock(
+            session=self.repo.session,
+            tenant_id=self.user.tenant_id,
+            shared=True,
+        )
+        await self.repo.lock(assistant_id, space.id)
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assert space.id is not None
         assistant = space.get_assistant(assistant_id=assistant_id)
@@ -3779,22 +3852,7 @@ class AssistantService:
             mcp_servers_override=projected_mcp_servers,
         )
 
-        # Persist only after the complete post-add provider payload is accepted.
-        existing_server_ids.append(mcp_server_id)
-        # Update via repository
-        from eneo.database.tables.assistant_table import Assistants
-
-        stmt = sa.select(Assistants).where(Assistants.id == assistant_id)
-        assistant_in_db = await self.repo.session.scalar(stmt)
-        assert assistant_in_db is not None
-
-        await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
-        # Keep the fit snapshot's parent-row version coupled to this association write.
-        await self.repo.session.execute(
-            sa.update(Assistants)
-            .where(Assistants.id == assistant_id)
-            .values(updated_at=sa.func.now())
-        )
+        await self.repo.add_mcp_server(assistant_id, space.id, mcp_server_id)
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(
@@ -3829,32 +3887,7 @@ class AssistantService:
                 },
             )
 
-        # Get existing associations from the database
-        import sqlalchemy as sa
-
-        from eneo.database.tables.assistant_table import (
-            AssistantMCPServers,
-            Assistants,
-        )
-
-        stmt = sa.select(AssistantMCPServers).where(
-            AssistantMCPServers.assistant_id == assistant_id
-        )
-        result = await self.repo.session.execute(stmt)
-        existing_server_ids: list[UUID] = [
-            row.mcp_server_id for row in result.scalars()
-        ]
-
-        # Remove the association
-        existing_server_ids = [
-            server_id for server_id in existing_server_ids if server_id != mcp_server_id
-        ]
-        # Update via repository
-        stmt = sa.select(Assistants).where(Assistants.id == assistant_id)
-        assistant_in_db = await self.repo.session.scalar(stmt)
-        assert assistant_in_db is not None
-
-        await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
+        await self.repo.remove_mcp_server(assistant_id, space.id, mcp_server_id)
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(
@@ -3897,7 +3930,6 @@ class AssistantService:
 
         from eneo.database.tables.assistant_table import (
             AssistantMCPServers,
-            Assistants,
         )
 
         stmt = sa.select(AssistantMCPServers).where(
@@ -3912,14 +3944,8 @@ class AssistantService:
         if mcp_server_id not in existing_server_ids:
             raise BadRequestException("MCP server not associated with assistant")
 
-        # Note: enabled/config/priority fields are not currently stored in the database schema
-        # The association table only stores assistant_id and mcp_server_id
-        # Update via repository
-        stmt = sa.select(Assistants).where(Assistants.id == assistant_id)
-        assistant_in_db = await self.repo.session.scalar(stmt)
-        assert assistant_in_db is not None
-
-        await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
+        # This legacy endpoint has no persisted config fields. A read must not
+        # rewrite the server selection or its timestamps.
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(
