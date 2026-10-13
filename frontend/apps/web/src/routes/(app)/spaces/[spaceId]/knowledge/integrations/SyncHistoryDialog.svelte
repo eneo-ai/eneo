@@ -1,110 +1,94 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { m } from "$lib/paraglide/messages";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
-  import { onMount } from "svelte";
   import { IconHistory } from "@eneo/icons/history";
   import { IconCheck } from "@eneo/icons/check";
   import { IconXMark } from "@eneo/icons/x-mark";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { getEneo } from "$lib/core/Eneo";
+  import { getErrorMessage } from "$lib/core/errors";
+  import {
+    readSyncLogExtras,
+    skippedNotListed,
+    summarizeSyncLogPage,
+    type SyncLog
+  } from "./syncHistory";
 
-  // Get eneo during component initialization
+  interface Props {
+    knowledge: IntegrationKnowledge | null;
+    open?: boolean;
+  }
+
+  let { knowledge, open = $bindable(false) }: Props = $props();
+
   const eneo = getEneo();
+  const pageSize = 10;
 
-  interface SkippedDetail {
-    file: string;
-    reason: string;
-  }
+  let syncLogs = $state<SyncLog[]>([]);
+  let loading = $state(false);
+  let error = $state<string | null>(null);
+  let currentPage = $state(1);
+  let totalCount = $state(0);
+  let totalPages = $state(1);
+  let loadedKnowledgeId = $state<string | null>(null);
+  let loadGeneration = 0;
 
-  interface SyncLog {
-    id: string;
-    sync_type: string;
-    status: string;
-    files_processed: number;
-    files_deleted: number;
-    pages_processed: number;
-    folders_processed: number;
-    skipped_items: number;
-    skipped_details: SkippedDetail[];
-    error_message: string | null;
-    started_at: string;
-    completed_at: string | null;
-    created_at: string;
-    duration_seconds?: number;
-    total_items_processed?: number;
-  }
+  let pageStats = $derived(summarizeSyncLogPage(syncLogs));
 
-  export let knowledge: IntegrationKnowledge | null;
-  export let open = false; // publik boolean, används av förälder
-
-  // Declare state variables FIRST before using them in callbacks
-  let syncLogs: SyncLog[] = [];
-  let loading = false;
-  let error: string | null = null;
-  let localKnowledge: IntegrationKnowledge | null = null;
-  let currentPage = 1;
-  let pageSize = 10;
-  let totalCount = 0;
-  let totalPages = 1;
-  let hasLoadedOnce = false;
-
-  function resetHistory() {
-    hasLoadedOnce = false;
+  function reset() {
+    loadGeneration += 1;
     syncLogs = [];
+    loading = false;
+    error = null;
     currentPage = 1;
+    totalCount = 0;
+    totalPages = 1;
+    loadedKnowledgeId = null;
   }
 
-  // Reset state when dialog closes
-  $: if (!open) resetHistory();
-
-  onMount(() => {
-    if (knowledge) {
-      localKnowledge = knowledge;
-      loadSyncHistory(1);
-    }
-  });
-
-  /* eslint-disable svelte/infinite-reactive-loop -- safe: async fetch then state update, called from reactive statement */
-  async function loadSyncHistory(page: number = 1) {
-    if (!localKnowledge?.id) return;
+  async function loadSyncHistory(target: IntegrationKnowledge, page: number) {
+    const generation = ++loadGeneration;
     loading = true;
     error = null;
     try {
-      const skip = (page - 1) * pageSize;
       const response = await eneo.integrations.knowledge.getSyncLogs({
-        knowledge: localKnowledge,
-        skip,
+        knowledge: target,
+        skip: (page - 1) * pageSize,
         limit: pageSize
       });
-
-      console.log("Sync logs response:", response);
-
-      syncLogs = (response.items || []) as unknown as SyncLog[];
-      totalCount = response.total_count || 0;
-      totalPages = response.total_pages || 1;
+      if (generation !== loadGeneration) return;
+      syncLogs = response.items ?? [];
+      totalCount = response.total_count ?? 0;
+      totalPages = response.total_pages ?? 1;
       currentPage = page;
-      hasLoadedOnce = true;
-
-      console.log("Loaded page", page, "with", syncLogs.length, "items, total:", totalCount);
     } catch (err) {
-      error = err instanceof Error ? err.message : "Failed to load sync history";
-      console.error("Error loading sync history:", err);
-      hasLoadedOnce = true;
+      if (generation !== loadGeneration) return;
+      error = `${m.sync_history_load_failed()}: ${getErrorMessage(err)}`;
     } finally {
-      loading = false;
+      if (generation === loadGeneration) loading = false;
     }
   }
-  /* eslint-enable svelte/infinite-reactive-loop */
 
   function goToPage(page: number) {
-    if (page >= 1 && page <= totalPages) {
-      loadSyncHistory(page);
-    }
+    if (!knowledge || page < 1 || page > totalPages) return;
+    void loadSyncHistory(knowledge, page);
   }
+
+  $effect(() => {
+    if (!open) {
+      reset();
+      return;
+    }
+    const target = knowledge;
+    if (!target || target.id === untrack(() => loadedKnowledgeId)) return;
+    loadedKnowledgeId = target.id;
+    void loadSyncHistory(target, 1);
+  });
 
   function formatDate(value: string): string {
     return Number.isNaN(new Date(value).getTime()) ? value : formatDateTime(value);
@@ -112,78 +96,44 @@
 
   function getDuration(log: SyncLog): string {
     if (!log.completed_at) return "-";
-    try {
-      const start = new Date(log.started_at).getTime();
-      const end = new Date(log.completed_at).getTime();
-      const seconds = Math.floor((end - start) / 1000);
-      if (seconds < 60) return `${seconds}s`;
-      if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-      return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-    } catch {
-      return "-";
-    }
+    const start = new Date(log.started_at).getTime();
+    const end = new Date(log.completed_at).getTime();
+    if (Number.isNaN(start) || Number.isNaN(end)) return "-";
+    const seconds = Math.max(0, Math.floor((end - start) / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
   }
 
   function getSyncTypeLabel(syncType: string): string {
     return syncType === "full" ? m.full_sync() : m.delta_sync();
   }
 
+  function getStatusLabel(status: string): string {
+    switch (status) {
+      case "success":
+        return m.success();
+      case "error":
+        return m.error();
+      case "in_progress":
+        return m.in_progress();
+      default:
+        return m.unknown();
+    }
+  }
+
   function getSyncSummary(log: SyncLog): string {
     const parts: string[] = [];
+    const extras = readSyncLogExtras(log);
 
-    if (log.files_processed > 0) {
-      parts.push(m.file_s_synced({ count: log.files_processed }));
-    }
-    if (log.files_deleted > 0) {
-      parts.push(m.file_s_deleted({ count: log.files_deleted }));
-    }
-    if (log.pages_processed > 0) {
-      parts.push(m.page_s_synced({ count: log.pages_processed }));
-    }
-    if (log.skipped_items > 0) {
-      parts.push(m.item_s_skipped({ count: log.skipped_items }));
-    }
+    if (log.files_processed > 0) parts.push(m.file_s_synced({ count: log.files_processed }));
+    if (log.files_deleted > 0) parts.push(m.file_s_deleted({ count: log.files_deleted }));
+    if (log.pages_processed > 0) parts.push(m.page_s_synced({ count: log.pages_processed }));
+    if (extras.unchangedItems > 0) parts.push(m.item_s_unchanged({ count: extras.unchangedItems }));
+    if (log.skipped_items > 0) parts.push(m.item_s_skipped({ count: log.skipped_items }));
 
     return parts.length > 0 ? parts.join(", ") : m.no_changes();
   }
-
-  function getPageStats() {
-    let pageFiles = 0;
-    let pageDeleted = 0;
-    let pagePages = 0;
-    let pageSyncs = 0;
-    let pageSuccessfulSyncs = 0;
-
-    for (const log of syncLogs) {
-      if (log.status === "success") {
-        pageFiles += log.files_processed;
-        pageDeleted += log.files_deleted;
-        pagePages += log.pages_processed;
-        pageSuccessfulSyncs++;
-      }
-      pageSyncs++;
-    }
-
-    return { pageFiles, pageDeleted, pagePages, pageSyncs, pageSuccessfulSyncs };
-  }
-
-  // Ladda historik när dialogen öppnas eller när knowledge ändras
-  /* eslint-disable svelte/infinite-reactive-loop -- safe: async fetch then state update */
-  $: if (open && knowledge) {
-    // If knowledge changed, reset and reload
-    if (localKnowledge?.id !== knowledge?.id) {
-      hasLoadedOnce = false;
-      syncLogs = [];
-      currentPage = 1;
-      localKnowledge = knowledge;
-      loadSyncHistory(1);
-    } else if (!hasLoadedOnce && !loading) {
-      // First load for this knowledge
-      localKnowledge = knowledge;
-      loadSyncHistory(1);
-    }
-  }
-  /* eslint-enable svelte/infinite-reactive-loop */
 </script>
 
 <Dialog.Root bind:open>
@@ -194,12 +144,15 @@
 
     <div class={dialogLayout.body}>
       {#if loading}
-        <div class="flex items-center justify-center py-8">
+        <div class="flex items-center justify-center py-8" role="status">
           <IconLoadingSpinner size="lg" class="animate-spin" />
-          <span class="ml-2">{m.loading_available_sites()}...</span>
+          <span class="ml-2">{m.loading_sync_history()}</span>
         </div>
       {:else if error}
-        <div class="text-negative-stronger bg-negative-dimmer flex items-center gap-2 rounded p-4">
+        <div
+          class="text-negative-stronger bg-negative-dimmer flex items-center gap-2 rounded p-4"
+          role="alert"
+        >
           <IconXMark size="md" />
           <span>{error}</span>
         </div>
@@ -209,14 +162,9 @@
           <p>{m.integration_sync_summary_none()}</p>
         </div>
       {:else}
-        <!-- Overall Statistics -->
-        {(() => {
-          getPageStats();
-          return null;
-        })()}
         <div class="bg-primary border-default space-y-3 rounded-lg border p-4">
           <div class="flex items-center justify-between">
-            <div class="text-sm font-semibold">{m.overall_statistics()}</div>
+            <div class="text-sm font-semibold">{m.page_statistics()}</div>
             <div class="text-muted text-xs">
               {m.total_syncs()}: {totalCount}
             </div>
@@ -224,31 +172,34 @@
           <div class="grid grid-cols-2 gap-3 text-sm">
             <div class="flex justify-between">
               <span class="text-secondary">{m.page()}:</span>
-              <span class="font-medium">{currentPage} {m.per_page()}</span>
+              <span class="font-medium">
+                {m.page_x_of_y({ x: currentPage, y: totalPages })}
+              </span>
             </div>
             <div class="flex justify-between">
-              <span class="text-secondary">{m.total_syncs()}:</span>
-              <span class="font-medium">{syncLogs.length}</span>
+              <span class="text-secondary">{m.syncs_on_page()}:</span>
+              <span class="font-medium">{pageStats.syncs}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-secondary">{m.files_synced()}:</span>
-              <span class="font-medium">{getPageStats().pageFiles}</span>
+              <span class="font-medium">{pageStats.files}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-secondary">{m.files_deleted()}:</span>
-              <span class="text-negative-default font-medium">{getPageStats().pageDeleted}</span>
+              <span class="text-negative-default font-medium">{pageStats.deleted}</span>
             </div>
             <div class="col-span-2 flex justify-between">
               <span class="text-secondary">{m.pages_synced()}:</span>
-              <span class="font-medium">{getPageStats().pagePages}</span>
+              <span class="font-medium">{pageStats.pages}</span>
             </div>
           </div>
         </div>
         {#each syncLogs as log (log.id)}
+          {@const extras = readSyncLogExtras(log)}
+          {@const notListed = skippedNotListed(log)}
           <div
             class="border-default hover:bg-hover-default rounded-lg border p-3 transition-colors"
           >
-            <!-- Status row -->
             <div class="mb-3 flex items-center justify-between">
               <div class="flex items-center gap-2">
                 {#if log.status === "success"}
@@ -273,39 +224,50 @@
                   class:bg-warning-dimmer={log.status === "in_progress"}
                   class:text-warning-stronger={log.status === "in_progress"}
                 >
-                  {log.status}
+                  {getStatusLabel(log.status)}
                 </span>
               </div>
               <span class="text-muted flex-shrink-0 text-xs">{formatDate(log.started_at)}</span>
             </div>
 
-            <!-- Summary -->
             <div class="text-secondary mb-2 text-xs">
               {getSyncSummary(log)}
             </div>
 
-            <!-- Skipped details -->
+            {#if extras.reconcileWarning}
+              <p class="text-warning-stronger mb-2 text-xs">
+                <span class="font-medium">{m.sync_reconcile_warning()}:</span>
+                {extras.reconcileWarning}
+              </p>
+            {/if}
+
             {#if log.skipped_items > 0 && log.skipped_details?.length > 0}
               <details class="mb-2">
-                <summary class="text-warning-default cursor-pointer text-xs hover:underline">
+                <summary class="text-warning-stronger cursor-pointer text-xs hover:underline">
                   {m.item_s_skipped({ count: log.skipped_items })}
                 </summary>
                 <ul class="text-secondary mt-1 ml-4 space-y-0.5 text-xs">
-                  {#each log.skipped_details as detail (detail.file)}
+                  <!-- The same file name recurs across folders, so the key needs the position. -->
+                  {#each log.skipped_details as detail, index (`${index}:${detail.file}`)}
                     <li class="flex gap-1">
-                      <span
-                        class="text-primary max-w-[200px] truncate font-medium"
-                        title={detail.file}>{detail.file}</span
+                      <span class="text-primary max-w-[200px] font-medium break-all"
+                        >{detail.file}</span
                       >
                       <span class="text-muted">&mdash;</span>
                       <span class="text-muted">{detail.reason}</span>
                     </li>
                   {/each}
+                  {#if extras.skippedTruncated}
+                    <li class="text-muted italic">
+                      {notListed > 0
+                        ? m.skipped_and_n_more({ count: notListed })
+                        : m.skipped_list_truncated()}
+                    </li>
+                  {/if}
                 </ul>
               </details>
             {/if}
 
-            <!-- Duration and error -->
             <div class="text-muted flex items-center gap-4 text-xs">
               <span>{m.duration()}: {getDuration(log)}</span>
               {#if log.error_message}

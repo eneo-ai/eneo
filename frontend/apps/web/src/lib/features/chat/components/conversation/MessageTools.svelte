@@ -15,10 +15,18 @@
   import McpResourceSnippetModal from "./McpResourceSnippetModal.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
+  import { getChatService } from "../../ChatService.svelte";
   import { citedTextDocumentReferences, dedupeByDocument } from "../../mcpReferenceDocs";
+  import {
+    getPartnerKnowledgeMode,
+    getPartnerKnowledgeSources,
+    hasKnowledgeSources,
+    shouldShowNoSourcesNotice
+  } from "../../knowledgeSources";
 
   const { settings } = getAppContext();
-  const { current, isLast } = getMessageContext();
+  const { current, isLast, isLoading } = getMessageContext();
+  const chat = getChatService();
   const message = $derived(current());
   const preferredCopyFormat = $derived(getPreferredAssistantCopyFormat(settings));
   const copyLabel = $derived(
@@ -73,6 +81,14 @@
   }
 
   const totalRefs = $derived(message.references.length + mcpRefDocs.length);
+  const showNoSourcesNotice = $derived(
+    shouldShowNoSourcesNotice({
+      hasKnowledge: hasKnowledgeSources(getPartnerKnowledgeSources(chat.partner)),
+      knowledgeMode: getPartnerKnowledgeMode(chat.partner),
+      referenceCount: totalRefs,
+      isLoading: isLoading()
+    })
+  );
 
   async function handleCopy(format: AssistantCopyFormat = preferredCopyFormat) {
     await copyAssistantAnswer(message.answer, format);
@@ -140,6 +156,10 @@
           {totalRefs}
           {m.references()}
         </button>
+      {:else if showNoSourcesNotice}
+        <span class="text-muted flex items-center px-2 text-xs" role="status">
+          {m.chat_no_sources_found()}
+        </span>
       {/if}
     </div>
   </div>

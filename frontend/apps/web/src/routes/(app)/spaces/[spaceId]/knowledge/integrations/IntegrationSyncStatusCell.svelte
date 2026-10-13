@@ -2,30 +2,46 @@
   import { m } from "$lib/paraglide/messages";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { IconHistory } from "@eneo/icons/history";
+  import { Info } from "@lucide/svelte";
+  import { Badge, type BadgeVariant } from "$lib/components/ui/badge/index.js";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import {
+    aggregateIntegrationSync,
+    summarizeIntegrationSync,
+    type IntegrationSyncState
+  } from "$lib/features/integrations/syncStatus";
 
   interface Props {
-    knowledge: IntegrationKnowledge;
+    /** One item, or every item of a wrapper for an aggregated row. */
+    knowledge: IntegrationKnowledge | IntegrationKnowledge[];
     onShowSyncHistory?: (() => void) | undefined;
   }
 
   let { knowledge, onShowSyncHistory }: Props = $props();
 
-  let syncedAt = $derived(knowledge.metadata?.last_synced_at ?? null);
-  let subscriptionExpiresAt = $derived(
-    knowledge.metadata?.sharepoint_subscription_expires_at ?? null
+  let single = $derived(Array.isArray(knowledge) ? null : knowledge);
+  let summary = $derived(
+    Array.isArray(knowledge)
+      ? aggregateIntegrationSync(knowledge)
+      : summarizeIntegrationSync(knowledge)
   );
-  let isSharePoint = $derived(knowledge.integration_type === "sharepoint");
+  let errorMessages = $derived(summary.errors.filter((error) => error.message.length > 0));
+  let errorOpen = $state(false);
 
-  // Compute subscription status
-  let subscriptionStatus = $derived.by(() => {
+  let subscriptionExpiresAt = $derived(
+    single?.metadata?.sharepoint_subscription_expires_at ?? null
+  );
+  let isSharePoint = $derived(single?.integration_type === "sharepoint");
+
+  type SubscriptionStatus = "none" | "expired" | "expiring_soon" | "active";
+
+  let subscriptionStatus = $derived.by((): SubscriptionStatus | null => {
     if (!isSharePoint) return null;
-
-    // No subscription configured
     if (!subscriptionExpiresAt) return "none";
 
-    const now = new Date();
-    const expiresAt = new Date(subscriptionExpiresAt);
-    const hoursUntilExpiry = (expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60);
+    const hoursUntilExpiry =
+      (new Date(subscriptionExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60);
 
     if (hoursUntilExpiry <= 0) return "expired";
     if (hoursUntilExpiry <= 48) return "expiring_soon";
@@ -33,28 +49,50 @@
   });
 
   function getTimeAgo(value: string): string {
-    try {
-      const date = new Date(value);
-      const now = new Date();
-      const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
 
-      if (seconds < 60) return m.integration_last_synced_just_now();
-      if (seconds < 3600) {
-        const minutes = Math.floor(seconds / 60);
-        return m.integration_last_synced_minutes_ago({ minutes });
-      }
-      if (seconds < 86400) {
-        const hours = Math.floor(seconds / 3600);
-        return m.integration_last_synced_hours_ago({ hours });
-      }
-      const days = Math.floor(seconds / 86400);
-      return m.integration_last_synced_days_ago({ days });
-    } catch (error) {
-      return value;
+    if (seconds < 60) return m.integration_last_synced_just_now();
+    if (seconds < 3600) {
+      const minutes = Math.floor(seconds / 60);
+      return m.integration_last_synced_minutes_ago({ minutes });
+    }
+    if (seconds < 86400) {
+      const hours = Math.floor(seconds / 3600);
+      return m.integration_last_synced_hours_ago({ hours });
+    }
+    const days = Math.floor(seconds / 86400);
+    return m.integration_last_synced_days_ago({ days });
+  }
+
+  function getStateLabel(state: IntegrationSyncState): string {
+    switch (state) {
+      case "never":
+        return m.integration_sync_status_never();
+      case "success":
+        return m.integration_sync_status_success();
+      case "error":
+        return m.integration_sync_status_error();
+      case "empty":
+        return m.integration_sync_status_empty();
     }
   }
 
-  function getSubscriptionStatusLabel(status: string): string {
+  function getStateBadge(state: IntegrationSyncState): { variant: BadgeVariant; class: string } {
+    switch (state) {
+      case "never":
+        return { variant: "outline", class: "" };
+      case "success":
+        return { variant: "secondary", class: "bg-positive-dimmer text-positive-stronger" };
+      case "error":
+        return { variant: "secondary", class: "bg-negative-dimmer text-negative-stronger" };
+      case "empty":
+        return { variant: "secondary", class: "bg-warning-dimmer text-warning-stronger" };
+    }
+  }
+
+  function getSubscriptionStatusLabel(status: SubscriptionStatus): string {
     switch (status) {
       case "none":
         return m.sharepoint_webhook_none();
@@ -64,62 +102,109 @@
         return m.sharepoint_webhook_expiring_soon();
       case "active":
         return m.sharepoint_webhook_active();
-      default:
-        return "";
     }
   }
 
-  function getSubscriptionStatusColor(status: string): string {
+  function getSubscriptionExplanation(status: SubscriptionStatus): string {
     switch (status) {
       case "none":
-        return "text-gray-500";
+        return m.sharepoint_webhook_none_tooltip();
       case "expired":
-        return "text-red-600";
+        return m.sharepoint_webhook_expired_tooltip();
       case "expiring_soon":
-        return "text-yellow-600";
       case "active":
-        return "text-green-600";
-      default:
-        return "";
+        return m.sharepoint_webhook_auto_renewal();
     }
   }
+
+  function getSubscriptionStatusClass(status: SubscriptionStatus): string {
+    switch (status) {
+      case "none":
+        return "text-muted";
+      case "expired":
+        return "text-negative-stronger";
+      case "expiring_soon":
+        return "text-warning-stronger";
+      case "active":
+        return "text-positive-stronger";
+    }
+  }
+
+  let stateBadge = $derived(getStateBadge(summary.state));
+  let documentsLabel = $derived(
+    summary.documentCount === 1
+      ? m.integration_documents_one({ count: summary.documentCount })
+      : m.integration_documents_other({ count: summary.documentCount })
+  );
+  let timelineLabel = $derived.by(() => {
+    if (summary.lastSyncedAt) {
+      return `${m.integration_last_synced()} ${getTimeAgo(summary.lastSyncedAt)}`;
+    }
+    if (summary.lastSyncAttemptedAt) {
+      return `${m.integration_last_sync_attempted()} ${getTimeAgo(summary.lastSyncAttemptedAt)}`;
+    }
+    return m.integration_sync_summary_none();
+  });
 </script>
 
-<div class="flex min-w-0 flex-col gap-1">
-  <!-- Sync status button -->
-  <button
-    onclick={onShowSyncHistory}
-    disabled={!onShowSyncHistory}
-    class="text-secondary hover:text-foreground disabled:hover:text-secondary flex min-w-0 items-center gap-1 text-xs transition-colors disabled:cursor-default"
-  >
-    {#if syncedAt}
-      <span class="truncate">
-        {m.integration_last_synced()}
-        {getTimeAgo(syncedAt)}
-      </span>
-      {#if onShowSyncHistory}
-        <IconHistory size="sm" class="flex-shrink-0" />
-      {/if}
-    {:else}
-      <span class="text-secondary truncate opacity-70">
-        {m.integration_sync_summary_none()}
-      </span>
+<div class="flex min-w-0 flex-col gap-1 text-xs">
+  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+    <Badge variant={stateBadge.variant} class={stateBadge.class}>
+      {getStateLabel(summary.state)}
+    </Badge>
+    {#if summary.state !== "never"}
+      <span class="text-secondary">{documentsLabel}</span>
     {/if}
-  </button>
+  </div>
 
-  <!-- SharePoint subscription status -->
-  {#if isSharePoint && subscriptionStatus}
-    <div
-      class="flex items-center gap-1 text-xs {getSubscriptionStatusColor(subscriptionStatus)}"
-      title={subscriptionStatus === "none"
-        ? m.sharepoint_webhook_none_tooltip()
-        : subscriptionStatus === "expired"
-          ? m.sharepoint_webhook_expired_tooltip()
-          : m.sharepoint_webhook_auto_renewal()}
+  {#if onShowSyncHistory}
+    <button
+      type="button"
+      onclick={onShowSyncHistory}
+      class="text-secondary hover:text-foreground focus-visible:ring-stronger flex w-fit min-w-0 items-center gap-1 rounded text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
     >
-      <span class="truncate">
-        {getSubscriptionStatusLabel(subscriptionStatus)}
-      </span>
-    </div>
+      <span class="truncate">{timelineLabel}</span>
+      <IconHistory size="sm" class="flex-shrink-0" />
+      <span class="sr-only">{m.sync_history()}</span>
+    </button>
+  {:else}
+    <span class="text-secondary truncate">{timelineLabel}</span>
+  {/if}
+
+  {#if summary.state === "error" && errorMessages.length > 0}
+    <Collapsible.Root bind:open={errorOpen}>
+      <Collapsible.Trigger
+        class="text-negative-stronger focus-visible:ring-stronger w-fit rounded font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+      >
+        {errorOpen ? m.integration_sync_error_hide() : m.integration_sync_error_show()}
+      </Collapsible.Trigger>
+      <Collapsible.Content>
+        <ul class="text-negative-stronger mt-1 space-y-0.5 break-words whitespace-normal">
+          {#each errorMessages as error, index (index)}
+            <li>
+              {#if error.itemName}
+                <span class="font-medium">{error.itemName}:</span>
+              {/if}
+              {error.message}
+            </li>
+          {/each}
+        </ul>
+      </Collapsible.Content>
+    </Collapsible.Root>
+  {/if}
+
+  {#if subscriptionStatus}
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        class="focus-visible:ring-stronger flex w-fit cursor-default items-center gap-1 rounded text-left focus-visible:ring-2 focus-visible:outline-none {getSubscriptionStatusClass(
+          subscriptionStatus
+        )}"
+      >
+        <span class="truncate">{getSubscriptionStatusLabel(subscriptionStatus)}</span>
+        <Info class="size-3.5 shrink-0" aria-hidden="true" />
+        <span class="sr-only">{getSubscriptionExplanation(subscriptionStatus)}</span>
+      </Tooltip.Trigger>
+      <Tooltip.Content>{getSubscriptionExplanation(subscriptionStatus)}</Tooltip.Content>
+    </Tooltip.Root>
   {/if}
 </div>

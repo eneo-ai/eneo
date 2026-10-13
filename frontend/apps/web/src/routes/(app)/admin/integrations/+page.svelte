@@ -10,9 +10,12 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import type { TenantIntegration } from "@eneo/eneo-js";
+  import type { TenantIntegration, components } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
   import SharePointAppConfigDialog from "$lib/features/integrations/sharepoint/SharePointAppConfigDialog.svelte";
+  import SharePointAuthHealth from "$lib/features/integrations/sharepoint/SharePointAuthHealth.svelte";
+  import { followServiceAccountSignIn } from "$lib/features/integrations/sharepoint/serviceAccountAuth";
   import SharePointAppDeleteDialog from "$lib/features/integrations/sharepoint/SharePointAppDeleteDialog.svelte";
   import SharePointSetupFixtureLauncher from "$lib/features/integrations/sharepoint/SharePointSetupFixtureLauncher.svelte";
   import SharePointSubscriptions from "./SharePointSubscriptions.svelte";
@@ -28,6 +31,7 @@
   let sharePointConfigStatus = $state<"loading" | "configured" | "not_configured" | "error">(
     "loading"
   );
+  let sharePointConfig = $state<components["schemas"]["TenantSharePointAppPublic"] | null>(null);
   let showWebhookManagement = $state(false);
 
   const loadSharePointStatus = createAsyncState(async () => {
@@ -36,9 +40,21 @@
       const config = await data.eneo.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "get"
       });
+      sharePointConfig = config ?? null;
       sharePointConfigStatus = config ? "configured" : "not_configured";
     } catch {
+      sharePointConfig = null;
       sharePointConfigStatus = "error";
+    }
+  });
+
+  const reauthServiceAccount = createAsyncState(async () => {
+    try {
+      followServiceAccountSignIn(
+        await data.eneo.integrations.admin.sharepoint.restartServiceAccountAuth()
+      );
+    } catch (error) {
+      toastError(error);
     }
   });
 
@@ -105,6 +121,23 @@
                           <Badge variant="outline">{m.integration_status_not_configured()}</Badge>
                         {/if}
                       </div>
+
+                      {#if sharePointConfigStatus === "configured" && sharePointConfig}
+                        <SharePointAuthHealth config={sharePointConfig} />
+                        {#if sharePointConfig.auth_method === "service_account" && sharePointConfig.auth_status === "error"}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            class="w-fit"
+                            disabled={reauthServiceAccount.isLoading}
+                            onclick={reauthServiceAccount}
+                          >
+                            {reauthServiceAccount.isLoading
+                              ? m.redirecting()
+                              : m.sharepoint_reauth_with_microsoft()}
+                          </Button>
+                        {/if}
+                      {/if}
 
                       <div class="flex items-center gap-2">
                         <Button

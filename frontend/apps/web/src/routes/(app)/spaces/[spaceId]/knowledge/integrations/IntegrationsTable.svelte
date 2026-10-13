@@ -94,6 +94,7 @@
     wrapperId: string;
     wrapperName: string;
     itemCount: number;
+    items: IntegrationKnowledge[];
     counts: SharePointItemTypeCounts;
     canEdit: boolean;
     canDelete: boolean;
@@ -149,6 +150,7 @@
           wrapperId,
           wrapperName,
           itemCount: wrapperItems.length,
+          items: wrapperItems,
           counts,
           canEdit: ownedInCurrentSpace && permissions.includes("edit"),
           canDelete: ownedInCurrentSpace && permissions.includes("delete"),
@@ -241,11 +243,7 @@
       cell: (displayItem) => {
         const di = displayItem.value;
         if (di.kind === "wrapper") {
-          const countLabel =
-            di.itemCount === 1
-              ? m.wrapper_items_count_one({ count: di.itemCount })
-              : m.wrapper_items_count_other({ count: di.itemCount });
-          return Table.renderComponent(Table.FormattedCell, { value: countLabel });
+          return Table.renderComponent(IntegrationSyncStatusCell, { knowledge: di.items });
         }
         return Table.renderComponent(IntegrationSyncStatusCell, {
           knowledge: di.item,
@@ -284,6 +282,7 @@
             wrapperId: di.wrapperId,
             wrapperName: di.wrapperName,
             itemCount: di.itemCount,
+            items: di.items,
             canEdit: di.canEdit,
             canDelete: di.canDelete
           });

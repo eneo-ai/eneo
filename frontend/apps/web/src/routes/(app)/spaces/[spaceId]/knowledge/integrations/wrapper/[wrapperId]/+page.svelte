@@ -134,6 +134,7 @@
           wrapperId={data.wrapperId}
           wrapperName={$wrapperName}
           itemCount={$wrapperItems.length}
+          items={$wrapperItems}
           canEdit={$wrapperPermissions.canEdit}
           canDelete={$wrapperPermissions.canDelete}
         />

@@ -1,8 +1,10 @@
-import { page } from "@vitest/browser/context";
+import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { tick, type ComponentProps } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import "../../../../app.css";
 import * as m from "$lib/paraglide/messages";
+import { expectNoAxeViolations } from "$lib/test/axe";
 import { buildSharePointSelectionKey } from "./selectionKey";
 import type { SharePointTreeItem } from "./treeState";
 
@@ -149,5 +151,143 @@ describe("SharePoint library search state", () => {
     ).click();
 
     expect(onDeselectMany).toHaveBeenCalledWith([direct]);
+  });
+});
+
+describe("SharePoint tree keyboard navigation", () => {
+  const policies: SharePointTreeItem = {
+    id: "policies",
+    name: "Policies",
+    type: "folder",
+    path: "/Policies",
+    has_children: true
+  };
+  const archive: SharePointTreeItem = {
+    id: "archive",
+    name: "Archive",
+    type: "folder",
+    path: "/Archive",
+    has_children: true
+  };
+  const readme: SharePointTreeItem = {
+    id: "readme",
+    name: "Readme.md",
+    type: "file",
+    path: "/Readme.md",
+    has_children: false
+  };
+  const child: SharePointTreeItem = {
+    id: "p1",
+    name: "Policy 1.docx",
+    type: "file",
+    path: "/Policies/Policy 1.docx",
+    has_children: false
+  };
+
+  function treeItem(name: string) {
+    return page.getByRole("treeitem", { name, exact: true });
+  }
+
+  function focused(): string | undefined {
+    return (document.activeElement as HTMLElement | null)?.getAttribute("aria-label") ?? undefined;
+  }
+
+  beforeEach(() => {
+    fetchLibrary.mockReset();
+    fetchLibrary.mockImplementation(
+      async (path: string, request?: { params?: { query?: { folder_id?: string } } }) => {
+        if (!path.endsWith("/tree/")) return { items: [] };
+        const folderId = request?.params?.query?.folder_id;
+        if (folderId === "policies") return { items: [child] };
+        if (folderId === "archive") {
+          return { items: [{ ...readme, id: "a1", path: "/Archive/Readme.md" }], truncated: true };
+        }
+        return { items: [policies, archive, readme] };
+      }
+    );
+  });
+
+  it("keeps one tree item tabbable and moves with the arrows, Home and End", async () => {
+    show();
+    await expect.element(treeItem("Policies")).toBeVisible();
+
+    expect(treeItem("Policies").element().getAttribute("tabindex")).toBe("0");
+    expect(treeItem("Archive").element().getAttribute("tabindex")).toBe("-1");
+    expect(
+      page
+        .getByRole("checkbox", { name: /Archive/ })
+        .element()
+        .getAttribute("tabindex")
+    ).toBe("-1");
+
+    (treeItem("Policies").element() as HTMLElement).focus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(focused()).toBe("Archive");
+    await userEvent.keyboard("{End}");
+    expect(focused()).toBe("Readme.md");
+    await userEvent.keyboard("{ArrowDown}");
+    expect(focused()).toBe("Readme.md");
+    await userEvent.keyboard("{Home}");
+    expect(focused()).toBe("Policies");
+    await userEvent.keyboard("{ArrowUp}");
+    expect(focused()).toBe("Policies");
+    expect(treeItem("Policies").element().getAttribute("tabindex")).toBe("0");
+  });
+
+  it("expands with ArrowRight, moves into and out of the children, collapses with ArrowLeft", async () => {
+    show();
+    await expect.element(treeItem("Policies")).toBeVisible();
+    (treeItem("Policies").element() as HTMLElement).focus();
+
+    await userEvent.keyboard("{ArrowRight}");
+    await expect.element(treeItem("Policy 1.docx")).toBeVisible();
+    expect(treeItem("Policies").element().getAttribute("aria-expanded")).toBe("true");
+    expect(focused()).toBe("Policies");
+
+    await userEvent.keyboard("{ArrowRight}");
+    expect(focused()).toBe("Policy 1.docx");
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(focused()).toBe("Policies");
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(treeItem("Policies").element().getAttribute("aria-expanded")).toBe("false");
+    expect(treeItem("Policy 1.docx").query()).toBeNull();
+  });
+
+  it("toggles the selection with Space, never for an item covered by its parent", async () => {
+    const onToggleSelect = vi.fn();
+    show({ onToggleSelect, selectedItemKeys: [buildSharePointSelectionKey(policies)] });
+    await expect.element(treeItem("Readme.md")).toBeVisible();
+
+    (treeItem("Readme.md").element() as HTMLElement).focus();
+    await userEvent.keyboard(" ");
+    expect(onToggleSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "readme" }));
+
+    (treeItem("Policies").element() as HTMLElement).focus();
+    await userEvent.keyboard("{Enter}");
+    await expect.element(treeItem("Policy 1.docx")).toBeVisible();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(focused()).toBe("Policy 1.docx");
+    await userEvent.keyboard(" ");
+    expect(onToggleSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("says when a folder listing was capped", async () => {
+    show();
+    await expect.element(treeItem("Archive")).toBeVisible();
+    expect(page.getByText(m.sharepoint_tree_truncated()).query()).toBeNull();
+
+    (treeItem("Archive").element() as HTMLElement).focus();
+    await userEvent.keyboard("{Enter}");
+
+    await expect.element(page.getByText(m.sharepoint_tree_truncated())).toBeVisible();
+  });
+
+  it("has no axe violations with an expanded folder", async () => {
+    const { container } = show();
+    await expect.element(treeItem("Policies")).toBeVisible();
+    (treeItem("Policies").element() as HTMLElement).focus();
+    await userEvent.keyboard("{ArrowRight}");
+    await expect.element(treeItem("Policy 1.docx")).toBeVisible();
+    await expectNoAxeViolations(container);
   });
 });

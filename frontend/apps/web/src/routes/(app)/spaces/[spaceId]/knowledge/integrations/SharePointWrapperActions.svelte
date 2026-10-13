@@ -2,8 +2,10 @@
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
+  import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { IconEdit } from "@eneo/icons/edit";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { IconRefresh } from "@eneo/icons/refresh";
   import { IconTrash } from "@eneo/icons/trash";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
@@ -14,11 +16,13 @@
     wrapperId: string;
     wrapperName: string;
     itemCount: number;
+    /** The wrapper's items; a resync queues one full sync per item. */
+    items?: IntegrationKnowledge[];
     canEdit: boolean;
     canDelete: boolean;
   }
 
-  let { wrapperId, wrapperName, itemCount, canEdit, canDelete }: Props = $props();
+  let { wrapperId, wrapperName, itemCount, items = [], canEdit, canDelete }: Props = $props();
 
   const eneo = getEneo();
   const {
@@ -28,6 +32,29 @@
 
   let showRenameDialog = $state(false);
   let showDeleteDialog = $state(false);
+  let showResyncDialog = $state(false);
+
+  let resyncableItems = $derived(
+    items.filter(
+      (item) => item.integration_type === "sharepoint" && item.permissions?.includes("edit")
+    )
+  );
+  let canResync = $derived(canEdit && resyncableItems.length > 0);
+
+  async function resyncAll() {
+    const results = await Promise.allSettled(
+      resyncableItems.map((knowledge) =>
+        eneo.integrations.knowledge.triggerFullSync({ knowledge, space: $currentSpace })
+      )
+    );
+    refreshCurrentSpace();
+    const failed = results.filter((result) => result.status === "rejected").length;
+    if (failed > 0) {
+      throw new Error(
+        m.resync_all_wrapper_partial_failure({ failed, total: resyncableItems.length })
+      );
+    }
+  }
 
   async function renameWrapper(name: string) {
     await eneo.integrations.knowledge.renameWrapper({
@@ -47,7 +74,7 @@
   }
 </script>
 
-{#if canEdit || canDelete}
+{#if canEdit || canDelete || canResync}
   <DropdownMenu.Root>
     <DropdownMenu.Trigger>
       {#snippet child({ props })}
@@ -60,6 +87,11 @@
       {#if canEdit}
         <DropdownMenu.Item onSelect={() => (showRenameDialog = true)}>
           <IconEdit size="sm" />{m.rename_wrapper()}
+        </DropdownMenu.Item>
+      {/if}
+      {#if canResync}
+        <DropdownMenu.Item onSelect={() => (showResyncDialog = true)}>
+          <IconRefresh size="sm" />{m.resync_all_wrapper()}
         </DropdownMenu.Item>
       {/if}
       {#if canDelete}
@@ -80,6 +112,17 @@
   pendingLabel={m.saving()}
   errorContext={m.integration_rename_error()}
   onSubmit={renameWrapper}
+/>
+
+<ConfirmDialog
+  bind:open={showResyncDialog}
+  title={m.resync_all_wrapper()}
+  description={m.confirm_resync_all_wrapper({ wrapperName, count: resyncableItems.length })}
+  confirmLabel={m.start_full_sync()}
+  pendingLabel={m.syncing()}
+  errorContext={m.sync_failed()}
+  variant="default"
+  onConfirm={resyncAll}
 />
 
 <ConfirmDialog

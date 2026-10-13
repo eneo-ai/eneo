@@ -5,8 +5,9 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { m } from "$lib/paraglide/messages";
 
+  import { SHAREPOINT_SERVICE_ACCOUNT_OAUTH_KEY as SERVICE_ACCOUNT_STORAGE_KEY } from "$lib/features/integrations/sharepoint/serviceAccountAuth";
+
   const MESSAGE_TYPE = "eneo/integration-callback";
-  const SERVICE_ACCOUNT_STORAGE_KEY = "sharepoint_service_account_oauth";
 
   // Flow types
   type FlowType = "popup" | "service_account" | "unknown";
