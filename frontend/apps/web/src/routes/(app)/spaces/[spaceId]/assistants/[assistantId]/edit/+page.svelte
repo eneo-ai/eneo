@@ -523,6 +523,7 @@
               <SelectMCPServers
                 bind:selectedMCPServers={$update.mcp_servers}
                 bind:selectedMCPTools={$update.mcp_tools}
+                savedMCPServers={$resource.mcp_servers}
                 selectedModel={toolModel}
                 allowedMCPServers={availableMCPServers}
               />

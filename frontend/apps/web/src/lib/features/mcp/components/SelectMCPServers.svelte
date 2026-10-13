@@ -8,10 +8,14 @@
   import { createEventDispatcher, untrack } from "svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import * as Field from "$lib/components/ui/field/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Empty from "$lib/components/ui/empty/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { ChevronRight, LockKeyhole } from "@lucide/svelte";
+  import { localizeHref } from "$lib/paraglide/runtime";
+  import { ChevronRight, LockKeyhole, Server, TriangleAlert } from "@lucide/svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import {
     sanitizeMcpSelection,
@@ -48,6 +52,8 @@
   type Props = {
     selectedMCPServers: MCPSelectionServer[] | undefined;
     selectedMCPTools?: MCPToolSelection[];
+    /** The servers as the assistant has them stored, before this form's edits. */
+    savedMCPServers?: { id: string; name: string; purpose: string; is_enabled: boolean }[];
     selectedModel?: { supports_tool_calling?: boolean } | null;
     /** Optional policy-filtered server list for personal assistant governance */
     allowedMCPServers?: { [key: string]: unknown }[] | undefined;
@@ -56,6 +62,7 @@
   let {
     selectedMCPServers = $bindable([]),
     selectedMCPTools = $bindable([]),
+    savedMCPServers = [],
     selectedModel = null,
     allowedMCPServers = undefined
   }: Props = $props();
@@ -74,6 +81,8 @@
   const {
     state: { currentSpace }
   } = getSpacesManager();
+  // The settings page is the space administrator's: the same rule as the space menu's entry.
+  const canEditSpace = $derived($currentSpace.hasPermission("edit", "space"));
 
   // Servers offered for selection: the space's enabled servers (with only their
   // space-enabled tools), narrowed to the policy-allowed set for personal
@@ -104,6 +113,19 @@
         !offeredIds.has(server.id)
     );
     return [...offered, ...retained];
+  });
+
+  // The effect below drops a stored server the space no longer offers, which
+  // marks the form as changed. Say so once, from the stored list, so the line
+  // goes away on its own when the save has removed them.
+  let droppedServerNames = $derived.by(() => {
+    const offeredIds = new Set(availableServers.map((server) => server.id));
+    return savedMCPServers
+      .filter(
+        (server) =>
+          !offeredIds.has(server.id) && server.is_enabled && !isCapabilityPurpose(server.purpose)
+      )
+      .map((server) => server.name);
   });
 
   // Track expanded servers
@@ -304,31 +326,37 @@
       <span class="font-bold">{m.warning()}:&nbsp;</span>{m.model_does_not_support_tools()}
     </p>
   {/if}
+  {#if droppedServerNames.length > 0}
+    <Alert.Root role="status" class="mb-2">
+      <TriangleAlert />
+      <Alert.Description>
+        {m.mcp_assistant_dropped_servers({ names: droppedServerNames.join(", ") })}
+      </Alert.Description>
+    </Alert.Root>
+  {/if}
   {#if generalAvailableServers.length === 0}
-    <div
-      class="border-dimmer bg-secondary/30 flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-8 text-center"
-    >
-      <div class="bg-secondary flex h-12 w-12 items-center justify-center rounded-xl">
-        <svg
-          class="text-muted h-6 w-6"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          stroke-width="1.5"
-          aria-hidden="true"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z"
-          />
-        </svg>
-      </div>
-      <div>
-        <p class="text-default text-sm font-medium">{m.no_mcp_servers_available()}</p>
-        <p class="text-muted mt-1 text-xs">{m.enable_mcp_in_space_settings()}</p>
-      </div>
-    </div>
+    <Empty.Root class="border">
+      <Empty.Header>
+        <Empty.Media variant="icon"><Server /></Empty.Media>
+        <Empty.Title>{m.no_mcp_servers_available()}</Empty.Title>
+        <Empty.Description>
+          {canEditSpace
+            ? m.mcp_picker_empty_description_editor()
+            : m.mcp_picker_empty_description()}
+        </Empty.Description>
+      </Empty.Header>
+      {#if canEditSpace}
+        <Empty.Content>
+          <Button
+            variant="outline"
+            size="sm"
+            href={localizeHref(`/spaces/${$currentSpace.routeId}/settings`)}
+          >
+            {m.mcp_open_space_settings()}
+          </Button>
+        </Empty.Content>
+      {/if}
+    </Empty.Root>
   {:else}
     <div class="divide-dimmer border-default divide-y overflow-hidden rounded-xl border">
       {#each generalAvailableServers as server (server.id)}
@@ -348,7 +376,7 @@
               class="text-muted hover:text-default disabled:hover:text-muted flex h-full w-10 shrink-0 items-center justify-center p-2.5 transition-colors disabled:opacity-20"
               disabled={!hasTools}
               onclick={() => toggleExpanded(server.id)}
-              aria-label={isExpanded ? "Dölj verktyg" : "Visa verktyg"}
+              aria-label={`${isExpanded ? m.governance_mcp_hide_tools() : m.governance_mcp_show_tools()}: ${server.name}`}
               aria-expanded={isExpanded}
             >
               <ChevronRight

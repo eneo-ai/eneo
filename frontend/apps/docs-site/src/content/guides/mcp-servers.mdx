@@ -54,7 +54,7 @@ The server form has a **Function** selection. Leave it at **General tools** for 
 1. Click **Add MCP Server**
 2. Fill in the required fields:
    - **Name** — A display name for the server
-   - **Server URL** — The Streamable HTTP endpoint (e.g. `https://example.com/mcp`)
+   - **Server URL** — The Streamable HTTP endpoint (e.g. `https://example.com/mcp`). Enter the final address: Eneo does not follow redirects
 3. Configure optional settings:
    - **Description** — What the server does
    - **Authentication** — Choose between `Public` (no auth) or `Bearer Token`
@@ -64,7 +64,7 @@ The server form has a **Function** selection. Leave it at **General tools** for 
    - **Security Classification** — Restrict which spaces can use this server
 4. Click **Add MCP Server**
 
-Eneo will **test the connection** before saving. If the URL is unreachable or returns an error, the server is not created and you get an error message.
+Eneo will **test the connection** before saving. If the URL is unreachable or returns an error, the server is not created and the error message is shown at the top of the form.
 
 <Callout type="info">
   On successful creation, Eneo connects to the server and stores the tools
@@ -156,7 +156,7 @@ The header shows the count of enabled tools, e.g. `2 / 5 enabled`.
 
 ## Syncing Tools
 
-Over time, an MCP server may add new tools, change existing tool descriptions, or remove tools. To detect these changes, click **Sync Tools** in the tools panel.
+Over time, an MCP server may add new tools, change existing tool descriptions, or remove tools. To detect these changes, click **Sync Tools** in the tools panel or in the server's row menu. If the sync fails, the server's error message is shown as an error notification.
 
 ### What Happens During Sync
 
@@ -225,10 +225,14 @@ After configuring MCP servers in the admin panel, you make them available to ass
 ### Steps
 
 1. Go to **Space → Settings**
-2. In the **MCP Servers** section, toggle the servers you want to enable
+2. In the **Tools** row, toggle the servers you want to enable. A switch ignores further clicks while its own change is being saved.
 3. Optionally expand a server to enable/disable individual tools for that space
 
+A new space has no MCP server switched on. Only a user who may edit the space can switch servers on; if the organisation has no MCP server to switch on, the row says that an administrator adds them under **Admin → Tools**. In the assistant editor, a space without servers shows an empty state; users who may edit the space get a link to the space settings from it.
+
 When a server is added to a space, all its tools are enabled by default. You can then disable specific tools you don't need.
+
+When you switch a server off, the space's assistants stop calling it, even if an assistant still has it selected. The one exception is the personal assistant when an organisation policy grants it servers directly: it keeps calling those. The assistant editor then lists the servers the space has switched off, and the selection is removed when the assistant is saved.
 
 ### Security Classification
 
@@ -372,7 +376,7 @@ that the model should reuse the handle from earlier results.
 
 **Solutions:**
 
-- Verify the server is enabled in the space settings (not just in admin)
+- Verify the server is switched on in the space settings (not just in admin). A server a space administrator switched off is not called, even by an assistant that still has it selected (except servers an organisation policy grants directly to the personal assistant)
 - Check that individual tools are toggled on in the space
 - If using security classifications, verify the server meets the space's classification level
 - Check that pending tool changes have been approved — new tools are inactive until approved
