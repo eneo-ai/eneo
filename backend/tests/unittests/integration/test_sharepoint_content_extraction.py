@@ -1,6 +1,5 @@
 """Bytes downloaded from SharePoint become text, a skip reason or a failure."""
 
-import io
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -29,52 +28,16 @@ from eneo.integration.infrastructure.content_service.utils import (
     extract_sharepoint_content,
     is_unextractable_content,
 )
-from tests.unittests.files.test_text_extractor import _text_pdf
-
-DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-OCTET = "application/octet-stream"
-
-
-def docx_bytes(*paragraphs: str) -> bytes:
-    from docx import Document
-
-    document = Document()
-    for paragraph in paragraphs:
-        document.add_paragraph(paragraph)
-    buffer = io.BytesIO()
-    document.save(buffer)
-    return buffer.getvalue()
-
-
-def xlsx_bytes(rows: list[list[object]]) -> bytes:
-    from openpyxl import Workbook
-
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Budget"
-    for row in rows:
-        sheet.append(row)
-    buffer = io.BytesIO()
-    workbook.save(buffer)
-    return buffer.getvalue()
-
-
-def pptx_bytes(*titles: str) -> bytes:
-    from pptx import Presentation
-
-    presentation = Presentation()
-    for title in titles:
-        slide = presentation.slides.add_slide(presentation.slide_layouts[5])
-        slide.shapes.title.text = title
-    buffer = io.BytesIO()
-    presentation.save(buffer)
-    return buffer.getvalue()
-
-
-def pdf_bytes(tmp_path: Path, page_texts: list[str]) -> bytes:
-    return _text_pdf(tmp_path / "generated.pdf", page_texts).read_bytes()
+from tests.unittests.integration.sharepoint_fixtures import (
+    DOCX_MIME,
+    OCTET,
+    PPTX_MIME,
+    XLSX_MIME,
+    docx_bytes,
+    pdf_bytes,
+    pptx_bytes,
+    xlsx_bytes,
+)
 
 
 class TestSupportedFormats:
@@ -98,7 +61,7 @@ class TestSupportedFormats:
             (
                 "scan.pdf",
                 "application/pdf",
-                lambda t: pdf_bytes(t, ["Hello PDF"]),
+                lambda t: pdf_bytes(["Hello PDF"]),
                 "[PAGE 1]\nHello PDF",
             ),
             ("notes.txt", "text/plain", lambda t: "Plain text".encode(), "Plain text"),
@@ -150,16 +113,16 @@ class TestSupportedFormats:
         )
         assert result.text == expected
 
-    def test_null_bytes_are_stripped_before_storage(self, tmp_path: Path):
+    def test_null_bytes_are_stripped_before_storage(self):
         with patch.object(TextExtractor, "extract_from_docx", return_value="Hel\x00lo"):
             result = extract_sharepoint_content(b"PK", DOCX_MIME, "a.docx")
         assert result.text == "Hello"
 
 
 class TestNoTextIsNotAFailure:
-    def test_scanned_pdf_reports_missing_text_layer(self, tmp_path: Path):
+    def test_scanned_pdf_reports_missing_text_layer(self):
         result = extract_sharepoint_content(
-            pdf_bytes(tmp_path, ["", ""]), "application/pdf", "scan.pdf"
+            pdf_bytes(["", ""]), "application/pdf", "scan.pdf"
         )
 
         assert result == ExtractionResult(
@@ -246,11 +209,6 @@ class TestUnsupportedFormatsNeverProduceGarbage:
         assert result.failed is False
         assert result.is_no_text is False
 
-    def test_byte_scraper_is_gone(self):
-        import eneo.integration.infrastructure.content_service.utils as utils
-
-        assert not hasattr(utils, "binary_to_text")
-
 
 class TestFailuresAreNotNoText:
     @pytest.mark.parametrize(
@@ -300,11 +258,11 @@ class TestFailuresAreNotNoText:
 
 
 class TestExtractionLimits:
-    def test_pdf_over_page_limit_is_skipped_not_chunked(self, tmp_path: Path):
+    def test_pdf_over_page_limit_is_skipped_not_chunked(self):
         limits = FileExtractionLimits(max_pdf_pages=2)
 
         result = extract_sharepoint_content(
-            pdf_bytes(tmp_path, ["one", "two", "three"]),
+            pdf_bytes(["one", "two", "three"]),
             "application/pdf",
             "long.pdf",
             limits=limits,
