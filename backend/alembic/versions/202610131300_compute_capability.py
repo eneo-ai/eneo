@@ -3,10 +3,11 @@
 Spaces, assistants and governance policies may now save ``compute`` (exact
 calculations in an isolated JavaScript sandbox, with CSV export of tabular
 results) as a capability, governed by a permission of the same name. The
-permission is granted to the predefined User, AI Configurator and Owner roles,
-matching file analysis, file creation and the YAML template in
-``server/dependencies/predefined_roles.yml``. Custom roles are left unchanged:
-tenant admins opt their own roles in.
+permission is granted to the predefined Owner role only, as charts was by
+202610091100 and as the YAML template in
+``server/dependencies/predefined_roles.yml`` gives new tenants: a function
+that runs code or writes files is opted in for other roles by an
+administrator. Custom roles are left unchanged.
 
 Existing bundled compute servers with purpose ``general`` are left as they are.
 They keep working as ordinary MCP servers next to the new function and are
@@ -41,7 +42,7 @@ _PREVIOUS = (
     "charts",
 )
 _ADDED = "compute"
-_PREDEFINED_ROLES = ("User", "AI Configurator", "Owner")
+_PREDEFINED_ROLES = ("Owner",)
 
 
 def _replace_constraints(purposes: tuple[str, ...]) -> None:

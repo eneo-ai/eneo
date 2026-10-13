@@ -151,7 +151,7 @@ Their old general-tool access rules continue to apply until then.
 Apply migration `202610131300`, then add **Built into Eneo** under
 **Admin → Tools → Functions → Compute** and activate it. Enable **Compute** on
 the space and assistant. The migration grants the `compute` permission to the
-predefined User, AI Configurator and Owner roles; custom roles are opted in by
+predefined Owner role only, as new installs do; other roles are opted in by
 an administrator. A bundled compute server added earlier from the MCP servers
 tab keeps its attachments and coexists with the new provider; retire it through
 the admin UI once the function is configured.
