@@ -14,6 +14,8 @@ from eneo.jobs.job_models import (
 from eneo.main.exceptions import (
     InfoBlobPublicationConflictError,
     QuotaExceededException,
+    TenantQuotaExceededException,
+    UserQuotaExceededException,
 )
 from eneo.main.models import Status
 from eneo.object_content.content import (
@@ -74,6 +76,14 @@ def test_unexpected_processing_failure_uses_one_generic_code() -> None:
         (
             QuotaExceededException("quota detail"),
             JobFailureCode.QUOTA_EXCEEDED,
+        ),
+        (
+            TenantQuotaExceededException("tenant quota detail"),
+            JobFailureCode.TENANT_QUOTA_EXCEEDED,
+        ),
+        (
+            UserQuotaExceededException("user quota detail"),
+            JobFailureCode.USER_QUOTA_EXCEEDED,
         ),
         (
             ContentTooLargeError(100),

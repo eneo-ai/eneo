@@ -76,6 +76,8 @@ from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
 from eneo.database.database import AsyncSession
+from eneo.document_templates.repo import DocumentTemplateRepository
+from eneo.document_templates.service import DocumentTemplateService
 from eneo.embedding_models.application.embedding_model_crud_service import (
     EmbeddingModelCRUDService,
 )
@@ -849,6 +851,9 @@ class Container(containers.DeclarativeContainer):
         session=session,
         user=user,
     )
+    document_template_repo = providers.Factory(
+        DocumentTemplateRepository, session=session
+    )
 
     # Audit logging
     audit_log_repo = providers.Factory(
@@ -1004,6 +1009,9 @@ class Container(containers.DeclarativeContainer):
         user=user,
         repo=security_classification_repo,
         tenant_service=tenant_service,
+    )
+    document_template_service = providers.Factory(
+        DocumentTemplateService, user=user, repo=document_template_repo
     )
     api_key_scope_revoker = providers.Factory(
         ApiKeyScopeRevoker,

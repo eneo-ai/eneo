@@ -138,6 +138,7 @@ INTENTIONALLY_UNGUARDED = {
     "/ws": "WebSocket endpoint — separate auth",
     "/audit": "Admin audit endpoints with admin scope + admin key guards",
     "/mcp-servers": "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
+    "/document-templates": "Document template library is tenant-admin infrastructure with admin scope + admin key guards; the signed runtime download and the read-only name listing are authenticated per route",
     "/skills": "Skill catalogue and organisation lifecycle endpoints require session authentication; service-layer actor and tenant checks authorize reads, bindings, and admin-only publication",
     "/whats-new": "Per-user What's new read state; session-only (Authentication.SESSION) and scoped to the caller's own row",
     "/auth": "Public federation/auth endpoints — no user auth required",
@@ -152,6 +153,7 @@ INTENTIONALLY_UNGUARDED = {
 # Route prefixes that intentionally do NOT have scope guards.
 # These are authenticated by bearer/super-key flows or are public endpoints.
 INTENTIONALLY_SCOPE_FREE = {
+    "/document-templates": "Admin routes carry tenant-admin scope + admin key guards; the signed runtime download needs no key and the read-only name listing is user-bound",
     "/users": "User profile/login/provisioning endpoints and legacy compatibility flows",
     "/settings": "Tenant settings read/models endpoints",
     "/icons": "Static icon catalog",

@@ -498,3 +498,44 @@ If you see `middleware "redirect-to-https@docker" does not exist` in Traefik log
   before its own capture/spool or any storage mutation. Use
   ingress/request-body limits and configure and monitor temporary-disk capacity
   to protect that earlier parsing boundary.
+
+### Large documents are rejected or slow to process
+Text is extracted from every uploaded document (chat attachments, knowledge
+uploads and crawled files) in a short-lived child process with CPU, memory,
+time and output limits, set by the `FILE_EXTRACTION_*` variables in
+`env_backend.env`. A document that exceeds a limit is rejected with an
+extraction-limit error; the backend and the workers keep running.
+
+- **"exceeded the PDF page limit"**: the PDF has more pages than
+  `FILE_EXTRACTION_MAX_PDF_PAGES` (default 1,000).
+- **"exceeded the document resource limit"**: the extracted text is larger than
+  `FILE_EXTRACTION_MAX_OUTPUT_BYTES` (default 10 MB), or the parser ran out of
+  `FILE_EXTRACTION_CPU_SECONDS` or `FILE_EXTRACTION_MEMORY_BYTES`. Large
+  spreadsheets usually hit the output limit first.
+- **"exceeded the extraction deadline"**: parsing took longer than
+  `FILE_EXTRACTION_TIMEOUT_SECONDS`.
+
+PDFs up to `FILE_EXTRACTION_PDF_LAYOUT_MAX_PAGES` (default 200) get table
+detection, which is slow (tens of milliseconds of CPU per page). Longer PDFs
+are read from their text layer instead: a 700-page report takes one to two
+seconds and well under 200 MB of memory, but tables come out as plain lines
+of text.
+
+To accept very long PDFs, for example 10,000 pages:
+
+1. Raise `FILE_EXTRACTION_MAX_PDF_PAGES`.
+2. Raise `FILE_EXTRACTION_MAX_OUTPUT_BYTES`. A dense text page is about 2 to
+   2.5 KB of text, so 10,000 pages need roughly 25 MB.
+3. Raise the upload size limits in **Admin > File storage** and at the ingress.
+   A text PDF of that length is typically well over 100 MB.
+4. Restart the backend and the workers.
+
+The default CPU, memory and time limits do not need to change for this. Keep
+in mind that a document of that size is far larger than any model context:
+add it to a knowledge collection, where it is chunked and searched, instead
+of attaching it to a chat.
+
+A `502 Bad Gateway` on a large upload usually means a backend process was
+killed while handling it. Check the backend log for `WORKER TIMEOUT` (the event loop was
+blocked longer than the gunicorn timeout) and the host for out-of-memory
+kills.

@@ -167,7 +167,7 @@ extend_exclude = ["src/eneo/server/example_mcp_server.py"]
 # sentry-sdk is declared for the planned Sentry integration but not yet wired up
 # (no sentry_sdk.init call) — kept available rather than dropping observability.
 [tool.deptry.per_rule_ignores]
-DEP003 = ["sqlalchemy", "starlette", "aiohttp", "pdfminer", "pydantic_core", "yaml"]
+DEP003 = ["sqlalchemy", "starlette", "aiohttp", "pdfminer", "pypdfium2", "pydantic_core", "yaml"]
 DEP002 = [
     "alembic",
     "asyncpg",

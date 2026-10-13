@@ -30,6 +30,7 @@ from eneo.database.tables.capabilities_table import (
     SpaceCapabilities,
 )
 from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.document_templates_table import AssistantDocumentTemplates
 from eneo.database.tables.group_chats_table import (
     GroupChatsAssistantsMapping,
     GroupChatsTable,
@@ -53,6 +54,7 @@ from eneo.database.tables.spaces_table import (
 )
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites
+from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.group_chat.infrastructure.group_chat_repo import GroupChatRepository
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.spaces.api.space_models import SpaceRoleValue
@@ -86,6 +88,7 @@ def persisted():
         AssistantMCPServers,
         AssistantMCPServerTools,
         AssistantCapabilities,
+        AssistantDocumentTemplates,
         GroupChatsTable,
         GroupChatsAssistantsMapping,
         Apps,
@@ -430,6 +433,54 @@ async def test_unchanged_selection_emits_no_delete_or_insert_and_empty_clears(
         persisted.connection.scalars(
             sa.select(SpacesEmbeddingModels.embedding_model_id)
         )
+    )
+
+
+async def test_document_template_choice_is_explicit_and_preserves_unchanged_rows(
+    persisted,
+):
+    choice = DocumentTemplateChoice(mode="selected", template_id=uuid4())
+    await persisted.assistant_repo.apply_update(
+        persisted.assistant_id,
+        persisted.space_id,
+        AssistantUpdate(document_template=choice),
+    )
+    before = snapshot(persisted, exclude=(Assistants,))
+
+    await persisted.assistant_repo.apply_update(
+        persisted.assistant_id, persisted.space_id, AssistantUpdate(name="Renamed")
+    )
+    await persisted.assistant_repo.apply_update(
+        persisted.assistant_id,
+        persisted.space_id,
+        AssistantUpdate(document_template=choice),
+    )
+    assert snapshot(persisted, exclude=(Assistants,)) == before
+
+    await persisted.assistant_repo.apply_update(
+        persisted.assistant_id,
+        persisted.space_id,
+        AssistantUpdate(document_template=DocumentTemplateChoice(mode="builtin")),
+    )
+    row = persisted.connection.execute(
+        sa.select(
+            AssistantDocumentTemplates.mode,
+            AssistantDocumentTemplates.document_template_id,
+        )
+    ).one()
+    assert row.mode == "builtin"
+    assert row.document_template_id is None
+
+    await persisted.assistant_repo.apply_update(
+        persisted.assistant_id,
+        persisted.space_id,
+        AssistantUpdate(document_template=DocumentTemplateChoice()),
+    )
+    assert (
+        persisted.connection.scalar(
+            sa.select(sa.func.count()).select_from(AssistantDocumentTemplates)
+        )
+        == 0
     )
 
 

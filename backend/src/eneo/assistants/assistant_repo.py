@@ -30,6 +30,7 @@ from eneo.database.tables.assistant_table import (
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.document_templates_table import AssistantDocumentTemplates
 from eneo.database.tables.group_chats_table import (
     GroupChatsAssistantsMapping,
     GroupChatsTable,
@@ -609,6 +610,7 @@ class AssistantRepository:
                 enabled_capabilities=assistant.enabled_capabilities,
                 mcp_server_ids=[server.id for server in assistant.mcp_servers],
                 prompt=assistant.prompt,
+                document_template=assistant.document_template,
             ),
         )
 
@@ -938,6 +940,7 @@ class AssistantRepository:
                 change.mcp_server_ids,
                 change.mcp_tools,
                 change.prompt,
+                change.document_template,
             )
         ):
             # Governance/attachment fit snapshots use the parent row version.
@@ -1011,6 +1014,41 @@ class AssistantRepository:
             await self._set_mcp_tools(assistant_id, change.mcp_tools)
         if change.prompt is not None:
             await self._add_prompt(assistant_id, change.prompt)
+        if change.document_template is not None:
+            choice = change.document_template
+            selection = AssistantDocumentTemplates
+            if choice.mode == "default":
+                await self.session.execute(
+                    sa.delete(selection).where(selection.assistant_id == assistant_id)
+                )
+            else:
+                stored = (
+                    await self.session.execute(
+                        sa.select(selection.mode, selection.document_template_id).where(
+                            selection.assistant_id == assistant_id
+                        )
+                    )
+                ).one_or_none()
+                if stored is None:
+                    await self.session.execute(
+                        sa.insert(selection).values(
+                            assistant_id=assistant_id,
+                            mode=choice.mode,
+                            document_template_id=choice.template_id,
+                        )
+                    )
+                elif (stored.mode, stored.document_template_id) != (
+                    choice.mode,
+                    choice.template_id,
+                ):
+                    await self.session.execute(
+                        sa.update(selection)
+                        .where(selection.assistant_id == assistant_id)
+                        .values(
+                            mode=choice.mode,
+                            document_template_id=choice.template_id,
+                        )
+                    )
 
     async def delete(self, assistant_id: UUID, space_id: UUID) -> None:
         await self.session.execute(

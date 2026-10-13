@@ -521,6 +521,22 @@ const ACTION_MESSAGES = {
     name: m.audit_action_mcp_server_created,
     description: m.audit_action_mcp_server_created_description
   },
+  document_template_created: {
+    name: m.audit_action_document_template_created,
+    description: m.audit_action_document_template_created_description
+  },
+  document_template_updated: {
+    name: m.audit_action_document_template_updated,
+    description: m.audit_action_document_template_updated_description
+  },
+  document_template_deleted: {
+    name: m.audit_action_document_template_deleted,
+    description: m.audit_action_document_template_deleted_description
+  },
+  document_template_default_set: {
+    name: m.audit_action_document_template_default_set,
+    description: m.audit_action_document_template_default_set_description
+  },
   mcp_server_updated: {
     name: m.audit_action_mcp_server_updated,
     description: m.audit_action_mcp_server_updated_description

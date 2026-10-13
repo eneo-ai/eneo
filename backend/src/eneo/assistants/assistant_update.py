@@ -5,6 +5,7 @@ from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.api.assistant_models import KnowledgeMode
+from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.prompts.prompt import Prompt
@@ -25,6 +26,7 @@ class AssistantUpdate:
     metadata_json: dict[str, object] | None | NotProvided = NOT_PROVIDED
     icon_id: UUID | None | NotProvided = NOT_PROVIDED
     prompt: Prompt | None = None
+    document_template: DocumentTemplateChoice | None = None
     collection_ids: list[UUID] | None = None
     website_ids: list[UUID] | None = None
     integration_knowledge_ids: list[UUID] | None = None

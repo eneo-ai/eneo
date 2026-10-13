@@ -89,6 +89,21 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
 };
 
 /**
+ * A storage quota refusal names which limit was hit in the payload's `code`.
+ * The organisation variant tells the user nothing they delete will help; the
+ * generic 9008 copy stays as the fallback for rate limits and older payloads.
+ */
+const QUOTA_REASON_MESSAGES: Record<string, () => string> = {
+  tenant_quota_exceeded: () => m.job_failure_tenant_quota_exceeded(),
+  user_quota_exceeded: () => m.job_failure_user_quota_exceeded()
+};
+
+function getQuotaReasonMessage(error: EneoError): string | undefined {
+  const reason = error.response?.code;
+  return typeof reason === "string" ? QUOTA_REASON_MESSAGES[reason]?.() : undefined;
+}
+
+/**
  * Get a localized, user-facing error message from any error.
  *
  * Resolution order:
@@ -105,7 +120,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
  */
 export function getErrorMessage(error: unknown, fallback?: string): string {
   if (error instanceof EneoError) {
-    const mapped = getErrorCodeMessage(error.code);
+    const mapped = getQuotaReasonMessage(error) ?? getErrorCodeMessage(error.code);
     if (mapped) {
       return mapped;
     }

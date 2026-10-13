@@ -58,3 +58,29 @@ export type RenderJob = {
   organisationName?: string;
 };
 export type RenderResult = { bytes: number; pages?: number };
+
+/** What a template inspection reports to callers: serialisable, without the parsed parts. */
+export type TemplateReport = {
+  syntax: "controls" | "braces" | "mixed" | "none";
+  placeholders: {
+    name: string;
+    syntax: "control" | "braces";
+    kind: "rich" | "text";
+    label?: string;
+    hint?: string;
+    location: "body" | "header" | "footer";
+    supported: boolean;
+    reason?: string;
+  }[];
+  checks: Record<string, { ok: boolean; detail: string }>;
+  language?: string;
+};
+/** Child job: read the placeholders and checks of a downloaded Word template. */
+export type InspectJob = { kind: "inspect_template"; templatePath: string };
+export type InspectResult = { inspection: TemplateReport };
+/** Child job: write Eneo's built-in template to `outputPath` (a parent-owned file). */
+export type BuiltinTemplateJob = {
+  kind: "builtin_template";
+  language: "sv" | "en";
+  outputPath: string;
+};
