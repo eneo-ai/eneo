@@ -1727,12 +1727,17 @@ class SharePointContentService:
     ) -> None:
         """Write the Redis ChangeKey cache only after the DB transaction commits.
 
-        Writing inline would let Redis claim an item is processed while its
-        info_blob write is still uncommitted; a rollback (e.g. a lease-loss
-        ``CancelledError`` that bypasses the per-item ``except``) would then skip
-        the item until the 7-day TTL or a 410 resync. Deferring to ``after_commit``
-        means a failed/rolled-back sync simply re-processes the item next time —
-        the safe direction.
+        The worker wrapper commits on a soft failure: ``set_status_on_exception``
+        turns an ``Exception`` from the sync into a FAILED job and the
+        transaction still commits, so info_blobs written before the error stay
+        (content_hash makes the re-run idempotent). The transaction is only
+        rolled back on lease loss or worker shutdown (``CancelledError``, which
+        bypasses the per-item ``except``) and when the commit itself fails.
+        Writing the ChangeKey inline would let Redis claim such an item is
+        processed while its info_blob was rolled back, skipping it until the
+        7-day TTL or a 410 resync. Deferring to ``after_commit`` means a
+        rolled-back sync simply re-processes the item next time — the safe
+        direction.
 
         The flush is a deliberate fire-and-forget task (a sync ``after_commit`` event
         cannot await). If the worker is killed in the tiny window between commit and
