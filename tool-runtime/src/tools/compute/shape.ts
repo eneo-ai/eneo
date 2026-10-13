@@ -102,6 +102,23 @@ export function showsResult(run: {
   return run.display === "result" ? "value" : false;
 }
 
+/**
+ * A key as a label: an identifier such as `result_kr`, `interestRate` or `belopp` reads as
+ * "Result kr", "Interest rate" or "Belopp". A key that is already words, or starts with a
+ * capital, a digit or punctuation, is shown as it is.
+ */
+export function labelOf(key: string): string {
+  if (!/^\p{Ll}[\p{L}\p{N}]*(?:[_-][\p{L}\p{N}]+)*$/u.test(key)) return key;
+  const words = key
+    .split(/[_-]/)
+    .flatMap((part) => part.split(/(?<=\p{Ll}|\p{N})(?=\p{Lu})/u))
+    .filter(Boolean)
+    .map((word) => word.toLowerCase());
+  const [first, ...rest] = words;
+  if (!first) return key;
+  return [first.charAt(0).toUpperCase() + first.slice(1), ...rest].join(" ");
+}
+
 export type Scalar = number | string | boolean;
 /** An input the reader can edit field by field: a non-empty flat object of scalars. */
 export function editableInput(input: unknown): Record<string, Scalar> | undefined {

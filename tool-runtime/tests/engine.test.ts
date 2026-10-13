@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { computeConfigSchema } from "../src/tools/compute/config";
 import { runJavaScript } from "../src/tools/compute/engine/quickjs";
 import type { ComputeExport } from "../src/tools/compute/ports";
-import { asTabular, describeShape, previewRows } from "../src/tools/compute/shape";
+import { asTabular, describeShape, labelOf, previewRows } from "../src/tools/compute/shape";
 
 const config = computeConfigSchema.parse({});
 const run = (code: string, input: unknown = null, overrides: Partial<typeof config> = {}) =>
@@ -149,6 +149,20 @@ describe("sandbox engine", () => {
     await run("globalThis.leak = 42;");
     const next = await run("return typeof leak;");
     expect(next.result).toBe("undefined");
+  });
+});
+
+describe("labels", () => {
+  test("identifiers read as words, keys that are words already stay as they are", () => {
+    expect(labelOf("amount")).toBe("Amount");
+    expect(labelOf("result_kr")).toBe("Result kr");
+    expect(labelOf("interestRate")).toBe("Interest rate");
+    expect(labelOf("saldo-vid-slut")).toBe("Saldo vid slut");
+    expect(labelOf("ränta")).toBe("Ränta");
+    expect(labelOf("År")).toBe("År");
+    expect(labelOf("Ränta för året (kr)")).toBe("Ränta för året (kr)");
+    expect(labelOf("2026")).toBe("2026");
+    expect(labelOf("")).toBe("");
   });
 });
 

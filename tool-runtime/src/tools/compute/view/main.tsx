@@ -44,6 +44,7 @@ import {
 import {
   asTabular,
   editableInput,
+  labelOf,
   showsResult,
   type DisplayMode,
   type ResultKind,
@@ -245,7 +246,7 @@ function ResultView() {
         const first = visible.find((row) => row[index] !== null && row[index] !== undefined);
         return {
           key: column,
-          header: column,
+          header: labelOf(column),
           sortable: true,
           align: first && isNumeric(first[index]) ? ("end" as const) : ("start" as const),
           width: columnWidth(
@@ -265,9 +266,12 @@ function ResultView() {
 
   const copy = async () => {
     const payload = table
-      ? toTsv(columns, matching)
+      ? toTsv(columns.map(labelOf), matching)
       : isFlatObject(value)
-        ? toTsv([text.key, text.value], Object.entries(value))
+        ? toTsv(
+            [text.key, text.value],
+            Object.entries(value).map(([key, cell]) => [labelOf(key), cell]),
+          )
         : typeof value === "object"
           ? JSON.stringify(value, null, 2)
           : String(value);
@@ -422,7 +426,7 @@ function ResultView() {
                           typeof field === "number" ? (
                             <NumberInput
                               key={key}
-                              label={key}
+                              label={labelOf(key)}
                               value={field}
                               onChange={(next: number | null) =>
                                 setDraft({ ...draft, [key]: next ?? 0 })
@@ -431,14 +435,14 @@ function ResultView() {
                           ) : typeof field === "boolean" ? (
                             <Switch
                               key={key}
-                              label={key}
+                              label={labelOf(key)}
                               value={field}
                               onChange={(next) => setDraft({ ...draft, [key]: next })}
                             />
                           ) : (
                             <TextInput
                               key={key}
-                              label={key}
+                              label={labelOf(key)}
                               value={field}
                               onChange={(next: string) => setDraft({ ...draft, [key]: next })}
                             />
@@ -518,7 +522,7 @@ function ResultView() {
         <Table<Row>
           data={Object.entries(value).map(([key, cell]) => ({ id: key, key, cell }))}
           columns={[
-            { key: "key", header: text.key, renderCell: (item: Row) => String(item.key) },
+            { key: "key", header: text.key, renderCell: (item: Row) => labelOf(String(item.key)) },
             {
               key: "cell",
               header: text.value,
