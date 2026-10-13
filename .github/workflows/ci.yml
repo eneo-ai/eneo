@@ -5,13 +5,10 @@ on:
   push:
     branches:
       - develop
-      - refactor/web-next
-      - feat/web-next-astryx
       - "release/**"
   pull_request:
     branches:
       - develop
-      - refactor/web-next
       - "release/**"
   # Merge queue candidates (develop + queued PRs). Every scoped job runs in
   # full here (their conditions only scope pull_request events), and the
@@ -68,6 +65,9 @@ jobs:
       docker_backend: ${{ steps.scope.outputs.docker_backend }}
       docker_frontend: ${{ steps.scope.outputs.docker_frontend }}
       docker_devcontainer: ${{ steps.scope.outputs.docker_devcontainer }}
+      web_next: ${{ steps.scope.outputs.web_next }}
+      web_next_e2e: ${{ steps.scope.outputs.web_next_e2e }}
+      docker_web_next: ${{ steps.scope.outputs.docker_web_next }}
 
     steps:
       - name: Checkout
@@ -436,6 +436,8 @@ jobs:
 
   frontend-web-next:
     name: Frontend (web-next)
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.web_next == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -571,7 +573,7 @@ jobs:
   frontend-web-next-e2e:
     name: Frontend E2E (web-next)
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.frontend_e2e == 'true'
+    if: github.event_name != 'pull_request' || needs.changes.outputs.web_next_e2e == 'true'
     runs-on: ubuntu-latest
     # Stack build (~2 min), install, build and the specs take ~10 min; a hung
     # stack or browser must not hold a runner for GitHub's 6-hour default.
@@ -805,6 +807,7 @@ jobs:
       github.event_name != 'pull_request' ||
       needs.changes.outputs.docker_backend == 'true' ||
       needs.changes.outputs.docker_frontend == 'true' ||
+      needs.changes.outputs.docker_web_next == 'true' ||
       needs.changes.outputs.docker_devcontainer == 'true'
     runs-on: ubuntu-latest
     strategy:
@@ -829,7 +832,8 @@ jobs:
         if: >-
           github.event_name != 'pull_request' ||
           (matrix.image == 'backend' && needs.changes.outputs.docker_backend == 'true') ||
-          ((matrix.image == 'frontend' || matrix.image == 'web-next') && needs.changes.outputs.docker_frontend == 'true') ||
+          (matrix.image == 'frontend' && needs.changes.outputs.docker_frontend == 'true') ||
+          (matrix.image == 'web-next' && needs.changes.outputs.docker_web_next == 'true') ||
           (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -851,7 +855,8 @@ jobs:
         if: >-
           github.event_name != 'pull_request' ||
           (matrix.image == 'backend' && needs.changes.outputs.docker_backend == 'true') ||
-          ((matrix.image == 'frontend' || matrix.image == 'web-next') && needs.changes.outputs.docker_frontend == 'true') ||
+          (matrix.image == 'frontend' && needs.changes.outputs.docker_frontend == 'true') ||
+          (matrix.image == 'web-next' && needs.changes.outputs.docker_web_next == 'true') ||
           (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
         env:
           DOCKER_BUILDKIT: "1"
