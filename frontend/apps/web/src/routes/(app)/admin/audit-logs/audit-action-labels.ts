@@ -421,6 +421,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_integration_knowledge_deleted,
     description: m.audit_action_integration_knowledge_deleted_description
   },
+  integration_knowledge_updated: {
+    name: m.audit_action_integration_knowledge_updated,
+    description: m.audit_action_integration_knowledge_updated_description
+  },
   integration_knowledge_synced: {
     name: m.audit_action_integration_knowledge_synced,
     description: m.audit_action_integration_knowledge_synced_description
