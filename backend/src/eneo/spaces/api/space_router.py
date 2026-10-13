@@ -22,10 +22,12 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
+from eneo.info_blobs.info_blob_repo import IntegrationDocumentSort
 from eneo.integration.application.integration_documents import (
-    IntegrationDocumentSort,
     SortOrder,
     document_items,
+    document_url_anchor,
+    ordered_by_relative_path,
     skipped_documents,
 )
 from eneo.integration.presentation.assemblers.integration_knowledge_assembler import (
@@ -1222,16 +1224,21 @@ async def get_integration_knowledge_documents(
     knowledge = await service.get_readable_knowledge(
         space_id=id, integration_knowledge_id=integration_knowledge_id
     )
+    descending = order == "desc"
     page = await container.info_blob_repo().get_integration_knowledge_page(
         knowledge.id,
         q=q,
+        url_anchor=document_url_anchor(knowledge),
         sort=sort,
-        descending=order == "desc",
+        descending=descending,
         limit=limit,
         offset=offset,
     )
+    items = document_items(page.items, knowledge)
+    if sort == "path":
+        items = ordered_by_relative_path(items, descending=descending)
     return IntegrationDocumentsPage(
-        items=document_items(page.items, knowledge),
+        items=items,
         total_count=page.total_count,
         limit=limit,
         offset=offset,

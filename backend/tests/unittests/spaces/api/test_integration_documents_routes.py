@@ -88,10 +88,12 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
             )
         },
     )
+    user_integration = MagicMock()
+    user_integration.tenant_integration.integration.integration_type = "sharepoint"
     knowledge = IntegrationKnowledge(
         id=uuid4(),
         name="Protokoll",
-        user_integration=MagicMock(),
+        user_integration=user_integration,
         embedding_model=MagicMock(),
         tenant_id=user.tenant_id,
         space_id=space.id,
@@ -167,10 +169,10 @@ async def test_documents_page_lists_the_item_with_relative_paths(documents_api):
     assert data["total_size"] == 123456
     assert (data["limit"], data["offset"]) == (50, 50)
     assert [(item["title"], item["relative_path"]) for item in data["items"]] == [
-        ("KS-1.pdf", "Bilagor/2026"),
         ("KS-2.pdf", ""),
+        ("KS-1.pdf", "Bilagor/2026"),
     ]
-    assert data["items"][0] == {
+    assert data["items"][1] == {
         "id": str(nested.id),
         "title": "KS-1.pdf",
         "relative_path": "Bilagor/2026",
@@ -180,7 +182,13 @@ async def test_documents_page_lists_the_item_with_relative_paths(documents_api):
         "source_metadata": [],
     }
     api.info_blobs.get_integration_knowledge_page.assert_awaited_once_with(
-        api.knowledge.id, q=None, sort="path", descending=False, limit=50, offset=50
+        api.knowledge.id,
+        q=None,
+        url_anchor=FOLDER,
+        sort="path",
+        descending=False,
+        limit=50,
+        offset=50,
     )
 
 
@@ -198,7 +206,13 @@ async def test_documents_page_defaults_to_the_first_fifty_by_path(documents_api)
         "total_size": 0,
     }
     api.info_blobs.get_integration_knowledge_page.assert_awaited_once_with(
-        api.knowledge.id, q=None, sort="path", descending=False, limit=50, offset=0
+        api.knowledge.id,
+        q=None,
+        url_anchor=FOLDER,
+        sort="path",
+        descending=False,
+        limit=50,
+        offset=0,
     )
 
 
@@ -211,11 +225,38 @@ async def test_documents_page_passes_search_and_sort_to_the_query(documents_api)
     api.info_blobs.get_integration_knowledge_page.assert_awaited_once_with(
         api.knowledge.id,
         q="bilagor",
+        url_anchor=FOLDER,
         sort="size",
         descending=True,
         limit=50,
         offset=0,
     )
+
+
+async def test_documents_page_sorted_by_path_reorders_the_page_on_decoded_folders(
+    documents_api,
+):
+    api = documents_api
+    swedish = _blob(
+        api.knowledge.id, api.user, f"{FOLDER}/%C3%85rsm%C3%B6te/KS-1.pdf", "KS-1.pdf"
+    )
+    plain = _blob(api.knowledge.id, api.user, f"{FOLDER}/Bilagor/KS-2.pdf", "KS-2.pdf")
+    api.info_blobs.get_integration_knowledge_page.return_value = (
+        IntegrationDocumentsPage(items=[swedish, plain], total_count=2, total_size=0)
+    )
+
+    ascending = await _get(api, api.url(), sort="path")
+    by_size = await _get(api, api.url(), sort="size")
+
+    assert ascending.status_code == 200, ascending.text
+    assert [item["relative_path"] for item in ascending.json()["items"]] == [
+        "Bilagor",
+        "Årsmöte",
+    ]
+    assert [item["relative_path"] for item in by_size.json()["items"]] == [
+        "Årsmöte",
+        "Bilagor",
+    ]
 
 
 @pytest.mark.parametrize(

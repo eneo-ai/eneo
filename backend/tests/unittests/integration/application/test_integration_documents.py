@@ -9,6 +9,8 @@ import pytest
 from eneo.info_blobs.info_blob import InfoBlobInDBNoText, SourceMetadataEntry
 from eneo.integration.application.integration_documents import (
     document_items,
+    document_url_anchor,
+    ordered_by_relative_path,
     relative_document_path,
     skipped_documents,
 )
@@ -118,6 +120,27 @@ def test_relative_document_path(case, document_url, item, expected):
     assert relative_document_path(document_url, **item) == expected
 
 
+def _user_integration(integration_type: str) -> MagicMock:
+    user_integration = MagicMock()
+    user_integration.tenant_integration.integration.integration_type = integration_type
+    return user_integration
+
+
+def _item(integration_type: str = "sharepoint", **overrides) -> IntegrationKnowledge:
+    fields = dict(
+        name="Protokoll",
+        user_integration=_user_integration(integration_type),
+        embedding_model=MagicMock(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        url=FOLDER,
+        folder_path="/Protokoll",
+        selected_item_type="folder",
+    )
+    fields.update(overrides)
+    return IntegrationKnowledge(**fields)
+
+
 def _blob(**overrides) -> InfoBlobInDBNoText:
     fields = dict(
         id=uuid4(),
@@ -141,16 +164,7 @@ def _blob(**overrides) -> InfoBlobInDBNoText:
 
 
 def test_document_items_carry_the_relative_path_and_source_metadata():
-    item = IntegrationKnowledge(
-        name="Protokoll",
-        user_integration=MagicMock(),
-        embedding_model=MagicMock(),
-        tenant_id=uuid4(),
-        space_id=uuid4(),
-        url=FOLDER,
-        folder_path="/Protokoll",
-        selected_item_type="folder",
-    )
+    item = _item()
     first = _blob()
     second = _blob(url=None, title=None, source_metadata=None, updated_at=None)
 
@@ -178,6 +192,58 @@ def test_document_items_carry_the_relative_path_and_source_metadata():
             "source_metadata": [],
         },
     ]
+
+
+def test_confluence_pages_have_no_relative_path():
+    item = _item(
+        "confluence",
+        url="https://contoso.atlassian.net/wiki/spaces/KS",
+        folder_path=None,
+        selected_item_type=None,
+    )
+    page = _blob(url="https://contoso.atlassian.net/wiki/spaces/KS/pages/123/Rutiner")
+
+    assert [entry.relative_path for entry in document_items([page], item)] == [""]
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        (f"{FOLDER}/", FOLDER),
+        (FOLDER, FOLDER),
+        ("/", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_document_url_anchor_is_the_item_url_without_a_trailing_slash(url, expected):
+    assert document_url_anchor(_item(url=url)) == expected
+
+
+def test_ordered_by_relative_path_sorts_the_page_on_the_decoded_path():
+    item = _item()
+    # The query hands the page over in percent-encoded order: %C3%85 (Å)
+    # before every plain letter.
+    page = document_items(
+        [
+            _blob(url=f"{FOLDER}/%C3%85rsm%C3%B6te/b.pdf", title="b.pdf"),
+            _blob(url=f"{FOLDER}/%C3%85rsm%C3%B6te/a.pdf", title="a.pdf"),
+            _blob(url=f"{FOLDER}/Bilagor/c.pdf", title="c.pdf"),
+            _blob(url=f"{FOLDER}/d.pdf", title="d.pdf"),
+        ],
+        item,
+    )
+
+    ascending = ordered_by_relative_path(page)
+    descending = ordered_by_relative_path(page, descending=True)
+
+    assert [(entry.relative_path, entry.title) for entry in ascending] == [
+        ("", "d.pdf"),
+        ("Bilagor", "c.pdf"),
+        ("Årsmöte", "a.pdf"),
+        ("Årsmöte", "b.pdf"),
+    ]
+    assert [entry.title for entry in descending] == ["b.pdf", "a.pdf", "c.pdf", "d.pdf"]
 
 
 def test_skipped_documents_without_a_sync_log_is_empty():
