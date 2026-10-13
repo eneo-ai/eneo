@@ -54,10 +54,11 @@ ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     'chosen tool fails, read_file ("Read attached file"), when available, accepts '
     'every file_ref in its url input. Entries with "kind": "image" are images; '
     "pass their file_ref to image tools, not read_file. "
-    "For totals, groupings, comparisons and other calculations over an attached "
-    "CSV or Excel file, use inspect_table and query_table, which read the file "
-    "itself; do not calculate from quoted text, earlier samples or a full-file "
-    "text dump, and do not re-type the file's rows into another tool. "
+    "For an attached CSV, TSV or Excel file, use inspect_table and query_table, "
+    "which read the file itself: to describe what it contains as well as for "
+    "totals, groupings, comparisons and other calculations. Do not calculate from "
+    "quoted text, earlier samples or a full-file text dump, and do not re-type "
+    "the file's rows into another tool. "
     "For Selected table rows, pass the provided file reference, including sheet and "
     "source_rows, unchanged to inspect_table and query_table. These are coordinates "
     "in the immutable original file, not values or positions in a sorted query result. "

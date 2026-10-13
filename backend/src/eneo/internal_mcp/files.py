@@ -134,7 +134,10 @@ async def read_file(
     task (for example tabular or spreadsheet analysis tools, or tools that
     summarize files too large to read into context), prefer that tool and
     pass it the same url; if it fails or no such tool exists, use this one
-    rather than telling the user the file cannot be read.
+    rather than telling the user the file cannot be read. For a CSV, TSV or
+    Excel file, inspect_table and query_table, when available, describe and
+    query the file far better than its raw text, also when the user only asks
+    what the file contains.
     """
     try:
         file_id, payload = verify_reference_url(url)

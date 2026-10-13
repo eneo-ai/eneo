@@ -29,6 +29,7 @@
     runningLabel,
     doneLabel,
     serverName,
+    identity = null,
     detail = null,
     args,
     toolCallId,
@@ -43,6 +44,8 @@
     doneLabel: string;
     /** Localized server label ("Kunskap"), used in the result heading. */
     serverName: string;
+    /** The call as the model made it, "server · tool", shown in the expanded panel. */
+    identity?: string | null;
     /** Extra context for the call, e.g. a filename or search query. */
     detail?: string | null;
     args?: Record<string, unknown>;
@@ -204,6 +207,7 @@
     <ToolCallDetailsPanel
       {open}
       toolName={serverName}
+      {identity}
       {args}
       {toolCallId}
       {onLoadResult}
