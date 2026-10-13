@@ -1,8 +1,8 @@
 version: 2
 
-# Runtime Docker updates are enabled with one grouped PR per area so pinned
-# base digests receive security refreshes. Other ecosystems remain paused.
-# Runtime owners review image scans and smoke tests before merging updates.
+# Automatic version-update PRs are intentionally disabled for every ecosystem.
+# Dependabot alerts and read-only image monitoring remain enabled. Security-update
+# PRs are also disabled in repository settings; findings are triaged manually.
 updates:
   - package-ecosystem: "uv"
     directory: "/backend"
@@ -79,7 +79,7 @@ updates:
       day: "monday"
       time: "07:30"
       timezone: "Europe/Stockholm"
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 0
     rebase-strategy: "disabled"
     labels:
       - "dependencies"
@@ -109,7 +109,7 @@ updates:
       day: "monday"
       time: "07:45"
       timezone: "Europe/Stockholm"
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 0
     rebase-strategy: "disabled"
     labels:
       - "dependencies"

@@ -18,7 +18,7 @@ Pull requests into `develop` run two security and quality gates:
 
 Backend dependency installs use `uv sync --frozen --all-groups`. Frontend dependency installs use `bun install --frozen-lockfile`. This matters because dependency PRs should prove that the committed lockfiles still install and the app still builds.
 
-The CI workflow also builds the backend, frontend, and devcontainer Docker images without pushing them. This catches Dockerfile and base-image update problems before Dependabot Docker PRs merge.
+The CI workflow also builds the backend, frontend, and devcontainer Docker images without pushing them. This catches Dockerfile and base-image update problems before manually prepared runtime updates merge.
 
 Ruff currently checks `backend/src/eneo`. Tests and Alembic are not part of the Ruff gate yet.
 
@@ -37,9 +37,22 @@ Publication builds each component as a local candidate, scans and exercises it,
 and only then pushes the attested image from the same build cache. The push is
 refused if the published layers differ from the scanned candidate, and the
 release bundle is assembled only from images that passed this gate.
-The Application image security workflow also rechecks published develop images
-weekly and on manual dispatch. A failure there is a maintenance signal; it does
-not prevent a remediation PR from building and checking its own candidate.
+The Application image security workflow rechecks the published `develop` images
+by immutable digest daily and on manual dispatch. HIGH/CRITICAL advisories appear
+under **Security → Code scanning → Eneo image security**. Stable identities group
+package matches so rebuilding an image does not create a fresh alert for the same
+advisory. Workflow summaries show both scanner ratings and fix availability;
+all-severity CSV/JSON and raw reports remain available as artifacts. A failed or
+incomplete scan cannot clear existing alerts. Existing release versions are not
+part of this initial monitoring scope.
+
+Automatic dependency update PRs remain disabled. Maintainers triage findings and
+prepare updates manually. Scanner severity is not proof that an Eneo endpoint can
+exploit the affected package. A published-image failure is a maintenance signal;
+it does not prevent a remediation PR from checking its own candidate or stop
+running containers. See [ownership, notification setup and rollout acceptance](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md#ownership-and-notifications)
+for the operational handoff; a red scheduled job alone does not notify the entire
+team.
 
 Runtime checks exercise audio formats and cancellation cleanup, native libraries,
 startup dispatch, SBOM tooling and Svelte health. See
@@ -49,7 +62,7 @@ for the distribution choice, operational changes and rollback procedure.
 
 ### Code scanning
 
-CodeQL advanced setup is paused while maintainers evaluate a code-scanning setup that gives developers useful feedback without high false-positive noise. Re-enable code scanning only with a tuned query set and a triage process that keeps alerts actionable.
+CodeQL advanced setup is paused while maintainers evaluate a code-scanning setup that gives developers useful feedback without high false-positive noise. Image-inventory alerts use SARIF independently of CodeQL. Re-enable CodeQL only with a tuned query set and a triage process that keeps alerts actionable.
 
 ## Declare access on every endpoint
 

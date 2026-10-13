@@ -685,6 +685,7 @@ jobs:
         if: steps.build-image.outcome == 'success' && matrix.image != 'devcontainer'
         uses: ./.github/actions/scan-application-image
         with:
+          component: ${{ matrix.image }}
           image: eneo-${{ matrix.image }}:ci
           output-directory: ${{ runner.temp }}/image-security
       - name: Verify the application runtime
@@ -694,7 +695,7 @@ jobs:
         if: always() && steps.build-image.outcome == 'success' && matrix.image != 'devcontainer'
         with:
           name: security-image-${{ matrix.image }}
-          path: ${{ runner.temp }}/image-security/*.json
+          path: ${{ runner.temp }}/image-security/
           retention-days: 14
 
   ci:

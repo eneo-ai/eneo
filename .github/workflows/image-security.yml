@@ -3,7 +3,11 @@ name: Application image security
 on:
   workflow_dispatch:
   schedule:
-    - cron: '17 6 * * 1'
+    - cron: '17 6 * * *'
+
+concurrency:
+  group: published-image-security-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -11,27 +15,55 @@ permissions:
 jobs:
   published-images:
     name: Published image (${{ matrix.image }})
+    # Only trusted default-branch code can publish alerts. No PR execution or PAT.
+    if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
-        image: [eneo-backend, eneo-frontend]
+        image: [backend, frontend]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-      - name: Pull published image
+      - name: Resolve and pull the published develop image
+        id: image
         env:
-          IMAGE: ghcr.io/eneo-ai/${{ matrix.image }}:develop
-        run: docker pull "$IMAGE"
-      - uses: ./.github/actions/scan-application-image
+          IMAGE: ghcr.io/eneo-ai/eneo-${{ matrix.image }}:develop
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/image-security"
+          docker pull --platform linux/amd64 "$IMAGE"
+          docker image inspect "$IMAGE" > "$RUNNER_TEMP/image-security/image-inspect.json"
+          digest=$(jq -er '.[0].RepoDigests[0]' "$RUNNER_TEMP/image-security/image-inspect.json")
+          [[ "$digest" =~ ^ghcr.io/eneo-ai/eneo-(backend|frontend)@sha256:[a-f0-9]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Scan the immutable published image
+        id: scan
+        uses: ./.github/actions/scan-application-image
         with:
-          image: ghcr.io/eneo-ai/${{ matrix.image }}:develop
+          component: ${{ matrix.image }}
+          image: ${{ steps.image.outputs.digest }}
           output-directory: ${{ runner.temp }}/image-security
+      - name: Publish actionable findings to GitHub Security
+        if: ${{ !cancelled() && steps.scan.outputs.sarif-ready == 'true' }}
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+        with:
+          sarif_file: ${{ runner.temp }}/image-security/image-security.sarif
+          category: image-security/develop/${{ matrix.image }}
+          wait-for-processing: true
+      - name: Explain missing image evidence
+        if: ${{ !cancelled() && steps.image.outcome == 'failure' }}
+        run: |
+          echo '## Image security: INCOMPLETE' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The published image could not be resolved/pulled. Existing alerts remain open; no clean result was uploaded. Inspect the failed step.' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: security-published-${{ matrix.image }}
-          path: ${{ runner.temp }}/image-security/*.json
-          retention-days: 14
+          path: ${{ runner.temp }}/image-security/
+          retention-days: 30

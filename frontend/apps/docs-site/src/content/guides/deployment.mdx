@@ -1324,7 +1324,8 @@ no database migration. Keep the prior backend and Svelte image digests and roll
 back both images if validation fails; if another release also changes the schema,
 follow that release's database recovery procedure separately.
 
-Runtime maintainers review grouped Docker dependency updates and retained scan
-reports. The base digest is pinned, but apk repositories remain live: rebuilds
+Runtime maintainers review daily develop-image findings and manually prepare
+updates; automatic dependency PRs are disabled. Existing releases are not yet
+covered by this daily monitor. The base digest is pinned, but apk repositories remain live: rebuilds
 can resolve newer system packages. The recorded final image digest, SBOM and
 scan reports identify the artifact that was actually tested and deployed.

@@ -49,8 +49,9 @@ should publish upgrade or mitigation guidance through a GitHub Security Advisory
 
 The repository uses GitHub security features and CI to prevent regressions:
 
-- Dependabot creates weekly dependency update pull requests for backend,
-  frontend, GitHub Actions, Dockerfiles, and devcontainer configuration.
+- Dependabot alerts remain enabled. Automatic version-update and security-update
+  PRs are intentionally disabled. Maintainers select and implement dependency
+  updates after triage; the monitoring workflows never create PRs or issues.
 - Dependency Review runs on pull requests into `develop` and blocks newly
   introduced vulnerable dependencies at `high` severity or above.
 - Each application image (backend and Svelte) is scanned with Trivy and Grype
@@ -60,8 +61,8 @@ The repository uses GitHub security features and CI to prevent regressions:
   Trivy's Wolfi feed alone does not detect unfixed vulnerabilities. CI scans its
   locally built candidates; `.github/workflows/application_image.yml` scans and
   exercises the publication candidate before the attested push and refuses a
-  pushed image whose layers differ from that candidate; the weekly Application
-  image security workflow rechecks published develop images.
+  pushed image whose layers differ from that candidate; the daily Application
+  image security workflow rechecks published develop images by resolved digest.
 - The Svelte runtime copies the builder's official Node 22 binary and license into
   a digest-pinned Chainguard `glibc-dynamic` image with maintained C/C++ libraries.
   It has no shell or package manager; probes execute `node` directly. Backend
@@ -69,17 +70,16 @@ The repository uses GitHub security features and CI to prevent regressions:
   FFmpeg 9.0 packages. FFmpeg owns audio decoding and MP3 segmentation; there is
   no wheel-bundled libsndfile. lxml is built against the scanned system
   libxml2/libxslt. Package metadata stays in every image for inventory and scans.
-- Runtime maintainers review the weekly grouped Docker Dependabot updates
-  (one open PR per area, backend and Svelte). Base-digest updates rebuild
-  the package layer; scanners and runtime smoke tests must pass before merge.
-  A new advisory may require an immediate refresh outside that schedule.
+- Runtime maintainers manually prepare base-digest/dependency updates in response
+  to actionable findings. Base-digest updates rebuild the package layer; scanners
+  and runtime smoke tests must pass before merge.
   `scripts/check-application-image.sh` is shared by CI and publication. It checks
   real audio formats and failure cleanup, native parser loading, worker/API
   launch dispatch, SBOM venv bootstrap and Svelte frontend health.
 - CodeQL advanced setup is paused while maintainers evaluate a code-scanning
   setup that gives developers useful feedback without high false-positive noise.
-  Re-enable code scanning only after the query set and triage process are tuned
-  enough that alerts are actionable for maintainers.
+  This does not disable the narrowly scoped image-inventory SARIF upload below.
+  Re-enable CodeQL only after its query set and triage process are tuned.
 - Release SBOMs are generated from the published backend, frontend, and bundled
   SeaweedFS container
   image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
@@ -142,6 +142,69 @@ The repository uses GitHub security features and CI to prevent regressions:
 Branch protection should require `CI` and `Dependency Review`. While code
 scanning is paused, remove `CodeQL gate` from the GitHub ruleset; otherwise pull
 requests can wait for a check that no longer runs.
+
+## Image monitoring and presentation
+
+`.github/actions/scan-application-image` owns collection and the HIGH/CRITICAL
+publication gate. `scripts/image_security_report.py` owns presentation of those
+same reports; it does not perform an independent scan or decide exploitability.
+`.github/workflows/image-security.yml` scans the published backend and Svelte
+`develop` images daily at 06:17 UTC and on manual dispatch from `develop`.
+It resolves tags to immutable digests before scanning and retains image metadata,
+raw scanner reports, readable Markdown, all-severity CSV/JSON, and SARIF for 30 days.
+Only `develop` is monitored initially; this is not coverage of existing releases
+or an inventory of what external operators have deployed. Candidates in normal
+CI/publication receive the same readable reports without publishing duplicate
+Security alerts.
+
+The workflow publishes HIGH/CRITICAL findings under **Security → Code scanning**,
+with tool **Eneo image security** and a stable category for each component.
+One advisory per component groups package matches from both scanners. A single
+unambiguous CVE alias is normalized; identifiers without a reliable alias stay
+separate. Package versions, image digest, both scanner severities, and reported
+fixes stay in the evidence. Alert fingerprints exclude digests and package
+versions so routine rebuilds do not create new alerts. The Dockerfile location
+identifies the image owner, not the vulnerable source line. SARIF numeric values
+9.0/7.0 encode qualitative CRITICAL/HIGH bands, not a newly calculated CVSS score.
+MEDIUM/LOW/unknown findings remain in the reports for maintenance review.
+
+A scanner failure, malformed report, image pull failure or failed SARIF upload
+makes the workflow fail. Only two complete scanner reports can replace Security
+results, including a legitimately empty result which resolves prior alerts.
+Missing evidence never closes an alert. Check both **last successful analysis**
+and the latest Actions run: retained old alerts are not proof of a fresh scan.
+A scan failure or HIGH/CRITICAL finding does not stop existing containers.
+No findings are suppressed automatically, including unfixed findings; scanner
+severity and application reachability are separate triage decisions.
+
+### Ownership and notifications
+
+Repository security maintainers own the daily queue and assign each actionable
+alert to its backend/frontend/runtime maintainer using GitHub alert assignment.
+Use the response targets below, record affected digest, exploitability evidence,
+owner and target date, and track a finding until a fixed image has been published.
+A merge alone does not remediate an operator's already-running image.
+
+Enable GitHub security notifications and verify delivery for the people handling
+triage. Assignment of a code-scanning alert notifies its assignee according to
+that person's settings. GitHub Actions failure notifications for scheduled runs
+normally go to the person who last changed the cron schedule; **they are not a
+team-wide paging system**. The schedule maintainer must enable failed-workflow
+notifications, cover absence with another maintainer, and check for stale or
+disabled runs. GitHub schedules can be delayed, and inactive public repositories
+can have schedules disabled. No Slack/email bot or notification recipient is
+silently configured by this workflow.
+
+Rollout acceptance after merge: dispatch the workflow on `develop`, confirm both
+component analyses under Security, inspect the digest and summary, assign one
+real actionable alert if present and verify recipient delivery, and verify the
+next scheduled run. Do not report notifications as operational before this is
+done. If monitoring breaks, fix/revert its workflow separately; keep the
+candidate publication gate. Never upload an empty replacement to clear failures.
+
+References: [SARIF uploads](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file),
+[security notifications](https://docs.github.com/en/subscriptions-and-notifications/how-tos/managing-security-notifications),
+[scheduled workflow notifications](https://docs.github.com/en/actions/concepts/workflows-and-actions/notifications-for-workflow-runs).
 
 ## Alert Triage
 
@@ -258,8 +321,8 @@ For each new alert:
    Docker image, GitHub Action, or code scanning.
 2. Check whether it is reachable in Eneo and whether it touches user input,
    files, prompts, credentials, authentication, network calls, or deployment.
-3. Prefer the Dependabot security PR. If Dependabot cannot create one, manually
-   bump, pin, replace, or remove the dependency.
+3. Manually prepare the smallest dependency/base-image update, replacement or
+   removal that addresses the finding. Automatic update PRs stay disabled.
 4. Review the diff. For AI and LLM packages, check changelogs for telemetry,
    callback behavior, environment variable handling, proxy behavior, logging
    changes, and changed defaults.
@@ -280,8 +343,8 @@ library updates.
 Immediate response:
 
 - check whether Eneo uses the affected package and version
-- use the Dependabot security PR if GitHub has an advisory
-- manually bump, pin, or temporarily remove the package if no advisory exists yet
+- use the advisory to identify the affected and fixed versions
+- manually bump, pin, or temporarily remove the affected package
 - rotate any potentially exposed provider keys
 - review application logs, CI artifacts, Sentry events, build logs, and package
   install logs

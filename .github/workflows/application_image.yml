@@ -95,17 +95,18 @@ jobs:
         if: steps.reuse.outputs.exists != 'true'
         uses: ./.github/actions/scan-application-image
         with:
+          component: ${{ inputs.component }}
           image: ${{ env.CANDIDATE }}
           output-directory: ${{ runner.temp }}/image-security
       - name: Verify the candidate runtime
         if: steps.reuse.outputs.exists != 'true'
         run: ./scripts/check-application-image.sh "$COMPONENT" "$CANDIDATE"
-      - name: Keep the raw scan reports
+      - name: Keep scanner reports and readable findings
         if: always() && steps.candidate.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: security-publish-${{ inputs.component }}
-          path: ${{ runner.temp }}/image-security/*.json
+          path: ${{ runner.temp }}/image-security/
           retention-days: 14
       - name: Publish the verified candidate with attestations
         if: steps.reuse.outputs.exists != 'true'

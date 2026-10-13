@@ -4,9 +4,16 @@ inputs:
   image:
     description: Locally built candidate image
     required: true
+  component:
+    description: Image owner (backend or frontend)
+    required: true
   output-directory:
     description: Directory for raw reports
     required: true
+outputs:
+  sarif-ready:
+    description: Both scanner reports were validated and SARIF was generated
+    value: ${{ steps.report.outputs.sarif-ready }}
 runs:
   using: composite
   steps:
@@ -23,18 +30,29 @@ runs:
         tar -xzf grype.tar.gz grype
         echo "$RUNNER_TEMP/eneo-image-scanners" >> "$GITHUB_PATH"
     - shell: bash
+      id: scan
       env:
         IMAGE: ${{ inputs.image }}
         REPORT_DIRECTORY: ${{ inputs.output-directory }}
       run: |
         set -euo pipefail
         mkdir -p "$REPORT_DIRECTORY"
-        status=0
-        trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 \
-          --format json --output "$REPORT_DIRECTORY/trivy.json" "$IMAGE" || status=1
-        # Trivy's Wolfi feed has no unfixed records. Grype also matches APK
-        # packages against upstream NVD/CPE data where that feed is silent.
-        # Do not use --only-fixed or remove APK metadata to make this pass.
-        grype "docker:$IMAGE" --add-cpes-if-none --fail-on high \
-          --output json --file "$REPORT_DIRECTORY/grype.json" || status=1
-        exit "$status"
+        trivy_status=0
+        grype_status=0
+        # Capture all severities. Scanner errors and vulnerability gates are
+        # separate: only two complete reports may replace published alerts.
+        trivy image --scanners vuln --exit-code 0 \
+          --format json --output "$REPORT_DIRECTORY/trivy.json" "$IMAGE" || trivy_status=$?
+        # Keep unfixed results and upstream CPE matches where Wolfi's feed is silent.
+        grype "docker:$IMAGE" --add-cpes-if-none \
+          --output json --file "$REPORT_DIRECTORY/grype.json" || grype_status=$?
+        printf '{"trivy":%s,"grype":%s}\n' "$trivy_status" "$grype_status" > "$REPORT_DIRECTORY/scan-status.json"
+    - name: Summarize evidence and enforce the HIGH/CRITICAL gate
+      id: report
+      if: always()
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        COMPONENT: ${{ inputs.component }}
+        REPORT_DIRECTORY: ${{ inputs.output-directory }}
+      run: python3 scripts/image_security_report.py --directory "$REPORT_DIRECTORY" --component "$COMPONENT" --image "$IMAGE"
