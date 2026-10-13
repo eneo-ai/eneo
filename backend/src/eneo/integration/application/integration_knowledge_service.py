@@ -171,6 +171,22 @@ class IntegrationKnowledgeService:
                 return
         raise NotFoundException("Integration knowledge not found")
 
+    async def get_readable_knowledge(
+        self, space_id: UUID, integration_knowledge_id: UUID
+    ) -> IntegrationKnowledge:
+        """An item as seen from a space, for anyone who may read its integrations.
+
+        Membership is checked before the item is looked up so a non-member
+        cannot probe which items a space holds.
+        """
+        space = await self.space_repo.one(id=space_id)
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not (actor.can_read_space() and actor.can_read_integrations()):
+            raise UnauthorizedException()
+        return space.get_integration_knowledge(
+            integration_knowledge_id=integration_knowledge_id
+        )
+
     async def _get_tenant_app_access_token(
         self, tenant_app: "TenantSharePointApp"
     ) -> str:

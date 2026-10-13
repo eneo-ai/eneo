@@ -22,10 +22,20 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
+from eneo.integration.application.integration_documents import (
+    IntegrationDocumentSort,
+    SortOrder,
+    document_items,
+    skipped_documents,
+)
 from eneo.integration.presentation.assemblers.integration_knowledge_assembler import (
     IntegrationKnowledgeAssembler,
 )
-from eneo.integration.presentation.models import IntegrationKnowledgePublic
+from eneo.integration.presentation.models import (
+    IntegrationDocumentsPage,
+    IntegrationKnowledgePublic,
+    IntegrationSkippedDocuments,
+)
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
 from eneo.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
@@ -1181,6 +1191,79 @@ async def update_integration_knowledge(
         name=data.name,
     )
     return IntegrationKnowledgeAssembler.to_space_knowledge_model(knowledge)
+
+
+@router.get(
+    "/{id}/knowledge/integrations/{integration_knowledge_id}/documents/",
+    response_model=IntegrationDocumentsPage,
+    description="List the indexed documents of an integration knowledge item, "
+    "with their folder relative to the imported item.",
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
+)
+async def get_integration_knowledge_documents(
+    id: UUID,
+    integration_knowledge_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    q: Annotated[
+        str | None,
+        Query(max_length=200, description="Matches the title or the path"),
+    ] = None,
+    sort: Annotated[IntegrationDocumentSort, Query()] = "path",
+    order: Annotated[SortOrder, Query()] = "asc",
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    service = container.integration_knowledge_service()
+    knowledge = await service.get_readable_knowledge(
+        space_id=id, integration_knowledge_id=integration_knowledge_id
+    )
+    page = await container.info_blob_repo().get_integration_knowledge_page(
+        knowledge.id,
+        q=q,
+        sort=sort,
+        descending=order == "desc",
+        limit=limit,
+        offset=offset,
+    )
+    return IntegrationDocumentsPage(
+        items=document_items(page.items, knowledge),
+        total_count=page.total_count,
+        limit=limit,
+        offset=offset,
+        total_size=page.total_size,
+    )
+
+
+@router.get(
+    "/{id}/knowledge/integrations/{integration_knowledge_id}/documents/skipped/",
+    response_model=IntegrationSkippedDocuments,
+    description="Files the latest sync of an integration knowledge item skipped, "
+    "with the reason for each.",
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
+)
+async def get_integration_knowledge_skipped_documents(
+    id: UUID,
+    integration_knowledge_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.integration_knowledge_service()
+    knowledge = await service.get_readable_knowledge(
+        space_id=id, integration_knowledge_id=integration_knowledge_id
+    )
+    sync_logs = await container.sync_log_repo().get_by_integration_knowledge(
+        knowledge.id, tenant_id=container.user().tenant_id, limit=1
+    )
+    return skipped_documents(sync_logs[0] if sync_logs else None)
 
 
 @router.post(
