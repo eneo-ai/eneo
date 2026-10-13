@@ -324,6 +324,44 @@ class SyncLogList(BaseListModel[SyncLog]):
     pass
 
 
+class IntegrationDocumentItem(BaseModel):
+    id: UUID
+    title: str
+    relative_path: str = Field(
+        description="Folders between the imported item and the document, "
+        "URL-decoded and without the file name; empty for the item itself."
+    )
+    url: Optional[str] = Field(None, description="Web URL of the source document")
+    size: int
+    updated_at: Optional[datetime] = None
+    source_metadata: list[SourceMetadataEntry] = []
+
+
+class IntegrationDocumentsPage(BaseModel):
+    items: list[IntegrationDocumentItem]
+    total_count: int = Field(description="Documents matching the query")
+    limit: int
+    offset: int
+    total_size: int = Field(description="Summed size of the matching documents")
+
+
+class IntegrationSkippedDocument(BaseModel):
+    file: str
+    reason: str
+
+
+class IntegrationSkippedDocuments(BaseModel):
+    """Files the latest sync of an item did not index."""
+
+    items: list[IntegrationSkippedDocument]
+    total: int = Field(description="Skipped files, including those not listed")
+    truncated: bool = Field(description="True when the stored list was capped")
+    synced_at: Optional[datetime] = Field(
+        default=None,
+        description="When the sync the list comes from finished or started",
+    )
+
+
 class PaginatedSyncLogList(BaseModel):
     """Paginated sync logs response with metadata."""
 

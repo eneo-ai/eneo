@@ -1,11 +1,11 @@
 from dataclasses import dataclass
-from typing import Any, List, TypeVar
+from typing import Any, List, Literal, TypeVar
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
-from sqlalchemy.orm import defer, selectinload
+from sqlalchemy.orm import InstrumentedAttribute, defer, selectinload
 from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.database.affected_rows import affected_row_count
@@ -86,6 +86,39 @@ class WebsiteInfoBlobPage:
     items: list[InfoBlobInDBNoText]
     total_count: int
     next_cursor: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class IntegrationDocumentsPage:
+    items: list[InfoBlobInDBNoText]
+    total_count: int
+    total_size: int
+
+
+IntegrationDocumentSort = Literal["name", "path", "size", "updated_at"]
+_SortKey = ColumnElement[Any] | InstrumentedAttribute[Any]
+_LIKE_ESCAPE = "\\"
+
+
+def _contains(column: InstrumentedAttribute[Any], needle: str) -> ColumnElement[bool]:
+    escaped = (
+        needle.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
+        .replace("%", _LIKE_ESCAPE + "%")
+        .replace("_", _LIKE_ESCAPE + "_")
+    )
+    return column.ilike(f"%{escaped}%", escape=_LIKE_ESCAPE)
+
+
+def _document_sort_keys(sort: IntegrationDocumentSort) -> list[_SortKey]:
+    if sort == "name":
+        return [InfoBlobs.title]
+    if sort == "size":
+        return [InfoBlobs.size]
+    if sort == "updated_at":
+        return [InfoBlobs.updated_at]
+    # The URL without its file name orders documents by folder; within one
+    # item every URL shares the same prefix, so this equals their relative path.
+    return [sa.func.regexp_replace(InfoBlobs.url, "/[^/]*$", ""), InfoBlobs.title]
 
 
 class InfoBlobRepository:
@@ -969,6 +1002,53 @@ class InfoBlobRepository:
         )
 
         return await self.session.scalar(stmt)
+
+    async def get_integration_knowledge_page(
+        self,
+        integration_knowledge_id: UUID,
+        *,
+        q: str | None = None,
+        sort: IntegrationDocumentSort = "path",
+        descending: bool = False,
+        limit: int,
+        offset: int = 0,
+    ) -> IntegrationDocumentsPage:
+        """Active documents of one item, filtered on title or URL, as one page."""
+        conditions: list[ColumnElement[bool]] = [
+            InfoBlobs.integration_knowledge_id == integration_knowledge_id,
+            active_info_blob_version(),
+        ]
+        if q:
+            conditions.append(
+                sa.or_(_contains(InfoBlobs.title, q), _contains(InfoBlobs.url, q))
+            )
+        totals = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count(), sa.func.coalesce(sa.func.sum(InfoBlobs.size), 0)
+                )
+                .select_from(InfoBlobs)
+                .where(*conditions)
+            )
+        ).one()
+        ordering = [
+            (key.desc() if descending else key.asc()).nulls_last()
+            for key in _document_sort_keys(sort)
+        ]
+        query = (
+            sa.select(InfoBlobs)
+            .where(*conditions)
+            .order_by(*ordering, InfoBlobs.id.asc())
+            .options(defer(InfoBlobs.text))
+            .limit(limit)
+            .offset(offset)
+        )
+        records = await self.session.scalars(query)
+        return IntegrationDocumentsPage(
+            items=[InfoBlobInDBNoText.model_validate(record) for record in records],
+            total_count=int(totals[0] or 0),
+            total_size=int(totals[1] or 0),
+        )
 
     async def get_by_filter_integration_knowledge(
         self, integration_knowledge_id: UUID
