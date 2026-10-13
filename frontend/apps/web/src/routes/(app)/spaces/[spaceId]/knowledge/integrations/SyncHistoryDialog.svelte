@@ -12,6 +12,7 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors";
+  import { describeSkipReason } from "$lib/features/integrations/skipReasons";
   import {
     readSyncLogExtras,
     skippedNotListed,
@@ -254,7 +255,7 @@
                         >{detail.file}</span
                       >
                       <span class="text-muted">&mdash;</span>
-                      <span class="text-muted">{detail.reason}</span>
+                      <span class="text-muted">{describeSkipReason(detail.reason)}</span>
                     </li>
                   {/each}
                   {#if extras.skippedTruncated}
