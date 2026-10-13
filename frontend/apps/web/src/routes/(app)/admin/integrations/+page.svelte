@@ -94,7 +94,7 @@
         >
           <IntegrationGrid>
             {#each tenantIntegrations as integration (integration.integration_id)}
-              <IntegrationCard {integration}>
+              <IntegrationCard {integration} tour="admin-integrations">
                 {#snippet action()}
                   <div class="flex flex-col gap-2">
                     {#if isSharePoint(integration)}
