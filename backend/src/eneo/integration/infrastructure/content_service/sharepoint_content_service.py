@@ -24,14 +24,12 @@ from eneo.integration.domain.entities.sync_log import SyncLog
 from eneo.integration.domain.entities.tenant_sharepoint_app import (
     TenantSharePointApp,
 )
-from eneo.integration.domain.tabular_policy import TabularPolicy
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     DeltaTokenExpiredException,
     SharePointContentClient,
 )
 from eneo.integration.infrastructure.content_service.originals import (
     build_tabular_placeholder_text,
-    is_tabular,
     original_media_type,
 )
 from eneo.integration.infrastructure.content_service.parsing import (
@@ -1434,9 +1432,9 @@ class SharePointContentService:
 
         Returns False when there is nothing to publish: no usable text and no
         original to keep. The caller then removes any stale local copy. A
-        tabular file under the ``tool_only`` policy is published with a schema
-        stub and no chunks; if its original cannot be kept it falls back to
-        indexing the extracted text so the document is never lost.
+        workbook whose rows could not be extracted but whose original is kept
+        is published with a schema stub, so search finds it by name and the
+        table tools can still open it.
         """
         filename = content.file_name or title
         unextractable = is_unextractable_content(content.text)
@@ -1447,11 +1445,6 @@ class SharePointContentService:
         )
         if media_type is None and unextractable:
             return False
-        tool_only = (
-            media_type is not None
-            and is_tabular(filename, content.content_type)
-            and integration_knowledge.tabular_policy == TabularPolicy.TOOL_ONLY
-        )
         async with self._prepared_original(
             filename=filename, media_type=media_type, data=content.data, stats=stats
         ) as original:
@@ -1461,10 +1454,9 @@ class SharePointContentService:
                 original = None
             if original is None and unextractable:
                 return False
-            schema_only = original is not None and (tool_only or unextractable)
             text = (
                 build_tabular_placeholder_text(filename, cast(bytes, content.data))
-                if schema_only
+                if unextractable
                 else content.text
             )
             await self._process_info_blob(
@@ -1475,7 +1467,6 @@ class SharePointContentService:
                 sharepoint_item_id=sharepoint_item_id,
                 source_metadata=source_metadata,
                 original=original,
-                index_text=not schema_only,
             )
         return True
 
@@ -1504,7 +1495,6 @@ class SharePointContentService:
         source_metadata: Optional[list[SourceMetadataEntry]] = None,
         *,
         original: Optional[PreparedKnowledgeOriginal] = None,
-        index_text: bool = True,
     ) -> None:
         existing_blob = None
         if sharepoint_item_id:
@@ -1582,7 +1572,6 @@ class SharePointContentService:
             info_blob_add,
             embedding_model=integration_knowledge.embedding_model,
             original=original,
-            index_text=index_text,
             attach_original_in_place=True,
         )
 

@@ -1,4 +1,4 @@
-"""Publishing one downloaded SharePoint file: originals, policy, fallbacks.
+"""Publishing one downloaded SharePoint file: originals and fallbacks.
 
 The service is built with mocked collaborators; ``_publish_file`` is the one
 path all four sync call sites go through, so its rules are tested here once.
@@ -11,7 +11,6 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.integration.domain.tabular_policy import TabularPolicy
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
     SharePointContentService,
 )
@@ -30,7 +29,6 @@ def knowledge():
         id=uuid4(),
         size=0,
         embedding_model=MagicMock(),
-        tabular_policy=TabularPolicy.INDEX_AND_TOOL,
     )
 
 
@@ -121,7 +119,6 @@ class TestOriginalCapture:
         assert calls[0]["media_type"] == XLSX and calls[0]["data"] == b"bytes"
         published = _published(service)
         assert published["original"] is prepared
-        assert published["index_text"] is True
         assert published["text"] == "Excel sheet data: a|b"
 
     async def test_non_tabular_file_carries_no_bytes_and_is_indexed_as_before(
@@ -137,7 +134,7 @@ class TestOriginalCapture:
 
         assert calls[0]["media_type"] is None
         published = _published(service)
-        assert published["original"] is None and published["index_text"] is True
+        assert published["original"] is None
 
     async def test_unextractable_file_without_bytes_is_not_published(
         self, service, knowledge
@@ -165,52 +162,6 @@ class TestOriginalCapture:
 
         published = _published(service)
         assert published["text"] == "stub for sales.xlsx"
-        assert published["index_text"] is False
-
-
-class TestTabularPolicy:
-    async def test_tool_only_publishes_a_schema_stub_without_chunks(
-        self, service, knowledge, monkeypatch
-    ):
-        knowledge.tabular_policy = TabularPolicy.TOOL_ONLY
-        _patch_prepared(service, _prepared())
-        monkeypatch.setattr(
-            "eneo.integration.infrastructure.content_service.sharepoint_content_service."
-            "build_tabular_placeholder_text",
-            lambda name, data: "schema only",
-        )
-
-        assert await _publish(service, knowledge, _content())
-
-        published = _published(service)
-        assert published["text"] == "schema only"
-        assert published["index_text"] is False
-        assert published["original"] is not None
-
-    async def test_tool_only_falls_back_to_indexing_when_no_original_is_kept(
-        self, service, knowledge
-    ):
-        knowledge.tabular_policy = TabularPolicy.TOOL_ONLY
-        _patch_prepared(service, None)
-
-        assert await _publish(service, knowledge, _content())
-
-        published = _published(service)
-        assert published["original"] is None
-        assert published["index_text"] is True
-        assert published["text"] == "Excel sheet data: a|b"
-
-    async def test_policy_does_not_touch_other_sources_files(self, service, knowledge):
-        knowledge.tabular_policy = TabularPolicy.TOOL_ONLY
-        _patch_prepared(service, None)
-
-        assert await _publish(
-            service,
-            knowledge,
-            _content("policy.docx", "Prose", data=None, content_type="docx"),
-        )
-
-        assert _published(service)["index_text"] is True
 
 
 class TestQuota:
@@ -226,7 +177,7 @@ class TestQuota:
         assert await _publish(service, knowledge, _content(), stats)
 
         published = _published(service)
-        assert published["original"] is None and published["index_text"] is True
+        assert published["original"] is None
         assert stats["skipped_details"] == [
             {"file": "sales.xlsx", "reason": "Original not kept: quota"}
         ]
@@ -234,21 +185,6 @@ class TestQuota:
         service.info_blob_service.quota_service.ensure_capacity.assert_awaited_once_with(
             50_000 + len(b"Excel sheet data: a|b")
         )
-
-    async def test_quota_overflow_under_tool_only_still_indexes_the_text(
-        self, service, knowledge
-    ):
-        knowledge.tabular_policy = TabularPolicy.TOOL_ONLY
-        _patch_prepared(service, _prepared())
-        service.info_blob_service.quota_service.ensure_capacity.side_effect = (
-            TenantQuotaExceededException("full")
-        )
-
-        assert await _publish(service, knowledge, _content())
-
-        published = _published(service)
-        assert published["index_text"] is True
-        assert published["text"] == "Excel sheet data: a|b"
 
 
 class TestUnchangedDocuments:

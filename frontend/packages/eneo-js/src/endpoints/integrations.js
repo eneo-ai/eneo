@@ -290,39 +290,6 @@ export function initIntegrations(client) {
       },
 
       /**
-       * Change an integration knowledge item: its name and/or how its spreadsheet
-       * files are handled. Omitted fields are left unchanged.
-       * @param {Object} args
-       * @param {{id: string}} args.knowledge IntegrationKnowledge to change
-       * @param {{id: string}} args.space Space where the knowledge belongs
-       * @param {string} [args.name] New name for the knowledge
-       * @param {import('../types/schema').components["schemas"]["TabularPolicy"]} [args.tabular_policy]
-       *   Whether spreadsheet files are indexed for search and kept for the table
-       *   tools, or kept for the tools only. Applied at the next sync.
-       * @throws {EneoError}
-       * */
-      update: async ({ knowledge, space, name, tabular_policy }) => {
-        const { id: integration_knowledge_id } = knowledge;
-        const { id } = space;
-        const res = await client.fetch(
-          "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/",
-          {
-            method: "patch",
-            params: {
-              path: { id, integration_knowledge_id }
-            },
-            requestBody: {
-              "application/json": {
-                ...(name !== undefined ? { name } : {}),
-                ...(tabular_policy !== undefined ? { tabular_policy } : {})
-              }
-            }
-          }
-        );
-        return res;
-      },
-
-      /**
        * Rename an integration knowledge item
        * @param {Object} args
        * @param {{id: string}} args.knowledge IntegrationKnowledge to rename

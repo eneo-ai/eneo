@@ -11,7 +11,6 @@ from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.integration.domain.entities.oauth_token import OauthToken
-from eneo.integration.domain.tabular_policy import TabularPolicy
 from eneo.integration.infrastructure.content_service.types import (
     SharePointTokenProtocol,
 )
@@ -728,13 +727,8 @@ class IntegrationKnowledgeService:
         integration_knowledge_id: UUID,
         *,
         name: str | None = None,
-        tabular_policy: TabularPolicy | None = None,
     ) -> IntegrationKnowledge:
-        """Change the name and/or tabular policy of an integration knowledge item.
-
-        The policy takes effect at the next sync, which republishes each
-        affected spreadsheet; it does not touch indexed content by itself.
-        """
+        """Change the name of an integration knowledge item."""
         space = await self.space_repo.one(id=space_id)
         # Verify the knowledge exists in this space (for permission check)
         space_knowledge = space.get_integration_knowledge(
@@ -766,8 +760,6 @@ class IntegrationKnowledgeService:
         )
         if name is not None:
             knowledge.name = name
-        if tabular_policy is not None:
-            knowledge.tabular_policy = tabular_policy
         return await self.integration_knowledge_repo.update(knowledge)
 
     async def _get_owned_wrapper_knowledge(

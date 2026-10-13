@@ -3,10 +3,6 @@ from typing import TYPE_CHECKING, Dict, Optional
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
-from eneo.integration.domain.tabular_policy import (
-    DEFAULT_TABULAR_POLICY,
-    TabularPolicy,
-)
 
 if TYPE_CHECKING:
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
@@ -46,7 +42,6 @@ class IntegrationKnowledge(Entity):
         drive_id: str | None = None,
         wrapper_id: UUID | None = None,
         wrapper_name: str | None = None,
-        tabular_policy: TabularPolicy | str | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.name = name
@@ -70,9 +65,6 @@ class IntegrationKnowledge(Entity):
         self.drive_id = drive_id
         self.wrapper_id = wrapper_id
         self.wrapper_name = wrapper_name
-        self.tabular_policy = (
-            TabularPolicy(tabular_policy) if tabular_policy else DEFAULT_TABULAR_POLICY
-        )
 
     @property
     def integration_type(self) -> str:

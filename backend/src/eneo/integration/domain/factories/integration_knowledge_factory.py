@@ -17,16 +17,6 @@ if TYPE_CHECKING:
     )
 
 
-def _stored_tabular_policy(record: object) -> str | None:
-    """The persisted policy value, or None for the default.
-
-    Records built without the column (older rows in flight, test doubles)
-    fall back to the default rather than failing to load.
-    """
-    value = getattr(record, "tabular_policy", None)
-    return value if isinstance(value, str) else None
-
-
 class IntegrationKnowledgeFactory:
     @classmethod
     def create_entity(
@@ -78,7 +68,6 @@ class IntegrationKnowledgeFactory:
             drive_id=getattr(record, "drive_id", None),
             wrapper_id=getattr(record, "wrapper_id", None),
             wrapper_name=getattr(record, "wrapper_name", None),
-            tabular_policy=_stored_tabular_policy(record),
         )
 
     @classmethod

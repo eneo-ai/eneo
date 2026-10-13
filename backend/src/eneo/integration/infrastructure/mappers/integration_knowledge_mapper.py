@@ -45,7 +45,6 @@ class IntegrationKnowledgeMapper(
             "drive_id": entity.drive_id,
             "wrapper_id": entity.wrapper_id,
             "wrapper_name": entity.wrapper_name,
-            "tabular_policy": entity.tabular_policy.value,
         }
 
     @override

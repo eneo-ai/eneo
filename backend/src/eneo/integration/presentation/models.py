@@ -9,10 +9,6 @@ from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
 )
 from eneo.info_blobs.info_blob import SourceMetadataEntry
-from eneo.integration.domain.tabular_policy import (
-    DEFAULT_TABULAR_POLICY,
-    TabularPolicy,
-)
 from eneo.integration.domain.value_objects import (
     IntegrationType,
     SkippedDetail,
@@ -241,7 +237,6 @@ class IntegrationKnowledgePublic(BaseModel):
     selected_item_type: Optional[str] = None
     wrapper_id: Optional[UUID] = None
     wrapper_name: Optional[str] = None
-    tabular_policy: TabularPolicy = DEFAULT_TABULAR_POLICY
     permissions: list[ResourcePermission] = Field(
         default_factory=_empty_resource_permissions
     )

@@ -1160,10 +1160,7 @@ async def delete_integration_knowledge_wrapper(
 @router.patch(
     "/{id}/knowledge/integrations/{integration_knowledge_id}/",
     response_model=IntegrationKnowledgePublic,
-    description=(
-        "Rename integration knowledge in a space or change how its spreadsheet "
-        "files are handled. Omitted fields are left unchanged."
-    ),
+    description="Rename integration knowledge in a space.",
     responses=responses.get_responses([400, 403, 404]),
 )
 @endpoint_access(
@@ -1179,22 +1176,13 @@ async def update_integration_knowledge(
 ):
     service = container.integration_knowledge_service()
     user = container.user()
-    knowledge = await service.update_knowledge(
+    knowledge = await service.update_knowledge_name(
         space_id=id,
         integration_knowledge_id=integration_knowledge_id,
         name=data.name,
-        tabular_policy=data.tabular_policy,
     )
 
     space = await container.space_repo().one(id=id)
-    changes = [
-        f"{field} to '{value}'"
-        for field, value in (
-            ("name", data.name),
-            ("tabular_policy", data.tabular_policy),
-        )
-        if value is not None
-    ]
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
         user=user,
@@ -1202,8 +1190,8 @@ async def update_integration_knowledge(
         entity_type=EntityType.INTEGRATION_KNOWLEDGE,
         entity_id=integration_knowledge_id,
         description=(
-            f"Changed {' and '.join(changes)} for {knowledge.integration_type} "
-            f"knowledge '{knowledge.name}' in space '{space.name}'"
+            f"Renamed {knowledge.integration_type} knowledge to "
+            f"'{knowledge.name}' in space '{space.name}'"
         ),
         metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space),
     )
