@@ -432,9 +432,10 @@ export function initIntegrations(client) {
          * @throws {EneoError}
          * */
         recreateAllSubscriptions: async () => {
-          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/recreate-all", {
-            method: "post"
-          });
+          const endpoint = /** @type {any} */ (
+            "/api/v1/admin/sharepoint/subscriptions/recreate-all"
+          );
+          const res = await client.fetch(endpoint, { method: "post" });
           return res;
         },
 
@@ -465,9 +466,23 @@ export function initIntegrations(client) {
          * @throws {EneoError}
          * */
         testStoredConnection: async () => {
-          const res = await client.fetch("/api/v1/admin/sharepoint/app/test", {
-            method: "post"
+          const options = /** @type {any} */ ({ method: "post" });
+          const res = await client.fetch("/api/v1/admin/sharepoint/app/test", options);
+          return res;
+        },
+
+        /**
+         * Test tenant-app credentials before saving them; nothing is stored.
+         * @param {{client_id: string, client_secret: string, tenant_domain: string, certificate_path?: string | null}} credentials
+         * @returns {Promise<import("../types/schema").components["schemas"]["TenantAppTestResult"]>}
+         * @throws {EneoError}
+         * */
+        testTenantAppCredentials: async (credentials) => {
+          const options = /** @type {any} */ ({
+            method: "post",
+            requestBody: { "application/json": credentials }
           });
+          const res = await client.fetch("/api/v1/admin/sharepoint/app/test", options);
           return res;
         },
 

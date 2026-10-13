@@ -170,10 +170,10 @@
     }
 
     try {
-      testResult = await eneo.client.fetch("/api/v1/admin/sharepoint/app/test", {
-        method: "post",
-        requestBody: { "application/json": buildCredentialsPayload() }
-      });
+      testResult =
+        await eneo.integrations.admin.sharepoint.testTenantAppCredentials(
+          buildCredentialsPayload()
+        );
     } catch (error) {
       toastError(error);
       testResult = { success: false, error_message: getErrorMessage(error) };

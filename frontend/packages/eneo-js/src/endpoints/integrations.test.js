@@ -59,3 +59,24 @@ test("recreating all SharePoint subscriptions posts to the recreate-all endpoint
     }
   ]);
 });
+
+test("testing unsaved tenant-app credentials posts them as the body", async () => {
+  const calls = [];
+  const integrations = initIntegrations({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return { success: false, error_message: "invalid_client" };
+    }
+  });
+  const credentials = { client_id: "c", client_secret: "s", tenant_domain: "t.onmicrosoft.com" };
+
+  const result = await integrations.admin.sharepoint.testTenantAppCredentials(credentials);
+
+  assert.equal(result.success, false);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/admin/sharepoint/app/test",
+      request: { method: "post", requestBody: { "application/json": credentials } }
+    }
+  ]);
+});
