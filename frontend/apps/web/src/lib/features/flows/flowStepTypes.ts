@@ -131,6 +131,7 @@ const INPUT_SOURCE_ORDER: InputSource[] = [
 ];
 
 const ADVANCED_ONLY_INPUT_TYPES = new Set<InputType>(["file", "any"]);
+const ADVANCED_ONLY_INPUT_SOURCES = new Set<InputSource>(["http_get", "tool"]);
 const OUTBOUND_DELIVERY_OUTPUT_MODES = new Set<OutputMode>(["http_post"]);
 
 const COMPATIBLE_COERCIONS: Record<OutputType, InputType[]> = {
@@ -192,9 +193,9 @@ export function getValidInputSources(params: {
   stepOrder: number;
 }): InputSource[] {
   if (params.stepOrder === 1) {
-    return ["flow_input", "http_get"];
+    return ["flow_input", "http_get", "tool"];
   }
-  return ["previous_step", "all_previous_steps", "http_get"];
+  return ["previous_step", "all_previous_steps", "http_get", "tool"];
 }
 
 export function getSelectableInputSourceOptions(params: {
@@ -205,12 +206,13 @@ export function getSelectableInputSourceOptions(params: {
 }): SelectableInputSourceOption[] {
   const { steps, stepOrder, currentInputSource, isAdvancedMode } = params;
   const visible = getValidInputSources({ steps, stepOrder });
-  // The editor cannot configure a tool input, so it never offers one: the
-  // option is listed only on a step saved with it, to show what the step has.
-  let options = INPUT_SOURCE_ORDER.filter(
-    (value) => visible.includes(value) || (value === "tool" && currentInputSource === "tool")
-  )
-    .filter((value) => isAdvancedMode || value !== "http_get" || value === currentInputSource)
+  // A source that reaches outside the flow is configured in Avancerad, so only
+  // that mode offers it; a step that already has one shows it in every mode.
+  let options = INPUT_SOURCE_ORDER.filter((value) => visible.includes(value))
+    .filter(
+      (value) =>
+        isAdvancedMode || !ADVANCED_ONLY_INPUT_SOURCES.has(value) || value === currentInputSource
+    )
     .map((value) => ({
       value,
       legacyInvalid: false

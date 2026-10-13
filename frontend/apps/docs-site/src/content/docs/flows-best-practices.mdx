@@ -54,6 +54,37 @@ relevant part in a pile of text it has already processed.
 When a step needs two earlier results, name them. A named underlag is cheaper
 than everything, and it documents the flow's data path for the next author.
 
+## Read from an MCP tool
+
+A step can take its material from one MCP tool instead of from the flow. In the
+step editor, switch to **Advanced**, open the step's **Source** and choose
+**Fetch from a tool**, then choose the tool and give its arguments.
+
+- The flow calls the tool once each time the step runs. A tool that changes
+  something changes it again when a run is started again.
+- Each argument is a fixed value or exactly one variable from the flow, such as
+  an earlier step's result. One argument cannot combine text with a variable.
+- Each argument the tool's schema names has a row of its own. A text, number,
+  yes/no or choice argument has a field of its own; any other argument, also
+  one that may be null, is entered as JSON. When the schema also takes
+  arguments of other names, **Other arguments the tool takes** opens one JSON
+  field for those. A tool whose arguments the editor cannot show as rows, or
+  whose schema names none and takes arguments of any name, gets one JSON field
+  for all of them. A whole number beyond 9,007,199,254,740,991 cannot be stored
+  exactly and is refused; enter it as text if the tool accepts text.
+- The tool's answer must be text or JSON. An answer with anything else in it,
+  such as an image, is refused and the step fails.
+- The tool must be allowed for flows in the flow's space. A space administrator
+  switches MCP servers on in the space settings; an instance administrator
+  switches servers and tools on and reviews new or changed tools. A tool the
+  editor lists as refused shows the reason and cannot be chosen. A flow in a
+  personal space cannot use tools.
+- The tool's MCP server must have at least the security class of the space,
+  so the run's own input (a form field, the run's text) and fixed values can be
+  sent to it. An earlier step's result can be sent only when that step's class
+  is not higher than the server's. The answer counts at the server's security
+  class, for this step and for every later step that reads it.
+
 ## Keep knowledge out of transforming steps
 
 Knowledge sources and websites are for steps that answer questions or write

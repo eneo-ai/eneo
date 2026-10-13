@@ -45,11 +45,16 @@ export class FlowSaveRejectedError extends Error {
  * seam — callers must not present a second toast for the same failure.
  */
 /** The draft cannot be persisted as it stands (a step still waiting for
- *  its assistant, or a typed IO binding that does not hold). */
+ *  its assistant, a typed IO binding that does not hold, or a tool step that
+ *  names no tool). */
 export class FlowSaveIncompleteError extends Error {
-  constructor() {
+  /** The validation banner says why: the editor holds issues of its own. */
+  readonly issuesInBanner: boolean;
+
+  constructor(issuesInBanner = false) {
     super("flow draft is not ready to be saved");
     this.name = "FlowSaveIncompleteError";
+    this.issuesInBanner = issuesInBanner;
   }
 }
 
@@ -77,7 +82,11 @@ export function describeFlowSaveRefusal(
   error: unknown,
   reportServerValidationError: (error: unknown) => boolean
 ): FlowSaveRefusal | null {
-  if (error instanceof FlowSaveRejectedError || reportServerValidationError(error)) {
+  if (
+    error instanceof FlowSaveRejectedError ||
+    (error instanceof FlowSaveIncompleteError && error.issuesInBanner) ||
+    reportServerValidationError(error)
+  ) {
     return { sentence: m.flow_validation_save_rejected(), issuesInBanner: true };
   }
   if (error instanceof FlowSaveIncompleteError) {
@@ -99,6 +108,7 @@ import { replaceBindingReference, type DanglingBindingReference } from "./flowIn
 import type { FlowInputMaterialOption } from "./flowInputBindings";
 import { rewriteStepBindings } from "./flowVariableReferenceRewriter";
 import { computeStepOrderRemap } from "./flowStepOrderRemap";
+import { lacksChosenTool, type ToolOptionsLoad } from "./components/tool/toolInputConfig";
 
 type FlowEditorInitData = {
   flow: Flow;
@@ -231,6 +241,10 @@ function createFlowEditor(data: FlowEditorInitData) {
 
   const activeStepId = writable<string | null>(null);
   const validationErrors = writable<Map<string, string[]>>(new Map());
+  // The tools a step of this flow can name. The editor asks for them once a
+  // step reads from a tool: that step's issues depend on what its tool requires.
+  const toolOptions = writable<ToolOptionsLoad>({ status: "loading" });
+  let toolOptionsRequests = 0;
   const serverValidationIssue = writable<ReturnType<typeof parseServerValidationIdentity>>(null);
   // The step the user just created: the editor opens its task chapter and hands
   // it over once (name focused and selected). `stepId` follows the temp→real id
@@ -390,10 +404,41 @@ function createFlowEditor(data: FlowEditorInitData) {
   }
 
   function syncStepConfigValidation(steps: FlowStep[]) {
+    if (toolOptionsRequests === 0 && steps.some((step) => step.input_source === "tool")) {
+      void loadToolOptions();
+    }
+    const load = get(toolOptions);
     replaceFlowValidationErrors(
       stepConfigValidationPrefix,
-      computeStepConfigValidationIssues(steps, stepConfigValidationPrefix)
+      computeStepConfigValidationIssues(
+        steps,
+        stepConfigValidationPrefix,
+        load.status === "loaded" ? load.options : null
+      )
     );
+  }
+
+  /** Asks the server again which tools a step of this flow can name. */
+  async function loadToolOptions(): Promise<void> {
+    const request = ++toolOptionsRequests;
+    // A list that is already shown stays while it is asked for again, so the
+    // rows and the issues that depend on it stay too.
+    toolOptions.update((load) =>
+      load.status === "loaded" ? { ...load, refreshing: true } : { status: "loading" }
+    );
+    try {
+      const { items } = await data.eneo.flows.toolOptions({ id: data.flow.id });
+      // The answer of an earlier request must not replace a later one's.
+      if (request !== toolOptionsRequests) return;
+      toolOptions.set({ status: "loaded", options: items, refreshing: false });
+    } catch (error) {
+      if (request !== toolOptionsRequests) return;
+      toolOptions.set({
+        status: "failed",
+        message: getFlowRuntimeErrorMessage(error, m.flow_tool_options_failed())
+      });
+    }
+    syncStepConfigValidation(get(editor.state.update).steps ?? []);
   }
 
   function revalidateDeletedStepReferences() {
@@ -516,13 +561,13 @@ function createFlowEditor(data: FlowEditorInitData) {
     if (!hasUnsavedChanges) return;
 
     if (!stepsAreSaveable(get(editor.state.update).steps ?? [])) {
-      throw new FlowSaveIncompleteError();
+      throw new FlowSaveIncompleteError(get(validationErrors).size > 0);
     }
 
     const result = await editor.saveChanges();
 
     if (!result.saved) {
-      if ("deferred" in result) throw new FlowSaveIncompleteError();
+      if ("deferred" in result) throw new FlowSaveIncompleteError(get(validationErrors).size > 0);
       if (result.handled) {
         // This save's structured rejection already lives in the banner.
         throw new FlowSaveRejectedError();
@@ -537,12 +582,15 @@ function createFlowEditor(data: FlowEditorInitData) {
     if (hasPendingFlowSaves()) await flushFlowSaves();
   }
 
-  /** Steps can be persisted once every step has its assistant and the typed
-   *  IO bindings hold; checked when a save is queued and again when it runs. */
+  /** Steps can be persisted once every step has its assistant, the typed IO
+   *  bindings hold and every tool step names its tool (the server refuses one
+   *  that names none); checked when a save is queued and again when it runs. */
   function stepsAreSaveable(steps: FlowStep[]): boolean {
     return (
       syncTypedIOValidation(steps).length === 0 &&
-      steps.every((s: FlowStep) => Boolean(s.assistant_id) && s.assistant_id !== "")
+      steps.every(
+        (s: FlowStep) => Boolean(s.assistant_id) && s.assistant_id !== "" && !lacksChosenTool(s)
+      )
     );
   }
 
@@ -1170,6 +1218,7 @@ function createFlowEditor(data: FlowEditorInitData) {
       newStepOpenIntent: readonly(newStepOpenIntent),
       stepNavigationRevision: readonly(stepNavigationRevision),
       validationErrors,
+      toolOptions: readonly(toolOptions),
       serverValidationIssue: readonly(serverValidationIssue),
       saveStatus: unifiedSaveStatus,
       isPublished
@@ -1210,6 +1259,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     flushSaves,
     checkDraft,
     reportServerValidationError,
+    loadToolOptions,
     scheduleAutoSave,
     destroy
   });

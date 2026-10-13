@@ -21,6 +21,7 @@ import {
 } from "./speakerMappingConfig";
 import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
 import { parseHttpAuthoredConfig, type HttpMethod } from "./components/http/httpConfigTypes";
+import { withToolInputConfig } from "./components/tool/toolInputConfig";
 import { canClearInputBindingSourceRefs, setInputBindingSourceRefs } from "./flowInputBindings";
 
 type StepInputSource = FlowStep["input_source"];
@@ -58,15 +59,25 @@ export function applyInputSourceChange({
     currentInputType: step.input_type,
     isAdvancedMode
   });
+  const toolSourceSelected = nextSource === "tool";
+  // A step that turns to a tool starts without one: a tool chosen before the
+  // step had another source is not brought back unseen.
   const nextInputConfig = httpSourceSelected
     ? withHttpInputSourceDefaults(step.input_config, "GET")
-    : (step.input_config ?? null);
-  const nextInputType = keepOrRecommendInputType({
-    currentInputType: step.input_type,
-    options: nextInputTypeOptions,
-    inputSource: nextSource,
-    previousOutputType
-  });
+    : toolSourceSelected
+      ? withToolInputConfig(step.input_config, null)
+      : (step.input_config ?? null);
+  // A tool answers with text or JSON, so every other input type becomes text.
+  const nextInputType = toolSourceSelected
+    ? step.input_type === "json"
+      ? "json"
+      : "text"
+    : keepOrRecommendInputType({
+        currentInputType: step.input_type,
+        options: nextInputTypeOptions,
+        inputSource: nextSource,
+        previousOutputType
+      });
 
   let finalInputConfig = nextInputConfig;
   const resetSourceRefs = canClearInputBindingSourceRefs(step)
@@ -113,6 +124,22 @@ export function applyInputSourceChange({
       finalInputConfig = patch.input_config ?? null;
       finalBindings = patch.input_bindings ?? null;
     }
+  }
+
+  // The server refuses uploaded files beside a tool, so a step that turns to a
+  // tool stops taking them, whatever its upload settings were.
+  if (toolSourceSelected && runtimeInputConfig.enabled) {
+    const patch = buildRuntimeInputStepPatch(
+      {
+        ...step,
+        input_config: nextInputConfig,
+        input_bindings: finalBindings,
+        input_type: nextInputType
+      },
+      { ...runtimeInputConfig, enabled: false }
+    );
+    finalInputConfig = patch.input_config ?? null;
+    finalBindings = patch.input_bindings ?? null;
   }
 
   return {

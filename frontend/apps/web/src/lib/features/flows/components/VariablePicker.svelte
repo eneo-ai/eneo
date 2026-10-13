@@ -29,6 +29,7 @@
   } from "$lib/features/flows/flowVariableTokens";
   import { fieldTypeLabel } from "$lib/features/flows/ai-builder/aiBuilderSummaryText";
   import { getRuntimeInputConfig } from "$lib/features/flows/flowRuntimeInputConfig";
+  import { isJsonObject } from "$lib/features/flows/jsonObject";
 
   let {
     steps,
@@ -39,6 +40,8 @@
     sectionVariablesAvailable = false,
     uploadVariableAvailable = false,
     classifyToken,
+    triggerLabel,
+    allowFor,
     onInsert
   }: {
     steps: VariablePickerContext["steps"];
@@ -52,6 +55,14 @@
     uploadVariableAvailable?: boolean;
     /** The editor's own classifier, so an entry wears the colour its token gets in the text. */
     classifyToken?: (token: string) => VariableCategory;
+    /** The button's text where the variable is chosen as a whole value, not inserted into a text. */
+    triggerLabel?: string;
+    /**
+     * A tool argument reads one whole value. Publish (whole_reference_value in
+     * flow_validators.py) refuses a step's whole output there, and a whole
+     * structured result unless the step declares a contract.
+     */
+    allowFor?: "tool_argument";
     onInsert?: (variable: string) => void;
   } = $props();
 
@@ -177,18 +188,18 @@
         });
       }
       if (isAdvancedMode) {
-        entries.push(
-          {
-            token: `step_${step.step_order}.output.text`,
-            label: m.flow_variable_output_text_label(),
-            description: outputTextDescription(step)
-          },
-          {
+        entries.push({
+          token: `step_${step.step_order}.output.text`,
+          label: m.flow_variable_output_text_label(),
+          description: outputTextDescription(step)
+        });
+        if (allowFor !== "tool_argument") {
+          entries.push({
             token: `step_${step.step_order}.output`,
             label: m.flow_variable_full_output_label(),
             description: fullOutputDescription(step)
-          }
-        );
+          });
+        }
         if (step.output_type === "json") {
           const fieldsOfStep = schemaFields(step);
           if (fieldsOfStep.length > 0) {
@@ -199,7 +210,7 @@
                 description: field.type || undefined
               });
             }
-          } else {
+          } else if (allowFor !== "tool_argument" || isJsonObject(step.output_contract)) {
             entries.push({
               token: `step_${step.step_order}.output.structured`,
               label: m.flow_variable_structured_label(),
@@ -232,9 +243,14 @@
 <Popover.Root bind:open>
   <Popover.Trigger>
     {#snippet child({ props })}
-      <Button {...props} variant="outline" size="sm" title={m.flow_variable_insert_hint()}>
+      <Button
+        {...props}
+        variant="outline"
+        size="sm"
+        title={triggerLabel ? undefined : m.flow_variable_insert_hint()}
+      >
         <Braces data-icon="inline-start" aria-hidden="true" />
-        {m.flow_variable_insert()}
+        {triggerLabel ?? m.flow_variable_insert()}
       </Button>
     {/snippet}
   </Popover.Trigger>

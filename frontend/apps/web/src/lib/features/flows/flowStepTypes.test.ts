@@ -71,40 +71,41 @@ describe("getValidInputTypes", () => {
 });
 
 describe("getValidInputSources", () => {
-  it("offers HTTP GET but never the removed HTTP POST input source", () => {
-    expect(getValidInputSources({ steps: [], stepOrder: 1 })).toEqual(["flow_input", "http_get"]);
+  it("offers HTTP GET and a tool but never the removed HTTP POST input source", () => {
+    expect(getValidInputSources({ steps: [], stepOrder: 1 })).toEqual([
+      "flow_input",
+      "http_get",
+      "tool"
+    ]);
     expect(getValidInputSources({ steps: [], stepOrder: 2 })).toEqual([
       "previous_step",
       "all_previous_steps",
-      "http_get"
+      "http_get",
+      "tool"
     ]);
   });
 });
 
 describe("getSelectableInputSourceOptions", () => {
-  // Kills the mutant that offers the tool source in an editor that cannot
-  // configure it, and the one that shows a saved tool step as an invalid option.
-  it.each([
-    { stepOrder: 1, isAdvancedMode: false },
-    { stepOrder: 2, isAdvancedMode: true }
-  ])("lists the tool source only on a step saved with it (%o)", (params) => {
-    const offered = getSelectableInputSourceOptions({
-      steps: [],
-      currentInputSource: "http_get",
-      ...params
-    });
-    const saved = getSelectableInputSourceOptions({
-      steps: [],
-      currentInputSource: "tool",
-      ...params
-    });
+  // Kills: the tool source is offered in Enkel, is missing in Avancerad, or a
+  // step saved with it shows it as an invalid option.
+  it.each([{ stepOrder: 1 }, { stepOrder: 2 }])(
+    "offers the tool source in Avancerad only, and always on a step that has it (%o)",
+    ({ stepOrder }) => {
+      const values = (isAdvancedMode: boolean, currentInputSource: "previous_step" | "tool") =>
+        getSelectableInputSourceOptions({
+          steps: [],
+          stepOrder,
+          isAdvancedMode,
+          currentInputSource
+        }).filter((option) => option.value === "tool");
 
-    expect(offered.map((option) => option.value)).not.toContain("tool");
-    expect(saved.filter((option) => option.value === "tool")).toEqual([
-      { value: "tool", legacyInvalid: false }
-    ]);
-    expect(getValidInputTypes("tool")).toEqual(["text", "json"]);
-  });
+      expect(values(false, "previous_step")).toEqual([]);
+      expect(values(true, "previous_step")).toEqual([{ value: "tool", legacyInvalid: false }]);
+      expect(values(false, "tool")).toEqual([{ value: "tool", legacyInvalid: false }]);
+      expect(getValidInputTypes("tool")).toEqual(["text", "json"]);
+    }
+  );
 });
 
 describe("getSelectableInputTypeOptions", () => {

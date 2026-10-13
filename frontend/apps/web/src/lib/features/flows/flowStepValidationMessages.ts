@@ -6,7 +6,8 @@ import {
   type UnattendedToolRefusal
 } from "./flowToolRefusal";
 
-const CODE_TO_MESSAGE: Record<string, () => string> = {
+// `subject` is what an issue of the editor's own names, when it names one.
+const CODE_TO_MESSAGE: Record<string, (subject?: string) => string> = {
   typed_io_duplicate_step_order: () => m.flow_validation_msg_duplicate_step_order(),
   typed_io_non_contiguous_step_order: () => m.flow_validation_msg_non_contiguous_step_order(),
   typed_io_multiple_flow_input_steps: () => m.flow_validation_msg_multiple_flow_input_steps(),
@@ -31,6 +32,8 @@ const CODE_TO_MESSAGE: Record<string, () => string> = {
   "deleted-step-reference": () => m.flow_validation_msg_deleted_step_reference(),
   assistant_save_failed: () => m.flow_validation_msg_assistant_save_failed(),
   http_missing_url: () => m.flow_validation_msg_http_missing_url(),
+  tool_missing_tool: () => m.flow_tool_missing_tool(),
+  tool_argument_missing: (name = "") => m.flow_tool_argument_missing({ name }),
   // Server-side step-graph issue codes (FlowGraphIssueCode) that authoring
   // can trigger; the raw technical sentence stays available as detail.
   flow_http_post_output_must_be_terminal: () => m.flow_validation_msg_http_post_not_terminal(),
@@ -89,12 +92,12 @@ const CODE_TO_MESSAGE: Record<string, () => string> = {
   typed_io_tool_invalid_schema: () => m.flow_error_typed_io_tool_invalid_schema()
 };
 
-export function getValidationIssueMessage(code: string): string {
-  return CODE_TO_MESSAGE[code]?.() ?? code;
+export function getValidationIssueMessage(code: string, subject?: string): string {
+  return CODE_TO_MESSAGE[code]?.(subject) ?? code;
 }
 
 export type ParsedValidationError =
-  | { kind: "step"; code: string; stepOrder: number; detail?: string }
+  | { kind: "step"; code: string; stepOrder: number; detail?: string; subject?: string }
   | { kind: "assistant"; assistantId: string; message: string }
   | { kind: "flow"; code: string; message: string; detail?: string };
 
@@ -377,7 +380,13 @@ export function parseValidationError(key: string, values: string[]): ParsedValid
         }
         return null;
       }
-      return { kind: "step", code: rest.slice(0, lastColon), stepOrder, detail: values[0] };
+      return {
+        kind: "step",
+        code: rest.slice(0, lastColon),
+        stepOrder,
+        detail: values[0],
+        subject: values[1]
+      };
     }
   }
 

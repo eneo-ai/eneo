@@ -95,7 +95,7 @@
     switch (parsed.kind) {
       case "step": {
         const step = steps.find((s) => s.step_order === parsed.stepOrder);
-        const translated = getValidationIssueMessage(parsed.code);
+        const translated = getValidationIssueMessage(parsed.code, parsed.subject);
         const raw = parsed.detail;
         const refusal = serverIssueFor(key, parsed);
         const message = refusal?.classification

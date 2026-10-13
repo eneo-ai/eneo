@@ -526,6 +526,20 @@ export function initFlows(client) {
       }
     },
 
+    /**
+     * List every tool of the MCP servers the flow's space has activated, for a step
+     * whose input source is a tool. A tool a flow may not use is listed with the
+     * level that refuses it.
+     * @param {{id: string}} params
+     * @throws {EneoError}
+     */
+    toolOptions: async ({ id }) => {
+      return _fetch("/api/v1/flows/{id}/tool-options", {
+        method: "get",
+        params: { path: { id } }
+      });
+    },
+
     runContract: {
       /**
        * Fetch canonical run contract for runtime step inputs and template readiness.

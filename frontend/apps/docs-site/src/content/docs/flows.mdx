@@ -140,7 +140,7 @@ _A worked example: audio goes in, a DOCX document comes out. Each step declares 
 | `output_type`                    | The result shape                                   | `text`, `json`, `pdf`, `docx`                                                                                                  | Explicit per step |
 | `output_classification_override` | Optional higher classification for the step output | integer: the level of one of your organisation's security classes                                                              | No override       |
 
-A step whose `input_source` is `tool` names one MCP tool in `input_config.tool`: the server's id, the tool's id and the arguments. It is configured through the API in this release line; the step editor shows such a step and cannot change the tool or its arguments.
+A step whose `input_source` is `tool` names one MCP tool in `input_config.tool`: the server's id, the tool's id and the arguments. It is configured in the step editor's Advanced mode, where the source is called "Fetch from a tool", or through the API.
 
 - An argument is a fixed JSON value or one whole reference such as `{{step_1.output.structured.days}}`, which keeps the JSON type of what it names. Text around a reference is refused, and so is a reference inside a list or an object.
 - A fixed string cannot contain `{{...}}`: it is read as a reference. There is no escape syntax.

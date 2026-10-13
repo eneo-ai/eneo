@@ -12,7 +12,7 @@ The reference guide keeps the full field catalog: [Flow Runtime API Reference](/
 
 A Flow is a published graph of steps. Each step declares `input_source`, `input_type`, `output_type`, and `output_mode`.
 
-Flow input can use HTTP GET, or the answer of one MCP tool that the step calls (`input_source` `tool`, set through the API; see [Flows](/docs/flows#core-step-fields)). Flow does not support HTTP POST input, and a step's model cannot use MCP tools. Terminal HTTP POST output remains available through the durable webhook outbox.
+Flow input can use HTTP GET, or the answer of one MCP tool that the step calls (`input_source` `tool`; see [Flows](/docs/flows#core-step-fields)). Flow does not support HTTP POST input, and a step's model cannot use MCP tools. Terminal HTTP POST output remains available through the durable webhook outbox.
 
 HTTP steps send to `http` or `https` URLs without credentials in the address, and only to public addresses. An administrator can allow private networks; loopback, link-local and cloud-metadata addresses are never allowed. Redirects are not followed. An HTTP input step that points at a blocked destination fails with `typed_io_http_ssrf_blocked`. A webhook delivery to one is not retried: it is dead-lettered on the first attempt and the run fails with `flow_webhook_delivery_failed`.
 

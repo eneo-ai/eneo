@@ -1,9 +1,17 @@
 import { cleanup, render, screen } from "@testing-library/svelte";
-import { afterEach, describe, expect, it } from "vitest";
+import { readable } from "svelte/store";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
 
+import { getRuntimeInputConfig } from "$lib/features/flows/flowRuntimeInputConfig";
+import { flowStepFixture } from "$lib/features/flows/flowStepTestFixture";
 import { m } from "$lib/paraglide/messages";
 import FlowStepInputSection from "./FlowStepInputSection.svelte";
+
+// The tool section a tool step shows reads the space it is in.
+vi.mock("$lib/features/spaces/SpacesManager", () => ({
+  getSpacesManager: () => ({ state: { currentSpace: readable({ personal: false }) } })
+}));
 
 afterEach(() => {
   cleanup();
@@ -47,6 +55,41 @@ function renderSection(
 const sourceSelect = () => screen.getByLabelText(m.flow_step_section_input());
 
 describe("FlowStepInputSection", () => {
+  // Kills: a tool step offers "accept files when the flow runs", which the
+  // server refuses beside a tool; a step with another source loses the
+  // control; a tool step that already takes files cannot switch them off.
+  it.each<{ source: FlowStep["input_source"]; uploads: boolean; offered: boolean }>([
+    { source: "tool", uploads: false, offered: false },
+    { source: "tool", uploads: true, offered: true },
+    { source: "previous_step", uploads: false, offered: true }
+  ])("offers uploads at run time: %o", ({ source, uploads, offered }) => {
+    const step = flowStepFixture({
+      input_source: source,
+      input_config: uploads ? { runtime_input: { enabled: true, input_format: "document" } } : null
+    });
+    render(FlowStepInputSection, {
+      props: {
+        step,
+        isPublished: false,
+        isAdvancedMode: true,
+        selectableInputSourceOptions: [],
+        displayedInputTypeOptions: [],
+        runtimeInputConfig: getRuntimeInputConfig(step),
+        sourceHintKind: null,
+        sourceValidationMessage: null,
+        inputSourceFeedback: null,
+        inputTypeValidationMessage: null,
+        inputTypeFeedback: null,
+        transcriptionEnabled: false,
+        transcriptionModelConfigured: false,
+        transcriptionModelLabel: null
+      }
+    });
+    expect(
+      screen.queryByRole("switch", { name: m.flow_runtime_input_accept_files() }) !== null
+    ).toBe(offered);
+  });
+
   // The source hint points at the section that overrides it, by the title the editor gives it.
   it("points a step with AI to the section the AI reads", () => {
     renderSection({ output_mode: "pass_through", input_type: "text", output_type: "text" });

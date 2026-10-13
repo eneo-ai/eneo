@@ -42,6 +42,12 @@
   import { stripTemporaryStepId } from "$lib/features/flows/flowStepPayloadShaping";
   import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
+  import ToolConfigPanel from "./tool/ToolConfigPanel.svelte";
+  import {
+    readToolInputConfig,
+    type ToolInputConfig,
+    type ToolOptionsLoad
+  } from "./tool/toolInputConfig";
 
   let {
     step,
@@ -59,6 +65,8 @@
     transcriptionModelConfigured,
     transcriptionModelLabel,
     flowId = "",
+    stepStateKey = "",
+    toolOptions = { status: "loading" },
     httpVariableContext = undefined,
     onInputSourceChange,
     onInputTypeChange,
@@ -66,6 +74,8 @@
     onTextProcessingChange,
     hasKnowledge = false,
     onHttpConfigChange,
+    onToolConfigChange,
+    onReloadToolOptions,
     onOpenTranscriptionSettings,
     speakerMappingStepOffered = false,
     onAddSpeakerMappingStep
@@ -92,6 +102,9 @@
     transcriptionModelConfigured: boolean;
     transcriptionModelLabel: string | null;
     flowId?: string;
+    /** The identity of the step being edited, as the chapters know it. */
+    stepStateKey?: string;
+    toolOptions?: ToolOptionsLoad;
     httpVariableContext?: import("$lib/features/flows/components/VariablePicker.svelte").VariablePickerContext;
     onInputSourceChange?: (detail: { value: string }) => void;
     onInputTypeChange?: (detail: { value: string }) => void;
@@ -99,12 +112,16 @@
     onTextProcessingChange?: (detail: { mode: FlowTextProcessingMode | null }) => void;
     hasKnowledge?: boolean;
     onHttpConfigChange?: (detail: { config: HttpAuthoredConfig }) => void;
+    onToolConfigChange?: (detail: { config: ToolInputConfig }) => void;
+    onReloadToolOptions?: () => void;
     onOpenTranscriptionSettings?: () => void;
     speakerMappingStepOffered?: boolean;
     onAddSpeakerMappingStep?: () => void;
   } = $props();
 
   const isHttpSource = $derived(step.input_source === "http_get");
+  const isToolSource = $derived(step.input_source === "tool");
+  const toolConfig = $derived(isToolSource ? readToolInputConfig(step.input_config) : null);
   // Explicit underlag is the whole step input, so the source choice has no
   // effect until the underlag is removed.
   const underlagDecidesInput = $derived(
@@ -353,183 +370,201 @@
     </Settings.Row>
   {/if}
 
-  <Settings.Row
-    title={m.flow_runtime_input_title()}
-    description={m.flow_runtime_input_description()}
-    fullWidth={true}
-    density="compact"
-  >
-    <div class="flex flex-col gap-3">
-      <div
-        class="bg-primary flex items-start justify-between gap-4 rounded-lg border px-3 py-3 transition-colors {runtimeInputConfig.enabled
-          ? 'border-accent-default/40'
-          : 'border-default'}"
-      >
-        <div class="min-w-0">
-          <p class="text-sm font-medium">{m.flow_runtime_input_accept_files()}</p>
-          <p class="text-muted mt-1 text-xs leading-relaxed">
-            {m.flow_runtime_input_accept_files_desc()}
-          </p>
-        </div>
-        <Switch
-          checked={runtimeInputConfig.enabled}
-          disabled={isPublished}
-          aria-label={m.flow_runtime_input_accept_files()}
-          onCheckedChange={(checked) => updateRuntimeInputSettings({ enabled: checked })}
-        />
-      </div>
-
-      {#if runtimeInputConfig.enabled}
-        <div class="border-default/40 ml-1 flex flex-col gap-4 border-l pl-3 sm:ml-2 sm:pl-4">
-          <div class="flex items-start justify-between gap-4">
-            <div class="min-w-0">
-              <p class="text-sm font-medium">{m.flow_runtime_input_required()}</p>
-              <p class="text-muted mt-1 text-xs leading-relaxed">
-                {m.flow_runtime_input_required_desc()}
-              </p>
-            </div>
-            <Switch
-              checked={runtimeInputConfig.required}
-              disabled={isPublished}
-              aria-label={m.flow_runtime_input_required()}
-              onCheckedChange={(checked) => updateRuntimeInputSettings({ required: checked })}
-            />
-          </div>
-
-          <div class="flex flex-col gap-1">
-            <label class="text-sm font-medium" for="runtime-input-format"
-              >{m.flow_runtime_input_format_label()}</label
-            >
-            <Select.Root
-              type="single"
-              value={runtimeInputConfig.input_format}
-              disabled={isPublished ||
-                step.output_mode === "transcribe_only" ||
-                FILE_BASED_INPUT_TYPES.has(step.input_type)}
-              onValueChange={(value) =>
-                updateRuntimeInputSettings({
-                  input_format: value as FlowRuntimeInputConfigValue["input_format"]
-                })}
-            >
-              <Select.Trigger id="runtime-input-format" class="w-full">
-                {runtimeInputFormatLabel}
-              </Select.Trigger>
-              <Select.Content>
-                <Select.Group>
-                  <Select.Item value="document" label={m.flow_runtime_input_format_document()}>
-                    {m.flow_runtime_input_format_document()}
-                  </Select.Item>
-                  <Select.Item value="audio" label={m.flow_runtime_input_format_audio()}>
-                    {m.flow_runtime_input_format_audio()}
-                  </Select.Item>
-                  <Select.Item value="file" label={m.flow_runtime_input_format_file()}>
-                    {m.flow_runtime_input_format_file()}
-                  </Select.Item>
-                </Select.Group>
-              </Select.Content>
-            </Select.Root>
-          </div>
-
-          <div class="flex flex-col gap-1">
-            <label class="text-sm font-medium" for="runtime-input-description">
-              {m.flow_runtime_input_instruction_label()}
-            </label>
-            <Textarea
-              id="runtime-input-description"
-              class="min-h-[88px]"
-              placeholder={m.flow_runtime_input_instruction_placeholder()}
-              value={runtimeInputConfig.description}
-              disabled={isPublished}
-              oninput={(event) =>
-                updateRuntimeInputSettings({ description: event.currentTarget.value })}
-            />
-            <p class="text-muted text-xs leading-relaxed">
-              {m.flow_runtime_input_instruction_hint()}
+  <!-- A tool step takes no uploaded files: the server refuses the two together.
+       One that already takes them keeps the setting, to switch it off. -->
+  {#if !isToolSource || runtimeInputConfig.enabled}
+    <Settings.Row
+      title={m.flow_runtime_input_title()}
+      description={m.flow_runtime_input_description()}
+      fullWidth={true}
+      density="compact"
+    >
+      <div class="flex flex-col gap-3">
+        <div
+          class="bg-primary flex items-start justify-between gap-4 rounded-lg border px-3 py-3 transition-colors {runtimeInputConfig.enabled
+            ? 'border-accent-default/40'
+            : 'border-default'}"
+        >
+          <div class="min-w-0">
+            <p class="text-sm font-medium">{m.flow_runtime_input_accept_files()}</p>
+            <p class="text-muted mt-1 text-xs leading-relaxed">
+              {m.flow_runtime_input_accept_files_desc()}
             </p>
           </div>
+          <Switch
+            checked={runtimeInputConfig.enabled}
+            disabled={isPublished}
+            aria-label={m.flow_runtime_input_accept_files()}
+            onCheckedChange={(checked) => updateRuntimeInputSettings({ enabled: checked })}
+          />
+        </div>
 
-          <Collapsible.Root
-            bind:open={showRuntimeInputAdvanced}
-            class="border-default/70 bg-secondary/10 overflow-hidden rounded-lg border"
-          >
-            <Collapsible.Trigger
-              class="hover:bg-secondary/20 flex w-full items-center gap-2 px-3 py-3 text-left text-sm font-medium transition-colors"
-            >
-              <IconChevronRight
-                class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {showRuntimeInputAdvanced
-                  ? 'rotate-90'
-                  : ''}"
+        {#if runtimeInputConfig.enabled}
+          <div class="border-default/40 ml-1 flex flex-col gap-4 border-l pl-3 sm:ml-2 sm:pl-4">
+            <div class="flex items-start justify-between gap-4">
+              <div class="min-w-0">
+                <p class="text-sm font-medium">{m.flow_runtime_input_required()}</p>
+                <p class="text-muted mt-1 text-xs leading-relaxed">
+                  {m.flow_runtime_input_required_desc()}
+                </p>
+              </div>
+              <Switch
+                checked={runtimeInputConfig.required}
+                disabled={isPublished}
+                aria-label={m.flow_runtime_input_required()}
+                onCheckedChange={(checked) => updateRuntimeInputSettings({ required: checked })}
               />
-              {m.flow_runtime_input_more_settings()}
-            </Collapsible.Trigger>
-            <Collapsible.Content class="collapsible-animate">
-              <div class="border-default/70 border-t px-3 pt-3 pb-3">
-                <div class="grid gap-3 md:grid-cols-2">
-                  <div class="flex flex-col gap-1">
-                    <label class="text-sm font-medium" for="runtime-input-label"
-                      >{m.flow_runtime_input_heading_label()}</label
-                    >
-                    <Input
-                      id="runtime-input-label"
-                      type="text"
-                      placeholder={m.flow_runtime_input_heading_placeholder()}
-                      value={runtimeInputConfig.label}
-                      disabled={isPublished}
-                      oninput={(event) =>
-                        updateRuntimeInputSettings({ label: event.currentTarget.value })}
-                    />
-                  </div>
+            </div>
 
-                  <div class="flex flex-col gap-1">
-                    <label class="text-sm font-medium" for="runtime-input-max-files">
-                      {m.flow_input_limits_max_files_title()}
-                    </label>
-                    <Input
-                      id="runtime-input-max-files"
-                      type="number"
-                      min="1"
-                      inputmode="numeric"
-                      placeholder={m.flow_runtime_input_max_files_placeholder()}
-                      value={runtimeInputConfig.max_files ?? ""}
-                      disabled={isPublished}
-                      oninput={(event) =>
-                        updateRuntimeInputSettings({
-                          max_files:
-                            event.currentTarget.value.trim().length > 0
-                              ? Number(event.currentTarget.value)
-                              : null
-                        })}
-                    />
-                  </div>
+            <div class="flex flex-col gap-1">
+              <label class="text-sm font-medium" for="runtime-input-format"
+                >{m.flow_runtime_input_format_label()}</label
+              >
+              <Select.Root
+                type="single"
+                value={runtimeInputConfig.input_format}
+                disabled={isPublished ||
+                  step.output_mode === "transcribe_only" ||
+                  FILE_BASED_INPUT_TYPES.has(step.input_type)}
+                onValueChange={(value) =>
+                  updateRuntimeInputSettings({
+                    input_format: value as FlowRuntimeInputConfigValue["input_format"]
+                  })}
+              >
+                <Select.Trigger id="runtime-input-format" class="w-full">
+                  {runtimeInputFormatLabel}
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Group>
+                    <Select.Item value="document" label={m.flow_runtime_input_format_document()}>
+                      {m.flow_runtime_input_format_document()}
+                    </Select.Item>
+                    <Select.Item value="audio" label={m.flow_runtime_input_format_audio()}>
+                      {m.flow_runtime_input_format_audio()}
+                    </Select.Item>
+                    <Select.Item value="file" label={m.flow_runtime_input_format_file()}>
+                      {m.flow_runtime_input_format_file()}
+                    </Select.Item>
+                  </Select.Group>
+                </Select.Content>
+              </Select.Root>
+            </div>
 
-                  {#if isAdvancedMode}
-                    <div class="flex flex-col gap-2 md:col-span-2">
-                      <span class="text-sm font-medium">
-                        {m.flow_runtime_input_mimetypes_label()}
-                      </span>
-                      <div class="flex flex-wrap gap-1.5">
-                        {#each getMimePresetsForFormat(runtimeInputConfig.input_format) as preset (preset.mime)}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors {runtimeInputConfig.accepted_mimetypes_override.includes(
-                              preset.mime
-                            )
-                              ? 'border-accent-default/60 bg-accent-dimmer/50 text-accent-stronger'
-                              : 'border-default bg-primary text-secondary hover:bg-secondary/10'}"
-                            disabled={isPublished}
-                            aria-pressed={runtimeInputConfig.accepted_mimetypes_override.includes(
-                              preset.mime
-                            )}
-                            onclick={() => toggleMimePreset(preset.mime)}
-                          >
-                            {preset.label}
-                          </Button>
-                        {/each}
-                      </div>
-                      {#if runtimeInputConfig.accepted_mimetypes_override.some((mt) => !getMimePresetsForFormat(runtimeInputConfig.input_format).some((p) => p.mime === mt))}
-                        <p class="text-muted text-xs">
-                          + {runtimeInputConfig.accepted_mimetypes_override
+            <div class="flex flex-col gap-1">
+              <label class="text-sm font-medium" for="runtime-input-description">
+                {m.flow_runtime_input_instruction_label()}
+              </label>
+              <Textarea
+                id="runtime-input-description"
+                class="min-h-[88px]"
+                placeholder={m.flow_runtime_input_instruction_placeholder()}
+                value={runtimeInputConfig.description}
+                disabled={isPublished}
+                oninput={(event) =>
+                  updateRuntimeInputSettings({ description: event.currentTarget.value })}
+              />
+              <p class="text-muted text-xs leading-relaxed">
+                {m.flow_runtime_input_instruction_hint()}
+              </p>
+            </div>
+
+            <Collapsible.Root
+              bind:open={showRuntimeInputAdvanced}
+              class="border-default/70 bg-secondary/10 overflow-hidden rounded-lg border"
+            >
+              <Collapsible.Trigger
+                class="hover:bg-secondary/20 flex w-full items-center gap-2 px-3 py-3 text-left text-sm font-medium transition-colors"
+              >
+                <IconChevronRight
+                  class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {showRuntimeInputAdvanced
+                    ? 'rotate-90'
+                    : ''}"
+                />
+                {m.flow_runtime_input_more_settings()}
+              </Collapsible.Trigger>
+              <Collapsible.Content class="collapsible-animate">
+                <div class="border-default/70 border-t px-3 pt-3 pb-3">
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <div class="flex flex-col gap-1">
+                      <label class="text-sm font-medium" for="runtime-input-label"
+                        >{m.flow_runtime_input_heading_label()}</label
+                      >
+                      <Input
+                        id="runtime-input-label"
+                        type="text"
+                        placeholder={m.flow_runtime_input_heading_placeholder()}
+                        value={runtimeInputConfig.label}
+                        disabled={isPublished}
+                        oninput={(event) =>
+                          updateRuntimeInputSettings({ label: event.currentTarget.value })}
+                      />
+                    </div>
+
+                    <div class="flex flex-col gap-1">
+                      <label class="text-sm font-medium" for="runtime-input-max-files">
+                        {m.flow_input_limits_max_files_title()}
+                      </label>
+                      <Input
+                        id="runtime-input-max-files"
+                        type="number"
+                        min="1"
+                        inputmode="numeric"
+                        placeholder={m.flow_runtime_input_max_files_placeholder()}
+                        value={runtimeInputConfig.max_files ?? ""}
+                        disabled={isPublished}
+                        oninput={(event) =>
+                          updateRuntimeInputSettings({
+                            max_files:
+                              event.currentTarget.value.trim().length > 0
+                                ? Number(event.currentTarget.value)
+                                : null
+                          })}
+                      />
+                    </div>
+
+                    {#if isAdvancedMode}
+                      <div class="flex flex-col gap-2 md:col-span-2">
+                        <span class="text-sm font-medium">
+                          {m.flow_runtime_input_mimetypes_label()}
+                        </span>
+                        <div class="flex flex-wrap gap-1.5">
+                          {#each getMimePresetsForFormat(runtimeInputConfig.input_format) as preset (preset.mime)}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors {runtimeInputConfig.accepted_mimetypes_override.includes(
+                                preset.mime
+                              )
+                                ? 'border-accent-default/60 bg-accent-dimmer/50 text-accent-stronger'
+                                : 'border-default bg-primary text-secondary hover:bg-secondary/10'}"
+                              disabled={isPublished}
+                              aria-pressed={runtimeInputConfig.accepted_mimetypes_override.includes(
+                                preset.mime
+                              )}
+                              onclick={() => toggleMimePreset(preset.mime)}
+                            >
+                              {preset.label}
+                            </Button>
+                          {/each}
+                        </div>
+                        {#if runtimeInputConfig.accepted_mimetypes_override.some((mt) => !getMimePresetsForFormat(runtimeInputConfig.input_format).some((p) => p.mime === mt))}
+                          <p class="text-muted text-xs">
+                            + {runtimeInputConfig.accepted_mimetypes_override
+                              .filter(
+                                (mt) =>
+                                  !getMimePresetsForFormat(runtimeInputConfig.input_format).some(
+                                    (p) => p.mime === mt
+                                  )
+                              )
+                              .join(", ")}
+                          </p>
+                        {/if}
+                        <Input
+                          id="runtime-input-mimetypes"
+                          class="text-xs"
+                          type="text"
+                          placeholder={m.flow_runtime_input_mimetypes_custom_placeholder()}
+                          value={runtimeInputConfig.accepted_mimetypes_override
                             .filter(
                               (mt) =>
                                 !getMimePresetsForFormat(runtimeInputConfig.input_format).some(
@@ -537,48 +572,34 @@
                                 )
                             )
                             .join(", ")}
+                          disabled={isPublished}
+                          oninput={(event) => {
+                            const presetMimes =
+                              runtimeInputConfig.accepted_mimetypes_override.filter((mt) =>
+                                getMimePresetsForFormat(runtimeInputConfig.input_format).some(
+                                  (p) => p.mime === mt
+                                )
+                              );
+                            const customMimes = parseMimeOverrideDraft(event.currentTarget.value);
+                            updateRuntimeInputSettings({
+                              accepted_mimetypes_override: [...presetMimes, ...customMimes]
+                            });
+                          }}
+                        />
+                        <p class="text-muted text-xs leading-relaxed">
+                          {m.flow_runtime_input_mimetypes_hint()}
                         </p>
-                      {/if}
-                      <Input
-                        id="runtime-input-mimetypes"
-                        class="text-xs"
-                        type="text"
-                        placeholder={m.flow_runtime_input_mimetypes_custom_placeholder()}
-                        value={runtimeInputConfig.accepted_mimetypes_override
-                          .filter(
-                            (mt) =>
-                              !getMimePresetsForFormat(runtimeInputConfig.input_format).some(
-                                (p) => p.mime === mt
-                              )
-                          )
-                          .join(", ")}
-                        disabled={isPublished}
-                        oninput={(event) => {
-                          const presetMimes = runtimeInputConfig.accepted_mimetypes_override.filter(
-                            (mt) =>
-                              getMimePresetsForFormat(runtimeInputConfig.input_format).some(
-                                (p) => p.mime === mt
-                              )
-                          );
-                          const customMimes = parseMimeOverrideDraft(event.currentTarget.value);
-                          updateRuntimeInputSettings({
-                            accepted_mimetypes_override: [...presetMimes, ...customMimes]
-                          });
-                        }}
-                      />
-                      <p class="text-muted text-xs leading-relaxed">
-                        {m.flow_runtime_input_mimetypes_hint()}
-                      </p>
-                    </div>
-                  {/if}
+                      </div>
+                    {/if}
+                  </div>
                 </div>
-              </div>
-            </Collapsible.Content>
-          </Collapsible.Root>
-        </div>
-      {/if}
-    </div>
-  </Settings.Row>
+              </Collapsible.Content>
+            </Collapsible.Root>
+          </div>
+        {/if}
+      </div>
+    </Settings.Row>
+  {/if}
 </FlowStepSection>
 
 {#if isHttpSource}
@@ -591,6 +612,18 @@
     {flowId}
     variableContext={httpVariableContext}
     onConfigChange={(detail) => onHttpConfigChange?.({ config: detail.config })}
+  />
+{/if}
+
+{#if isToolSource}
+  <ToolConfigPanel
+    config={toolConfig}
+    {toolOptions}
+    stepKey={stepStateKey}
+    {isPublished}
+    variableContext={httpVariableContext}
+    onConfigChange={(detail) => onToolConfigChange?.({ config: detail.config })}
+    onReloadOptions={onReloadToolOptions}
   />
 {/if}
 

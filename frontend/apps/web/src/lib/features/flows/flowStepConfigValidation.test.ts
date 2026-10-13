@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
+import { flowStepFixture } from "$lib/features/flows/flowStepTestFixture";
 import { removeOrphanedTemplateBindings } from "./templateFillConfig";
 import {
   computeStepConfigValidationIssues,
@@ -143,6 +144,45 @@ describe("computeStepConfigValidationIssues", () => {
     expect([...issues.keys()]).toContain(`${PREFIX}http_missing_url:4`);
   });
 
+  // Kills: a tool step without a chosen tool has no issue; a choice without a
+  // server counts as one; a step with a chosen tool is flagged.
+  it.each([
+    { tool: undefined, flagged: true },
+    { tool: { mcp_server_id: "", tool_id: "tool-1", arguments: {} }, flagged: true },
+    { tool: { mcp_server_id: "server-1", tool_id: "tool-1", arguments: {} }, flagged: false }
+  ])("flags a tool step until a tool is chosen ($tool.mcp_server_id)", ({ tool, flagged }) => {
+    const step = flowStepFixture({ input_source: "tool", step_order: 2, input_config: { tool } });
+
+    expect([...computeStepConfigValidationIssues([step], PREFIX).keys()]).toEqual(
+      flagged ? [`${PREFIX}tool_missing_tool:2`] : []
+    );
+  });
+
+  // Kills: a required argument named like a member every object has reads as set.
+  it("misses a required argument named constructor until the step holds it", () => {
+    const tool = { mcp_server_id: "server-1", tool_id: "tool-1" };
+    const options = [
+      {
+        ...tool,
+        mcp_server_name: "Ärenden",
+        tool_name: "build",
+        tool_description: null,
+        refusal: null,
+        input_schema: { required: ["constructor"], properties: { constructor: {} } }
+      }
+    ];
+    const keys = (args: Record<string, unknown>) => {
+      const step = flowStepFixture({
+        input_source: "tool",
+        input_config: { tool: { ...tool, arguments: args } }
+      });
+      return [...computeStepConfigValidationIssues([step], PREFIX, options).keys()];
+    };
+
+    expect(keys({})).toEqual([`${PREFIX}tool_argument_missing:1`]);
+    expect(keys({ constructor: "a" })).toEqual([]);
+  });
+
   it("blocks publishing an incompatible output mode without rewriting the step", () => {
     const issues = computeStepConfigValidationIssues(
       [
@@ -181,6 +221,18 @@ describe("hasDeletedStepReferences", () => {
   it("detects a deleted-step token in input_bindings.question", () => {
     const step = makeStep({ input_bindings: { question: "See {{step_2_deleted}} here" } });
     expect(hasDeletedStepReferences([step], noCache)).toBe(true);
+  });
+
+  // Kills: a tool argument that reads a deleted step stops the banner from staying.
+  it.each([
+    { argument: "{{step_2_deleted.output.text}}", dangling: true },
+    { argument: "se {{step_2_deleted}} nedan", dangling: false }
+  ])("detects a deleted step in a bound tool argument only: $argument", (row) => {
+    const step = flowStepFixture({
+      input_source: "tool",
+      input_config: { tool: { mcp_server_id: "s", tool_id: "t", arguments: { a: row.argument } } }
+    });
+    expect(hasDeletedStepReferences([step], noCache)).toBe(row.dangling);
   });
 
   it("detects a deleted typed source ref in input_bindings.source_refs", () => {

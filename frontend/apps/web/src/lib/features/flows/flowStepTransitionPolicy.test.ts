@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
 
+import { flowStepFixture } from "$lib/features/flows/flowStepTestFixture";
 import {
   applyInputSourceChange,
   applyInputTypeChange,
@@ -104,6 +105,38 @@ describe("flow step transition policy", () => {
       headers: { "X-Legacy": "kept" }
     });
   });
+
+  // Kills: a step that turns to a tool keeps an input type a tool cannot fill,
+  // loses a JSON input type, brings back a tool chosen before, loses its
+  // other input settings, or keeps taking uploaded files.
+  it.each<{ inputType: FlowStep["input_type"]; expected: FlowStep["input_type"] }>([
+    { inputType: "document", expected: "text" },
+    { inputType: "json", expected: "json" }
+  ])(
+    "gives a step that turns to a tool an empty tool choice and $expected input",
+    ({ inputType, expected }) => {
+      const { step } = applyInputSourceChange({
+        step: flowStepFixture({
+          input_source: "previous_step",
+          input_type: inputType,
+          input_config: {
+            tool: { mcp_server_id: "server-1", tool_id: "tool-1", arguments: { q: "x" } },
+            text_processing: { mode: "summarize" }
+          }
+        }),
+        nextSource: "tool",
+        previousOutputType: undefined,
+        runtimeInputConfig: makeRuntimeInputConfig({ enabled: true, label: "Bilagor" }),
+        isAdvancedMode: true
+      });
+
+      expect(step.input_type).toBe(expected);
+      expect(step.input_config).toEqual({
+        text_processing: { mode: "summarize" },
+        runtime_input: false
+      });
+    }
+  );
 
   it("preserves valid HTTP config fields during input-source transitions", () => {
     const result = applyInputSourceChange({

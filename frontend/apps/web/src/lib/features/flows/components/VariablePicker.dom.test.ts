@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import VariablePicker from "./VariablePicker.svelte";
+import { flowStepFixture } from "$lib/features/flows/flowStepTestFixture";
 import { VARIABLE_CATEGORY_CLASSES } from "$lib/features/flows/flowVariableTokens";
 
 // The command list scrolls the active option into view, which jsdom lacks.
@@ -140,5 +141,57 @@ describe("VariablePicker", () => {
     );
     await screen.findByRole("option", { name: /kundnamn/ });
     expect(screen.queryByRole("option", { name: /Delens nummer|Section number/ })).toBeNull();
+  });
+
+  // Kills: a tool argument is offered a step's whole output, or a structured
+  // result no contract declares, which publish refuses; a reference publish
+  // accepts is hidden from it; another use of the picker loses the whole output.
+  it.each([
+    {
+      allowFor: undefined,
+      extra: [
+        ...["step_1.output", "step_2.output", "step_3.output", "step_4.output"],
+        "step_3.output.structured"
+      ]
+    },
+    { allowFor: "tool_argument" as const, extra: [] }
+  ])("offers the references a value may take (allowFor $allowFor)", async ({ allowFor, extra }) => {
+    const json = { output_type: "json" as const, user_description: "" };
+    const contract = { type: "object", properties: { id: { type: "string" } } };
+    render(VariablePicker, {
+      steps: [
+        flowStepFixture({ user_description: "Hämta" }),
+        flowStepFixture({ ...json, step_order: 2, output_contract: contract }),
+        flowStepFixture({ ...json, step_order: 3, output_contract: null }),
+        flowStepFixture({ ...json, step_order: 4, output_contract: { type: "object" } })
+      ],
+      currentStepOrder: 5,
+      formSchema: { fields: [{ name: "kundnamn", type: "text" }] },
+      isAdvancedMode: true,
+      transcriptionEnabled: true,
+      allowFor,
+      onInsert: vi.fn()
+    });
+    await fireEvent.click(
+      screen.getByRole("button", { name: /^(Infoga från flödet|Insert from the flow)$/ })
+    );
+    const offered = (await screen.findAllByRole("option")).map((option) =>
+      option.querySelector("code")?.textContent?.slice(2, -2)
+    );
+    expect(offered.toSorted()).toEqual(
+      [
+        "flow_input.kundnamn",
+        "transkribering",
+        "föregående_steg",
+        "Hämta",
+        "step_1.output.text",
+        "step_2.output.text",
+        "step_2.output.structured.id",
+        "step_3.output.text",
+        "step_4.output.text",
+        "step_4.output.structured",
+        ...extra
+      ].toSorted()
+    );
   });
 });

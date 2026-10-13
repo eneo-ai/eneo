@@ -3,6 +3,14 @@ import { hasDeletedInputBindingSourceRefs, getInputBindingQuestion } from "./flo
 import { getTemplateFillOutputConfig, isStructuredTemplateBinding } from "./templateFillConfig";
 import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
 import { parseHttpAuthoredConfig } from "./components/http/httpConfigTypes";
+import {
+  boundToolArguments,
+  findToolOption,
+  lacksChosenTool,
+  readToolInputConfig,
+  type FlowToolOption
+} from "./components/tool/toolInputConfig";
+import { firstMissingRequiredArgument } from "./components/tool/toolInputSchema";
 import { getOutputModeCompatibilityIssue } from "./flowStepTypes";
 import {
   getSpeakerMappingInferNames,
@@ -14,12 +22,15 @@ export const DELETED_STEP_TOKEN = /\{\{step_\d+_deleted/;
 
 /**
  * Per-step configuration validation: a template_fill step needs a template
- * asset, and an HTTP input/output step needs a URL. Returned keys are namespaced
+ * asset, an HTTP input/output step needs a URL, and a tool input step needs a
+ * chosen tool and a value for each argument the tool requires. What a tool
+ * requires is known only once `toolOptions` are. Returned keys are namespaced
  * with `prefix` so the caller can replace exactly its own error slice.
  */
 export function computeStepConfigValidationIssues(
   steps: FlowStep[],
-  prefix: string
+  prefix: string,
+  toolOptions: FlowToolOption[] | null = null
 ): Map<string, string[]> {
   const entries = new Map<string, string[]>();
   for (const step of steps) {
@@ -93,13 +104,29 @@ export function computeStepConfigValidationIssues(
         entries.set(`${prefix}http_missing_url:${step.step_order}`, ["http_missing_url"]);
       }
     }
+    if (lacksChosenTool(step)) {
+      entries.set(`${prefix}tool_missing_tool:${step.step_order}`, ["tool_missing_tool"]);
+    } else if (step.input_source === "tool" && toolOptions) {
+      const tool = readToolInputConfig(step.input_config);
+      const option = findToolOption(toolOptions, tool);
+      const argument =
+        tool && option ? firstMissingRequiredArgument(option.input_schema, tool.arguments) : null;
+      if (argument !== null) {
+        // The second value is what the issue is about: the banner names it.
+        entries.set(`${prefix}tool_argument_missing:${step.step_order}`, [
+          "tool_argument_missing",
+          argument
+        ]);
+      }
+    }
   }
   return entries;
 }
 
 /**
- * True if any step still references a deleted step — either in its
- * input_bindings.question or in its cached assistant prompt text. The caller
+ * True if any step still references a deleted step — in its
+ * input_bindings.question, in a bound argument of its tool or in its cached
+ * assistant prompt text. The caller
  * pre-fetches the cached prompt texts (keyed by assistant id) so this stays pure.
  */
 export function hasDeletedStepReferences(
@@ -111,6 +138,9 @@ export function hasDeletedStepReferences(
       return true;
     }
     if (hasDeletedInputBindingSourceRefs(step.input_bindings)) return true;
+    if (boundToolArguments(step).some((reference) => DELETED_STEP_TOKEN.test(reference))) {
+      return true;
+    }
     const text = cachedPromptTextByAssistantId.get(step.assistant_id) ?? "";
     if (DELETED_STEP_TOKEN.test(text)) return true;
   }

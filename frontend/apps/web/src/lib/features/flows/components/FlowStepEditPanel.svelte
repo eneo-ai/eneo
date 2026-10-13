@@ -56,6 +56,7 @@
     type FlowRuntimeInputConfigValue
   } from "$lib/features/flows/flowRuntimeInputConfig";
   import { updateTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
+  import { withToolInputConfig } from "./tool/toolInputConfig";
   import FlowStepAIMenu from "./FlowStepAIMenu.svelte";
   import type { AIBuilderStepIntent } from "$lib/features/flows/ai-builder/protocol";
   import FlowStepRequestPreview from "./FlowStepRequestPreview.svelte";
@@ -234,6 +235,7 @@
   // Chapter state follows the step the user is working on, not the id it is
   // saved under: see getStepChapterStateKey.
   const newStepOpenIntent = flowEditor.state.newStepOpenIntent;
+  const toolOptions = flowEditor.state.toolOptions;
   const activeStepStateKey = $derived(
     getStepChapterStateKey({ activeStep, newStepOpenIntent: $newStepOpenIntent })
   );
@@ -1148,6 +1150,9 @@
             {transcriptionModelConfigured}
             {transcriptionModelLabel}
             flowId={currentFlowId}
+            stepStateKey={activeStepStateKey}
+            toolOptions={$toolOptions}
+            onReloadToolOptions={() => void flowEditor.loadToolOptions()}
             onInputSourceChange={(detail) =>
               handleInputSourceChange(detail.value as FlowStep["input_source"])}
             onInputTypeChange={(detail) =>
@@ -1158,6 +1163,12 @@
               updateStep("input_config", updateTextProcessingMode(activeStep, detail.mode))}
             hasKnowledge={hasKnowledgeSelections}
             onHttpConfigChange={(detail) => updateStep("input_config", detail.config)}
+            onToolConfigChange={(detail) =>
+              activeStep &&
+              updateStep(
+                "input_config",
+                withToolInputConfig(activeStep.input_config, detail.config)
+              )}
             onOpenTranscriptionSettings={() => onOpenTranscriptionSettings?.()}
             {speakerMappingStepOffered}
             onAddSpeakerMappingStep={() => onAddSpeakerMappingStep?.()}
