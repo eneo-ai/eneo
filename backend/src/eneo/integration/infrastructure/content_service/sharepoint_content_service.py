@@ -2091,6 +2091,7 @@ class SharePointContentService:
                     integration_knowledge=integration_knowledge,
                     integration_knowledge_id=integration_knowledge_id,
                     stats=stats,
+                    reason=skip_reason or EMPTY_CONTENT_REASON,
                 )
             else:
                 stats["skipped_items"] += 1
