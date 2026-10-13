@@ -154,6 +154,73 @@
           }
         },
         {
+          "id": "sharepoint-sync-status",
+          "type": "improved",
+          "area": "knowledge",
+          "title": {
+            "en": "See how each SharePoint source is doing",
+            "sv": "Se hur varje SharePoint-källa mår"
+          },
+          "body": {
+            "en": "Every SharePoint item in a space's Knowledge list now shows whether it is synced, failed or empty, how many documents it holds and when it last synced successfully, with the error text when a sync failed. The sync history names each skipped file with the reason, and a site row can resync all of its items at once. When an answer used none of the assistant's knowledge, the chat says so.",
+            "sv": "Varje SharePoint-objekt i ytans kunskapslista visar nu om det är synkat, har fel eller är tomt, hur många dokument det innehåller och när det senast synkades, med feltexten när en synkronisering misslyckats. Synkhistoriken namnger varje överhoppad fil med orsaken, och en webbplatsrad kan synka om alla sina objekt på en gång. När ett svar inte använde något ur assistentens kunskap säger chatten det."
+          }
+        },
+        {
+          "id": "sharepoint-file-formats",
+          "type": "fixed",
+          "area": "knowledge",
+          "title": {
+            "en": "Read SharePoint files like uploads",
+            "sv": "Läs SharePoint-filer som uppladdningar"
+          },
+          "body": {
+            "en": "PDF, Word, Excel and PowerPoint files from SharePoint are now read with the same parsers as files you upload, so tables and spreadsheets come through correctly. Older formats such as .doc and .ppt, scanned PDFs without text and empty pages are skipped with a clear reason instead of producing unreadable text, and a failed download never removes a document Eneo already has.",
+            "sv": "PDF-, Word-, Excel- och PowerPoint-filer från SharePoint läses nu med samma tolkar som filer du laddar upp, så tabeller och kalkylblad kommer med korrekt. Äldre format som .doc och .ppt, skannade PDF:er utan text och tomma sidor hoppas över med en tydlig orsak i stället för att ge oläslig text, och en misslyckad nedladdning tar aldrig bort ett dokument som Eneo redan har."
+          }
+        },
+        {
+          "id": "sharepoint-credential-health",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Check SharePoint credentials and sign in again",
+            "sv": "Kontrollera SharePoint-inloggningen och logga in igen"
+          },
+          "body": {
+            "en": "Under Admin > Integrations the SharePoint card shows whether the stored credentials still work, with Microsoft's error and guidance when they do not. A service account can be signed in again with one button, keeping the configuration and all imported knowledge.",
+            "sv": "Under Administration > Integrationer visar SharePoint-kortet om de sparade inloggningsuppgifterna fortfarande fungerar, med Microsofts fel och en vägledning när de inte gör det. Ett tjänstekonto kan loggas in igen med en knapp, och konfigurationen och all importerad kunskap behålls."
+          }
+        },
+        {
+          "id": "sharepoint-webhook-recovery",
+          "type": "fixed",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Keep SharePoint webhooks working after a move",
+            "sv": "Behåll SharePoint-webhooks efter ett adressbyte"
+          },
+          "body": {
+            "en": "If Eneo moves to a new address, its SharePoint webhook subscriptions are recreated with the new address at the next renewal instead of silently going quiet, and expired subscriptions are recreated automatically at the next sync. Your operator can also recreate all of them at once.",
+            "sv": "Om Eneo flyttar till en ny adress återskapas SharePoint-prenumerationerna med den nya adressen vid nästa förnyelse i stället för att tyst sluta fungera, och utgångna prenumerationer återskapas automatiskt vid nästa synkronisering. Driftansvarig kan också återskapa alla på en gång."
+          }
+        },
+        {
+          "id": "sharepoint-picker-keyboard",
+          "type": "improved",
+          "area": "knowledge",
+          "title": {
+            "en": "Browse SharePoint folders with the keyboard",
+            "sv": "Bläddra i SharePoint-mappar med tangentbordet"
+          },
+          "body": {
+            "en": "In the import dialog, the folder tree follows the arrow keys, Home, End, Space and Enter. A folder with more items than the list shows says so, and the search still finds the rest.",
+            "sv": "I importdialogen styrs mappträdet med piltangenterna, Home, End, mellanslag och Enter. En mapp med fler objekt än listan visar säger till, och sökningen hittar ändå resten."
+          }
+        },
+        {
           "id": "model-provider-headers",
           "type": "new",
           "area": "admin",
