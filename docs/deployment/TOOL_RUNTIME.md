@@ -4,8 +4,9 @@ The tool runtime is an isolated container included in the standard Eneo deployme
 Eneo-maintained MCP tools from an isolated process, never from the backend.
 It has four endpoints:
 
-- `/mcp/compute`: `run_javascript`, restricted compute over JSON. It is added
-  as an ordinary MCP server.
+- `/mcp/compute`: `run_javascript`, restricted compute over JSON, with CSV
+  export of tabular results. It is added as the provider of the **Compute**
+  capability (`compute`, "Beräkning" in Swedish).
 - `/mcp/file-analysis`: `inspect_table`, `query_table` and `assert_table` over
   attached CSV and XLSX files (more formats will follow). It is added as the
   provider of the **Ask a file** capability (`file_analysis`, "Fråga fil" in
@@ -127,6 +128,16 @@ Existing bundled general chart servers keep their current attachments and
 can coexist with the new provider. Retire those general servers through the
 admin UI after configuring the function to avoid offering the same tool twice.
 Their old general-tool access rules continue to apply until then.
+
+### Enabling the Compute function after upgrading
+
+Apply migration `202610131300`, then add **Built into Eneo** under
+**Admin → Tools → Functions → Compute** and activate it. Enable **Compute** on
+the space and assistant. The migration grants the `compute` permission to the
+predefined User, AI Configurator and Owner roles; custom roles are opted in by
+an administrator. A bundled compute server added earlier from the MCP servers
+tab keeps its attachments and coexists with the new provider; retire it through
+the admin UI once the function is configured.
 
 ## TL;DR
 
@@ -367,10 +378,10 @@ adopt the complete bundle, and remove the extra runtime overlay/profile.
 release. Registrations, external providers, permissions and activation decisions
 are preserved. Installing the service does not enable capabilities.
 
-In **Admin > Tools > Functions**, turn on **Ask a file**, **Create a file** or
-**Charts**, then grant the desired space and assistant access. **Compute**
-remains under **MCP servers**. Existing roles still need the permissions
-described above; active external providers are not replaced automatically.
+In **Admin > Tools > Functions**, turn on **Ask a file**, **Create a file**,
+**Charts** or **Compute**, then grant the desired space and assistant access.
+Existing roles still need the permissions described above; active external
+providers are not replaced automatically.
 
 To omit the runtime explicitly:
 

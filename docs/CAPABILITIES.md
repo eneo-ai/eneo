@@ -5,9 +5,10 @@
 
 Capabilities are functions an assistant can use: **Webbsökning**
 (`web_search`), **Bildgenerering** (`image_generation`), **Fråga fil**
-(`file_analysis`), **Skapa fil** (`file_creation`) and **Diagram** (`charts`). Image generation can
+(`file_analysis`), **Skapa fil** (`file_creation`), **Diagram** (`charts`) and
+**Beräkning** (`compute`). Image generation can
 run through a configured image model or an external MCP server; web search
-uses an external server; file analysis, file creation and charts run in the
+uses an external server; file analysis, file creation, charts and compute run in the
 bundled tool runtime or an external MCP server.
 
 For the relationship between Skills, Functions, providers, interactive MCP Apps
@@ -50,7 +51,7 @@ activation action identifies the default that will be replaced.
 ## 2. Saved intent and provider lifecycle
 
 Spaces and assistants store enabled_capabilities, a list of purposes
-(web_search, image_generation, file_analysis, file_creation, charts). Governance
+(web_search, image_generation, file_analysis, file_creation, charts, compute). Governance
 policies store purposes with
 is_default_enabled. These rows reference their owner, never a provider.
 They remain intact when a provider is switched, disabled or deleted—even
@@ -99,8 +100,9 @@ permissions, classification and replacement) works as for external providers.
 Bundled tool definitions and view snapshots follow the deployed runtime
 automatically, preserving stored enablement and display names and recording
 catalog updates in the audit log. Per-call user approval still follows the
-conversation setting. Compute is added as a general server from the MCP
-servers tab; Charts is a Function with purpose `charts`.
+conversation setting. Charts and Compute are Functions with purposes `charts`
+and `compute`; a compute server added as a general server before the function
+existed keeps working until an administrator retires it.
 
 ## 3. Ask-time resolution
 
@@ -184,7 +186,7 @@ A PDF follows the same template: the runtime renders the Word file, reads its pa
 Adding a capability requires:
 
 - backend: the `CapabilityPurpose` type and `CAPABILITY_PURPOSES` list, `MCPServerPurpose`, the matching `Permission` and its description in `permissions_mapper.py`, the predefined roles in `predefined_roles.yml`, and the purpose CHECK constraints in `capabilities_table.py`;
-- a migration that replaces the three purpose constraints and decides which existing roles get the permission (`202610011000` grants `file_analysis` and `file_creation` to the predefined User, AI Configurator and Owner roles; `202610011200` grants `charts` to no existing role, so administrators opt roles in);
+- a migration that replaces the three purpose constraints and decides which existing roles get the permission (`202610081000` grants `file_analysis` and `file_creation` to the predefined User, AI Configurator and Owner roles; `202610081100` grants `charts` to no existing role and `202610091100` adds it to Owner; `202610131300` grants `compute` to the three predefined roles);
 - frontend: the `capabilities.ts` descriptor, `CAPABILITY_STEPS` in `internalToolLabels.ts`, `permission-labels.ts`, `permission-groups.ts` and the Paraglide messages; the JSDoc unions in `packages/eneo-js/src/endpoints/*.js`, and a regenerated `schema.d.ts`;
 - for a capability that delivers files, its types in `GENERATED_FILE_TYPES_BY_PURPOSE`;
 - for a bundled provider, an entry in `BUNDLED_TOOLS` naming its purpose and whether it needs forwarded identity.
@@ -197,7 +199,7 @@ Whether a capability should be served by a built-in loopback server at all, and 
 ## 6. Deployment and client changes
 
 Ship migrations **202609041000** and **202610081000** (`file_analysis`,
-`file_creation`), and **202610081100** (`charts`), backend,
+`file_creation`), **202610081100** (`charts`) and **202610131300** (`compute`), backend,
 frontend and the bundled JavaScript client together. The migration backfills active and inactive capability
 attachments, collapses duplicate purposes, preserves a policy default as on
 when any duplicate was on, and removes obsolete provider attachments and

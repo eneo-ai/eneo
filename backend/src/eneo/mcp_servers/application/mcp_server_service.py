@@ -193,7 +193,8 @@ BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "compute": (
         "Runs JavaScript over JSON in an isolated sandbox for exact "
-        "calculations. No network, files or state between calls."
+        "calculations, and can export a tabular result as a CSV file for "
+        "charts, spreadsheets and documents. No network or state between calls."
     ),
 }
 

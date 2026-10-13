@@ -7,7 +7,11 @@ import { Calculator, ChartColumn, type Globe } from "@lucide/svelte";
 import { m } from "$lib/paraglide/messages";
 import { getCapability } from "./capabilities";
 
-/** The general (per-space) servers the runtime offers, by their tool key. */
+/**
+ * General (per-space) servers the runtime offers, by their tool key. Every
+ * runtime tool is a function today; these entries only name rows added while
+ * the tool was still a general server, which keep working until retired.
+ */
 export const BUNDLED_SERVERS: Record<
   string,
   { label: () => string; description: () => string; icon: typeof Globe }

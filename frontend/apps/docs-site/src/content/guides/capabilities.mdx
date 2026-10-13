@@ -1,6 +1,6 @@
 # Functions
 
-Web search, image generation, ask a file, create files and charts are **functions**
+Web search, image generation, ask a file, create files, charts and compute are **functions**
 (Swedish: *Funktioner*) that an
 assistant switches on, not servers it connects to. An administrator decides
 which source serves each function for the organisation; spaces, assistants and
@@ -29,6 +29,7 @@ import { Callout } from 'nextra/components'
 | **Ask a file** (*Fråga fil*) | Lets the assistant answer questions about attached files: today it inspects, queries, joins and checks CSV and Excel files and exports full results; more formats will follow | The provider **built into Eneo** (the bundled tool runtime), or an external MCP server |
 | **Create a file** (_Skapa fil_) | Lets the assistant draft and revise Markdown documents in Eneo, export Word (DOCX) and PDF, fill templates, and create Excel (XLSX) workbooks                                 | The provider **built into Eneo**, or an external MCP server                             |
 | **Charts** (_Diagram_)          | Lets the assistant compare values and show trends with interactive bar, line, pie and scatter charts, or export PNG images when requested                                     | The provider **built into Eneo**, or an external MCP server                             |
+| **Compute** (_Beräkning_)       | Lets the assistant run exact arithmetic, statistics, date and text calculations in an isolated JavaScript sandbox, show the result as a table and export it as CSV           | The provider **built into Eneo**, or an external MCP server                             |
 
 The key ideas:
 
@@ -193,15 +194,19 @@ operator configures or omits it. When it runs:
    source the default; added from the menu while another default is active,
    it is saved inactive, ready to be activated as a replacement.
 
-The runtime also offers **Compute** (exact JavaScript calculations), added
-from the **MCP servers** tab through **Add MCP Server** under _Built into Eneo_.
-It is enabled per space like any other general MCP server.
-
 For **Charts**, enable the function in the space and assistant settings and
 grant the **Charts** role permission. On an existing installation, roles are
 not granted this new permission automatically. Existing general chart servers
 remain unchanged; an administrator can add the function's provider separately
 and retire the old server when the function is configured.
+
+**Compute** (_Beräkning_) follows the same pattern. Its provider built into Eneo
+runs model-written JavaScript in an isolated sandbox for calculations that must
+be exact, shows a tabular result as an interactive table, and can export it as
+a CSV file that **Create a file** and **Charts** take as a source. Upgrading
+grants the **Compute** permission to the predefined User, AI Configurator and
+Owner roles. A compute server added earlier from the **MCP servers** tab keeps
+working as a general server until an administrator retires it.
 
 A bundled source is an ordinary source in other respects: audiences,
 permissions and classification apply unchanged, and an external MCP server can
@@ -244,8 +249,9 @@ external server.
 Each function has a role permission of the same name, edited under **Admin →
 Roles**: **Web search** (`web_search`), **Image generation**
 (`image_generation`), **Ask a file** (`file_analysis`), **Create a file**
-(`file_creation`) and **Charts** (`charts`). New predefined User, AI Configurator
-and Owner roles include all five. Existing roles need the new **Charts**
+(`file_creation`), **Charts** (`charts`) and **Compute** (`compute`). New
+predefined User, AI Configurator and Owner roles include all six. Existing
+predefined roles receive **Compute** on upgrade but need the **Charts**
 permission added by an administrator; custom roles only have the permissions
 an administrator adds. Without the
 permission the tools are never attached for that user, even where an assistant

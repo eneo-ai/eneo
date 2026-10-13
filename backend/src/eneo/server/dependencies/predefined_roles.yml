@@ -12,6 +12,7 @@ roles:
       - file_analysis
       - file_creation
       - charts
+      - compute
 
   - name: 'AI Configurator'
     permissions:
@@ -31,6 +32,7 @@ roles:
       - file_analysis
       - file_creation
       - charts
+      - compute
 
   - name: 'Owner'
     permissions:
@@ -57,3 +59,4 @@ roles:
       - file_analysis
       - file_creation
       - charts
+      - compute
