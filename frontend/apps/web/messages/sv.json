@@ -1307,6 +1307,7 @@
   "predefined": "Fördefinierad",
   "custom": "Anpassad",
   "open_in_sharepoint": "Öppna i SharePoint",
+  "breadcrumb": "Sökväg",
   "template_singular": "mall",
   "template_plural": "mallar",
   "note": "Observera:",
