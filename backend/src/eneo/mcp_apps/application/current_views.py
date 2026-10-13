@@ -1,7 +1,7 @@
 """The view a stored tool call shows when its conversation is read again.
 
 A tool call is stored with the view approved for its tool when it was made. A
-server's views change with its releases, and a built-in server's follow every
+server's views change with its releases, and a bundled server's follow every
 release of the runtime image: the stored view is then no longer the approved
 one, and no link is minted for it. So a call that is read back shows the view
 approved for its tool now. Nothing but an approved view is ever shown, and a

@@ -2,7 +2,8 @@ import type { Permission } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { getPermissionCopy } from "./permission-labels";
 
-export type PermissionGroupId = "chat" | "build" | "knowledge" | "insight" | "admin" | "other";
+export type PermissionGroupId =
+  "chat" | "functions" | "build" | "knowledge" | "insight" | "admin" | "other";
 
 export type PermissionEntry = { name: Permission; label: string; description: string };
 
@@ -24,16 +25,10 @@ export type GroupSummary = {
 // Display order of the groups, and of the permissions inside each group.
 // Keys the backend adds later land in "other" until they are placed here.
 const MEMBERS: Record<Exclude<PermissionGroupId, "other">, readonly string[]> = {
-  chat: [
-    "personal_chat",
-    "group_chats",
-    "shared_spaces",
-    "web_search",
-    "image_generation",
-    "file_analysis",
-    "file_creation",
-    "charts"
-  ],
+  chat: ["personal_chat", "group_chats", "shared_spaces"],
+  // The functions assistants offer (Admin > Tools > Functions); each is a permission of its
+  // own, so a new function is visible here instead of lost among the chat rights.
+  functions: ["web_search", "image_generation", "file_analysis", "file_creation", "charts"],
   build: ["assistants", "apps", "services", "skills", "skills_management", "AI"],
   knowledge: ["collections", "websites", "integrations"],
   insight: ["insights", "assistant_debug"],
@@ -42,6 +37,7 @@ const MEMBERS: Record<Exclude<PermissionGroupId, "other">, readonly string[]> = 
 
 const ORDER: readonly PermissionGroupId[] = [
   "chat",
+  "functions",
   "build",
   "knowledge",
   "insight",
@@ -53,6 +49,11 @@ function groupCopy(id: PermissionGroupId): { label: string; shortLabel: string }
   switch (id) {
     case "chat":
       return { label: m.permission_group_chat(), shortLabel: m.permission_group_chat_short() };
+    case "functions":
+      return {
+        label: m.permission_group_functions(),
+        shortLabel: m.permission_group_functions_short()
+      };
     case "build":
       return { label: m.permission_group_build(), shortLabel: m.permission_group_build_short() };
     case "knowledge":

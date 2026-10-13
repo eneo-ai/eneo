@@ -41,12 +41,22 @@ LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.revision="${GIT_SHA}"
 USER root
 # coreutils provides /usr/bin/timeout, the external watchdog for sandbox children.
-# fonts-dejavu-core is embedded in generated PDFs (Swedish characters included).
+# PDFs are laid out by WeasyPrint (scripts/render_pdf.py) in a Python venv at /opt/pdf, which
+# needs pango and fontconfig. The fonts are what documents embed: DejaVu, Liberation, and
+# Carlito and Caladea, metric-compatible with the Calibri and Cambria of Word templates.
 # The upgrade picks up Debian security fixes the base image has not yet absorbed.
 RUN apt-get update \
     && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends coreutils fonts-dejavu-core \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends \
+        coreutils python3 python3-venv \
+        libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libharfbuzz-subset0 fontconfig \
+        fonts-dejavu-core fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea \
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -f
+COPY scripts/requirements-pdf.txt /tmp/requirements-pdf.txt
+RUN python3 -m venv /opt/pdf \
+    && /opt/pdf/bin/pip install --no-cache-dir --require-hashes -r /tmp/requirements-pdf.txt \
+    && rm /tmp/requirements-pdf.txt
 WORKDIR /app
 ENV NODE_ENV=production \
     APP_VERSION=${VERSION} \
@@ -55,6 +65,7 @@ COPY --from=landrun /landrun /usr/local/bin/landrun
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY src ./src
+COPY scripts/render_pdf.py ./scripts/render_pdf.py
 COPY --from=views /app/dist ./dist
 USER bun
 EXPOSE 3010

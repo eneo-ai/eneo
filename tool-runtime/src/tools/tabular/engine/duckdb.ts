@@ -52,12 +52,42 @@ function quoteSqlString(value: string): string {
   return "'" + value.replaceAll("'", "''") + "'";
 }
 
+/** How a sheet CSV is read: the same options at ingest and at query time, so types agree. */
+export type CsvReadOptions = {
+  /** The first line is the header, whatever the sniffer thinks (exact selections). */
+  explicitHeader?: boolean;
+  /** Lines above the header (a report title, a blank line) found at ingest. */
+  skipRows?: number;
+};
+
+/**
+ * The `read_csv_auto` call for a sheet CSV. `sample_size = -1` types every column from the
+ * whole file: a column that is numeric for 20,000 rows and then holds "N/A" becomes text
+ * instead of silently losing that row, and inspect and query see the same types.
+ */
+function readCsv(
+  csvPath: string,
+  options: CsvReadOptions,
+  errors: "store_rejects" | "ignore_errors",
+): string {
+  const parts = [
+    quoteSqlString(csvPath),
+    "sample_size = -1",
+    `${errors} = true`,
+  ];
+  if (options.explicitHeader) parts.push("header = true");
+  if (options.skipRows) parts.push(`skip = ${options.skipRows}`);
+  return `read_csv_auto(${parts.join(", ")})`;
+}
+
 export type DescribeCsvResult = {
   columns: TabularColumn[];
   rowCount: number;
   /** CSV lines that failed to parse/cast and were skipped (coverage signal). */
   rejectedRows: number;
   sampleRows: Array<Record<string, unknown>>;
+  /** Lines above the header that queries must skip too; absent when the header is line 1. */
+  skipRows?: number;
 };
 
 /**
@@ -69,82 +99,182 @@ export type DescribeCsvResult = {
  */
 const MAX_ENUMERATED_DISTINCT = 50;
 
+/** Most title lines a report puts above its header; probing stops here. */
+const MAX_SKIPPED_LINES = 10;
+/** The name DuckDB gives a column whose header cell is missing or blank. */
+const GENERIC_COLUMN = /^column\d+$/;
+
 /**
- * Run `DESCRIBE` + `COUNT(*)` + a 5-row sample query against a local CSV path
- * via DuckDB's native `read_csv_auto`. Used by the ingest path to cache
- * schema/sample into `uploaded_file.tabular_metadata` so `inspect_table`
- * never has to re-parse the file.
+ * Materialize the CSV once in a per-connection temp table, then describe, count, sample and
+ * profile it. Used by the ingest path to cache schema and samples so `inspect_table` never
+ * has to re-parse the file.
  *
- * Malformed lines do not fail the ingest: the count scan runs with
- * `store_rejects = true` (which implies skipping faulty lines) and the number
- * of rejected lines is returned so the envelope can report partial coverage
- * instead of the file silently failing or silently passing.
+ * Malformed lines do not fail the ingest: the scan runs with `store_rejects = true` (which
+ * skips faulty lines) and the number of rejected lines is returned so the envelope reports
+ * partial coverage. Counting after materialization matters: a bare `COUNT(*)` over
+ * `read_csv_auto` never casts the columns, so it saw none of the cast rejections a query
+ * later hits.
+ *
+ * Unless the caller fixed the header (exact selections), lines above the header are
+ * detected and skipped; see `detectSkippedLines`.
  */
 export async function describeCsv(
   csvPath: string,
-  explicitHeader = false,
+  options: CsvReadOptions = {},
 ): Promise<DescribeCsvResult> {
   const conn = await openIngestConnection();
   try {
-    const csvLit = quoteSqlString(csvPath) + (explicitHeader ? ", header = true" : "");
-
-    const descReader = await conn.runAndReadAll(
-      `DESCRIBE SELECT * FROM read_csv_auto(${csvLit}, ignore_errors = true)`,
+    const skipRows = options.explicitHeader
+      ? 0
+      : (options.skipRows ?? (await detectSkippedLines(conn, csvPath)));
+    const read = { explicitHeader: options.explicitHeader, skipRows };
+    await conn.run(
+      `CREATE TEMPORARY TABLE src AS SELECT * FROM ${readCsv(csvPath, read, "store_rejects")}`,
     );
-    const descRows = descReader.getRowObjectsJS();
-    const columns = descRows.map((r) => ({
+
+    const descReader = await conn.runAndReadAll(`DESCRIBE src`);
+    const columns = descReader.getRowObjectsJS().map((r) => ({
       name: String(r.column_name),
       type: String(r.column_type),
     }));
+    if (columns.length > 200) throw new Error("Too many columns (maximum 200)");
 
     const countReader = await conn.runAndReadAll(
-      `SELECT COUNT(*) AS n FROM read_csv_auto(${csvLit}, store_rejects = true)`,
+      `SELECT COUNT(*) AS n FROM src`,
     );
-    const countCell = countReader.getRowsJS()[0]?.[0];
-    const rowCount = toFiniteNumber(countCell);
+    const rowCount = toFiniteNumber(countReader.getRowsJS()[0]?.[0]);
 
-    // One row can carry several cast errors; DISTINCT line = skipped CSV lines.
+    // One row can carry several cast errors; DISTINCT line = skipped CSV lines. The reject
+    // tables are per connection, and this connection scanned the file exactly once.
     const rejectReader = await conn.runAndReadAll(
       `SELECT COUNT(DISTINCT line) AS n FROM reject_errors`,
     );
     const rejectedRows = toFiniteNumber(rejectReader.getRowsJS()[0]?.[0]);
 
-    const sampleReader = await conn.runAndReadAll(
-      `SELECT * FROM read_csv_auto(${csvLit}, ignore_errors = true) LIMIT 5`,
-    );
-    const sampleRows = sampleReader.getRowObjectsJson() as Array<Record<string, unknown>>;
+    const sampleReader = await conn.runAndReadAll(`SELECT * FROM src LIMIT 5`);
+    const sampleRows = sampleReader.getRowObjectsJson() as Array<
+      Record<string, unknown>
+    >;
 
-    if (columns.length > 200) throw new Error("Too many columns (maximum 200)");
-    const profiles = await profileColumns(conn, csvLit, columns);
+    const profiles = await profileColumns(conn, columns);
     const columnsWithProfile: TabularColumn[] = columns.map((c, i) => ({
       ...c,
       profile: profiles[i],
     }));
 
-    return { columns: columnsWithProfile, rowCount, rejectedRows, sampleRows };
+    return {
+      columns: columnsWithProfile,
+      rowCount,
+      rejectedRows,
+      sampleRows,
+      ...(skipRows ? { skipRows } : {}),
+    };
   } finally {
     conn.closeSync();
   }
 }
 
 /**
- * Build the per-column value profile in two server-trusted scans:
- *   1. distinct-count for every column + min/max for the numeric/temporal ones.
+ * Lines above the header, as reports export them: a title in A1, a blank line, then the
+ * table. Read as is, the title becomes one column name and the rest `column1`, `column2`,
+ * … while the real header turns into a data row that makes every column text.
+ *
+ * The sniffer's own schema tells when that happened (generic names, or all text with a
+ * generic name). Only then are `skip = 1 … MAX_SKIPPED_LINES` tried, on the default sample,
+ * and the first that yields a header with distinct, non-generic names for at least two
+ * columns wins. A header-less file never qualifies, so none of its rows is skipped.
+ */
+async function detectSkippedLines(
+  conn: DuckDBConnection,
+  csvPath: string,
+): Promise<number> {
+  const schema = async (skip: number) => {
+    const parts = [quoteSqlString(csvPath), "ignore_errors = true"];
+    if (skip) parts.push(`skip = ${skip}`);
+    const reader = await conn.runAndReadAll(
+      `DESCRIBE SELECT * FROM read_csv_auto(${parts.join(", ")})`,
+    );
+    return reader
+      .getRowObjectsJS()
+      .map((r) => ({
+        name: String(r.column_name),
+        type: String(r.column_type),
+      }));
+  };
+  const first = await schema(0);
+  const generic = first.filter((c) => GENERIC_COLUMN.test(c.name)).length;
+  const allText = first.every((c) => c.type === "VARCHAR");
+  if (generic === 0 || (generic * 2 < first.length && !allText)) return 0;
+  for (let skip = 1; skip <= MAX_SKIPPED_LINES; skip++) {
+    let candidate;
+    try {
+      candidate = await schema(skip);
+    } catch {
+      return 0;
+    }
+    const names = new Set(candidate.map((c) => c.name));
+    if (
+      candidate.length >= 2 &&
+      names.size === candidate.length &&
+      candidate.every((c) => !GENERIC_COLUMN.test(c.name))
+    )
+      return skip;
+  }
+  return 0;
+}
+
+/**
+ * Text that DuckDB could not type but a model can, once told how. Each pattern pairs with
+ * the SQL that converts the column; the share of non-null values matching decides whether
+ * the hint is given. Dates need no entry: the sniffer already reads the common day-first
+ * and ISO forms, dotted ones included.
+ */
+const TEXT_SHAPES: Array<{
+  key: string;
+  pattern: string;
+  hint: (column: string) => string;
+}> = [
+  {
+    // 1 234,50   15 000,00   987,25   12,5%   1.234,50 (space, no-break space or dot
+    // thousands, comma decimals, optional percent). Plain digits match too, which is
+    // what a numeric column with a few "N/A" cells looks like after full-file typing.
+    key: "decimal_comma",
+    pattern: "^\\s*[-+]?(\\d{1,3}([  .]\\d{3})+|\\d+)(,\\d+)?\\s*%?\\s*$",
+    hint: (column) =>
+      `Numeric text with a comma decimal separator and space or dot thousands separators; a percent sign may follow. Cast with TRY_CAST(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${column}, ' ', ''), chr(160), ''), '.', ''), '%', ''), ',', '.') AS DOUBLE); other text becomes NULL.`,
+  },
+  {
+    // 1,234.56   12.5%   1,000 (comma thousands, dot decimals, optional percent).
+    key: "decimal_point",
+    pattern: "^\\s*[-+]?(\\d{1,3}(,\\d{3})+|\\d+)(\\.\\d+)?\\s*%?\\s*$",
+    hint: (column) =>
+      `Numeric text with comma thousands separators or a percent sign. Cast with TRY_CAST(REPLACE(REPLACE(${column}, ',', ''), '%', '') AS DOUBLE); other text becomes NULL.`,
+  },
+];
+/** Share of a text column's values a shape must match before its hint is given. */
+const TEXT_SHAPE_SHARE = 0.9;
+
+/**
+ * Build the per-column value profile in two server-trusted scans over the materialized
+ * table:
+ *   1. distinct-count for every column, min/max for the numeric/temporal ones, and for
+ *      text columns three example values plus the share matching each `TEXT_SHAPES` entry.
  *   2. the enumerated distinct values for the columns whose distinct-count came
  *      in at or below `MAX_ENUMERATED_DISTINCT` (so the model gets the exact
  *      filter values, not a sample).
  * Each column resolves to one of three shapes: enumerated `values` (low-card),
- * `min`/`max` range (wide numeric/temporal), or just `distinctCount`
- * (high-card text — an id or free-text column not worth enumerating).
+ * `min`/`max` range (wide numeric/temporal), or `distinctCount` with `examples`
+ * (high-card text — an id or free-text column not worth enumerating). A text column that
+ * is really numbers or dates in a local format also carries a `hint` with the cast to use.
  */
 async function profileColumns(
   conn: DuckDBConnection,
-  csvLit: string,
   columns: Array<{ name: string; type: string }>,
 ): Promise<Array<NonNullable<TabularColumn["profile"]>>> {
   if (columns.length === 0) return [];
 
-  // Scan 1: distinct counts (all columns) + min/max (range types only).
+  // Scan 1: distinct counts (all columns), min/max (range types), examples and shape
+  // shares (text).
   const aggSelects: string[] = [];
   columns.forEach((c, i) => {
     const col = quoteIdent(c.name);
@@ -153,9 +283,20 @@ async function profileColumns(
       aggSelects.push(`min(${col})::VARCHAR AS lo${i}`);
       aggSelects.push(`max(${col})::VARCHAR AS hi${i}`);
     }
+    if (c.type === "VARCHAR") {
+      aggSelects.push(
+        `min(${col}) AS e${i}_0`,
+        `quantile_disc(${col}, 0.5) AS e${i}_1`,
+        `max(${col}) AS e${i}_2`,
+      );
+      for (const shape of TEXT_SHAPES)
+        aggSelects.push(
+          `avg(CASE WHEN ${col} IS NULL THEN NULL WHEN regexp_matches(${col}, ${quoteSqlString(shape.pattern)}) THEN 1 ELSE 0 END) AS ${shape.key}${i}`,
+        );
+    }
   });
   const aggReader = await conn.runAndReadAll(
-    `SELECT ${aggSelects.join(", ")} FROM read_csv_auto(${csvLit}, ignore_errors = true)`,
+    `SELECT ${aggSelects.join(", ")} FROM src`,
   );
   const agg = (aggReader.getRowObjectsJS()[0] ?? {}) as Record<string, unknown>;
 
@@ -171,9 +312,12 @@ async function profileColumns(
       ({ i }) => `list(DISTINCT ${quoteIdent(columns[i]!.name)}) AS v${i}`,
     );
     const valReader = await conn.runAndReadAll(
-      `SELECT ${valSelects.join(", ")} FROM read_csv_auto(${csvLit}, ignore_errors = true)`,
+      `SELECT ${valSelects.join(", ")} FROM src`,
     );
-    const valRow = (valReader.getRowObjectsJson()[0] ?? {}) as Record<string, unknown>;
+    const valRow = (valReader.getRowObjectsJson()[0] ?? {}) as Record<
+      string,
+      unknown
+    >;
     for (const { i } of lowCard) {
       const raw = valRow[`v${i}`];
       if (!Array.isArray(raw)) continue;
@@ -188,7 +332,9 @@ async function profileColumns(
   return columns.map((c, i) => {
     const distinctCount = toFiniteNumber(agg[`d${i}`]);
     const values = valuesByIndex.get(i);
-    if (values) return { distinctCount, values };
+    const hint =
+      c.type === "VARCHAR" ? textHint(agg, i, quoteIdent(c.name)) : undefined;
+    if (values) return { distinctCount, values, ...(hint ? { hint } : {}) };
     if (isRangeType(c.type)) {
       const min = agg[`lo${i}`];
       const max = agg[`hi${i}`];
@@ -198,8 +344,34 @@ async function profileColumns(
         ...(max !== null && max !== undefined ? { max: String(max) } : {}),
       };
     }
-    return { distinctCount };
+    if (c.type !== "VARCHAR") return { distinctCount };
+    const examples = [
+      ...new Set(
+        [agg[`e${i}_0`], agg[`e${i}_1`], agg[`e${i}_2`]]
+          .filter((v) => v !== null && v !== undefined)
+          .map((v) => String(v)),
+      ),
+    ];
+    return {
+      distinctCount,
+      ...(examples.length ? { examples } : {}),
+      ...(hint ? { hint } : {}),
+    };
   });
+}
+
+/** The cast hint for text column `i`, when one shape covers enough of its values. */
+function textHint(
+  agg: Record<string, unknown>,
+  i: number,
+  column: string,
+): string | undefined {
+  for (const shape of TEXT_SHAPES) {
+    const share = agg[`${shape.key}${i}`];
+    if (typeof share === "number" && share >= TEXT_SHAPE_SHARE)
+      return shape.hint(column);
+  }
+  return undefined;
 }
 
 /** Quote an identifier for safe inclusion in DuckDB SQL (server-trusted lane). */
@@ -252,12 +424,11 @@ function compareValues(a: string, b: string): number {
 }
 
 export const TABLE_ALIAS = /^[a-z][a-z0-9_]{0,30}$/;
-export type RunQueryInput = {
+export type RunQueryInput = CsvReadOptions & {
   csvPath: string;
-  explicitHeader?: boolean;
   sql: string;
   /** Further CSV files materialized as additional tables named by alias (never `t`). */
-  tables?: { alias: string; csvPath: string; explicitHeader?: boolean }[];
+  tables?: ({ alias: string; csvPath: string } & CsvReadOptions)[];
   /** Maximum rows returned to the caller. The wrapper requests `rowLimit + 1`
    *  so we can detect truncation. Defaults to `tabularQueryLimits().rowLimit`. */
   rowLimit?: number;
@@ -363,13 +534,13 @@ export async function runQuery(input: RunQueryInput): Promise<RunQueryResult> {
       //    malformed lines instead of failing the whole scan and records
       //    them in `reject_errors` — counted below for the coverage envelope.
       await conn.run(
-        `CREATE TEMPORARY TABLE t AS SELECT * FROM read_csv_auto(${quoteSqlString(input.csvPath)}${input.explicitHeader ? ", header = true" : ""}, store_rejects = true)`,
+        `CREATE TEMPORARY TABLE t AS SELECT * FROM ${readCsv(input.csvPath, input, "store_rejects")}`,
       );
       for (const table of input.tables ?? []) {
         if (!TABLE_ALIAS.test(table.alias) || table.alias === "t")
           throw new QueryRejectedError(`Invalid table alias: ${table.alias}`);
         await conn.run(
-          `CREATE TEMPORARY TABLE ${table.alias} AS SELECT * FROM read_csv_auto(${quoteSqlString(table.csvPath)}${table.explicitHeader ? ", header = true" : ""}, ignore_errors = true)`,
+          `CREATE TEMPORARY TABLE ${table.alias} AS SELECT * FROM ${readCsv(table.csvPath, table, "ignore_errors")}`,
         );
       }
 
@@ -399,7 +570,11 @@ export async function runQuery(input: RunQueryInput): Promise<RunQueryResult> {
       //    a price tag the caller can read before paying for the real run.
       const wrapped = `SELECT * FROM (${sql}) AS _user_q LIMIT ${rowLimit + 1}`;
       if (input.explainOnly) {
-        const planReader = await runWithTimeout(conn, `EXPLAIN ${wrapped}`, timeoutMs);
+        const planReader = await runWithTimeout(
+          conn,
+          `EXPLAIN ${wrapped}`,
+          timeoutMs,
+        );
         const planRows = planReader.getRowsJson() as unknown[][];
         return {
           columns: planReader.columnNames(),
@@ -415,7 +590,14 @@ export async function runQuery(input: RunQueryInput): Promise<RunQueryResult> {
       const allRows = reader.getRowsJson() as unknown[][];
       const truncated = allRows.length > rowLimit;
       const rows = truncated ? allRows.slice(0, rowLimit) : allRows;
-      return { columns, rows, returnedRows: rows.length, truncated, parsedRows, rejectedRows };
+      return {
+        columns,
+        rows,
+        returnedRows: rows.length,
+        truncated,
+        parsedRows,
+        rejectedRows,
+      };
     } finally {
       conn.closeSync();
     }
@@ -453,7 +635,7 @@ async function runWithTimeout(
   } catch (err) {
     if (timedOut) {
       throw new QueryRejectedError(
-        `query exceeded ${timeoutMs}ms timeout — refine with WHERE / LIMIT or simpler aggregates`,
+        `The query exceeded the ${timeoutMs} ms limit. Narrow it with WHERE or aggregate instead of returning every row.`,
       );
     }
     throw err;
@@ -468,17 +650,21 @@ async function runWithTimeout(
  * rejected with a clear message the LLM can act on.
  *
  * Implementation: ask DuckDB to parse-and-prepare. The prepared statement
- * exposes its `statementType`. Parse errors propagate as the raw DuckDB
- * message (caught upstream and surfaced as `{error, sql}` to the LLM).
+ * exposes its `statementType`. Parse and binding errors propagate as the raw
+ * DuckDB message; `executeQuery` passes those classes on to the model, since
+ * they describe its own SQL (see `modelFacingDiagnostic`).
  */
-async function assertSingleReadOnlyStatement(conn: DuckDBConnection, sql: string): Promise<void> {
+async function assertSingleReadOnlyStatement(
+  conn: DuckDBConnection,
+  sql: string,
+): Promise<void> {
   let extracted: DuckDBExtractedStatements;
   try {
     extracted = await conn.extractStatements(sql);
   } catch (err) {
-    // Re-throw with the same message so the tool's outer catch surfaces it
-    // verbatim. Don't wrap in QueryRejectedError — parse errors are LLM
-    // syntax errors, not authorization rejections.
+    // Re-throw with the same message so the outer catch can classify it. Not a
+    // QueryRejectedError: parse errors are LLM syntax errors, not authorization
+    // rejections.
     throw err instanceof Error ? err : new Error(String(err));
   }
   if (extracted.count !== 1) {

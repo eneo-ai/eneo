@@ -8,9 +8,20 @@ import { runIsolated } from "../../src/sandbox";
 import { SheetCache } from "../../src/tools/tabular/cache";
 import { tabularConfigSchema } from "../../src/tools/tabular/config";
 import type { downloadFile } from "../../src/tools/tabular/download";
-import { executeIngest, executeQuery, toCsv } from "../../src/tools/tabular/execute";
-import type { QueryJobResult, SheetMetadata } from "../../src/tools/tabular/ports";
-import { exportFilename, tabularTools, type TabularExecutor } from "../../src/tools/tabular/tool";
+import {
+  executeIngest,
+  executeQuery,
+  toCsv,
+} from "../../src/tools/tabular/execute";
+import type {
+  QueryJobResult,
+  SheetMetadata,
+} from "../../src/tools/tabular/ports";
+import {
+  exportFilename,
+  tabularTools,
+  type TabularExecutor,
+} from "../../src/tools/tabular/tool";
 import { queryResultView } from "../../src/tools/tabular/view";
 import {
   filterRows,
@@ -20,11 +31,16 @@ import {
   showsTable,
   toTsv,
 } from "../../src/tools/tabular/view/paging";
-import { RichResult, type CallContext, type ToolDefinition } from "../../src/tools/types";
+import {
+  RichResult,
+  type CallContext,
+  type ToolDefinition,
+} from "../../src/tools/types";
 
 const ORIGIN = "http://backend:8000";
 const FILE_A = "11111111-1111-4111-8111-111111111111";
 const FILE_B = "22222222-2222-4222-8222-222222222222";
+const FILE_C = "33333333-3333-4333-8333-333333333333";
 const alice: CallContext = {
   tenantId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -39,6 +55,10 @@ const url = (id: string, token = "signed") =>
   `${ORIGIN}/api/v1/files/${id}/original/download/?token=${token}`;
 
 const SALES = Buffer.from("region,amount\nnorth,100\nsouth,250.5\nnorth,50\n");
+// A report export: a title and a blank line above the header.
+const REPORT = Buffer.from(
+  "Rapport budgetutfall 2024,,\n,,\nKommun,Belopp,Ar\nSundsvall,100,2024\nTimra,200,2024\n",
+);
 let workbook: Buffer;
 let root: string;
 
@@ -67,14 +87,18 @@ function setup(
   const download = (async (raw: string) => {
     downloads.calls.push(raw);
     const token = new URL(raw).searchParams.get("token")!;
-    if (downloads.denied.has(token)) throw Object.assign(new Error("response:403"));
+    if (downloads.denied.has(token))
+      throw Object.assign(new Error("response:403"));
     return raw.includes(FILE_B)
       ? {
           bytes: workbook,
-          contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          contentType:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           name: "budget.xlsx",
         }
-      : { bytes: SALES, contentType: "text/csv", name: "sales.csv" };
+      : raw.includes(FILE_C)
+        ? { bytes: REPORT, contentType: "text/csv", name: "rapport.csv" }
+        : { bytes: SALES, contentType: "text/csv", name: "sales.csv" };
   }) as unknown as typeof downloadFile;
   // In-process executor: the sandbox boundary has its own test below.
   const executor: TabularExecutor = {
@@ -87,11 +111,16 @@ function setup(
   const tools = tabularTools({
     config: { ...config, ...limits },
     allowedFileOrigins,
-    cache: new SheetCache(join(root, dir), config.cache_ttl_ms, config.cache_max_bytes),
+    cache: new SheetCache(
+      join(root, dir),
+      config.cache_ttl_ms,
+      config.cache_max_bytes,
+    ),
     executor,
     download,
   });
-  const tool = (name: string) => tools.find((t) => t.name === name) as ToolDefinition;
+  const tool = (name: string) =>
+    tools.find((t) => t.name === name) as ToolDefinition;
   return { tool, downloads, ingests };
 }
 
@@ -106,7 +135,10 @@ describe("file references", () => {
       "file:///etc/passwd",
     ])
       await expect(
-        tool("inspect_table").execute({ files: [{ url: bad, filename: "a.csv" }] }, alice),
+        tool("inspect_table").execute(
+          { files: [{ url: bad, filename: "a.csv" }] },
+          alice,
+        ),
       ).rejects.toMatchObject({ code: "INVALID_URL" });
     expect(downloads.calls).toEqual([]);
   });
@@ -114,12 +146,19 @@ describe("file references", () => {
   test("fetches only from the file origin Eneo sent", async () => {
     const { tool, downloads } = setup("origin");
     const inspect = (ctx: CallContext) =>
-      tool("inspect_table").execute({ files: [{ url: url(FILE_A), filename: "a.csv" }] }, ctx);
-    await expect(inspect({ ...alice, fileOrigin: undefined })).rejects.toMatchObject({
+      tool("inspect_table").execute(
+        { files: [{ url: url(FILE_A), filename: "a.csv" }] },
+        ctx,
+      );
+    await expect(
+      inspect({ ...alice, fileOrigin: undefined }),
+    ).rejects.toMatchObject({
       code: "FILE_ORIGIN_UNKNOWN",
     });
     // The model's URL must match Eneo's origin, not merely look like an Eneo link.
-    await expect(inspect({ ...alice, fileOrigin: "http://other:8000" })).rejects.toMatchObject({
+    await expect(
+      inspect({ ...alice, fileOrigin: "http://other:8000" }),
+    ).rejects.toMatchObject({
       code: "INVALID_URL",
     });
     expect(downloads.calls).toEqual([]);
@@ -141,7 +180,10 @@ describe("file references", () => {
   test("an operator allowlist also bounds Eneo's origin", async () => {
     const { tool, downloads } = setup("allowlist", ["http://backend:9000"]);
     await expect(
-      tool("inspect_table").execute({ files: [{ url: url(FILE_A), filename: "a.csv" }] }, alice),
+      tool("inspect_table").execute(
+        { files: [{ url: url(FILE_A), filename: "a.csv" }] },
+        alice,
+      ),
     ).rejects.toMatchObject({ code: "FILE_ORIGIN_NOT_ALLOWED" });
     expect(downloads.calls).toEqual([]);
   });
@@ -149,7 +191,10 @@ describe("file references", () => {
   test("rejects unsupported file types before downloading", async () => {
     const { tool, downloads } = setup("types");
     await expect(
-      tool("inspect_table").execute({ files: [{ url: url(FILE_A), filename: "a.json" }] }, alice),
+      tool("inspect_table").execute(
+        { files: [{ url: url(FILE_A), filename: "a.json" }] },
+        alice,
+      ),
     ).rejects.toThrow();
     expect(downloads.calls).toEqual([]);
   });
@@ -164,10 +209,12 @@ describe("inspect and query", () => {
     )) as {
       files: Array<{ sheets: Array<{ name: string; parsed_rows: number }> }>;
     };
-    expect(result.files[0]!.sheets.map((s) => [s.name, s.parsed_rows])).toEqual([
-      ["Budget", 2],
-      ["Notes", 1],
-    ]);
+    expect(result.files[0]!.sheets.map((s) => [s.name, s.parsed_rows])).toEqual(
+      [
+        ["Budget", 2],
+        ["Notes", 1],
+      ],
+    );
   });
 
   test("computes exact totals over the whole file", async () => {
@@ -187,6 +234,86 @@ describe("inspect and query", () => {
       ],
       truncated: false,
       parsed_rows: 3,
+      rejected_rows: 0,
+    });
+  });
+
+  test("DuckDB's diagnosis of the SQL reaches the model; runtime errors stay generic", async () => {
+    const { tool } = setup("diagnose");
+    const file = { url: url(FILE_A), filename: "sales.csv" };
+    const failure = async (sql: string) =>
+      tool("query_table")
+        .execute({ file, sql }, alice)
+        .then(
+          () => "",
+          (error: { code: string; message: string }) =>
+            `${error.code}: ${error.message}`,
+        );
+    expect(await failure("SELECT regon FROM t")).toContain(
+      'Candidate bindings: "region"',
+    );
+    expect(await failure("SELECT region FROM t GROUP region")).toContain(
+      "Parser Error",
+    );
+    expect(await failure("SELECT DATE_FORMAT(amount) FROM t")).toContain(
+      "Did you mean",
+    );
+    const privileged = await failure(
+      "SELECT * FROM read_csv_auto('/etc/passwd')",
+    );
+    expect(privileged).toStartWith(
+      "QUERY_REJECTED: SQL was rejected or failed.",
+    );
+    expect(privileged).not.toContain("/etc/passwd");
+  });
+
+  test("an empty result over a filter says how to check the filter", async () => {
+    const { tool } = setup("empty");
+    const file = { url: url(FILE_A), filename: "sales.csv" };
+    const result = await tool("query_table").execute(
+      { file, sql: "SELECT * FROM t WHERE region = 'North'" },
+      alice,
+    );
+    expect(result).toMatchObject({ returned_rows: 0 });
+    expect((result as { hint: string }).hint).toContain("case-sensitive");
+    const total = await tool("query_table").execute(
+      { file, sql: "SELECT SUM(amount) FROM t WHERE region = 'north'" },
+      alice,
+    );
+    expect(total).not.toHaveProperty("hint");
+  });
+
+  test("a report title above the header is skipped for inspection and queries alike", async () => {
+    const { tool } = setup("report");
+    const file = { url: url(FILE_C), filename: "rapport.csv" };
+    const inspected = (await tool("inspect_table").execute(
+      { files: [file] },
+      alice,
+    )) as {
+      files: Array<{
+        sheets: Array<{
+          header_row?: number;
+          parsed_rows: number;
+          columns: Array<{ name: string }>;
+        }>;
+      }>;
+    };
+    expect(inspected.files[0]!.sheets[0]).toMatchObject({
+      header_row: 3,
+      parsed_rows: 2,
+    });
+    expect(inspected.files[0]!.sheets[0]!.columns.map((c) => c.name)).toEqual([
+      "Kommun",
+      "Belopp",
+      "Ar",
+    ]);
+    const result = await tool("query_table").execute(
+      { file, sql: "SELECT SUM(Belopp) AS total FROM t" },
+      alice,
+    );
+    expect(result).toMatchObject({
+      rows: [["300"]],
+      parsed_rows: 2,
       rejected_rows: 0,
     });
   });
@@ -399,7 +526,9 @@ describe("sandbox", () => {
         {
           job: {
             kind: "tabular_ingest",
-            selection: selection ? { source_rows: [...selection.source_rows] } : undefined,
+            selection: selection
+              ? { source_rows: [...selection.source_rows] }
+              : undefined,
             inputPath: input,
             isXlsx: false,
             contentType: "text/csv",
@@ -416,7 +545,10 @@ describe("sandbox", () => {
             csvPath: join(dir, sheets[0]!.csv),
             explicitHeader: sheets[0]!.explicitHeader,
             tables: [],
-            statements: ["SELECT SUM(amount) FROM t", "SELECT * FROM read_csv_auto('/etc/passwd')"],
+            statements: [
+              "SELECT SUM(amount) FROM t",
+              "SELECT * FROM read_csv_auto('/etc/passwd')",
+            ],
             explain: false,
             config,
           },
@@ -503,19 +635,25 @@ describe("result view", () => {
           body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
         }),
       );
-      return ((await response.json()) as { result: Record<string, unknown> }).result;
+      return ((await response.json()) as { result: Record<string, unknown> })
+        .result;
     };
 
-    const listed = (await rpc("tools/list", {})).tools as Array<Record<string, unknown>>;
+    const listed = (await rpc("tools/list", {})).tools as Array<
+      Record<string, unknown>
+    >;
     expect(listed.find((t) => t.name === "query_table")?._meta).toEqual({
       ui: { resourceUri: view.uri },
     });
-    expect(listed.find((t) => t.name === "inspect_table")?._meta).toBeUndefined();
+    expect(
+      listed.find((t) => t.name === "inspect_table")?._meta,
+    ).toBeUndefined();
 
-    expect(view.uri).toMatch(/^ui:\/\/file-analysis\/query-result-[0-9a-f]{12}\.html$/);
-    const read = (await rpc("resources/read", { uri: view.uri })).contents as Array<
-      Record<string, unknown>
-    >;
+    expect(view.uri).toMatch(
+      /^ui:\/\/file-analysis\/query-result-[0-9a-f]{12}\.html$/,
+    );
+    const read = (await rpc("resources/read", { uri: view.uri }))
+      .contents as Array<Record<string, unknown>>;
     expect(read).toHaveLength(1);
     expect(read[0]).toMatchObject({
       uri: view.uri,
@@ -525,7 +663,9 @@ describe("result view", () => {
     // The official SDK includes schema/documentation URLs as string literals.
     // The document still embeds its assets rather than loading remote scripts.
     expect(read[0]!.text).toContain('<div id="app"></div>');
-    expect(read[0]!.text).not.toMatch(/<(?:script|link|img)\b[^>]*(?:src|href)=["']https?:\/\//i);
+    expect(read[0]!.text).not.toMatch(
+      /<(?:script|link|img)\b[^>]*(?:src|href)=["']https?:\/\//i,
+    );
   });
 
   test("the view reads on from the model's query in pages and in another order", async () => {
@@ -555,7 +695,11 @@ describe("result view", () => {
     const tools = tabularTools({
       config,
       allowedFileOrigins: [],
-      cache: new SheetCache(join(root, "view-note"), config.cache_ttl_ms, config.cache_max_bytes),
+      cache: new SheetCache(
+        join(root, "view-note"),
+        config.cache_ttl_ms,
+        config.cache_max_bytes,
+      ),
       executor: {
         ingest: (job) => executeIngest(job),
         query: (job) => executeQuery(job),
@@ -571,7 +715,10 @@ describe("result view", () => {
     const file = { url: url(FILE_A), filename: "sales.csv" };
     const shown = { ...alice, showsViews: true };
 
-    const rows = (await query.execute({ file, sql: "SELECT * FROM t" }, shown)) as {
+    const rows = (await query.execute(
+      { file, sql: "SELECT * FROM t" },
+      shown,
+    )) as {
       shown?: string;
       rows: unknown[][];
     };
@@ -585,19 +732,29 @@ describe("result view", () => {
     expect(intermediate.rows).toEqual(rows.rows);
     expect(intermediate.display).toBe("none");
     expect(intermediate).not.toHaveProperty("shown");
-    expect(showsTable({ ...intermediate, plan: false, exported: false })).toBe(false);
+    expect(showsTable({ ...intermediate, plan: false, exported: false })).toBe(
+      false,
+    );
     const explicitTable = await query.execute(
       { file, sql: "SELECT * FROM t", display: "table", title: "All sales" },
       shown,
     );
     expect(explicitTable).toEqual(rows);
-    expect(showsTable({ rows: rows.rows, plan: false, exported: false })).toBe(true);
+    expect(showsTable({ rows: rows.rows, plan: false, exported: false })).toBe(
+      true,
+    );
     await expect(
-      query.execute({ file, sql: "SELECT * FROM t", display: "invalid" }, shown),
+      query.execute(
+        { file, sql: "SELECT * FROM t", display: "invalid" },
+        shown,
+      ),
     ).rejects.toThrow();
 
     // A single value has no table, and a host that shows no views is told nothing.
-    const one = await query.execute({ file, sql: "SELECT COUNT(*) AS n FROM t" }, shown);
+    const one = await query.execute(
+      { file, sql: "SELECT COUNT(*) AS n FROM t" },
+      shown,
+    );
     expect(one).not.toHaveProperty("shown");
     const unseen = await query.execute({ file, sql: "SELECT * FROM t" }, alice);
     expect(unseen).not.toHaveProperty("shown");
@@ -622,7 +779,9 @@ describe("result view", () => {
     expect(sortRows(rows, 1, false).map((r) => r[0])).toEqual(["b", "c", "a"]);
     expect(sortRows(rows, 1, true).map((r) => r[0])).toEqual(["c", "b", "a"]);
     expect(filterRows(rows, " C ")).toEqual([["c", 10]]);
-    expect(toTsv(["name", "n"], [["two\nlines", null]])).toBe("name\tn\ntwo lines\t");
+    expect(toTsv(["name", "n"], [["two\nlines", null]])).toBe(
+      "name\tn\ntwo lines\t",
+    );
   });
 });
 
@@ -638,7 +797,11 @@ describe("formula diagnostics across the workflow", () => {
     workbook = Buffer.from(await book.xlsx.writeBuffer());
     try {
       const { tool, ingests } = setup("formulas");
-      const file = { url: url(FILE_B), filename: "budget.xlsx", sheet: "Budget" };
+      const file = {
+        url: url(FILE_B),
+        filename: "budget.xlsx",
+        sheet: "Budget",
+      };
       // Direct queries must disclose limitations without a preceding inspection.
       const query = (await tool("query_table").execute(
         {
@@ -655,7 +818,9 @@ describe("formula diagnostics across the workflow", () => {
       )) as any;
       expect(inspection.files[0].sheets[0].calculation.formula_cells).toBe(2);
       expect(inspection.files[0].sheets[1].queryable).toBe(false);
-      expect(inspection.files[0].sheets[1].calculation.missing_cached_results).toBe(1);
+      expect(
+        inspection.files[0].sheets[1].calculation.missing_cached_results,
+      ).toBe(1);
       expect(ingests.length).toBe(1);
       const joined = (await tool("query_table").execute(
         {
@@ -683,7 +848,9 @@ describe("formula diagnostics across the workflow", () => {
         },
         alice,
       )) as any;
-      expect(exported.structured.calculation_warnings[0].missing_cached_results).toBe(1);
+      expect(
+        exported.structured.calculation_warnings[0].missing_cached_results,
+      ).toBe(1);
       expect(exported.files.length).toBe(1);
       await expect(
         tool("query_table").execute(
@@ -703,8 +870,15 @@ describe("formula diagnostics across the workflow", () => {
 describe("native source-row selections", () => {
   test("filters before aggregation, sorting, limits, joins and exports without polluting full-file cache", async () => {
     const { tool, downloads, ingests } = setup("selected-csv");
-    const file = { url: url(FILE_A), filename: "sales.csv", source_rows: [4, 2, 4] };
-    const inspection = (await tool("inspect_table").execute({ files: [file] }, alice)) as any;
+    const file = {
+      url: url(FILE_A),
+      filename: "sales.csv",
+      source_rows: [4, 2, 4],
+    };
+    const inspection = (await tool("inspect_table").execute(
+      { files: [file] },
+      alice,
+    )) as any;
     expect(inspection.files[0].sheets[0].source_rows).toEqual([2, 4]);
     expect(inspection.files[0].sheets[0].parsed_rows).toBe(2);
     const total = (await tool("query_table").execute(
@@ -724,21 +898,34 @@ describe("native source-row selections", () => {
     expect(exported.structured.returned_rows).toBe(2);
     expect(exported.structured.source_rows).toEqual([2, 4]);
     const all = (await tool("query_table").execute(
-      { file: { url: file.url, filename: file.filename }, sql: "SELECT SUM(amount) FROM t" },
+      {
+        file: { url: file.url, filename: file.filename },
+        sql: "SELECT SUM(amount) FROM t",
+      },
       alice,
     )) as any;
     expect(Number(all.rows[0][0])).toBe(400.5);
     const joined = (await tool("query_table").execute(
       {
         file,
-        files: [{ url: file.url, filename: file.filename, source_rows: [2], alias: "chosen" }],
+        files: [
+          {
+            url: file.url,
+            filename: file.filename,
+            source_rows: [2],
+            alias: "chosen",
+          },
+        ],
         sql: "SELECT SUM(t.amount) FROM t JOIN chosen USING (region)",
       },
       alice,
     )) as any;
     expect(Number(joined.rows[0][0])).toBe(150);
     const checks = (await tool("assert_table").execute(
-      { file, checks: [{ name: "selection", sql: "SELECT COUNT(*) = 2 FROM t" }] },
+      {
+        file,
+        checks: [{ name: "selection", sql: "SELECT COUNT(*) = 2 FROM t" }],
+      },
       alice,
     )) as any;
     expect(checks.passed).toBe(true);
@@ -746,7 +933,10 @@ describe("native source-row selections", () => {
     downloads.denied.add("revoked");
     await expect(
       tool("query_table").execute(
-        { file: { ...file, url: url(FILE_A, "revoked") }, sql: "SELECT * FROM t" },
+        {
+          file: { ...file, url: url(FILE_A, "revoked") },
+          sql: "SELECT * FROM t",
+        },
         alice,
       ),
     ).rejects.toThrow();
@@ -803,11 +993,22 @@ describe("native source-row selections", () => {
 
   test("rejects invalid selectors rather than widening to the full table", async () => {
     const { tool } = setup("invalid-selection");
-    for (const rows of [[], [1], [2.5], [-1], [999999999], Array(501).fill(2)]) {
+    for (const rows of [
+      [],
+      [1],
+      [2.5],
+      [-1],
+      [999999999],
+      Array(501).fill(2),
+    ]) {
       await expect(
         tool("query_table").execute(
           {
-            file: { url: url(FILE_A), filename: "sales.csv", source_rows: rows },
+            file: {
+              url: url(FILE_A),
+              filename: "sales.csv",
+              source_rows: rows,
+            },
             sql: "SELECT * FROM t",
           },
           alice,

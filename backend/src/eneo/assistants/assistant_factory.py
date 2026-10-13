@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
@@ -10,11 +10,25 @@ from eneo.assistants.assistant import Assistant
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.prompts_table import Prompts
+from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.files.file_models import File
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from eneo.prompts.prompt_factory import PromptFactory
 from eneo.users.user import UserInDB, UserSparse
+
+
+def _document_template_choice(row: Any) -> DocumentTemplateChoice:
+    """The assistant's stored choice; the organisation's default when there is none."""
+    if row is None:
+        return DocumentTemplateChoice()
+    try:
+        return DocumentTemplateChoice(
+            mode=row.mode, template_id=row.document_template_id
+        )
+    except ValueError:
+        return DocumentTemplateChoice()
+
 
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
@@ -144,6 +158,9 @@ class AssistantFactory:
         assert assistant_in_db.space_id is not None, "Assistants must belong to a space"
         return Assistant(
             enabled_capabilities=[c.purpose for c in assistant_in_db.capabilities],
+            document_template=_document_template_choice(
+                getattr(assistant_in_db, "document_template_choice", None)
+            ),
             id=assistant_in_db.id,
             user=user,
             space_id=assistant_in_db.space_id,
@@ -264,6 +281,9 @@ class AssistantFactory:
         assert assistant_in_db.space_id is not None, "Assistants must belong to a space"
         return Assistant(
             enabled_capabilities=[c.purpose for c in assistant_in_db.capabilities],
+            document_template=_document_template_choice(
+                getattr(assistant_in_db, "document_template_choice", None)
+            ),
             id=assistant_in_db.id,
             user=user_sparse,
             space_id=assistant_in_db.space_id,

@@ -46,9 +46,9 @@
 
   const occupied = $derived(occupant?.shown ?? false);
   const shown = $derived(preview.shown || occupied || (overview && hasContents));
-  // A file may take the whole width; the conversation stays mounted behind it
-  // and the split it returns to keeps its sizes.
-  const maximised = $derived(preview.maximised && preview.shown && !occupied);
+  // A file or view may take the whole width; the conversation stays mounted
+  // behind it and the split it returns to keeps its sizes.
+  const maximised = $derived(preview.maximised && (preview.shown || occupied));
   const label = $derived(
     occupied && occupant
       ? occupant.label

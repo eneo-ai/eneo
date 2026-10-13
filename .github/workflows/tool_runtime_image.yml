@@ -59,6 +59,17 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # The PDF tests need the WeasyPrint sidecar as the image installs it.
+      - name: Install PDF sidecar
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libharfbuzz-subset0 fontconfig \
+            fonts-dejavu-core fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea
+          sudo fc-cache -f
+          sudo python3 -m venv /opt/pdf
+          sudo /opt/pdf/bin/pip install --no-cache-dir --require-hashes -r scripts/requirements-pdf.txt
+
       - name: Typecheck
         run: bun run typecheck
 

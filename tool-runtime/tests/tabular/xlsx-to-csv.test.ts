@@ -24,7 +24,10 @@ async function workbookWithSheetNames(names: string[]): Promise<Buffer> {
   const zip = await JSZip.loadAsync(built);
   let xml = await zip.file("xl/workbook.xml")!.async("string");
   names.forEach((name, i) => {
-    xml = xml.replace(`name="S${i + 1}"`, `name="${name.replace(/&/g, "&amp;")}"`);
+    xml = xml.replace(
+      `name="S${i + 1}"`,
+      `name="${name.replace(/&/g, "&amp;")}"`,
+    );
   });
   zip.file("xl/workbook.xml", xml);
   return zip.generateAsync({ type: "nodebuffer" });
@@ -33,7 +36,11 @@ async function workbookWithSheetNames(names: string[]): Promise<Buffer> {
 describe("convertXlsxToCsvSheets", () => {
   it("converts a workbook whose sheet name exceeds Excel's 31-character limit", async () => {
     const long = "Periodiserade Månadsförbrukningar"; // 33 chars, straight from the failing export
-    const bytes = await workbookWithSheetNames(["Värden", long, "Periodenergi"]);
+    const bytes = await workbookWithSheetNames([
+      "Värden",
+      long,
+      "Periodenergi",
+    ]);
 
     const sheets = await convertXlsxToCsvSheets(bytes);
 
@@ -67,7 +74,11 @@ describe("convertXlsxToCsvSheets", () => {
     ws.addRow(["Starttid", "Värde", "Status", " "]); // the exporter's whitespace cell in D1
     ws.addRow([new Date(Date.UTC(2026, 0, 1)), 0.964, "Normalt"]);
     ws.addRow([]); // blank rows are skipped, not emitted as ",,"
-    ws.addRow([new Date(Date.UTC(2026, 0, 1, 0, 15)), 0.772, 'Normalt, "kontrollerad"']);
+    ws.addRow([
+      new Date(Date.UTC(2026, 0, 1, 0, 15)),
+      0.772,
+      'Normalt, "kontrollerad"',
+    ]);
     const bytes = Buffer.from(await wb.xlsx.writeBuffer());
 
     const [sheet] = await convertXlsxToCsvSheets(bytes);
@@ -75,7 +86,7 @@ describe("convertXlsxToCsvSheets", () => {
 
     expect(lines).toEqual([
       "Starttid,Värde,Status",
-      "2026-01-01T00:00:00.000Z,0.964,Normalt",
+      "2026-01-01,0.964,Normalt", // a date without a time of day is written as a date
       '2026-01-01T00:15:00.000Z,0.772,"Normalt, ""kontrollerad"""',
     ]);
   });
@@ -106,7 +117,9 @@ it("reports ordinary/shared formulas and distinguishes missing results from zero
   const bytes = Buffer.from(await book.xlsx.writeBuffer());
   const sheets = await convertXlsxToCsvSheets(bytes);
   expect(sheets[0]!.calculation).toEqual({
-    formula_cells: 5, missing_cached_results: 1, recalculated: false,
+    formula_cells: 5,
+    missing_cached_results: 1,
+    recalculated: false,
   });
   expect(sheets[0]!.csv.toString()).toContain("1,0");
   expect(sheets[0]!.csv.toString()).toContain("2,false");

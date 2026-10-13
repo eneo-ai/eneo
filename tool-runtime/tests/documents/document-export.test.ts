@@ -4,6 +4,10 @@ import { documentConfigSchema } from "../../src/tools/documents/config";
 import { executeRender } from "../../src/tools/documents/execute";
 import { contentDisposition, safeFilename } from "../../src/tools/documents/filename";
 import { parseMarkdown, plainText } from "../../src/tools/documents/markdown/parse";
+import { pdfAvailable } from "../../src/tools/documents/engine/pdf";
+import { inspectPdf } from "./pdf-inspect";
+
+const PDF = await pdfAvailable();
 import { renderDocument } from "../../src/tools/documents/engine/render";
 import { sheetName } from "../../src/tools/documents/engine/xlsx";
 import type { RenderJob } from "../../src/tools/documents/ports";
@@ -238,14 +242,20 @@ describe("engines", () => {
     expect(sheetName("x".repeat(40), taken)).toHaveLength(31);
     expect(sheetName("x".repeat(40), taken)).toEndWith(" (2)");
   });
-  test("pdf embeds DejaVu, numbers pages and starts with the magic bytes", async () => {
-    const { buffer, pages } = await renderDocument("pdf", document, {
-      organisationName: "Kommunen",
-    });
-    expect(buffer.subarray(0, 5).toString()).toBe("%PDF-");
-    expect(buffer.includes(Buffer.from("DejaVuSans"))).toBe(true);
-    expect(pages).toBeGreaterThanOrEqual(2);
-  });
+  test.skipIf(!PDF)(
+    "pdf is tagged, embeds the template's fonts, numbers pages and starts with the magic bytes",
+    async () => {
+      const { buffer, pages } = await renderDocument("pdf", document, {
+        organisationName: "Kommunen",
+      });
+      expect(buffer.subarray(0, 5).toString()).toBe("%PDF-");
+      const facts = await inspectPdf(buffer);
+      expect(facts).toMatchObject({ lang: "sv-SE", marked: true, structured: true });
+      // The built-in template is set in Calibri, which the image substitutes with Carlito.
+      expect(facts.fonts.some((font) => /Carlito/.test(font))).toBe(true);
+      expect(pages).toBeGreaterThanOrEqual(2);
+    },
+  );
   test("a template keeps its header, footer and lists around the content", async () => {
     const template = await makeTemplate("Efter innehållet");
     const { buffer } = await renderDocument("docx", document, { template });
@@ -265,7 +275,9 @@ describe("engines", () => {
     for (const id of ids) expect(numbering).toContain(`w:numId="${id}"`);
     const rels = await unzipText(buffer, "word/_rels/document.xml.rels");
     expect(rels).toContain("https://example.org/a");
-    expect(xml).toContain('r:id="rIdEneo1"');
+    // The link's relationship is registered in the template under an id of its own.
+    const linkId = /<w:hyperlink[^>]*r:id="([^"]+)"/.exec(xml)![1]!;
+    expect(rels).toContain(`Id="${linkId}"`);
   });
   test("a template without a placeholder has its body replaced", async () => {
     const template = Buffer.from(
@@ -290,7 +302,7 @@ describe("engines", () => {
     expect(xml).not.toContain("Exempeltext");
     expect(await unzipText(buffer, "word/footer1.xml")).toContain("Sidfot");
   });
-  test("refuses templates with macros, non-Word files and PDF output", async () => {
+  test("refuses templates with macros and non-Word files", async () => {
     const JSZip = (await import("jszip")).default;
     const zip = await JSZip.loadAsync(await makeTemplate("x"));
     zip.file(
@@ -305,9 +317,6 @@ describe("engines", () => {
     await expect(
       renderDocument("docx", document, { template: Buffer.from("not a zip") }),
     ).rejects.toThrow("not a Word");
-    await expect(
-      renderDocument("pdf", document, { template: await makeTemplate("x") }),
-    ).rejects.toThrow("docx");
   });
   test("placeholders are filled in the body, header and footer of a Word template", async () => {
     const { Document, Footer, Header, Packer, Paragraph, TextRun } = await import("docx");
@@ -383,7 +392,9 @@ describe("engines", () => {
     await expect(fill("Hej {{namn}}", {})).rejects.toMatchObject({
       code: "TEMPLATE_VALUES_MISSING",
     });
-    await expect(fill("Ingen markör", { namn: "x" })).rejects.toThrow("no {{placeholders}}");
+    await expect(fill("Ingen markör", { namn: "x" })).rejects.toThrow(
+      "no content controls or {{placeholders}}",
+    );
     await expect(fill(Buffer.from([0xff, 0xfe, 0x7b]), {})).rejects.toMatchObject({
       code: "INVALID_FILE",
     });
@@ -591,7 +602,7 @@ describe("tools", () => {
         {
           title: "x",
           content: "y",
-          format: "pdf",
+          format: "md",
           template: { url: sourceUrl("tpl"), filename: "mall.docx" },
         },
         withOrigin,

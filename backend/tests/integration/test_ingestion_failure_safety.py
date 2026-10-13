@@ -252,7 +252,7 @@ async def _seed_transcription_attempt(
             "retained quota",
             b"audio rejected by retained quota",
             None,
-            JobFailureCode.QUOTA_EXCEEDED,
+            JobFailureCode.TENANT_QUOTA_EXCEEDED,
         ),
         (
             "worker storage ceiling",
