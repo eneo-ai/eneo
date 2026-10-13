@@ -138,6 +138,16 @@ def _summary_counts(stats: SyncStats) -> dict[str, Any]:
     return summary
 
 
+def _delta_worth_logging(summary: SyncStats) -> bool:
+    """Delta runs are frequent; only keep the ones that changed something or warned."""
+    return (
+        summary.get("files_processed", 0) > 0
+        or summary.get("files_deleted", 0) > 0
+        or summary.get("skipped_items", 0) > 0
+        or bool(summary.get("reconcile_warning"))
+    )
+
+
 def _sync_metadata(
     stats: SyncStats | None = None,
     *,
@@ -287,6 +297,7 @@ class SharePointContentService:
                 id=integration_knowledge_id
             )
             resolved_integration_knowledge_id = integration_knowledge.id
+            integration_knowledge.mark_sync_started(started_at)
             resolved_site_id = site_id or integration_knowledge.site_id
             resolved_drive_id = drive_id or integration_knowledge.drive_id
             if site_id and not getattr(integration_knowledge, "site_id", None):
@@ -320,12 +331,8 @@ class SharePointContentService:
                 id=resolved_integration_knowledge_id
             )
 
-            files_processed = summary_stats.get("files_processed", 0)
-            files_deleted = summary_stats.get("files_deleted", 0)
-
             integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
-            if files_processed > 0 or files_deleted > 0:
-                integration_knowledge.last_synced_at = datetime.now(timezone.utc)
+            integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
 
             if not integration_knowledge.delta_token:
                 try:
@@ -361,41 +368,34 @@ class SharePointContentService:
             await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
             if self.sync_log_repo:
-                files_processed = summary_stats.get("files_processed", 0)
-                files_deleted = summary_stats.get("files_deleted", 0)
-                skipped_items = summary_stats.get("skipped_items", 0)
-
-                if files_processed > 0 or files_deleted > 0 or skipped_items > 0:
-                    sync_log = SyncLog(
-                        integration_knowledge_id=resolved_integration_knowledge_id,
-                        sync_type="full",
-                        status="success",
-                        started_at=started_at,
-                        completed_at=datetime.now(timezone.utc),
-                        metadata=_sync_metadata(
-                            summary_stats,
-                            trigger=sync_trigger,
-                            recovery=recovery,
-                        ),
-                    )
-                    await self.sync_log_repo.add(sync_log)
-                else:
-                    logger.info(
-                        f"Skipping sync log creation for integration knowledge {resolved_integration_knowledge_id}: "
-                        "no files processed or deleted"
-                    )
+                sync_log = SyncLog(
+                    integration_knowledge_id=resolved_integration_knowledge_id,
+                    sync_type="full",
+                    status="success",
+                    started_at=started_at,
+                    completed_at=datetime.now(timezone.utc),
+                    metadata=_sync_metadata(
+                        summary_stats,
+                        trigger=sync_trigger,
+                        recovery=recovery,
+                    ),
+                )
+                await self.sync_log_repo.add(sync_log)
 
             return self._format_summary_for_job(summary_stats)
 
         except Exception as e:
-            # Log failed sync
+            failed_at = datetime.now(timezone.utc)
+            await self._record_sync_failure(
+                resolved_integration_knowledge_id, str(e), failed_at
+            )
             if self.sync_log_repo and resolved_integration_knowledge_id is not None:
                 sync_log = SyncLog(
                     integration_knowledge_id=resolved_integration_knowledge_id,
                     sync_type="full",
                     status="error",
                     started_at=started_at,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=failed_at,
                     error_message=str(e),
                     metadata=_sync_metadata(trigger=sync_trigger, recovery=recovery),
                 )
@@ -403,6 +403,31 @@ class SharePointContentService:
 
             logger.error(f"Error in pull_content: {e}", exc_info=True)
             raise
+
+    async def _record_sync_failure(
+        self, integration_knowledge_id: UUID | None, error: str, at: datetime
+    ) -> None:
+        """Persist the failure before re-raising.
+
+        The worker commits on a soft failure (see
+        ``_schedule_post_commit_change_keys``), so the status written here is what
+        the UI shows. A fresh read keeps half-applied in-memory state (a delta
+        token that was never confirmed, a stale size) out of the row.
+        """
+        if integration_knowledge_id is None:
+            return
+        try:
+            integration_knowledge = await self.integration_knowledge_repo.one(
+                id=integration_knowledge_id
+            )
+            integration_knowledge.mark_sync_failed(error, at)
+            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+        except Exception as exc:
+            logger.warning(
+                "Could not record sync failure for integration knowledge %s: %s",
+                integration_knowledge_id,
+                exc,
+            )
 
     async def process_delta_changes(
         self,
@@ -451,6 +476,8 @@ class SharePointContentService:
                 id=integration_knowledge_id
             )
             resolved_integration_knowledge_id = integration_knowledge.id
+            integration_knowledge.mark_sync_started(started_at)
+            await self.integration_knowledge_repo.update(obj=integration_knowledge)
             resolved_site_id = site_id or integration_knowledge.site_id
             resolved_drive_id = drive_id or integration_knowledge.drive_id
             if integration_knowledge.delta_token is None:
@@ -588,6 +615,9 @@ class SharePointContentService:
 
                     integration_knowledge.last_sync_summary = _summary_counts(
                         summary_stats
+                    )
+                    integration_knowledge.mark_sync_succeeded(
+                        datetime.now(timezone.utc)
                     )
                     await self.integration_knowledge_repo.update(
                         obj=integration_knowledge
@@ -808,11 +838,7 @@ class SharePointContentService:
 
                 summary_stats = self._build_summary_stats(stats)
                 integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
-
-                files_processed = summary_stats.get("files_processed", 0)
-                files_deleted = summary_stats.get("files_deleted", 0)
-                if files_processed > 0 or files_deleted > 0:
-                    integration_knowledge.last_synced_at = datetime.now(timezone.utc)
+                integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
 
                 logger.info(f"Delta sync completed: {summary_stats}")
 
@@ -825,11 +851,7 @@ class SharePointContentService:
                 )
 
                 if self.sync_log_repo:
-                    files_processed = summary_stats.get("files_processed", 0)
-                    files_deleted = summary_stats.get("files_deleted", 0)
-                    skipped_items = summary_stats.get("skipped_items", 0)
-
-                    if files_processed > 0 or files_deleted > 0 or skipped_items > 0:
+                    if _delta_worth_logging(summary_stats):
                         sync_log = SyncLog(
                             integration_knowledge_id=resolved_integration_knowledge_id,
                             sync_type="delta",
@@ -852,14 +874,17 @@ class SharePointContentService:
                 return self._format_summary_for_job(summary_stats)
 
         except Exception as e:
-            # Log failed delta sync
+            failed_at = datetime.now(timezone.utc)
+            await self._record_sync_failure(
+                resolved_integration_knowledge_id, str(e), failed_at
+            )
             if self.sync_log_repo and resolved_integration_knowledge_id is not None:
                 sync_log = SyncLog(
                     integration_knowledge_id=resolved_integration_knowledge_id,
                     sync_type="delta",
                     status="error",
                     started_at=started_at,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=failed_at,
                     error_message=str(e),
                     metadata=_sync_metadata(trigger=sync_trigger),
                 )
@@ -1741,6 +1766,10 @@ class SharePointContentService:
                 "an authoritative picture (not deleting from a partial list): %s",
                 integration_knowledge.id,
                 exc,
+                exc_info=True,
+            )
+            stats["reconcile_warning"] = (
+                f"Orphan cleanup skipped: could not list SharePoint items ({exc})"
             )
             return
 
@@ -1759,6 +1788,10 @@ class SharePointContentService:
                 len(orphans),
                 len(indexed),
                 cap,
+            )
+            stats["reconcile_warning"] = (
+                f"Orphan cleanup skipped: {len(orphans)} of {len(indexed)} indexed "
+                f"documents are missing from SharePoint (above the safety cap of {cap})"
             )
             return
 
