@@ -6,7 +6,8 @@
  * and run the same code again.
  *
  * It takes room only when the tool said the reader sees the value. A failed run is the model's
- * retry loop, an exported table is its own file, and a hidden intermediate step stays hidden.
+ * retry loop and a hidden intermediate step stays hidden; an exported table shows its first rows
+ * as a preview, with the file holding the rest.
  * Nothing leaves the view for the conversation unless the reader quotes it.
  */
 import { useMemo, useState } from "react";
@@ -69,7 +70,7 @@ type Outcome = {
   logs?: string[];
   dropped_log_lines?: number;
   duration_ms?: number;
-  export?: unknown;
+  export?: { rows?: number; preview_rows?: number };
 };
 type Row = Record<string, unknown>;
 
@@ -93,6 +94,8 @@ const TEXTS = {
     logs: "Logg",
     language: "JavaScript",
     rerunNote: "Samma kod körs igen med värdena ovan. Svaret i chatten ändras inte.",
+    preview: (shown: number, total: number) =>
+      `Förhandsvisning: de första ${shown} av ${total} rader. Hela resultatet finns i filen.`,
     noInputTitle: "Ingen indata",
     noInput:
       "Koden fick inga värden som indata, så det finns inget att ändra här. Be om beräkningen igen med värdena som indata för att kunna räkna om.",
@@ -127,6 +130,8 @@ const TEXTS = {
     logs: "Logs",
     language: "JavaScript",
     rerunNote: "The same code runs again with the values above. The answer in the chat stays as it is.",
+    preview: (shown: number, total: number) =>
+      `Preview: the first ${shown} of ${total} rows. The whole result is in the file.`,
     noInputTitle: "No input",
     noInput:
       "The code was given no values as input, so there is nothing to change here. Ask for the calculation again with the values as input to be able to recalculate.",
@@ -381,11 +386,25 @@ function ResultView() {
                   <Badge label={text.recomputed} />
                   <Button variant="ghost" size="sm" label={text.reset} icon={undoIcon} onClick={reset} />
                 </>
-              ) : typeof outcome?.duration_ms === "number" ? (
+              ) : (
                 <Text type="supporting" color="secondary">
-                  {text.duration(outcome.duration_ms)}
+                  {[
+                    outcome?.export && typeof outcome.export.rows === "number"
+                      ? text.preview(
+                          typeof outcome.export.preview_rows === "number"
+                            ? outcome.export.preview_rows
+                            : (table?.rows.length ?? 0),
+                          outcome.export.rows,
+                        )
+                      : undefined,
+                    typeof outcome?.duration_ms === "number"
+                      ? text.duration(outcome.duration_ms)
+                      : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </Text>
-              ) : undefined
+              )
             }
             endContent={
               <Button

@@ -4,7 +4,7 @@ import { computeConfigSchema } from "../../src/tools/compute/config";
 import { runJavaScript } from "../../src/tools/compute/engine/quickjs";
 import { showsResult } from "../../src/tools/compute/shape";
 import type { ComputeExecutor } from "../../src/tools/compute/tool";
-import { TABLE_SHOWN, VALUE_SHOWN, computeTools } from "../../src/tools/compute/tool";
+import { EXPORT_SHOWN, TABLE_SHOWN, VALUE_SHOWN, computeTools } from "../../src/tools/compute/tool";
 import { computeResultView } from "../../src/tools/compute/view";
 import { RichResult, type ToolView } from "../../src/tools/types";
 
@@ -123,7 +123,13 @@ describe("result view", () => {
     expect(await shown(`return [{ a: 1 }];`)).toBeUndefined();
   });
 
-  test("nothing is shown for display=none, a failure, an export, or a host without views", async () => {
+  test("an exported table is shown as a preview, with its own hint", async () => {
+    const run = tool(inProcess, stubView);
+    const exported = (await run.execute({ code: table, export: true }, viewed)) as RichResult;
+    expect(exported.structured.shown).toBe(EXPORT_SHOWN);
+  });
+
+  test("nothing is shown for display=none, a failure, or a host without views", async () => {
     const run = tool(inProcess, stubView);
     expect(await run.execute({ code: table, display: "none" }, viewed)).not.toHaveProperty("shown");
     expect(await run.execute({ code: "throw new Error('x');", display: "result" }, viewed)).toMatchObject({
@@ -132,8 +138,6 @@ describe("result view", () => {
     expect(await run.execute({ code: "throw new Error('x');", display: "result" }, viewed)).not.toHaveProperty(
       "shown",
     );
-    const exported = (await run.execute({ code: table, export: true }, viewed)) as RichResult;
-    expect(exported.structured.shown).toBeUndefined();
     expect(await run.execute({ code: table }, ctx)).not.toHaveProperty("shown");
     expect(await run.execute({ code: table }, { ...ctx, showsViews: false })).not.toHaveProperty("shown");
     expect(await tool().execute({ code: table }, viewed)).not.toHaveProperty("shown");
@@ -142,7 +146,7 @@ describe("result view", () => {
   test("the view decides what to draw with the same rule the tool used", () => {
     const value = [{ a: 1 }, { a: 2 }];
     expect(showsResult({ ok: true, result: value, exported: false, display: "auto" })).toBe("table");
-    expect(showsResult({ ok: true, result: value, exported: true, display: "auto" })).toBe(false);
+    expect(showsResult({ ok: true, result: value, exported: true, display: "auto" })).toBe("table");
     expect(showsResult({ ok: true, result: value, exported: false, display: "none" })).toBe(false);
     expect(showsResult({ ok: false, result: value, exported: false, display: "result" })).toBe(false);
     expect(showsResult({ ok: true, result: 1, exported: false, display: "auto" })).toBe(false);

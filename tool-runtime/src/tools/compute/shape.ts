@@ -96,7 +96,7 @@ export function showsResult(run: {
   exported: boolean;
   display: DisplayMode;
 }): ResultKind {
-  if (!run.ok || run.exported || run.display === "none") return false;
+  if (!run.ok || run.display === "none") return false;
   const table = asTabular(run.result);
   if (table && table.rows.length > 1) return "table";
   return run.display === "result" ? "value" : false;

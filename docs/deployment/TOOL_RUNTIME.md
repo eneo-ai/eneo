@@ -130,9 +130,10 @@ and a copy button), the input and the logs. When the
 input is a flat set of values, the reader can edit them and run the same code
 again from the view; that call goes through Eneo like any other tool call and
 follows the user's automatic-tools preference, and nothing reaches the
-conversation unless the reader quotes it. A failed run, an exported table and a
-hidden step take no room. The tool tells the model when the reader sees the
-value (`shown`), so the answer does not repeat it.
+conversation unless the reader quotes it. A failed run and a hidden step take
+no room; an exported table shows its first rows as a preview, with the file
+holding the rest. The tool tells the model when the reader sees the value
+(`shown`), so the answer does not repeat it.
 
 ### Enabling the Charts function after upgrading
 
