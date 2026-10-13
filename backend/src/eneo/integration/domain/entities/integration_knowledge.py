@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
@@ -36,7 +36,7 @@ class IntegrationKnowledge(Entity):
         original_name: str | None = None,
         site_id: str | None = None,
         last_synced_at: datetime | None = None,
-        last_sync_summary: Dict[str, int] | None = None,
+        last_sync_summary: dict[str, Any] | None = None,
         sharepoint_subscription_id: UUID | None = None,
         sharepoint_subscription: Optional["SharePointSubscription"] = None,
         delta_token: str | None = None,

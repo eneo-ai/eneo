@@ -19,6 +19,9 @@ if TYPE_CHECKING:
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
+    from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
+        SharePointContentService,
+    )
     from eneo.integration.presentation.models import (
         ConfluenceContentTaskParam,
         SharepointContentTaskParam,
@@ -100,27 +103,98 @@ async def pull_confluence_content(
     )
 
 
+# A webhook that arrives while a sync holds the lease leaves this marker; the
+# lease holder runs one more delta pass before releasing. Without it the skipped
+# task is simply dropped, and because the webhook service has already recorded the
+# item's ChangeKey the next identical notification is treated as a duplicate.
+SHAREPOINT_SYNC_PENDING_TTL_SECONDS = 3600
+_PENDING_RETRY_DELAY_SECONDS = 1.0
+
+
+def _lock_key(knowledge_id: str) -> str:
+    return f"sharepoint_sync_lock:{knowledge_id}"
+
+
+def _pending_key(knowledge_id: str) -> str:
+    return f"sharepoint_sync_pending:{knowledge_id}"
+
+
+async def _open_redis() -> "redis.Redis":
+    settings = get_settings()
+    return await redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
+        build_redis_url(settings),
+        encoding="utf8",
+        decode_responses=True,
+        **build_redis_auth_kwargs(settings),
+    )
+
+
+async def _prepare_sharepoint_sync(
+    container: "Container", params: "SharepointContentTaskParam"
+) -> tuple["IntegrationKnowledge", "SharePointContentService"]:
+    knowledge = await _get_knowledge_with_retry(
+        container, params.integration_knowledge_id
+    )
+    assert knowledge is not None
+    await _validate_embedding_provider(container, knowledge)
+    return knowledge, container.sharepoint_content_service()
+
+
+async def _run_delta(
+    service: "SharePointContentService",
+    params: "SharepointContentTaskParam",
+    knowledge: "IntegrationKnowledge",
+) -> str:
+    return await service.process_delta_changes(
+        token_id=params.token_id,
+        tenant_app_id=params.tenant_app_id,
+        integration_knowledge_id=knowledge.id,
+        site_id=params.site_id,
+        drive_id=params.drive_id,
+        resource_type=params.resource_type,
+    )
+
+
+async def _drain_pending_delta(
+    redis_client: "redis.Redis",
+    knowledge_id_str: str,
+    service: "SharePointContentService",
+    params: "SharepointContentTaskParam",
+    knowledge: "IntegrationKnowledge",
+) -> str | None:
+    """Run the delta pass a skipped task asked for, while still holding the lease."""
+    if not await redis_client.delete(_pending_key(knowledge_id_str)):
+        return None
+    logger.info(
+        "Running pending delta pass for knowledge %s requested while the sync "
+        "lease was held",
+        knowledge_id_str,
+    )
+    try:
+        return await _run_delta(service, params, knowledge)
+    except Exception:
+        # The service has already recorded the failure on the knowledge; the
+        # result of the sync that owned the lease still stands.
+        logger.error(
+            "Pending delta pass failed for knowledge %s",
+            knowledge_id_str,
+            exc_info=True,
+        )
+        return None
+
+
 @worker.task(channel_type=ChannelType.PULL_SHAREPOINT_CONTENT)
 async def pull_sharepoint_content(
     params: "SharepointContentTaskParam", container: "Container", **kw: Any
 ):
-    # Redis-based deduplication to prevent duplicate syncs from concurrent webhooks
     knowledge_id_str = str(params.integration_knowledge_id)
-    lock_key = f"sharepoint_sync_lock:{knowledge_id_str}"
 
     try:
-        settings = get_settings()
-        redis_client = await redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
-            build_redis_url(settings),
-            encoding="utf8",
-            decode_responses=True,
-            **build_redis_auth_kwargs(settings),
-        )
-
+        redis_client = await _open_redis()
         try:
             async with redis_lease(
                 redis_client,
-                lock_key,
+                _lock_key(knowledge_id_str),
                 ttl_seconds=SHAREPOINT_SYNC_LOCK_TTL_SECONDS,
             ) as acquired:
                 if not acquired:
@@ -131,13 +205,7 @@ async def pull_sharepoint_content(
                     return "Skipped: Duplicate sync blocked by Redis lock"
 
                 logger.info(f"Acquired sync lock for knowledge {knowledge_id_str}")
-
-                knowledge = await _get_knowledge_with_retry(
-                    container, params.integration_knowledge_id
-                )
-                assert knowledge is not None
-                await _validate_embedding_provider(container, knowledge)
-                service = container.sharepoint_content_service()
+                knowledge, service = await _prepare_sharepoint_sync(container, params)
 
                 result = await service.pull_content(
                     token_id=params.token_id,
@@ -151,6 +219,9 @@ async def pull_sharepoint_content(
                 )
 
                 logger.info(f"Completed full sync for knowledge {knowledge_id_str}")
+                await _drain_pending_delta(
+                    redis_client, knowledge_id_str, service, params, knowledge
+                )
                 return result
         finally:
             await redis_client.close()
@@ -171,54 +242,55 @@ async def sync_sharepoint_delta(
     Process incremental SharePoint changes using delta query.
     This is called by webhooks to efficiently sync only changed items.
     """
-    # Redis-based deduplication to prevent duplicate syncs from concurrent webhooks
-    # This lock persists across the webhook handler and worker task boundary
     knowledge_id_str = str(params.integration_knowledge_id)
-    lock_key = f"sharepoint_sync_lock:{knowledge_id_str}"
+    lock_key = _lock_key(knowledge_id_str)
 
     try:
-        settings = get_settings()
-        redis_client = await redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
-            build_redis_url(settings),
-            encoding="utf8",
-            decode_responses=True,
-            **build_redis_auth_kwargs(settings),
-        )
-
+        redis_client = await _open_redis()
         try:
             async with redis_lease(
-                redis_client,
-                lock_key,
-                ttl_seconds=SHAREPOINT_SYNC_LOCK_TTL_SECONDS,
+                redis_client, lock_key, ttl_seconds=SHAREPOINT_SYNC_LOCK_TTL_SECONDS
             ) as acquired:
-                if not acquired:
-                    logger.info(
-                        f"Skipping sync for knowledge {knowledge_id_str} - "
-                        f"another sync is already in progress (Redis lock active)"
+                if acquired:
+                    logger.info(f"Acquired sync lock for knowledge {knowledge_id_str}")
+                    knowledge, service = await _prepare_sharepoint_sync(
+                        container, params
                     )
-                    return "Skipped: Duplicate sync blocked by Redis lock"
+                    result = await _run_delta(service, params, knowledge)
+                    await _drain_pending_delta(
+                        redis_client, knowledge_id_str, service, params, knowledge
+                    )
+                    return result
 
-                logger.info(f"Acquired sync lock for knowledge {knowledge_id_str}")
-
-                knowledge = await _get_knowledge_with_retry(
-                    container, params.integration_knowledge_id
-                )
-                assert knowledge is not None
-                await _validate_embedding_provider(container, knowledge)
-                service = container.sharepoint_content_service()
-
-                result = await service.process_delta_changes(
-                    token_id=params.token_id,
-                    tenant_app_id=params.tenant_app_id,
-                    integration_knowledge_id=knowledge.id,
-                    site_id=params.site_id,
-                    drive_id=params.drive_id,
-                    resource_type=params.resource_type,
-                )
-                return result
+            logger.info(
+                f"Sync lease for knowledge {knowledge_id_str} is held by another "
+                "sync; leaving a pending marker for the lease holder"
+            )
+            await redis_client.set(
+                _pending_key(knowledge_id_str),
+                "1",
+                ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+            )
+            # The holder may have passed its own pending check and released in the
+            # meantime; one short retry closes that window instead of waiting for
+            # the next webhook.
+            await asyncio.sleep(_PENDING_RETRY_DELAY_SECONDS)
+            async with redis_lease(
+                redis_client, lock_key, ttl_seconds=SHAREPOINT_SYNC_LOCK_TTL_SECONDS
+            ) as acquired:
+                if acquired:
+                    knowledge, service = await _prepare_sharepoint_sync(
+                        container, params
+                    )
+                    drained = await _drain_pending_delta(
+                        redis_client, knowledge_id_str, service, params, knowledge
+                    )
+                    if drained is not None:
+                        return drained
+            return "Skipped: Duplicate sync blocked by Redis lock"
         finally:
             await redis_client.close()
 
     except Exception as e:
-        logger.error(f"Error in sync_sharepoint_delta: {e}")
+        logger.error(f"Error in sync_sharepoint_delta: {e}", exc_info=True)
         raise
