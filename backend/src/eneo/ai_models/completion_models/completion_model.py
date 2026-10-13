@@ -136,6 +136,11 @@ class ToolCallMetadata:
     # arguments are still being written.
     app_view: Optional[dict[str, Any]] = None
 
+    # Knowledge documents (and files) a tool result handed to the model as
+    # signed original links, admitted into this conversation's reference map
+    # and shown as handles. Persisted so a later turn can mint them again.
+    referenced_file_ids: Optional[list[UUID]] = None
+
 
 @dataclass
 class McpToolReference:

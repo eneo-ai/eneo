@@ -6,10 +6,16 @@ from uuid import UUID
 
 import aiohttp
 
+from eneo.integration.infrastructure.content_service.originals import (
+    retain_original_bytes,
+)
 from eneo.integration.infrastructure.content_service.sharepoint_metadata import (
     LIST_ITEM_FIELDS_EXPAND,
 )
-from eneo.integration.infrastructure.content_service.types import SharePointItem
+from eneo.integration.infrastructure.content_service.types import (
+    SharePointFileContent,
+    SharePointItem,
+)
 from eneo.integration.infrastructure.content_service.utils import (
     process_sharepoint_response,
 )
@@ -343,11 +349,11 @@ class SharePointContentClient(BaseClient):
         self,
         download_url: str,
         file_name: str,
-    ) -> tuple[str, str]:
+    ) -> SharePointFileContent:
         # Streams the body directly off the raw session to enforce the size
         # limit, bypassing WrappedAiohttpClient — so throttling retry must be
         # applied here explicitly.
-        async def _download() -> tuple[str, str]:
+        async def _download() -> SharePointFileContent:
             async with self.client.client.get(
                 download_url, headers=self.headers
             ) as response:
@@ -355,23 +361,37 @@ class SharePointContentClient(BaseClient):
                 content_type = response.headers.get("Content-Type", "")
                 content_type_lower = content_type.lower()
                 payload = await self._read_response_with_size_limit(response, file_name)
+                # Only files whose original is kept hold on to their bytes.
+                data = (
+                    payload if retain_original_bytes(file_name, content_type) else None
+                )
 
                 if "application/json" in content_type_lower:
                     decoded = payload.decode(
                         response.charset or "utf-8", errors="replace"
                     )
                     try:
-                        return str(json.loads(decoded)), content_type
+                        text = str(json.loads(decoded))
                     except json.JSONDecodeError:
-                        return decoded, content_type
+                        text = decoded
+                    return SharePointFileContent(
+                        text=text,
+                        content_type=content_type,
+                        file_name=file_name,
+                        data=data,
+                    )
 
                 if (
                     "text/" in content_type_lower
                     or "application/xml" in content_type_lower
                 ):
-                    return (
-                        payload.decode(response.charset or "utf-8", errors="replace"),
-                        content_type,
+                    return SharePointFileContent(
+                        text=payload.decode(
+                            response.charset or "utf-8", errors="replace"
+                        ),
+                        content_type=content_type,
+                        file_name=file_name,
+                        data=data,
                     )
 
                 text, detected_content_type = process_sharepoint_response(
@@ -379,7 +399,12 @@ class SharePointContentClient(BaseClient):
                     content_type=content_type,
                     filename=file_name,
                 )
-                return text, detected_content_type
+                return SharePointFileContent(
+                    text=text,
+                    content_type=detected_content_type,
+                    file_name=file_name,
+                    data=data,
+                )
 
         return await retry_on_throttle(
             _download,
@@ -745,7 +770,7 @@ class SharePointContentClient(BaseClient):
 
     async def get_file_content_by_id(
         self, drive_id: str, item_id: str
-    ) -> tuple[str, str]:
+    ) -> SharePointFileContent:
         """
         Get the content of a file by its ID.
 
@@ -754,7 +779,8 @@ class SharePointContentClient(BaseClient):
             item_id: The ID of the file
 
         Returns:
-            Tuple of (extracted text, content type)
+            The extracted text, the content type and, for files whose
+            original is kept, the downloaded bytes.
         """
         try:
             file_info = await self.get_file_metadata(drive_id, item_id)

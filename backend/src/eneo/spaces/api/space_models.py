@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Any, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModelPublic,
@@ -21,6 +21,7 @@ from eneo.embedding_models.presentation.embedding_model_models import (
 )
 from eneo.group_chat.presentation.models import GroupChatSparse
 from eneo.groups_legacy.api.group_models import GroupMetadata, GroupPublicWithMetadata
+from eneo.integration.domain.tabular_policy import TabularPolicy
 from eneo.integration.presentation.models import IntegrationKnowledgePublic
 from eneo.jobs.job_models import JobPublic
 from eneo.main.models import (
@@ -398,7 +399,19 @@ class CreateSpaceIntegrationKnowledgeBatchResponse(BaseModel):
 
 
 class UpdateIntegrationKnowledgeRequest(BaseModel):
-    name: str
+    """Fields of an integration knowledge source a space may change.
+
+    Omitted fields are left as they are; at least one must be given.
+    """
+
+    name: Optional[str] = Field(default=None, min_length=1)
+    tabular_policy: Optional[TabularPolicy] = None
+
+    @model_validator(mode="after")
+    def _requires_a_change(self) -> "UpdateIntegrationKnowledgeRequest":
+        if self.name is None and self.tabular_policy is None:
+            raise ValueError("Provide a name or a tabular_policy to update")
+        return self
 
 
 class UpdateIntegrationKnowledgeWrapperRequest(BaseModel):

@@ -4,7 +4,7 @@ from typing import Annotated
 from urllib.parse import urlencode
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -211,8 +211,13 @@ def authorize_original_download(
                     "description": "SHA-256 digest of the original representation",
                     "schema": {"type": "string"},
                 },
+                "ETag": {
+                    "description": "Content digest for If-None-Match revalidation",
+                    "schema": {"type": "string"},
+                },
             },
         },
+        304: {"description": "Access revalidated; original content is unchanged"},
         **responses.get_responses([401, 403, 404, 409, 503]),
     },
     summary="Download an uploaded knowledge original",
@@ -232,7 +237,8 @@ async def download_original(
         tuple[ContentDisposition, UUID], Depends(authorize_original_download)
     ],
     container: Annotated[Container, Depends(get_container(with_transaction=False))],
-) -> ClosingStreamingResponse:
+    if_none_match: Annotated[str | None, Header()] = None,
+) -> ClosingStreamingResponse | Response:
     disposition, tenant_id = access
     download = await open_info_blob_original_download(
         repo=container.info_blob_repo(),
@@ -240,12 +246,27 @@ async def download_original(
         info_blob_id=id,
         expected_tenant_id=tenant_id,
     )
+    # Resolve through the authorized path first so tenant, availability and
+    # storage checks also run on a cache revalidation. The entity tag is the
+    # content digest: tool runtimes cache by it and revalidate on every call.
+    etag = f'"{download.sha256.hex()}"'
+    if if_none_match is not None and any(
+        value.strip().removeprefix("W/") in (etag, "*")
+        for value in if_none_match.split(",")
+    ):
+        await download.aclose()
+        return Response(
+            status_code=304,
+            headers={"ETag": etag, "Cache-Control": "private, no-cache"},
+        )
     headers = {
         "Content-Disposition": content_disposition_header(
             disposition.value, download.filename
         ),
         "Content-Length": str(download.content_length),
         "Repr-Digest": f"sha-256=:{base64.b64encode(download.sha256).decode('ascii')}:",
+        "ETag": etag,
+        "Cache-Control": "private, no-cache",
     }
 
     return ClosingStreamingResponse(

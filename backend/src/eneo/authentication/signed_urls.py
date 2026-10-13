@@ -5,7 +5,7 @@ import json
 import re
 import time
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
@@ -323,38 +323,69 @@ def verify_mcp_app_view_token(token: str) -> dict[str, Any] | None:
     )
 
 
-# Path suffix of a signed original-download URL (the shape minted by
-# build_signed_original_download_url); matched host-agnostically because the
-# HMAC token is the sole authorizer.
-_FILE_ORIGINAL_DOWNLOAD_PATH = re.compile(
-    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download/?$"
+# Route of a signed original-download URL. Two resources serve exact
+# originals under the same shape: conversation files (``files``) and knowledge
+# documents (``info-blobs``). Everything that recognizes, redacts, restores or
+# repairs a reference link keys on this one fragment so the two kinds cannot
+# drift apart. Matched host-agnostically because the HMAC token is the sole
+# authorizer.
+_ORIGINAL_DOWNLOAD_ROUTE = (
+    r"/api/v1/(?P<kind>files|info-blobs)/(?P<file_id>[0-9a-fA-F-]{36})"
+    r"/original/download"
 )
+_ORIGINAL_DOWNLOAD_PATH = re.compile(_ORIGINAL_DOWNLOAD_ROUTE + r"/?$")
+
+OriginalReferenceKind = Literal["file", "info_blob"]
+_KIND_BY_ROUTE: Mapping[str, OriginalReferenceKind] = {
+    "files": "file",
+    "info-blobs": "info_blob",
+}
+_ROUTE_BY_KIND: Mapping[OriginalReferenceKind, str] = {
+    "file": "files",
+    "info_blob": "info-blobs",
+}
 
 
-def parse_file_reference_url(url: str) -> tuple[UUID, str] | None:
-    """Extract ``(file_id, token)`` from a signed original-download URL.
+def parse_original_reference_url(
+    url: str,
+) -> tuple[OriginalReferenceKind, UUID, str] | None:
+    """Extract ``(kind, resource_id, token)`` from a signed original link.
 
     Host-agnostic on purpose: the signed token is the sole authorizer, so
     links minted against either the public origin or the tool-facing
     reference base URL both resolve. The inverse of
-    :func:`build_signed_original_download_url`; the token is not verified
-    here.
+    :func:`build_signed_original_download_url` and
+    :func:`build_signed_info_blob_original_download_url`; the token is not
+    verified here.
     """
     try:
         parts = urlsplit(url)
     except ValueError:
         return None
-    match = _FILE_ORIGINAL_DOWNLOAD_PATH.search(parts.path)
+    match = _ORIGINAL_DOWNLOAD_PATH.search(parts.path)
     if match is None:
         return None
     tokens = parse_qs(parts.query).get("token")
     if not tokens or not tokens[0]:
         return None
     try:
-        file_id = UUID(match.group("file_id"))
+        resource_id = UUID(match.group("file_id"))
     except ValueError:
         return None
-    return file_id, tokens[0]
+    return _KIND_BY_ROUTE[match.group("kind")], resource_id, tokens[0]
+
+
+def parse_file_reference_url(url: str) -> tuple[UUID, str] | None:
+    """Extract ``(file_id, token)`` from a signed conversation-file link.
+
+    Knowledge-document links have the same shape but a different audience
+    and reader; callers that may only act on conversation files use this
+    narrower parser.
+    """
+    parsed = parse_original_reference_url(url)
+    if parsed is None or parsed[0] != "file":
+        return None
+    return parsed[1], parsed[2]
 
 
 _REFERENCE_TOKEN = re.compile(
@@ -365,8 +396,11 @@ REDACTED_TOKEN = "REDACTED"
 
 
 _REDACTED_REFERENCE_URL = re.compile(
-    r"https?://[^\s\"'<>]*?/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})"
-    r"/original/download/?\?[^\s\"'<>]*?token=" + REDACTED_TOKEN + r"[^\s\"'<>]*"
+    r"https?://[^\s\"'<>]*?"
+    + _ORIGINAL_DOWNLOAD_ROUTE
+    + r"/?\?[^\s\"'<>]*?token="
+    + REDACTED_TOKEN
+    + r"[^\s\"'<>]*"
 )
 
 
@@ -444,22 +478,19 @@ def redact_reference_tokens_in_json(text: str) -> str:
 
 
 _REFERENCE_LINK = re.compile(
-    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download/?"
+    _ORIGINAL_DOWNLOAD_ROUTE + r"/?"
     r"\?(?:[^\s\"'<>]*?&)?token=(?P<token>[A-Za-z0-9_\-=.]+)"
 )
 
 
 # Admission must also recognize tokenless/malformed references. Otherwise a
 # model typo can hide a file identity from the conversation boundary check.
-_REFERENCE_LOCATION = re.compile(
-    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download(?=$|[/\s?\"'<>])"
-)
+_REFERENCE_LOCATION = re.compile(_ORIGINAL_DOWNLOAD_ROUTE + r"(?=$|[/\s?\"'<>])")
 
 # A structured input can have a missing token or a stray final path component.
 # This is only for lookup in the already-authorized map, never for HTTP access.
 _REPAIRABLE_REFERENCE_PATH = re.compile(
-    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download"
-    r"(?P<tail>(?:/[A-Za-z0-9_-]+)?/?)$"
+    _ORIGINAL_DOWNLOAD_ROUTE + r"(?P<tail>(?:/[A-Za-z0-9_-]+)?/?)$"
 )
 
 
@@ -495,6 +526,30 @@ def reference_file_ids(value: object, *, include_redacted: bool = False) -> set[
     return file_ids
 
 
+def reference_kinds(value: object) -> set[OriginalReferenceKind]:
+    """Which kinds of original the reference links in ``value`` point at.
+
+    Shape only, tokenless and malformed links included, like
+    :func:`reference_file_ids` with ``include_redacted``. Lets infrastructure
+    phrase a hint by what was referenced (a conversation file, a knowledge
+    document) without resolving anything.
+    """
+    kinds: set[OriginalReferenceKind] = set()
+    if isinstance(value, str):
+        for match in _REFERENCE_LOCATION.finditer(unquote(value)):
+            kinds.add(_KIND_BY_ROUTE[match.group("kind")])
+        return kinds
+    if isinstance(value, dict):
+        entries = list(cast(dict[object, object], value).values())
+    elif isinstance(value, list):
+        entries = cast(list[object], value)
+    else:
+        return kinds
+    for item in entries:
+        kinds |= reference_kinds(item)
+    return kinds
+
+
 def looks_like_reference_url(url: str) -> bool:
     """Whether ``url`` has the shape of a signed attachment reference.
 
@@ -502,7 +557,37 @@ def looks_like_reference_url(url: str) -> bool:
     tool arguments (e.g. to hint at the built-in reader when an external tool
     fails) without authorizing anything.
     """
-    return parse_file_reference_url(url) is not None
+    return parse_original_reference_url(url) is not None
+
+
+def verify_eneo_original_reference(
+    url: str, *, tenant_id: UUID
+) -> tuple[OriginalReferenceKind, UUID] | None:
+    """The kind and id behind a signed original link that Eneo itself issued.
+
+    For admitting links that arrive from outside the trusted completion layer
+    (a tool result). The token must verify under the audience that matches
+    the route, name the resource in the path and belong to ``tenant_id``, so
+    a provider cannot smuggle a foreign or forged link into a conversation's
+    reference map. Shape, signature and claims only; no database access.
+    """
+    parsed = parse_original_reference_url(url)
+    if parsed is None:
+        return None
+    kind, resource_id, token = parsed
+    if kind == "file":
+        payload = verify_file_original_download_token(token)
+        claim = "file_id"
+    else:
+        payload = verify_info_blob_original_download_token(token)
+        claim = "info_blob_id"
+    if payload is None:
+        return None
+    if payload.get(claim) != str(resource_id):
+        return None
+    if payload.get("tenant_id") != str(tenant_id):
+        return None
+    return kind, resource_id
 
 
 def build_signed_original_download_url(
@@ -532,6 +617,38 @@ def build_signed_original_download_url(
     )
     return (
         f"{base_url.rstrip('/')}/api/v1/files/{file_id}/original/download/"
+        f"?token={token}"
+    )
+
+
+def build_signed_info_blob_original_download_url(
+    info_blob_id: UUID,
+    base_url: str,
+    expires_in: int,
+    tenant_id: UUID,
+    content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT,
+) -> str:
+    """Build an absolute signed URL for a knowledge document's original.
+
+    The knowledge-document twin of :func:`build_signed_original_download_url`:
+    same clamp, same shape, purpose-separated token. Minted by internal tools
+    that hand a document to a provider, so ``base_url`` is the configured
+    reference origin, never a request host.
+    """
+    expires_in = max(
+        1, min(expires_in, FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS)
+    )
+    issued_at = int(time.time())
+    token = generate_info_blob_original_download_token(
+        info_blob_id=info_blob_id,
+        expires_at=issued_at + expires_in,
+        content_disposition=content_disposition,
+        tenant_id=tenant_id,
+        issued_at=issued_at,
+    )
+    route = _ROUTE_BY_KIND["info_blob"]
+    return (
+        f"{base_url.rstrip('/')}/api/v1/{route}/{info_blob_id}/original/download/"
         f"?token={token}"
     )
 

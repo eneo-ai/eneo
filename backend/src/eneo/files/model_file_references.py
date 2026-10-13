@@ -21,7 +21,7 @@ HANDLE_PATTERN = r"eneo-file:[0-9a-f]{32}"
 _HANDLE = re.compile(HANDLE_PATTERN + r"$")
 # Historical arguments/results can contain URLs inside JSON text or prose.
 _LEGACY_LINK = re.compile(
-    r"https?://[^\s\"'<>]+?/api/v1/files/(?P<id>[0-9a-fA-F-]{36})"
+    r"https?://[^\s\"'<>]+?/api/v1/(?:files|info-blobs)/(?P<id>[0-9a-fA-F-]{36})"
     r"/original/download[^\s\"'<>]*"
 )
 

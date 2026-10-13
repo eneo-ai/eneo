@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from typing_extensions import TypedDict
@@ -12,6 +13,7 @@ from eneo.integration.domain.value_objects import (
 
 __all__ = [
     "GraphParentReference",
+    "SharePointFileContent",
     "SharePointItem",
     "OAuthResource",
     "SkippedDetail",
@@ -50,6 +52,21 @@ class SharePointItem(TypedDict, total=False):
     createdDateTime: str
     lastModifiedDateTime: str
     listItem: GraphListItem
+
+
+@dataclass(frozen=True, slots=True)
+class SharePointFileContent:
+    """What downloading a file yields.
+
+    The extracted text is always present; the bytes only for the kinds of
+    file whose original is kept (see ``content_service.originals``), so a
+    large presentation never sits in memory longer than its extraction.
+    """
+
+    text: str
+    content_type: str
+    file_name: str
+    data: bytes | None = None
 
 
 class SyncStats(TypedDict):

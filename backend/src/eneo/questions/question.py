@@ -167,6 +167,11 @@ class ToolCallInfo(BaseModel):
     # model a fresh reference URL per image so it can pass the image back to
     # an image tool. Absent on rows persisted before this field existed.
     generated_file_ids: Optional[list[UUID]] = None
+    # Knowledge documents (and files) this call's result handed to the model
+    # as signed original links. A later turn mints fresh links for them and
+    # appends their handles on replay, so a follow-up can pass the same
+    # document to a tool. Absent on rows persisted before this field existed.
+    referenced_file_ids: Optional[list[UUID]] = None
     # The tool result's MCP `structuredContent`, kept only for a call whose
     # tool has an approved MCP App view, which renders from it. Like `result`
     # it is left out of conversation payloads and read through the tool-result

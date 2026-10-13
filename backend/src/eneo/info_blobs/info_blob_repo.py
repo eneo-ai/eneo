@@ -43,6 +43,10 @@ from eneo.websites.domain.source_url import normalize_url
 _InfoBlobNoTextT = TypeVar("_InfoBlobNoTextT", bound=InfoBlobInDBNoText)
 
 
+def _escape_like(term: str) -> str:
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @dataclass(frozen=True, slots=True)
 class InfoBlobOriginal:
     content_id: UUID
@@ -51,6 +55,7 @@ class InfoBlobOriginal:
     access_class: ContentAccessClass
     state: ContentState
     original_filename: str
+    media_type: str | None = None
 
     @property
     def usable(self) -> bool:
@@ -381,27 +386,28 @@ class InfoBlobRepository:
             and row.sha256 == original_sha256
         )
 
-    async def get_original(self, info_blob_id: UUID) -> InfoBlobOriginal | None:
-        row = (
-            await self.session.execute(
-                sa.select(
-                    InfoBlobContentReferences.content_id,
-                    InfoBlobContentReferences.original_filename,
-                    ObjectContents.tenant_id,
-                    ObjectContents.sha256,
-                    ObjectContents.access_class,
-                    ObjectContents.state,
-                )
-                .select_from(InfoBlobContentReferences)
-                .join(
-                    ObjectContents,
-                    ObjectContents.id == InfoBlobContentReferences.content_id,
-                )
-                .where(InfoBlobContentReferences.info_blob_id == info_blob_id)
+    @staticmethod
+    def _original_stmt():
+        return (
+            sa.select(
+                InfoBlobContentReferences.info_blob_id,
+                InfoBlobContentReferences.content_id,
+                InfoBlobContentReferences.original_filename,
+                ObjectContents.tenant_id,
+                ObjectContents.sha256,
+                ObjectContents.access_class,
+                ObjectContents.state,
+                ObjectContents.verified_media_type,
             )
-        ).one_or_none()
-        if row is None:
-            return None
+            .select_from(InfoBlobContentReferences)
+            .join(
+                ObjectContents,
+                ObjectContents.id == InfoBlobContentReferences.content_id,
+            )
+        )
+
+    @staticmethod
+    def _original_from_row(row: Any) -> InfoBlobOriginal:
         return InfoBlobOriginal(
             content_id=row.content_id,
             tenant_id=row.tenant_id,
@@ -409,7 +415,38 @@ class InfoBlobRepository:
             access_class=ContentAccessClass(row.access_class),
             state=ContentState(row.state),
             original_filename=row.original_filename,
+            media_type=row.verified_media_type,
         )
+
+    async def get_original(self, info_blob_id: UUID) -> InfoBlobOriginal | None:
+        row = (
+            await self.session.execute(
+                self._original_stmt().where(
+                    InfoBlobContentReferences.info_blob_id == info_blob_id
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return self._original_from_row(row)
+
+    async def get_originals(
+        self, info_blob_ids: list[UUID]
+    ) -> dict[UUID, InfoBlobOriginal]:
+        """The referenced originals of several documents in one query."""
+        if not info_blob_ids:
+            return {}
+        ids_parameter = sa.bindparam(
+            "info_blob_ids",
+            type_=ARRAY(PostgreSQLUUID(as_uuid=True)),
+        )
+        rows = await self.session.execute(
+            self._original_stmt().where(
+                InfoBlobContentReferences.info_blob_id == sa.any_(ids_parameter)
+            ),
+            {"info_blob_ids": list(dict.fromkeys(info_blob_ids))},
+        )
+        return {row.info_blob_id: self._original_from_row(row) for row in rows.all()}
 
     async def get_original_availability(self, info_blob_ids: list[UUID]) -> set[UUID]:
         """Return ids with a referenced, available original in one query."""
@@ -485,6 +522,20 @@ class InfoBlobRepository:
             content_id=content_id,
             original_filename=original_filename,
         )
+
+    async def release_original_reference(self, info_blob_id: UUID) -> bool:
+        """Drop a version's claim on its original bytes.
+
+        The content object itself is reference-counted; once no version
+        refers to it the sweep reclaims it after the grace period. Returns
+        whether a reference existed.
+        """
+        deleted = await self.session.execute(
+            sa.delete(InfoBlobContentReferences).where(
+                InfoBlobContentReferences.info_blob_id == info_blob_id
+            )
+        )
+        return affected_row_count(deleted) == 1
 
     async def refresh_original_filename(
         self,
@@ -922,6 +973,45 @@ class InfoBlobRepository:
             .limit(limit)
             .offset(offset)
         )
+        rows = await self.session.execute(stmt)
+        return [
+            InfoBlobListing(id=row.id, title=row.title, url=row.url)
+            for row in rows.all()
+        ]
+
+    async def find_titles_by_sources(
+        self,
+        *,
+        group_ids: list[UUID],
+        website_ids: list[UUID],
+        integration_knowledge_ids: list[UUID],
+        terms: list[str],
+        limit: int,
+        exclude_ids: list[UUID] | None = None,
+    ) -> list[InfoBlobListing]:
+        """Documents whose title (or url) contains any of ``terms``.
+
+        A lexical complement to passage search for documents that have no
+        searchable passages, such as spreadsheets kept for tools only. Bounded
+        by the caller's sources and ``limit``; case-insensitive substring match
+        with LIKE wildcards in the terms escaped.
+        """
+        if not terms:
+            return []
+        label = sa.func.coalesce(InfoBlobs.title, InfoBlobs.url)
+        patterns = [f"%{_escape_like(term)}%" for term in terms]
+        stmt = (
+            sa.select(InfoBlobs.id, InfoBlobs.title, InfoBlobs.url)
+            .where(
+                self._source_filter(group_ids, website_ids, integration_knowledge_ids),
+                active_info_blob_version(),
+                sa.or_(*[label.ilike(pattern, escape="\\") for pattern in patterns]),
+            )
+            .order_by(label.nulls_last(), InfoBlobs.id)
+            .limit(limit)
+        )
+        if exclude_ids:
+            stmt = stmt.where(InfoBlobs.id.not_in(exclude_ids))
         rows = await self.session.execute(stmt)
         return [
             InfoBlobListing(id=row.id, title=row.title, url=row.url)

@@ -130,6 +130,16 @@ class _FakeMCPProxy:
     def __init__(self):
         self.calls = []
         self.refreshed = []
+        self.admitted_references = {}
+
+    def verify_reference_link(self, url):
+        # A plain fake admits no tool-result link; tests that exercise
+        # admission override this with a verifier of their own.
+        del url
+        return None
+
+    def allow_file_references(self, file_ids):
+        self.admitted_references.update(file_ids)
 
     def get_allowed_tool_names(self):
         return {"server__tool"}
@@ -268,7 +278,7 @@ def _make_adapter() -> TenantModelAdapter:
 
 
 def test_build_tool_result_with_references_uses_self_describing_resource_blocks():
-    llm_text, display_text, refs, _ = _build_tool_result_with_references(
+    llm_text, display_text, refs, _, _admitted = _build_tool_result_with_references(
         content_list=[
             {"type": "text", "text": "Tool summary.\n"},
             {
@@ -327,7 +337,7 @@ def test_build_tool_result_with_references_uses_self_describing_resource_blocks(
 
 
 def test_build_tool_result_with_references_skips_unciteable_resources():
-    llm_text, display_text, refs, _ = _build_tool_result_with_references(
+    llm_text, display_text, refs, _, _admitted = _build_tool_result_with_references(
         content_list=[
             {"type": "text", "text": "Tool summary."},
             {
@@ -349,14 +359,16 @@ def test_build_tool_result_with_references_skips_unciteable_resources():
 def test_build_tool_result_with_references_turns_image_blocks_into_generated_images():
     png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
     encoded = base64.b64encode(png_bytes).decode("ascii")
-    llm_text, display_text, refs, images = _build_tool_result_with_references(
-        content_list=[
-            {"type": "text", "text": "Here is your picture."},
-            {"type": "image", "data": encoded, "mime_type": "image/png"},
-        ],
-        tool_call_id="call_img",
-        mcp_tool_name="images__generate",
-        existing_prefixes=set(),
+    llm_text, display_text, refs, images, _admitted = (
+        _build_tool_result_with_references(
+            content_list=[
+                {"type": "text", "text": "Here is your picture."},
+                {"type": "image", "data": encoded, "mime_type": "image/png"},
+            ],
+            tool_call_id="call_img",
+            mcp_tool_name="images__generate",
+            existing_prefixes=set(),
+        )
     )
 
     assert refs == []
@@ -378,7 +390,7 @@ def test_build_tool_result_with_references_turns_image_blocks_into_generated_ima
 def test_build_tool_result_with_references_turns_file_blocks_into_generated_files():
     pdf = b"%PDF-1.7 report"
     encoded = base64.b64encode(pdf).decode("ascii")
-    llm_text, _, refs, files = _build_tool_result_with_references(
+    llm_text, _, refs, files, _admitted = _build_tool_result_with_references(
         content_list=[
             {"type": "text", "text": "Done."},
             {
@@ -431,15 +443,83 @@ def test_saved_files_give_the_model_same_turn_handles_without_credentials():
     )
 
 
-def test_build_tool_result_with_references_skips_undecodable_image_blocks():
-    llm_text, display_text, refs, images = _build_tool_result_with_references(
+def test_build_tool_result_admits_verified_original_links_as_file_references():
+    # A knowledge tool hands a document over as a signed original link. The
+    # verifier (the proxy, tenant-bound) decides; an admitted link becomes a
+    # credential-free reference entry for the model and a display row, and
+    # the link itself never reaches either text.
+    document_id = uuid4()
+    signed = (
+        f"https://eneo.example/api/v1/info-blobs/{document_id}"
+        "/original/download/?token=synthetic"
+    )
+    foreign = (
+        f"https://eneo.example/api/v1/info-blobs/{uuid4()}/original/download/?token=x"
+    )
+    xlsx = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    def verify(url):
+        return ("info_blob", document_id) if url == signed else None
+
+    llm_text, display_text, refs, images, admitted = _build_tool_result_with_references(
         content_list=[
-            {"type": "image", "data": "not base64!!", "mime_type": "image/png"},
-            {"type": "image", "data": "", "mime_type": "image/png"},
+            {"type": "text", "text": "2 result(s)"},
+            {
+                "type": "resource_link",
+                "uri": signed,
+                "name": "sales.xlsx",
+                "mime_type": xlsx,
+                "meta": {"info_blob_id": str(document_id), "title": "Sales"},
+            },
+            {"type": "resource_link", "uri": foreign, "name": "other.xlsx"},
         ],
-        tool_call_id="call_img",
-        mcp_tool_name="images__generate",
+        tool_call_id="call_k",
+        mcp_tool_name="knowledge__search_knowledge",
         existing_prefixes=set(),
+        verify_reference_link=verify,
+    )
+
+    assert admitted == {document_id: signed}
+    assert images == []
+    entry = json.loads(llm_text.split("File reference: ", 1)[1].split("\n", 1)[0])
+    assert entry == {
+        "kind": "document",
+        "filename": "sales.xlsx",
+        "mimetype": xlsx,
+        "file_ref": file_handle(document_id),
+        "document_id": str(document_id),
+    }
+    assert "synthetic" not in llm_text and "synthetic" not in display_text
+    assert "other.xlsx" not in llm_text
+    assert [ref.uri for ref in refs] == [f"eneo://info-blob/{document_id}"]
+    assert refs[0].meta["filename"] == "sales.xlsx"
+
+
+def test_build_tool_result_ignores_original_links_without_a_verifier():
+    document_id = uuid4()
+    signed = f"https://eneo.example/api/v1/info-blobs/{document_id}/original/download/?token=t"
+    llm_text, _, refs, _, admitted = _build_tool_result_with_references(
+        content_list=[{"type": "resource_link", "uri": signed, "name": "sales.xlsx"}],
+        tool_call_id="call_k",
+        mcp_tool_name="knowledge__search_knowledge",
+        existing_prefixes=set(),
+    )
+    assert admitted == {}
+    assert refs == []
+    assert "File reference" not in llm_text
+
+
+def test_build_tool_result_with_references_skips_undecodable_image_blocks():
+    llm_text, display_text, refs, images, _admitted = (
+        _build_tool_result_with_references(
+            content_list=[
+                {"type": "image", "data": "not base64!!", "mime_type": "image/png"},
+                {"type": "image", "data": "", "mime_type": "image/png"},
+            ],
+            tool_call_id="call_img",
+            mcp_tool_name="images__generate",
+            existing_prefixes=set(),
+        )
     )
 
     assert images == []

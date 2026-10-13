@@ -322,6 +322,14 @@ def _completion_adapter(
 
 
 class _FakeMCPProxy:
+    def verify_reference_link(self, url):
+        # Admits no tool-result links; this suite is about transport headers.
+        del url
+        return None
+
+    def allow_file_references(self, file_ids):
+        del file_ids
+
     def __init__(self) -> None:
         self.calls: list[Any] = []
 
