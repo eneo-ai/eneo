@@ -3,7 +3,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { m } from "$lib/paraglide/messages";
-  import { classifyMicrosoftAuthError, type MicrosoftAuthGuidance } from "./microsoftAuthErrors";
+  import { classifyMicrosoftAuthError, getMicrosoftAuthGuidanceText } from "./microsoftAuthErrors";
 
   type TenantSharePointAppPublic = components["schemas"]["TenantSharePointAppPublic"];
 
@@ -24,17 +24,6 @@
     if (!value) return null;
     return Number.isNaN(new Date(value).getTime()) ? value : formatDateTime(value);
   }
-
-  function getGuidanceText(kind: MicrosoftAuthGuidance): string {
-    switch (kind) {
-      case "invalid_client":
-        return m.sharepoint_auth_guidance_invalid_client();
-      case "interaction_required":
-        return m.sharepoint_auth_guidance_interaction_required();
-      case "invalid_grant":
-        return m.sharepoint_auth_guidance_invalid_grant();
-    }
-  }
 </script>
 
 <div class="flex flex-col gap-1 text-xs {className}">
@@ -51,9 +40,9 @@
   {/if}
 
   {#if status === "error" && config.last_auth_error}
-    <div class="text-negative-stronger" role="status">
+    <div class="text-negative-stronger">
       {#if guidance}
-        <p>{getGuidanceText(guidance)}</p>
+        <p>{getMicrosoftAuthGuidanceText(guidance)}</p>
         <details class="mt-1">
           <summary class="cursor-pointer hover:underline">
             {m.sharepoint_auth_error_details()}
