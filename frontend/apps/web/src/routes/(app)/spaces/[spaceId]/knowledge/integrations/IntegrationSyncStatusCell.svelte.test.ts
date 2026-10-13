@@ -112,6 +112,25 @@ describe("IntegrationSyncStatusCell", () => {
     expect(page.getByRole("button", { name: m.integration_sync_error_show() }).query()).toBeNull();
   });
 
+  it("links the document count to the documents page when given one", async () => {
+    const { unmount } = render(IntegrationSyncStatusCell, {
+      knowledge: knowledge({ last_sync_status: "success", document_count: 12 }),
+      documentsHref: "/spaces/s-1/knowledge/integrations/k-1"
+    });
+    const link = page.getByRole("link", { name: m.integration_documents_other({ count: 12 }) });
+    await expect.element(link).toHaveAttribute("href", "/spaces/s-1/knowledge/integrations/k-1");
+    await expectNoAxeViolations();
+    unmount();
+
+    render(IntegrationSyncStatusCell, {
+      knowledge: knowledge({ last_sync_status: "success", document_count: 12 })
+    });
+    expect(page.getByRole("link").query()).toBeNull();
+    await expect
+      .element(page.getByText(m.integration_documents_other({ count: 12 })))
+      .toBeVisible();
+  });
+
   it("opens the sync history from the timeline button", async () => {
     const onShowSyncHistory = vi.fn();
     render(IntegrationSyncStatusCell, {

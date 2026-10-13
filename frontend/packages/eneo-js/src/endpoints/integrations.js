@@ -290,6 +290,72 @@ export function initIntegrations(client) {
       },
 
       /**
+       * List the indexed documents of an integration knowledge item, one page at a time.
+       * @param {Object} args
+       * @param {{id: string}} args.knowledge IntegrationKnowledge
+       * @param {{id: string}} args.space Space where the knowledge belongs
+       * @param {string=} args.q Matches the title or the path relative to the imported folder
+       * @param {"name" | "path" | "size" | "updated_at"=} args.sort
+       * @param {"asc" | "desc"=} args.order
+       * @param {number=} args.limit 1..100
+       * @param {number=} args.offset
+       *
+       * @returns {Promise<any>} An `IntegrationDocumentsPage`
+       * @throws {EneoError}
+       * */
+      listDocuments: async ({ knowledge, space, q, sort, order, limit, offset }) => {
+        const { id: integration_knowledge_id } = knowledge;
+        const { id } = space;
+        const query = Object.fromEntries(
+          Object.entries({ q, sort, order, limit, offset }).filter(
+            ([, value]) => value !== undefined && value !== ""
+          )
+        );
+        // The schema does not know this endpoint yet; the casts go once it is regenerated.
+        const options = /** @type {any} */ ({
+          method: "get",
+          params: {
+            path: { id, integration_knowledge_id },
+            query
+          }
+        });
+        const res = await client.fetch(
+          /** @type {any} */ (
+            "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/"
+          ),
+          options
+        );
+        return res;
+      },
+
+      /**
+       * The files the newest sync of an integration knowledge item left out, with reasons.
+       * @param {Object} args
+       * @param {{id: string}} args.knowledge IntegrationKnowledge
+       * @param {{id: string}} args.space Space where the knowledge belongs
+       *
+       * @returns {Promise<any>} An `IntegrationSkippedDocuments`
+       * @throws {EneoError}
+       * */
+      listSkippedDocuments: async ({ knowledge, space }) => {
+        const { id: integration_knowledge_id } = knowledge;
+        const { id } = space;
+        const options = /** @type {any} */ ({
+          method: "get",
+          params: {
+            path: { id, integration_knowledge_id }
+          }
+        });
+        const res = await client.fetch(
+          /** @type {any} */ (
+            "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/skipped/"
+          ),
+          options
+        );
+        return res;
+      },
+
+      /**
        * Rename an integration knowledge item
        * @param {Object} args
        * @param {{id: string}} args.knowledge IntegrationKnowledge to rename

@@ -16,9 +16,11 @@
     /** One item, or every item of a wrapper for an aggregated row. */
     knowledge: IntegrationKnowledge | IntegrationKnowledge[];
     onShowSyncHistory?: (() => void) | undefined;
+    /** The item's documents page; the document count links there. */
+    documentsHref?: string | undefined;
   }
 
-  let { knowledge, onShowSyncHistory }: Props = $props();
+  let { knowledge, onShowSyncHistory, documentsHref }: Props = $props();
 
   let single = $derived(Array.isArray(knowledge) ? null : knowledge);
   let summary = $derived(
@@ -153,7 +155,18 @@
       {getStateLabel(summary.state)}
     </Badge>
     {#if summary.state !== "never"}
-      <span class="text-secondary">{documentsLabel}</span>
+      {#if documentsHref}
+        <!-- eslint-disable svelte/no-navigation-without-resolve -- link is a typed prop passed from caller -->
+        <a
+          href={documentsHref}
+          class="text-secondary hover:text-foreground focus-visible:ring-stronger rounded underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+        >
+          {documentsLabel}
+        </a>
+        <!-- eslint-enable svelte/no-navigation-without-resolve -->
+      {:else}
+        <span class="text-secondary">{documentsLabel}</span>
+      {/if}
     {/if}
   </div>
 
