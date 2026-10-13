@@ -98,8 +98,13 @@ describe("KnowledgeCombobox", () => {
 
     await expect.element(page.getByText(m.integration_sync_status_error())).toBeVisible();
     await expect.element(page.getByText(m.integration_sync_status_empty())).toBeVisible();
+    const broken = page.getByRole("option", { name: /Broken/ }).element();
+    expect(broken.className).toContain("border-negative-default");
+    const empty = page.getByRole("option", { name: /Empty/ }).element();
+    expect(empty.className).toContain("border-warning-default");
+    expect(empty.className).not.toContain("border-negative-default");
     const healthy = page.getByRole("option", { name: /Healthy/ }).element();
-    expect(healthy.className).not.toContain("border-negative-default");
+    expect(healthy.className).not.toMatch(/border-(negative|warning)-default/);
     expect(healthy.textContent).not.toContain(m.integration_sync_status_success());
   });
 });

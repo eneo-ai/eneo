@@ -218,12 +218,15 @@
                 {#each section.integrationOptions as option (option.key)}
                   {@const health = integrationHealth(option)}
                   {@const unhealthy = isIntegrationSyncUnhealthy(health)}
+                  {@const failed = health.state === "error"}
                   <Command.Item
                     value={option.key}
                     onSelect={() => selectAndClose(() => onAddIntegration(option))}
-                    class={unhealthy
-                      ? "border-negative-default bg-negative-default/10 border-l-4"
-                      : undefined}
+                    class={!unhealthy
+                      ? undefined
+                      : failed
+                        ? "border-negative-default bg-negative-default/10 border-l-4"
+                        : "border-warning-default bg-warning-default/10 border-l-4"}
                   >
                     {#if option.type === "wrapper"}
                       <IntegrationVendorIcon size="sm" type={option.wrapper.integration_type} />
@@ -236,9 +239,11 @@
                     {#if unhealthy}
                       <Badge
                         variant="outline"
-                        class="border-negative-default/30 text-negative-stronger"
+                        class={failed
+                          ? "border-negative-default/30 text-negative-stronger"
+                          : "border-warning-default/30 text-warning-stronger"}
                       >
-                        {health.state === "error"
+                        {failed
                           ? m.integration_sync_status_error()
                           : m.integration_sync_status_empty()}
                       </Badge>
