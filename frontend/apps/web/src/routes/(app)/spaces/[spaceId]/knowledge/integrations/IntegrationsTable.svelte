@@ -8,7 +8,7 @@
   import IntegrationActions from "./IntegrationActions.svelte";
   import SharePointWrapperActions from "./SharePointWrapperActions.svelte";
   import WrapperNameCell from "./WrapperNameCell.svelte";
-  import { integrationData } from "$lib/features/integrations/IntegrationData";
+  import { previewLinkLabel } from "$lib/features/integrations/IntegrationData";
   import { m } from "$lib/paraglide/messages";
   import { SvelteMap } from "svelte/reactivity";
   import { integrationDocumentsHref } from "$lib/features/integrations/integrationDocuments";
@@ -265,13 +265,9 @@
         if (di.kind === "wrapper") {
           return Table.renderComponent(Table.FormattedCell, { value: "" });
         }
-        const labelKey = integrationData[di.item.integration_type].previewLinkLabel;
-        const translatedLabel =
-          (m as Record<string, ((...args: unknown[]) => string) | undefined>)[labelKey]?.() ??
-          labelKey;
         return Table.renderComponent(Table.ButtonCell, {
           link: di.item.url ?? "",
-          label: translatedLabel,
+          label: previewLinkLabel(di.item.integration_type),
           linkIsExternal: true
         });
       }

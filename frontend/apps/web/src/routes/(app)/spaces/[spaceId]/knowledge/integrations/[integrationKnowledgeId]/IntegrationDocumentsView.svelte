@@ -17,6 +17,7 @@
     DEFAULT_INTEGRATION_DOCUMENTS_QUERY,
     documentsPageRange,
     groupSkippedByReason,
+    lastPageOffset,
     skippedDocumentsNotListed,
     toggleDocumentsSort,
     type IntegrationDocumentSort,
@@ -25,6 +26,8 @@
     type IntegrationDocumentsTab,
     type IntegrationSkippedDocuments
   } from "$lib/features/integrations/integrationDocuments";
+  import { previewLinkLabel } from "$lib/features/integrations/IntegrationData";
+  import { describeSkipReason } from "$lib/features/integrations/skipReasons";
   import { summarizeIntegrationSync } from "$lib/features/integrations/syncStatus";
   import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
@@ -55,7 +58,8 @@
   const eneo = getEneo();
   const SEARCH_DEBOUNCE_MS = 300;
 
-  let tab = $state<string>(untrack(() => initialTab));
+  // Tab clicks reassign it; a navigation's `tab` param (a "Visa" link, history) resets it.
+  let tab = $derived<string>(initialTab);
   let query = $state<IntegrationDocumentsQuery>({ ...DEFAULT_INTEGRATION_DOCUMENTS_QUERY });
   let documents = $state<IntegrationDocumentsPage>(untrack(() => initialDocuments));
   let loading = $state(false);
@@ -72,7 +76,15 @@
   let range = $derived(documentsPageRange(documents));
   let hasPrevious = $derived(documents.offset > 0);
   let hasNext = $derived(documents.offset + documents.items.length < documents.total_count);
-  let skippedGroups = $derived(skipped ? groupSkippedByReason(skipped.items) : []);
+  // Grouping on the translated reason also merges per-file variants of one reason.
+  let skippedGroups = $derived(
+    skipped
+      ? groupSkippedByReason(
+          skipped.items.map((item) => ({ ...item, reason: describeSkipReason(item.reason) }))
+        )
+      : []
+  );
+  let sourceLinkLabel = $derived(previewLinkLabel(knowledge.integration_type));
   let skippedNotListed = $derived(skipped ? skippedDocumentsNotListed(skipped) : 0);
   let skippedTabLabel = $derived(
     skipped
@@ -101,6 +113,11 @@
         ...next
       })) as IntegrationDocumentsPage;
       if (generation !== loadGeneration) return;
+      // Documents deleted while paging can leave this offset past the end.
+      const lastOffset = lastPageOffset(page, next.limit);
+      if (page.items.length === 0 && next.offset > lastOffset) {
+        return loadDocuments({ ...next, offset: lastOffset });
+      }
       documents = page;
     } catch (err) {
       if (generation !== loadGeneration) return;
@@ -262,7 +279,7 @@
                         rel="noopener noreferrer"
                         variant="ghost"
                         size="icon-sm"
-                        aria-label={m.open_in_sharepoint()}
+                        aria-label={sourceLinkLabel}
                       >
                         <IconLinkExternal size="sm" />
                       </Button>

@@ -6,7 +6,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import ButtonCell from "$lib/components/resource-table/ButtonCell.svelte";
-  import { integrationData } from "$lib/features/integrations/IntegrationData";
+  import { previewLinkLabel } from "$lib/features/integrations/IntegrationData";
   import { integrationDocumentsHref } from "$lib/features/integrations/integrationDocuments";
   import {
     buildIntegrationTree,
@@ -41,13 +41,6 @@
   function toggle(item: IntegrationKnowledge) {
     if (collapsed.has(item.id)) collapsed.delete(item.id);
     else collapsed.add(item.id);
-  }
-
-  function previewLabel(item: IntegrationKnowledge): string {
-    const labelKey = integrationData[item.integration_type].previewLinkLabel;
-    return (
-      (m as Record<string, ((...args: unknown[]) => string) | undefined>)[labelKey]?.() ?? labelKey
-    );
   }
 </script>
 
@@ -109,7 +102,11 @@
               />
             </Table.Cell>
             <Table.Cell>
-              <ButtonCell link={row.item.url ?? ""} label={previewLabel(row.item)} linkIsExternal />
+              <ButtonCell
+                link={row.item.url ?? ""}
+                label={previewLinkLabel(row.item.integration_type)}
+                linkIsExternal
+              />
             </Table.Cell>
             <Table.Cell>
               <IntegrationActions knowledgeItem={row.item} />

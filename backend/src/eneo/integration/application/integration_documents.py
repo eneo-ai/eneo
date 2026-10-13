@@ -21,10 +21,10 @@ if TYPE_CHECKING:
     )
     from eneo.integration.domain.entities.sync_log import SyncLog
 
-IntegrationDocumentSort = Literal["name", "path", "size", "updated_at"]
 SortOrder = Literal["asc", "desc"]
 
 ONEDRIVE_RESOURCE_TYPE = "onedrive"
+SHAREPOINT_INTEGRATION_TYPE = "sharepoint"
 
 
 def _segments(path: str | None) -> list[str]:
@@ -91,6 +91,41 @@ def relative_document_path(
     return "/".join(folders)
 
 
+def document_url_anchor(item: IntegrationKnowledge) -> str | None:
+    """The item's URL as its document URLs start, for searching below it."""
+    return item.url.rstrip("/") or None if item.url else None
+
+
+def _relative_path_for(item: IntegrationKnowledge, document_url: str | None) -> str:
+    # Confluence pages are not files under an imported folder; their URL path
+    # (wiki/spaces/KEY/pages/123) says nothing a user would call a folder.
+    if item.integration_type != SHAREPOINT_INTEGRATION_TYPE:
+        return ""
+    return relative_document_path(
+        document_url,
+        item_url=item.url,
+        folder_path=item.folder_path,
+        resource_type=item.resource_type,
+    )
+
+
+def ordered_by_relative_path(
+    items: list[IntegrationDocumentItem], *, descending: bool = False
+) -> list[IntegrationDocumentItem]:
+    """The page sorted on the decoded path, folders first within each.
+
+    The query orders on the percent-encoded URL so pages stay stable, which
+    puts an encoded folder such as Årsmöte (%C3%85...) before plain letters.
+    Only the page in hand is reordered; a document can still land on the
+    page the encoded order assigns it.
+    """
+    return sorted(
+        items,
+        key=lambda item: (item.relative_path.casefold(), item.title.casefold()),
+        reverse=descending,
+    )
+
+
 def document_items(
     documents: Iterable[InfoBlobInDBNoText], item: IntegrationKnowledge
 ) -> list[IntegrationDocumentItem]:
@@ -98,12 +133,7 @@ def document_items(
         IntegrationDocumentItem(
             id=document.id,
             title=document.title or document.url or "",
-            relative_path=relative_document_path(
-                document.url,
-                item_url=item.url,
-                folder_path=item.folder_path,
-                resource_type=item.resource_type,
-            ),
+            relative_path=_relative_path_for(item, document.url),
             url=document.url or None,
             size=document.size,
             updated_at=document.updated_at or document.created_at,

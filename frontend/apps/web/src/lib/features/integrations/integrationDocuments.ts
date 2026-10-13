@@ -96,6 +96,13 @@ export function documentsPageRange(page: {
   return { from, to: Math.min(total, page.offset + page.items.length), total };
 }
 
+/** The offset of the last page that still holds a row; 0 when there is none. */
+export function lastPageOffset(page: { total_count: number }, limit: number): number {
+  const total = Math.max(0, page.total_count);
+  if (total === 0 || limit <= 0) return 0;
+  return Math.floor((total - 1) / limit) * limit;
+}
+
 /** The sort after clicking a column: a new column sorts ascending, the current one flips. */
 export function toggleDocumentsSort(
   query: IntegrationDocumentsQuery,
