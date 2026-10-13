@@ -1477,6 +1477,7 @@ class Container(containers.DeclarativeContainer):
         oauth_token_repo=oauth_token_repo,
         confluence_auth_service=confluence_auth_service,
         sharepoint_auth_service=sharepoint_auth_service,
+        redis_client=redis_client,
     )
 
     # SharePoint auth router (after oauth_token_service)
