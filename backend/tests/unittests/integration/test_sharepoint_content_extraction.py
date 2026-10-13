@@ -105,6 +105,7 @@ class TestSupportedFormats:
             ("café".encode("latin-1"), "iso-8859-1", "café"),
             ("café".encode("utf-16"), None, "café"),
         ],
+        ids=["utf8", "cp1252-fallback", "declared-latin1", "utf16-bom"],
     )
     def test_decodes_text_by_charset_then_utf8_then_cp1252(
         self, payload: bytes, charset: str | None, expected: str
