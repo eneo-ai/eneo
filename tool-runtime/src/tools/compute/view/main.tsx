@@ -92,6 +92,9 @@ const TEXTS = {
     logs: "Logg",
     language: "JavaScript",
     rerunNote: "Samma kod körs igen med värdena ovan. Svaret i chatten ändras inte.",
+    noInputTitle: "Ingen indata",
+    noInput:
+      "Koden fick inga värden som indata, så det finns inget att ändra här. Be om beräkningen igen med värdena som indata för att kunna räkna om.",
     dropped: (n: number) => (n === 1 ? "1 rad utelämnad" : `${n} rader utelämnade`),
     duration: (ms: number) => `Kördes på ${ms} ms`,
     rerun: "Beräkna igen",
@@ -123,6 +126,9 @@ const TEXTS = {
     logs: "Logs",
     language: "JavaScript",
     rerunNote: "The same code runs again with the values above. The answer in the chat stays as it is.",
+    noInputTitle: "No input",
+    noInput:
+      "The code was given no values as input, so there is nothing to change here. Ask for the calculation again with the values as input to be able to recalculate.",
     dropped: (n: number) => (n === 1 ? "1 line dropped" : `${n} lines dropped`),
     duration: (ms: number) => `Ran in ${ms} ms`,
     rerun: "Run again",
@@ -452,9 +458,11 @@ function ResultView() {
                         </Text>
                       </div>
                     </>
+                  ) : args.input === undefined || args.input === null ? (
+                    <EmptyState isCompact title={text.noInputTitle} description={text.noInput} />
                   ) : (
                     <CodeBlock
-                      code={JSON.stringify(args.input ?? null, null, 2)}
+                      code={JSON.stringify(args.input, null, 2)}
                       language="json"
                       hasLanguageLabel={false}
                       size="sm"
