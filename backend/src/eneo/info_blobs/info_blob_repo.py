@@ -71,6 +71,21 @@ class InfoBlobPublication:
 
 
 @dataclass(frozen=True, slots=True)
+class InfoBlobText:
+    """One document's text for a digest, with its identity and size."""
+
+    id: UUID
+    title: str | None
+    url: str | None
+    text: str
+    length: int
+
+    @property
+    def label(self) -> str:
+        return self.title or self.url or "Untitled source"
+
+
+@dataclass(frozen=True, slots=True)
 class InfoBlobListing:
     """One document's identity, without its text.
 
@@ -938,18 +953,95 @@ class InfoBlobRepository:
             InfoBlobs.integration_knowledge_id.in_(integration_knowledge_ids),
         )
 
+    @staticmethod
+    def _title_filter(title_contains: str | None) -> list[ColumnElement[bool]]:
+        """Case-insensitive substring on the displayed label, when given."""
+        if not title_contains or not title_contains.strip():
+            return []
+        label = sa.func.coalesce(InfoBlobs.title, InfoBlobs.url)
+        pattern = f"%{_escape_like(title_contains.strip())}%"
+        return [label.ilike(pattern, escape="\\")]
+
     async def count_by_sources(
         self,
         *,
         group_ids: list[UUID],
         website_ids: list[UUID],
         integration_knowledge_ids: list[UUID],
+        title_contains: str | None = None,
     ) -> int:
         stmt = sa.select(sa.func.count()).where(
             self._source_filter(group_ids, website_ids, integration_knowledge_ids),
             active_info_blob_version(),
+            *self._title_filter(title_contains),
         )
         return await self.session.scalar(stmt) or 0
+
+    async def size_by_sources(
+        self,
+        *,
+        group_ids: list[UUID],
+        website_ids: list[UUID],
+        integration_knowledge_ids: list[UUID],
+        title_contains: str | None = None,
+    ) -> tuple[int, int]:
+        """``(documents, total text characters)`` of the active versions.
+
+        Lets a digest refuse an obviously oversized selection before loading
+        a single text.
+        """
+        stmt = sa.select(
+            sa.func.count(), sa.func.coalesce(sa.func.sum(InfoBlobs.size), 0)
+        ).where(
+            self._source_filter(group_ids, website_ids, integration_knowledge_ids),
+            active_info_blob_version(),
+            *self._title_filter(title_contains),
+        )
+        row = (await self.session.execute(stmt)).one()
+        return int(row[0] or 0), int(row[1] or 0)
+
+    async def list_texts_by_ids(
+        self,
+        info_blob_ids: list[UUID],
+        *,
+        group_ids: list[UUID],
+        website_ids: list[UUID],
+        integration_knowledge_ids: list[UUID],
+    ) -> list[InfoBlobText]:
+        """The texts of the given documents, in the given order.
+
+        Re-applies the source filter and the active-version rule so an id
+        from elsewhere, or a superseded version, yields nothing.
+        """
+        if not info_blob_ids:
+            return []
+        ids = list(dict.fromkeys(info_blob_ids))
+        ids_parameter = sa.bindparam(
+            "info_blob_ids", type_=ARRAY(PostgreSQLUUID(as_uuid=True))
+        )
+        stmt = sa.select(
+            InfoBlobs.id,
+            InfoBlobs.title,
+            InfoBlobs.url,
+            InfoBlobs.text,
+            sa.func.length(InfoBlobs.text).label("length"),
+        ).where(
+            InfoBlobs.id == sa.any_(ids_parameter),
+            self._source_filter(group_ids, website_ids, integration_knowledge_ids),
+            active_info_blob_version(),
+        )
+        rows = await self.session.execute(stmt, {"info_blob_ids": ids})
+        by_id = {
+            row.id: InfoBlobText(
+                id=row.id,
+                title=row.title,
+                url=row.url,
+                text=row.text or "",
+                length=int(row.length or 0),
+            )
+            for row in rows.all()
+        }
+        return [by_id[blob_id] for blob_id in ids if blob_id in by_id]
 
     async def list_by_sources(
         self,
@@ -959,6 +1051,7 @@ class InfoBlobRepository:
         integration_knowledge_ids: list[UUID],
         limit: int,
         offset: int = 0,
+        title_contains: str | None = None,
     ) -> list[InfoBlobListing]:
         """Document identities across the given sources, alphabetically.
 
@@ -972,6 +1065,7 @@ class InfoBlobRepository:
             .where(
                 self._source_filter(group_ids, website_ids, integration_knowledge_ids),
                 active_info_blob_version(),
+                *self._title_filter(title_contains),
             )
             .order_by(label.nulls_last(), InfoBlobs.id)
             .limit(limit)

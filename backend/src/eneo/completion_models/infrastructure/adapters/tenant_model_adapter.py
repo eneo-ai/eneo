@@ -58,6 +58,7 @@ from eneo.completion_models.infrastructure.static_prompts import (
     MCP_TOOL_REFERENCES_INSTRUCTION,
 )
 from eneo.files.model_file_references import file_handle
+from eneo.internal_mcp.constants import CITE_KEY_META
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
@@ -185,6 +186,13 @@ def _build_tool_result_with_references(
     The base64 never reaches the model or the persisted result text; both see
     a short placeholder instead.
 
+    A resource whose ``_meta`` carries ``eneo.cite_key`` (for example
+    ``"D3"``) names a key the result's text cites as ``[D3]``: every such
+    key in the text blocks is rewritten to the resource's inline reference
+    tag before the text reaches the model, so a tool that composes a body
+    with its own keys (the digest tools) gets citations the pipeline
+    renders. ``display_text`` keeps the keys as written.
+
     A non-image ``resource_link`` whose URL ``verify_reference_link`` accepts
     as an Eneo-signed original (a knowledge document a tool hands over) is
     returned in the admitted map for the proxy's reference allow-list and is
@@ -199,6 +207,7 @@ def _build_tool_result_with_references(
     refs: list[McpToolReference] = []
     images: list[GeneratedFile] = []
     admitted: dict[UUID, str] = {}
+    cite_prefixes: dict[str, str] = {}
     # Placeholders number images and documents separately ("Image N",
     # "File N"); replay appends reference urls in the same numbering.
     pictures = 0
@@ -225,6 +234,10 @@ def _build_tool_result_with_references(
             ref_id = _mint_ref_id(existing_prefixes)
             prefix = str(ref_id)[:8]
             resource_text = ci.get("text") or ""
+            resource_meta: dict[str, Any] = ci.get("meta") or {}
+            cite_key = resource_meta.get(CITE_KEY_META)
+            if isinstance(cite_key, str) and cite_key:
+                cite_prefixes.setdefault(cite_key, prefix)
             refs.append(
                 McpToolReference(
                     id=ref_id,
@@ -361,10 +374,28 @@ def _build_tool_result_with_references(
         seg.strip() for seg in (upstream_text, *resource_texts) if seg.strip()
     )
     llm_segments = [
-        seg for seg in (upstream_text, *llm_blocks, *reference_lines) if seg
+        seg
+        for seg in (
+            _rewrite_cite_keys(upstream_text, cite_prefixes),
+            *llm_blocks,
+            *reference_lines,
+        )
+        if seg
     ]
     llm_text = "\n".join(llm_segments) + "\n\n" + MCP_TOOL_REFERENCES_INSTRUCTION
     return llm_text, display_text, refs, images, admitted
+
+
+def _rewrite_cite_keys(text: str, prefixes: dict[str, str]) -> str:
+    """``[D3]`` becomes ``<inref id="<prefix>"/>`` for every keyed resource.
+
+    Whole-token match on the bracketed key, so ``[D1]`` never touches
+    ``[D10]``. Keys without a resource stay as written.
+    """
+    if not prefixes or not text:
+        return text
+    pattern = re.compile(r"\[(" + "|".join(re.escape(key) for key in prefixes) + r")\]")
+    return pattern.sub(lambda m: f'<inref id="{prefixes[m.group(1)]}"/>', text)
 
 
 class _GeneratedFileChunks:

@@ -23,10 +23,28 @@ from typing import Sequence
 from uuid import UUID
 
 from mcp.server.fastmcp import Context, FastMCP
-from mcp.types import TextContent
+from mcp.types import CallToolResult, TextContent
 
+from eneo.completion_models.application.map_reduce import DigestItem
 from eneo.files.file_models import FileType
+from eneo.files.tabular_index import TABULAR_INDEX_MAX_CHARS
+from eneo.integration.infrastructure.content_service.originals import (
+    retain_original_bytes,
+)
 from eneo.internal_mcp.constants import FILES_SERVER_NAME
+from eneo.internal_mcp.digest import (
+    DigestRefused,
+    SetAside,
+    clip_title,
+    digest_meta,
+    disconnect_check,
+    format_digest,
+    log_digest,
+    plan_or_refuse,
+    prepare_digest_model,
+    run_bounded_digest,
+    validate_instruction,
+)
 from eneo.internal_mcp.file_references import (
     INVALID_LINK_MESSAGE,
     NOT_A_REFERENCE_MESSAGE,
@@ -39,9 +57,11 @@ from eneo.internal_mcp.foundation import (
     bearer_from_ctx,
     build_ephemeral_server,
     default_page_cap,
+    digest_claims_from_token,
     internal_tool_context,
     table_tools_from_token,
 )
+from eneo.main.config import get_settings
 from eneo.mcp_servers.domain.entities.mcp_server import (
     CSV_MIME_TYPE,
     XLSX_MIME_TYPE,
@@ -65,9 +85,15 @@ __all__ = [
     "NOT_A_REFERENCE_MESSAGE",
     "NOT_FOUND_MESSAGE",
     "build_files_mcp_server",
+    "digest_files",
     "mcp",
     "read_file",
 ]
+
+DIGEST_FITS_ONE_READ_MESSAGE = (
+    "That file fits one read: call read_file with its url instead."
+)
+DIGEST_NARROW_HINT = "Pass fewer files per call, or digest the largest file on its own."
 
 
 # Files the table tools read whole: when they are attached, read_file points at
@@ -162,16 +188,17 @@ async def read_file(
 
     This is a general-purpose fallback that loads the file's raw text into
     context. If another available tool is better suited to the file or the
-    task (for example tabular or spreadsheet analysis tools, or tools that
-    summarize files too large to read into context), prefer that tool and
-    pass it the same url; if it fails or no such tool exists, use this one
-    rather than telling the user the file cannot be read. For a CSV, TSV or
-    Excel file, inspect_table and query_table, when available, describe and
-    query the file far better than its raw text, also when the user only asks
-    what the file contains; while they are available this tool points such a
-    file at them instead of returning its text. Set raw=true only when they
-    could not read the file: the extracted text is then returned as for any
-    other file.
+    task (for example tabular or spreadsheet analysis tools, or digest_files
+    for a summary, comparison or extraction over a file too large to read in
+    a few pages or over several files at once), prefer that tool and pass it
+    the same url; if it fails or no such tool exists, use this one rather
+    than telling the user the file cannot be read. For a CSV, TSV or Excel
+    file, inspect_table and query_table, when available, describe and query
+    the file far better than its raw text, also when the user only asks what
+    the file contains; while they are available this tool points such a file
+    at them instead of returning its text. Set raw=true only when they could
+    not read the file: the extracted text is then returned as for any other
+    file.
     """
     try:
         file_id, payload = verify_reference_url(url)
@@ -208,6 +235,146 @@ _TABLE_TOOLS_SUFFIX = (
 )
 
 
+def _refusal(message: str) -> CallToolResult:
+    return CallToolResult(content=[TextContent(type="text", text=message)])
+
+
+def _large_table(file) -> bool:
+    """A spreadsheet or delimited file whose rows would eat the digest."""
+    return retain_original_bytes(file.name, file.mimetype) and (
+        len(file.text or "") > TABULAR_INDEX_MAX_CHARS
+    )
+
+
+@mcp.tool(title="Digest attached files")
+async def digest_files(
+    instruction: str,
+    urls: list[str],
+    ctx: Context,
+) -> CallToolResult:
+    """Read attached files in full and answer an instruction across them.
+
+    Use this for a summary, comparison, timeline or extraction over several
+    attached files at once, or over one file too large to read in a few
+    read_file pages (the entries' size_bytes show which files are large).
+    Pass the exact "url" values from the attached-file reference entries;
+    never construct or modify them. It is an exhaustive pass: every file is
+    read in full, so give a precise instruction and call it once.
+
+    Cost: one model call per text segment plus the merges, up to several
+    minutes. The result starts with the files read ([D1], [D2], ...) and a
+    coverage line; relay the body faithfully, state the coverage line when
+    it is partial, and pass the body unchanged to a document tool when a
+    document is wanted. Numbers in CSV or XLSX files belong to the table
+    tools: large tables are not digested and are listed with their url for
+    those tools. A file that fits one read is refused: use read_file.
+    """
+    try:
+        instruction = validate_instruction(instruction)
+    except DigestRefused as refused:
+        return _refusal(refused.message)
+    wanted = list(dict.fromkeys(url for url in urls if url))
+    if not wanted:
+        return _refusal("Pass at least one attached-file url.")
+    if len(wanted) > get_settings().attachment_max_files:
+        return _refusal(
+            f"At most {get_settings().attachment_max_files} files per digest."
+        )
+    verified: list[tuple[UUID, dict]] = []
+    for url in wanted:
+        try:
+            verified.append(verify_reference_url(url))
+        except FileReferenceRejected as exc:
+            return _refusal(str(exc))
+    claims = digest_claims_from_token(bearer_from_ctx(ctx))
+    should_stop = disconnect_check(ctx)
+
+    async with internal_tool_context(ctx) as tool_ctx:
+        container = tool_ctx.container
+        assistant, _ = await container.assistant_service().get_assistant(
+            tool_ctx.assistant_id
+        )
+        try:
+            digest_model = await prepare_digest_model(
+                tool_ctx, assistant, claims, instruction=instruction
+            )
+        except DigestRefused as refused:
+            return _refusal(refused.message)
+        files = []
+        for (file_id, payload), url in zip(verified, wanted):
+            try:
+                file = await load_referenced_file(
+                    file_id, payload, tool_ctx, log_tag="[FILES] digest_files"
+                )
+            except FileReferenceRejected as exc:
+                return _refusal(str(exc))
+            files.append((file, url))
+
+        items: list[DigestItem] = []
+        set_aside: list[SetAside] = []
+        for file, url in files:
+            title = clip_title(file.name)
+            if file.file_type == FileType.IMAGE:
+                set_aside.append(SetAside(title, "image; no text to digest"))
+            elif file.file_type == FileType.AUDIO:
+                set_aside.append(
+                    SetAside(title, "audio; its transcription is in the conversation")
+                )
+            elif not (file.text or "").strip():
+                set_aside.append(SetAside(title, "no extracted text"))
+            elif _large_table(file):
+                set_aside.append(
+                    SetAside(title, f"table; use the table tools with url {url}")
+                )
+            else:
+                items.append(
+                    DigestItem(key=f"D{len(items) + 1}", title=title, text=file.text)
+                )
+        if (
+            len(files) == 1
+            and len(items) == 1
+            and len(items[0].text) <= default_page_cap()
+        ):
+            return _refusal(DIGEST_FITS_ONE_READ_MESSAGE)
+        try:
+            plan = plan_or_refuse(items, digest_model, narrow_hint=DIGEST_NARROW_HINT)
+        except DigestRefused as refused:
+            return _refusal(refused.message)
+
+    if not items:
+        header = "\n".join(
+            [
+                "Digest: no readable text among the files.",
+                "Not digested (tables):",
+                *(f"- {entry.title}: {entry.reason}" for entry in set_aside),
+            ]
+        )
+        return _refusal(header)
+
+    result, seconds = await run_bounded_digest(
+        plan, digest_model, instruction=instruction, should_stop=should_stop
+    )
+    content = format_digest(
+        heading=f"Digest of {len(items)} attached files with {digest_model.model.name}.",
+        items=items,
+        result=result,
+        set_aside=set_aside,
+        omitted=0,
+        stubs=(),
+        body_cap=digest_model.body_cap_chars,
+        item_word="files",
+    )
+    log_digest(
+        "[FILES]",
+        assistant_id=tool_ctx.assistant_id,
+        scope=f"{len(files)} files",
+        result=result,
+        digest_model=digest_model,
+        seconds=seconds,
+    )
+    return CallToolResult(content=content, _meta=digest_meta(result, digest_model))
+
+
 def _attachments_suffix(attachment_labels: Sequence[str]) -> str:
     """Static suffix appended when the conversation has referenced attachments.
 
@@ -221,7 +388,8 @@ def _attachments_suffix(attachment_labels: Sequence[str]) -> str:
         return ""
     return (
         "\n\nEvery file attached to this conversation or to this assistant is "
-        "readable here, whatever its reference url looks like."
+        "readable here, whatever its reference url looks like. Files too "
+        "large to read in a few pages are reachable through digest_files."
     )
 
 
@@ -237,14 +405,19 @@ async def build_files_mcp_server(
     ``table_tools`` says the completion also attached the file-analysis tools;
     the token must then carry the same claim for read_file to act on it.
     """
-    suffix = _attachments_suffix(attachment_labels) + (
-        _TABLE_TOOLS_SUFFIX if table_tools else ""
-    )
+    attachments = _attachments_suffix(attachment_labels)
+    suffixes: dict[str, str] = {}
+    if attachments or table_tools:
+        suffixes["read_file"] = attachments + (
+            _TABLE_TOOLS_SUFFIX if table_tools else ""
+        )
+    if attachments:
+        suffixes["digest_files"] = attachments
     return await build_ephemeral_server(
         mcp,
         name=FILES_SERVER_NAME,
         description="Loopback server for reading files attached to this conversation.",
         token=token,
         tenant_id=tenant_id,
-        tool_description_suffixes={"read_file": suffix} if suffix else None,
+        tool_description_suffixes=suffixes or None,
     )

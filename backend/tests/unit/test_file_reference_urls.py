@@ -35,6 +35,7 @@ from eneo.files.file_models import (
     FileType,
 )
 from eneo.files.file_reference import (
+    can_fall_back_to_url_only,
     image_reference_file_ids,
     reference_url_file_ids,
     referenced_file_ids,
@@ -799,3 +800,74 @@ class TestAssistantAttachmentReferences:
         context = self._context([kontoplan, page], {kontoplan.id}, urls)
 
         assert context.images == []
+
+
+class TestUrlOnlyFallback:
+    """Uploads that overflow the window may switch the turn to URL-only only
+    when the files tools can actually read every one of them."""
+
+    def _file(self, *, file_type=FileType.TEXT, original_available=True):
+        return SimpleNamespace(
+            id=uuid4(), file_type=file_type, original_available=original_available
+        )
+
+    def _model(self, tools=True):
+        return SimpleNamespace(supports_tool_calling=tools)
+
+    def test_falls_back_when_every_text_upload_has_a_reference(self, monkeypatch):
+        monkeypatch.setattr(
+            "eneo.files.file_reference.file_reference_base_url", lambda: "https://x"
+        )
+        files = [self._file(), self._file(file_type=FileType.IMAGE)]
+
+        assert can_fall_back_to_url_only(
+            files,
+            completion_model=self._model(),
+            inline_file_text=True,
+            policy_enforces_inlining=False,
+        )
+
+    def test_never_falls_back_without_references_tools_or_against_a_policy(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "eneo.files.file_reference.file_reference_base_url", lambda: "https://x"
+        )
+        readable, unreadable = self._file(), self._file(original_available=False)
+        common = dict(inline_file_text=True, policy_enforces_inlining=False)
+
+        assert not can_fall_back_to_url_only(
+            [readable, unreadable], completion_model=self._model(), **common
+        )
+        assert not can_fall_back_to_url_only(
+            [readable], completion_model=self._model(tools=False), **common
+        )
+        assert not can_fall_back_to_url_only(
+            [readable],
+            completion_model=self._model(),
+            inline_file_text=True,
+            policy_enforces_inlining=True,
+        )
+        assert not can_fall_back_to_url_only(
+            [readable],
+            completion_model=self._model(),
+            inline_file_text=False,
+            policy_enforces_inlining=False,
+        )
+        assert not can_fall_back_to_url_only(
+            [self._file(file_type=FileType.IMAGE)],
+            completion_model=self._model(),
+            **common,
+        )
+
+    def test_no_reference_base_url_means_no_fallback(self, monkeypatch):
+        monkeypatch.setattr(
+            "eneo.files.file_reference.file_reference_base_url", lambda: ""
+        )
+
+        assert not can_fall_back_to_url_only(
+            [self._file()],
+            completion_model=self._model(),
+            inline_file_text=True,
+            policy_enforces_inlining=False,
+        )

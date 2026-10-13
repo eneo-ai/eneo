@@ -36,6 +36,7 @@ from eneo.files.attachment_budget import (
 )
 from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import (
+    can_fall_back_to_url_only,
     inline_file_text_for_model,
     inlined_attachments,
     url_only_file_ids,
@@ -95,6 +96,7 @@ from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.prompts.prompt import Prompt
 from eneo.prompts.prompt_service import PromptService
 from eneo.questions.question import ToolAssistant, ToolCallInfo, UseTools
+from eneo.questions.tool_usage import tool_usage_tokens
 from eneo.roles.permissions import (
     Permission,
     validate_permission,
@@ -1472,6 +1474,53 @@ class AssistantService:
             files=persistent_files + message_files,
         )
 
+    async def _assert_message_attachments_fit_or_fall_back(
+        self,
+        *,
+        assistant: "Assistant",
+        model: "CompletionModel",
+        prompt_text: str,
+        files: list["File"],
+        validate_persistent_baseline: bool,
+        policy_enforces_inlining: bool,
+    ) -> None:
+        """The fit gate, with one escape: uploads that do not fit inlined can
+        still be read through the files tools when every one of them has a
+        reference URL, so the turn switches to URL-only (request-scoped, like
+        the governance flip; every downstream reader takes the flag from the
+        entity) instead of rejecting the ask. Persistent attachments alone
+        overflowing still fail: they were gated on save."""
+        try:
+            await self._assert_message_attachments_fit(
+                assistant=assistant,
+                model=model,
+                prompt_text=prompt_text,
+                files=files,
+                validate_persistent_baseline=validate_persistent_baseline,
+            )
+        except BadRequestException as overflow:
+            if not can_fall_back_to_url_only(
+                files,
+                completion_model=model,
+                inline_file_text=assistant.inline_file_text,
+                policy_enforces_inlining=policy_enforces_inlining,
+            ):
+                raise
+            assistant.inline_file_text = False
+            logger.info(
+                "[FILES] assistant=%s uploads exceed the window (%s), switched to "
+                "URL-only for this turn",
+                assistant.id,
+                overflow,
+            )
+            await self._assert_message_attachments_fit(
+                assistant=assistant,
+                model=model,
+                prompt_text=prompt_text,
+                files=files,
+                validate_persistent_baseline=validate_persistent_baseline,
+            )
+
     async def get_completion_model(self, space: "Space") -> Optional["CompletionModel"]:
         """Get a completion model for the space. Returns None if no model is available."""
         model = space.get_default_completion_model()
@@ -2680,6 +2729,16 @@ class AssistantService:
                         f"input={num_tokens_question} ({input_source}), "
                         f"output={num_tokens_answer} ({output_source})"
                     )
+                    tool_input, tool_output = tool_usage_tokens(
+                        tool_calls, completion_model.id
+                    )
+                    if tool_input or tool_output:
+                        num_tokens_question += tool_input
+                        num_tokens_answer += tool_output
+                        logger.info(
+                            f"[TokenUsage] assistant={assistant_id} folded tool "
+                            f"usage input={tool_input} output={tool_output}"
+                        )
 
                     skill_provenance, skill_activation = _final_skill_runtime_state()
                     _attach_generated_file_ids(tool_calls, generated_file_ids_by_call)
@@ -2915,6 +2974,16 @@ class AssistantService:
                 f"input={num_tokens_question} ({input_source}), "
                 f"output={num_tokens_answer} ({output_source})"
             )
+            tool_input, tool_output = tool_usage_tokens(
+                non_streaming_tool_calls, completion_model.id
+            )
+            if tool_input or tool_output:
+                num_tokens_question += tool_input
+                num_tokens_answer += tool_output
+                logger.info(
+                    f"[TokenUsage] assistant={assistant_id} folded tool usage "
+                    f"input={tool_input} output={tool_output}"
+                )
 
             skill_provenance, skill_activation = _final_skill_runtime_state()
             await self.session_service.complete_question_with_answer(
@@ -3299,7 +3368,7 @@ class AssistantService:
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question
         # row is created — same "fail before persisting" carve-out as governance.
-        await self._assert_message_attachments_fit(
+        await self._assert_message_attachments_fit_or_fall_back(
             assistant=assistant_to_ask,
             model=effective_completion_model,
             prompt_text=skill_composition.prompt,
@@ -3310,6 +3379,10 @@ class AssistantService:
                 and (
                     effective_config.models_enforced or effective_config.prompt_enforced
                 )
+            ),
+            policy_enforces_inlining=(
+                effective_config is not None
+                and effective_config.inline_file_text is not None
             ),
         )
 
@@ -3408,10 +3481,19 @@ class AssistantService:
         def mint_scoped_token() -> str:
             nonlocal scoped_token
             if scoped_token is None:
+                # The digest tools run the completion's effective model: a
+                # policy-enforced model and effort travel as claims so the
+                # loopback cannot fall back to the assistant's stored ones.
+                effective_kwargs = (
+                    model_kwargs_override or assistant_to_ask.completion_model_kwargs
+                )
                 scoped_token = self.auth_service.create_scoped_mcp_token(
                     self.user,
                     assistant_id=assistant_to_ask.id,
                     table_tools=table_tools_attached,
+                    completion_model_id=effective_completion_model.id,
+                    reasoning_effort=effective_kwargs.reasoning_effort,
+                    reasoning_enforced=model_kwargs_override is not None,
                 )
             return scoped_token
 

@@ -2400,3 +2400,71 @@ async def test_provider_file_echo_is_converted_before_next_model_request(streami
     results = [message["content"] for message in messages if message["role"] == "tool"]
     assert results == [file_handle(file_id)]
     assert "synthetic-secret" not in str(messages)
+
+
+class TestCiteKeyRewrite:
+    """A resource that names its citation key links the result text's
+    bracketed key to the minted source id, so a tool-composed body cites."""
+
+    def _resource(self, key, text, uri="eneo://info-blob/1"):
+        return {
+            "type": "resource",
+            "uri": uri,
+            "text": text,
+            "mime_type": "text/plain",
+            "meta": {"eneo.cite_key": key},
+        }
+
+    def test_keys_become_inref_tags_for_the_model_only(self):
+        content = [
+            {"type": "text", "text": "Decided [D1]; postponed [D10]; see [D1] again."},
+            self._resource("D1", "[D1] Minutes January"),
+            self._resource("D10", "[D10] Minutes October", "eneo://info-blob/10"),
+        ]
+        prefixes: set[str] = set()
+
+        llm_text, display_text, refs, _, _ = _build_tool_result_with_references(
+            content, "call_1", "knowledge__digest_documents", prefixes
+        )
+
+        by_key = {ref.meta["eneo.cite_key"]: str(ref.id)[:8] for ref in refs}
+        first_line = llm_text.splitlines()[0]
+        assert first_line == (
+            f'Decided <inref id="{by_key["D1"]}"/>; postponed '
+            f'<inref id="{by_key["D10"]}"/>; see <inref id="{by_key["D1"]}"/> again.'
+        )
+        assert display_text.startswith("Decided [D1]; postponed [D10]; see [D1] again.")
+
+    def test_keys_without_a_resource_stay_as_written(self):
+        content = [
+            {"type": "text", "text": "Decided [D1] and [D2]."},
+            self._resource("D1", "[D1] Minutes January"),
+        ]
+
+        llm_text, _, refs, _, _ = _build_tool_result_with_references(
+            content, "call_1", "knowledge__digest_documents", set()
+        )
+
+        prefix = str(refs[0].id)[:8]
+        assert llm_text.startswith(f'Decided <inref id="{prefix}"/> and [D2].')
+
+    def test_two_digests_in_one_turn_keep_independent_key_spaces(self):
+        prefixes: set[str] = set()
+        first = _build_tool_result_with_references(
+            [{"type": "text", "text": "A [D1]"}, self._resource("D1", "[D1] A")],
+            "call_1",
+            "knowledge__digest_documents",
+            prefixes,
+        )
+        second = _build_tool_result_with_references(
+            [{"type": "text", "text": "B [D1]"}, self._resource("D1", "[D1] B")],
+            "call_2",
+            "files__digest_files",
+            prefixes,
+        )
+
+        first_prefix = str(first[2][0].id)[:8]
+        second_prefix = str(second[2][0].id)[:8]
+        assert first_prefix != second_prefix
+        assert f'<inref id="{first_prefix}"/>' in first[0]
+        assert f'<inref id="{second_prefix}"/>' in second[0]

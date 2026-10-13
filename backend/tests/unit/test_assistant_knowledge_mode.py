@@ -361,3 +361,37 @@ class TestKnowledgeServerCollisionDefense:
         assert surviving[0]["function"]["description"] == (
             FILE_HANDLE_INSTRUCTION + "\n\nBuilt-in knowledge search"
         )
+
+
+class TestKnowledgeCatalogDigestRule:
+    """Coverage requests over a whole source route to one digest call and
+    never to a search-first emulation; tables stay with rule 8."""
+
+    def _catalog(self):
+        return _assistant().build_knowledge_catalog()
+
+    def test_catalog_routes_coverage_requests_to_one_digest_call(self):
+        catalog = self._catalog()
+
+        assert "knowledge__digest_documents" in catalog
+        assert (
+            "9. Summaries, overviews, comparisons, extractions or timelines" in catalog
+        )
+        assert "make ONE knowledge__digest_documents call" in catalog
+        assert "rule 1's search-first does not apply" in catalog
+        assert "never emulate a digest" in catalog
+
+    def test_catalog_keeps_tables_with_the_table_tools(self):
+        catalog = self._catalog()
+
+        assert (
+            "Rule 8 wins for anything the digest lists under 'Not digested (tables)'"
+            in catalog
+        )
+        assert "state its coverage line whenever the coverage is partial" in catalog
+
+    def test_describe_source_examples_no_longer_claim_summaries(self):
+        catalog = self._catalog()
+
+        assert "'summarize this source'" not in catalog
+        assert "'what does this source cover'" in catalog

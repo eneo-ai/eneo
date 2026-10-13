@@ -102,6 +102,30 @@ def inline_file_text_for_model(
     return inline_file_text or not completion_model.supports_tool_calling
 
 
+def can_fall_back_to_url_only(
+    files: Iterable["File"],
+    *,
+    completion_model: "CompletionModel",
+    inline_file_text: bool,
+    policy_enforces_inlining: bool,
+) -> bool:
+    """Whether a message whose uploads overflow the window can go URL-only.
+
+    True when inlining is the assistant's own choice (not a governed file
+    policy), the model can call the files tool, and every text upload of the
+    message has a reference URL to be read through. The same files would
+    have been inlined, so switching never widens what the model can read.
+    """
+    if policy_enforces_inlining or not inline_file_text:
+        return False
+    if not completion_model.supports_tool_calling:
+        return False
+    text_files = [file for file in files if file.file_type == FileType.TEXT]
+    if not text_files:
+        return False
+    return {file.id for file in text_files} <= referenced_file_ids(text_files)
+
+
 def url_only_file_ids(files: Iterable["File"], inline_file_text: bool) -> set[UUID]:
     """Ids of TEXT files that reach the model as a signed URL only.
 

@@ -33,6 +33,7 @@ from eneo.files.model_file_references import (
 from eneo.internal_mcp.constants import (
     FILES_SERVER_NAME,
     IMAGE_GENERATION_SERVER_NAME,
+    KNOWLEDGE_SERVER_NAME,
 )
 from eneo.libs.json_text import contains_null_character
 from eneo.main.config import get_settings
@@ -136,10 +137,15 @@ def _tool_call_timeout_for(server: MCPServer) -> int | None:
     """Per-server tool-call budget; ``None`` keeps the client default.
 
     The built-in image generation provider runs an image model whose calls
-    routinely outlast a general MCP tool call, so it gets its own budget.
+    routinely outlast a general MCP tool call, so it gets its own budget. The
+    loopback knowledge and files servers host the digest tools, which run one
+    model call per text segment; every call on those servers shares that
+    budget (a hung search or read therefore also waits that long).
     """
     if server.is_internal and server.purpose == IMAGE_GENERATION_SERVER_NAME:
         return _settings.image_generation_timeout_seconds
+    if server.is_internal and server.name in (KNOWLEDGE_SERVER_NAME, FILES_SERVER_NAME):
+        return _settings.digest_timeout_seconds
     return None
 
 

@@ -134,6 +134,12 @@ class CompletionService:
         )
         super().__init__()
 
+    async def build_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
+        """The provider-bound adapter for ``model``, for callers that run their
+        own completions (the digest tools). Needs the service's session to load
+        the provider; the adapter itself is then usable outside it."""
+        return await self._get_adapter(model)
+
     async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
         """
         Get the adapter for the given model.

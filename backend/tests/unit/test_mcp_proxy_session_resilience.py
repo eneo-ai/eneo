@@ -1805,3 +1805,40 @@ async def test_handle_from_another_request_is_not_an_authorization_grant():
     result = await second.call_tool("files__tool", {"url": file_handle(file_id)})
     assert result["is_error"]
     client_call.assert_not_awaited()
+
+
+async def test_loopback_knowledge_and_files_servers_get_the_digest_budget(monkeypatch):
+    """The digest tools run one model call per segment, so every call on the
+    knowledge and files loopback servers shares the digest budget; an external
+    server named like them keeps the default."""
+    general = _make_server("general")
+    lookalike = _make_server("knowledge")
+    knowledge = MCPServer(
+        id=uuid4(),
+        tenant_id=general.tenant_id,
+        name="knowledge",
+        http_url="http://localhost/internal-mcp/knowledge/mcp",
+        http_auth_type="bearer",
+        is_internal=True,
+    )
+    files = MCPServer(
+        id=uuid4(),
+        tenant_id=general.tenant_id,
+        name="files",
+        http_url="http://localhost/internal-mcp/files/mcp",
+        http_auth_type="bearer",
+        is_internal=True,
+    )
+    monkeypatch.setattr(proxy_module, "MCPClient", _RecordingMCPClient)
+    _RecordingMCPClient.options_by_server = {}
+    proxy = MCPProxySession([general, lookalike, knowledge, files])
+
+    for server in (general, lookalike, knowledge, files):
+        await proxy._get_or_create_client(server)  # pyright: ignore[reportPrivateUsage]
+
+    options = _RecordingMCPClient.options_by_server
+    budget = proxy_module._settings.digest_timeout_seconds  # pyright: ignore[reportPrivateUsage]
+    assert options[general.id]["tool_call_timeout"] is None
+    assert options[lookalike.id]["tool_call_timeout"] is None
+    assert options[knowledge.id]["tool_call_timeout"] == budget
+    assert options[files.id]["tool_call_timeout"] == budget

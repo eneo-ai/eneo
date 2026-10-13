@@ -181,6 +181,53 @@ Eneo hands the template to the provider itself: `MCPProxySession._with_document_
 
 A PDF follows the same template: the runtime renders the Word file, reads its page, fonts, heading faces, header, footer and logo into a stylesheet, keeps the template's own text, tables and pictures around the content, and lays the document out with WeasyPrint as a tagged PDF/UA-1 file (validated with veraPDF on the runtime's fixtures). Uploads are checked for macros and bounds in the backend (`document_templates/validation.py`), then inspected by the runtime (`POST /templates/inspect`), whose fields and style checks the admin view shows; a template is `unchecked` when the runtime cannot be reached. Every library change is audited (`DOCUMENT_TEMPLATE_*`).
 
+### Digests over knowledge and attached files
+
+Two built-in tools answer coverage questions that search cannot ("summarise
+all the minutes", "every decision about X", "summarise these ten files"):
+`digest_documents` on the loopback knowledge server (scope: one knowledge
+source, a `title_contains` filter and `max_documents`, or one long document)
+and `digest_files` on the loopback files server (scope: the signed reference
+urls of attached files). Both run the same map-reduce in the backend: every
+selected text is split into segments, each segment gets one model call, long
+items are merged per item, and the notes are reduced hierarchically to one
+answer. When everything fits one call, a single call answers directly.
+
+- **Model.** The completion's *effective* model and reasoning effort travel on
+  the loopback token as claims minted after governance resolution. An enforced
+  reasoning policy is kept; otherwise the digest uses the lowest effort the
+  model supports.
+- **Coverage is explicit.** The result opens with the items read (`[D1]`,
+  `[D2]`, ...) and a coverage line: `complete`, or `partial` with the reason
+  (deadline, failed segments, excluded at reduce) and the keys not fully
+  covered. Nothing is dropped silently.
+- **Citations.** Each cited knowledge document comes back as a resource whose
+  `_meta.eneo.cite_key` names its key; the completion layer rewrites `[Dn]` in
+  the body to the inline reference tag, so the answer cites like a search
+  result. Any MCP server may use the same `_meta` key.
+- **Tables.** A knowledge document indexed as a table sample or placeholder,
+  and an attached spreadsheet over the index budget, are listed under "Not
+  digested (tables)" with their file reference for the table tools; the rows
+  are never summarised from text.
+- **Bounds.** One absolute deadline (`DIGEST_TIMEOUT_SECONDS`, default 300)
+  covers loading, queueing, retries and every model call; map admission stops
+  when less than 30 % remains so the merges finish. At most
+  `DIGEST_MAX_SEGMENTS` (120) segments per digest, `DIGEST_CONCURRENCY` (4)
+  concurrent calls per digest and 8 per backend process. Rate limits and
+  provider outages are retried with backoff inside the deadline. The loopback
+  knowledge and files servers get `DIGEST_TIMEOUT_SECONDS` as their tool-call
+  budget, so a hung search or read also waits that long.
+- **Usage.** The tokens a digest spends are reported in the tool result
+  `_meta` (`gen_ai.usage.*`) and folded into the question row when the tool
+  ran on Eneo's own server (proxy-decided) and on the turn's model, so token
+  statistics include them. A turn that fails after the tool ran persists no
+  answer row; the `[RAG] digest` / `[FILES] digest` log line is the record.
+- **Uploads that do not fit.** When a message's uploads overflow the model's
+  window and every one of them has a reference url, the turn switches to
+  URL-only instead of rejecting the ask (unless a governance file policy
+  enforces inlining); the model then reaches them through `read_file` and
+  `digest_files`.
+
 ## 5. Extending the capability set
 
 Adding a capability requires:

@@ -130,6 +130,9 @@ class AuthService:
         assistant_id: UUID,
         mcp_server_id: UUID | None = None,
         table_tools: bool = False,
+        completion_model_id: UUID | None = None,
+        reasoning_effort: str | None = None,
+        reasoning_enforced: bool = False,
         expires_in: int = 15,
     ) -> str:
         """Mint a short-lived access token for a loopback MCP server.
@@ -150,12 +153,25 @@ class AuthService:
         cannot be chosen by the caller. ``table_tools`` records that the
         completion also attached the file-analysis tools, so the files server
         can point spreadsheets at them instead of dumping their text.
+        cannot be chosen by the caller.
+
+        ``completion_model_id`` and ``reasoning_effort`` carry the completion's
+        *effective* model and effort (a governance policy may have overridden
+        the assistant's stored ones) to loopback tools that call a model
+        themselves; ``reasoning_enforced`` says whether the effort is policy,
+        which such a tool must then keep instead of choosing a cheaper one.
         """
         claims: dict[str, object] = {"assistant_id": str(assistant_id)}
         if mcp_server_id is not None:
             claims["mcp_server_id"] = str(mcp_server_id)
         if table_tools:
             claims["table_tools"] = True
+        if completion_model_id is not None:
+            claims["completion_model_id"] = str(completion_model_id)
+        if reasoning_effort is not None:
+            claims["reasoning_effort"] = reasoning_effort
+        if reasoning_enforced:
+            claims["reasoning_enforced"] = True
         return self.create_access_token_for_user(
             user,
             audience=INTERNAL_MCP_AUDIENCE,

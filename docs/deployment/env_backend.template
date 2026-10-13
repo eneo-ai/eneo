@@ -444,6 +444,13 @@ EXPORT_MAX_CONCURRENT_PER_TENANT=2
 EXPORT_MAX_AGE_HOURS=24
 
 # ----------------------------------------------------------------------------
+# Built-in digest tools (digest_documents, digest_files): one model call per
+# text segment plus the merges. The knowledge and files loopback servers get
+# this tool-call budget for every call.
+# DIGEST_TIMEOUT_SECONDS=300
+# DIGEST_MAX_SEGMENTS=120
+# DIGEST_CONCURRENCY=4
+
 # Internal MCP Loopback URL
 # ----------------------------------------------------------------------------
 # [OPTIONAL] URL the backend uses to reach its own loopback MCP servers
