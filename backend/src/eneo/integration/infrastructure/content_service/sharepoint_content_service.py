@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import unicodedata
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 from urllib.parse import unquote
 from uuid import UUID
 
@@ -90,6 +90,13 @@ logger = get_logger(__name__)
 _RECONCILE_MAX_DELETE_FRACTION = 0.5
 _RECONCILE_MIN_DELETE_FLOOR = 10
 
+# skipped_details is persisted in last_sync_summary and SyncLog metadata; cap it so
+# a library full of unsupported files cannot bloat those rows. skipped_total keeps
+# the true count.
+_MAX_SKIPPED_DETAILS = 50
+
+BlobOutcome = Literal["embedded", "unchanged", "empty"]
+
 
 class SimpleSharePointToken:
     """Simple token wrapper for SharePoint API calls.
@@ -114,14 +121,21 @@ def _require_sharepoint_token(
     raise ValueError("Expected a SharePoint token")
 
 
-def _summary_counts(stats: SyncStats) -> dict[str, int]:
-    return {
+def _summary_counts(stats: SyncStats) -> dict[str, Any]:
+    summary: dict[str, Any] = {
         "files_processed": stats.get("files_processed", 0),
         "files_deleted": stats.get("files_deleted", 0),
         "pages_processed": stats.get("pages_processed", 0),
         "folders_processed": stats.get("folders_processed", 0),
+        "unchanged_items": stats.get("unchanged_items", 0),
         "skipped_items": stats.get("skipped_items", 0),
+        "skipped_total": stats.get("skipped_total", stats.get("skipped_items", 0)),
+        "skipped_truncated": stats.get("skipped_truncated", False),
     }
+    reconcile_warning = stats.get("reconcile_warning")
+    if reconcile_warning:
+        summary["reconcile_warning"] = reconcile_warning
+    return summary
 
 
 def _sync_metadata(
@@ -139,8 +153,16 @@ def _sync_metadata(
         metadata["out_of_scope_deleted"] = stats.get("out_of_scope_deleted", 0)
         metadata["pages_processed"] = stats.get("pages_processed", 0)
         metadata["folders_processed"] = stats.get("folders_processed", 0)
+        metadata["unchanged_items"] = stats.get("unchanged_items", 0)
         metadata["skipped_items"] = stats.get("skipped_items", 0)
+        metadata["skipped_total"] = stats.get(
+            "skipped_total", stats.get("skipped_items", 0)
+        )
+        metadata["skipped_truncated"] = stats.get("skipped_truncated", False)
         metadata["skipped_details"] = stats.get("skipped_details", [])
+        reconcile_warning = stats.get("reconcile_warning")
+        if reconcile_warning:
+            metadata["reconcile_warning"] = reconcile_warning
     if recovery:
         metadata["recovery"] = recovery
     if changes_detected is not None:
@@ -379,7 +401,7 @@ class SharePointContentService:
                 )
                 await self.sync_log_repo.add(sync_log)
 
-            logger.error(f"Error in pull_content: {e}")
+            logger.error(f"Error in pull_content: {e}", exc_info=True)
             raise
 
     async def process_delta_changes(
@@ -562,15 +584,7 @@ class SharePointContentService:
                     if new_delta_token:
                         integration_knowledge.delta_token = new_delta_token
 
-                    summary_stats: SyncStats = {
-                        "files_processed": 0,
-                        "files_deleted": 0,
-                        "out_of_scope_deleted": 0,
-                        "pages_processed": 0,
-                        "folders_processed": 0,
-                        "skipped_items": 0,
-                        "skipped_details": [],
-                    }
+                    summary_stats = self._build_summary_stats(stats)
 
                     integration_knowledge.last_sync_summary = _summary_counts(
                         summary_stats
@@ -718,10 +732,7 @@ class SharePointContentService:
                         logger.info(
                             f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
                         )
-                        stats["skipped_items"] += 1
-                        stats["skipped_details"].append(
-                            {"file": item_name, "reason": "Already synced (no changes)"}
-                        )
+                        stats["unchanged_items"] += 1
                         continue
 
                     unsupported_reason = unsupported_file_reason(item_name)
@@ -741,7 +752,7 @@ class SharePointContentService:
                         )
 
                         if content and not is_unextractable_content(content):
-                            await self._process_info_blob(
+                            outcome = await self._process_info_blob(
                                 title=item_name,
                                 text=content,
                                 url=web_url,
@@ -749,7 +760,7 @@ class SharePointContentService:
                                 sharepoint_item_id=item_id,
                                 source_metadata=source_metadata,
                             )
-                            stats["files_processed"] += 1
+                            self._count_outcome(stats, outcome, item_name)
 
                             # Defer the ChangeKey cache write until after commit so a
                             # rolled-back sync re-processes the item instead of skipping it.
@@ -775,13 +786,19 @@ class SharePointContentService:
                             reason = "File too large (exceeds 50 MB limit)"
                         else:
                             reason = f"Error: {e}"
-                        logger.error(f"Error processing changed file {item_name}: {e}")
+                        logger.error(
+                            f"Error processing changed file {item_name}: {e}",
+                            exc_info=True,
+                        )
                         stats["skipped_items"] += 1
                         stats["skipped_details"].append(
                             {"file": item_name, "reason": reason}
                         )
                     except Exception as e:
-                        logger.error(f"Error processing changed file {item_name}: {e}")
+                        logger.error(
+                            f"Error processing changed file {item_name}: {e}",
+                            exc_info=True,
+                        )
                         stats["skipped_items"] += 1
                         stats["skipped_details"].append(
                             {"file": item_name, "reason": f"Error: {e}"}
@@ -848,7 +865,7 @@ class SharePointContentService:
                 )
                 await self.sync_log_repo.add(sync_log)
 
-            logger.error(f"Error processing delta changes: {e}")
+            logger.error(f"Error processing delta changes: {e}", exc_info=True)
             raise
 
     async def _pull_content(
@@ -985,7 +1002,8 @@ class SharePointContentService:
                             )
                         except Exception as e:
                             logger.error(
-                                f"Error getting file content for {item_name}: {e}"
+                                f"Error getting file content for {item_name}: {e}",
+                                exc_info=True,
                             )
                             stats["skipped_items"] += 1
                             stats["skipped_details"].append(
@@ -994,7 +1012,7 @@ class SharePointContentService:
                             return stats
 
                         if content and not is_unextractable_content(content):
-                            await self._process_info_blob(
+                            outcome = await self._process_info_blob(
                                 title=item_name,
                                 text=content,
                                 url=item_info.get("webUrl", ""),
@@ -1006,7 +1024,7 @@ class SharePointContentService:
                                     cast(SharePointItem, item_info),
                                 ),
                             )
-                            stats["files_processed"] += 1
+                            self._count_outcome(stats, outcome, item_name)
                         else:
                             await self._delete_local_blob_for_unextractable_item(
                                 item_id=folder_id_value,
@@ -1062,7 +1080,7 @@ class SharePointContentService:
                     )
 
         except Exception as e:
-            logger.error(f"Error processing document {site_id}: {e}")
+            logger.error(f"Error processing document {site_id}: {e}", exc_info=True)
             raise
 
         return stats
@@ -1115,7 +1133,9 @@ class SharePointContentService:
                         drive_id=drive_id, item_id=item_id
                     )
                 except Exception as e:
-                    logger.error(f"Error getting file content for {doc_name}: {e}")
+                    logger.error(
+                        f"Error getting file content for {doc_name}: {e}", exc_info=True
+                    )
                     stats["skipped_items"] += 1
                     stats["skipped_details"].append(
                         {"file": doc_name, "reason": f"Error: {e}"}
@@ -1123,7 +1143,7 @@ class SharePointContentService:
                     continue
 
                 if content and not is_unextractable_content(content):
-                    await self._process_info_blob(
+                    outcome = await self._process_info_blob(
                         title=doc_name,
                         text=content,
                         url=document.get("webUrl", ""),
@@ -1133,7 +1153,7 @@ class SharePointContentService:
                             client, drive_id, document
                         ),
                     )
-                    stats["files_processed"] += 1
+                    self._count_outcome(stats, outcome, doc_name)
                 else:
                     await self._delete_local_blob_for_unextractable_item(
                         item_id=item_id,
@@ -1155,28 +1175,39 @@ class SharePointContentService:
             page_id = page.get("id")
             if not site_id or not page_id:
                 continue
-            content = await client.get_page_content(site_id=site_id, page_id=page_id)
-            if content:
-                page_text = extract_text_from_canvas_layout(content)
-                if not page_text:
-                    page_text = content.get("description", "")
-                await self._process_info_blob(
+            page_name = (
+                page.get("name", "") or page.get("title", "") or f"Page {page_id}"
+            )
+            try:
+                content = await client.get_page_content(
+                    site_id=site_id, page_id=page_id
+                )
+                page_text = ""
+                if content:
+                    page_text = extract_text_from_canvas_layout(content)
+                    if not page_text:
+                        page_text = content.get("description", "")
+                if not content or not page_text.strip():
+                    stats["skipped_items"] += 1
+                    stats["skipped_details"].append(
+                        {"file": page_name, "reason": "Empty or unreadable content"}
+                    )
+                    continue
+                outcome = await self._process_info_blob(
                     title=content.get("title", ""),
                     text=page_text,
                     url=content.get("webUrl", ""),
                     integration_knowledge=integration_knowledge,
-                    sharepoint_item_id=page.get("id"),
+                    sharepoint_item_id=page_id,
                 )
-                stats["pages_processed"] += 1
-            else:
-                page_name = (
-                    page.get("name", "")
-                    or page.get("title", "")
-                    or f"Page {page.get('id', 'unknown')}"
+                self._count_outcome(stats, outcome, page_name, page=True)
+            except Exception as e:
+                logger.error(
+                    f"Error processing site page {page_name}: {e}", exc_info=True
                 )
                 stats["skipped_items"] += 1
                 stats["skipped_details"].append(
-                    {"file": page_name, "reason": "Empty or unreadable content"}
+                    {"file": page_name, "reason": f"Error: {e}"}
                 )
 
     async def _column_catalog(
@@ -1282,7 +1313,16 @@ class SharePointContentService:
         integration_knowledge: "IntegrationKnowledge",
         sharepoint_item_id: Optional[str] = None,
         source_metadata: Optional[list[SourceMetadataEntry]] = None,
-    ) -> None:
+    ) -> BlobOutcome:
+        sanitized_text = sanitize_text_for_db(text)
+        if not sanitized_text.strip():
+            logger.debug(
+                "Skipping SharePoint item with no indexable text: %s (item_id=%s)",
+                title,
+                sharepoint_item_id,
+            )
+            return "empty"
+
         existing_blob = None
         if sharepoint_item_id:
             existing_blob = await self.info_blob_service.repo.get_by_sharepoint_item_and_integration_knowledge(
@@ -1297,7 +1337,6 @@ class SharePointContentService:
 
         previous_blob_size = safe_int(existing_blob.size) if existing_blob else 0
 
-        sanitized_text = sanitize_text_for_db(text)
         if source_metadata is None:
             source_metadata = (
                 (existing_blob.source_metadata or []) if existing_blob else []
@@ -1336,7 +1375,7 @@ class SharePointContentService:
                 title,
                 sharepoint_item_id,
             )
-            return
+            return "unchanged"
 
         info_blob_add = InfoBlobAdd(
             title=title,
@@ -1363,6 +1402,21 @@ class SharePointContentService:
         if size_delta:
             integration_knowledge.size = max(0, current_size + size_delta)
             await self.integration_knowledge_repo.update(obj=integration_knowledge)
+        return "embedded"
+
+    @staticmethod
+    def _count_outcome(
+        stats: SyncStats, outcome: BlobOutcome, item_name: str, *, page: bool = False
+    ) -> None:
+        if outcome == "embedded":
+            stats["pages_processed" if page else "files_processed"] += 1
+        elif outcome == "unchanged":
+            stats["unchanged_items"] += 1
+        else:
+            stats["skipped_items"] += 1
+            stats["skipped_details"].append(
+                {"file": item_name, "reason": "Empty or unreadable content"}
+            )
 
     async def _delete_local_sharepoint_item(
         self,
@@ -1839,7 +1893,7 @@ class SharePointContentService:
             content, skip_reason = await self._get_file_content(client, item)
 
             if content and not is_unextractable_content(content):
-                await self._process_info_blob(
+                outcome = await self._process_info_blob(
                     title=item_name,
                     text=content,
                     url=web_url,
@@ -1849,7 +1903,7 @@ class SharePointContentService:
                         client, drive_id, item
                     ),
                 )
-                stats["files_processed"] += 1
+                self._count_outcome(stats, outcome, item_name)
             elif item_id and self._is_positive_unextractable_result(
                 content, skip_reason
             ):
@@ -1874,23 +1928,28 @@ class SharePointContentService:
             "out_of_scope_deleted": 0,
             "folders_processed": 0,
             "pages_processed": 0,
+            "unchanged_items": 0,
             "skipped_items": 0,
             "skipped_details": [],
         }
 
     def _build_summary_stats(self, stats: SyncStats) -> SyncStats:
+        skipped_details = stats.get("skipped_details", [])
         summary: SyncStats = {
             "files_processed": stats.get("files_processed", 0),
             "files_deleted": stats.get("files_deleted", 0),
             "out_of_scope_deleted": stats.get("out_of_scope_deleted", 0),
             "pages_processed": stats.get("pages_processed", 0),
             "folders_processed": stats.get("folders_processed", 0),
+            "unchanged_items": stats.get("unchanged_items", 0),
             "skipped_items": stats.get("skipped_items", 0),
-            "skipped_details": [],
+            "skipped_total": stats.get("skipped_items", 0),
+            "skipped_truncated": len(skipped_details) > _MAX_SKIPPED_DETAILS,
+            "skipped_details": skipped_details[:_MAX_SKIPPED_DETAILS],
         }
-        skipped_details = stats.get("skipped_details", [])
-        if skipped_details:
-            summary["skipped_details"] = skipped_details[:50]
+        reconcile_warning = stats.get("reconcile_warning")
+        if reconcile_warning:
+            summary["reconcile_warning"] = reconcile_warning
         return summary
 
     def _format_summary_for_job(self, summary: SyncStats) -> str:
@@ -1898,6 +1957,7 @@ class SharePointContentService:
         deleted = summary.get("files_deleted", 0) or 0
         pages = summary.get("pages_processed", 0) or 0
         folders = summary.get("folders_processed", 0) or 0
+        unchanged = summary.get("unchanged_items", 0) or 0
         skipped = summary.get("skipped_items", 0) or 0
 
         processed_parts: list[str] = []
@@ -1915,6 +1975,8 @@ class SharePointContentService:
         extra_parts: list[str] = []
         if folders:
             extra_parts.append(f"{folders} folder{'s' if folders != 1 else ''} scanned")
+        if unchanged:
+            extra_parts.append(f"{unchanged} unchanged")
         if skipped:
             extra_parts.append(f"{skipped} item{'s' if skipped != 1 else ''} skipped")
 
@@ -2070,7 +2132,9 @@ class SharePointContentService:
                 all_files.extend(self._flatten_files(data))
 
         except Exception as e:
-            logger.error(f"Error getting SharePoint files for comparison: {e}")
+            logger.error(
+                f"Error getting SharePoint files for comparison: {e}", exc_info=True
+            )
             # Return empty list on error - safe default
             return []
 

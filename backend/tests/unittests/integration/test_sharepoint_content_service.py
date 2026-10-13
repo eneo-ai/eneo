@@ -2402,3 +2402,105 @@ class TestEnumerateAuthoritativeItemIds:
                 drive_id="drive-1",
                 folder_id=None,
             )
+
+
+class TestProcessPages:
+    """Site pages are isolated per item: one bad page never aborts the sync."""
+
+    @staticmethod
+    def _page(page_id: str) -> dict:
+        return {
+            "id": page_id,
+            "name": f"{page_id}.aspx",
+            "parentReference": {"siteId": "site-1"},
+        }
+
+    @pytest.mark.parametrize(
+        "empty_content",
+        [
+            {"title": "Blank", "webUrl": "https://x/blank"},
+            {"title": "Blank", "description": "   \n", "webUrl": "https://x/blank"},
+        ],
+        ids=["no-canvas-no-description", "whitespace-description"],
+    )
+    async def test_empty_page_is_skipped_and_loop_continues(
+        self, service, mock_integration_knowledge, empty_content
+    ):
+        client = AsyncMock()
+        client.get_page_content.side_effect = [
+            empty_content,
+            {
+                "title": "Real",
+                "description": "Some text",
+                "webUrl": "https://x/real",
+            },
+        ]
+        stats = service._initialize_stats()
+
+        with patch.object(
+            service, "_process_info_blob", AsyncMock(return_value="embedded")
+        ) as process:
+            await service._process_pages(
+                pages=[self._page("p-empty"), self._page("p-real")],
+                client=client,
+                integration_knowledge=mock_integration_knowledge,
+                stats=stats,
+            )
+
+        assert process.await_count == 1
+        assert process.await_args.kwargs["sharepoint_item_id"] == "p-real"
+        assert stats["pages_processed"] == 1
+        assert stats["skipped_details"] == [
+            {"file": "p-empty.aspx", "reason": "Empty or unreadable content"}
+        ]
+
+    async def test_failing_page_is_counted_and_loop_continues(
+        self, service, mock_integration_knowledge
+    ):
+        client = AsyncMock()
+        client.get_page_content.side_effect = [
+            RuntimeError("Graph 500"),
+            {"title": "Real", "description": "Some text", "webUrl": "https://x"},
+        ]
+        stats = service._initialize_stats()
+
+        with patch.object(
+            service, "_process_info_blob", AsyncMock(return_value="embedded")
+        ) as process:
+            await service._process_pages(
+                pages=[self._page("p-bad"), self._page("p-real")],
+                client=client,
+                integration_knowledge=mock_integration_knowledge,
+                stats=stats,
+            )
+
+        assert process.await_count == 1
+        assert stats["pages_processed"] == 1
+        assert stats["skipped_items"] == 1
+        assert stats["skipped_details"] == [
+            {"file": "p-bad.aspx", "reason": "Error: Graph 500"}
+        ]
+
+
+class TestProcessInfoBlobEmptyText:
+    @pytest.mark.parametrize("text", ["", "   \n\t", "\x00\x00"])
+    async def test_text_without_content_is_not_published(
+        self, service, mock_dependencies, mock_integration_knowledge, text
+    ):
+        mock_integration_knowledge.size = 500
+        publish = mock_dependencies[
+            "info_blob_service"
+        ].publish_info_blob_without_validation
+
+        outcome = await service._process_info_blob(
+            title="Doc",
+            text=text,
+            url="https://example.com",
+            integration_knowledge=mock_integration_knowledge,
+            sharepoint_item_id="item-1",
+        )
+
+        assert outcome == "empty"
+        publish.assert_not_called()
+        assert mock_integration_knowledge.size == 500
+        mock_dependencies["integration_knowledge_repo"].update.assert_not_called()

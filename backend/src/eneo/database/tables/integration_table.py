@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
 
 from sqlalchemy import (
@@ -124,7 +124,7 @@ class IntegrationKnowledge(BasePublic):
     last_synced_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    last_sync_summary: Mapped[Optional[Dict[str, int]]] = mapped_column(
+    last_sync_summary: Mapped[Optional[Dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
     )
     # Outcome of the most recent sync attempt: 'never' | 'success' | 'error'.
