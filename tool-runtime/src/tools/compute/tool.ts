@@ -4,13 +4,26 @@ import { join } from "node:path";
 import { z } from "zod";
 import { ToolError } from "../../errors";
 import { exportFilename, MAX_EXPORT_BYTES } from "../files/csv";
-import { RichResult, type ToolDefinition } from "../types";
+import { RichResult, type ToolDefinition, type ToolView } from "../types";
 import type { ComputeConfig } from "./config";
 import type { ComputeJob, ComputeOutcome } from "./ports";
+import { showsResult } from "./shape";
 
 export type ComputeExecutor = (job: ComputeJob) => Promise<ComputeOutcome>;
 
-export function computeTools(config: ComputeConfig, run: ComputeExecutor): ToolDefinition[] {
+export const TABLE_SHOWN =
+  "The user sees these rows as a table directly under your answer, which they can sort, filter, copy and expand; the code, input and logs sit behind a disclosure there, and they can run the same code again over edited input. Do not write the rows out again or list the columns; introduce the table briefly and explain the relevant findings.";
+export const VALUE_SHOWN =
+  "The user sees the returned value directly under your answer, with the code, input and logs behind a disclosure, and can run the same code again over edited input. Do not repeat the value verbatim or paste the code; say what it means.";
+
+/**
+ * @param view The result view shown with a run, in hosts that show tool views.
+ */
+export function computeTools(
+  config: ComputeConfig,
+  run: ComputeExecutor,
+  view?: ToolView,
+): ToolDefinition[] {
   const input = z.object({
     code: z
       .string()
@@ -36,16 +49,30 @@ export function computeTools(config: ComputeConfig, run: ComputeExecutor): ToolD
       .max(100)
       .optional()
       .describe("File name for the exported CSV, without extension."),
+    display: z
+      .enum(["auto", "result", "none"])
+      .default("auto")
+      .describe(
+        "auto shows the value as an interactive table under your answer only when it is a table with several rows. result shows the value whatever its shape (a number, a key/value list or JSON) when the user asked to see the result or the calculation. none hides the view for intermediate calculations. Every mode returns the same data to you.",
+      ),
+    title: z
+      .string()
+      .max(120)
+      .optional()
+      .describe(
+        "Short caption in the user's language for a shown result, such as 'Ränta per år'. Give one when display is result or the value is a table; the host lists the conversation's views by it.",
+      ),
   });
   return [
     {
       name: "run_javascript",
       title: "Run JavaScript",
+      ...(view ? { view } : {}),
       description:
-        "Run JavaScript in an isolated sandbox and get the returned value back. Use it for arithmetic and statistics that must be exact, unit and currency conversion, date arithmetic, sorting, grouping, deduplication, parsing or reshaping data you already have, regular expressions and string formatting. Write the code as the body of an async function and return a JSON-serialisable value; read the optional argument from the global input; console.log lines come back as logs. The sandbox has the standard ECMAScript library only: no network, file system, timers, imports, require or Node and Bun APIs, and no state between calls, so pass in everything the code needs. Errors thrown by the code, time and memory limits and oversized results are reported in the result with ok=false so you can fix the code and retry. With export=true a tabular value is attached as a CSV file for the user and as a source for create_chart and create_spreadsheet; result then holds only a preview and export.rows says how many rows the file has. Do not use it to fetch data; report the returned value, not the code, unless the user asked to see it.",
+        "Run JavaScript in an isolated sandbox and get the returned value back. Use it for arithmetic and statistics that must be exact, unit and currency conversion, date arithmetic, sorting, grouping, deduplication, parsing or reshaping data you already have, regular expressions and string formatting. Write the code as the body of an async function and return a JSON-serialisable value; read the optional argument from the global input; console.log lines come back as logs. The sandbox has the standard ECMAScript library only: no network, file system, timers, imports, require or Node and Bun APIs, and no state between calls, so pass in everything the code needs. Errors thrown by the code, time and memory limits and oversized results are reported in the result with ok=false so you can fix the code and retry. With export=true a tabular value is attached as a CSV file for the user and as a source for create_chart and create_spreadsheet; result then holds only a preview and export.rows says how many rows the file has. When the result includes shown, follow it and do not repeat what the user already sees; otherwise report the returned value yourself. Do not use it to fetch data; report the returned value, not the code, unless the user asked to see it.",
       inputSchema: input.shape,
       readOnly: true,
-      async execute(raw) {
+      async execute(raw, ctx) {
         const args = input.parse(raw);
         const payload = args.input === undefined ? null : args.input;
         if (Buffer.byteLength(JSON.stringify(payload)) > config.max_input_bytes)
@@ -73,12 +100,25 @@ export function computeTools(config: ComputeConfig, run: ComputeExecutor): ToolD
                 }
               : {}),
           });
+          // Where Eneo shows the value, the model is told, so it is not written out again.
+          const kind =
+            view !== undefined && ctx.showsViews === true
+              ? showsResult({
+                  ok: outcome.ok,
+                  result: outcome.result,
+                  exported: args.export,
+                  display: args.display,
+                })
+              : false;
           const structured = {
             ok: outcome.ok,
             ...(outcome.ok ? { result: outcome.result ?? null } : { error: outcome.error }),
             logs: outcome.logs,
             ...(outcome.dropped_log_lines ? { dropped_log_lines: outcome.dropped_log_lines } : {}),
             duration_ms: outcome.duration_ms,
+            display: args.display,
+            ...(kind === "table" ? { shown: TABLE_SHOWN } : {}),
+            ...(kind === "value" ? { shown: VALUE_SHOWN } : {}),
           };
           if (!outputPath || !outcome.ok || !outcome.export) return structured;
           const csv = await readFile(outputPath);

@@ -1,0 +1,49 @@
+/* A single returned value, large enough to be the point of the view. */
+.eneo-value {
+  padding: var(--spacing-4) var(--spacing-3);
+  font-size: var(--font-size-heading-2, 1.75rem);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Code, input, logs and a value with no better shape: monospace, scrolling, never wider. */
+.eneo-code {
+  margin: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  max-height: 21rem;
+  overflow: auto;
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: var(--font-size-body-sm, 0.8125rem);
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+}
+.eneo-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-3) var(--spacing-3);
+}
+.eneo-details h3 {
+  margin: 0;
+}
+/* The fields of an editable input, two to a row where there is room. */
+.eneo-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--spacing-2) var(--spacing-3);
+  align-items: end;
+}
+.eneo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+:root[data-mode="fullscreen"] [data-view="compute-result"] .eneo-rows,
+:root[data-mode="fullscreen"] [data-view="compute-result"] .eneo-code {
+  flex: 1 0 20rem;
+  min-height: 20rem;
+  max-height: none;
+}

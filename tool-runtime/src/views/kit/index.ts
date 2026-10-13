@@ -4,6 +4,8 @@ import "@astryxdesign/core/astryx.css";
 import "@astryxdesign/theme-neutral/theme.css";
 import "./kit.css";
 
+export { copyText } from "./clipboard";
 export { columnWidth } from "./columns";
 export { ViewFrame, TableRows } from "./Frame";
 export { pick, useHost, useViewHost, type Host, type ToolResult } from "./host";
+export { filterRows, sortRows, toTsv } from "./rows";

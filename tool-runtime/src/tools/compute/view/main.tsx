@@ -1,0 +1,476 @@
+/// <reference lib="dom" />
+/**
+ * The view run_javascript brings (an MCP App): the returned value as a table the reader can
+ * sort, filter and copy, or as a single value, a key/value list or JSON; the code, input and
+ * logs behind a disclosure; and, when the input is a flat set of values, fields to change them
+ * and run the same code again.
+ *
+ * It takes room only when the tool said the reader sees the value. A failed run is the model's
+ * retry loop, an exported table is its own file, and a hidden intermediate step stays hidden.
+ * Nothing leaves the view for the conversation unless the reader quotes it.
+ */
+import { useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { Badge } from "@astryxdesign/core/Badge";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Icon } from "@astryxdesign/core/Icon";
+import { NumberInput } from "@astryxdesign/core/NumberInput";
+import { Switch } from "@astryxdesign/core/Switch";
+import { Table, useTableSortable, type TableSortState } from "@astryxdesign/core/Table";
+import { Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import {
+  TableRows,
+  ViewFrame,
+  columnWidth,
+  copyText,
+  filterRows,
+  pick,
+  sortRows,
+  toTsv,
+  useHost,
+  type ToolResult,
+} from "../../../views/kit";
+import {
+  asTabular,
+  editableInput,
+  showsResult,
+  type DisplayMode,
+  type ResultKind,
+  type Scalar,
+} from "../shape";
+import "./view.css";
+
+/** Rows drawn at once; the rest are added with the button. All of them are already here. */
+const ROWS_PER_PAGE = 2000;
+
+type Arguments = {
+  code?: unknown;
+  input?: unknown;
+  display?: DisplayMode;
+  title?: unknown;
+  export?: unknown;
+};
+type Outcome = {
+  ok: boolean;
+  result?: unknown;
+  error?: { code?: string; message?: string; line?: number };
+  logs?: string[];
+  dropped_log_lines?: number;
+  duration_ms?: number;
+  export?: unknown;
+};
+type Row = Record<string, unknown>;
+
+const TEXTS = {
+  sv: {
+    label: "Beräkning",
+    result: "Resultat",
+    rows: (n: number) => (n === 1 ? "1 rad" : `${n} rader`),
+    matching: (n: number, of: number) => `${n} av ${of} rader`,
+    more: "Visa fler rader",
+    filter: "Filtrera rader",
+    noMatches: "Inga rader matchar filtret.",
+    clear: "Rensa filter",
+    copy: "Kopiera",
+    copied: "Kopierat",
+    details: "Visa kod",
+    code: "Kod",
+    input: "Indata",
+    logs: "Logg",
+    dropped: (n: number) => (n === 1 ? "1 rad utelämnad" : `${n} rader utelämnade`),
+    duration: (ms: number) => `Kördes på ${ms} ms`,
+    rerun: "Beräkna igen",
+    running: "Beräknar…",
+    reset: "Återställ",
+    recomputed: "Omräknat",
+    failed: "Beräkningen misslyckades.",
+    key: "Fält",
+    value: "Värde",
+    yes: "ja",
+    no: "nej",
+  },
+  en: {
+    label: "Calculation",
+    result: "Result",
+    rows: (n: number) => (n === 1 ? "1 row" : `${n} rows`),
+    matching: (n: number, of: number) => `${n} of ${of} rows`,
+    more: "Show more rows",
+    filter: "Filter rows",
+    noMatches: "No rows match the filter.",
+    clear: "Clear filter",
+    copy: "Copy",
+    copied: "Copied",
+    details: "Show code",
+    code: "Code",
+    input: "Input",
+    logs: "Logs",
+    dropped: (n: number) => (n === 1 ? "1 line dropped" : `${n} lines dropped`),
+    duration: (ms: number) => `Ran in ${ms} ms`,
+    rerun: "Run again",
+    running: "Running…",
+    reset: "Reset",
+    recomputed: "Recomputed",
+    failed: "The calculation failed.",
+    key: "Field",
+    value: "Value",
+    yes: "yes",
+    no: "no",
+  },
+};
+
+function outcomeOf(result: ToolResult): Outcome | undefined {
+  let value: unknown = result.structuredContent;
+  if (!value) {
+    try {
+      value = JSON.parse(result.content?.find((block) => block.type === "text")?.text ?? "");
+    } catch {
+      return undefined;
+    }
+  }
+  const candidate = value as Partial<Outcome> | null;
+  return candidate && typeof candidate.ok === "boolean" ? (candidate as Outcome) : undefined;
+}
+
+const isNumeric = (value: unknown) =>
+  typeof value === "number" || (typeof value === "string" && /^-?\d+$/.test(value));
+const isFlatObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Object.values(value).every((v) => v === null || typeof v !== "object");
+
+function ResultView() {
+  const [args, setArgs] = useState<Arguments>({});
+  /** The run the model made, kept so a reader can return to it after running again. */
+  const [original, setOriginal] = useState<Outcome>();
+  const [outcome, setOutcome] = useState<Outcome>();
+  const [kind, setKind] = useState<ResultKind>(false);
+  const [draft, setDraft] = useState<Record<string, Scalar>>();
+  const [recomputed, setRecomputed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string>();
+  const [sort, setSort] = useState<TableSortState>([]);
+  const [filter, setFilter] = useState("");
+  const [drawn, setDrawn] = useState(ROWS_PER_PAGE);
+  const [copied, setCopied] = useState(false);
+
+  const host = useHost("eneo-compute-result", {
+    onInput: (input) => {
+      const next = input as Arguments;
+      setArgs(next);
+      setDraft(editableInput(next.input));
+    },
+    onResult: (result) => {
+      const found = result.isError ? undefined : outcomeOf(result);
+      if (!found) return;
+      setOriginal(found);
+      setOutcome(found);
+      // The same rule the tool used to tell the model what the reader sees.
+      setKind(
+        showsResult({
+          ok: found.ok,
+          result: found.result,
+          exported: found.export !== undefined,
+          display: (found as { display?: DisplayMode }).display ?? args.display ?? "auto",
+        }),
+      );
+    },
+  });
+  const { app, context } = host;
+  const text = pick(context, TEXTS);
+  const shown = kind !== false && outcome !== undefined;
+  const value = outcome?.result;
+  const table = useMemo(() => (kind === "table" ? asTabular(value) : undefined), [kind, value]);
+
+  const format = useMemo(
+    () => new Intl.NumberFormat(context.locale ?? "sv", { maximumFractionDigits: 10 }),
+    [context.locale],
+  );
+  const shownCell = (cell: unknown) =>
+    typeof cell === "number"
+      ? format.format(cell)
+      : typeof cell === "boolean"
+        ? cell
+          ? text.yes
+          : text.no
+        : typeof cell === "object"
+          ? JSON.stringify(cell)
+          : String(cell);
+
+  // The table: every row is here, so sorting and filtering happen in the view itself.
+  const columns = table?.columns ?? [];
+  const ordered = useMemo(() => {
+    if (!table) return [];
+    const first = sort[0];
+    if (!first) return table.rows;
+    return sortRows(table.rows, columns.indexOf(first.sortKey), first.direction === "descending");
+  }, [table, sort, columns]);
+  const matching = useMemo(() => filterRows(ordered, filter), [ordered, filter]);
+  const visible = useMemo(() => matching.slice(0, drawn), [matching, drawn]);
+  const data = useMemo<Row[]>(
+    () => visible.map((row, index) => ({ ...row, id: index }) as unknown as Row),
+    [visible],
+  );
+  const sortPlugin = useTableSortable<Row>({ sort, onSortChange: setSort });
+  const tableColumns = useMemo(
+    () =>
+      columns.map((column, index) => {
+        const first = visible.find((row) => row[index] !== null && row[index] !== undefined);
+        return {
+          key: column,
+          header: column,
+          sortable: true,
+          align: first && isNumeric(first[index]) ? ("end" as const) : ("start" as const),
+          width: columnWidth(
+            column,
+            visible.map((row) => shownCell(row[index] ?? "")),
+          ),
+          renderCell: (item: Row) => {
+            const cell = item[index];
+            if (cell === null || cell === undefined) return <Text color="disabled">–</Text>;
+            return shownCell(cell);
+          },
+        };
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [columns, visible, format, text],
+  );
+
+  const copy = async () => {
+    const payload = table
+      ? toTsv(columns, matching)
+      : isFlatObject(value)
+        ? toTsv([text.key, text.value], Object.entries(value))
+        : typeof value === "object"
+          ? JSON.stringify(value, null, 2)
+          : String(value);
+    await copyText(payload);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  /** The same code over the reader's edited input, through the host like any call of the tool. */
+  const rerun = async () => {
+    if (busy || typeof args.code !== "string" || !draft) return;
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      const result = await app.callServerTool({
+        name: "run_javascript",
+        arguments: { code: args.code, input: draft, display: "none", export: false },
+      });
+      const found = result.isError ? undefined : outcomeOf(result as ToolResult);
+      if (!found) throw new Error(text.failed);
+      if (!found.ok) throw new Error(found.error?.message ?? text.failed);
+      setOutcome(found);
+      setRecomputed(true);
+      setSort([]);
+      setFilter("");
+      setDrawn(ROWS_PER_PAGE);
+      // The reader asked to see this one, whatever its shape.
+      setKind(showsResult({ ok: true, result: found.result, exported: false, display: "result" }));
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : text.failed);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const reset = () => {
+    if (!original) return;
+    setDraft(editableInput(args.input));
+    setOutcome(original);
+    setRecomputed(false);
+    setFailure(undefined);
+    setKind(
+      showsResult({
+        ok: original.ok,
+        result: original.result,
+        exported: original.export !== undefined,
+        display: args.display ?? "auto",
+      }),
+    );
+  };
+
+  const title =
+    typeof args.title === "string" && args.title.trim()
+      ? args.title.trim()
+      : table
+        ? filter.trim()
+          ? text.matching(matching.length, table.rows.length)
+          : text.rows(table.rows.length)
+        : text.result;
+
+  return (
+    <ViewFrame
+      host={host}
+      name="compute-result"
+      shown={shown}
+      label={text.label}
+      title={title}
+      controls={
+        <>
+          {recomputed && <Badge label={text.recomputed} />}
+          {table && (
+            <TextInput
+              label={text.filter}
+              isLabelHidden
+              placeholder={text.filter}
+              startIcon="search"
+              hasClear
+              value={filter}
+              onChange={setFilter}
+              width={208}
+            />
+          )}
+          <Button
+            variant="ghost"
+            label={copied ? text.copied : text.copy}
+            icon={<Icon icon={copied ? "check" : "copy"} />}
+            onClick={copy}
+          />
+        </>
+      }
+      notices={
+        failure && <Banner status="error" container="section" title={text.failed} description={failure} />
+      }
+      footer={
+        <Collapsible trigger={<Text weight="medium">{text.details}</Text>} defaultIsOpen={false}>
+          <div className="eneo-details">
+            {draft && (
+              <>
+                <div className="eneo-fields">
+                  {Object.entries(draft).map(([key, field]) =>
+                    typeof field === "number" ? (
+                      <NumberInput
+                        key={key}
+                        label={key}
+                        value={field}
+                        onChange={(next: number | null) =>
+                          setDraft({ ...draft, [key]: next ?? 0 })
+                        }
+                      />
+                    ) : typeof field === "boolean" ? (
+                      <Switch
+                        key={key}
+                        label={key}
+                        value={field}
+                        onChange={(next) => setDraft({ ...draft, [key]: next })}
+                      />
+                    ) : (
+                      <TextInput
+                        key={key}
+                        label={key}
+                        value={field}
+                        onChange={(next: string) => setDraft({ ...draft, [key]: next })}
+                      />
+                    ),
+                  )}
+                </div>
+                <div className="eneo-actions">
+                  <Button
+                    variant="secondary"
+                    label={busy ? text.running : text.rerun}
+                    isLoading={busy}
+                    onClick={() => void rerun()}
+                  />
+                  {recomputed && <Button variant="ghost" label={text.reset} onClick={reset} />}
+                </div>
+              </>
+            )}
+            <Text type="supporting" weight="medium">
+              {text.code}
+            </Text>
+            <pre className="eneo-code">{typeof args.code === "string" ? args.code : ""}</pre>
+            {args.input !== undefined && args.input !== null && !draft && (
+              <>
+                <Text type="supporting" weight="medium">
+                  {text.input}
+                </Text>
+                <pre className="eneo-code">{JSON.stringify(args.input, null, 2)}</pre>
+              </>
+            )}
+            {outcome?.logs && outcome.logs.length > 0 && (
+              <>
+                <Text type="supporting" weight="medium">
+                  {text.logs}
+                </Text>
+                <pre className="eneo-code">
+                  {outcome.logs.join("\n")}
+                  {outcome.dropped_log_lines ? `\n… ${text.dropped(outcome.dropped_log_lines)}` : ""}
+                </pre>
+              </>
+            )}
+            {typeof outcome?.duration_ms === "number" && (
+              <Text type="supporting" color="secondary">
+                {text.duration(outcome.duration_ms)}
+              </Text>
+            )}
+          </div>
+        </Collapsible>
+      }
+    >
+      {table ? (
+        <>
+          <Table<Row>
+            data={data}
+            columns={tableColumns}
+            idKey="id"
+            density="compact"
+            dividers="rows"
+            hasHover
+            plugins={{ sort: sortPlugin }}
+            scrollWrapper={TableRows}
+            emptyState={
+              <EmptyState
+                isCompact
+                title={text.noMatches}
+                actions={<Button variant="secondary" label={text.clear} onClick={() => setFilter("")} />}
+              />
+            }
+          />
+          {matching.length > drawn && (
+            <div className="eneo-actions">
+              <Button
+                variant="secondary"
+                label={text.more}
+                onClick={() => setDrawn((count) => count + ROWS_PER_PAGE)}
+              />
+            </div>
+          )}
+        </>
+      ) : isFlatObject(value) ? (
+        <Table<Row>
+          data={Object.entries(value).map(([key, cell]) => ({ id: key, key, cell }))}
+          columns={[
+            { key: "key", header: text.key, renderCell: (item: Row) => String(item.key) },
+            {
+              key: "cell",
+              header: text.value,
+              align: "end" as const,
+              renderCell: (item: Row) =>
+                item.cell === null || item.cell === undefined ? (
+                  <Text color="disabled">–</Text>
+                ) : (
+                  shownCell(item.cell)
+                ),
+            },
+          ]}
+          idKey="id"
+          density="compact"
+          dividers="rows"
+          scrollWrapper={TableRows}
+        />
+      ) : typeof value === "object" && value !== null ? (
+        <pre className="eneo-code">{JSON.stringify(value, null, 2)}</pre>
+      ) : (
+        <div className="eneo-value">{value === null || value === undefined ? "null" : shownCell(value)}</div>
+      )}
+    </ViewFrame>
+  );
+}
+
+createRoot(document.getElementById("app")!).render(<ResultView />);

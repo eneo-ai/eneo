@@ -5,6 +5,14 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
 
 - `POST /mcp/compute` is a stateless Streamable HTTP MCP endpoint (JSON
   responses) exposing `run_javascript`.
+- `POST /mcp/compute` (`run_javascript`) provides the **Compute** function: exact
+  calculations over JSON in a QuickJS sandbox. With `export: true` a tabular
+  value is attached as a CSV file (`src/tools/files/csv.ts`) that charts,
+  spreadsheets and documents take as a source. The tool brings a result view
+  (`src/tools/compute/view/`): a table, a value, a key/value list or JSON, with
+  the code, input and logs behind a disclosure and fields to run the same code
+  again over edited input. `display: "auto"` shows a table of several rows,
+  `"result"` shows any value, `"none"` hides the view.
 - `POST /mcp/file-analysis` exposes `inspect_table`, `query_table` and
   `assert_table` over signed Eneo attachment URLs. It fetches only from the
   origin Eneo sends in `X-Eneo-File-Origin`. `query_table` brings a table view

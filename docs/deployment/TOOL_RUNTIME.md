@@ -117,6 +117,21 @@ support keeps the existing SVG/resvg image path. Interactive data is bounded
 at 200 KiB, below Eneo's 256 KiB structured-result limit; oversized data returns
 `CHART_DATA_TOO_LARGE` and asks the model to aggregate, filter or use PNG.
 
+## The result view
+
+`run_javascript` brings a result view (an MCP App) built with the same kit as
+the table view. Where Eneo shows tool views, a returned table of several rows
+appears under the answer, sortable, filterable and copyable; `display: "result"`
+shows a value of any shape (a number, a key/value list or JSON) when the user
+asked to see the result; `display: "none"` hides the view for intermediate
+steps. The code, input and logs sit behind a "Visa kod" disclosure. When the
+input is a flat set of values, the reader can edit them and run the same code
+again from the view; that call goes through Eneo like any other tool call and
+follows the user's automatic-tools preference, and nothing reaches the
+conversation unless the reader quotes it. A failed run, an exported table and a
+hidden step take no room. The tool tells the model when the reader sees the
+value (`shown`), so the answer does not repeat it.
+
 ### Enabling the Charts function after upgrading
 
 Apply migration `202610081100`, then add **Built into Eneo** under

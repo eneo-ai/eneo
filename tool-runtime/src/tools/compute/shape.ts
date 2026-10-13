@@ -78,3 +78,37 @@ function kindOf(value: unknown): string {
   if (Array.isArray(value)) return "array";
   return typeof value;
 }
+
+export type DisplayMode = "auto" | "result" | "none";
+/** What the result view shows for a run: a table, the value itself, or nothing. */
+export type ResultKind = "table" | "value" | false;
+
+/**
+ * Whether the view has something to show for a result, and what. A failed run is the model's
+ * retry loop, an exported table is its own file and a hidden intermediate step stays hidden; a
+ * table of several rows is the one shape prose cannot carry, so it is shown unasked, while a
+ * scalar or a small object belongs in the answer unless the model asks for it to be shown.
+ * The tool asks the same question to tell the model what the reader sees.
+ */
+export function showsResult(run: {
+  ok: boolean;
+  result: unknown;
+  exported: boolean;
+  display: DisplayMode;
+}): ResultKind {
+  if (!run.ok || run.exported || run.display === "none") return false;
+  const table = asTabular(run.result);
+  if (table && table.rows.length > 1) return "table";
+  return run.display === "result" ? "value" : false;
+}
+
+export type Scalar = number | string | boolean;
+/** An input the reader can edit field by field: a non-empty flat object of scalars. */
+export function editableInput(input: unknown): Record<string, Scalar> | undefined {
+  if (!isPlainObject(input)) return undefined;
+  const entries = Object.entries(input);
+  if (entries.length === 0 || entries.length > 24) return undefined;
+  if (!entries.every(([, value]) => ["number", "string", "boolean"].includes(typeof value)))
+    return undefined;
+  return input as Record<string, Scalar>;
+}

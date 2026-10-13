@@ -2,14 +2,18 @@ import { describe, expect, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { computeConfigSchema } from "../../src/tools/compute/config";
 import { runJavaScript } from "../../src/tools/compute/engine/quickjs";
+import { showsResult } from "../../src/tools/compute/shape";
 import type { ComputeExecutor } from "../../src/tools/compute/tool";
-import { computeTools } from "../../src/tools/compute/tool";
-import { RichResult } from "../../src/tools/types";
+import { TABLE_SHOWN, VALUE_SHOWN, computeTools } from "../../src/tools/compute/tool";
+import { computeResultView } from "../../src/tools/compute/view";
+import { RichResult, type ToolView } from "../../src/tools/types";
 
 const config = computeConfigSchema.parse({});
 const ctx = { tenantId: "tenant", userId: "user" };
 const inProcess: ComputeExecutor = (job) => runJavaScript(job, config);
-const tool = (run: ComputeExecutor = inProcess) => computeTools(config, run)[0]!;
+const stubView: ToolView = { uri: "ui://compute/test", html: "<html></html>" };
+const tool = (run: ComputeExecutor = inProcess, view?: ToolView) =>
+  computeTools(config, run, view)[0]!;
 const rows = `return Array.from({ length: 30 }, (_, i) => ({ år: 2000 + i, belopp: i * 1.5 }));`;
 
 describe("run_javascript", () => {
@@ -88,5 +92,70 @@ describe("run_javascript", () => {
       tool(spy).execute({ code: "return 1;", input: "x".repeat(config.max_input_bytes + 1) }, ctx),
     ).rejects.toMatchObject({ code: "INPUT_TOO_LARGE" });
     expect(ran).toBe(false);
+  });
+});
+
+describe("result view", () => {
+  const table = `return [{ a: 1 }, { a: 2 }, { a: 3 }];`;
+  const scalar = `return 42;`;
+  const viewed = { ...ctx, showsViews: true };
+
+  test("the tool brings the built view and declares what it asks of the browser", async () => {
+    const view = await computeResultView();
+    expect(view.uri).toMatch(/^ui:\/\/compute\/compute-result-[0-9a-f]{12}\.html$/);
+    expect(view.ui).toEqual({ prefersBorder: true, permissions: { clipboardWrite: {} } });
+    expect(view.html).toContain("<script");
+    expect(view.html).not.toMatch(/<script[^>]+src=/);
+    expect(Buffer.byteLength(view.html)).toBeLessThan(2 * 1024 * 1024);
+    expect(tool(inProcess, view).view).toBe(view);
+    expect(tool().view).toBeUndefined();
+  });
+
+  test("a table of several rows is shown unasked; a scalar only when the model asks", async () => {
+    const shown = async (code: string, args: Record<string, unknown> = {}) =>
+      ((await tool(inProcess, stubView).execute({ code, ...args }, viewed)) as Record<string, unknown>)
+        .shown;
+    expect(await shown(table)).toBe(TABLE_SHOWN);
+    expect(await shown(table, { display: "result" })).toBe(TABLE_SHOWN);
+    expect(await shown(scalar)).toBeUndefined();
+    expect(await shown(scalar, { display: "result" })).toBe(VALUE_SHOWN);
+    expect(await shown(`return { a: 1 };`, { display: "result" })).toBe(VALUE_SHOWN);
+    expect(await shown(`return [{ a: 1 }];`)).toBeUndefined();
+  });
+
+  test("nothing is shown for display=none, a failure, an export, or a host without views", async () => {
+    const run = tool(inProcess, stubView);
+    expect(await run.execute({ code: table, display: "none" }, viewed)).not.toHaveProperty("shown");
+    expect(await run.execute({ code: "throw new Error('x');", display: "result" }, viewed)).toMatchObject({
+      ok: false,
+    });
+    expect(await run.execute({ code: "throw new Error('x');", display: "result" }, viewed)).not.toHaveProperty(
+      "shown",
+    );
+    const exported = (await run.execute({ code: table, export: true }, viewed)) as RichResult;
+    expect(exported.structured.shown).toBeUndefined();
+    expect(await run.execute({ code: table }, ctx)).not.toHaveProperty("shown");
+    expect(await run.execute({ code: table }, { ...ctx, showsViews: false })).not.toHaveProperty("shown");
+    expect(await tool().execute({ code: table }, viewed)).not.toHaveProperty("shown");
+  });
+
+  test("the view decides what to draw with the same rule the tool used", () => {
+    const value = [{ a: 1 }, { a: 2 }];
+    expect(showsResult({ ok: true, result: value, exported: false, display: "auto" })).toBe("table");
+    expect(showsResult({ ok: true, result: value, exported: true, display: "auto" })).toBe(false);
+    expect(showsResult({ ok: true, result: value, exported: false, display: "none" })).toBe(false);
+    expect(showsResult({ ok: false, result: value, exported: false, display: "result" })).toBe(false);
+    expect(showsResult({ ok: true, result: 1, exported: false, display: "auto" })).toBe(false);
+    expect(showsResult({ ok: true, result: 1, exported: false, display: "result" })).toBe("value");
+    expect(showsResult({ ok: true, result: [{ a: 1 }], exported: false, display: "result" })).toBe(
+      "value",
+    );
+  });
+
+  test("the result names its display mode for the view", async () => {
+    expect(await tool().execute({ code: scalar }, ctx)).toMatchObject({ display: "auto" });
+    expect(await tool().execute({ code: scalar, display: "none" }, ctx)).toMatchObject({
+      display: "none",
+    });
   });
 });
