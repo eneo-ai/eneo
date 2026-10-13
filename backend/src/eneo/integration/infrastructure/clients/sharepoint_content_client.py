@@ -25,6 +25,9 @@ from eneo.main.logging import get_logger
 logger = get_logger(__name__)
 
 TokenRefreshCallback = Callable[[UUID], Awaitable[dict[str, str]]]
+# Re-acquires an organisation (tenant app / service account) access token, which
+# has no OAuth token row and so no token id to hand to a TokenRefreshCallback.
+AccessTokenProvider = Callable[[], Awaitable[str]]
 
 
 def _relative_graph_link(url: str) -> str:
@@ -95,6 +98,7 @@ class SharePointContentClient(BaseClient):
         token_refresh_callback: Optional[TokenRefreshCallback] = None,
         max_download_bytes: Optional[int] = None,
         include_list_item_fields: bool = False,
+        access_token_provider: Optional[AccessTokenProvider] = None,
     ):
         super().__init__(base_url=base_url)
         # Content sync asks for each item's list item columns (source metadata)
@@ -111,6 +115,7 @@ class SharePointContentClient(BaseClient):
         self.token_id = token_id
         # Used to do token refresh when token is expired
         self.token_refresh_callback = token_refresh_callback
+        self.access_token_provider = access_token_provider
         # Serializes refreshes when concurrent requests hit 401 simultaneously.
         self._refresh_lock = asyncio.Lock()
         if max_download_bytes is None:
@@ -126,9 +131,15 @@ class SharePointContentClient(BaseClient):
             "Accept": "application/json",
         }
 
+    @property
+    def can_refresh_token(self) -> bool:
+        return self.access_token_provider is not None or bool(
+            self.token_refresh_callback and self.token_id
+        )
+
     async def refresh_token(self):
         """Refresh the token using the provided callback"""
-        if not self.token_refresh_callback or not self.token_id:
+        if not self.can_refresh_token:
             raise ValueError(
                 "Cannot refresh token: missing token_refresh_callback or token_id"
             )
@@ -139,6 +150,14 @@ class SharePointContentClient(BaseClient):
                 # Another concurrent caller already refreshed.
                 return None
 
+            if self.access_token_provider is not None:
+                access_token = await self.access_token_provider()
+                if not access_token:
+                    raise ValueError("Access token provider returned no token")
+                self.update_token(access_token)
+                return {"access_token": access_token}
+
+            assert self.token_refresh_callback is not None and self.token_id is not None
             token_data = await self.token_refresh_callback(self.token_id)
             if not token_data or "access_token" not in token_data:
                 raise ValueError("Token refresh callback returned invalid token data")
@@ -244,9 +263,58 @@ class SharePointContentClient(BaseClient):
             next_link = cast(Optional[str], response.get("@odata.nextLink"))
             if len(rows) >= max_items:
                 return rows[:max_items], bool(next_link) or len(rows) > max_items
-            if next_link and scanned >= self.MAX_SCANNED_ROWS:
+            if next_link and scanned >= max(self.MAX_SCANNED_ROWS, max_items):
                 return rows, True
         return rows, False
+
+    async def _get_items_capped(
+        self, endpoint: str, *, max_items: int
+    ) -> tuple[list[SharePointItem], bool]:
+        """Capped paged listing with list item columns when enabled."""
+        try:
+            rows, truncated = await self._get_paged_items_capped(
+                self._with_item_expand(endpoint), max_items=max_items
+            )
+        except aiohttp.ClientResponseError as e:
+            if not self._disable_item_expand_after(e):
+                raise
+            rows, truncated = await self._get_paged_items_capped(
+                endpoint, max_items=max_items
+            )
+        return cast(list[SharePointItem], rows), truncated
+
+    async def list_folder_children(
+        self,
+        *,
+        drive_id: str,
+        folder_id: str,
+        site_id: Optional[str] = None,
+        max_items: int,
+    ) -> tuple[list[SharePointItem], bool]:
+        """Up to ``max_items`` children of a folder; True when more exist.
+
+        For the picker: a folder with thousands of items is cut off here and
+        reported as truncated, so people search instead of scrolling a list
+        Graph would take minutes to page through.
+        """
+        if site_id:
+            endpoint = (
+                f"v1.0/sites/{site_id}/drives/{drive_id}/items/{folder_id}/children"
+            )
+        elif folder_id == "root":
+            endpoint = f"v1.0/drives/{drive_id}/root/children"
+        else:
+            endpoint = f"v1.0/drives/{drive_id}/items/{folder_id}/children"
+        try:
+            return await self._get_items_capped(endpoint, max_items=max_items)
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.can_refresh_token:
+                logger.info(
+                    "Token expired while listing folder children, refreshing..."
+                )
+                await self.refresh_token()
+                return await self._get_items_capped(endpoint, max_items=max_items)
+            raise
 
     async def get_list_items_filtered(
         self,
@@ -271,7 +339,7 @@ class SharePointContentClient(BaseClient):
                 endpoint, max_items=max_items, accept=accept
             )
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 await self.refresh_token()
                 return await self._get_paged_items_capped(
                     endpoint, max_items=max_items, accept=accept
@@ -304,7 +372,7 @@ class SharePointContentClient(BaseClient):
                     max_items=max_items,
                     accept=accept,
                 )
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 await self.refresh_token()
                 return await self._get_paged_items_capped(
                     endpoint, max_items=max_items, accept=accept
@@ -317,7 +385,7 @@ class SharePointContentClient(BaseClient):
         try:
             return cast(list[dict[str, Any]], await self._get_all_paged_items(endpoint))
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 logger.info("Token expired while getting list columns, refreshing...")
                 await self.refresh_token()
                 return cast(
@@ -408,7 +476,7 @@ class SharePointContentClient(BaseClient):
         try:
             return {"value": await self._get_all_paged_items(endpoint)}
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 logger.info(
                     "SharePoint token expired while listing sites, refreshing..."
                 )
@@ -424,7 +492,7 @@ class SharePointContentClient(BaseClient):
             groups = await self._get_all_paged_items(endpoint)
             return [cast(str, g.get("id")) for g in groups if g.get("id")]
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 logger.info(
                     "SharePoint token expired while listing memberOf groups, refreshing..."
                 )
@@ -468,11 +536,7 @@ class SharePointContentClient(BaseClient):
                         retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
                     )
                 except aiohttp.ClientResponseError as e:
-                    if (
-                        e.status == 401
-                        and self.token_refresh_callback
-                        and self.token_id
-                    ):
+                    if e.status == 401 and self.can_refresh_token:
                         logger.info(
                             "SharePoint token expired during $batch, refreshing..."
                         )
@@ -559,7 +623,7 @@ class SharePointContentClient(BaseClient):
         try:
             return await self.client.get("v1.0/me/drive", headers=self.headers)
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 logger.info("Token expired while getting OneDrive, refreshing...")
                 await self.refresh_token()
                 return await self.client.get("v1.0/me/drive", headers=self.headers)
@@ -572,7 +636,7 @@ class SharePointContentClient(BaseClient):
         try:
             return await self._get_items(endpoint)
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 logger.info("Token expired while getting drive root, refreshing...")
                 await self.refresh_token()
                 return await self._get_items(endpoint)
@@ -587,7 +651,7 @@ class SharePointContentClient(BaseClient):
         try:
             return await self._get_items(endpoint)
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 logger.info("Token expired while getting folder items, refreshing...")
                 await self.refresh_token()
                 return await self._get_items(endpoint)
@@ -600,7 +664,7 @@ class SharePointContentClient(BaseClient):
             return {"value": await self._get_all_paged_items(endpoint)}
 
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 await self.refresh_token()
                 return {"value": await self._get_all_paged_items(endpoint)}
             else:
@@ -617,7 +681,7 @@ class SharePointContentClient(BaseClient):
             # resp är redan JSON om BaseClient.get() dekodar; annars: resp = await resp.json()
             return cast(Optional[str], resp.get("id"))
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 await self.refresh_token()
                 resp = cast(
                     dict[str, Any],
@@ -636,7 +700,7 @@ class SharePointContentClient(BaseClient):
                 dict[str, Any], await self.client.get(endpoint, headers=self.headers)
             )
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 logger.info(
                     "SharePoint token expired when listing drives, refreshing..."
                 )
@@ -671,7 +735,7 @@ class SharePointContentClient(BaseClient):
             endpoint = f"v1.0/sites/{site_id}/drives/{drive_id}/root/children"
             return await self._get_items(endpoint)
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 logger.info("SharePoint token expired, refreshing...")
                 await self.refresh_token()
                 drive_id = await self.get_default_drive_id(site_id)
@@ -699,7 +763,7 @@ class SharePointContentClient(BaseClient):
             endpoint = f"v1.0/drives/{drive_id}/items/{item_id}"
             return await self._get_item(endpoint)
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 logger.info(
                     "SharePoint token expired while getting file metadata, refreshing..."
                 )
@@ -733,7 +797,7 @@ class SharePointContentClient(BaseClient):
             )
             return await self._get_items(endpoint)
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 logger.info(
                     "SharePoint token expired while getting folder items, refreshing..."
                 )
@@ -751,7 +815,7 @@ class SharePointContentClient(BaseClient):
         try:
             return await self.client.get(endpoint, headers=self.headers)
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 logger.info(
                     "SharePoint token expired while getting page content, refreshing..."
                 )
@@ -771,7 +835,7 @@ class SharePointContentClient(BaseClient):
         try:
             return await self._download_by_id(drive_id, item_id)
         except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
+            if e.status == 401 and self.can_refresh_token:
                 logger.info(
                     "SharePoint token expired while getting file content, refreshing..."
                 )
@@ -883,12 +947,7 @@ class SharePointContentClient(BaseClient):
                 raise DeltaTokenExpiredException(
                     f"Delta token expired (410 Gone) during initialization for drive {drive_id}"
                 ) from e
-            elif (
-                e.status == 401
-                and self.token_refresh_callback
-                and self.token_id
-                and not _retried
-            ):
+            elif e.status == 401 and self.can_refresh_token and not _retried:
                 logger.info("SharePoint token expired during delta init, refreshing...")
                 await self.refresh_token()
                 return await self.initialize_delta_token(drive_id, _retried=True)
@@ -952,12 +1011,7 @@ class SharePointContentClient(BaseClient):
                 raise DeltaTokenExpiredException(
                     f"Delta token expired (410 Gone) for drive {drive_id}"
                 ) from e
-            elif (
-                e.status == 401
-                and self.token_refresh_callback
-                and self.token_id
-                and not _retried
-            ):
+            elif e.status == 401 and self.can_refresh_token and not _retried:
                 logger.info(
                     "SharePoint token expired during delta query, refreshing..."
                 )

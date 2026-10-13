@@ -34,6 +34,7 @@ def _make_service(
         oauth_token_service=MagicMock(),
         tenant_app_auth_service=tenant_app_auth_service,
         service_account_auth_service=service_account_auth_service,
+        tenant_sharepoint_app_repo=AsyncMock(),
     )
 
 

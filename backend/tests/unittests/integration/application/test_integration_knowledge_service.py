@@ -9,8 +9,10 @@ Tests cover:
 - Remove knowledge with different auth types (user_oauth, tenant_app, service_account)
 """
 
+import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -21,6 +23,10 @@ from eneo.integration.application.integration_knowledge_service import (
 from eneo.integration.application.user_integration_service import UserIntegrationService
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
+)
+from eneo.integration.infrastructure.detached_tasks import pending_detached_tasks
+from eneo.integration.infrastructure.sharepoint_subscription_service import (
+    SharePointSubscriptionService,
 )
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.roles.permissions import Permission
@@ -630,6 +636,82 @@ class TestRemoveKnowledge:
         knowledge.user_integration = user_integration_tenant_app
         return knowledge
 
+    async def test_remove_knowledge_cleans_up_the_subscription_on_its_own_session(
+        self,
+        actor,
+        space,
+        sharepoint_knowledge_tenant_app,
+        tenant_app_client_credentials,
+    ):
+        """The Graph cleanup runs past the response, so it must not reuse the
+        request session or its repositories."""
+        actor.can_delete_integrations.return_value = True
+        space.get_integration_knowledge.return_value = sharepoint_knowledge_tenant_app
+        space.tenant_space_id = uuid4()
+        actor_manager = MagicMock()
+        actor_manager.get_space_actor_from_space.return_value = actor
+        space_repo = AsyncMock()
+        space_repo.one.return_value = space
+        tenant_sharepoint_app_repo = AsyncMock()
+        tenant_sharepoint_app_repo.one.return_value = tenant_app_client_credentials
+        tenant_app_auth_service = AsyncMock()
+        tenant_app_auth_service.get_access_token.return_value = "tenant-app-token"
+
+        request_scoped_repo = AsyncMock()
+        subscription_service = SharePointSubscriptionService(request_scoped_repo)
+        own_session = MagicMock()
+        count = MagicMock()
+        count.scalar_one.return_value = 0
+        own_session.execute = AsyncMock(return_value=count)
+        own_session.scalar = AsyncMock(return_value=None)
+
+        @asynccontextmanager
+        async def begin():
+            yield
+
+        own_session.begin = begin
+        sessions = MagicMock()
+
+        @asynccontextmanager
+        async def session():
+            yield own_session
+
+        sessions.session = session
+
+        service = IntegrationKnowledgeService(
+            job_service=AsyncMock(),
+            user=TEST_USER,
+            oauth_token_repo=AsyncMock(),
+            space_repo=space_repo,
+            integration_knowledge_repo=AsyncMock(),
+            embedding_model_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+            ),
+            actor_manager=actor_manager,
+            sharepoint_subscription_service=subscription_service,
+            tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+            tenant_app_auth_service=tenant_app_auth_service,
+            service_account_auth_service=AsyncMock(),
+        )
+
+        with patch("eneo.database.database.sessionmanager", sessions):
+            await service.remove_knowledge(
+                space_id=space.id,
+                integration_knowledge_id=sharepoint_knowledge_tenant_app.id,
+            )
+            while pending_detached_tasks():
+                await asyncio.gather(*pending_detached_tasks())
+
+        own_session.execute.assert_awaited()
+        request_scoped_repo.count_references.assert_not_called()
+        request_scoped_repo.one_or_none.assert_not_called()
+        space_repo.session.execute.assert_not_awaited()
+
     async def test_remove_knowledge_user_oauth_uses_oauth_token(
         self, actor, space, sharepoint_knowledge_user_oauth
     ):
@@ -733,7 +815,7 @@ class TestRemoveKnowledge:
 
         # Verify tenant_app_auth_service was called (not service_account)
         tenant_app_auth_service.get_access_token.assert_called_once_with(
-            tenant_app_client_credentials
+            tenant_app_client_credentials, force_refresh=False
         )
 
     async def test_remove_knowledge_service_account_uses_service_account_auth(
@@ -1082,7 +1164,7 @@ class TestCreateSpaceIntegrationKnowledge:
 
         # Verify tenant_app_auth_service was called
         tenant_app_auth_service.get_access_token.assert_called_once_with(
-            tenant_app_client_credentials
+            tenant_app_client_credentials, force_refresh=False
         )
         # Verify job was queued with tenant_app_id
         job_service.queue_job.assert_called_once()

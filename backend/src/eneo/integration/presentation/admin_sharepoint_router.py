@@ -36,8 +36,8 @@ from eneo.integration.presentation.admin_models import (
 )
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
+from eneo.main.exceptions import EncryptionNotConfiguredException
 from eneo.main.logging import get_logger
-from eneo.redis.connection import build_redis_auth_kwargs, build_redis_url
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.settings.encryption_service import EncryptionService
@@ -142,39 +142,39 @@ class _SimpleGraphToken:
         self.base_url = "https://graph.microsoft.com"
 
 
-async def _get_redis_client() -> Redis:
-    settings = get_settings()
-    return Redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
-        build_redis_url(settings),
-        encoding="utf8",
-        decode_responses=True,
-        **build_redis_auth_kwargs(settings),
+async def _store_oauth_state(
+    redis_client: Redis,
+    encryption_service: EncryptionService,
+    state: str,
+    data: dict[str, str],
+) -> None:
+    # The blob may carry the Entra client secret for the first sign-in, so it
+    # never sits in Redis as plaintext.
+    sealed = encryption_service.encrypt(json.dumps(data))
+    await redis_client.set(
+        f"{OAUTH_STATE_PREFIX}{state}", sealed, ex=OAUTH_STATE_TTL_SECONDS
     )
 
 
-async def _store_oauth_state(state: str, data: dict[str, str]) -> None:
-    client = await _get_redis_client()
-    try:
-        await client.set(
-            f"{OAUTH_STATE_PREFIX}{state}",
-            json.dumps(data),
-            ex=OAUTH_STATE_TTL_SECONDS,
-        )
-    finally:
-        await client.close()
-
-
-async def _pop_oauth_state(state: str) -> Optional[dict[str, str]]:
-    client = await _get_redis_client()
-    try:
-        key = f"{OAUTH_STATE_PREFIX}{state}"
-        data = await client.get(key)
-        if data is not None:
-            await client.delete(key)
-            return json.loads(data)
+async def _pop_oauth_state(
+    redis_client: Redis,
+    encryption_service: EncryptionService,
+    state: str,
+) -> Optional[dict[str, str]]:
+    # GETDEL makes the state single-use even under concurrent callbacks.
+    raw = await redis_client.getdel(f"{OAUTH_STATE_PREFIX}{state}")
+    if raw is None:
         return None
-    finally:
-        await client.close()
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        data = json.loads(encryption_service.decrypt(str(raw)))
+    except (ValueError, TypeError, EncryptionNotConfiguredException):
+        logger.warning("Discarding undecryptable or corrupt SharePoint OAuth state")
+        return None
+    if not isinstance(data, dict):
+        return None
+    return cast(dict[str, str], data)
 
 
 def _is_onedrive_subscription(subscription: SharePointSubscription) -> bool:
@@ -207,23 +207,7 @@ async def _get_sharepoint_token_for_user_integration(
                 f"TenantSharePointApp {user_integration.tenant_app_id} not found"
             )
 
-        if tenant_app.is_service_account():
-            service_account_auth = container.service_account_auth_service()
-            token_result = await service_account_auth.refresh_access_token(tenant_app)
-            new_refresh_token = token_result.get("refresh_token")
-            if (
-                new_refresh_token
-                and new_refresh_token != tenant_app.service_account_refresh_token
-            ):
-                tenant_app.update_refresh_token(new_refresh_token)
-                await tenant_app_repo.update(tenant_app)
-            return cast(
-                SharePointTokenProtocol,
-                _SimpleGraphToken(token_result["access_token"]),
-            )
-
-        tenant_app_auth = container.tenant_app_auth_service()
-        access_token = await tenant_app_auth.get_access_token(tenant_app)
+        access_token = await container.org_token_provider().get_access_token(tenant_app)
         return cast(SharePointTokenProtocol, _SimpleGraphToken(access_token))
 
     token = await oauth_token_service.get_oauth_token_by_user_integration(
@@ -474,12 +458,15 @@ async def get_sharepoint_app(
     response_model=TenantAppTestResult,
     summary="Test SharePoint app credentials",
     description=(
-        "Test if the provided SharePoint app credentials are valid by attempting "
-        "to acquire an access token. This does not save the credentials. "
-        "Requires admin role."
+        "With a body: test the given tenant-app credentials by acquiring an access "
+        "token, without saving them. Without a body: do a full token round trip "
+        "with the stored app (client credentials for tenant apps, the refresh "
+        "token for service accounts) and record the outcome as the app's "
+        "credential health. Requires admin role."
     ),
     responses={
         200: {"description": "Test completed (check success field in response)"},
+        400: {"description": "No SharePoint app is configured to test"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
     },
@@ -490,10 +477,12 @@ async def get_sharepoint_app(
     reason="Organization administration requires the admin permission.",
 )
 async def test_sharepoint_app_credentials(
-    app_config: Annotated[TenantSharePointAppCreate, Body()],
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    app_config: Annotated[Optional[TenantSharePointAppCreate], Body()] = None,
 ) -> TenantAppTestResult:
     """Test SharePoint app credentials without saving them."""
+    if app_config is None:
+        return await _test_stored_sharepoint_app(container)
     try:
         user = container.user()
         logger.info(
@@ -537,6 +526,31 @@ async def test_sharepoint_app_credentials(
             error_message=str(e),
             details=None,
         )
+
+
+async def _test_stored_sharepoint_app(container: Container) -> TenantAppTestResult:
+    user = container.user()
+    tenant_app_service: TenantSharePointAppService = (
+        container.tenant_sharepoint_app_service()
+    )
+    app = await tenant_app_service.get_active_app_for_tenant(user.tenant_id)
+    if app is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active SharePoint app is configured for this organization.",
+        )
+    success, error_msg = await container.org_token_provider().test_connection(app)
+    logger.info(
+        "Tested stored SharePoint app %s for tenant %s: %s",
+        app.id,
+        user.tenant_id,
+        "ok" if success else "failed",
+    )
+    return TenantAppTestResult(
+        success=success,
+        error_message=error_msg,
+        details="Token acquired successfully" if success else None,
+    )
 
 
 @router.delete(
@@ -841,6 +855,83 @@ async def renew_expired_subscriptions(
 
 
 @router.post(
+    "/sharepoint/subscriptions/recreate-all",
+    response_model=SubscriptionRenewalResult,
+    summary="Recreate every SharePoint subscription of the tenant",
+    description=(
+        "Recreate all of the tenant's SharePoint webhook subscriptions in place, "
+        "whether expired or not, so Graph posts to the currently configured "
+        "notification URL. Use it after the public origin changed. Preserves "
+        "all integration relationships. Requires admin role."
+    ),
+    responses={
+        200: {"description": "Recreation completed (check result for details)"},
+        401: {"description": "Authentication required"},
+        403: {"description": "Admin permissions required"},
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
+async def recreate_all_subscriptions(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> SubscriptionRenewalResult:
+    user = container.user()
+    subscription_repo = container.sharepoint_subscription_repo()
+    subscription_service = container.sharepoint_subscription_service()
+    user_integration_repo = container.user_integration_repo()
+
+    subscriptions = await subscription_repo.list_by_tenant(user.tenant_id)
+    logger.info(
+        f"Admin {user.id} initiated recreation of {len(subscriptions)} subscriptions "
+        f"for tenant {user.tenant_id}"
+    )
+
+    recreated = 0
+    failed = 0
+    errors: list[str] = []
+    for sub in subscriptions:
+        try:
+            user_integration = await user_integration_repo.one_or_none(
+                id=sub.user_integration_id
+            )
+            if (
+                user_integration is None
+                or user_integration.tenant_integration.tenant_id != user.tenant_id
+            ):
+                raise ValueError(
+                    f"User integration {sub.user_integration_id} not found"
+                )
+            token = await _get_sharepoint_token_for_user_integration(
+                user_integration=user_integration, container=container
+            )
+            if await subscription_service.recreate_expired_subscription(
+                subscription=sub,
+                token=token,
+                is_onedrive=_is_onedrive_subscription(sub),
+            ):
+                recreated += 1
+            else:
+                raise RuntimeError("Graph did not accept the new subscription")
+        except Exception as exc:
+            logger.error(
+                f"Error recreating subscription {sub.id}: {exc}", exc_info=True
+            )
+            failed += 1
+            errors.append(f"Subscription {sub.id}: {exc}")
+
+    return SubscriptionRenewalResult(
+        total_subscriptions=len(subscriptions),
+        expired_count=sum(1 for sub in subscriptions if sub.is_expired()),
+        recreated=recreated,
+        failed=failed,
+        errors=errors,
+    )
+
+
+@router.post(
     "/sharepoint/subscriptions/{subscription_id}/recreate",
     response_model=SharePointSubscriptionPublic,
     summary="Recreate a specific SharePoint subscription",
@@ -1002,6 +1093,8 @@ async def start_service_account_auth(
 
         # Store state with credentials in Redis for callback verification
         await _store_oauth_state(
+            container.redis_client(),
+            container.encryption_service(),
             state,
             {
                 "client_id": app_config.client_id,
@@ -1080,12 +1173,13 @@ async def restart_service_account_auth(
         )
 
     state = secrets.token_urlsafe(32)
+    # The callback reloads the stored app, so the secret never leaves the database.
     await _store_oauth_state(
+        container.redis_client(),
+        container.encryption_service(),
         state,
         {
-            "client_id": app.client_id,
-            "client_secret": app.client_secret,
-            "tenant_domain": app.tenant_domain,
+            "reauth": "1",
             "tenant_id": str(user.tenant_id),
             "user_id": str(user.id),
         },
@@ -1136,41 +1230,59 @@ async def service_account_auth_callback(
         user = container.user()
         _require_sharepoint_webhook_client_state()
 
-        # Verify state (atomically retrieve and delete from Redis)
-        stored_state = await _pop_oauth_state(callback.state)
+        encryption_service: EncryptionService = container.encryption_service()
+        stored_state = await _pop_oauth_state(
+            container.redis_client(), encryption_service, callback.state
+        )
         if stored_state is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired OAuth state. Please restart the authentication flow.",
             )
 
-        # Verify tenant matches
-        if stored_state["tenant_id"] != str(user.tenant_id):
+        if stored_state.get("tenant_id") != str(user.tenant_id) or stored_state.get(
+            "user_id"
+        ) != str(user.id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OAuth state was initiated by a different tenant",
+                detail="OAuth state was initiated by a different user or tenant",
             )
+
+        tenant_app_service: TenantSharePointAppService = (
+            container.tenant_sharepoint_app_service()
+        )
+
+        if stored_state.get("reauth"):
+            stored_app = await tenant_app_service.get_active_app_for_tenant(
+                user.tenant_id
+            )
+            if stored_app is None or not stored_app.is_service_account():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No active service account is configured for this organization.",
+                )
+            client_id = stored_app.client_id
+            client_secret = stored_app.client_secret
+            tenant_domain = stored_app.tenant_domain
+        else:
+            client_id = stored_state["client_id"]
+            client_secret = stored_state["client_secret"]
+            tenant_domain = stored_state["tenant_domain"]
 
         # Exchange auth code for tokens
         service_account_auth_service = ServiceAccountAuthService()
         token_result = await service_account_auth_service.exchange_token(
             auth_code=callback.auth_code,
-            client_id=stored_state["client_id"],
-            client_secret=stored_state["client_secret"],
-            tenant_domain=stored_state["tenant_domain"],
+            client_id=client_id,
+            client_secret=client_secret,
+            tenant_domain=tenant_domain,
         )
-
-        # Configure service account
-        tenant_app_service: TenantSharePointAppService = (
-            container.tenant_sharepoint_app_service()
-        )
-        encryption_service: EncryptionService = container.encryption_service()
 
         app = await tenant_app_service.configure_service_account(
             tenant_id=user.tenant_id,
-            client_id=stored_state["client_id"],
-            client_secret=stored_state["client_secret"],
-            tenant_domain=stored_state["tenant_domain"],
+            client_id=client_id,
+            client_secret=client_secret,
+            tenant_domain=tenant_domain,
             refresh_token=token_result.refresh_token,
             service_account_email=token_result.email or "unknown",
             created_by=user.id,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hmac
-from typing import Optional, cast
+from typing import cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import sqlalchemy as sa
@@ -12,6 +12,9 @@ from eneo.database.tables.integration_table import (
 )
 from eneo.database.tables.integration_table import (
     UserIntegration as UserIntegrationDBModel,
+)
+from eneo.integration.domain.entities.sharepoint_subscription import (
+    SharePointSubscription,
 )
 from eneo.integration.domain.repositories.oauth_token_repo import OauthTokenRepository
 from eneo.integration.domain.repositories.sharepoint_subscription_repo import (
@@ -68,8 +71,11 @@ class SharepointWebhookService:
     ) -> None:
         """Handle incoming webhook notifications from Microsoft Graph.
 
-        ChangeKey-based deduplication prevents processing of duplicate
-        notifications. Each notification item is validated before queuing.
+        Notifications are routed by their ``subscriptionId`` to the stored
+        subscription and from there to the knowledge rows referencing it, so a
+        notification can only ever reach the tenant that created the
+        subscription. ChangeKey-based deduplication prevents processing of
+        duplicate notifications.
         """
         values = notifications.get("value")
         if not values:
@@ -87,17 +93,8 @@ class SharepointWebhookService:
             )
             return
 
-        # Group notifications by resource (SharePoint site or OneDrive drive)
-        notifications_by_resource: dict[
-            tuple[str, str], list[SharePointWebhookNotification]
-        ] = {}
-        received_subscription_ids: set[str] = set()
+        by_subscription: dict[str, list[SharePointWebhookNotification]] = {}
         for notification in values:
-            resource_info = self._extract_resource_from_notification(notification)
-            if not resource_info:
-                continue
-            resource_type, resource_id = resource_info
-
             client_state = notification.get("clientState")
             # Constant-time compare to avoid leaking the secret via timing.
             if not isinstance(client_state, str) or not hmac.compare_digest(
@@ -110,74 +107,64 @@ class SharepointWebhookService:
                 continue
 
             subscription_id = notification.get("subscriptionId")
-            if subscription_id and subscription_id not in received_subscription_ids:
-                await self._mark_subscription_webhook_received(subscription_id)
-                received_subscription_ids.add(subscription_id)
+            if not isinstance(subscription_id, str) or not subscription_id:
+                logger.warning("Ignoring webhook notification without subscriptionId")
+                continue
+            by_subscription.setdefault(subscription_id, []).append(notification)
 
-            key = (resource_type, resource_id)
-            if key not in notifications_by_resource:
-                notifications_by_resource[key] = []
-            notifications_by_resource[key].append(notification)
-
-        # Process each resource's notifications
-        for (
-            resource_type,
-            resource_id,
-        ), resource_notifications in notifications_by_resource.items():
-            await self._queue_refresh_for_resource(
-                resource_type=resource_type,
-                resource_id=resource_id,
-                notifications=resource_notifications,
-            )
-
-    async def _mark_subscription_webhook_received(self, subscription_id: str) -> None:
-        try:
+        for subscription_id, subscription_notifications in by_subscription.items():
             subscription = (
                 await self.sharepoint_subscription_repo.get_by_subscription_id(
                     subscription_id
                 )
             )
-            if not subscription:
-                logger.debug(
-                    "Received SharePoint webhook for unknown subscription %s",
+            if subscription is None:
+                logger.info(
+                    "Ignoring SharePoint webhook for unknown subscription %s",
                     subscription_id,
                 )
-                return
+                continue
+            await self._mark_subscription_webhook_received(subscription)
+            await self._queue_refresh_for_subscription(
+                subscription=subscription,
+                notifications=subscription_notifications,
+            )
 
+    async def _mark_subscription_webhook_received(
+        self, subscription: SharePointSubscription
+    ) -> None:
+        try:
             subscription.mark_webhook_received()
             await self.sharepoint_subscription_repo.update(subscription)
         except Exception as exc:
             logger.warning(
                 "Could not update SharePoint subscription webhook health for %s: %s",
-                subscription_id,
+                subscription.subscription_id,
                 exc,
             )
 
-    async def _queue_refresh_for_resource(
+    async def _queue_refresh_for_subscription(
         self,
-        resource_type: str,
-        resource_id: str,
+        subscription: SharePointSubscription,
         notifications: list[SharePointWebhookNotification],
     ) -> None:
-        """Queue refresh jobs for a site/drive based on notifications.
+        """Queue refresh jobs for the knowledge rows referencing a subscription.
 
         Validates each notification's ChangeKey before queuing to prevent
         processing duplicates. Filters integrations by scope to avoid
         unnecessary syncs for file/folder-level integrations.
-
-        Uses site-level ChangeKey deduplication so the same webhook
-        notification doesn't trigger multiple syncs.
         """
-        if resource_type == "drive":
-            knowledge_records = await self._fetch_knowledge_by_drive(
-                drive_id=resource_id
-            )
+        # OneDrive subscriptions store the drive id in both columns.
+        if subscription.site_id == subscription.drive_id:
+            resource_type, resource_id = "drive", subscription.drive_id
         else:
-            knowledge_records = await self._fetch_knowledge_by_site(site_id=resource_id)
+            resource_type, resource_id = "site", subscription.site_id
 
+        knowledge_records = await self._fetch_knowledge_by_subscription(subscription.id)
         if not knowledge_records:
             logger.info(
-                "No integration knowledge found for SharePoint %s %s",
+                "No integration knowledge references SharePoint subscription %s (%s %s)",
+                subscription.subscription_id,
                 resource_type,
                 resource_id,
             )
@@ -187,13 +174,13 @@ class SharepointWebhookService:
         user_cache: dict[str, UserInDB] = {}
         queued_knowledge: set[str] = set()
 
-        # Filter out duplicate notifications at site level first
-        # This prevents the same webhook from being processed multiple times
+        # Deduplicate per subscription: two subscriptions on the same site get
+        # their own Graph notifications for one change, and each must still
+        # reach its own knowledge rows.
         unique_notifications: list[SharePointWebhookNotification] = []
-        dedupe_key = f"{resource_type}:{resource_id}"
+        dedupe_key = f"subscription:{subscription.id}"
         dedupe_integration_knowledge_id = uuid5(NAMESPACE_URL, dedupe_key)
         for notification in notifications:
-            # Check ChangeKey at site level (not per integration)
             resource_data = cast(
                 dict[str, str],
                 notification.get("resourceData") or {},
@@ -206,8 +193,6 @@ class SharepointWebhookService:
                 unique_notifications.append(notification)
                 continue
 
-            # Check if we've already seen this item+changekey combo in this webhook batch
-            # This handles the case where Microsoft sends duplicate notifications
             should_include = await self.change_key_service.should_process(
                 integration_knowledge_id=dedupe_integration_knowledge_id,
                 item_id=item_id,
@@ -443,24 +428,8 @@ class SharepointWebhookService:
         # so a provider's outbound headers carry this admin's attributes.
         return admins[0]
 
-    async def _fetch_knowledge_by_site(
-        self, site_id: str
-    ) -> list[tuple[IntegrationKnowledgeDBModel, UserIntegrationDBModel]]:
-        stmt = (
-            sa.select(IntegrationKnowledgeDBModel, UserIntegrationDBModel)
-            .join(
-                UserIntegrationDBModel,
-                IntegrationKnowledgeDBModel.user_integration_id
-                == UserIntegrationDBModel.id,
-            )
-            .where(IntegrationKnowledgeDBModel.site_id == site_id)
-        )
-
-        result = await self.session.execute(stmt)
-        return result.all()  # type: ignore[return-value]
-
-    async def _fetch_knowledge_by_drive(
-        self, drive_id: str
+    async def _fetch_knowledge_by_subscription(
+        self, subscription_db_id: UUID
     ) -> list[tuple[IntegrationKnowledgeDBModel, UserIntegrationDBModel]]:
         stmt = (
             sa.select(IntegrationKnowledgeDBModel, UserIntegrationDBModel)
@@ -470,10 +439,8 @@ class SharepointWebhookService:
                 == UserIntegrationDBModel.id,
             )
             .where(
-                sa.and_(
-                    IntegrationKnowledgeDBModel.drive_id == drive_id,
-                    IntegrationKnowledgeDBModel.resource_type == "onedrive",
-                )
+                IntegrationKnowledgeDBModel.sharepoint_subscription_id
+                == subscription_db_id
             )
         )
 
@@ -614,70 +581,3 @@ class SharepointWebhookService:
             )
 
         return should_process
-
-    def _extract_resource_from_notification(
-        self,
-        notification: SharePointWebhookNotification,
-    ) -> Optional[tuple[str, str]]:
-        """Extract ('site'|'drive', identifier) from notification."""
-        resource: Optional[str] = notification.get("resource")
-        if resource:
-            parsed = self._parse_resource(resource)
-            if parsed:
-                return parsed
-
-        # Fallback for notifications where only resourceData is populated.
-        resource_data = cast(dict[str, str], notification.get("resourceData", {}))
-        site_id = resource_data.get("siteId")
-        if site_id:
-            return ("site", site_id)
-        drive_id = resource_data.get("driveId")
-        if drive_id:
-            return ("drive", drive_id)
-        return None
-
-    def _extract_site_id_from_notification(
-        self, notification: SharePointWebhookNotification
-    ) -> Optional[str]:
-        """Extract site ID from a single notification."""
-        parsed = self._extract_resource_from_notification(notification)
-        if not parsed:
-            return None
-        resource_type, resource_id = parsed
-        if resource_type == "site":
-            return resource_id
-        return None
-
-    @staticmethod
-    def _parse_site_id(resource: str) -> Optional[str]:
-        parsed = SharepointWebhookService._parse_resource(resource)
-        if not parsed:
-            return None
-        resource_type, resource_id = parsed
-        if resource_type == "site":
-            return resource_id
-        return None
-
-    @staticmethod
-    def _parse_resource(resource: str) -> Optional[tuple[str, str]]:
-        # Expected formats:
-        # sites/{siteId}/drives/{driveId}/root
-        # sites/{siteId}/lists/{listId}
-        # drives/{driveId}/root
-        try:
-            after_sites = resource.split("sites/", 1)[1]
-            site_id_part = after_sites.split("/", 1)[0]
-            if site_id_part:
-                return ("site", site_id_part)
-        except IndexError:
-            pass
-
-        try:
-            after_drives = resource.split("drives/", 1)[1]
-            drive_id_part = after_drives.split("/", 1)[0]
-            if drive_id_part:
-                return ("drive", drive_id_part)
-        except IndexError:
-            pass
-
-        return None

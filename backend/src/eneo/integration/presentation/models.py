@@ -150,6 +150,8 @@ class SharePointFilterColumn(BaseModel):
 
 class SharePointTreeResponse(BaseModel):
     items: list[SharePointTreeItem]
+    # True when the folder holds more items than ``items``; search to narrow.
+    truncated: bool = False
     current_path: str
     parent_id: Optional[str] = None
     drive_id: str
