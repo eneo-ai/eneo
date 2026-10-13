@@ -147,6 +147,8 @@ async def _run_delta(
     service: "SharePointContentService",
     params: "SharepointContentTaskParam",
     knowledge: "IntegrationKnowledge",
+    *,
+    record_failure: bool = True,
 ) -> str:
     return await service.process_delta_changes(
         token_id=params.token_id,
@@ -155,6 +157,7 @@ async def _run_delta(
         site_id=params.site_id,
         drive_id=params.drive_id,
         resource_type=params.resource_type,
+        record_failure=record_failure,
     )
 
 
@@ -192,11 +195,11 @@ async def _drain_pending_delta(
             knowledge_id_str,
         )
         try:
-            result = await _run_delta(service, params, knowledge)
+            result = await _run_delta(service, params, knowledge, record_failure=False)
         except Exception:
-            # The service has already recorded the failure on the knowledge; the
-            # result of the sync that owned the lease still stands. The marker
-            # goes back so the change is retried by the next sync, not lost.
+            # The sync that owned the lease succeeded and its status stands; the
+            # marker goes back so the change is retried by the next notification
+            # or scheduled sync, not lost.
             logger.error(
                 "Pending delta pass failed for knowledge %s",
                 knowledge_id_str,

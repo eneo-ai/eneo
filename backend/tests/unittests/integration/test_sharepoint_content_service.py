@@ -3013,6 +3013,33 @@ class TestSyncStatus:
         assert ik.last_sync_attempted_at is not None
         assert update.await_args.kwargs["obj"] is ik
 
+    async def test_unrecorded_delta_failure_leaves_the_owning_sync_status(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik = _real_integration_knowledge(
+            delta_token="token-1", last_sync_status="success"
+        )
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(side_effect=RuntimeError("throttled")),
+            )
+            with pytest.raises(RuntimeError, match="throttled"):
+                await service.process_delta_changes(
+                    token_id=mock_oauth_token.id,
+                    integration_knowledge_id=ik.id,
+                    record_failure=False,
+                )
+
+        assert ik.last_sync_status == "success"
+        assert ik.last_sync_error is None
+        mock_dependencies["sync_log_repo"].add.assert_not_awaited()
+
     @pytest.mark.parametrize(
         ("delta_token", "delta_outcome", "recovery"),
         [

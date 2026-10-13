@@ -137,6 +137,10 @@ async def test_lease_holder_runs_the_pending_pass_before_releasing(
 
     expected_delta_passes = 2 if task is delta_task else 1
     assert service.process_delta_changes.await_count == expected_delta_passes
+    assert [
+        call.kwargs["record_failure"]
+        for call in service.process_delta_changes.await_args_list
+    ] == [True] * (expected_delta_passes - 1) + [False]
     assert seen_during_pending[-1] is True
     assert PENDING_KEY not in fake_redis.store
     assert LOCK_KEY not in fake_redis.store
@@ -183,6 +187,7 @@ async def test_failing_pending_pass_keeps_the_marker_for_the_next_sync(
 
     assert result == "Imported 3 files"
     service.process_delta_changes.assert_awaited_once()
+    assert service.process_delta_changes.await_args.kwargs["record_failure"] is False
     assert fake_redis.store[PENDING_KEY] == "1"
     assert fake_redis.ttls[PENDING_KEY] == 3600
     assert LOCK_KEY not in fake_redis.store
