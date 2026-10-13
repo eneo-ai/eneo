@@ -283,6 +283,18 @@ class TestListFolderChildren:
         assert truncated is True
         assert len(_urls(client)) == 1
 
+    async def test_exactly_the_cap_on_the_last_page_is_not_truncated(self):
+        client = _client(
+            include=False, responses=[{"value": [{"id": "1"}, {"id": "2"}]}]
+        )
+
+        items, truncated = await client.list_folder_children(
+            drive_id="d1", folder_id="root", max_items=2
+        )
+
+        assert [item["id"] for item in items] == ["1", "2"]
+        assert truncated is False
+
     async def test_follows_pages_under_the_cap_without_truncating(self):
         client = _client(
             include=False,
