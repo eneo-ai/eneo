@@ -41,6 +41,7 @@ from eneo.integration.infrastructure.content_service.utils import (
     EMPTY_CONTENT_REASON,
     FILE_TOO_LARGE_REASON,
     NO_TEXT_REASONS,
+    error_reason,
     file_extension_to_type,
     is_unextractable_content,
 )
@@ -972,40 +973,29 @@ class SharePointContentService:
                             )
                             return stats
 
-                        try:
-                            content, _ = await content_client.get_file_content_by_id(
-                                drive_id=actual_drive_id,
-                                item_id=folder_id_value,
-                            )
-                        except Exception as e:
-                            logger.error(
-                                f"Error getting file content for {item_name}: {e}",
-                                exc_info=True,
-                            )
-                            stats["skipped_items"] += 1
-                            stats["skipped_details"].append(
-                                {"file": item_name, "reason": f"Error: {e}"}
-                            )
-                            return stats
-
+                        content, skip_reason = await self._extract_file(
+                            content_client, actual_drive_id, folder_id_value, item_name
+                        )
                         if content and not is_unextractable_content(content):
                             outcome = await self._process_info_blob(
                                 title=item_name,
                                 text=content,
                                 url=item_info.get("webUrl", ""),
                                 integration_knowledge=integration_knowledge,
-                                sharepoint_item_id=integration_knowledge.folder_id,
+                                sharepoint_item_id=folder_id_value,
                                 source_metadata=await self._source_metadata_for(
                                     content_client,
                                     actual_drive_id,
                                     cast(SharePointItem, item_info),
                                 ),
+                                stats=stats,
                             )
                             self._count_outcome(stats, outcome, item_name)
                         else:
-                            await self._delete_local_blob_for_unextractable_item(
+                            await self._skip_or_remove_unextractable(
                                 item_id=folder_id_value,
                                 item_name=item_name,
+                                skip_reason=skip_reason,
                                 integration_knowledge=integration_knowledge,
                                 integration_knowledge_id=integration_knowledge_id,
                                 stats=stats,
@@ -1101,20 +1091,9 @@ class SharePointContentService:
                         {"file": doc_name, "reason": unsupported_reason}
                     )
                     continue
-                try:
-                    content, _ = await client.get_file_content_by_id(
-                        drive_id=drive_id, item_id=item_id
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Error getting file content for {doc_name}: {e}", exc_info=True
-                    )
-                    stats["skipped_items"] += 1
-                    stats["skipped_details"].append(
-                        {"file": doc_name, "reason": f"Error: {e}"}
-                    )
-                    continue
-
+                content, skip_reason = await self._extract_file(
+                    client, drive_id, item_id, doc_name
+                )
                 if content and not is_unextractable_content(content):
                     outcome = await self._process_info_blob(
                         title=doc_name,
@@ -1125,12 +1104,14 @@ class SharePointContentService:
                         source_metadata=await self._source_metadata_for(
                             client, drive_id, document
                         ),
+                        stats=stats,
                     )
                     self._count_outcome(stats, outcome, doc_name)
                 else:
-                    await self._delete_local_blob_for_unextractable_item(
+                    await self._skip_or_remove_unextractable(
                         item_id=item_id,
                         item_name=doc_name,
+                        skip_reason=skip_reason,
                         integration_knowledge=integration_knowledge,
                         integration_knowledge_id=integration_knowledge.id,
                         stats=stats,
@@ -1172,6 +1153,7 @@ class SharePointContentService:
                     url=content.get("webUrl", ""),
                     integration_knowledge=integration_knowledge,
                     sharepoint_item_id=page_id,
+                    stats=stats,
                 )
                 self._count_outcome(stats, outcome, page_name, page=True)
             except Exception as e:
@@ -1284,16 +1266,25 @@ class SharePointContentService:
         text: str,
         url: str,
         integration_knowledge: "IntegrationKnowledge",
+        *,
+        stats: SyncStats,
         sharepoint_item_id: Optional[str] = None,
         source_metadata: Optional[list[SourceMetadataEntry]] = None,
     ) -> BlobOutcome:
         sanitized_text = sanitize_text_for_db(text)
         if not sanitized_text.strip():
-            logger.debug(
-                "Skipping SharePoint item with no indexable text: %s (item_id=%s)",
-                title,
-                sharepoint_item_id,
-            )
+            # Nothing indexable survives sanitising; treat it like a parser that
+            # found no text so a previously indexed copy does not linger. The
+            # caller counts the skip from the outcome.
+            if sharepoint_item_id:
+                await self._delete_local_sharepoint_item(
+                    item_id=sharepoint_item_id,
+                    item_name=title,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=integration_knowledge.id,
+                    stats=stats,
+                    reason="unextractable",
+                )
             return "empty"
 
         existing_blob = None
@@ -1499,6 +1490,31 @@ class SharePointContentService:
     ) -> bool:
         return content is None and skip_reason in NO_TEXT_REASONS
 
+    async def _skip_or_remove_unextractable(
+        self,
+        *,
+        item_id: Optional[str],
+        item_name: str,
+        skip_reason: Optional[str],
+        integration_knowledge: "IntegrationKnowledge",
+        integration_knowledge_id: UUID,
+        stats: SyncStats,
+    ) -> None:
+        """Count a file that yielded no text; drop the local copy only for a positive no-text result."""
+        if item_id and self._is_positive_unextractable_result(None, skip_reason):
+            await self._delete_local_blob_for_unextractable_item(
+                item_id=item_id,
+                item_name=item_name,
+                integration_knowledge=integration_knowledge,
+                integration_knowledge_id=integration_knowledge_id,
+                stats=stats,
+                reason=skip_reason or EMPTY_CONTENT_REASON,
+            )
+            return
+        stats["skipped_items"] += 1
+        if skip_reason:
+            stats["skipped_details"].append({"file": item_name, "reason": skip_reason})
+
     async def _delete_out_of_scope_folder_subtree(
         self,
         *,
@@ -1575,41 +1591,39 @@ class SharePointContentService:
     ) -> None:
         """Index one changed file; every failure is counted, none propagates."""
         item_name = item.get("name", "")
-        item_id = require_text(item.get("id"), "item id")
-        source_metadata = await self._source_metadata_for(
-            content_client, drive_id, item
-        )
-        change_key = self._change_key_with_metadata(
-            item.get("cTag"), source_metadata, title=item_name
-        )
-
-        if self.change_key_service and change_key:
-            should_process = await self.change_key_service.should_process(
-                integration_knowledge_id=integration_knowledge_id,
-                item_id=item_id,
-                change_key=change_key,
+        try:
+            item_id = require_text(item.get("id"), "item id")
+            source_metadata = await self._source_metadata_for(
+                content_client, drive_id, item
             )
-            if not should_process:
-                logger.info(
-                    f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
+            change_key = self._change_key_with_metadata(
+                item.get("cTag"), source_metadata, title=item_name
+            )
+
+            if self.change_key_service and change_key:
+                should_process = await self.change_key_service.should_process(
+                    integration_knowledge_id=integration_knowledge_id,
+                    item_id=item_id,
+                    change_key=change_key,
                 )
-                stats["unchanged_items"] += 1
+                if not should_process:
+                    logger.info(
+                        f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
+                    )
+                    stats["unchanged_items"] += 1
+                    return
+
+            unsupported_reason = unsupported_file_reason(item_name)
+            if unsupported_reason:
+                stats["skipped_items"] += 1
+                stats["skipped_details"].append(
+                    {"file": item_name, "reason": unsupported_reason}
+                )
                 return
 
-        unsupported_reason = unsupported_file_reason(item_name)
-        if unsupported_reason:
-            stats["skipped_items"] += 1
-            stats["skipped_details"].append(
-                {"file": item_name, "reason": unsupported_reason}
+            content, skip_reason = await self._extract_file(
+                content_client, drive_id, item_id, item_name
             )
-            return
-
-        try:
-            content, _ = await content_client.get_file_content_by_id(
-                drive_id=drive_id,
-                item_id=item_id,
-            )
-
             if content and not is_unextractable_content(content):
                 outcome = await self._process_info_blob(
                     title=item_name,
@@ -1618,6 +1632,7 @@ class SharePointContentService:
                     integration_knowledge=integration_knowledge,
                     sharepoint_item_id=item_id,
                     source_metadata=source_metadata,
+                    stats=stats,
                 )
                 self._count_outcome(stats, outcome, item_name)
 
@@ -1628,31 +1643,22 @@ class SharePointContentService:
                         (integration_knowledge_id, item_id, change_key)
                     )
             else:
-                await self._delete_local_blob_for_unextractable_item(
+                await self._skip_or_remove_unextractable(
                     item_id=item_id,
                     item_name=item_name,
+                    skip_reason=skip_reason,
                     integration_knowledge=integration_knowledge,
                     integration_knowledge_id=integration_knowledge_id,
                     stats=stats,
                 )
 
-        except ValueError as e:
-            if "exceeds max download size" in str(e):
-                reason = "File too large (exceeds 50 MB limit)"
-            else:
-                reason = f"Error: {e}"
-            logger.error(
-                f"Error processing changed file {item_name}: {e}", exc_info=True
-            )
-            stats["skipped_items"] += 1
-            stats["skipped_details"].append({"file": item_name, "reason": reason})
         except Exception as e:
             logger.error(
                 f"Error processing changed file {item_name}: {e}", exc_info=True
             )
             stats["skipped_items"] += 1
             stats["skipped_details"].append(
-                {"file": item_name, "reason": f"Error: {e}"}
+                {"file": item_name, "reason": error_reason(str(e))}
             )
 
     async def _index_folder_subtree_entering_scope(
@@ -1817,9 +1823,9 @@ class SharePointContentService:
     ) -> list[SharePointItem]:
         """Strictly enumerate every in-scope file (and page) item.
 
-        Unlike _collect_files_recursive, this propagates listing errors instead of
-        swallowing them: an incomplete enumeration must NOT be treated as the
-        authoritative set during reconciliation, or it would delete valid blobs.
+        Listing errors propagate instead of being swallowed: an incomplete
+        enumeration must NOT be treated as the authoritative set during
+        reconciliation, or it would delete valid blobs.
         """
         items: list[SharePointItem] = []
 
@@ -2080,25 +2086,18 @@ class SharePointContentService:
                     source_metadata=await self._source_metadata_for(
                         client, drive_id, item
                     ),
+                    stats=stats,
                 )
                 self._count_outcome(stats, outcome, item_name)
-            elif item_id and self._is_positive_unextractable_result(
-                content, skip_reason
-            ):
-                await self._delete_local_blob_for_unextractable_item(
+            else:
+                await self._skip_or_remove_unextractable(
                     item_id=item_id,
                     item_name=item_name,
+                    skip_reason=skip_reason,
                     integration_knowledge=integration_knowledge,
                     integration_knowledge_id=integration_knowledge_id,
                     stats=stats,
-                    reason=skip_reason or EMPTY_CONTENT_REASON,
                 )
-            else:
-                stats["skipped_items"] += 1
-                if skip_reason:
-                    stats["skipped_details"].append(
-                        {"file": item_name, "reason": skip_reason}
-                    )
 
     def _initialize_stats(self) -> SyncStats:
         return {
@@ -2276,108 +2275,6 @@ class SharePointContentService:
             return "/"
         return parent_path
 
-    async def _get_all_sharepoint_files(
-        self,
-        content_client: SharePointContentClient,
-        site_id: str,
-    ) -> list[SharePointItem]:
-        """
-        Recursively collect all file names from SharePoint for comparison with database.
-        Returns a flat list of all files (not folders) in the drive, including files in subfolders.
-
-        This is used during delta recovery to accurately detect deleted files.
-        """
-        all_files: list[SharePointItem] = []
-
-        try:
-            # Get default drive for the site
-            drive_id = await content_client.get_default_drive_id(site_id=site_id)
-            if not drive_id:
-                logger.warning(f"Could not get drive ID for site {site_id}")
-                return []
-
-            # Recursively collect all files starting from root
-            await self._collect_files_recursive(
-                content_client=content_client,
-                site_id=site_id,
-                drive_id=drive_id,
-                folder_id=None,  # None means root
-                all_files=all_files,
-            )
-
-            # Also get site pages
-            pages = await content_client.get_site_pages(site_id=site_id)
-            if data := pages.get("value", []):
-                all_files.extend(self._flatten_files(data))
-
-        except Exception as e:
-            logger.error(
-                f"Error getting SharePoint files for comparison: {e}", exc_info=True
-            )
-            # Return empty list on error - safe default
-            return []
-
-        return all_files
-
-    async def _collect_files_recursive(
-        self,
-        content_client: SharePointContentClient,
-        site_id: str,
-        drive_id: str,
-        folder_id: Optional[str],
-        all_files: list[SharePointItem],
-    ) -> None:
-        """
-        Recursively collect all files from a folder and its subfolders.
-
-        Args:
-            content_client: The SharePoint client
-            site_id: The site ID
-            drive_id: The drive ID
-            folder_id: The folder ID to collect from (None for root)
-            all_files: The list to collect files into (mutated)
-        """
-        try:
-            # Get items in this folder
-            if folder_id:
-                items = await content_client.get_folder_items(
-                    site_id=site_id,
-                    drive_id=drive_id,
-                    folder_id=folder_id,
-                )
-            else:
-                # Root folder
-                items = await content_client.get_documents_in_drive(site_id=site_id)
-
-            for item in items:
-                if item.get("folder"):
-                    # It's a folder - recurse into it
-                    item_id = item.get("id")
-                    if item_id:
-                        await self._collect_files_recursive(
-                            content_client=content_client,
-                            site_id=site_id,
-                            drive_id=drive_id,
-                            folder_id=item_id,
-                            all_files=all_files,
-                        )
-                else:
-                    # It's a file - add to our list
-                    all_files.append(item)
-
-        except Exception as e:
-            logger.warning(f"Error collecting files from folder {folder_id}: {e}")
-            # Continue with other folders on error
-
-    def _flatten_files(self, items: list[SharePointItem]) -> list[SharePointItem]:
-        """Extract all files from a list of items (excluding folders)."""
-        files: list[SharePointItem] = []
-        for item in items:
-            if not item.get("folder", {}):
-                # It's a file
-                files.append(item)
-        return files
-
     async def token_refresh_callback(self, token_id: UUID) -> dict[str, str]:
         token = await self.oauth_token_service.refresh_and_update_token(
             token_id=token_id
@@ -2408,6 +2305,16 @@ class SharePointContentService:
         if skip_reason:
             return None, skip_reason
 
+        return await self._extract_file(client, drive_id, item_id, item_name)
+
+    async def _extract_file(
+        self,
+        client: SharePointContentClient,
+        drive_id: str,
+        item_id: str,
+        item_name: str,
+    ) -> tuple[Optional[str], Optional[str]]:
+        """``(text, None)`` or ``(None, skip_reason)``; never raises."""
         try:
             result = await client.get_file_extraction_by_id(
                 drive_id=drive_id, item_id=item_id
@@ -2415,12 +2322,23 @@ class SharePointContentService:
         except ValueError as e:
             if "exceeds max download size" in str(e):
                 return None, FILE_TOO_LARGE_REASON
-            logger.error(f"Error getting file content for {item_name}: {e}")
-            return None, f"Error: {e}"
+            logger.error(
+                f"Error getting file content for {item_name}: {e}", exc_info=True
+            )
+            return None, error_reason(str(e))
         except Exception as e:
-            logger.error(f"Error getting file content for {item_name}: {e}")
-            return None, f"Error: {e}"
+            logger.error(
+                f"Error getting file content for {item_name}: {e}", exc_info=True
+            )
+            return None, error_reason(str(e))
 
         if result.text is not None:
             return result.text, None
+        if result.failed:
+            logger.warning(
+                "Extraction failed for %s (item_id=%s): %s",
+                item_name,
+                item_id,
+                result.skip_reason,
+            )
         return None, result.skip_reason

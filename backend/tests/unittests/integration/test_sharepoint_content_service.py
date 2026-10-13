@@ -367,6 +367,7 @@ class TestProcessInfoBlobSizeAccounting:
             url="https://example.com",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-123",
+            stats=service._initialize_stats(),
         )
 
         assert mock_integration_knowledge.size == 530
@@ -404,6 +405,7 @@ class TestProcessInfoBlobSizeAccounting:
             url="https://example.com",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-123",
+            stats=service._initialize_stats(),
         )
 
         assert mock_integration_knowledge.size == 500
@@ -433,6 +435,7 @@ class TestProcessInfoBlobSizeAccounting:
             url="https://example.com/new",
             integration_knowledge=copy_a,
             sharepoint_item_id="item-new",
+            stats=service._initialize_stats(),
         )
 
         deleted_blob = MagicMock(size=40)
@@ -488,6 +491,7 @@ class TestProcessInfoBlobSizeAccounting:
             url="https://example.com",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-123",
+            stats=service._initialize_stats(),
         )
 
         # Unchanged content + metadata: no publication, no embedding,
@@ -534,6 +538,7 @@ class TestProcessInfoBlobSizeAccounting:
             url="https://example.com/new",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-123",
+            stats=service._initialize_stats(),
         )
 
         # Metadata refreshed, but no replacement is published.
@@ -573,6 +578,7 @@ class TestProcessInfoBlobSizeAccounting:
             url="https://example.com",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-123",
+            stats=service._initialize_stats(),
         )
 
         mock_dependencies[
@@ -620,6 +626,7 @@ class TestProcessInfoBlobSizeAccounting:
             url="https://example.com",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-123",
+            stats=service._initialize_stats(),
         )
 
         assert upserted[0].content_hash == expected_hash
@@ -648,6 +655,7 @@ class TestProcessInfoBlobSizeAccounting:
                 url="https://example.com",
                 integration_knowledge=mock_integration_knowledge,
                 sharepoint_item_id="item-123",
+                stats=service._initialize_stats(),
             )
 
 
@@ -1326,7 +1334,7 @@ class TestDeltaChangesProcessing:
             sharepoint_item_id="item-123",
             integration_knowledge_id=mock_integration_knowledge.id,
         )
-        mock_client.get_file_content_by_id.assert_not_called()
+        mock_client.get_file_extraction_by_id.assert_not_called()
 
     async def test_deleted_delta_size_never_goes_below_zero(
         self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
@@ -1421,7 +1429,9 @@ class TestDeltaChangesProcessing:
                 ],
                 "new-delta-token",
             )
-            mock_client.get_file_content_by_id.return_value = ("", None)
+            mock_client.get_file_extraction_by_id.return_value = (
+                ExtractionResult.no_text(EMPTY_CONTENT_REASON)
+            )
             mock_client_class.return_value = mock_client
 
             with patch.object(
@@ -1502,7 +1512,7 @@ class TestDeltaChangesProcessing:
             sharepoint_item_id="item-123",
             integration_knowledge_id=mock_integration_knowledge.id,
         )
-        mock_client.get_file_content_by_id.assert_not_called()
+        mock_client.get_file_extraction_by_id.assert_not_called()
         assert mock_integration_knowledge.size == 60
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
         assert sync_log.metadata["trigger"] == "webhook"
@@ -1622,7 +1632,7 @@ class TestDeltaChangesProcessing:
         mock_dependencies[
             "info_blob_service"
         ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
-        mock_client.get_file_content_by_id.assert_not_called()
+        mock_client.get_file_extraction_by_id.assert_not_called()
         assert mock_integration_knowledge.folder_path is None
         assert "1 item skipped" in result
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
@@ -2065,9 +2075,8 @@ class TestSyncLogging:
                 }
             ]
             mock_client.get_site_pages.return_value = {"value": []}
-            mock_client.get_file_content_by_id.return_value = (
-                "File content",
-                "text/plain",
+            mock_client.get_file_extraction_by_id.return_value = ExtractionResult.ok(
+                "File content", "text/plain"
             )
             mock_client.initialize_delta_token.return_value = "delta-token"
             mock_client_class.return_value = mock_client
@@ -2724,14 +2733,25 @@ class TestProcessPages:
 
 
 class TestProcessInfoBlobEmptyText:
+    """Text that sanitises to nothing is a no-text result: not published, and a
+    previously indexed copy is removed and counted once."""
+
     @pytest.mark.parametrize("text", ["", "   \n\t", "\x00\x00"])
-    async def test_text_without_content_is_not_published(
+    async def test_previously_indexed_item_is_removed_and_counted_once(
         self, service, mock_dependencies, mock_integration_knowledge, text
     ):
         mock_integration_knowledge.size = 500
+        _size_ledger(mock_dependencies["integration_knowledge_repo"], 500)
+        stale_blob = MagicMock(size=120)
+        delete = mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[stale_blob]
+        )
         publish = mock_dependencies[
             "info_blob_service"
         ].publish_info_blob_without_validation
+        stats = service._initialize_stats()
 
         outcome = await service._process_info_blob(
             title="Doc",
@@ -2739,12 +2759,47 @@ class TestProcessInfoBlobEmptyText:
             url="https://example.com",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-1",
+            stats=stats,
         )
+        service._count_outcome(stats, outcome, "Doc")
 
         assert outcome == "empty"
         publish.assert_not_called()
-        assert mock_integration_knowledge.size == 500
-        mock_dependencies["integration_knowledge_repo"].update.assert_not_called()
+        delete.assert_awaited_once_with(
+            sharepoint_item_id="item-1",
+            integration_knowledge_id=mock_integration_knowledge.id,
+        )
+        assert mock_integration_knowledge.size == 380
+        assert stats["files_deleted"] == 1
+        assert stats["skipped_items"] == 1
+        assert stats["skipped_details"] == [
+            {"file": "Doc", "reason": EMPTY_CONTENT_REASON}
+        ]
+        mock_dependencies[
+            "change_key_service"
+        ].invalidate_change_key.assert_awaited_once_with(
+            integration_knowledge_id=mock_integration_knowledge.id, item_id="item-1"
+        )
+
+    async def test_item_without_an_id_is_only_counted(
+        self, service, mock_dependencies, mock_integration_knowledge
+    ):
+        delete = mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge
+        stats = service._initialize_stats()
+
+        outcome = await service._process_info_blob(
+            title="Doc",
+            text="\x00",
+            url="https://example.com",
+            integration_knowledge=mock_integration_knowledge,
+            stats=stats,
+        )
+
+        assert outcome == "empty"
+        delete.assert_not_called()
+        assert stats["files_deleted"] == 0
 
 
 def _real_integration_knowledge(**overrides):
@@ -3026,7 +3081,6 @@ class TestFullSyncUsesStoredDrive:
             call.args[0] for call in client.get_drive_root_children.await_args_list
         }
         assert listed_drives == {"drive-stored"}
-        client.get_documents_in_drive.assert_not_called()
         client.get_default_drive_id.assert_not_called()
 
 
@@ -3058,7 +3112,9 @@ class TestDeltaFolderScopeOrdering:
             client = _mock_graph_client(
                 mock_client_class,
                 get_delta_changes=AsyncMock(return_value=(changes, "new-token")),
-                get_file_content_by_id=AsyncMock(return_value=("text", "text/plain")),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("text", "text/plain")
+                ),
             )
             result = await service.process_delta_changes(
                 token_id=mock_oauth_token.id,
@@ -3099,7 +3155,7 @@ class TestDeltaFolderScopeOrdering:
         mock_dependencies[
             "info_blob_service"
         ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
-        client.get_file_content_by_id.assert_awaited_once_with(
+        client.get_file_extraction_by_id.assert_awaited_once_with(
             drive_id="drive-123", item_id="nested-1"
         )
         assert folder_scoped.folder_path == "/Documents/A renamed"
@@ -3151,7 +3207,7 @@ class TestDeltaFolderScopeOrdering:
         assert enumerate_items.await_args.kwargs["folder_id"] == "folder-x"
         fetched = [
             call.kwargs["item_id"]
-            for call in client.get_file_content_by_id.await_args_list
+            for call in client.get_file_extraction_by_id.await_args_list
         ]
         # x-2 is already indexed; x-new arrives as its own delta entry (once).
         assert sorted(fetched) == ["x-1", "x-new"]
@@ -3186,3 +3242,282 @@ class TestDeltaFolderScopeOrdering:
             {"file": "X", "reason": "Could not list folder contents: throttled"}
         ]
         assert "1 item skipped" in result
+
+
+def _delta_file(item_id: str, name: str, **extra) -> dict:
+    return {
+        "id": item_id,
+        "name": name,
+        "file": {},
+        "cTag": f"ctag-{item_id}",
+        "webUrl": f"https://x/{name}",
+        "parentReference": {"driveId": "drive-456"},
+        **extra,
+    }
+
+
+class TestDeltaExtractionOutcomes:
+    """The delta path decides from the ExtractionResult exactly as the folder
+    path does: only a completed parse without text removes the local copy."""
+
+    async def _run(self, service, mock_dependencies, mock_oauth_token, outcome):
+        ik = _real_integration_knowledge(delta_token="token-1")
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        _size_ledger(mock_dependencies["integration_knowledge_repo"], 100)
+        delete = mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[MagicMock(size=40)]
+        )
+        extraction = (
+            AsyncMock(side_effect=outcome)
+            if isinstance(outcome, Exception)
+            else AsyncMock(return_value=outcome)
+        )
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(
+                    return_value=([_delta_file("item-1", "scan.pdf")], "token-2")
+                ),
+                get_file_extraction_by_id=extraction,
+            )
+            with patch.object(service, "_process_info_blob", AsyncMock()) as process:
+                await service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+        return ik, delete, process
+
+    async def test_scanned_pdf_removes_the_local_copy_with_its_reason(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik, delete, process = await self._run(
+            service,
+            mock_dependencies,
+            mock_oauth_token,
+            ExtractionResult.no_text(NO_TEXT_LAYER_REASON, "application/pdf"),
+        )
+
+        process.assert_not_called()
+        delete.assert_awaited_once_with(
+            sharepoint_item_id="item-1", integration_knowledge_id=ik.id
+        )
+        assert ik.last_sync_status == "success"
+        assert ik.delta_token == "token-2"
+        assert ik.last_sync_summary["files_deleted"] == 1
+        assert ik.last_sync_summary["skipped_items"] == 1
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.metadata["skipped_details"] == [
+            {"file": "scan.pdf", "reason": NO_TEXT_LAYER_REASON}
+        ]
+
+    @pytest.mark.parametrize(
+        ("outcome", "expected_reason"),
+        [
+            (
+                ExtractionResult.error("Corrupt or malformed file"),
+                "Error: Corrupt or malformed file",
+            ),
+            (
+                ExtractionResult.error(
+                    "Incomplete download of 'scan.pdf' (1 of 2 bytes)"
+                ),
+                "Error: Incomplete download of 'scan.pdf' (1 of 2 bytes)",
+            ),
+            (
+                ExtractionResult.skipped("Exceeds extraction limit (1000 PDF pages)"),
+                "Exceeds extraction limit (1000 PDF pages)",
+            ),
+            (RuntimeError("Graph timeout"), "Error: Graph timeout"),
+            (
+                ValueError("SharePoint file 'x' exceeds max download size (1 > 0)"),
+                "File too large (exceeds 50 MB limit)",
+            ),
+        ],
+    )
+    async def test_failures_and_limits_keep_the_local_copy(
+        self, service, mock_dependencies, mock_oauth_token, outcome, expected_reason
+    ):
+        ik, delete, process = await self._run(
+            service, mock_dependencies, mock_oauth_token, outcome
+        )
+
+        process.assert_not_called()
+        delete.assert_not_called()
+        assert ik.last_sync_status == "success"
+        assert ik.delta_token == "token-2"
+        assert ik.last_sync_summary["files_deleted"] == 0
+        assert ik.last_sync_summary["skipped_items"] == 1
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.metadata["skipped_details"] == [
+            {"file": "scan.pdf", "reason": expected_reason}
+        ]
+
+    async def test_text_that_sanitises_to_nothing_removes_the_local_copy_once(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik = _real_integration_knowledge(delta_token="token-1")
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        _size_ledger(mock_dependencies["integration_knowledge_repo"], 100)
+        delete = mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[MagicMock(size=40)]
+        )
+        publish = mock_dependencies[
+            "info_blob_service"
+        ].publish_info_blob_without_validation
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(
+                    return_value=([_delta_file("item-1", "nulls.txt")], "token-2")
+                ),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("\x00\x00", "text/plain")
+                ),
+            )
+            await service.process_delta_changes(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        publish.assert_not_called()
+        delete.assert_awaited_once_with(
+            sharepoint_item_id="item-1", integration_knowledge_id=ik.id
+        )
+        assert ik.size == 60
+        assert ik.last_sync_summary["files_deleted"] == 1
+        assert ik.last_sync_summary["skipped_items"] == 1
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.metadata["skipped_details"] == [
+            {"file": "nulls.txt", "reason": EMPTY_CONTENT_REASON}
+        ]
+
+    async def test_a_failing_duplicate_check_skips_the_item_not_the_pass(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik = _real_integration_knowledge(delta_token="token-1")
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        mock_dependencies["change_key_service"].should_process.side_effect = [
+            RuntimeError("redis down"),
+            True,
+        ]
+        mock_dependencies[
+            "info_blob_service"
+        ].publish_info_blob_without_validation.return_value = MagicMock(size=10)
+        _size_ledger(mock_dependencies["integration_knowledge_repo"], 0)
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            client = _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(
+                    return_value=(
+                        [
+                            _delta_file("item-1", "a.docx"),
+                            _delta_file("item-2", "b.docx"),
+                        ],
+                        "token-2",
+                    )
+                ),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body")
+                ),
+            )
+            await service.process_delta_changes(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        assert ik.last_sync_status == "success"
+        assert ik.delta_token == "token-2"
+        assert client.get_file_extraction_by_id.await_args.kwargs["item_id"] == "item-2"
+        assert ik.last_sync_summary["files_processed"] == 1
+        assert ik.last_sync_summary["skipped_items"] == 1
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.metadata["skipped_details"] == [
+            {"file": "a.docx", "reason": "Error: redis down"}
+        ]
+
+
+class TestSiteRootExtractionOutcomes:
+    """Root-level documents of a full sync follow the same ExtractionResult rules."""
+
+    async def _run(self, service, mock_dependencies, mock_oauth_token, outcome):
+        ik = _real_integration_knowledge()
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        _size_ledger(mock_dependencies["integration_knowledge_repo"], 100)
+        delete = mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[MagicMock(size=40)]
+        )
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            _mock_graph_client(
+                mock_client_class,
+                get_drive_root_children=AsyncMock(
+                    return_value=[_delta_file("item-1", "photo")]
+                ),
+                get_file_extraction_by_id=AsyncMock(return_value=outcome),
+            )
+            with patch.object(service, "_process_info_blob", AsyncMock()) as process:
+                await service.pull_content(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+        return ik, delete, process
+
+    async def test_unsupported_content_type_is_skipped_with_its_reason(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik, delete, process = await self._run(
+            service,
+            mock_dependencies,
+            mock_oauth_token,
+            ExtractionResult.skipped("Unsupported file type (image)", "image/png"),
+        )
+
+        process.assert_not_called()
+        delete.assert_not_called()
+        assert ik.last_sync_status == "success"
+        assert ik.last_sync_summary["skipped_items"] == 1
+        assert ik.last_sync_summary["files_deleted"] == 0
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.metadata["skipped_details"] == [
+            {"file": "photo", "reason": "Unsupported file type (image)"}
+        ]
+
+    async def test_empty_document_removes_the_local_copy(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik, delete, process = await self._run(
+            service,
+            mock_dependencies,
+            mock_oauth_token,
+            ExtractionResult.no_text(EMPTY_CONTENT_REASON),
+        )
+
+        process.assert_not_called()
+        delete.assert_awaited_once_with(
+            sharepoint_item_id="item-1", integration_knowledge_id=ik.id
+        )
+        assert ik.last_sync_summary["files_deleted"] == 1
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.metadata["skipped_details"] == [
+            {"file": "photo", "reason": EMPTY_CONTENT_REASON}
+        ]

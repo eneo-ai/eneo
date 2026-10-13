@@ -5,9 +5,11 @@ import pytest
 
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     SharePointContentClient,
-    SharePointContentUnavailable,
 )
-from eneo.integration.infrastructure.content_service.utils import ExtractionResult
+from eneo.integration.infrastructure.content_service.utils import (
+    EMPTY_CONTENT_REASON,
+    ExtractionResult,
+)
 from tests.unittests.integration.sharepoint_fixtures import OCTET, docx_bytes
 
 
@@ -117,10 +119,6 @@ class TestFileDownloadExtraction:
 
         assert result.text is not None and "Downloaded body" in result.text
         assert result.content_type == OCTET
-        assert await client.get_file_content_by_id("drive", "item") == (
-            result.text,
-            OCTET,
-        )
 
     @pytest.mark.parametrize("encoding", [None, "identity"])
     async def test_truncated_download_is_a_failure_not_an_empty_file(
@@ -142,9 +140,6 @@ class TestFileDownloadExtraction:
             failed=True,
             content_type=OCTET,
         )
-        with pytest.raises(SharePointContentUnavailable) as exc_info:
-            await client.get_file_content_by_id("drive", "item")
-        assert str(exc_info.value).startswith("Incomplete download of 'report.docx'")
 
     @pytest.mark.parametrize("encoding", ["gzip", "br", "deflate", "GZIP"])
     async def test_decompressed_body_is_not_measured_against_the_wire_length(
@@ -174,25 +169,24 @@ class TestFileDownloadExtraction:
 
         assert result.text is not None and "No length header" in result.text
 
-    async def test_no_text_result_is_an_empty_string_for_legacy_callers(
+    async def test_empty_document_is_a_no_text_result(
         self, client: SharePointContentClient
     ):
-        _serve(client, [docx_bytes()], **{"Content-Length": str(len(docx_bytes()))})
+        payload = docx_bytes()
+        _serve(client, [payload], **{"Content-Length": str(len(payload))})
 
-        assert await client.get_file_content_by_id("drive", "item") == ("", OCTET)
+        result = await client.get_file_extraction_by_id("drive", "item")
 
-    async def test_parse_failure_raises_for_legacy_callers(
+        assert result == ExtractionResult.no_text(EMPTY_CONTENT_REASON, OCTET)
+
+    async def test_parse_failure_is_a_failed_result(
         self, client: SharePointContentClient
     ):
         _serve(client, [b"not a zip"], **{"Content-Length": "9"})
 
         result = await client.get_file_extraction_by_id("drive", "item")
-        assert result.failed is True
 
-        with pytest.raises(SharePointContentUnavailable) as exc_info:
-            await client.get_file_content_by_id("drive", "item")
-        assert str(exc_info.value) == "Corrupt or malformed file"
-        assert exc_info.value.reason == "Error: Corrupt or malformed file"
+        assert result == ExtractionResult.error("Corrupt or malformed file", OCTET)
 
     async def test_oversized_download_still_raises_value_error(
         self, client: SharePointContentClient
