@@ -16,6 +16,7 @@ from eneo.flows.application import flow_tool_publication
 from eneo.flows.application.flow_service import FlowService
 from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.domain.tool_input import required_tool_arguments
 from eneo.flows.output_processing import ContractUnevaluable, refuse_unknown_dialect
 from eneo.flows.published_definition import (
     PublishedDefinitionIntegrityStatus,
@@ -421,3 +422,102 @@ async def test_one_publish_checks_a_schema_once_for_all_the_steps_that_use_it(
         == definition["steps"][2]["input_config"]["tool"]["input_schema_sha256"]
         == canonical_json_hash(_SCHEMA)
     )
+
+
+def _requiring(required: object) -> dict[str, object]:
+    return {**_SCHEMA, "required": required}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("required", "missing"),
+    [
+        pytest.param(["limit"], None, id="given-as-a-fixed-value"),
+        pytest.param(["case_id"], None, id="given-as-a-bound-value"),
+        pytest.param(["case_id", "days", "view"], "days", id="absent"),
+    ],
+)
+async def test_publish_refuses_a_tool_step_that_lacks_a_required_argument(
+    user, required: object, missing: str | None
+) -> None:
+    # Kills the mutants that publish a tool step without an argument its tool
+    # requires (every run would fail where the arguments are checked), or
+    # count only fixed or only bound arguments as given.
+    facts = _Facts(_facts(input_schema=_requiring(required)))
+    flow = _tool_flow(user, facts.facts)
+    service, flow_repo, version_repo = _publisher(user, flow, facts)
+
+    if missing is None:
+        await service.publish_flow(flow_id=flow.id)
+        version_repo.create.assert_awaited_once()
+        return
+    with pytest.raises(BadRequestException) as refused:
+        await service.publish_flow(flow_id=flow.id)
+
+    assert refused.value.code == "typed_io_tool_invalid_config"
+    assert refused.value.context == {
+        "step_order": 2,
+        "field": f"input_config.tool.arguments.{missing}",
+        "argument": missing,
+        "problem": "missing_required",
+    }
+    assert f"'{missing}'" in str(refused.value) and "Step 2" in str(refused.value)
+    version_repo.create.assert_not_awaited()
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("draft", "refused"),
+    [
+        pytest.param("http://json-schema.org/draft-04/schema#", False, id="draft-04"),
+        pytest.param("http://json-schema.org/draft-06/schema#", False, id="draft-06"),
+        pytest.param("http://json-schema.org/draft-07/schema#", False, id="draft-07"),
+        pytest.param(
+            "https://json-schema.org/draft/2020-12/schema", True, id="2020-12"
+        ),
+    ],
+)
+async def test_publish_reads_required_beside_a_ref_only_where_the_draft_does(
+    user, draft: str, refused: bool
+) -> None:
+    # Kills the mutants that read a top-level "required" beside "$ref" in a
+    # draft whose "$ref" stands for the whole object (publish would refuse
+    # what every run accepts), and that ignore it in a draft that reads it.
+    schema = {
+        "$schema": draft,
+        "$ref": "#/definitions/args",
+        "definitions": {"args": {"type": "object"}},
+        "required": ["days"],
+    }
+    facts = _Facts(_facts(input_schema=schema))
+    flow = _tool_flow(user, facts.facts)
+    service, _, version_repo = _publisher(user, flow, facts)
+
+    if not refused:
+        await service.publish_flow(flow_id=flow.id)
+        version_repo.create.assert_awaited_once()
+        return
+    with pytest.raises(BadRequestException) as refusal:
+        await service.publish_flow(flow_id=flow.id)
+    assert refusal.value.context is not None
+    assert refusal.value.context["problem"] == "missing_required"
+
+
+@pytest.mark.parametrize(
+    ("input_schema", "names"),
+    [
+        pytest.param(_requiring(["a", "b"]), ("a", "b"), id="a-list-of-names"),
+        pytest.param(_SCHEMA, (), id="no-required"),
+        pytest.param(_requiring("a"), (), id="a-string"),
+        pytest.param(_requiring(["a", 7]), (), id="a-list-with-a-number"),
+        pytest.param(_requiring(True), (), id="a-boolean"),
+    ],
+)
+def test_only_a_top_level_list_of_names_is_read_as_required_arguments(
+    input_schema: dict[str, object], names: tuple[str, ...]
+) -> None:
+    # Kills the mutant that reads any other shape of ``required`` as names (a
+    # string would be read letter by letter, a number as a name): publish
+    # judges only the list of strings the schema's own grammar gives.
+    assert required_tool_arguments(input_schema) == names

@@ -56,6 +56,27 @@ MAX_REPORTED_KEY_PATHS = 20
 _SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 
 
+# The drafts whose "$ref" stands for its whole schema object: a keyword beside
+# it is not evaluated.
+_REF_IGNORES_SIBLINGS: frozenset[type[Validator]] = frozenset(
+    {
+        jsonschema.Draft3Validator,
+        jsonschema.Draft4Validator,
+        jsonschema.Draft6Validator,
+        jsonschema.Draft7Validator,
+    }
+)
+
+
+def ref_ignores_siblings(schema: Mapping[str, object]) -> bool:
+    """Whether validating against ``schema`` reads none of the keywords beside
+    its top-level ``$ref``: it has one, and the draft it names (read as the
+    validator reads it) is 3, 4, 6 or 7."""
+    return (
+        schema.get("$ref") is not None and dialect_of(schema) in _REF_IGNORES_SIBLINGS
+    )
+
+
 class ContractUnevaluable(TypedIOValidationException):
     """No data can be judged against the contract: the fault is the schema's,
     whatever the data is."""

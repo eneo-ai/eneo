@@ -19,6 +19,7 @@ from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.enums import FlowInputType
 from eneo.flows.flow_validators_template import EXACT_TEMPLATE_EXPRESSION_PATTERN
 from eneo.flows.http_transport.authored_config import ConfigPath
+from eneo.flows.output_processing import ref_ignores_siblings
 from eneo.flows.variable_resolver import TEMPLATE_VARIABLE_PATTERN
 from eneo.json_types import JsonValue
 
@@ -34,6 +35,8 @@ class ToolArgumentProblem(StrEnum):
     COMPOSED_TEXT = "composed_text"
     # A reference inside a list or an object: it would fill part of an argument.
     NESTED_REFERENCE = "nested_reference"
+    # The step gives no value for an argument the tool's input schema requires.
+    MISSING_REQUIRED = "missing_required"
 
 
 class ToolArgumentError(ValueError):
@@ -96,6 +99,8 @@ class PublishedToolInputConfig(ToolInputConfig):
     input_schema_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+_ARGUMENT_NAMES = TypeAdapter[list[str]](list[str])
+
 # Lineage is asked about editable steps and about published ones.
 _SAVED_OR_PUBLISHED = TypeAdapter[ToolInputConfig](
     ToolInputConfig | PublishedToolInputConfig
@@ -106,6 +111,21 @@ def tool_input_schema_sha256(input_schema: Mapping[str, object] | None) -> str:
     """The fingerprint of a tool's input schema. A tool that declares none is
     fingerprinted as the empty object."""
     return canonical_json_hash(input_schema or {})
+
+
+def required_tool_arguments(input_schema: Mapping[str, object]) -> tuple[str, ...]:
+    """The argument names a tool's input schema requires: its top-level
+    ``required`` when that is a list of strings, else none. Nothing else of
+    the schema is read (no ``required`` below the top level or inside
+    ``anyOf``). None either when the schema's draft reads no keyword beside
+    its top-level ``$ref`` (``ref_ignores_siblings``): the run's validator
+    does not read that ``required``."""
+    if ref_ignores_siblings(input_schema):
+        return ()
+    try:
+        return tuple(_ARGUMENT_NAMES.validate_python(input_schema.get("required")))
+    except ValidationError:
+        return ()
 
 
 def read_tool_input_config(

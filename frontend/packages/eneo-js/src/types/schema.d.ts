@@ -58725,7 +58725,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
-      /** @description The flow cannot be published because its draft definition is incomplete or invalid. A step whose tool the instance or the space does not allow is refused with `typed_io_tool_not_allowed`; `context` holds `step_order`, `refusal` (the refusing level), `mcp_server_id` and `tool_id`. A step whose tool has an input schema that is not a valid JSON Schema, or of a draft Eneo does not support, is refused with `typed_io_tool_invalid_schema`. */
+      /** @description The flow cannot be published because its draft definition is incomplete or invalid. A step whose tool the instance or the space does not allow is refused with `typed_io_tool_not_allowed`; `context` holds `step_order`, `refusal` (the refusing level), `mcp_server_id` and `tool_id`. A step whose tool has an input schema that is not a valid JSON Schema, or of a draft Eneo does not support, is refused with `typed_io_tool_invalid_schema`. A step that gives no value for an argument the schema's top-level `required` names is refused with `typed_io_tool_invalid_config` (not for a `required` beside a top-level `$ref` in drafts 3, 4, 6 and 7, which a run does not read either); `context` holds `step_order`, `field`, `argument` and `problem` `missing_required`. */
       400: {
         headers: {
           [name: string]: unknown;

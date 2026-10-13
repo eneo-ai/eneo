@@ -725,7 +725,13 @@ async def delete_flow(
                 "`mcp_server_id` and `tool_id`. A step whose tool has an input "
                 "schema that is not a valid JSON Schema, or of a draft Eneo "
                 "does not support, is refused with "
-                "`typed_io_tool_invalid_schema`."
+                "`typed_io_tool_invalid_schema`. A step that gives no value for "
+                "an argument the schema's top-level `required` names is refused "
+                "with `typed_io_tool_invalid_config` (not for a `required` beside "
+                "a top-level `$ref` in drafts 3, 4, 6 and 7, which a run does not "
+                "read either); `context` holds "
+                "`step_order`, `field`, `argument` and `problem` "
+                "`missing_required`."
             ),
             message="Flow cannot be published in its current state.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,

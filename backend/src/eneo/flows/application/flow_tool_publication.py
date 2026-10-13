@@ -21,9 +21,15 @@ from eneo.flows.domain.tool_facts import UnattendedToolFactsSource
 from eneo.flows.domain.tool_input import (
     TOOL_INPUT_CONFIG_KEY,
     PublishedToolInputConfig,
+    ToolArgumentProblem,
     ToolInputConfig,
     read_tool_input_config,
+    required_tool_arguments,
     tool_input_schema_sha256,
+)
+from eneo.flows.domain.tool_input_validation import (
+    invalid_tool_config,
+    tool_argument_context,
 )
 from eneo.flows.enums import FlowInputSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -156,9 +162,11 @@ async def pin_tool_steps(
     ``facts_reader`` is asked for only when a tool step is met, so a flow
     without one is published by a service that has no reader. Raises for the
     first step, in step order, whose tool a level refuses for
-    the space (``typed_io_tool_not_allowed``) or whose approved input schema
+    the space (``typed_io_tool_not_allowed``), whose approved input schema
     is not a valid JSON Schema of a draft Eneo supports
-    (``typed_io_tool_invalid_schema``). The steps have passed the graph check,
+    (``typed_io_tool_invalid_schema``), or that
+    gives no value for an argument the schema's top-level ``required`` names
+    (``typed_io_tool_invalid_config``). The steps have passed the graph check,
     so each tool configuration reads.
     """
     pins: dict[int, PublishedToolInputConfig] = {}
@@ -186,6 +194,7 @@ async def pin_tool_steps(
                 _refuse_invalid_tool_schema, step.step_order, tool.input_schema
             )
             checked.add(fingerprint)
+        _refuse_missing_required_argument(step.step_order, config, tool)
         pins[step.step_order] = PublishedToolInputConfig(
             mcp_server_id=config.mcp_server_id,
             tool_id=config.tool_id,
@@ -216,6 +225,27 @@ def _refuse_invalid_tool_schema(
             code=FlowApiErrorCode.TYPED_IO_TOOL_INVALID_SCHEMA,
             context={"step_order": step_order},
         ) from None
+
+
+def _refuse_missing_required_argument(
+    step_order: int, config: ToolInputConfig, tool: MCPServerTool
+) -> None:
+    # A run checks the whole arguments object against the schema before each
+    # call. That an argument the schema requires is absent is already known
+    # here, whatever a bound argument will hold: every run would fail on it.
+    for name in required_tool_arguments(tool.input_schema or {}):
+        if name not in config.arguments:
+            raise invalid_tool_config(
+                f"Step {step_order}: tool '{tool.name}' requires the argument "
+                f"'{name}', which the step does not give.",
+                step_order=step_order,
+                context={
+                    "step_order": step_order,
+                    **tool_argument_context(
+                        name, ToolArgumentProblem.MISSING_REQUIRED.value
+                    ),
+                },
+            )
 
 
 def published_input_config(
