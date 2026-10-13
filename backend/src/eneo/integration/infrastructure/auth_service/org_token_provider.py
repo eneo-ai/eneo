@@ -188,7 +188,7 @@ class OrgTokenProvider:
                     and new_refresh_token != app.service_account_refresh_token
                 )
                 if rotated:
-                    app.update_refresh_token(cast(str, new_refresh_token))
+                    app.update_refresh_token(new_refresh_token)
                 # Every service-account call is a real token round trip and may
                 # have rotated the refresh token.
                 self._mark_success(app)
