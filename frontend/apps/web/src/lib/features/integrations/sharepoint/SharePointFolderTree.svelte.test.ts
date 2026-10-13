@@ -213,12 +213,11 @@ describe("SharePoint tree keyboard navigation", () => {
 
     expect(treeItem("Policies").element().getAttribute("tabindex")).toBe("0");
     expect(treeItem("Archive").element().getAttribute("tabindex")).toBe("-1");
-    expect(
-      page
-        .getByRole("checkbox", { name: /Archive/ })
-        .element()
-        .getAttribute("tabindex")
-    ).toBe("-1");
+    const innerControls = Array.from(
+      document.querySelectorAll('[role="tree"] [data-slot="checkbox"], [role="tree"] button')
+    );
+    expect(innerControls.length).toBeGreaterThan(0);
+    expect(innerControls.every((el) => el.getAttribute("tabindex") === "-1")).toBe(true);
 
     (treeItem("Policies").element() as HTMLElement).focus();
     await userEvent.keyboard("{ArrowDown}");
@@ -251,6 +250,55 @@ describe("SharePoint tree keyboard navigation", () => {
     await userEvent.keyboard("{ArrowLeft}");
     expect(treeItem("Policies").element().getAttribute("aria-expanded")).toBe("false");
     expect(treeItem("Policy 1.docx").query()).toBeNull();
+  });
+
+  it("keeps a focused child as the only tabbable item through a Tab round-trip", async () => {
+    show();
+    await expect.element(treeItem("Policies")).toBeVisible();
+    (treeItem("Policies").element() as HTMLElement).focus();
+
+    await userEvent.keyboard("{ArrowRight}");
+    await expect.element(treeItem("Policy 1.docx")).toBeVisible();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(focused()).toBe("Policy 1.docx");
+    expect(treeItem("Policy 1.docx").element().getAttribute("tabindex")).toBe("0");
+    expect(treeItem("Policies").element().getAttribute("tabindex")).toBe("-1");
+    expect(document.querySelectorAll('[role="treeitem"][tabindex="0"]')).toHaveLength(1);
+
+    await userEvent.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(document.activeElement?.closest('[role="tree"]')).toBeNull();
+    await userEvent.keyboard("{Tab}");
+    expect(focused()).toBe("Policy 1.docx");
+  });
+
+  it("exposes the checkbox state on the treeitem, with the parent coverage as its description", async () => {
+    show({
+      selectedItemKeys: [buildSharePointSelectionKey(policies)],
+      selectedPaths: ["/Policies"]
+    });
+    await expect.element(treeItem("Policies")).toBeVisible();
+    (treeItem("Policies").element() as HTMLElement).focus();
+    await userEvent.keyboard("{ArrowRight}");
+    await expect.element(treeItem("Policy 1.docx")).toBeVisible();
+
+    const parent = treeItem("Policies").element();
+    const child = treeItem("Policy 1.docx").element();
+    const sibling = treeItem("Readme.md").element();
+    expect(parent.getAttribute("aria-checked")).toBe("true");
+    expect(child.getAttribute("aria-checked")).toBe("true");
+    expect(sibling.getAttribute("aria-checked")).toBe("false");
+    expect(parent.hasAttribute("aria-selected")).toBe(false);
+    expect(parent.hasAttribute("aria-describedby")).toBe(false);
+    const description = document.getElementById(child.getAttribute("aria-describedby") ?? "");
+    expect(description?.textContent?.trim()).toBe(m.sharepoint_selected_by_parent());
+    expect(page.getByRole("tree").getByRole("checkbox").query()).toBeNull();
+    expect(document.querySelector('[role="tree"] [data-slot="checkbox"][title]')).toBeNull();
+  });
+
+  it("marks a folder with a selected descendant as mixed", async () => {
+    show({ selectedItemKeys: [buildSharePointSelectionKey(child)], selectedPaths: [child.path] });
+    await expect.element(treeItem("Policies")).toBeVisible();
+    expect(treeItem("Policies").element().getAttribute("aria-checked")).toBe("mixed");
   });
 
   it("toggles the selection with Space, never for an item covered by its parent", async () => {
