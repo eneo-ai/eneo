@@ -36,8 +36,8 @@ from eneo.integration.presentation.admin_models import (
 )
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
+from eneo.main.exceptions import EncryptionNotConfiguredException
 from eneo.main.logging import get_logger
-from eneo.redis.connection import build_redis_auth_kwargs, build_redis_url
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.settings.encryption_service import EncryptionService
@@ -142,39 +142,39 @@ class _SimpleGraphToken:
         self.base_url = "https://graph.microsoft.com"
 
 
-async def _get_redis_client() -> Redis:
-    settings = get_settings()
-    return Redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
-        build_redis_url(settings),
-        encoding="utf8",
-        decode_responses=True,
-        **build_redis_auth_kwargs(settings),
+async def _store_oauth_state(
+    redis_client: Redis,
+    encryption_service: EncryptionService,
+    state: str,
+    data: dict[str, str],
+) -> None:
+    # The blob may carry the Entra client secret for the first sign-in, so it
+    # never sits in Redis as plaintext.
+    sealed = encryption_service.encrypt(json.dumps(data))
+    await redis_client.set(
+        f"{OAUTH_STATE_PREFIX}{state}", sealed, ex=OAUTH_STATE_TTL_SECONDS
     )
 
 
-async def _store_oauth_state(state: str, data: dict[str, str]) -> None:
-    client = await _get_redis_client()
-    try:
-        await client.set(
-            f"{OAUTH_STATE_PREFIX}{state}",
-            json.dumps(data),
-            ex=OAUTH_STATE_TTL_SECONDS,
-        )
-    finally:
-        await client.close()
-
-
-async def _pop_oauth_state(state: str) -> Optional[dict[str, str]]:
-    client = await _get_redis_client()
-    try:
-        key = f"{OAUTH_STATE_PREFIX}{state}"
-        data = await client.get(key)
-        if data is not None:
-            await client.delete(key)
-            return json.loads(data)
+async def _pop_oauth_state(
+    redis_client: Redis,
+    encryption_service: EncryptionService,
+    state: str,
+) -> Optional[dict[str, str]]:
+    # GETDEL makes the state single-use even under concurrent callbacks.
+    raw = await redis_client.getdel(f"{OAUTH_STATE_PREFIX}{state}")
+    if raw is None:
         return None
-    finally:
-        await client.close()
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        data = json.loads(encryption_service.decrypt(str(raw)))
+    except (ValueError, TypeError, EncryptionNotConfiguredException):
+        logger.warning("Discarding undecryptable or corrupt SharePoint OAuth state")
+        return None
+    if not isinstance(data, dict):
+        return None
+    return cast(dict[str, str], data)
 
 
 def _is_onedrive_subscription(subscription: SharePointSubscription) -> bool:
@@ -1002,6 +1002,8 @@ async def start_service_account_auth(
 
         # Store state with credentials in Redis for callback verification
         await _store_oauth_state(
+            container.redis_client(),
+            container.encryption_service(),
             state,
             {
                 "client_id": app_config.client_id,
@@ -1080,12 +1082,13 @@ async def restart_service_account_auth(
         )
 
     state = secrets.token_urlsafe(32)
+    # The callback reloads the stored app, so the secret never leaves the database.
     await _store_oauth_state(
+        container.redis_client(),
+        container.encryption_service(),
         state,
         {
-            "client_id": app.client_id,
-            "client_secret": app.client_secret,
-            "tenant_domain": app.tenant_domain,
+            "reauth": "1",
             "tenant_id": str(user.tenant_id),
             "user_id": str(user.id),
         },
@@ -1136,41 +1139,59 @@ async def service_account_auth_callback(
         user = container.user()
         _require_sharepoint_webhook_client_state()
 
-        # Verify state (atomically retrieve and delete from Redis)
-        stored_state = await _pop_oauth_state(callback.state)
+        encryption_service: EncryptionService = container.encryption_service()
+        stored_state = await _pop_oauth_state(
+            container.redis_client(), encryption_service, callback.state
+        )
         if stored_state is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired OAuth state. Please restart the authentication flow.",
             )
 
-        # Verify tenant matches
-        if stored_state["tenant_id"] != str(user.tenant_id):
+        if stored_state.get("tenant_id") != str(user.tenant_id) or stored_state.get(
+            "user_id"
+        ) != str(user.id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OAuth state was initiated by a different tenant",
+                detail="OAuth state was initiated by a different user or tenant",
             )
+
+        tenant_app_service: TenantSharePointAppService = (
+            container.tenant_sharepoint_app_service()
+        )
+
+        if stored_state.get("reauth"):
+            stored_app = await tenant_app_service.get_active_app_for_tenant(
+                user.tenant_id
+            )
+            if stored_app is None or not stored_app.is_service_account():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No active service account is configured for this organization.",
+                )
+            client_id = stored_app.client_id
+            client_secret = stored_app.client_secret
+            tenant_domain = stored_app.tenant_domain
+        else:
+            client_id = stored_state["client_id"]
+            client_secret = stored_state["client_secret"]
+            tenant_domain = stored_state["tenant_domain"]
 
         # Exchange auth code for tokens
         service_account_auth_service = ServiceAccountAuthService()
         token_result = await service_account_auth_service.exchange_token(
             auth_code=callback.auth_code,
-            client_id=stored_state["client_id"],
-            client_secret=stored_state["client_secret"],
-            tenant_domain=stored_state["tenant_domain"],
+            client_id=client_id,
+            client_secret=client_secret,
+            tenant_domain=tenant_domain,
         )
-
-        # Configure service account
-        tenant_app_service: TenantSharePointAppService = (
-            container.tenant_sharepoint_app_service()
-        )
-        encryption_service: EncryptionService = container.encryption_service()
 
         app = await tenant_app_service.configure_service_account(
             tenant_id=user.tenant_id,
-            client_id=stored_state["client_id"],
-            client_secret=stored_state["client_secret"],
-            tenant_domain=stored_state["tenant_domain"],
+            client_id=client_id,
+            client_secret=client_secret,
+            tenant_domain=tenant_domain,
             refresh_token=token_result.refresh_token,
             service_account_email=token_result.email or "unknown",
             created_by=user.id,

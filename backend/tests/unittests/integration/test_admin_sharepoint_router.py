@@ -1,16 +1,76 @@
+import json
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import HTTPException
 
+from eneo.integration.domain.entities.integration import Integration
+from eneo.integration.domain.entities.tenant_integration import TenantIntegration
+from eneo.integration.domain.entities.tenant_sharepoint_app import (
+    AUTH_METHOD_SERVICE_ACCOUNT,
+    TenantSharePointApp,
+)
+from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
+    ServiceAccountTokenResult,
+)
 from eneo.integration.presentation.admin_sharepoint_router import (
+    OAUTH_STATE_PREFIX,
     _get_sharepoint_token_for_user_integration,
+    _pop_oauth_state,
     _require_sharepoint_webhook_client_state,
+    _store_oauth_state,
     list_sharepoint_subscriptions,
     recreate_subscription,
     renew_expired_subscriptions,
+    restart_service_account_auth,
+    service_account_auth_callback,
 )
+from eneo.settings.encryption_service import EncryptionService
+
+_ROUTER = "eneo.integration.presentation.admin_sharepoint_router"
+
+
+class _FakeRedis:
+    """Dict-backed Redis exposing only GETDEL for reads, so a non-atomic
+    GET+DEL pop fails loudly."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    async def set(self, key: str, value: str, ex: int | None = None) -> None:
+        self.store[key] = value
+
+    async def getdel(self, key: str) -> str | None:
+        return self.store.pop(key, None)
+
+    async def get(self, key: str) -> None:
+        raise AssertionError("pop must use GETDEL, not GET")
+
+    async def delete(self, key: str) -> None:
+        raise AssertionError("pop must use GETDEL, not DEL")
+
+
+def _encryption_service() -> EncryptionService:
+    return EncryptionService(Fernet.generate_key().decode())
+
+
+def _service_account_app(tenant_id) -> TenantSharePointApp:
+    now = datetime.now(timezone.utc)
+    return TenantSharePointApp(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        client_id="stored-client-id",
+        client_secret="stored-client-secret",
+        tenant_domain="contoso.onmicrosoft.com",
+        auth_method=AUTH_METHOD_SERVICE_ACCOUNT,
+        service_account_refresh_token="stored-refresh",
+        service_account_email="svc@contoso.com",
+        created_at=now,
+        updated_at=now,
+    )
 
 
 def _build_container_with_admin_user():
@@ -116,6 +176,131 @@ async def test_token_helper_persists_rotated_service_account_refresh_token():
     assert token.access_token == "service-account-access-token"
     tenant_app.update_refresh_token.assert_called_once_with("new-refresh-token")
     tenant_app_repo.update.assert_called_once_with(tenant_app)
+
+
+@pytest.mark.asyncio
+async def test_oauth_state_is_encrypted_at_rest_and_single_use():
+    redis = _FakeRedis()
+    encryption = _encryption_service()
+    data = {"client_secret": "super-secret", "tenant_id": "t", "user_id": "u"}
+
+    await _store_oauth_state(redis, encryption, "state-1", data)
+
+    stored = redis.store[f"{OAUTH_STATE_PREFIX}state-1"]
+    assert "super-secret" not in stored
+    assert encryption.decrypt(stored) == json.dumps(data)
+    assert await _pop_oauth_state(redis, encryption, "state-1") == data
+    assert await _pop_oauth_state(redis, encryption, "state-1") is None
+
+
+@pytest.mark.asyncio
+async def test_pop_oauth_state_discards_blob_sealed_with_another_key():
+    redis = _FakeRedis()
+    await _store_oauth_state(redis, _encryption_service(), "state-1", {"a": "b"})
+
+    assert await _pop_oauth_state(redis, _encryption_service(), "state-1") is None
+
+
+def _callback_container(stored: dict[str, str], user_id, tenant_id):
+    container, user = _build_container_with_admin_user()
+    user.id = user_id
+    user.tenant_id = tenant_id
+    redis = _FakeRedis()
+    encryption = _encryption_service()
+    container.redis_client.return_value = redis
+    container.encryption_service.return_value = encryption
+    redis.store[f"{OAUTH_STATE_PREFIX}state-1"] = encryption.encrypt(json.dumps(stored))
+    return container
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mismatch", ["user_id", "tenant_id"])
+async def test_callback_rejects_state_bound_to_another_principal(mismatch):
+    user_id, tenant_id = uuid4(), uuid4()
+    stored = {
+        "client_id": "c",
+        "client_secret": "s",
+        "tenant_domain": "d",
+        "tenant_id": str(tenant_id),
+        "user_id": str(user_id),
+    }
+    stored[mismatch] = str(uuid4())
+    container = _callback_container(stored, user_id, tenant_id)
+    settings = MagicMock(sharepoint_webhook_client_state="secret")
+    callback = MagicMock(state="state-1", auth_code="code")
+
+    with (
+        patch(f"{_ROUTER}.get_settings", return_value=settings),
+        patch(f"{_ROUTER}.ServiceAccountAuthService") as auth_cls,
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await service_account_auth_callback(callback=callback, container=container)
+
+    assert exc_info.value.status_code == 400
+    auth_cls.return_value.exchange_token.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reauth_state_carries_no_secret_and_callback_reuses_stored_app():
+    container, user = _build_container_with_admin_user()
+    redis = _FakeRedis()
+    encryption = _encryption_service()
+    container.redis_client.return_value = redis
+    container.encryption_service.return_value = encryption
+    app = _service_account_app(user.tenant_id)
+    tenant_app_service = AsyncMock()
+    tenant_app_service.get_active_app_for_tenant.return_value = app
+    tenant_app_service.configure_service_account.return_value = app
+    container.tenant_sharepoint_app_service.return_value = tenant_app_service
+    settings = MagicMock(sharepoint_webhook_client_state="secret")
+
+    with (
+        patch(f"{_ROUTER}.get_settings", return_value=settings),
+        patch(f"{_ROUTER}.ServiceAccountAuthService") as auth_cls,
+    ):
+        auth_cls.return_value.gen_auth_url.return_value = {"auth_url": "https://x"}
+        started = await restart_service_account_auth(container=container)
+
+        (stored_blob,) = redis.store.values()
+        assert "stored-client-secret" not in stored_blob
+        assert json.loads(encryption.decrypt(stored_blob)) == {
+            "reauth": "1",
+            "tenant_id": str(user.tenant_id),
+            "user_id": str(user.id),
+        }
+
+        auth_cls.return_value.exchange_token = AsyncMock(
+            return_value=ServiceAccountTokenResult(
+                access_token="at", refresh_token="new-refresh", email="svc@contoso.com"
+            )
+        )
+        container.user_integration_repo.return_value = AsyncMock()
+        tenant_integration_repo = AsyncMock()
+        container.tenant_integration_repo.return_value = tenant_integration_repo
+        tenant_integration_repo.query.return_value = [
+            TenantIntegration(
+                tenant_id=user.tenant_id,
+                integration=Integration(
+                    name="SharePoint", description="", integration_type="sharepoint"
+                ),
+            )
+        ]
+        callback = MagicMock(state=started.state, auth_code="code")
+        result = await service_account_auth_callback(
+            callback=callback, container=container
+        )
+
+    auth_cls.return_value.exchange_token.assert_awaited_once_with(
+        auth_code="code",
+        client_id="stored-client-id",
+        client_secret="stored-client-secret",
+        tenant_domain="contoso.onmicrosoft.com",
+    )
+    configure_kwargs = tenant_app_service.configure_service_account.await_args.kwargs
+    assert configure_kwargs["client_secret"] == "stored-client-secret"
+    assert configure_kwargs["refresh_token"] == "new-refresh"
+    assert result.id == app.id
+    assert redis.store == {}
 
 
 def test_require_sharepoint_webhook_client_state_raises_when_missing():
