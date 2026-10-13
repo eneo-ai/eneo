@@ -1,0 +1,65 @@
+FROM python:3.11-slim-trixie AS runtime-base
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+    ffmpeg libmagic1t64 libxml2 libxslt1.1 \
+    && rm -rf /var/lib/apt/lists/*
+RUN python -m pip uninstall -y pip setuptools wheel
+
+FROM runtime-base AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /usr/local/bin/uv
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libxml2-dev libxslt1-dev && rm -rf /var/lib/apt/lists/*
+ENV UV_NO_BINARY_PACKAGE=lxml
+
+# Set uv optimizations
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PYTHON_DOWNLOADS=never
+
+WORKDIR /app
+
+# Copy dependency files for optimal layer caching
+COPY pyproject.toml uv.lock ./
+
+# Create venv and install dependencies only (optimal caching)
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv venv /app/.venv && \
+    uv sync --frozen --no-dev --no-editable --no-install-project
+
+# Copy application code
+COPY . .
+
+# Install the project itself
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv sync --frozen --no-dev --no-editable
+
+# Handle tiktoken cache
+ENV TIKTOKEN_CACHE_DIR=/tiktoken
+RUN mkdir -p /tiktoken
+ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken /tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4
+
+# Production stage
+FROM runtime-base AS runner
+
+# Copy venv and tiktoken from builder
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /tiktoken /tiktoken
+COPY --from=builder /app /app
+
+# Set PATH to use venv and environment variables
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    TIKTOKEN_CACHE_DIR=/tiktoken
+
+# OTel service version — pass --build-arg OTEL_SERVICE_VERSION=<version> at
+# build time so it surfaces as resource.service.version in every log line and
+# span. CI passes the release tag / branch-sha here. Defaults to "unknown" for
+# local builds that don't supply it.
+ARG OTEL_SERVICE_VERSION=unknown
+ENV OTEL_SERVICE_VERSION=${OTEL_SERVICE_VERSION}
+
+WORKDIR /app
+
+# Run as unprivileged user
+USER 1000
+
+CMD ["sh", "-c", "./run.sh"]

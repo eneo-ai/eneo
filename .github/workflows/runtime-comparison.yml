@@ -1,0 +1,192 @@
+name: Runtime distribution comparison
+
+# An isolated experiment, never an image publisher or production merge gate.
+on:
+  push:
+    branches: [fix/runtime-debian-comparison]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: runtime-comparison-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  databases:
+    name: Freeze scanner databases
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: bash .github/actions/scan-application-image/install.sh
+      - name: Download one database snapshot for every candidate
+        env:
+          TRIVY_CACHE_DIR: ${{ runner.temp }}/scanner-databases/trivy
+          GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/scanner-databases/grype
+        run: |
+          mkdir -p "$RUNNER_TEMP/scanner-databases"
+          trivy image --download-db-only
+          grype db update
+          trivy --version > "$RUNNER_TEMP/scanner-databases/trivy-version.txt"
+          grype version > "$RUNNER_TEMP/scanner-databases/grype-version.txt"
+          grype db status > "$RUNNER_TEMP/scanner-databases/grype-db-status.txt"
+          cd "$RUNNER_TEMP/scanner-databases"
+          find . -type f -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/database-checksums.txt"
+          mv "$RUNNER_TEMP/database-checksums.txt" checksums.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scanner-databases
+          path: ${{ runner.temp }}/scanner-databases
+          retention-days: 14
+          include-hidden-files: true
+
+  compare:
+    name: Compare ${{ matrix.variant }}
+    needs: databases
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - variant: backend-debian-refresh
+            kind: backend
+            dockerfile: .github/runtime-comparison/backend-wheels.Dockerfile
+            baseline: true
+          - variant: backend-debian-wheels
+            kind: backend
+            dockerfile: .github/runtime-comparison/backend-wheels.Dockerfile
+          - variant: backend-debian-system
+            kind: backend
+            dockerfile: .github/runtime-comparison/backend-system.Dockerfile
+          - variant: backend-wolfi
+            kind: backend
+            dockerfile: backend/Dockerfile
+          - variant: frontend-debian
+            kind: frontend
+            dockerfile: .github/runtime-comparison/frontend-debian.Dockerfile
+          - variant: frontend-chainguard
+            kind: frontend
+            dockerfile: frontend/Dockerfile
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: scanner-databases
+          path: ${{ runner.temp }}/scanner-databases
+      - name: Verify shared scanner database bytes
+        run: cd "$RUNNER_TEMP/scanner-databases" && sha256sum --check checksums.txt
+      - name: Restore pre-PR dependency and audio owners for the minimal candidate
+        if: matrix.baseline == true
+        run: |
+          git fetch --depth=1 origin d30550781a1d2bd0812e64b4164a8c329aba3969
+          for file in backend/pyproject.toml backend/uv.lock backend/src/eneo/files/audio.py; do
+            git show "d30550781a1d2bd0812e64b4164a8c329aba3969:$file" > "$file"
+          done
+      - name: Add swap for frontend image build
+        if: matrix.kind == 'frontend'
+        run: |
+          sudo fallocate --length 4G /mnt/eneo-frontend.swap
+          sudo chmod 600 /mnt/eneo-frontend.swap
+          sudo mkswap /mnt/eneo-frontend.swap
+          sudo swapon /mnt/eneo-frontend.swap
+      - name: Build candidate without publishing
+        id: build
+        continue-on-error: true
+        env:
+          DOCKER_BUILDKIT: "1"
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          CONTEXT: ${{ matrix.kind }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/report"
+          cp "$DOCKERFILE" "$RUNNER_TEMP/report/Dockerfile"
+          if [[ "$CONTEXT" == backend ]]; then
+            sha256sum backend/pyproject.toml backend/uv.lock backend/src/eneo/files/audio.py > "$RUNNER_TEMP/report/source-checksums.txt"
+          else
+            sha256sum frontend/bun.lock > "$RUNNER_TEMP/report/source-checksums.txt"
+          fi
+          docker build --pull --file "$DOCKERFILE" --tag eneo-comparison:ci "$CONTEXT" 2>&1 | tee "$RUNNER_TEMP/report/build.log"
+          docker image inspect eneo-comparison:ci > "$RUNNER_TEMP/report/image-inspect.json"
+      - name: Scan with identical tools, databases and severity policy
+        id: scan
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        uses: ./.github/actions/scan-application-image
+        env:
+          TRIVY_CACHE_DIR: ${{ runner.temp }}/scanner-databases/trivy
+          TRIVY_SKIP_DB_UPDATE: "true"
+          GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/scanner-databases/grype
+          GRYPE_DB_AUTO_UPDATE: "false"
+        with:
+          image: eneo-comparison:ci
+          output-directory: ${{ runner.temp }}/report
+      - name: Check runtime behavior independently of scan outcome
+        id: runtime
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          KIND: ${{ matrix.kind }}
+        run: bash .github/runtime-comparison/check-runtime.sh "$KIND" eneo-comparison:ci 2>&1 | tee "$RUNNER_TEMP/report/runtime.log"
+      - name: Record outcomes and input provenance
+        if: always()
+        env:
+          VARIANT: ${{ matrix.variant }}
+          BUILD: ${{ steps.build.outcome }}
+          SCAN: ${{ steps.scan.outcome }}
+          RUNTIME: ${{ steps.runtime.outcome }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/report"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          result = {key.lower(): os.environ[key] for key in ("VARIANT", "BUILD", "SCAN", "RUNTIME", "GITHUB_SHA", "GITHUB_RUN_ID")}
+          Path(os.environ["RUNNER_TEMP"], "report", "outcomes.json").write_text(json.dumps(result, indent=2))
+          PY
+          cp "$RUNNER_TEMP/scanner-databases/checksums.txt" "$RUNNER_TEMP/report/database-checksums.txt"
+          cp "$RUNNER_TEMP/scanner-databases/"*.txt "$RUNNER_TEMP/report/"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: comparison-${{ matrix.variant }}
+          path: ${{ runner.temp }}/report
+          retention-days: 30
+          if-no-files-found: error
+
+  report:
+    name: Compare findings and behavior
+    needs: compare
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: comparison-*
+          path: reports
+      - run: |
+          status=0
+          python3 .github/runtime-comparison/report.py reports || status=$?
+          cat reports/comparison.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: runtime-comparison-summary
+          path: |
+            reports/comparison.md
+            reports/findings.csv
+          retention-days: 90

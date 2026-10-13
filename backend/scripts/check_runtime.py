@@ -1,5 +1,6 @@
 """Production-image ABI and operational contracts; no services/network required."""
 
+import argparse
 import importlib
 import importlib.util
 import json
@@ -16,7 +17,7 @@ from PIL import Image, features
 from pillow_heif import register_heif_opener
 
 
-def main() -> None:
+def main(*, portable: bool = False) -> None:
     assert os.getuid() == 1000, "Preserve the deployed backend UID"
     for module in ("asyncpg", "psycopg2", "numpy", "cryptography", "greenlet"):
         importlib.import_module(module)
@@ -25,17 +26,20 @@ def main() -> None:
     assert (
         etree.fromstring(b"<document><text>hello</text></document>")[0].text == "hello"
     )
-    assert etree.LIBXML_VERSION >= (2, 15, 4)
-    assert xml.parsers.expat.version_info >= (2, 8, 5)
-    assert importlib.util.find_spec("soundfile") is None
-    assert importlib.util.find_spec("audioread") is None
-
-    # lxml must load scanned system packages, not an older wheel-bundled copy.
+    # Comparison builds exercise behavior on Debian too. Version numbers alone
+    # do not describe distribution backports; scanners retain that evidence.
     mappings = Path("/proc/self/maps").read_text()
-    for name in ("libxml2", "libxslt"):
-        paths = {line.split()[-1] for line in mappings.splitlines() if name in line}
-        assert paths and all(path.startswith("/usr/lib/") for path in paths), paths
-    assert "libsndfile" not in mappings
+    if not portable:
+        assert etree.LIBXML_VERSION >= (2, 15, 4)
+        assert xml.parsers.expat.version_info >= (2, 8, 5)
+        assert importlib.util.find_spec("soundfile") is None
+        assert importlib.util.find_spec("audioread") is None
+
+        # lxml must load scanned system packages, not an older wheel-bundled copy.
+        for name in ("libxml2", "libxslt"):
+            paths = {line.split()[-1] for line in mappings.splitlines() if name in line}
+            assert paths and all(path.startswith("/usr/lib/") for path in paths), paths
+        assert "libsndfile" not in mappings
     print(
         json.dumps(
             {
@@ -44,6 +48,16 @@ def main() -> None:
                 "expat": xml.parsers.expat.EXPAT_VERSION,
                 "pillow_libtiff": features.version_codec("libtiff"),
                 "openssl": ssl.OPENSSL_VERSION,
+                "native_mappings": sorted(
+                    {
+                        line.split()[-1]
+                        for line in mappings.splitlines()
+                        if any(
+                            name in line
+                            for name in ("libxml2", "libxslt", "libsndfile")
+                        )
+                    }
+                ),
             }
         )
     )
@@ -120,4 +134,10 @@ def check_startup(root: Path) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--portable",
+        action="store_true",
+        help="Compare runtime behavior without Wolfi-specific library policy",
+    )
+    main(portable=parser.parse_args().portable)
