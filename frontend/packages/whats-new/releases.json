@@ -167,6 +167,19 @@
           }
         },
         {
+          "id": "sharepoint-imported-documents",
+          "type": "new",
+          "area": "knowledge",
+          "title": {
+            "en": "See what a SharePoint import contains",
+            "sv": "Se vad en SharePoint-import innehåller"
+          },
+          "body": {
+            "en": "Click a SharePoint item's name or document count in a space's Knowledge list to open its documents page. The Documents tab lists every indexed file with its folder, size and properties, lets you search and sort, and opens a preview of the text. The Not indexed tab groups the files the latest sync left out by reason, so you can see why a file is missing. When an import finishes its first sync, a notice tells you how many files were indexed and skipped.",
+            "sv": "Klicka på namnet eller antalet dokument för ett SharePoint-objekt i ytans kunskapslista för att öppna dess dokumentsida. Fliken Dokument listar varje indexerad fil med mapp, storlek och egenskaper, går att söka och sortera i och öppnar en förhandsvisning av texten. Fliken Ej indexerade grupperar filerna som den senaste synkroniseringen hoppade över efter orsak, så att du ser varför en fil saknas. När en imports första synkronisering är klar får du en notis om hur många filer som indexerades och hoppades över."
+          }
+        },
+        {
           "id": "sharepoint-file-formats",
           "type": "fixed",
           "area": "knowledge",
