@@ -1,4 +1,4 @@
-"""Which synced originals are kept, and the schema stub for tool-only tables.
+"""Which synced originals are kept, and the schema stub for unreadable workbooks.
 
 A synced document normally survives only as extracted text. Tabular files are
 the exception: a spreadsheet's value lies in computing over it, which needs
@@ -23,7 +23,6 @@ RETAINED_ORIGINALS: Mapping[str, str] = {
     "tsv": "text/tab-separated-values",
 }
 _EXTENSION_BY_MEDIA_TYPE = {media: ext for ext, media in RETAINED_ORIGINALS.items()}
-TABULAR_EXTENSIONS = frozenset({"xlsx", "csv", "tsv"})
 PLACEHOLDER_MAX_CHARS = 2000
 _PLACEHOLDER_MAX_SHEETS = 20
 
@@ -53,23 +52,15 @@ def retain_original_bytes(filename: str, content_type: str | None = None) -> boo
     return original_media_type(filename, content_type) is not None
 
 
-def is_tabular(filename: str, content_type: str | None = None) -> bool:
-    """Whether the source's tabular policy applies to this file."""
-    media_type = original_media_type(filename, content_type)
-    return media_type is not None and _EXTENSION_BY_MEDIA_TYPE[media_type] in (
-        TABULAR_EXTENSIONS
-    )
-
-
 def build_tabular_placeholder_text(filename: str, data: bytes) -> str:
-    """Title, sheet names and header rows of a table kept for tools only.
+    """Title, sheet names and header rows of a table whose text was not extracted.
 
-    Enough for a reader to know what the file holds and that the table tools
-    open it; never the rows themselves, which are not indexed.
+    Indexed in place of the rows, so search still finds the file by name or
+    column and the table tools open the original.
     """
     lines = [
         f"Spreadsheet: {filename}",
-        "Rows are not indexed for search; the file is available to the table "
+        "Row text could not be extracted; the file is available to the table "
         "analysis tools.",
         "",
     ]

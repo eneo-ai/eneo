@@ -5,7 +5,6 @@ from uuid import UUID
 from sqlalchemy import (
     JSON,
     BigInteger,
-    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -144,17 +143,7 @@ class IntegrationKnowledge(BasePublic):
     drive_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     wrapper_id: Mapped[Optional[UUID]] = mapped_column(nullable=True, index=True)
     wrapper_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    tabular_policy: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default="index_and_tool"
-    )
 
     user_integration: Mapped[UserIntegration] = relationship()
     embedding_model: Mapped[EmbeddingModels] = relationship()
     sharepoint_subscription: Mapped[Optional[SharePointSubscription]] = relationship()
-
-    __table_args__ = (
-        CheckConstraint(
-            "tabular_policy IN ('index_and_tool', 'tool_only')",
-            name="ck_integration_knowledge_tabular_policy",
-        ),
-    )

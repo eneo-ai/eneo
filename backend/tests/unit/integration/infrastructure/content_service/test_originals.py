@@ -1,4 +1,4 @@
-"""Which synced files keep their original bytes, and the tools-only schema stub."""
+"""Which synced files keep their original bytes, and the unreadable-workbook stub."""
 
 import io
 
@@ -6,7 +6,6 @@ from openpyxl import Workbook
 
 from eneo.integration.infrastructure.content_service.originals import (
     build_tabular_placeholder_text,
-    is_tabular,
     original_media_type,
     retain_original_bytes,
 )
@@ -35,7 +34,6 @@ class TestAllowlist:
         for name in ("deck.pptx", "policy.docx", "scan.pdf", "notes.txt", "noext"):
             assert original_media_type(name) is None
             assert not retain_original_bytes(name)
-            assert not is_tabular(name)
 
     def test_header_decides_only_without_an_extension(self):
         assert original_media_type("download", "text/csv; charset=utf-8") == "text/csv"
@@ -52,7 +50,7 @@ class TestPlaceholder:
         assert text.startswith("Spreadsheet: sales.xlsx")
         assert 'Sheet "Sales": Month, Region, Amount' in text
         assert 'Sheet "Notes": Note' in text
-        assert "not indexed for search" in text
+        assert "could not be extracted" in text
 
     def test_delimited_text_uses_its_first_line(self):
         assert "Columns: id, name" in build_tabular_placeholder_text(

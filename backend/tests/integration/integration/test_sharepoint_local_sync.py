@@ -1,8 +1,8 @@
 """Full SharePoint syncs over a local folder, end to end through the publish path.
 
 The Graph client is replaced by a directory walk; everything after the bytes
-arrive is production code: byte retention for tabular files, the per-source
-tabular policy, versioning of originals, and the quota fallback.
+arrive is production code: byte retention for tabular files, versioning of
+originals, and the quota fallback.
 """
 
 from __future__ import annotations
@@ -21,10 +21,7 @@ from openpyxl import load_workbook
 from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.database.tables.info_blob_chunk_table import InfoBlobChunks
 from eneo.database.tables.info_blobs_table import InfoBlobs, InfoBlobVersionState
-from eneo.database.tables.object_content_table import (
-    InfoBlobContentReferences,
-    ObjectContents,
-)
+from eneo.database.tables.object_content_table import ObjectContents
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
@@ -35,7 +32,6 @@ from eneo.integration.domain.entities.integration_knowledge import (
 )
 from eneo.integration.domain.entities.tenant_integration import TenantIntegration
 from eneo.integration.domain.entities.user_integration import UserIntegration
-from eneo.integration.domain.tabular_policy import TabularPolicy
 from eneo.object_content.content import ContentState
 from tests.integration.fixtures.sharepoint_local_client import (
     FIXTURE_DRIVE_ID,
@@ -57,7 +53,7 @@ def _embedding_result(*, model, chunks):
     return result
 
 
-async def _seed_source(container, *, policy: TabularPolicy) -> UUID:
+async def _seed_source(container) -> UUID:
     session = container.session()
     user = container.user()
     space = await session.scalar(
@@ -99,7 +95,6 @@ async def _seed_source(container, *, policy: TabularPolicy) -> UUID:
             folder_id=FIXTURE_ROOT_ID,
             resource_type="onedrive",
             selected_item_type="folder",
-            tabular_policy=policy,
         )
     )
     return knowledge.id
@@ -182,9 +177,7 @@ async def test_tabular_originals_follow_the_document_through_syncs(
     (folder / "notes.txt").write_text("Minutes from the budget meeting.\n")
 
     async with db_container() as container:
-        knowledge_id = await _seed_source(
-            container, policy=TabularPolicy.INDEX_AND_TOOL
-        )
+        knowledge_id = await _seed_source(container)
 
     # First sync: the spreadsheet is indexed and keeps its bytes; prose keeps none.
     async with db_container() as container:
@@ -236,28 +229,6 @@ async def test_tabular_originals_follow_the_document_through_syncs(
         ).one()
         assert (state, reference_count) == (ContentState.DELETE_PENDING.value, 0)
         assert versions[0].text  # text history stays
-        second_content_id = current.content_id
-
-    # Tools only: the next sync republishes the sheet as a schema stub without
-    # chunks, sharing the unchanged bytes instead of storing a copy.
-    async with db_container() as container:
-        knowledge = await container.integration_knowledge_repo().one(id=knowledge_id)
-        knowledge.tabular_policy = TabularPolicy.TOOL_ONLY
-        await container.integration_knowledge_repo().update(knowledge)
-    async with db_container() as container:
-        await _sync(container, monkeypatch, knowledge_id=knowledge_id, folder=folder)
-        session = container.session()
-        sheet = await _active(session, knowledge_id, "sales.xlsx")
-        assert 'Sheet "Sales": Month, Region, Amount' in (sheet.text or "")
-        assert await _chunk_count(session, sheet.id) == 0
-        original = await InfoBlobRepository(session).get_original(sheet.id)
-        assert original is not None and original.content_id == second_content_id
-        references = await session.scalar(
-            sa.select(sa.func.count()).where(
-                InfoBlobContentReferences.content_id == second_content_id
-            )
-        )
-        assert references == 1
 
 
 @pytest.mark.integration
@@ -269,7 +240,7 @@ async def test_original_is_dropped_not_the_document_when_quota_is_full(
     shutil.copy(FIXTURE_FILES / "sales.xlsx", folder / "sales.xlsx")
 
     async with db_container() as container:
-        knowledge_id = await _seed_source(container, policy=TabularPolicy.TOOL_ONLY)
+        knowledge_id = await _seed_source(container)
         session = container.session()
         user = container.user()
         retained = await InfoBlobRepository(session).get_retained_size_of_tenant(
@@ -294,8 +265,7 @@ async def test_original_is_dropped_not_the_document_when_quota_is_full(
         ), stats["skipped_details"]
         session = container.session()
         sheet = await _active(session, knowledge_id, "sales.xlsx")
-        # Tools-only degraded to indexed text: the rows are searchable and no
-        # chunkless stub was left behind without a file.
+        # The bytes were dropped, the rows are still indexed.
         assert await InfoBlobRepository(session).get_original(sheet.id) is None
         assert await _chunk_count(session, sheet.id) > 0
         assert "North" in (sheet.text or "")

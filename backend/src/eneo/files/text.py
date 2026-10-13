@@ -17,6 +17,12 @@ from eneo.files.extraction_limits import (
     FileExtractionLimits,
     get_file_extraction_limits,
 )
+from eneo.files.tabular_index import (
+    IndexedSheet,
+    delimited_index_text,
+    fits_index_budget,
+    tabular_sample_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -355,6 +361,14 @@ class TextExtractor:
                 f"DOCX extraction failed for '{display_name}': {str(e)}"
             )
 
+    @classmethod
+    def extract_from_delimited(cls, filepath: Path, filename: str | None = None) -> str:
+        """CSV or TSV: the file itself while it fits the index budget, else a sample."""
+        display_name = filename or filepath.name
+        return delimited_index_text(
+            display_name, cls.extract_from_plain_text(filepath, display_name)
+        )
+
     @staticmethod
     def extract_from_xlsx(filepath: Path, filename: str | None = None) -> str:
         import pandas as pd
@@ -366,6 +380,7 @@ class TextExtractor:
             xls = pd.ExcelFile(filepath, engine="calamine")
             try:
                 parts: list[str] = []
+                sheets: list[IndexedSheet] = []
 
                 # Global file context (helpful for first chunk and direct chat)
                 parts.append(f"File: {display_name}")
@@ -397,12 +412,18 @@ class TextExtractor:
                         ]
                         return f"Sheet: {sheet_name} | " + " | ".join(pairs)
 
-                    # pandas apply/str.cat return types are unknown due to incomplete stubs
-                    raw_sheet_text = df.apply(serialize_row, axis=1).str.cat(sep="\n")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs are incomplete
-                    sheet_text: str = str(raw_sheet_text)  # pyright: ignore[reportUnknownArgumentType]  # pandas stubs are incomplete
-                    parts.append(sheet_text)
+                    # pandas apply return types are unknown due to incomplete stubs
+                    raw_lines: Any = df.apply(serialize_row, axis=1)  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
+                    lines = [str(line) for line in raw_lines]
+                    raw_columns: Any = df.columns  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
+                    columns = [str(column) for column in raw_columns]
+                    sheets.append(IndexedSheet(sheet_name, columns, lines))
+                    parts.append("\n".join(lines))
 
-                return "\n\n".join(parts)
+                text = "\n\n".join(parts)
+                if fits_index_budget(text):
+                    return text
+                return tabular_sample_text(display_name, sheets)
             finally:
                 xls.close()  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]  # pandas-stubs miss ExcelFile.close
         except ValueError as e:
@@ -494,13 +515,13 @@ class TextExtractor:
             case (
                 TextMimeTypes.TXT
                 | TextMimeTypes.MD
-                | TextMimeTypes.TEXT_CSV
-                | TextMimeTypes.APP_CSV
                 | TextMimeTypes.JSON
                 | TextMimeTypes.XML
                 | TextMimeTypes.XML_APP
             ):
                 extracted_text = self.extract_from_plain_text(filepath, display_name)
+            case TextMimeTypes.TEXT_CSV | TextMimeTypes.APP_CSV:
+                extracted_text = self.extract_from_delimited(filepath, display_name)
             case TextMimeTypes.PDF:
                 extracted_text = self.extract_from_pdf(
                     filepath, display_name, limits=limits

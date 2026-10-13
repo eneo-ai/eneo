@@ -802,3 +802,50 @@ class TestTextExtractorExceptionClasses:
         assert ".doc" in error.message
         assert "not supported" in error.message.lower()
         assert error.code == "UNSUPPORTED_FORMAT"
+
+
+class TestTabularIndexBudget:
+    """Large tables are indexed as schema plus sample; small ones unchanged."""
+
+    def test_large_workbook_is_indexed_as_schema_and_sample(
+        self, tmp_path, monkeypatch
+    ):
+        from openpyxl import Workbook
+
+        monkeypatch.setattr("eneo.files.tabular_index.TABULAR_INDEX_MAX_CHARS", 300)
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Orders"
+        ws.append(["id", "amount"])
+        for i in range(40):
+            ws.append([i, i * 10])
+        path = tmp_path / "orders.xlsx"
+        wb.save(path)
+
+        result = TextExtractor.extract_from_xlsx(path, "orders.xlsx")
+
+        assert result.startswith("File: orders.xlsx\n\nLarge table: 40 rows.")
+        assert 'Sheet "Orders" (40 rows): id, amount' in result
+        assert "Sheet: Orders | id: 0 | amount: 0" in result
+
+    def test_large_csv_is_indexed_as_schema_and_sample(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("eneo.files.tabular_index.TABULAR_INDEX_MAX_CHARS", 250)
+        path = tmp_path / "people.csv"
+        path.write_text("id,name\n" + "".join(f"{i},person-{i}\n" for i in range(30)))
+
+        result = TextExtractor().extract(
+            path, mimetype="text/csv", filename="people.csv"
+        )
+
+        assert result.startswith("File: people.csv\n\nLarge table: 30 rows.")
+        assert "Table (30 rows): id, name\n0,person-0" in result
+
+    def test_small_csv_is_indexed_verbatim(self, tmp_path):
+        path = tmp_path / "people.csv"
+        path.write_text("id,name\n1,Ada\n")
+
+        result = TextExtractor().extract(
+            path, mimetype="text/csv", filename="people.csv"
+        )
+
+        assert result == "id,name\n1,Ada"

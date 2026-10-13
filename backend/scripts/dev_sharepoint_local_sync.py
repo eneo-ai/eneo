@@ -4,13 +4,12 @@
 Development only. Seeds a fixture SharePoint integration for the user, creates
 (or reuses) an integration knowledge source in the given space and runs the
 real full-sync code with the Graph client replaced by a directory walk. Re-run
-after editing files in the folder to exercise versions, backfill and the
-tabular policy.
+after editing files in the folder to exercise versions and backfill.
 
 Usage (inside the devcontainer):
     uv run python scripts/dev_sharepoint_local_sync.py \\
         --space-id <uuid> --user-email you@example.com --files-dir ./sheets \\
-        [--name "Local SharePoint"] [--policy index_and_tool|tool_only]
+        [--name "Local SharePoint"]
 """
 
 from __future__ import annotations
@@ -50,7 +49,6 @@ from eneo.integration.domain.entities.tenant_integration import (  # noqa: E402
 from eneo.integration.domain.entities.user_integration import (  # noqa: E402
     UserIntegration,
 )
-from eneo.integration.domain.tabular_policy import TabularPolicy  # noqa: E402
 from eneo.integration.infrastructure.content_service import (  # noqa: E402
     sharepoint_content_service as service_module,
 )
@@ -78,9 +76,7 @@ async def _get_or_add(repo, entity, *, id: UUID):
     return existing if existing is not None else await repo.add(entity)
 
 
-async def _ensure_source(
-    container, *, space_id: UUID, name: str, policy: TabularPolicy
-):
+async def _ensure_source(container, *, space_id: UUID, name: str):
     user = container.user()
     session = container.session()
     space = await session.get(Spaces, space_id)
@@ -96,11 +92,7 @@ async def _ensure_source(
         )
     )
     if existing_id is not None:
-        existing = await knowledge_repo.one(id=existing_id)
-        if existing.tabular_policy != policy:
-            existing.tabular_policy = policy
-            existing = await knowledge_repo.update(existing)
-        return existing, False
+        return await knowledge_repo.one(id=existing_id), False
 
     integration = await _get_or_add(
         container.integration_repo(),
@@ -152,7 +144,6 @@ async def _ensure_source(
             folder_id=FIXTURE_ROOT_ID,
             resource_type="onedrive",
             selected_item_type="folder",
-            tabular_policy=policy,
         )
     )
     return knowledge, True
@@ -210,11 +201,6 @@ async def main() -> None:
             "source into the configured database"
         ),
     )
-    parser.add_argument(
-        "--policy",
-        choices=[p.value for p in TabularPolicy],
-        default=TabularPolicy.INDEX_AND_TOOL.value,
-    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -254,10 +240,9 @@ async def main() -> None:
                 container,
                 space_id=args.space_id,
                 name=args.name,
-                policy=TabularPolicy(args.policy),
             )
             print(
-                f"{'Created' if created else 'Reusing'} source '{knowledge.name}' ({knowledge.id}), policy {knowledge.tabular_policy.value}"
+                f"{'Created' if created else 'Reusing'} source '{knowledge.name}' ({knowledge.id})"
             )
 
             service_module.SharePointContentClient = (  # type: ignore[misc]

@@ -6,6 +6,7 @@ from uuid import UUID
 
 import aiohttp
 
+from eneo.files.tabular_index import delimited_index_text
 from eneo.integration.infrastructure.content_service.originals import (
     retain_original_bytes,
 )
@@ -385,10 +386,13 @@ class SharePointContentClient(BaseClient):
                     "text/" in content_type_lower
                     or "application/xml" in content_type_lower
                 ):
+                    text = payload.decode(response.charset or "utf-8", errors="replace")
+                    if data is not None:
+                        # A delimited table whose original is kept: indexed
+                        # whole while it fits, otherwise schema and a sample.
+                        text = delimited_index_text(file_name, text)
                     return SharePointFileContent(
-                        text=payload.decode(
-                            response.charset or "utf-8", errors="replace"
-                        ),
+                        text=text,
                         content_type=content_type,
                         file_name=file_name,
                         data=data,

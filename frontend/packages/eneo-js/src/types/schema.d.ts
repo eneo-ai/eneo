@@ -15305,8 +15305,6 @@ export interface components {
       wrapper_id?: string | null;
       /** Wrapper Name */
       wrapper_name?: string | null;
-      /** @default index_and_tool */
-      tabular_policy?: components["schemas"]["TabularPolicy"];
       /** Permissions */
       permissions?: components["schemas"]["ResourcePermission"][];
       metadata: components["schemas"]["IntegrationKnowledgeMetaData"];
@@ -15429,12 +15427,6 @@ export interface components {
      * @enum {string}
      */
     KnowledgeMode: "tool" | "inject";
-    /**
-     * TabularPolicy
-     * @description How a knowledge source's spreadsheet files reach an assistant.
-     * @enum {string}
-     */
-    TabularPolicy: "index_and_tool" | "tool_only";
     /** Limit */
     Limit: {
       /** Max Files */
@@ -22791,8 +22783,7 @@ export interface components {
     /** UpdateIntegrationKnowledgeRequest */
     UpdateIntegrationKnowledgeRequest: {
       /** Name */
-      name?: string | null;
-      tabular_policy?: components["schemas"]["TabularPolicy"] | null;
+      name: string;
     };
     /** UpdateIntegrationKnowledgeWrapperRequest */
     UpdateIntegrationKnowledgeWrapperRequest: {

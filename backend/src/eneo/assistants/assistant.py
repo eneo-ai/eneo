@@ -399,11 +399,13 @@ class Assistant(Entity):
             "document, do not calculate from text excerpts: pass that "
             "file_ref (with the filename) to the table tools (inspect_table, "
             "then query_table or assert_table) or to create_chart or "
-            "create_spreadsheet, exactly as for an attached file. Documents "
-            "listed as matching by title have no searchable passages; open "
-            "them this way, or with knowledge__read_source for their "
-            "description. Prose documents are read with "
-            "knowledge__read_source.\n"
+            "create_spreadsheet, exactly as for an attached file, whether the "
+            "document was uploaded or synced. Large tables are indexed only as "
+            "a header and a sample of rows, so any answer about their contents "
+            "must come from the tools, never from the sample. Documents listed "
+            "as matching by title were found by name, not by content: open "
+            "spreadsheets among them the same way. Prose documents are read "
+            "with knowledge__read_source.\n"
             "Knowledge sources:\n" + "\n".join(lines)
         )
 

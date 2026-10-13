@@ -10,6 +10,11 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from eneo.files.tabular_index import (
+    IndexedSheet,
+    fits_index_budget,
+    tabular_sample_text,
+)
 from eneo.integration.infrastructure.content_service.types import SharePointItem
 
 logger = getLogger(__name__)
@@ -325,16 +330,27 @@ def extract_text_from_pptx(
     return "[Could not extract text from PowerPoint presentation]"
 
 
-def extract_text_from_xlsx(binary_data: bytes) -> str:
+def extract_text_from_xlsx(binary_data: bytes, filename: str = "spreadsheet") -> str:
+    """Pipe-separated rows per sheet while the table fits the index budget.
+
+    Larger workbooks are indexed as schema plus a sample; the retained
+    original carries the full table to the analysis tools.
+    """
     try:
         excel_file = io.BytesIO(binary_data)
         xls = pd.ExcelFile(excel_file)
         csv_data: list[str] = []
+        sheets: list[IndexedSheet] = []
         for sheet_name in xls.sheet_names:
             df: pd.DataFrame = pd.read_excel(xls, sheet_name=sheet_name)  # type: ignore[assignment]  # pandas stubs return broad type
             csv_text = df.to_csv(index=False, sep="|")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs incomplete
             csv_data.append(f"### {sheet_name} ###\n{csv_text}")
-        return "Excel sheet data: " + "\n\n".join(csv_data)
+            header, *rows = str(csv_text).splitlines()  # pyright: ignore[reportUnknownArgumentType]  # pandas stubs incomplete
+            sheets.append(IndexedSheet(str(sheet_name), header.split("|"), rows))
+        text = "Excel sheet data: " + "\n\n".join(csv_data)
+        if fits_index_budget(text):
+            return text
+        return tabular_sample_text(filename, sheets)
     except Exception as e:
         logger.error(f"Error extracting data from Excel: {e}")
         return "[Could not extract text from Excel spreadsheet]"
@@ -499,7 +515,7 @@ def process_sharepoint_response(
         if detected_type in ["docx", "document"]:
             return extract_text_from_docx(response_content), content_type
         elif detected_type in ["xlsx", "spreadsheet"]:
-            return extract_text_from_xlsx(response_content), content_type
+            return extract_text_from_xlsx(response_content, filename), content_type
         elif detected_type in ["pptx", "presentation"]:
             return extract_text_from_pptx(response_content), content_type
         else:

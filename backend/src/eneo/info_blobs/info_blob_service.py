@@ -415,13 +415,10 @@ class InfoBlobService:
         *,
         embedding_model: "EmbeddingModel",
         original: PreparedKnowledgeOriginal | None = None,
-        index_text: bool = True,
         attach_original_in_place: bool = False,
     ) -> InfoBlobInDB:
         """Publish ``info_blob`` as the active version of its source.
 
-        ``index_text=False`` stores the text without chunks or embeddings, for
-        documents whose value is the retained original rather than its prose.
         Only the active version keeps a claim on original bytes: a superseded
         version releases its reference, and a new version whose bytes are
         unchanged shares the existing content object instead of storing a copy.
@@ -501,11 +498,10 @@ class InfoBlobService:
                 size_of_text = await self.quota_service.add_text(info_blob.text)
                 info_blob.size = size_of_text
                 published = await self.repo.add(info_blob, source_id=source_id)
-                if index_text:
-                    await self.datastore.add(
-                        info_blob=published,
-                        embedding_model=embedding_model,
-                    )
+                await self.datastore.add(
+                    info_blob=published,
+                    embedding_model=embedding_model,
+                )
                 if original is not None:
                     if (
                         match.same_original

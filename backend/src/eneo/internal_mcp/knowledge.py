@@ -37,7 +37,9 @@ from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.info_blobs.info_blob_chunk_repo import InfoBlobChunkExcerpt
 from eneo.info_blobs.info_blob_repo import InfoBlobListing
 from eneo.info_blobs.source_metadata import format_source_metadata_lines
-from eneo.integration.infrastructure.content_service.originals import is_tabular
+from eneo.integration.infrastructure.content_service.originals import (
+    retain_original_bytes,
+)
 from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
 from eneo.internal_mcp.foundation import (
     build_ephemeral_server,
@@ -638,9 +640,8 @@ def _title_match_content(listings: Sequence[InfoBlobListing]) -> list[TextConten
     if not listings:
         return []
     lines = [
-        "Documents whose title matches the query (no passage matched; they "
-        "may have no searchable text, such as spreadsheets kept for the table "
-        "tools):"
+        "Documents whose title matches the query (no passage of theirs scored; "
+        "spreadsheets among them are opened with the table tools):"
     ]
     lines.extend(
         f"- {listing.label}  document_id: {listing.id}" for listing in listings
@@ -829,7 +830,7 @@ async def search_knowledge(
     Documents whose original file is retained (spreadsheets, for example)
     come with a File reference entry; pass its file_ref to a table or document
     tool to compute over the file instead of reading excerpts. Documents that
-    match the query by title but have no searchable passages are listed too.
+    match the query by title without a scoring passage are listed too.
     """
     fetch, autocut_cutoff, cap = _resolve_search_params(mode, max_results)
     logger.debug("[RAG] search_knowledge query=%r within=%r", query[:120], within)
@@ -1095,7 +1096,7 @@ async def describe_source(
         tabular = [
             listing
             for listing in kept
-            if listing.title is not None and is_tabular(listing.title)
+            if listing.title is not None and retain_original_bytes(listing.title)
         ]
         links = await _original_links(
             container,
