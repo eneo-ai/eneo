@@ -131,6 +131,7 @@ it.each([
 describe("security classification refusals", () => {
   const MISMATCH = "flow_step_security_classification_mismatch";
   const WRITE_DOWN = "flow_step_output_classification_write_down";
+  const TOOL_WRITE_DOWN = "flow_step_tool_arguments_classification_write_down";
 
   function refusalError(code: string, context: Record<string, unknown>) {
     return new EneoError(
@@ -229,11 +230,69 @@ describe("security classification refusals", () => {
     expect(identity?.classification).toBeUndefined();
   });
 
-  it("gives both codes a translated fallback for a refusal without facts", () => {
-    for (const code of [MISMATCH, WRITE_DOWN]) {
+  it("gives every code a translated fallback for a refusal without facts", () => {
+    const fallbacks = [MISMATCH, WRITE_DOWN, TOOL_WRITE_DOWN].map((code) => {
       expect(getValidationIssueMessage(code)).not.toBe(code);
-    }
-    expect(getValidationIssueMessage(MISMATCH)).not.toBe(getValidationIssueMessage(WRITE_DOWN));
+      return getValidationIssueMessage(code);
+    });
+    expect(new Set(fallbacks).size).toBe(3);
+  });
+
+  // Fails when the tool refusal is read as a model refusal (a model picker
+  // sentence), loses the unclassified server, or drops the sending sentence.
+  it("says which step's data a tool step sends to a server below it", () => {
+    const identity = parseServerValidationIdentity(
+      refusalError(TOOL_WRITE_DOWN, {
+        required_level: 3,
+        current_level: null,
+        cause: "reads",
+        source_step_orders: [1]
+      })
+    );
+    const refusal: ClassificationRefusal = {
+      kind: "tool_arguments_write_down",
+      requiredLevel: 3,
+      currentLevel: null,
+      cause: "reads",
+      sourceStepOrders: [1],
+      qualifyingModelIds: []
+    };
+    expect(identity?.classification).toEqual(refusal);
+
+    const message = describeClassificationRefusal(refusal, names);
+
+    expect(message).toBe(
+      `${m.flow_validation_classification_reads({ name: "Konfidentiell", sources: "Transkribera" })} ${m.flow_error_flow_step_tool_arguments_classification_write_down()}`
+    );
+  });
+
+  // Fails when a level set by the tool's server is blamed on the space.
+  it("names the tool's server when it sets the level a model must clear", () => {
+    const identity = parseServerValidationIdentity(
+      refusalError(MISMATCH, {
+        required_level: 3,
+        current_level: 2,
+        cause: "external_source",
+        source_step_orders: [],
+        qualifying_model_ids: ["model-a"]
+      })
+    );
+    const refusal: ClassificationRefusal = {
+      kind: "model_below_required",
+      requiredLevel: 3,
+      currentLevel: 2,
+      cause: "external_source",
+      sourceStepOrders: [],
+      qualifyingModelIds: ["model-a"]
+    };
+    expect(identity?.classification).toEqual(refusal);
+
+    const message = describeClassificationRefusal(refusal, names);
+
+    expect(message).toContain(
+      m.flow_validation_classification_external_source({ name: "Konfidentiell" })
+    );
+    expect(message).toContain("Modell A");
   });
 
   it("says what is read, what the model is cleared for and which models to choose", () => {

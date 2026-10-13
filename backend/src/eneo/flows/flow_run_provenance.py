@@ -103,6 +103,15 @@ class FlowResolvedInputToolAnswerSource(_FlowResolvedInputSelectedSource):
         min_length=1,
         description="The name the call used: the one pinned when the flow was published.",
     )
+    server_classification_level: int | None = Field(
+        default=None,
+        description=(
+            "The security classification level the answer was counted at: the "
+            "level of the tool's server when the tool was read. Null when the "
+            "organization has security classifications off or the server has "
+            "none, and on an edge stored before this field existed."
+        ),
+    )
 
 
 FlowResolvedInputSource: TypeAlias = Annotated[
@@ -416,6 +425,20 @@ def parse_resolved_input_edges(raw: Any) -> FlowResolvedInputEdgesParseResult:
             ),
         )
     return FlowResolvedInputEdgesParseResult(status="tracked", aggregate=aggregate)
+
+
+def tool_answer_source(
+    parsed: FlowResolvedInputEdgesParseResult,
+) -> FlowResolvedInputToolAnswerSource | None:
+    """The source of the ``tool_answer`` edge among an attempt's stored edges;
+    None when they hold none (also for edges that are not tracked or cannot
+    be read)."""
+    if parsed.aggregate is None:
+        return None
+    for edge in parsed.aggregate.edges:
+        if isinstance(edge.source, FlowResolvedInputToolAnswerSource):
+            return edge.source
+    return None
 
 
 FlowAttemptProvenanceParseStatus: TypeAlias = Literal[

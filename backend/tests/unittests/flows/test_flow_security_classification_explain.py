@@ -7,7 +7,7 @@ the violation the explain names (or does not refuse when the explain has none).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -19,9 +19,14 @@ from eneo.flows.flow_security_classification import (
     require_flow_security_classification,
 )
 from eneo.main.exceptions import BadRequestException
+from eneo.mcp_servers.application.unattended_tool_use import UnattendedToolFacts
+from tests.unittests.flows.test_tool_publish_pin import _facts
+
+pytestmark = pytest.mark.asyncio
 
 MISMATCH = "flow_step_security_classification_mismatch"
 WRITE_DOWN = "flow_step_output_classification_write_down"
+TOOL_WRITE_DOWN = "flow_step_tool_arguments_classification_write_down"
 
 
 def _classification(level: int):
@@ -50,6 +55,20 @@ def _space(level: int | None, models):
 
 
 @dataclass(frozen=True)
+class _Tool:
+    """The tool a step reads its input from: the level of its server (None:
+    unclassified) and the arguments the step binds."""
+
+    server_level: int | None = None
+    arguments: tuple[tuple[str, object], ...] = ()
+    server_exists: bool = True
+    server_in_space: bool = True
+    readable: bool = True
+    # The configuration as a published step holds it, with the pin.
+    pinned: bool = False
+
+
+@dataclass(frozen=True)
 class _Step:
     model_level: int | None
     input_source: str = "previous_step"
@@ -58,6 +77,7 @@ class _Step:
     knowledge_level: int | None = None
     override: int | None = None
     mode: str = "pass_through"
+    tool: _Tool | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +92,7 @@ class _Expect:
     floor: int | None = None
     reads: tuple[int, ...] = ()
     required_model: int | None = None
+    external_source: int | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +105,9 @@ class _Scenario:
 
 
 HIGH_FIRST = _Step(model_level=3, input_source="flow_input", override=3)
+# A second step that reads nothing, so its output sits at the space's level.
+LOW_SECOND = _Step(model_level=1, question="Fast text.")
+SENDS_STEP_1 = (("case", "{{step_1.output.text}}"), ("limit", 5))
 
 
 SCENARIOS: dict[str, _Scenario] = {
@@ -353,6 +377,351 @@ SCENARIOS: dict[str, _Scenario] = {
             ),
         ),
     ),
+    # Kills: the server's level is left out of the step's input level, or
+    # only raises the level of later steps.
+    "tool-server-level-enters-the-step": _Scenario(
+        steps=(_Step(model_level=2, tool=_Tool(server_level=3)),),
+        expect=(
+            _Expect(
+                1,
+                code=MISMATCH,
+                cause="external_source",
+                required_level=3,
+                current_level=2,
+                required_model=3,
+                output=3,
+                floor=3,
+                external_source=3,
+            ),
+        ),
+    ),
+    # Kills: a model AT the server's level is refused.
+    "tool-model-at-the-server-level": _Scenario(
+        steps=(_Step(model_level=3, tool=_Tool(server_level=3)),),
+        expect=(_Expect(1, required_model=3, output=3, floor=3, external_source=3),),
+    ),
+    # Kills: the server's level replaces the space's instead of joining it, or
+    # a server below the space is refused here (that is the MCP decision's).
+    "tool-server-below-the-space-adds-nothing": _Scenario(
+        steps=(
+            _Step(
+                model_level=2,
+                tool=_Tool(server_level=1, arguments=(("q", "{{flow_input.q}}"),)),
+            ),
+        ),
+        space_level=2,
+        expect=(_Expect(1, required_model=2, output=2, floor=2, external_source=1),),
+    ),
+    # Kills: an unclassified server is read as a level, or refused although
+    # its arguments carry nothing from a step.
+    "tool-server-unclassified-adds-nothing": _Scenario(
+        steps=(_Step(model_level=1, tool=_Tool(arguments=(("limit", 5),))),),
+        expect=(_Expect(1, required_model=1, output=1, floor=1),),
+    ),
+    # Kills: the tool's server is named after knowledge or the space.
+    "tool-server-is-named-before-knowledge-and-the-space": _Scenario(
+        steps=(_Step(model_level=1, knowledge_level=2, tool=_Tool(server_level=2)),),
+        space_level=2,
+        expect=(
+            _Expect(
+                1,
+                code=MISMATCH,
+                cause="external_source",
+                required_level=2,
+                current_level=1,
+                required_model=2,
+                output=2,
+                floor=2,
+                external_source=2,
+            ),
+        ),
+    ),
+    # Kills: the tool's server is named before a read step at the same level.
+    "tool-reads-are-named-before-the-server": _Scenario(
+        steps=(
+            HIGH_FIRST,
+            _Step(
+                model_level=2,
+                prompt="Bakgrund: {{ step_1.output.text }}",
+                tool=_Tool(server_level=3),
+            ),
+        ),
+        expect=(
+            _Expect(1, output=3, floor=1, required_model=1),
+            _Expect(
+                2,
+                code=MISMATCH,
+                cause="reads",
+                required_level=3,
+                current_level=2,
+                sources=(1,),
+                reads=(1,),
+                required_model=3,
+                output=3,
+                floor=3,
+                external_source=3,
+            ),
+        ),
+    ),
+    # Kills: a step that reads the tool step does not inherit the server's level.
+    "tool-later-step-inherits-the-server-level": _Scenario(
+        steps=(_Step(model_level=3, tool=_Tool(server_level=3)), _Step(model_level=2)),
+        expect=(
+            _Expect(1, required_model=3, output=3, floor=3, external_source=3),
+            _Expect(
+                2,
+                code=MISMATCH,
+                cause="reads",
+                required_level=3,
+                current_level=2,
+                sources=(1,),
+                reads=(1,),
+                required_model=3,
+                output=3,
+                floor=3,
+            ),
+        ),
+    ),
+    # Kills: a deterministic tool step passes the answer on below the server's
+    # level, or its write-down names another cause.
+    "tool-deterministic-step-carries-the-server-level": _Scenario(
+        steps=(
+            _Step(
+                model_level=None,
+                mode="render_verbatim",
+                override=1,
+                tool=_Tool(server_level=3),
+            ),
+        ),
+        expect=(
+            _Expect(
+                1,
+                code=WRITE_DOWN,
+                cause="external_source",
+                required_level=3,
+                current_level=1,
+                output=3,
+                floor=3,
+                external_source=3,
+            ),
+        ),
+    ),
+    # Kills: the arguments are not compared with the server, or the refusal
+    # names the server's level as required and the data's as current.
+    "tool-arguments-read-above-the-server": _Scenario(
+        steps=(
+            HIGH_FIRST,
+            _Step(model_level=3, tool=_Tool(server_level=2, arguments=SENDS_STEP_1)),
+        ),
+        expect=(
+            _Expect(1, output=3, floor=1, required_model=1),
+            _Expect(
+                2,
+                code=TOOL_WRITE_DOWN,
+                cause="reads",
+                required_level=3,
+                current_level=2,
+                sources=(1,),
+                reads=(1,),
+                required_model=3,
+                output=3,
+                floor=3,
+                external_source=2,
+            ),
+        ),
+    ),
+    # Kills: arguments AT the server's level are refused.
+    "tool-arguments-read-at-the-server-level": _Scenario(
+        steps=(
+            HIGH_FIRST,
+            _Step(model_level=3, tool=_Tool(server_level=3, arguments=SENDS_STEP_1)),
+        ),
+        expect=(
+            _Expect(1, output=3, floor=1, required_model=1),
+            _Expect(
+                2, reads=(1,), required_model=3, output=3, floor=3, external_source=3
+            ),
+        ),
+    ),
+    # Kills: the comparison is inverted (a server above its arguments refused).
+    "tool-arguments-read-below-the-server": _Scenario(
+        steps=(
+            HIGH_FIRST,
+            _Step(model_level=4, tool=_Tool(server_level=4, arguments=SENDS_STEP_1)),
+        ),
+        expect=(
+            _Expect(1, output=3, floor=1, required_model=1),
+            _Expect(
+                2, reads=(1,), required_model=4, output=4, floor=4, external_source=4
+            ),
+        ),
+    ),
+    # Kills: an unclassified server may receive classified data.
+    "tool-arguments-read-classified-data-for-an-unclassified-server": _Scenario(
+        steps=(HIGH_FIRST, _Step(model_level=3, tool=_Tool(arguments=SENDS_STEP_1))),
+        expect=(
+            _Expect(1, output=3, floor=1, required_model=1),
+            _Expect(
+                2,
+                code=TOOL_WRITE_DOWN,
+                cause="reads",
+                required_level=3,
+                current_level=None,
+                sources=(1,),
+                reads=(1,),
+                required_model=3,
+                output=3,
+                floor=3,
+            ),
+        ),
+    ),
+    # Kills: everything the step reads is compared with the server, not only
+    # what its arguments send (the prompt goes to the model, not to the tool).
+    "tool-prompt-reads-high-arguments-read-low": _Scenario(
+        steps=(
+            HIGH_FIRST,
+            LOW_SECOND,
+            _Step(
+                model_level=3,
+                prompt="Bakgrund: {{ step_1.output.text }}",
+                tool=_Tool(
+                    server_level=2, arguments=(("case", "{{step_2.output.text}}"),)
+                ),
+            ),
+        ),
+        expect=(
+            _Expect(1, output=3, floor=1, required_model=1),
+            _Expect(2, output=1, floor=1, required_model=1),
+            _Expect(
+                3, reads=(1, 2), required_model=3, output=3, floor=3, external_source=2
+            ),
+        ),
+    ),
+    # Kills: the model's refusal hides that the step sends data to the server.
+    "tool-arguments-refusal-is-named-before-the-model": _Scenario(
+        steps=(
+            HIGH_FIRST,
+            _Step(model_level=1, tool=_Tool(server_level=2, arguments=SENDS_STEP_1)),
+        ),
+        expect=(
+            _Expect(1, output=3, floor=1, required_model=1),
+            _Expect(
+                2,
+                code=TOOL_WRITE_DOWN,
+                cause="reads",
+                required_level=3,
+                current_level=2,
+                sources=(1,),
+                reads=(1,),
+                required_model=3,
+                output=3,
+                floor=3,
+                external_source=2,
+            ),
+        ),
+    ),
+    # Kills: a server that no longer exists is read as an unclassified one and
+    # refused here, ahead of the MCP decision that says it is gone.
+    "tool-server-deleted-has-no-level-here": _Scenario(
+        steps=(
+            HIGH_FIRST,
+            _Step(
+                model_level=3,
+                tool=_Tool(server_level=4, arguments=SENDS_STEP_1, server_exists=False),
+            ),
+        ),
+        expect=(
+            _Expect(1, output=3, floor=1, required_model=1),
+            _Expect(2, reads=(1,), required_model=3, output=3, floor=3),
+        ),
+    ),
+    # Kills: the level of a server the flow's space has not activated is
+    # counted or compared, so a flow editor who names any server of the
+    # organization learns its level from the preview or from a refusal.
+    "tool-server-outside-the-space-has-no-level-here": _Scenario(
+        steps=(
+            HIGH_FIRST,
+            _Step(
+                model_level=3,
+                tool=_Tool(
+                    server_level=4, arguments=SENDS_STEP_1, server_in_space=False
+                ),
+            ),
+        ),
+        expect=(
+            _Expect(1, output=3, floor=1, required_model=1),
+            _Expect(2, reads=(1,), required_model=3, output=3, floor=3),
+        ),
+    ),
+    # Kills: the rule reads the tool configuration in the editable shape
+    # only, so a step that carries the pin sends its arguments' data to a
+    # server whose level is never asked.
+    "tool-pinned-configuration-has-its-server": _Scenario(
+        steps=(
+            HIGH_FIRST,
+            _Step(
+                model_level=3,
+                tool=_Tool(server_level=2, arguments=SENDS_STEP_1, pinned=True),
+            ),
+        ),
+        expect=(
+            _Expect(1, output=3, floor=1, required_model=1),
+            _Expect(
+                2,
+                code=TOOL_WRITE_DOWN,
+                cause="reads",
+                required_level=3,
+                current_level=2,
+                sources=(1,),
+                reads=(1,),
+                required_model=3,
+                output=3,
+                floor=3,
+                external_source=2,
+            ),
+        ),
+    ),
+    # Kills: every tool step gets the level of the first tool's server.
+    "tool-two-steps-each-count-their-own-server": _Scenario(
+        steps=(
+            _Step(model_level=2, tool=_Tool(server_level=2)),
+            _Step(model_level=2, tool=_Tool(server_level=3)),
+        ),
+        expect=(
+            _Expect(1, required_model=2, output=2, floor=2, external_source=2),
+            _Expect(
+                2,
+                code=MISMATCH,
+                cause="external_source",
+                required_level=3,
+                current_level=2,
+                required_model=3,
+                output=3,
+                floor=3,
+                external_source=3,
+            ),
+        ),
+    ),
+    # Kills: the preview fails on a tool configuration that names no server
+    # (the editor before a tool is picked), or asks the facts about it.
+    "tool-configuration-unreadable-has-no-server": _Scenario(
+        steps=(HIGH_FIRST, _Step(model_level=3, tool=_Tool(readable=False))),
+        expect=(
+            _Expect(1, output=3, floor=1, required_model=1),
+            _Expect(2, reads=(1,), required_model=3, output=3, floor=3),
+        ),
+    ),
+    # Kills: the server is read, counted or compared while classifications
+    # are off.
+    "tool-classification-disabled": _Scenario(
+        space_level=3,
+        security_enabled=False,
+        steps=(
+            _Step(model_level=1, input_source="flow_input", override=4),
+            _Step(model_level=1, tool=_Tool(server_level=2, arguments=SENDS_STEP_1)),
+        ),
+        expect=(_Expect(1), _Expect(2, reads=(1,))),
+    ),
     "nothing-classified": _Scenario(
         space_level=None,
         steps=(
@@ -397,11 +766,85 @@ def _assistant(spec: _Step):
 
 
 @dataclass
+class _ToolFacts:
+    """What is stored about each tool's server, and every read of it."""
+
+    by_server: dict[UUID, UnattendedToolFacts] = field(default_factory=dict)
+    asked: list[dict[str, UUID]] = field(default_factory=list)
+
+    async def read(
+        self, *, tenant_id: UUID, space_id: UUID, mcp_server_id: UUID, tool_id: UUID
+    ) -> UnattendedToolFacts:
+        self.asked.append(
+            {
+                "tenant_id": tenant_id,
+                "space_id": space_id,
+                "mcp_server_id": mcp_server_id,
+                "tool_id": tool_id,
+            }
+        )
+        return self.by_server[mcp_server_id]
+
+
+@dataclass
 class _Flow:
     security_enabled: bool = True
     steps: list[FlowStep] = field(default_factory=list)
     assistants: dict[UUID, SimpleNamespace] = field(default_factory=dict)
     space: SimpleNamespace | None = None
+    tool_facts: _ToolFacts = field(default_factory=_ToolFacts)
+    tenant_id: UUID = field(default_factory=uuid4)
+    space_id: UUID = field(default_factory=uuid4)
+
+    def rule_arguments(self) -> dict[str, object]:
+        return {
+            "steps": self.steps,
+            "assistants_by_id": self.assistants,
+            "space": self.space,
+            "security_enabled": self.security_enabled,
+            "tool_facts_reader": lambda: self.tool_facts,
+            "tenant_id": self.tenant_id,
+            "space_id": self.space_id,
+        }
+
+
+async def _explain(flow: _Flow, **changed: object):
+    return await explain_flow_security_classification(
+        **{**flow.rule_arguments(), **changed}
+    )
+
+
+async def _require(flow: _Flow, **changed: object) -> None:
+    await require_flow_security_classification(**{**flow.rule_arguments(), **changed})
+
+
+def _tool_input_config(flow: _Flow, tool: _Tool) -> dict[str, object]:
+    """The step configuration that names ``tool``; its server is stored in
+    the flow's facts with the tool's level, or as missing."""
+    facts = _facts(
+        server={
+            "security_classification": (
+                _classification(tool.server_level)
+                if tool.server_level is not None
+                else None
+            )
+        }
+    )
+    assert facts.server is not None and facts.tool is not None
+    flow.tool_facts.by_server[facts.server.id] = replace(
+        facts,
+        server=facts.server if tool.server_exists else None,
+        server_in_space=tool.server_in_space,
+    )
+    pin = {"tool_name": facts.tool.name, "input_schema_sha256": "0" * 64}
+    return {
+        "tool": {
+            "mcp_server_id": str(facts.server.id) if tool.readable else "no-id",
+            "tool_id": str(facts.tool.id),
+            "arguments": dict(tool.arguments),
+            **(pin if tool.pinned else {}),
+        }
+    }
 
 
 def _build(scenario: _Scenario) -> _Flow:
@@ -413,7 +856,10 @@ def _build(scenario: _Scenario) -> _Flow:
             assistant_id=uuid4(),
             step_order=order,
             user_description=f"Step {order}",
-            input_source=spec.input_source,
+            input_source="tool" if spec.tool is not None else spec.input_source,
+            input_config=(
+                _tool_input_config(flow, spec.tool) if spec.tool is not None else None
+            ),
             input_type="text",
             output_mode=spec.mode,
             output_type="text",
@@ -432,16 +878,11 @@ def _build(scenario: _Scenario) -> _Flow:
 
 
 @pytest.mark.parametrize("name", SCENARIOS)
-def test_the_explain_reports_the_rule_outcome(name: str) -> None:
+async def test_the_explain_reports_the_rule_outcome(name: str) -> None:
     scenario = SCENARIOS[name]
     flow = _build(scenario)
 
-    explained = explain_flow_security_classification(
-        steps=flow.steps,
-        assistants_by_id=flow.assistants,
-        space=flow.space,
-        security_enabled=flow.security_enabled,
-    )
+    explained = await _explain(flow)
 
     assert [item.step_order for item in explained] == [
         expect.order for expect in scenario.expect
@@ -476,36 +917,37 @@ def test_the_explain_reports_the_rule_outcome(name: str) -> None:
         )
         assert item.effective_output_level == expect.output, f"step {expect.order}"
         assert item.output_floor == expect.floor, f"step {expect.order}"
+        assert item.external_source_level == expect.external_source, (
+            f"step {expect.order}"
+        )
+    # One read per tool step the rule can name a server for, none while off.
+    assert flow.tool_facts.asked == [
+        {
+            "tenant_id": flow.tenant_id,
+            "space_id": flow.space_id,
+            "mcp_server_id": UUID(str(step.input_config["tool"]["mcp_server_id"])),
+            "tool_id": UUID(str(step.input_config["tool"]["tool_id"])),
+        }
+        for step, spec in zip(flow.steps, scenario.steps, strict=True)
+        if spec.tool is not None and spec.tool.readable and scenario.security_enabled
+    ]
 
 
 @pytest.mark.parametrize("name", SCENARIOS)
-def test_the_raising_check_refuses_exactly_what_the_explain_names(name: str) -> None:
+async def test_the_raising_check_refuses_exactly_what_the_explain_names(
+    name: str,
+) -> None:
     scenario = SCENARIOS[name]
     flow = _build(scenario)
-    explained = explain_flow_security_classification(
-        steps=flow.steps,
-        assistants_by_id=flow.assistants,
-        space=flow.space,
-        security_enabled=flow.security_enabled,
-    )
+    explained = await _explain(flow)
     first = next((item for item in explained if item.violation is not None), None)
 
     if first is None:
-        require_flow_security_classification(
-            steps=flow.steps,
-            assistants_by_id=flow.assistants,
-            space=flow.space,
-            security_enabled=flow.security_enabled,
-        )
+        await _require(flow)
         return
 
     with pytest.raises(BadRequestException) as exc_info:
-        require_flow_security_classification(
-            steps=flow.steps,
-            assistants_by_id=flow.assistants,
-            space=flow.space,
-            security_enabled=flow.security_enabled,
-        )
+        await _require(flow)
 
     violation = first.violation
     assert violation is not None
@@ -526,7 +968,7 @@ def test_the_raising_check_refuses_exactly_what_the_explain_names(name: str) -> 
         assert "qualifying_model_ids" not in error.context
 
 
-def test_qualifying_models_are_the_usable_space_models_that_clear_the_requirement() -> (
+async def test_qualifying_models_are_the_usable_space_models_that_clear_the_requirement() -> (
     None
 ):
     cleared = _model(3)
@@ -541,12 +983,7 @@ def test_qualifying_models_are_the_usable_space_models_that_clear_the_requiremen
     flow = _build(scenario)
     flow.space = _space(1, [too_low, unclassified, unusable, higher, cleared])
 
-    explained = explain_flow_security_classification(
-        steps=flow.steps,
-        assistants_by_id=flow.assistants,
-        space=flow.space,
-        security_enabled=flow.security_enabled,
-    )
+    explained = await _explain(flow)
 
     assert set(explained[1].qualifying_model_ids) == {cleared.id, higher.id}
     # Lowest sufficient level first, so "the closest fit" leads the picker.
@@ -554,7 +991,7 @@ def test_qualifying_models_are_the_usable_space_models_that_clear_the_requiremen
     assert explained[1].model_level == 2
 
 
-def test_with_nothing_classified_every_usable_model_qualifies() -> None:
+async def test_with_nothing_classified_every_usable_model_qualifies() -> None:
     usable = _model(None)
     unusable = _model(None, can_access=False)
     flow = _build(
@@ -566,28 +1003,18 @@ def test_with_nothing_classified_every_usable_model_qualifies() -> None:
     )
     flow.space = _space(None, [usable, unusable])
 
-    (only,) = explain_flow_security_classification(
-        steps=flow.steps,
-        assistants_by_id=flow.assistants,
-        space=flow.space,
-        security_enabled=flow.security_enabled,
-    )
+    (only,) = await _explain(flow)
 
     assert only.required_model_level is None
     assert only.qualifying_model_ids == (usable.id,)
 
 
-def test_a_disabled_classification_disappears_from_the_explain_entirely() -> None:
+async def test_a_disabled_classification_disappears_from_the_explain_entirely() -> None:
     flow = _build(SCENARIOS["classification-disabled"])
     assert flow.space is not None
     flow.space.completion_models = [_model(1), _model(4)]
 
-    explained = explain_flow_security_classification(
-        steps=flow.steps,
-        assistants_by_id=flow.assistants,
-        space=flow.space,
-        security_enabled=False,
-    )
+    explained = await _explain(flow, security_enabled=False)
 
     for item in explained:
         assert item.input_level is None
@@ -599,18 +1026,13 @@ def test_a_disabled_classification_disappears_from_the_explain_entirely() -> Non
         assert item.violation is None
 
 
-def test_the_same_flow_is_classified_and_refused_while_the_tenant_has_it_enabled() -> (
+async def test_the_same_flow_is_classified_and_refused_while_the_tenant_has_it_enabled() -> (
     None
 ):
     scenario = SCENARIOS["classification-disabled"]
     flow = _build(scenario)
 
-    explained = explain_flow_security_classification(
-        steps=flow.steps,
-        assistants_by_id=flow.assistants,
-        space=flow.space,
-        security_enabled=True,
-    )
+    explained = await _explain(flow, security_enabled=True)
 
     assert explained[0].effective_output_level == 4
     assert explained[1].violation is not None
@@ -646,23 +1068,20 @@ class _RecordingAssistants(dict):
         return super().__getitem__(key)
 
 
-def test_a_write_that_clears_every_step_reads_no_model_of_the_space() -> None:
+async def test_a_write_that_clears_every_step_reads_no_model_of_the_space() -> None:
     flow = _build(SCENARIOS["knowledge-cleared"])
     models = [_ScannedModel(level) for level in (1, 2, 3, 4)]
     flow.space = _space(1, [])
     flow.space.completion_models = models
 
-    require_flow_security_classification(
-        steps=flow.steps,
-        assistants_by_id=flow.assistants,
-        space=flow.space,
-        security_enabled=True,
-    )
+    await _require(flow, security_enabled=True)
 
     assert sum(model.reads for model in models) == 0
 
 
-def test_a_refused_write_stops_at_the_first_refusal_and_reads_the_models_once() -> None:
+async def test_a_refused_write_stops_at_the_first_refusal_and_reads_the_models_once() -> (
+    None
+):
     flow = _build(
         SCENARIOS["the-raise-names-the-first-violation-the-explain-lists-both"]
     )
@@ -672,12 +1091,7 @@ def test_a_refused_write_stops_at_the_first_refusal_and_reads_the_models_once() 
     assistants = _RecordingAssistants(flow.assistants)
 
     with pytest.raises(BadRequestException) as exc_info:
-        require_flow_security_classification(
-            steps=flow.steps,
-            assistants_by_id=assistants,
-            space=flow.space,
-            security_enabled=True,
-        )
+        await _require(flow, assistants_by_id=assistants, security_enabled=True)
 
     assert exc_info.value.context is not None
     assert exc_info.value.context["step_order"] == 1
@@ -688,7 +1102,7 @@ def test_a_refused_write_stops_at_the_first_refusal_and_reads_the_models_once() 
     assert [model.reads for model in models] == [1, 1, 1, 1]
 
 
-def test_the_preview_reads_the_space_models_once_per_distinct_level() -> None:
+async def test_the_preview_reads_the_space_models_once_per_distinct_level() -> None:
     flow = _build(
         _Scenario(steps=(HIGH_FIRST, _Step(model_level=3), _Step(model_level=3)))
     )
@@ -696,12 +1110,7 @@ def test_the_preview_reads_the_space_models_once_per_distinct_level() -> None:
     flow.space = _space(1, [])
     flow.space.completion_models = models
 
-    explained = explain_flow_security_classification(
-        steps=flow.steps,
-        assistants_by_id=flow.assistants,
-        space=flow.space,
-        security_enabled=True,
-    )
+    explained = await _explain(flow, security_enabled=True)
 
     assert [item.required_model_level for item in explained] == [1, 3, 3]
     assert [len(item.qualifying_model_ids or ()) for item in explained] == [4, 2, 2]

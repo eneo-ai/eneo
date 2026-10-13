@@ -768,6 +768,22 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "Choose the same or a higher level for the result, or let it inherit."
         ),
     ),
+    FlowApiErrorCode.STEP_TOOL_ARGUMENTS_CLASSIFICATION_WRITE_DOWN: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause=(
+            "A step sends data from earlier steps to a tool whose server has a "
+            "lower security classification than that data, or none."
+        ),
+        consumer_action=(
+            "Bind the arguments to steps at or below the server's level, or choose "
+            "a tool whose server has the required_level in the error context."
+        ),
+        user_action=(
+            "Change what the tool's arguments read, or choose a tool whose "
+            "server has the required level."
+        ),
+    ),
     FlowApiErrorCode.STEP_MISSING: _entry(
         category="Step runtime",
         surfaced_through="Run error payload",
@@ -1141,6 +1157,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         cause="The tool's name or approved input schema differs from what the published flow pinned.",
         consumer_action="Publish the flow again so that it pins the tool as it is now.",
         user_action="Ask a flow editor to publish the flow again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_CLASSIFICATION_CHANGED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The security classification of the tool's server changed after the run started.",
+        consumer_action="Start the run again: a new run counts the server's classification as it is now.",
+        user_action="Start the run again.",
     ),
     FlowApiErrorCode.TYPED_IO_TOOL_CONNECTION_ERROR: _entry(
         category="Typed input/output",

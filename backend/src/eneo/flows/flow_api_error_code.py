@@ -91,6 +91,9 @@ class FlowApiErrorCode(StrEnum):
     REQUEST_BODY_TOO_LARGE = "flow_request_body_too_large"
     STEP_SECURITY_CLASSIFICATION_MISMATCH = "flow_step_security_classification_mismatch"
     STEP_OUTPUT_CLASSIFICATION_WRITE_DOWN = "flow_step_output_classification_write_down"
+    STEP_TOOL_ARGUMENTS_CLASSIFICATION_WRITE_DOWN = (
+        "flow_step_tool_arguments_classification_write_down"
+    )
     STEP_MISSING = "flow_step_missing"
     STEP_ATTEMPT_START_FAILED = "flow_step_attempt_start_failed"
     STEP_EXECUTION_FAILED = "flow_step_execution_failed"
@@ -146,6 +149,7 @@ class FlowApiErrorCode(StrEnum):
     TYPED_IO_HTTP_TIMEOUT = "typed_io_http_timeout"
     TYPED_IO_TOOL_ANSWER_TOO_LARGE = "typed_io_tool_answer_too_large"
     TYPED_IO_TOOL_CHANGED = "typed_io_tool_changed"
+    TYPED_IO_TOOL_CLASSIFICATION_CHANGED = "typed_io_tool_classification_changed"
     TYPED_IO_TOOL_CONNECTION_ERROR = "typed_io_tool_connection_error"
     TYPED_IO_TOOL_DESTINATION_BLOCKED = "typed_io_tool_destination_blocked"
     TYPED_IO_TOOL_INVALID_ARGUMENTS = "typed_io_tool_invalid_arguments"
@@ -306,6 +310,7 @@ FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.TYPED_IO_HTTP_TIMEOUT,
         FlowApiErrorCode.TYPED_IO_TOOL_ANSWER_TOO_LARGE,
         FlowApiErrorCode.TYPED_IO_TOOL_CHANGED,
+        FlowApiErrorCode.TYPED_IO_TOOL_CLASSIFICATION_CHANGED,
         FlowApiErrorCode.TYPED_IO_TOOL_CONNECTION_ERROR,
         FlowApiErrorCode.TYPED_IO_TOOL_DESTINATION_BLOCKED,
         FlowApiErrorCode.TYPED_IO_TOOL_INVALID_ARGUMENTS,

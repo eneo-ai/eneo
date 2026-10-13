@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -14,6 +15,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from eneo.assistants.assistant import AssistantOrigin
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.flows.api import flow_security_classification_router as router_module
 from eneo.flows.api.flow_assembler import FlowAssembler
@@ -52,8 +54,10 @@ from tests.unittests.flows.test_flow_router import (
     _enable_space_access,
     _request,
 )
+from tests.unittests.flows.test_tool_publish_pin import _Facts, _facts
 
 MISMATCH = "flow_step_security_classification_mismatch"
+TOOL_WRITE_DOWN = "flow_step_tool_arguments_classification_write_down"
 
 
 def _classification(level: int):
@@ -236,6 +240,121 @@ def unclassified_world(user) -> _World:
 def _violation_code(preview, order: int) -> str | None:
     item = next(item for item in preview if item.step_order == order)
     return None if item.violation is None else item.violation.code.value
+
+
+def _sends_step_1_to_a_tool(
+    world: _World, *, server_level: int, server_exists: bool = True
+) -> _Facts:
+    """Makes step 2 of the saved flow a tool step whose argument sends step 1's
+    level-3 output to a tool on a server of ``server_level``."""
+    stored = _facts(server={"security_classification": _classification(server_level)})
+    assert stored.server is not None and stored.tool is not None
+    reader = _Facts(stored if server_exists else replace(stored, server=None))
+    world.service.tool_facts_reader = reader
+    world.service._validate_assistant_scope_for_steps = AsyncMock()  # type: ignore[method-assign]
+    world.flow.steps = world.candidate_steps(
+        input_source="tool",
+        input_config={
+            "tool": {
+                "mcp_server_id": str(stored.server.id),
+                "tool_id": str(stored.tool.id),
+                "arguments": {"case": "{{step_1.output.text}}"},
+            }
+        },
+    )
+    return reader
+
+
+@pytest.mark.asyncio
+async def test_preview_save_and_publish_refuse_arguments_above_the_tool_server(
+    reading_world,
+):
+    # Kills the mutants that leave the preview, the save, the change of a
+    # step's assistant or the publish without the server's level, ask about
+    # another tenant, space, server or tool, let publish ask the chain and pin
+    # before the classification has refused (a fifth read), or answer the
+    # preview with another level than the server's.
+    world = reading_world
+    reader = _sends_step_1_to_a_tool(world, server_level=2)
+    world.weak.origin = AssistantOrigin.FLOW_MANAGED
+    world.weak.managing_flow_id = world.flow.id
+
+    preview = await world.preview()
+    with pytest.raises(BadRequestException) as saved:
+        await world.service.update_flow(flow_id=world.flow.id, steps=world.flow.steps)
+    with pytest.raises(BadRequestException) as assistant_changed:
+        await world.service.update_flow_assistant(
+            flow_id=world.flow.id,
+            assistant_id=world.weak.id,
+            update=AssistantUpdateCommand(prompt=PromptCreate(text="Skriv kort.")),
+        )
+    with pytest.raises(BadRequestException) as published:
+        await world.service.publish_flow(flow_id=world.flow.id)
+
+    assert _violation_code(preview, 2) == TOOL_WRITE_DOWN
+    public = FlowSecurityClassificationPreviewPublic.from_explanations(preview)
+    assert [step.external_source_level for step in public.steps] == [None, 2]
+    for refused in (saved, assistant_changed, published):
+        assert refused.value.code == TOOL_WRITE_DOWN
+        assert refused.value.context == {
+            "issue_code": TOOL_WRITE_DOWN,
+            "step_order": 2,
+            "step_id": str(world.second.id),
+            "required_level": 3,
+            "current_level": 2,
+            "cause": "reads",
+            "source_step_orders": [1],
+        }
+    ids = world.flow.steps[1].input_config["tool"]
+    assert reader.asked == 4 * [
+        {
+            "tenant_id": world.flow.tenant_id,
+            "space_id": world.flow.space_id,
+            "mcp_server_id": UUID(ids["mcp_server_id"]),
+            "tool_id": UUID(ids["tool_id"]),
+        }
+    ]
+    world.flow_repo.update.assert_not_awaited()
+    world.assistant_service.update_assistant.assert_not_awaited()
+    world.service.flow_version_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_tool_server_is_refused_by_the_chain_at_publish(reading_world):
+    # Kills the mutant that reads a deleted server as an unclassified one: the
+    # author would be told about a classification, not that the server is gone.
+    # A save asks no chain, so the draft is stored and publish refuses it.
+    world = reading_world
+    reader = _sends_step_1_to_a_tool(world, server_level=4, server_exists=False)
+
+    preview = await world.preview()
+    await world.service.update_flow(flow_id=world.flow.id, steps=world.flow.steps)
+    with pytest.raises(BadRequestException) as published:
+        await world.service.publish_flow(flow_id=world.flow.id)
+
+    assert _violation_code(preview, 2) is None
+    assert preview[1].external_source_level is None
+    world.flow_repo.update.assert_awaited_once()
+    assert published.value.code == "typed_io_tool_not_allowed"
+    assert published.value.context is not None
+    assert published.value.context["refusal"] == "server_not_found"
+    # The preview's read, the save's, then one for the publish: its
+    # classification rule and the chain judge the same read.
+    assert len(reader.asked) == 3
+
+
+@pytest.mark.asyncio
+async def test_while_classifications_are_off_the_tool_server_is_not_read(user):
+    # Kills the mutant that reads and compares the server's level for a tenant
+    # that has classifications turned off.
+    world = _World(user, second_reads_first=True, security_enabled=False)
+    reader = _sends_step_1_to_a_tool(world, server_level=2)
+
+    preview = await world.preview()
+
+    assert _violation_code(preview, 2) is None
+    assert preview[1].external_source_level is None
+    assert reader.asked == []
 
 
 @pytest.mark.asyncio

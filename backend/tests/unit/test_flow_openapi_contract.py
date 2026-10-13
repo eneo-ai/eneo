@@ -3203,11 +3203,13 @@ def test_openapi_security_classification_preview_is_a_closed_typed_contract(
 
     violation = schemas["FlowStepSecurityClassificationViolationPublic"]["properties"]
     assert _extract_enum_values(openapi_spec, violation["code"]) == {
+        "flow_step_tool_arguments_classification_write_down",
         "flow_step_security_classification_mismatch",
         "flow_step_output_classification_write_down",
     }
     assert _extract_enum_values(openapi_spec, violation["cause"]) == {
         "reads",
+        "external_source",
         "knowledge",
         "space",
     }
@@ -3216,6 +3218,7 @@ def test_openapi_security_classification_preview_is_a_closed_typed_contract(
         "step_order",
         "reads",
         "input_level",
+        "external_source_level",
         "knowledge_level",
         "required_model_level",
         "model_level",

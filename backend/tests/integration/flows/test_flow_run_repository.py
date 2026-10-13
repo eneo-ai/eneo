@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 from eneo.authentication.auth_models import ApiKeyOwnership, ApiKeyPermission
@@ -2891,6 +2892,218 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
         assert resolved_input.aggregate == _resolved_input_aggregate(
             binding_ref="tracked-input"
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_the_tool_steps_a_run_has_completed_are_read_in_one_statement(
+    attempt_provenance_context,
+):
+    # Kills the mutants that read the tool answers of another run, count a
+    # step that read its tool but has not completed, lose the level the
+    # answer was counted at, or need a statement per step: a resumed run's
+    # preflight reads them once.
+    context = attempt_provenance_context
+    tool_answer = {
+        "kind": "tool_answer",
+        "mcp_server_id": str(uuid4()),
+        "tool_id": str(uuid4()),
+        "tool_name": "lookup_case",
+        "server_classification_level": 3,
+        "selector": {"kind": "json_path", "path": []},
+    }
+    aggregate = FlowResolvedInputEdges.model_validate(
+        {
+            "schema_version": 1,
+            "edges": [
+                {
+                    "binding_ref": "tool.answer",
+                    "source": tool_answer,
+                    "selection": {
+                        "encoding": "canonical_json",
+                        "sha256": "c" * 64,
+                        "byte_size": 9,
+                    },
+                }
+            ],
+        }
+    )
+    statements: list[str] = []
+
+    def record(_conn, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    async with sessionmanager.session() as session, session.begin():
+        run_repo = FlowRunRepository(session=session)
+        await run_repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            dispatch_task_id="completed-tool-steps",
+        )
+        assert await _activate_test_attempt(
+            repo=run_repo, context=context, aggregate=aggregate
+        )
+
+        async def completed_tool_answers(run_id: UUID) -> dict[int, object]:
+            answers = await run_repo.list_completed_tool_answers(
+                run_id=run_id, tenant_id=context.tenant_id
+            )
+            return {
+                order: source.model_dump(mode="json")
+                for order, source in answers.items()
+            }
+
+        assert await completed_tool_answers(context.run_id) == {}
+        now = datetime.now(timezone.utc)
+        await run_repo.save_step_result(
+            flow_run_id=context.run_id,
+            result=FlowStepResult(
+                id=uuid4(),
+                flow_run_id=context.run_id,
+                flow_id=context.flow_id,
+                tenant_id=context.tenant_id,
+                step_id=context.step_id,
+                step_order=1,
+                current_attempt_no=1,
+                status=FlowStepResultStatus.COMPLETED,
+                created_at=now,
+                updated_at=now,
+            ),
+            tenant_id=context.tenant_id,
+            attempt_no=1,
+        )
+        sa.event.listen(Engine, "before_cursor_execute", record)
+        try:
+            recorded = await completed_tool_answers(context.run_id)
+        finally:
+            sa.event.remove(Engine, "before_cursor_execute", record)
+        assert recorded == {1: tool_answer}
+        assert len(statements) == 1
+        assert await completed_tool_answers(uuid4()) == {}
+
+
+def _edge(binding_ref: str, source: dict[str, object]) -> dict[str, object]:
+    return {
+        "binding_ref": binding_ref,
+        "source": {**source, "selector": {"kind": "json_path", "path": []}},
+        "selection": {"encoding": "utf8", "sha256": "d" * 64, "byte_size": 4},
+    }
+
+
+_TOOL_ANSWER: dict[str, object] = {
+    "kind": "tool_answer",
+    "mcp_server_id": str(uuid4()),
+    "tool_id": str(uuid4()),
+    "tool_name": "lookup_case",
+    "server_classification_level": 3,
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("read_step", "reads_the_tool", "copied"),
+    [
+        pytest.param("imported", True, True, id="tool-step"),
+        pytest.param("imported", False, False, id="step-that-read-no-tool"),
+        pytest.param("not-imported", True, None, id="argument-of-a-step-not-imported"),
+    ],
+)
+async def test_the_prefix_import_copies_the_evidence_of_a_tool_step(
+    attempt_provenance_context,
+    admin_user,
+    read_step: str,
+    reads_the_tool: bool,
+    copied: bool | None,
+):
+    # Kills the mutants that import a tool step without the edges of its read
+    # (a run that takes it over has no level to count it at), copy the edges
+    # of a step that read no tool, keep the attempt number an earlier step
+    # had in the source run (the run the import creates has attempt 1 of
+    # it), or copy an edge from a step the import does not take over.
+    from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
+
+    context = attempt_provenance_context
+    argument_step_id = context.step_id if read_step == "imported" else uuid4()
+    argument = {
+        "kind": "step_result",
+        "source_step_id": str(argument_step_id),
+        "source_attempt_no": 2,
+    }
+    edges = [_edge("tool.arguments.case_id", argument)]
+    if reads_the_tool:
+        edges.append(_edge("tool.answer", _TOOL_ANSWER))
+    aggregate = FlowResolvedInputEdges.model_validate(
+        {"schema_version": 1, "edges": edges}
+    )
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        await repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            dispatch_task_id="prefix-import-evidence",
+        )
+        assert await _activate_test_attempt(
+            repo=repo, context=context, aggregate=aggregate
+        )
+        source = (
+            await repo.list_step_results(
+                run_id=context.run_id, tenant_id=context.tenant_id
+            )
+        )[0].model_copy(
+            update={
+                "status": FlowStepResultStatus.COMPLETED,
+                "current_attempt_no": 1,
+                "output_payload_json": {"text": "Ärende A-17 är öppet."},
+            }
+        )
+        child = await repo.create(
+            flow_id=context.flow_id,
+            flow_version=1,
+            tenant_id=context.tenant_id,
+            principal_user_id=admin_user.id,
+            input_payload_json={"question": "Retry"},
+            preseed_steps=[
+                {
+                    "step_id": context.step_id,
+                    "assistant_id": source.assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        seed = FlowRunPrefixSeed(
+            source_run_id=context.run_id,
+            results=(source,),
+            provenance={"source_run_id": str(context.run_id), "request_hash": "r"},
+            kind="reused_prefix",
+            review_established_step_ids=frozenset(),
+        )
+        if copied is None:
+            with pytest.raises(ValueError, match="does not take over"):
+                await repo.seed_validated_prefix(run=child, seed=seed)
+            return
+        await repo.seed_validated_prefix(run=child, seed=seed)
+        lineage = await repo.list_current_attempt_lineage(
+            tenant_id=context.tenant_id, run_ids=[child.id]
+        )
+
+    if not copied:
+        assert lineage == []
+        return
+    (imported,) = lineage
+    assert imported.edges.aggregate is not None
+    assert imported.edges.aggregate.model_dump(mode="json")["edges"] == [
+        _edge("tool.arguments.case_id", {**argument, "source_attempt_no": 1}),
+        _edge("tool.answer", _TOOL_ANSWER),
+    ]
 
 
 @pytest.mark.asyncio

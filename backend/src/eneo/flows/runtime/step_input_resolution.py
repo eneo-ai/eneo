@@ -137,7 +137,12 @@ RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE: Final = (
 
 class ResolveToolInputFn(Protocol):
     def __call__(
-        self, *, step: RuntimeStep, run: FlowRun, context: FlowVariableContext
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        context: FlowVariableContext,
+        counted_server_levels: Mapping[int, int | None],
     ) -> Awaitable[FlowOutsideInputResolution]: ...
 
 
@@ -273,7 +278,14 @@ async def resolve_step_input(
             step_ref_mapping=state.step_ref_mapping if state else None,
         )
         outside_input = await (
-            deps.resolve_tool_input(step=step, run=run, context=source_context)
+            deps.resolve_tool_input(
+                step=step,
+                run=run,
+                context=source_context,
+                counted_server_levels=(
+                    state.counted_tool_server_levels if state is not None else {}
+                ),
+            )
             if step.input_source == "tool"
             else deps.resolve_http_input_source_text(
                 step=step, run=run, context=source_context

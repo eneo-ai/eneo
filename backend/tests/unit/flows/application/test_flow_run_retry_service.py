@@ -233,9 +233,13 @@ async def test_retry_import_copies_bounded_consumed_material_alias(context):
         ),
         seed=seed,
     )
+    # The result's update, then the attempt's insert (which returns its id).
     copied_inputs = [
         call.args[0].compile(dialect=postgresql.dialect()).params["input_payload_json"]
-        for call in session.execute.await_args_list[-2:]
+        for call in (
+            session.execute.await_args_list[-1],
+            session.scalar.await_args_list[-1],
+        )
     ]
     assert copied_inputs == [payload, payload]
     assert payload["text"] == text[:2048]

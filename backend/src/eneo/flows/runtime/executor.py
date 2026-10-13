@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -28,7 +29,6 @@ from eneo.flows.application.flow_run_terminalization import (
     FlowRunTerminalizationResult,
     FlowRunTerminalizer,
 )
-from eneo.flows.application.flow_tool_publication import UnattendedToolFactsSource
 from eneo.flows.assistant_execution_snapshot import (
     AssistantExecutionSnapshotV2,
     validate_assistant_execution_snapshot,
@@ -81,6 +81,7 @@ from eneo.flows.domain.step_output import (
     utf8_prefix,
 )
 from eneo.flows.domain.text_processing import SummarizationProvenance
+from eneo.flows.domain.tool_facts import ToolFactsReadOnce, UnattendedToolFactsSource
 from eneo.flows.domain.transcript_source import (
     TranscriptSourceReference,
     with_transcript_source_reference,
@@ -120,8 +121,10 @@ from eneo.flows.flow_runtime_policy import (
     resolve_step_timeout_seconds,
 )
 from eneo.flows.flow_security_classification import (
+    ExternalSourceClassification,
     evaluate_step_security_classification,
     evidence_classification_level,
+    read_tool_source_classification,
 )
 from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from eneo.flows.http_transport import (
@@ -323,6 +326,19 @@ _PROVIDER_RESPONSE_RECEIVED_DISCLOSURE = (
     "The provider returned a response; retrying will make a new request "
     "and can incur additional cost."
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _ToolPreflight:
+    """What one preflight asks about the run's tool steps with: a facts source
+    that reads each tool once, so the classification rule and the decision
+    judge the same rows, and the space the flow is in."""
+
+    facts: ToolFactsReadOnce
+    space_id: UUID
+    # By step order, the level the answer of each completed tool step was
+    # counted at when it was read.
+    recorded_levels: Mapping[int, int | None]
 
 
 class _FlowDeletedDuringRun(Exception):
@@ -990,8 +1006,9 @@ class FlowRunExecutor:
         )
         try:
             self._refuse_unacceptable_http_configs(steps)
+            tool_preflight = await self._tool_preflight(steps, run=run, state=state)
             step_output_levels = await self._resolve_step_output_levels(
-                steps=steps, state=state
+                steps=steps, state=state, run=run, tool_preflight=tool_preflight
             )
         except BadRequestException as exc:
             return await self._fail_run_before_its_steps(
@@ -1001,7 +1018,9 @@ class FlowRunExecutor:
                 source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
             )
         try:
-            await self._refuse_unusable_tools(steps, run=run, state=state)
+            await self._refuse_unusable_tools(
+                steps, run=run, state=state, tool_preflight=tool_preflight
+            )
         except TypedIOValidationException as exc:
             # What a level decides about a tool is no fault of the definition:
             # the run ends with the code, the source and the typed details it
@@ -2829,6 +2848,7 @@ class FlowRunExecutor:
         step: RuntimeStep,
         run: FlowRun,
         context: FlowVariableContext,
+        counted_server_levels: Mapping[int, int | None],
     ) -> FlowOutsideInputResolution:
         return await resolve_tool_input_runtime(
             step=step,
@@ -2836,6 +2856,58 @@ class FlowRunExecutor:
             context=context,
             deps=self._tool_input_deps(),
             space_id=await self._flow_space_id(run),
+            counted_server_levels=counted_server_levels,
+        )
+
+    async def _tool_preflight(
+        self, steps: list[RuntimeStep], *, run: FlowRun, state: RunExecutionState
+    ) -> _ToolPreflight | None:
+        """What one preflight of a run with a tool step asks its tools with;
+        None for a run without one, which needs neither reader nor space.
+
+        A tool step the run has completed is not asked about again: the level
+        its answer was counted at is a recorded fact of the run, read from the
+        ``tool_answer`` edge of the attempt that completed it. A run without a
+        completed tool step reads none.
+        """
+        tool_step_orders = [
+            step.step_order
+            for step in steps
+            if FlowInputSource(step.input_source) is FlowInputSource.TOOL
+        ]
+        if not tool_step_orders:
+            return None
+        completed = sorted(
+            order for order in tool_step_orders if order in state.completed_by_order
+        )
+        recorded_levels: dict[int, int | None] = {}
+        if completed:
+            answers = await self.flow_run_repo.list_completed_tool_answers(
+                run_id=run.id, tenant_id=run.tenant_id
+            )
+            recorded_levels = {
+                order: answers[order].server_classification_level
+                for order in completed
+                if order in answers
+            }
+            without_edge = [
+                order for order in completed if order not in recorded_levels
+            ]
+            if without_edge:
+                # A tool step this run completed stored the edge with its
+                # read, and one it took over from the run a retry started
+                # from got the edge of the attempt it was imported from
+                # (FlowRunRepository.seed_validated_prefix): that run read
+                # the tool in a version that stores the edge, as every
+                # version that runs tool steps does.
+                raise FlowRuntimeInvariantError(
+                    "A completed tool step has no tool_answer evidence edge "
+                    f"(run_id={run.id}, step_orders={without_edge})."
+                )
+        return _ToolPreflight(
+            facts=ToolFactsReadOnce(lambda: self._tool_input_deps().facts_reader),
+            space_id=await self._flow_space_id(run),
+            recorded_levels=recorded_levels,
         )
 
     def _tool_input_deps(self) -> ToolInputDeps:
@@ -2855,8 +2927,9 @@ class FlowRunExecutor:
         )
 
     async def _flow_space_id(self, run: FlowRun) -> UUID:
-        # Read for each check: the decision is about the space the flow is in
-        # now. A run of a deleted flow may still be finishing.
+        # Read for the preflight and again for each read: the decision is about
+        # the space the flow is in now. A run of a deleted flow may still be
+        # finishing.
         space_id = await self.flow_repo.get_space_id(
             flow_id=run.flow_id, tenant_id=run.tenant_id, include_deleted=True
         )
@@ -2886,7 +2959,12 @@ class FlowRunExecutor:
         return {"status": "failed", "error": run_error.code.value}
 
     async def _refuse_unusable_tools(
-        self, steps: list[RuntimeStep], *, run: FlowRun, state: RunExecutionState
+        self,
+        steps: list[RuntimeStep],
+        *,
+        run: FlowRun,
+        state: RunExecutionState,
+        tool_preflight: _ToolPreflight | None,
     ) -> None:
         """Refuse a run with a tool step whose tool a level does not allow for
         the flow's space, or is no longer the tool the flow pinned, before any
@@ -2895,23 +2973,21 @@ class FlowRunExecutor:
         A step the run has already completed makes no call any more, so a
         resumed run is not refused for it.
         """
+        if tool_preflight is None:
+            return
         tool_steps = [
             step
             for step in sorted(steps, key=lambda item: item.step_order)
             if FlowInputSource(step.input_source) is FlowInputSource.TOOL
             and step.step_order not in state.completed_by_order
         ]
-        if not tool_steps:
-            return
-        deps = self._tool_input_deps()
-        space_id = await self._flow_space_id(run)
         for step in tool_steps:
             await read_usable_tool(
                 step_order=step.step_order,
                 config=pinned_tool_config(step),
-                facts_reader=deps.facts_reader,
+                facts_reader=tool_preflight.facts,
                 tenant_id=run.tenant_id,
-                space_id=space_id,
+                space_id=tool_preflight.space_id,
             )
 
     async def _load_assistant(
@@ -3168,7 +3244,12 @@ class FlowRunExecutor:
             ) from None
 
     async def _resolve_step_output_levels(
-        self, *, steps: list[RuntimeStep], state: RunExecutionState
+        self,
+        *,
+        steps: list[RuntimeStep],
+        state: RunExecutionState,
+        run: FlowRun,
+        tool_preflight: _ToolPreflight | None,
     ) -> dict[int, int | None]:
         """Every step's effective output level, in order, before any step runs.
 
@@ -3180,7 +3261,9 @@ class FlowRunExecutor:
             levels[step.step_order] = await self._validate_runtime_step_security(
                 step=step,
                 state=state,
+                run=run,
                 prior_output_levels_by_order=levels,
+                tool_preflight=tool_preflight,
             )
         return levels
 
@@ -3189,7 +3272,9 @@ class FlowRunExecutor:
         *,
         step: RuntimeStep,
         state: RunExecutionState,
+        run: FlowRun,
         prior_output_levels_by_order: dict[int, int | None],
+        tool_preflight: _ToolPreflight | None,
     ) -> int | None:
         assistant = await self._load_assistant(
             step.assistant_id, state, snapshot=step.assistant_snapshot
@@ -3197,6 +3282,34 @@ class FlowRunExecutor:
         if state.flow_space is None:
             raise FlowRuntimeInvariantError("Frozen assistants require a flow space.")
         space = state.flow_space
+        external_source: ExternalSourceClassification | None = None
+        if tool_preflight is None:
+            # The run has no tool step.
+            pass
+        elif step.step_order in tool_preflight.recorded_levels:
+            # A completed tool step: its answer is the step's stored input at
+            # the level it was counted at then, and it sends nothing any more.
+            external_source = ExternalSourceClassification(
+                level=tool_preflight.recorded_levels[step.step_order],
+                sent_step_orders=(),
+            )
+        else:
+            # The server of the step's pinned tool, read for the tenant and
+            # the space the tool decision is asked about.
+            external_source = await read_tool_source_classification(
+                input_source=step.input_source,
+                step_order=step.step_order,
+                input_config=step.input_config,
+                step_ref_mapping=state.step_ref_mapping,
+                facts_reader=lambda: tool_preflight.facts,
+                tenant_id=run.tenant_id,
+                space_id=tool_preflight.space_id,
+                security_enabled=self.security_classification_enabled,
+            )
+            if external_source is not None:
+                state.counted_tool_server_levels[step.step_order] = (
+                    external_source.level
+                )
         evaluation = evaluate_step_security_classification(
             step_order=step.step_order,
             step_id=step.step_id,
@@ -3223,6 +3336,7 @@ class FlowRunExecutor:
             assistant=assistant,
             space=space,
             security_enabled=self.security_classification_enabled,
+            external_source=external_source,
         )
         return evaluation.effective_output_level
 

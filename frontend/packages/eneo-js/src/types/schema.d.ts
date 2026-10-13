@@ -5896,7 +5896,7 @@ export interface paths {
     put?: never;
     /**
      * Preview Security Classification
-     * @description Explain, step by step, what the security classification rule makes of the submitted editor state: the level each step's inputs carry, which earlier steps it reads, the level its model must clear, the models of the space that qualify, the level its output carries, the lowest output override the rule accepts, and the violation a save would be refused with. `steps` and `assistants` are the editor's unsaved state in the shape a flow update and an assistant update accept; omit them to explain the saved draft. The rule is the one a save applies, so a candidate reported without a violation is not refused for classification. This endpoint does not save the flow or any assistant and writes no audit record. It reads the flow's assistants, so it needs the same permission as reading them: editing flows in the space.
+     * @description Explain, step by step, what the security classification rule makes of the submitted editor state: the level each step's inputs carry, which earlier steps it reads, the level of the server of the tool it reads, the level its model must clear, the models of the space that qualify, the level its output carries, the lowest output override the rule accepts, and the violation a save would be refused with. `steps` and `assistants` are the editor's unsaved state in the shape a flow update and an assistant update accept; omit them to explain the saved draft. The rule is the one a save applies, so a candidate reported without a violation is not refused for classification by a save. The preview does not report what the tool decision refuses at publish: a tool whose server has a lower classification than the space is refused there with `typed_io_tool_not_allowed`. This endpoint does not save the flow or any assistant and writes no audit record. It reads the flow's assistants, so it needs the same permission as reading them: editing flows in the space.
      */
     post: operations["preview_flow_security_classification"];
     delete?: never;
@@ -14960,14 +14960,16 @@ export interface components {
      * @description What sets the level a step must clear.
      * @enum {string}
      */
-    ClassificationCause: "reads" | "knowledge" | "space";
+    ClassificationCause: "reads" | "external_source" | "knowledge" | "space";
     /**
      * ClassificationViolationCode
      * @description The refusals of the rule, as the catalog names them.
      * @enum {string}
      */
     ClassificationViolationCode:
-      "flow_step_security_classification_mismatch" | "flow_step_output_classification_write_down";
+      | "flow_step_tool_arguments_classification_write_down"
+      | "flow_step_security_classification_mismatch"
+      | "flow_step_output_classification_write_down";
     /** CollectionMetadata */
     CollectionMetadata: {
       /** Num Info Blobs */
@@ -18149,6 +18151,7 @@ export interface components {
       | "flow_request_body_too_large"
       | "flow_step_security_classification_mismatch"
       | "flow_step_output_classification_write_down"
+      | "flow_step_tool_arguments_classification_write_down"
       | "flow_step_missing"
       | "flow_step_attempt_start_failed"
       | "flow_step_execution_failed"
@@ -18198,6 +18201,7 @@ export interface components {
       | "typed_io_http_timeout"
       | "typed_io_tool_answer_too_large"
       | "typed_io_tool_changed"
+      | "typed_io_tool_classification_changed"
       | "typed_io_tool_connection_error"
       | "typed_io_tool_destination_blocked"
       | "typed_io_tool_invalid_arguments"
@@ -20306,6 +20310,11 @@ export interface components {
       mcp_server_id: string;
       selector: components["schemas"]["FlowResolvedInputJsonPath"];
       /**
+       * Server Classification Level
+       * @description The security classification level the answer was counted at: the level of the tool's server when the tool was read. Null when the organization has security classifications off or the server has none, and on an edge stored before this field existed.
+       */
+      server_classification_level?: number | null;
+      /**
        * Tool Id
        * Format: uuid
        * @description The server's tool that was called.
@@ -22144,6 +22153,7 @@ export interface components {
         | "typed_io_template_render_failed"
         | "typed_io_tool_answer_too_large"
         | "typed_io_tool_changed"
+        | "typed_io_tool_classification_changed"
         | "typed_io_tool_connection_error"
         | "typed_io_tool_destination_blocked"
         | "typed_io_tool_invalid_arguments"
@@ -24940,6 +24950,7 @@ export interface components {
             | "typed_io_template_render_failed"
             | "typed_io_tool_answer_too_large"
             | "typed_io_tool_changed"
+            | "typed_io_tool_classification_changed"
             | "typed_io_tool_connection_error"
             | "typed_io_tool_destination_blocked"
             | "typed_io_tool_invalid_arguments"
@@ -25933,6 +25944,7 @@ export interface components {
      *       "steps": [
      *         {
      *           "effective_output_level": 2,
+     *           "external_source_level": null,
      *           "input_level": 2,
      *           "knowledge_level": null,
      *           "model_level": 1,
@@ -26340,6 +26352,7 @@ export interface components {
             | "typed_io_template_render_failed"
             | "typed_io_tool_answer_too_large"
             | "typed_io_tool_changed"
+            | "typed_io_tool_classification_changed"
             | "typed_io_tool_connection_error"
             | "typed_io_tool_destination_blocked"
             | "typed_io_tool_invalid_arguments"
@@ -26661,8 +26674,13 @@ export interface components {
        */
       effective_output_level: number | null;
       /**
+       * External Source Level
+       * @description The level of the server of the tool the step reads its input from. Null for a step without a tool, for an unclassified server, for a server that no longer exists and for a server the flow's space has not activated: such a server has no level in this rule.
+       */
+      external_source_level: number | null;
+      /**
        * Input Level
-       * @description The level the step's inputs carry: the space's level and the output levels of the steps it reads. Null when nothing is classified.
+       * @description The level the step's inputs carry: the space's level, the output levels of the steps it reads and `external_source_level`. Null when nothing is classified.
        */
       input_level: number | null;
       /**
@@ -26704,20 +26722,20 @@ export interface components {
     };
     /** FlowStepSecurityClassificationViolationPublic */
     FlowStepSecurityClassificationViolationPublic: {
-      /** @description What sets `required_level`: `reads` (the steps in `source_step_orders`), `knowledge` (the step's knowledge sources) or `space`. */
+      /** @description What sets `required_level`: `reads` (the steps in `source_step_orders`), `external_source` (the server of the step's tool), `knowledge` (the step's knowledge sources) or `space`. When several sit at that level, the first of them in this order is named. */
       cause: components["schemas"]["ClassificationCause"];
-      /** @description `flow_step_security_classification_mismatch`: the step's model is below the level the step must clear. `flow_step_output_classification_write_down`: the step's output override is below the level its output already carries. */
+      /** @description `flow_step_tool_arguments_classification_write_down`: the step's tool arguments read steps above the level of the tool's server. `flow_step_security_classification_mismatch`: the step's model is below the level the step must clear. `flow_step_output_classification_write_down`: the step's output override is below the level its output already carries. A step that breaks several is reported with the first of them in this order. */
       code: components["schemas"]["ClassificationViolationCode"];
       /**
        * Current Level
-       * @description The model's level (null when the step has no model or an unclassified one), or the output override for a write-down.
+       * @description The model's level (null when the step has no model or an unclassified one), the output override for an output write-down, or the level of the tool's server (null for an unclassified one) for the tool arguments.
        */
       current_level: number | null;
       /** Message */
       message: string;
       /**
        * Required Level
-       * @description The level the model or the output override must reach.
+       * @description The level the model, the output override or, for the tool arguments, the tool's server must reach.
        */
       required_level: number;
       /** Source Step Orders */
@@ -61858,6 +61876,7 @@ export interface operations {
            *       "steps": [
            *         {
            *           "effective_output_level": 2,
+           *           "external_source_level": null,
            *           "input_level": 2,
            *           "knowledge_level": null,
            *           "model_level": 1,

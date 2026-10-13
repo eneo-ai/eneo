@@ -94,12 +94,16 @@ from eneo.flows.flow_run_input_envelope import (
 )
 from eneo.flows.flow_run_provenance import (
     FlowImportedAttemptProvenance,
+    FlowResolvedInputEdge,
     FlowResolvedInputEdges,
     FlowResolvedInputEdgesConflictError,
     FlowResolvedInputEdgesParseResult,
     FlowResolvedInputEdgesUnavailableError,
+    FlowResolvedInputStepResultSource,
+    FlowResolvedInputToolAnswerSource,
     parse_resolved_input_edges,
     resolve_attempt_terminalization_evidence,
+    tool_answer_source,
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFileProjection
@@ -685,6 +689,7 @@ class FlowRunRepository:
         )
 
         now = datetime.now(timezone.utc)
+        imported_step_ids = frozenset(source.step_id for source in seed.results)
         for source in seed.results:
             if source.id is None or source.current_attempt_no is None:
                 raise ValueError("Imported step results require a persisted attempt.")
@@ -772,8 +777,9 @@ class FlowRunRepository:
                 .returning(FlowStepResults.id)
             )
             updated.scalar_one()
-            await self.session.execute(
-                sa.insert(FlowStepAttempts).values(
+            attempt_id = await self.session.scalar(
+                sa.insert(FlowStepAttempts)
+                .values(
                     flow_run_id=run.id,
                     flow_id=run.flow_id,
                     tenant_id=run.tenant_id,
@@ -790,7 +796,58 @@ class FlowRunRepository:
                     started_at=now,
                     finished_at=now,
                 )
+                .returning(FlowStepAttempts.id)
             )
+            if parent_attempt is not None:
+                await self._copy_tool_answer_evidence(
+                    parent_attempt_id=parent_attempt.id,
+                    attempt_id=attempt_id,
+                    tenant_id=run.tenant_id,
+                    imported_step_ids=imported_step_ids,
+                )
+
+    async def _copy_tool_answer_evidence(
+        self,
+        *,
+        parent_attempt_id: UUID,
+        attempt_id: UUID | None,
+        tenant_id: UUID,
+        imported_step_ids: frozenset[UUID],
+    ) -> None:
+        """Give an imported attempt the resolved-input edges of the attempt it
+        was imported from when that attempt read a tool: the ``tool_answer``
+        edge keeps the level its answer was counted at, which a run that
+        takes the step over counts it at again, without reading the server.
+
+        An edge from an earlier step names that step's attempt; in the run
+        the import creates every imported step is attempt 1, and a tool
+        step's arguments read earlier steps only, which the import takes
+        over with it.
+        """
+        parsed = await self.get_resolved_input_edges(
+            attempt_id=parent_attempt_id, tenant_id=tenant_id
+        )
+        if parsed is None or tool_answer_source(parsed) is None:
+            return
+        assert parsed.aggregate is not None and attempt_id is not None
+        edges: list[FlowResolvedInputEdge] = []
+        for edge in parsed.aggregate.edges:
+            source = edge.source
+            if isinstance(source, FlowResolvedInputStepResultSource):
+                if source.source_step_id not in imported_step_ids:
+                    raise ValueError(
+                        "Imported tool evidence reads a step the import does not take over."
+                    )
+                source = source.model_copy(update={"source_attempt_no": 1})
+            edges.append(edge.model_copy(update={"source": source}))
+        await self.session.execute(
+            sa.insert(FlowStepAttemptResolvedInputs).values(
+                flow_step_attempt_id=attempt_id,
+                resolved_input_edges_jsonb=parsed.aggregate.model_copy(
+                    update={"edges": tuple(edges)}
+                ).model_dump(mode="json"),
+            )
+        )
 
     async def get(
         self,
@@ -1719,6 +1776,48 @@ class FlowRunRepository:
             )
             for run_id, step_id, raw_edges in rows
         ]
+
+    async def list_completed_tool_answers(
+        self, *, run_id: UUID, tenant_id: UUID
+    ) -> dict[int, FlowResolvedInputToolAnswerSource]:
+        """The tool steps the run has completed: by step order, the source of
+        the ``tool_answer`` edge on the attempt behind each completed step
+        result, which the attempt recorded when it read its tool, or which
+        ``seed_validated_prefix`` copied onto an imported attempt. One
+        statement; a completed step whose attempt holds no such edge is not
+        in the answer."""
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepResults.step_order,
+                    FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
+                )
+                .select_from(FlowStepResults)
+                .join(
+                    FlowStepAttempts,
+                    sa.and_(
+                        FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+                        FlowStepAttempts.step_id == FlowStepResults.step_id,
+                        FlowStepAttempts.attempt_no
+                        == FlowStepResults.current_attempt_no,
+                    ),
+                )
+                .join(
+                    FlowStepAttemptResolvedInputs,
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                    == FlowStepAttempts.id,
+                )
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .where(FlowStepResults.flow_run_id == run_id)
+                .where(FlowStepResults.status == FlowStepResultStatus.COMPLETED.value)
+            )
+        ).all()
+        answers: dict[int, FlowResolvedInputToolAnswerSource] = {}
+        for step_order, raw_edges in rows:
+            source = tool_answer_source(parse_resolved_input_edges(raw_edges))
+            if source is not None:
+                answers[step_order] = source
+        return answers
 
     async def list_step_result_identities(
         self, *, run_id: UUID, tenant_id: UUID

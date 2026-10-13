@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
@@ -14,7 +14,6 @@ from eneo.assistants.assistant_update import (
 )
 from eneo.files.file_models import File
 from eneo.flows.application.flow_tool_publication import (
-    UnattendedToolFactsSource,
     pin_tool_steps,
     published_input_config,
 )
@@ -38,6 +37,7 @@ from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationError,
 )
 from eneo.flows.domain.step_config import clean_inactive_step_config
+from eneo.flows.domain.tool_facts import ToolFactsReadOnce, UnattendedToolFactsSource
 from eneo.flows.domain.tool_input import PublishedToolInputConfig
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -642,11 +642,15 @@ class FlowService:
             metadata_json=normalized_metadata,
             publishing_steps=flow.steps,
         )
+        # One read of each tool's facts serves this publish: the classification
+        # rule and the decision then judge the same rows.
+        tool_facts = ToolFactsReadOnce(self._require_tool_facts_reader)
         await self._validate_step_security_classification_for_steps(
             space_id=flow.space_id,
             steps=flow.steps,
             assistants_by_id=assistants_by_id,
             space=space,
+            tool_facts_reader=lambda: tool_facts,
         )
         self._reject_templated_stored_secrets(flow.steps)
         self._reject_unprotected_stored_secrets(flow.steps)
@@ -657,7 +661,7 @@ class FlowService:
         )
         tool_pins = await pin_tool_steps(
             flow.steps,
-            facts_reader=self._require_tool_facts_reader,
+            facts_reader=lambda: tool_facts,
             tenant_id=self.user.tenant_id,
             space_id=flow.space_id,
         )
@@ -857,13 +861,17 @@ class FlowService:
         steps: list[FlowStep],
         assistants_by_id: dict[UUID, Assistant] | None = None,
         space: Space | None = None,
+        tool_facts_reader: Callable[[], UnattendedToolFactsSource] | None = None,
     ) -> None:
+        """Refuse steps the classification rule refuses. ``tool_facts_reader``
+        is the caller's when it asks about the same tools again (a publish);
+        otherwise the service's own reader is used."""
         if self.space_service is None or not steps:
             return
 
         if space is None:
             space = await self.space_service.get_space(space_id)
-        require_flow_security_classification(
+        await require_flow_security_classification(
             steps=steps,
             assistants_by_id=(
                 assistants_by_id
@@ -872,6 +880,9 @@ class FlowService:
             ),
             space=space,
             security_enabled=self.user.tenant.security_enabled,
+            tool_facts_reader=tool_facts_reader or self._require_tool_facts_reader,
+            tenant_id=self.user.tenant_id,
+            space_id=space_id,
         )
 
     async def preview_step_security_classification(
@@ -915,11 +926,14 @@ class FlowService:
                     update=update,
                 )
             )
-        return explain_flow_security_classification(
+        return await explain_flow_security_classification(
             steps=candidate_steps,
             assistants_by_id=assistants_by_id,
             space=space,
             security_enabled=self.user.tenant.security_enabled,
+            tool_facts_reader=self._require_tool_facts_reader,
+            tenant_id=self.user.tenant_id,
+            space_id=flow.space_id,
         )
 
     async def _load_step_assistants(
@@ -968,11 +982,14 @@ class FlowService:
             )
             assistants_by_id[step.assistant_id] = current_assistant
 
-        require_flow_security_classification(
+        await require_flow_security_classification(
             steps=flow.steps,
             assistants_by_id=assistants_by_id,
             space=space,
             security_enabled=self.user.tenant.security_enabled,
+            tool_facts_reader=self._require_tool_facts_reader,
+            tenant_id=self.user.tenant_id,
+            space_id=flow.space_id,
         )
 
     def _build_candidate_flow_assistant_for_security_validation(

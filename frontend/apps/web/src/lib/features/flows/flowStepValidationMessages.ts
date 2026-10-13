@@ -72,7 +72,9 @@ const CODE_TO_MESSAGE: Record<string, () => string> = {
   flow_step_security_classification_mismatch: () =>
     m.flow_error_flow_step_security_classification_mismatch(),
   flow_step_output_classification_write_down: () =>
-    m.flow_error_flow_step_output_classification_write_down()
+    m.flow_error_flow_step_output_classification_write_down(),
+  flow_step_tool_arguments_classification_write_down: () =>
+    m.flow_error_flow_step_tool_arguments_classification_write_down()
 };
 
 export function getValidationIssueMessage(code: string): string {
@@ -84,23 +86,34 @@ export type ParsedValidationError =
   | { kind: "assistant"; assistantId: string; message: string }
   | { kind: "flow"; code: string; message: string; detail?: string };
 
+/** What sets the level of a refusal; `external_source` is the server of the step's tool. */
+const CLASSIFICATION_CAUSES = ["reads", "external_source", "knowledge", "space"] as const;
+type ClassificationCause = (typeof CLASSIFICATION_CAUSES)[number];
+
+function isClassificationCause(value: unknown): value is ClassificationCause {
+  return CLASSIFICATION_CAUSES.some((cause) => cause === value);
+}
+
 /**
  * The facts of a security-classification refusal: what the step must clear,
- * what it has, and what sets the level. `qualifyingModelIds` are the space's
- * usable models that would clear it (model refusals only).
+ * what it has, and what sets the level. For `tool_arguments_write_down` the
+ * levels are those of the data the step sends to its tool and of the tool's
+ * server. `qualifyingModelIds` are the space's usable models that would clear
+ * it (model refusals only).
  */
 export type ClassificationRefusal = {
-  kind: "model_below_required" | "output_write_down";
+  kind: "model_below_required" | "output_write_down" | "tool_arguments_write_down";
   requiredLevel: number;
   currentLevel: number | null;
-  cause: "reads" | "knowledge" | "space";
+  cause: ClassificationCause;
   sourceStepOrders: number[];
   qualifyingModelIds: string[];
 };
 
 const CLASSIFICATION_KIND_BY_CODE: Record<string, ClassificationRefusal["kind"]> = {
   flow_step_security_classification_mismatch: "model_below_required",
-  flow_step_output_classification_write_down: "output_write_down"
+  flow_step_output_classification_write_down: "output_write_down",
+  flow_step_tool_arguments_classification_write_down: "tool_arguments_write_down"
 };
 
 function isLevel(value: unknown): value is number {
@@ -120,7 +133,7 @@ function readClassificationRefusal(
   if (!kind) return undefined;
   const { required_level: requiredLevel, current_level: current, cause } = context;
   if (!isLevel(requiredLevel)) return undefined;
-  if (cause !== "reads" && cause !== "knowledge" && cause !== "space") return undefined;
+  if (!isClassificationCause(cause)) return undefined;
   if (current != null && !isLevel(current)) return undefined;
   if (current == null && kind === "output_write_down") return undefined;
   const list = (value: unknown) => (Array.isArray(value) ? value : []);
@@ -158,9 +171,14 @@ export function describeClassificationRefusal(
           name,
           sources: refusal.sourceStepOrders.map(names.stepLabel).join(", ")
         })
-      : refusal.cause === "knowledge"
-        ? m.flow_validation_classification_knowledge({ name })
-        : m.flow_validation_classification_space({ name });
+      : refusal.cause === "external_source"
+        ? m.flow_validation_classification_external_source({ name })
+        : refusal.cause === "knowledge"
+          ? m.flow_validation_classification_knowledge({ name })
+          : m.flow_validation_classification_space({ name });
+  if (refusal.kind === "tool_arguments_write_down") {
+    return `${why} ${m.flow_error_flow_step_tool_arguments_classification_write_down()}`;
+  }
   if (refusal.kind === "output_write_down") {
     return `${why} ${m.flow_validation_classification_write_down({
       override: current ?? name,

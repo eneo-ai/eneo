@@ -76,6 +76,10 @@ def _empty_reviewed_results() -> dict[ReviewedResultKey, ReviewedResult]:
     return {}
 
 
+def _empty_counted_tool_server_levels() -> dict[int, int | None]:
+    return {}
+
+
 def _empty_activated_attempts() -> set[tuple[UUID, int]]:
     return set()
 
@@ -228,6 +232,12 @@ class RunExecutionState:
     )
     # The orders of the steps whose input is a tool's answer.
     tool_step_orders: frozenset[int] = frozenset()
+    # The level the run's preflight counted the server of each tool step at,
+    # by step order (None: a server without a classification). Empty while
+    # security classifications are off.
+    counted_tool_server_levels: dict[int, int | None] = field(
+        default_factory=_empty_counted_tool_server_levels
+    )
 
     def all_previous_text_before(self, step_order: int) -> str:
         segments: list[str] = []

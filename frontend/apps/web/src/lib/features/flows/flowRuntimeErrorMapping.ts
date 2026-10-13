@@ -143,6 +143,8 @@ const FLOW_API_ERROR_MESSAGES = {
     m.flow_error_flow_step_security_classification_mismatch,
   flow_step_output_classification_write_down:
     m.flow_error_flow_step_output_classification_write_down,
+  flow_step_tool_arguments_classification_write_down:
+    m.flow_error_flow_step_tool_arguments_classification_write_down,
   flow_step_missing: m.flow_error_flow_step_missing,
   flow_step_attempt_start_failed: m.flow_error_flow_step_attempt_start_failed,
   flow_step_execution_failed: m.flow_error_flow_step_execution_failed,
@@ -197,6 +199,7 @@ const FLOW_API_ERROR_MESSAGES = {
   typed_io_tool_invalid_schema: m.flow_error_typed_io_tool_invalid_schema,
   typed_io_tool_not_allowed: m.flow_error_typed_io_tool_not_allowed,
   typed_io_tool_changed: m.flow_error_typed_io_tool_changed,
+  typed_io_tool_classification_changed: m.flow_error_typed_io_tool_classification_changed,
   typed_io_tool_invalid_arguments: m.flow_error_typed_io_tool_invalid_arguments,
   typed_io_tool_destination_blocked: m.flow_error_typed_io_tool_destination_blocked,
   typed_io_tool_connection_error: m.flow_error_typed_io_tool_connection_error,

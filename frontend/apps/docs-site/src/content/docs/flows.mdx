@@ -154,7 +154,7 @@ A run asks every level about its tool steps before it runs them (when it starts,
 
 What a run keeps of a tool read:
 
-- On a successful read, the evidence edges of the bound arguments and one `tool_answer` edge with the server's id, the tool's id and name, and the hash and size of the answer, never the value.
+- On a successful read, the evidence edges of the bound arguments and one `tool_answer` edge with the server's id, the tool's id and name, the security classification level the answer was counted at, and the hash and size of the answer, never the value.
 - One audit record for each read that reached out for the server and ended with a typed result (a success or a typed failure): the server's host and path, the outcome, the duration, the server's id and the tool's name, never the arguments.
 - A read that fails keeps that one audit record and no argument edge. A read that is cancelled, or that fails with an error that has no typed code, writes no audit record, as for an HTTP input.
 - A typed record of each call (what was sent, also for a failed or interrupted call) is not built in this release line.
@@ -628,15 +628,20 @@ Flows evaluate step security classification from several inputs:
 - the space baseline classification
 - the classification implied by previous outputs
 - knowledge-source classifications
+- the classification of the MCP server of a tool the step reads its input from
 - any explicit output classification override
 
 "Previous outputs" covers everything a step reads from earlier steps: its input, its prompt, the bindings of a `template_fill` step, and the URL, headers, and body templates of an HTTP request. A `{{ ... }}` reference to an earlier step in any of these counts, so a step cannot pull in higher-classified material through a template that its own input does not name.
+
+A step whose input is the answer of an MCP tool counts the tool's server in two ways. The answer enters the step at the server's classification: the step's model must be cleared for it, and every later step that reads the step inherits it. The arguments are sent to the server, so the server's classification must be at least that of every earlier step the arguments read; a server without a classification adds no level and cannot receive data from a classified step. A server that no longer exists, or that the flow's space has not activated, has no level in this rule: publishing such a step is refused because the tool may not be used, not for its classification, and so is a run that has still to make the step's call.
+
+A run counts the server's level before its first step and compares it again before the call. If the level was raised, lowered or removed in between and the MCP decision still allows the tool, the step fails with `typed_io_tool_classification_changed` and nothing is sent; start the run again. A tool the decision no longer allows, for example because its server is now below the space's classification, is refused before that with `typed_io_tool_not_allowed`. The level the answer was counted at is kept on the step's `tool_answer` evidence edge (`server_classification_level`). A run that is taken up again after a review counts a tool step it has already completed at that kept level, whatever has happened to the server since (removed from the space, deleted, reclassified): the answer is already the step's stored input. Such a step is not asked about again, and what it sent is not compared with the server again.
 
 Current enforcement prevents a step from lowering the effective classification of its output. In practice, that means a flow cannot use an override to lower the classification below what the input material already implies.
 
 While the organization has security classifications turned off, none of these levels applies: a flow follows the same rule as the rest of the platform and no step is refused for its classification.
 
-When a save is refused for its classification, the response names the step, the level it must reach, what sets that level (a step it reads, its knowledge sources or the space) and the space's models that would clear it.
+When a save is refused for its classification, the response names the step, the level it must reach, what sets that level (a step it reads, the server of its tool, its knowledge sources or the space) and, when the step's model is what falls short, the space's models that would clear it.
 
 ### Supported external effects
 

@@ -652,6 +652,12 @@ def test_executor_keeps_service_principal_actor_and_canonical_file_service(user)
     assert executor._template_fill_runtime_deps().file_service is executor.file_service
 
 
+def _levels_run(user) -> FlowRun:
+    """The run whose steps' levels a test resolves: the preflight reads a tool
+    step's server for this run's tenant and flow."""
+    return _run(status=FlowRunStatus.RUNNING, user=user)
+
+
 def _empty_execution_state() -> RunExecutionState:
     return RunExecutionState(
         completed_by_order={},
@@ -4974,13 +4980,16 @@ async def _validate_security_steps(
     executor: FlowRunExecutor,
     state: RunExecutionState,
     steps: list[RuntimeStep],
+    run: FlowRun,
 ) -> dict[int, int | None]:
     levels: dict[int, int | None] = {}
     for step in steps:
         levels[step.step_order] = await executor._validate_runtime_step_security(
             step=step,
             state=state,
+            run=run,
             prior_output_levels_by_order=levels,
+            tool_preflight=None,
         )
     return levels
 
@@ -5009,7 +5018,10 @@ async def test_runtime_preflight_classifies_bound_steps_before_anything_complete
 
     with pytest.raises(BadRequestException) as exc_info:
         await executor._resolve_step_output_levels(
-            steps=[first, bound], state=_empty_execution_state()
+            steps=[first, bound],
+            state=_empty_execution_state(),
+            run=_levels_run(user),
+            tool_preflight=None,
         )
 
     assert exc_info.value.code == "flow_step_security_classification_mismatch"
@@ -5041,7 +5053,10 @@ async def test_runtime_preflight_reads_prompt_references_when_underlag_is_litera
 
     with pytest.raises(BadRequestException) as exc_info:
         await executor._resolve_step_output_levels(
-            steps=[first, literal], state=_empty_execution_state()
+            steps=[first, literal],
+            state=_empty_execution_state(),
+            run=_levels_run(user),
+            tool_preflight=None,
         )
 
     assert exc_info.value.code == "flow_step_security_classification_mismatch"
@@ -5074,7 +5089,10 @@ async def test_runtime_preflight_ignores_prompts_of_deterministic_steps(user):
     )
 
     levels = await executor._resolve_step_output_levels(
-        steps=[first, compose], state=_empty_execution_state()
+        steps=[first, compose],
+        state=_empty_execution_state(),
+        run=_levels_run(user),
+        tool_preflight=None,
     )
 
     assert levels == {1: 3, 2: 1}
@@ -5126,7 +5144,10 @@ async def _preflight_levels(
         )
     ]
     return await executor._resolve_step_output_levels(
-        steps=[first, *rest], state=_empty_execution_state()
+        steps=[first, *rest],
+        state=_empty_execution_state(),
+        run=_levels_run(user),
+        tool_preflight=None,
     )
 
 
@@ -5284,7 +5305,9 @@ async def test_runtime_step_security_reuses_flow_space_for_all_assistants(user):
         )
     ]
 
-    levels = await _validate_security_steps(executor=executor, state=state, steps=steps)
+    levels = await _validate_security_steps(
+        executor=executor, state=state, steps=steps, run=_levels_run(user)
+    )
 
     assert levels == {1: 1, 2: 1, 3: 1}
     assert len(state.assistant_cache) == 2
@@ -5312,7 +5335,10 @@ async def test_a_preflight_refusal_names_its_step_on_the_failed_run(user):
 
     with pytest.raises(BadRequestException) as exc_info:
         await executor._resolve_step_output_levels(
-            steps=[first, second], state=_empty_execution_state()
+            steps=[first, second],
+            state=_empty_execution_state(),
+            run=_levels_run(user),
+            tool_preflight=None,
         )
 
     context = exc_info.value.context
@@ -5362,7 +5388,10 @@ async def test_a_preflight_while_classifications_are_off_classifies_nothing(user
     )
 
     levels = await executor._resolve_step_output_levels(
-        steps=[first, second], state=_empty_execution_state()
+        steps=[first, second],
+        state=_empty_execution_state(),
+        run=_levels_run(user),
+        tool_preflight=None,
     )
 
     assert levels == {1: None, 2: None}
@@ -7233,7 +7262,9 @@ async def test_validate_runtime_step_security_rejects_write_down(user):
         await executor._validate_runtime_step_security(
             step=step,
             state=state,
+            run=_levels_run(user),
             prior_output_levels_by_order={1: 3},
+            tool_preflight=None,
         )
 
 
@@ -7871,7 +7902,9 @@ async def test_v2_snapshots_share_flow_space_classification(user, monkeypatch):
     await executor._validate_assistant_snapshots(
         steps=steps, state=state, run_id=run.id
     )
-    levels = await executor._resolve_step_output_levels(steps=steps, state=state)
+    levels = await executor._resolve_step_output_levels(
+        steps=steps, state=state, run=_levels_run(user), tool_preflight=None
+    )
 
     assert levels == {1: 2, 2: 2}
 

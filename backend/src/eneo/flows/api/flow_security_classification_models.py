@@ -46,6 +46,7 @@ FLOW_SECURITY_CLASSIFICATION_PREVIEW_EXAMPLE: dict[str, Any] = {
             "step_id": _STEP_ID,
             "reads": [],
             "input_level": 2,
+            "external_source_level": None,
             "knowledge_level": None,
             "required_model_level": 2,
             "model_level": 1,
@@ -119,26 +120,36 @@ class FlowStepSecurityClassificationViolationPublic(BaseModel):
 
     code: ClassificationViolationCode = Field(
         description=(
+            "`flow_step_tool_arguments_classification_write_down`: the step's "
+            "tool arguments read steps above the level of the tool's server. "
             "`flow_step_security_classification_mismatch`: the step's model is "
             "below the level the step must clear. "
             "`flow_step_output_classification_write_down`: the step's output "
-            "override is below the level its output already carries."
+            "override is below the level its output already carries. A step that "
+            "breaks several is reported with the first of them in this order."
         )
     )
     message: str
     required_level: int = Field(
-        description="The level the model or the output override must reach."
+        description=(
+            "The level the model, the output override or, for the tool "
+            "arguments, the tool's server must reach."
+        )
     )
     current_level: int | None = Field(
         description=(
             "The model's level (null when the step has no model or an unclassified "
-            "one), or the output override for a write-down."
+            "one), the output override for an output write-down, or the level of "
+            "the tool's server (null for an unclassified one) for the tool "
+            "arguments."
         )
     )
     cause: ClassificationCause = Field(
         description=(
             "What sets `required_level`: `reads` (the steps in `source_step_orders`), "
-            "`knowledge` (the step's knowledge sources) or `space`."
+            "`external_source` (the server of the step's tool), `knowledge` (the "
+            "step's knowledge sources) or `space`. When several sit at that level, "
+            "the first of them in this order is named."
         )
     )
     source_step_orders: list[int]
@@ -161,8 +172,17 @@ class FlowStepSecurityClassificationPublic(BaseModel):
     reads: list[int] = Field(description="The earlier steps this step reads.")
     input_level: int | None = Field(
         description=(
-            "The level the step's inputs carry: the space's level and the output "
-            "levels of the steps it reads. Null when nothing is classified."
+            "The level the step's inputs carry: the space's level, the output "
+            "levels of the steps it reads and `external_source_level`. Null when "
+            "nothing is classified."
+        )
+    )
+    external_source_level: int | None = Field(
+        description=(
+            "The level of the server of the tool the step reads its input from. "
+            "Null for a step without a tool, for an unclassified server, for a "
+            "server that no longer exists and for a server the flow's space "
+            "has not activated: such a server has no level in this rule."
         )
     )
     knowledge_level: int | None = Field(
@@ -204,6 +224,7 @@ class FlowStepSecurityClassificationPublic(BaseModel):
             step_id=explanation.step_id,
             reads=list(explanation.reads),
             input_level=explanation.input_level,
+            external_source_level=explanation.external_source_level,
             knowledge_level=explanation.knowledge_level,
             required_model_level=explanation.required_model_level,
             model_level=explanation.model_level,

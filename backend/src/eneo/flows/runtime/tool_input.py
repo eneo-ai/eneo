@@ -2,8 +2,9 @@
 
 The order, each refusal with its own typed code: the pinned configuration,
 the arguments, what every level says about the tool now and whether it is
-still the tool the flow pinned, the arguments against the tool's approved
-input schema (in a child process with a time limit: tool_argument_check),
+still the tool the flow pinned, the level of the tool's server against the
+one the run counted, the arguments against the tool's approved input schema
+(in a child process with a time limit: tool_argument_check),
 the step's time, the server's address, the call, the answer.
 The levels are asked before the call; the server's name is resolved in
 between, within the time the step has left. The run's preflight asks the
@@ -18,7 +19,7 @@ import json
 import math
 import re
 import time
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, TypeAlias
 from uuid import UUID
@@ -28,9 +29,9 @@ from pydantic import TypeAdapter, ValidationError
 from eneo.audit.domain.outcome import Outcome
 from eneo.flows.application.flow_tool_publication import (
     AllowedTool,
-    UnattendedToolFactsSource,
     read_allowed_tool,
 )
+from eneo.flows.domain.tool_facts import UnattendedToolFactsSource
 from eneo.flows.domain.tool_input import (
     TOOL_INPUT_TYPES,
     PublishedToolInputConfig,
@@ -49,6 +50,9 @@ from eneo.flows.flow_run_provenance import (
     FlowResolvedInputJsonPath,
     FlowResolvedInputToolAnswerSource,
     build_resolved_input_edge,
+)
+from eneo.flows.flow_security_classification import (
+    tool_server_classification_level,
 )
 from eneo.flows.http_transport.effective_url import (
     InvalidHttpUrl,
@@ -207,8 +211,15 @@ async def resolve_tool_input(
     run: FlowRun,
     context: FlowVariableContext,
     space_id: UUID,
+    counted_server_levels: Mapping[int, int | None],
     deps: ToolInputDeps,
 ) -> FlowOutsideInputResolution:
+    """Read the tool of ``step`` and return its answer as the step's input.
+
+    ``counted_server_levels`` holds, by step order, the level the run's
+    preflight counted the tool's server at; a step it does not hold was
+    counted at none, which is the case while classifications are off.
+    """
     config = pinned_tool_config(step)
     arguments, argument_edges = _resolve_arguments(step, config, context, deps)
     usable = await read_usable_tool(
@@ -218,6 +229,7 @@ async def resolve_tool_input(
         tenant_id=run.tenant_id,
         space_id=space_id,
     )
+    counted_level = _counted_server_level(step, usable.server, counted_server_levels)
     await _refuse_arguments_outside_the_schema(step, arguments, usable.tool)
     # Asked before anything goes out: a step whose time is spent makes no
     # outbound call, so there is none to audit.
@@ -261,6 +273,7 @@ async def resolve_tool_input(
             mcp_server_id=config.mcp_server_id,
             tool_id=config.tool_id,
             tool_name=config.tool_name,
+            server_classification_level=counted_level,
             selector=FlowResolvedInputJsonPath(kind="json_path", path=()),
         ),
         selected_value=text if structured is None else structured,
@@ -277,6 +290,33 @@ def _refusal(
     message: str, code: FlowApiErrorCode, **context: object
 ) -> TypedIOValidationException:
     return TypedIOValidationException(message, code=code, context=context)
+
+
+def _counted_server_level(
+    step: RuntimeStep,
+    server: MCPServer,
+    counted_server_levels: Mapping[int, int | None],
+) -> int | None:
+    """The level the preflight counted the step's server at, when the server
+    row the decision just allowed still has it; None when none was counted.
+
+    The preflight held the step's model, and what the step sends to the
+    server, to the level the server had then. A server that is lower now
+    would be sent data above it, and one that is higher would answer above
+    what the model was held to, so either difference fails the step before
+    anything goes out.
+    """
+    if step.step_order not in counted_server_levels:
+        return None
+    counted = counted_server_levels[step.step_order]
+    if tool_server_classification_level(server) != counted:
+        raise _refusal(
+            f"Step {step.step_order}: the security classification of the tool's "
+            "server changed after the run started. Start the run again.",
+            FlowApiErrorCode.TYPED_IO_TOOL_CLASSIFICATION_CHANGED,
+            step_order=step.step_order,
+        )
+    return counted
 
 
 def _resolve_arguments(

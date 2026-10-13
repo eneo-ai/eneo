@@ -129,16 +129,30 @@ def read_published_tool_input_config(
     )
 
 
+def read_stored_tool_input_config(
+    input_config: Mapping[str, object] | None,
+) -> ToolInputConfig | None:
+    """The tool configuration a step's ``input_config`` holds, editable or
+    published. None when it cannot be read as either."""
+    try:
+        return _SAVED_OR_PUBLISHED.validate_python(
+            (input_config or {}).get(TOOL_INPUT_CONFIG_KEY)
+        )
+    except ValidationError:
+        return None
+
+
 def tool_reference_sites(
     input_config: Mapping[str, object] | None,
 ) -> list[tuple[ConfigPath, str]] | None:
     """Where a step's tool configuration, editable or published, reads run
     values. None when the configuration cannot be read."""
+    config = read_stored_tool_input_config(input_config)
+    if config is None:
+        return None
     try:
-        return _SAVED_OR_PUBLISHED.validate_python(
-            (input_config or {}).get(TOOL_INPUT_CONFIG_KEY)
-        ).reference_sites()
-    except (ValidationError, ToolArgumentError):
+        return config.reference_sites()
+    except ToolArgumentError:
         return None
 
 

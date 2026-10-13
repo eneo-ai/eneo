@@ -9,10 +9,13 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
 from eneo.flows.flow_security_classification import (
     ClassificationViolationCode,
+    ExternalSourceClassification,
     evaluate_step_security_classification,
     evidence_classification_level,
 )
 from eneo.main.exceptions import BadRequestException
+
+TOOL_WRITE_DOWN = "flow_step_tool_arguments_classification_write_down"
 
 
 def _classification(level: int):
@@ -73,6 +76,7 @@ def test_rejects_model_below_previous_step_classification() -> None:
             assistant=_assistant(model_level=2),
             space=_space(1),
             security_enabled=True,
+            external_source=None,
         )
 
     assert exc_info.value.code == "flow_step_security_classification_mismatch"
@@ -89,6 +93,7 @@ def test_rejects_output_override_write_down() -> None:
             assistant=_assistant(model_level=3),
             space=_space(1),
             security_enabled=True,
+            external_source=None,
         )
 
     assert exc_info.value.code == "flow_step_output_classification_write_down"
@@ -104,6 +109,7 @@ def test_returns_effective_output_level_when_security_is_compatible() -> None:
         assistant=_assistant(model_level=4, knowledge_level=3),
         space=_space(1),
         security_enabled=True,
+        external_source=None,
     )
 
     assert evaluation.required_model_level == 3
@@ -120,6 +126,7 @@ def test_current_step_output_override_does_not_raise_same_step_input_floor() -> 
         assistant=_assistant(model_level=3),
         space=_space(None),
         security_enabled=True,
+        external_source=None,
     )
 
     assert evaluation.required_model_level is None
@@ -137,6 +144,7 @@ def test_all_previous_steps_uses_max_prior_effective_output_level() -> None:
             assistant=_assistant(model_level=2),
             space=_space(1),
             security_enabled=True,
+            external_source=None,
         )
 
     assert exc_info.value.code == "flow_step_security_classification_mismatch"
@@ -154,6 +162,7 @@ def test_deterministic_step_without_model_carries_input_classification() -> None
         assistant=_assistant(model_level=None),
         space=_space(1),
         security_enabled=True,
+        external_source=None,
     )
 
     assert evaluation.required_model_level is None
@@ -171,6 +180,7 @@ def test_deterministic_step_still_rejects_output_override_write_down() -> None:
             assistant=_assistant(model_level=None),
             space=_space(None),
             security_enabled=True,
+            external_source=None,
         )
 
     assert exc_info.value.code == "flow_step_output_classification_write_down"
@@ -188,6 +198,7 @@ def test_underlag_floor_reads_only_the_steps_it_binds() -> None:
         assistant=_assistant(model_level=2),
         space=_space(1),
         security_enabled=True,
+        external_source=None,
     )
 
     assert evaluation.required_model_level == 1
@@ -205,6 +216,7 @@ def test_completion_step_without_model_is_rejected_when_floor_exists() -> None:
             assistant=_assistant(model_level=None),
             space=_space(1),
             security_enabled=True,
+            external_source=None,
         )
 
     assert exc_info.value.code == "flow_step_security_classification_mismatch"
@@ -236,6 +248,7 @@ def _raise_mismatch(**overrides):
         evaluate_step_security_classification(
             **kwargs,
             security_enabled=True,
+            external_source=None,
         )
     return exc_info.value, step_id
 
@@ -295,6 +308,7 @@ def test_write_down_carries_the_floor_and_the_override() -> None:
             assistant=_assistant(model_level=3),
             space=_space(1),
             security_enabled=True,
+            external_source=None,
         )
 
     assert exc_info.value.code == "flow_step_output_classification_write_down"
@@ -320,6 +334,7 @@ def test_messages_stay_the_ones_clients_already_read() -> None:
             assistant=_assistant(model_level=2),
             space=_space(1),
             security_enabled=True,
+            external_source=None,
         )
     assert str(mismatch.value) == (
         "Step 3: assistant model does not meet the required security classification."
@@ -334,6 +349,7 @@ def test_messages_stay_the_ones_clients_already_read() -> None:
             assistant=_assistant(model_level=3),
             space=_space(1),
             security_enabled=True,
+            external_source=None,
         )
     assert str(exc_info.value) == (
         "Step 2: output classification override would lower the effective "
@@ -366,8 +382,11 @@ def test_a_disabled_classification_sets_no_level_and_refuses_nothing() -> None:
         assistant=assistant,
         space=_space(3),
         security_enabled=False,
+        external_source=ExternalSourceClassification(level=4, sent_step_orders=(1,)),
     )
 
+    assert evaluation.input_level is None
+    assert evaluation.external_source_level is None
     assert evaluation.required_model_level is None
     assert evaluation.model_level is None
     assert evaluation.effective_output_level is None
@@ -383,6 +402,7 @@ def test_a_stored_override_sets_no_output_level_while_classifications_are_off() 
         prior_output_levels_by_order={},
         assistant=_assistant(model_level=1),
         space=_space(None),
+        external_source=None,
     )
 
     off = evaluate_step_security_classification(**kwargs, security_enabled=False)
@@ -392,10 +412,48 @@ def test_a_stored_override_sets_no_output_level_while_classifications_are_off() 
     assert on.effective_output_level == 3
 
 
-def test_the_two_refusal_codes_are_public_catalog_codes() -> None:
+def test_tool_arguments_write_down_carries_the_steps_and_the_two_levels() -> None:
+    # Kills the mutants that refuse with the model's code, name every read step
+    # (step 2 is read by the prompt only), or drop a level from the context.
+    step_id = uuid4()
+    with pytest.raises(BadRequestException) as exc_info:
+        evaluate_step_security_classification(
+            step_order=4,
+            step_id=step_id,
+            upstream_step_orders=[1, 2, 3],
+            output_mode="pass_through",
+            output_classification_override=None,
+            prior_output_levels_by_order={1: 3, 2: 4, 3: 1},
+            assistant=_assistant(model_level=4),
+            space=_space(1),
+            security_enabled=True,
+            external_source=ExternalSourceClassification(
+                level=2, sent_step_orders=(1, 3)
+            ),
+            completion_models=[_space_model(4)],
+        )
+
+    assert str(exc_info.value) == (
+        "Step 4: the tool's server does not meet the security classification of "
+        "the data the step sends to it."
+    )
+    assert exc_info.value.code == TOOL_WRITE_DOWN
+    assert exc_info.value.context == {
+        "issue_code": TOOL_WRITE_DOWN,
+        "step_order": 4,
+        "step_id": str(step_id),
+        "required_level": 3,
+        "current_level": 2,
+        "cause": "reads",
+        "source_step_orders": [1],
+    }
+
+
+def test_the_refusal_codes_are_public_catalog_codes() -> None:
     # A client branches on these codes, so they belong to the closed catalog
     # with a recovery entry, not to strings the classification module owns.
     codes = {
+        TOOL_WRITE_DOWN,
         "flow_step_security_classification_mismatch",
         "flow_step_output_classification_write_down",
     }
@@ -417,6 +475,7 @@ def test_the_raised_refusals_carry_catalog_codes() -> None:
             assistant=_assistant(model_level=2),
             space=_space(1),
             security_enabled=True,
+            external_source=None,
         )
     with pytest.raises(BadRequestException) as write_down:
         evaluate_step_security_classification(
@@ -428,6 +487,7 @@ def test_the_raised_refusals_carry_catalog_codes() -> None:
             assistant=_assistant(model_level=3),
             space=_space(1),
             security_enabled=True,
+            external_source=None,
         )
 
     assert (

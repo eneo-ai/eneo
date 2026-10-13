@@ -11,12 +11,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
 from eneo.flows.domain.flow_invariant_exceptions import FlowInvariantError
 from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+from eneo.flows.domain.tool_facts import UnattendedToolFactsSource
 from eneo.flows.domain.tool_input import (
     TOOL_INPUT_CONFIG_KEY,
     PublishedToolInputConfig,
@@ -33,19 +34,12 @@ from eneo.flows.output_processing import (
 )
 from eneo.main.exceptions import TypedIOValidationException
 from eneo.mcp_servers.application.unattended_tool_use import (
-    UnattendedToolFacts,
     UnattendedToolRefusal,
     unattended_tool_refusal,
 )
 
 if TYPE_CHECKING:
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
-
-
-class UnattendedToolFactsSource(Protocol):
-    async def read(
-        self, *, tenant_id: UUID, space_id: UUID, mcp_server_id: UUID, tool_id: UUID
-    ) -> UnattendedToolFacts: ...
 
 
 # What is wrong and who can change it, for the author who publishes. Where no

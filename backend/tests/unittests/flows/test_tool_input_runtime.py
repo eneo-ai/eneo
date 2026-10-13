@@ -11,6 +11,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from functools import partial
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -32,6 +33,8 @@ from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunErrorDetails
 from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputJsonPath,
+    FlowResolvedInputToolAnswerSource,
     group_resolved_input_edges,
     parse_resolved_input_edges,
 )
@@ -59,6 +62,7 @@ from eneo.flows.runtime.tool_argument_check import (
 from eneo.main.config import Settings, get_settings
 from eneo.main.destination_policy import IPAddress
 from eneo.main.exceptions import (
+    BadRequestException,
     MCPClientError,
     MCPToolAnswerTooLarge,
     MCPToolCallTimedOut,
@@ -79,6 +83,9 @@ from tests.unittests.flows.test_flow_executor_runtime import (
     _claimed_step_result,
     _empty_execution_state,
     _execute_setup_for_security,
+    _security_assistant,
+    _security_space,
+    _stub_security_assistants,
 )
 from tests.unittests.flows.test_resolved_input_runtime import _result
 from tests.unittests.flows.test_tool_publish_pin import _Facts, _facts
@@ -292,6 +299,7 @@ async def test_a_bound_list_reaches_the_tool_and_its_structured_answer_is_the_in
         "mcp_server_id": str(facts.server.id),
         "tool_id": str(facts.tool.id),
         "tool_name": "lookup",
+        "server_classification_level": None,
         "selector": {"kind": "json_path", "path": []},
     }
     assert edges[2]["selection"] == {
@@ -543,6 +551,7 @@ async def test_the_read_and_the_preflight_refuse_what_changed_after_publication(
     assert error.source is FlowRunLifecycleSource.EXECUTOR_FAILED
     flow_run_repo.claim_step_result.assert_not_awaited()
     executor._execute_step.assert_not_awaited()
+    # One read serves the classification rule and the decision.
     assert executor.tool_facts_reader.asked == [
         {
             "tenant_id": user.tenant_id,
@@ -584,6 +593,9 @@ async def test_a_run_whose_tool_is_allowed_and_unchanged_passes_the_preflight(
     assert result == {"status": "skipped", "reason": "step_already_claimed"}
     flow_run_repo.claim_step_result.assert_awaited_once()
     assert facts.server is not None and facts.tool is not None
+    # No tool step is completed, so no recorded level is read.
+    flow_run_repo.list_completed_tool_answers.assert_not_awaited()
+    # One read serves the classification rule and the decision.
     assert executor.tool_facts_reader.asked == [
         {
             "tenant_id": user.tenant_id,
@@ -592,6 +604,143 @@ async def test_a_run_whose_tool_is_allowed_and_unchanged_passes_the_preflight(
             "tool_id": facts.tool.id,
         }
     ]
+
+
+def _level(level: int) -> SimpleNamespace:
+    return SimpleNamespace(security_level=level)
+
+
+_PASSED = {"status": "skipped", "reason": "step_already_claimed"}
+_INVALID = {"status": "failed", "error": "flow_definition_invalid"}
+
+
+@pytest.mark.parametrize(
+    ("server_level", "enabled", "result", "said"),
+    [
+        pytest.param(
+            1,
+            True,
+            _INVALID,
+            "the tool's server does not meet",
+            id="arguments-above",
+        ),
+        pytest.param(2, True, _PASSED, None, id="arguments-at-the-server-level"),
+        pytest.param(
+            3, True, _INVALID, "assistant model does not meet", id="model-below"
+        ),
+        pytest.param(
+            None,
+            True,
+            {"status": "failed", "error": "typed_io_tool_not_allowed"},
+            "no longer exists",
+            id="deleted-server",
+        ),
+        pytest.param(
+            -1,
+            True,
+            {"status": "failed", "error": "typed_io_tool_not_allowed"},
+            "not added to this space",
+            id="server-outside-the-space",
+        ),
+        pytest.param(1, False, _PASSED, None, id="classification-off"),
+    ],
+)
+async def test_the_preflight_counts_the_tool_server_before_it_asks_the_chain(
+    user,
+    server_level: int | None,
+    enabled: bool,
+    result: dict[str, str],
+    said: str | None,
+) -> None:
+    # Kills the mutants whose preflight leaves the server's level out of the
+    # step's level or does not compare it with what the arguments send, refuse
+    # a deleted server as an unclassified one instead of leaving it to the
+    # decision, compare the level of a server the space has not activated (-1
+    # here: a level-1 server outside the space), read and apply the server's
+    # level while classifications are off, ask the rule and the decision about
+    # different tenants or spaces, or read the tool's facts once for the rule
+    # and again for the decision (the two could then judge different rows).
+    # Step 1's output sits at the space's level, 2, and step 2 sends it to the
+    # tool on a level-2 model.
+    stored = _facts(
+        server={"security_classification": _level(abs(server_level or 0))},
+        server_in_space=server_level != -1,
+    )
+    now = stored if server_level is not None else replace(stored, server=None)
+    executor, flow_run_repo, queued = _execute_setup_for_security(
+        user,
+        space_level=2,
+        model_level=2,
+        model_levels=[2, 2],
+        step_fields={
+            "input_source": "tool",
+            "input_type": "json",
+            "input_config": {
+                "tool": _tool_config(
+                    stored, arguments={"case": "{{step_1.output.text}}"}
+                )
+            },
+        },
+        step_fields_index=1,
+    )
+    executor.security_classification_enabled = enabled
+    executor.tool_facts_reader, executor.tool_caller = _Facts(now), _answered()
+    executor.flow_repo.get_space_id = AsyncMock(return_value=_SPACE_ID)
+
+    outcome = await executor.execute(
+        run_id=queued.id,
+        flow_id=queued.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert outcome == result
+    assert [
+        (asked["tenant_id"], asked["space_id"])
+        for asked in executor.tool_facts_reader.asked
+    ] == [(user.tenant_id, _SPACE_ID)]
+    if said is None:
+        flow_run_repo.claim_step_result.assert_awaited_once()
+        return
+    error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["error"]
+    assert said in error.message and error.step_order == 2
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    executor._execute_step.assert_not_awaited()
+
+
+async def test_the_runs_evidence_level_counts_the_level_of_the_tools_server(
+    user,
+) -> None:
+    # Kills the mutant that keeps the answer of a level-3 server at the
+    # space's level in what the run records for its evidence.
+    facts = _facts(server={"security_classification": _level(3)})
+    executor, flow_run_repo, queued = _execute_setup_for_security(
+        user,
+        space_level=1,
+        model_level=3,
+        step_fields={
+            "input_source": "tool",
+            "input_type": "json",
+            "input_config": {"tool": _tool_config(facts)},
+        },
+    )
+    executor.tool_facts_reader, executor.tool_caller = _Facts(facts), _answered()
+    executor.flow_repo.get_space_id = AsyncMock(return_value=_SPACE_ID)
+
+    await executor.execute(
+        run_id=queued.id,
+        flow_id=queued.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    flow_run_repo.record_evidence_classification_level.assert_awaited_once_with(
+        run_id=queued.id, tenant_id=user.tenant_id, level=3
+    )
 
 
 @pytest.mark.parametrize(
@@ -1299,12 +1448,23 @@ async def test_a_resumed_run_is_not_refused_for_a_tool_step_it_has_completed(
     executor = _tool_executor(user, reader, _answered({"ok": True}))
     step, run, state = _tool_step(removed), _running(user), _empty_execution_state()
 
+    async def preflight() -> None:
+        await executor._refuse_unusable_tools(
+            [step],
+            run=run,
+            state=state,
+            tool_preflight=await executor._tool_preflight([step], run=run, state=state),
+        )
+
     with pytest.raises(TypedIOValidationException) as refused:
-        await executor._refuse_unusable_tools([step], run=run, state=state)
+        await preflight()
     assert refused.value.code == "typed_io_tool_not_allowed"
 
     state.completed_by_order[step.step_order] = _result(step_order=step.step_order)
-    await executor._refuse_unusable_tools([step], run=run, state=state)
+    executor.flow_run_repo.list_completed_tool_answers = AsyncMock(
+        return_value={step.step_order: _recorded_answer(None)}
+    )
+    await preflight()
     assert len(reader.asked) == 1
 
 
@@ -1429,9 +1589,13 @@ async def test_the_preflight_asks_about_every_tool_step_in_step_order(user) -> N
     second = replace(_tool_step(refused_facts), step_order=2)
     third = replace(_tool_step(refused_facts), step_order=3)
 
+    steps = [third, second, first]
     with pytest.raises(TypedIOValidationException) as refused:
         await executor._refuse_unusable_tools(
-            [third, second, first], run=run, state=state
+            steps,
+            run=run,
+            state=state,
+            tool_preflight=await executor._tool_preflight(steps, run=run, state=state),
         )
 
     assert (refused.value.context or {})["step_order"] == 2
@@ -1587,3 +1751,301 @@ async def test_the_run_error_of_a_refusal_at_the_step_carries_the_typed_reason(
         "schema_rule": "type",
         "json_pointer": "/days",
     }
+
+
+@pytest.mark.parametrize(
+    ("counted", "now", "changed"),
+    [
+        pytest.param(3, 1, True, id="lowered"),
+        pytest.param(1, 3, True, id="raised"),
+        pytest.param(3, None, True, id="removed"),
+        pytest.param(None, 2, True, id="added"),
+        pytest.param(3, 3, False, id="unchanged"),
+        pytest.param(None, None, False, id="unclassified-as-counted"),
+    ],
+)
+async def test_the_read_refuses_a_server_whose_level_is_not_the_one_the_run_counted(
+    user, counted: int | None, now: int | None, changed: bool
+) -> None:
+    # Kills the mutants that send the step's arguments to a server whose
+    # classification was lowered or removed after the preflight counted it, or
+    # read the answer of one that was raised above what the step's model was
+    # held to, and the one that leaves the counted level off the answer's
+    # evidence edge.
+    facts = _facts(
+        server={"security_classification": None if now is None else _level(now)}
+    )
+    caller = _answered({"ok": True})
+    executor = _tool_executor(user, _Facts(facts), caller)
+    state = replace(_empty_execution_state(), counted_tool_server_levels={2: counted})
+
+    async def read() -> Any:
+        return await executor._resolve_step_input(
+            step=_tool_step(facts, arguments={"case": _SECRET_ARGUMENT}),
+            context={},
+            run=_running(user),
+            prior_results=[],
+            state=state,
+        )
+
+    if changed:
+        with pytest.raises(TypedIOValidationException) as refused:
+            await read()
+        assert refused.value.code == "typed_io_tool_classification_changed"
+        assert str(refused.value) == (
+            "Step 2: the security classification of the tool's server changed "
+            "after the run started. Start the run again."
+        )
+        assert caller.calls == [] and _audits(executor) == []
+    else:
+        answer_edge = (await read()).edges[-1]
+        assert answer_edge.source.server_classification_level == counted
+        assert len(caller.calls) == 1
+
+
+async def test_a_server_unclassified_after_the_preflight_gets_nothing_of_the_run(
+    user,
+) -> None:
+    # Kills the mutant whose preflight does not keep the level it counted: the
+    # read would compare with nothing and send step 1's level-3 text to a
+    # server whose classification was removed while step 1 ran. Also the
+    # mutant that keeps a level while classifications are off.
+    counted = _facts(server={"security_classification": _level(3)})
+    unclassified = _facts()
+    for now, then in (
+        (unclassified.server, counted.server),
+        (unclassified.tool, counted.tool),
+    ):
+        assert now is not None and then is not None
+        now.id = then.id
+    assert unclassified.tool is not None and counted.server is not None
+    unclassified.tool.mcp_server_id = counted.server.id
+    for enabled in (True, False):
+        reader, caller = _Facts(counted), _answered({"ok": True})
+        executor = _tool_executor(user, reader, caller)
+        executor.security_classification_enabled = enabled
+        assistants = [_security_assistant(uuid4(), model_level=3) for _ in range(2)]
+        _stub_security_assistants(
+            executor,
+            _security_space(space_id=uuid4(), assistants=assistants, security_level=3),
+        )
+        first = replace(_runtime_step(step_order=1), assistant_id=assistants[0].id)
+        tool = replace(
+            _tool_step(counted, arguments={"case": "{{step_1.output.text}}"}),
+            assistant_id=assistants[1].id,
+        )
+        run, state = _running(user), _empty_execution_state()
+        steps = [first, tool]
+
+        await executor._resolve_step_output_levels(
+            steps=steps,
+            state=state,
+            run=run,
+            tool_preflight=await executor._tool_preflight(steps, run=run, state=state),
+        )
+        reader.facts = unclassified
+        secret = _result(step_order=1, output_payload={"text": "LEVEL-3 SECRET"})
+
+        async def read() -> Any:
+            return await executor._resolve_step_input(
+                step=tool, context={}, run=run, prior_results=[secret], state=state
+            )
+
+        if enabled:
+            assert state.counted_tool_server_levels == {2: 3}
+            with pytest.raises(TypedIOValidationException) as refused:
+                await read()
+            assert refused.value.code == "typed_io_tool_classification_changed"
+            assert caller.calls == []
+        else:
+            assert state.counted_tool_server_levels == {}
+            await read()
+            assert len(caller.calls) == 1
+
+
+async def test_the_rule_and_the_decision_of_one_preflight_judge_the_same_read(
+    user,
+) -> None:
+    # Kills the mutant that reads the facts once for the rule and again for
+    # the decision: the first read sees a server outside the space (no level
+    # to count), the second a level-3 server inside it (allowed), and a run on
+    # level-1 models would start with an answer nothing counted.
+    stored = _facts(server={"security_classification": _level(3)})
+    outside = replace(stored, server_in_space=False)
+
+    class _ChangesAfterTheFirstRead:
+        asked = 0
+
+        async def read(self, **_: object) -> UnattendedToolFacts:
+            self.asked += 1
+            return outside if self.asked == 1 else stored
+
+    executor, flow_run_repo, queued = _execute_setup_for_security(
+        user,
+        space_level=1,
+        model_level=1,
+        step_fields={
+            "input_source": "tool",
+            "input_type": "json",
+            "input_config": {"tool": _tool_config(stored)},
+        },
+    )
+    reader = _ChangesAfterTheFirstRead()
+    executor.tool_facts_reader, executor.tool_caller = reader, _answered()
+    executor.flow_repo.get_space_id = AsyncMock(return_value=_SPACE_ID)
+
+    outcome = await executor.execute(
+        run_id=queued.id,
+        flow_id=queued.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert outcome == {"status": "failed", "error": "typed_io_tool_not_allowed"}
+    assert reader.asked == 1
+    flow_run_repo.record_evidence_classification_level.assert_not_awaited()
+
+
+def _recorded_answer(level: int | None) -> FlowResolvedInputToolAnswerSource:
+    """The ``tool_answer`` source a completed tool step recorded at ``level``."""
+    return FlowResolvedInputToolAnswerSource(
+        kind="tool_answer",
+        mcp_server_id=uuid4(),
+        tool_id=uuid4(),
+        tool_name="lookup_case",
+        server_classification_level=level,
+        selector=FlowResolvedInputJsonPath(kind="json_path", path=()),
+    )
+
+
+def _resumed_after_a_tool_step(user, changed: dict[str, Any], *, later_model: int):
+    """A run taken up again: step 1 read a tool of a level-3 server and is
+    completed, step 2 reads step 1 on a model of ``later_model``. The space
+    is level 1, and the tool's facts have ``changed`` since the read."""
+    then = _facts()
+    now = replace(then, **changed)
+    reader = _Facts(now)
+    executor = _tool_executor(user, reader, _answered())
+    assistants = [
+        _security_assistant(uuid4(), model_level=level) for level in (3, later_model)
+    ]
+    _stub_security_assistants(
+        executor,
+        _security_space(space_id=uuid4(), assistants=assistants, security_level=1),
+    )
+    tool = replace(_tool_step(then), step_order=1, assistant_id=assistants[0].id)
+    later = replace(
+        _runtime_step(step_order=2, input_source="previous_step"),
+        assistant_id=assistants[1].id,
+    )
+    state = _empty_execution_state()
+    state.completed_by_order[1] = _result(step_order=1)
+    executor.flow_run_repo.list_completed_tool_answers = AsyncMock(
+        return_value={1: _recorded_answer(3)}
+    )
+    return executor, reader, [tool, later], state
+
+
+async def _preflight(executor, steps: list[RuntimeStep], state, run):
+    tool_preflight = await executor._tool_preflight(steps, run=run, state=state)
+    levels = await executor._resolve_step_output_levels(
+        steps=steps, state=state, run=run, tool_preflight=tool_preflight
+    )
+    await executor._refuse_unusable_tools(
+        steps, run=run, state=state, tool_preflight=tool_preflight
+    )
+    return levels
+
+
+@pytest.mark.parametrize(
+    "now",
+    [
+        pytest.param({"server_in_space": False}, id="server-removed-from-the-space"),
+        pytest.param({"server": None}, id="server-deleted"),
+        pytest.param({}, id="classification-removed"),
+    ],
+)
+async def test_a_resumed_run_counts_a_completed_tool_step_at_its_recorded_level(
+    user, now: dict[str, Any]
+) -> None:
+    # Kills the mutant that counts a completed tool step from the server as
+    # it is when the run is taken up again: the level-3 answer is already the
+    # step's stored input, and the run's evidence level and the requirement
+    # of the steps that read it would drop to the space's level 1. Also the
+    # mutants that ask the facts or the decision about a step that calls
+    # nothing more, or read the recorded level for another run or step.
+    executor, reader, steps, state = _resumed_after_a_tool_step(
+        user, now, later_model=3
+    )
+    run = _running(user)
+
+    levels = await _preflight(executor, steps, state, run)
+
+    assert levels == {1: 3, 2: 3}
+    assert reader.asked == []
+    executor.flow_run_repo.list_completed_tool_answers.assert_awaited_once_with(
+        run_id=run.id, tenant_id=run.tenant_id
+    )
+
+    executor, _, steps, state = _resumed_after_a_tool_step(user, now, later_model=1)
+    with pytest.raises(BadRequestException) as refused:
+        await _preflight(executor, steps, state, run)
+    assert refused.value.code == "flow_step_security_classification_mismatch"
+    assert (refused.value.context or {})["required_level"] == 3
+
+
+@pytest.mark.parametrize(
+    "recorded",
+    [
+        pytest.param(2, id="server-lowered-after-the-call"),
+        pytest.param(None, id="read-while-classifications-were-off"),
+    ],
+)
+async def test_a_resumed_run_is_not_refused_for_what_a_completed_tool_step_sent(
+    user, recorded: int | None
+) -> None:
+    # Kills the mutants that compare what a completed tool step sent with a
+    # server level again, the server's as it is now (lowered to 1 after the
+    # call) or the recorded one (none, for a read made while classifications
+    # were off): the step sends nothing any more, so neither may fail the run
+    # that is taken up again.
+    lowered = _facts(server={"security_classification": _level(1)})
+    reader = _Facts(lowered)
+    executor = _tool_executor(user, reader, _answered())
+    assistants = [_security_assistant(uuid4(), model_level=2) for _ in range(2)]
+    _stub_security_assistants(
+        executor,
+        _security_space(space_id=uuid4(), assistants=assistants, security_level=2),
+    )
+    first = replace(_runtime_step(step_order=1), assistant_id=assistants[0].id)
+    tool = replace(
+        _tool_step(lowered, arguments={"case": "{{step_1.output.text}}"}),
+        assistant_id=assistants[1].id,
+    )
+    state = _empty_execution_state()
+    state.completed_by_order.update(
+        {order: _result(step_order=order) for order in (1, 2)}
+    )
+    executor.flow_run_repo.list_completed_tool_answers = AsyncMock(
+        return_value={2: _recorded_answer(recorded)}
+    )
+
+    levels = await _preflight(executor, [first, tool], state, _running(user))
+
+    assert levels == {1: 2, 2: 2}
+    assert reader.asked == []
+
+
+async def test_a_completed_tool_step_without_its_answer_edge_is_an_invariant_failure(
+    user,
+) -> None:
+    # Kills the mutant that counts a completed tool step whose attempt holds
+    # no tool_answer edge as a step without a level: a step cannot complete
+    # without that edge, so the run's record is not what the run wrote.
+    executor, _, steps, state = _resumed_after_a_tool_step(user, {}, later_model=3)
+    executor.flow_run_repo.list_completed_tool_answers = AsyncMock(return_value={})
+
+    with pytest.raises(FlowRuntimeInvariantError):
+        await executor._tool_preflight(steps, run=_running(user), state=state)
