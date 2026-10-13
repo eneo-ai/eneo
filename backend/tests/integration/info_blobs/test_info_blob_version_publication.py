@@ -929,6 +929,51 @@ async def test_new_upload_retains_exact_inline_original_and_counts_it_once(
         ).size == first_size
 
 
+async def test_releasing_an_original_keeps_the_text_and_recounts_the_size(
+    db_container,
+) -> None:
+    """A sync that cannot keep a changed file's bytes drops the stale original."""
+    text = "Rows a sync indexed from a workbook"
+    payload = b"workbook bytes the tools would otherwise keep serving"
+
+    async with db_container() as container:
+        group, embedding_model, _, _ = await _seed_active_document(
+            container,
+            text="Unrelated fixture",
+            title="unrelated.txt",
+        )
+        embeddings = AsyncMock()
+        embeddings.get_embeddings.side_effect = _embedding_result
+        container.create_embeddings_service.override(providers.Object(embeddings))
+
+        async with _inline_original(
+            container, payload, filename="sales.xlsx"
+        ) as original:
+            published = await container.text_processor().process_text(
+                text=text,
+                title="sales.xlsx",
+                embedding_model=embedding_model,
+                group_id=group.id,
+                original=original,
+            )
+
+        repo = InfoBlobRepository(container.session())
+        attached = await repo.get_original(published.id)
+        assert attached is not None
+        assert attached.size_bytes == len(payload)
+
+        released = (
+            await container.info_blob_service().release_original_without_validation(
+                published.id
+            )
+        )
+
+        assert await repo.get_original(published.id) is None
+        assert released.size == published.size - len(payload)
+        assert released.text == text
+        assert released.version_state == InfoBlobVersionState.ACTIVE.value
+
+
 async def test_identical_healthy_reupload_keeps_version_and_refreshes_filename(
     db_container,
 ) -> None:
@@ -1186,11 +1231,10 @@ async def test_concurrent_changed_originals_keep_one_active_version_and_history(
                 .where(InfoBlobs.source_id == first.source_id)
             )
         ).all()
-        assert len(references) == 2
-        assert {reference.info_blob_id for reference in references} == {
-            first.id,
-            second.id,
-        }
+        # Only the active version keeps a claim on its bytes; the superseded
+        # version stays as text history and its original is released for
+        # reclamation.
+        assert [reference.info_blob_id for reference in references] == [second.id]
 
 
 async def _seed_crossed_identity_sources(
@@ -1391,6 +1435,9 @@ async def test_different_original_with_same_text_creates_a_retained_version(
                 group_id=group.id,
                 original=original,
             )
+        first_reference = await _original_reference(container.session(), first.id)
+        assert first_reference is not None
+        first_content_id = first_reference[0].content_id
         async with _inline_original(
             container,
             b"different original",
@@ -1414,14 +1461,24 @@ async def test_different_original_with_same_text_creates_a_retained_version(
             first.id: InfoBlobVersionState.SUPERSEDED.value,
             second.id: InfoBlobVersionState.ACTIVE.value,
         }
-        first_reference = await _original_reference(container.session(), first.id)
+        # The superseded version keeps its text but releases its bytes; the
+        # replaced content object is queued for reclamation.
+        assert await _original_reference(container.session(), first.id) is None
         second_reference = await _original_reference(container.session(), second.id)
-        assert first_reference is not None
         assert second_reference is not None
-        content_ids = {
-            first_reference[0].content_id,
-            second_reference[0].content_id,
-        }
+        assert second_reference[0].content_id != first_content_id
+        # Column select: the trigger-maintained counters bypass the identity
+        # map, so a previously loaded ORM instance would be stale here.
+        reference_count, delete_requested_at = (
+            await container.session().execute(
+                sa.select(
+                    ObjectContents.reference_count, ObjectContents.delete_requested_at
+                ).where(ObjectContents.id == first_content_id)
+            )
+        ).one()
+        assert reference_count == 0
+        assert delete_requested_at is not None
+        content_ids = {first_content_id, second_reference[0].content_id}
 
         await container.info_blob_repo().delete(second.id)
 

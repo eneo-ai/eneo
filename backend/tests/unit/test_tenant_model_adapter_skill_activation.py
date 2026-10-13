@@ -39,6 +39,14 @@ class _AsyncChunkStream:
 
 
 class _FakeMCPProxy:
+    def verify_reference_link(self, url):
+        # Admits no tool-result links; this suite is about Skill activation.
+        del url
+        return None
+
+    def allow_file_references(self, file_ids):
+        del file_ids
+
     def model_result_text(self, text: str) -> str:
         return text
 

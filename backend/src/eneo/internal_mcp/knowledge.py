@@ -11,24 +11,42 @@ authentication model shared by all internal servers.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple
 from uuid import UUID
 
 from mcp.server.fastmcp import Context, FastMCP
-from mcp.types import EmbeddedResource, TextContent, TextResourceContents
+from mcp.types import (
+    EmbeddedResource,
+    ResourceLink,
+    TextContent,
+    TextResourceContents,
+)
 from pydantic import AnyUrl
 
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.signed_urls import (
+    build_signed_info_blob_original_download_url,
+)
+from eneo.files.file_reference import file_reference_base_url
 from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.info_blobs.info_blob_chunk_repo import InfoBlobChunkExcerpt
 from eneo.info_blobs.info_blob_repo import InfoBlobListing
 from eneo.info_blobs.source_metadata import format_source_metadata_lines
+from eneo.integration.infrastructure.content_service.originals import (
+    retain_original_bytes,
+)
 from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
 from eneo.internal_mcp.foundation import (
     build_ephemeral_server,
     default_page_cap,
     internal_tool_context,
 )
+from eneo.main.config import get_settings
 from eneo.main.exceptions import NotFoundException
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 
@@ -69,6 +87,13 @@ OVERVIEW_EXCERPT_CHARS = 700
 # and out-of-scope must be indistinguishable, so this is a constant, never
 # interpolated with what was asked for.
 NOT_FOUND_MESSAGE = "No document with that id in this assistant's knowledge sources."
+# Originals handed to tools per result: enough for every document a page can
+# show, small enough that the reference lines stay a footnote.
+ORIGINAL_LINKS_CAP = 20
+# Lexical title matches complement passage search for documents without
+# searchable passages (spreadsheets kept for tools only).
+TITLE_MATCH_CAP = 5
+TITLE_MATCH_TERMS_CAP = 6
 
 # The same discipline for the `within` scope argument, which accepts either a
 # source id or a document id: one message covers every way it can miss.
@@ -525,6 +550,105 @@ def _sample_targets(
     ]
 
 
+KnowledgeContent = TextContent | EmbeddedResource | ResourceLink
+
+
+def _title_terms(query: str) -> list[str]:
+    """Distinct query words long enough to mean something in a title."""
+    terms: list[str] = []
+    for term in re.findall(r"[\w.\-]{3,}", query.lower()):
+        if term not in terms:
+            terms.append(term)
+        if len(terms) == TITLE_MATCH_TERMS_CAP:
+            break
+    return terms
+
+
+@dataclass(frozen=True, slots=True)
+class _LinkedDocument:
+    """Audit target for a minted link: the document, named by its title."""
+
+    id: UUID
+    name: str
+
+
+async def _original_links(
+    container,
+    *,
+    user,
+    blob_ids: Sequence[UUID],
+    titles: Mapping[UUID, str] | None = None,
+) -> list[ResourceLink]:
+    """Signed links to the originals behind these documents, for tool hand-off.
+
+    Emitted as MCP ``resource_link`` blocks. The completion layer verifies each
+    as an Eneo-signed original of this tenant, admits it into the
+    conversation's reference map and shows the model a credential-free handle;
+    the link itself never reaches the model. Nothing is minted without a
+    reference base URL, since no tool could fetch it. Each mint is audited
+    like a download link created by hand.
+    """
+    ids = list(dict.fromkeys(blob_ids))[:ORIGINAL_LINKS_CAP]
+    settings = get_settings()
+    base_url = file_reference_base_url(settings)
+    if not ids or not base_url:
+        return []
+    originals = await container.info_blob_repo().get_originals(ids)
+    expires_in = settings.file_reference_url_expiry_seconds
+    links: list[ResourceLink] = []
+    for blob_id in ids:
+        original = originals.get(blob_id)
+        if original is None or not original.usable:
+            continue
+        title = (titles or {}).get(blob_id) or original.original_filename
+        url = build_signed_info_blob_original_download_url(
+            info_blob_id=blob_id,
+            base_url=base_url,
+            expires_in=expires_in,
+            tenant_id=user.tenant_id,
+        )
+        links.append(
+            ResourceLink(
+                type="resource_link",
+                uri=AnyUrl(url),
+                name=original.original_filename,
+                mimeType=original.media_type,
+                _meta={"info_blob_id": str(blob_id), "title": title},
+            )
+        )
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED,
+            entity_type=EntityType.INFO_BLOB,
+            entity_id=blob_id,
+            description="Handed a knowledge document's original to tools",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=_LinkedDocument(id=blob_id, name=title),
+                extra={
+                    "source": "knowledge_tool",
+                    "variant": "original",
+                    "expires_in": expires_in,
+                },
+            ),
+        )
+    return links
+
+
+def _title_match_content(listings: Sequence[InfoBlobListing]) -> list[TextContent]:
+    if not listings:
+        return []
+    lines = [
+        "Documents whose title matches the query (no passage of theirs scored; "
+        "spreadsheets among them are opened with the table tools):"
+    ]
+    lines.extend(
+        f"- {listing.label}  document_id: {listing.id}" for listing in listings
+    )
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
 def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedResource]:
     """Convert search hits to MCP content blocks.
 
@@ -675,7 +799,7 @@ async def search_knowledge(
     mode: Literal["specific", "overview"] = "specific",
     max_results: int | None = None,
     within: str | None = None,
-) -> list[TextContent | EmbeddedResource]:
+) -> list[KnowledgeContent]:
     """Search this assistant's knowledge sources for relevant passages.
 
     Write the query as a focused, self-contained natural-language phrase in
@@ -702,10 +826,15 @@ async def search_knowledge(
     This tool always needs a content query. To answer what a source covers or
     contains, use describe_source; to list the sources themselves, use
     list_knowledge_sources.
+
+    Documents whose original file is retained (spreadsheets, for example)
+    come with a File reference entry; pass its file_ref to a table or document
+    tool to compute over the file instead of reading excerpts. Documents that
+    match the query by title without a scoring passage are listed too.
     """
     fetch, autocut_cutoff, cap = _resolve_search_params(mode, max_results)
     logger.debug("[RAG] search_knowledge query=%r within=%r", query[:120], within)
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx) as (container, user, assistant_id):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         # The embedding model comes from the assistant, not the scope: a
         # document scope carries no source to read it from.
@@ -762,6 +891,33 @@ async def search_knowledge(
             )
             chunks = _merge_adjacent_chunks(chunks, neighbors)
 
+        hit_ids = list(dict.fromkeys(chunk.info_blob_id for chunk in chunks))
+        title_matches: list[InfoBlobListing] = []
+        if not scope.info_blob_ids:
+            title_matches = await container.info_blob_repo().find_titles_by_sources(
+                group_ids=[collection.id for collection in scope.collections],
+                website_ids=[website.id for website in scope.websites],
+                integration_knowledge_ids=[
+                    knowledge.id for knowledge in scope.integration_knowledge_list
+                ],
+                terms=_title_terms(query),
+                limit=TITLE_MATCH_CAP,
+                exclude_ids=hit_ids,
+            )
+        links = await _original_links(
+            container,
+            user=user,
+            blob_ids=[*hit_ids, *(listing.id for listing in title_matches)],
+            titles={
+                **{
+                    chunk.info_blob_id: chunk.info_blob_title
+                    for chunk in chunks
+                    if chunk.info_blob_title
+                },
+                **{listing.id: listing.label for listing in title_matches},
+            },
+        )
+
     if scope.info_blob_ids:
         # Within one document the model is reading, not ranking: reading order
         # carries more meaning than relevance order.
@@ -779,7 +935,11 @@ async def search_knowledge(
         top_score,
     )
 
-    return _search_result_content(query, chunks)
+    return [
+        *_search_result_content(query, chunks),
+        *_title_match_content(title_matches),
+        *links,
+    ]
 
 
 @mcp.tool(title="Read source document")
@@ -787,13 +947,14 @@ async def read_source(
     document_id: str,
     ctx: Context,
     offset: int = 0,
-) -> list[TextContent | EmbeddedResource]:
+) -> list[KnowledgeContent]:
     """Read the full text of one document from the knowledge sources.
 
     Use after search_knowledge when chunks are not enough (procedures,
     tables, full policies): pass the document_id shown in a search result.
     Long documents are returned in parts; the truncation notice gives the
-    offset for the next part.
+    offset for the next part. A document whose original file is retained also
+    comes with a File reference entry for the table and document tools.
     """
     not_found = TextContent(type="text", text=NOT_FOUND_MESSAGE)
     try:
@@ -802,7 +963,7 @@ async def read_source(
         return [TextContent(type="text", text="Invalid document_id.")]
     offset = max(0, offset)
 
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx) as (container, user, assistant_id):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         try:
             blob = await container.info_blob_repo().get(blob_id)
@@ -822,6 +983,12 @@ async def read_source(
                 blob_id,
             )
             return [not_found]
+        links = await _original_links(
+            container,
+            user=user,
+            blob_ids=[blob.id],
+            titles={blob.id: blob.title or ""},
+        )
 
     logger.info(
         "[RAG] read_source assistant=%s document=%s offset=%d size=%d",
@@ -830,7 +997,10 @@ async def read_source(
         offset,
         len(blob.text),
     )
-    return _document_page_content(blob, offset=offset, page_cap=default_page_cap())
+    return [
+        *_document_page_content(blob, offset=offset, page_cap=default_page_cap()),
+        *links,
+    ]
 
 
 @mcp.tool(title="Describe knowledge source")
@@ -838,7 +1008,7 @@ async def describe_source(
     ctx: Context,
     source_id: str | None = None,
     offset: int = 0,
-) -> list[TextContent | EmbeddedResource]:
+) -> list[KnowledgeContent]:
     """Survey one knowledge source without a search query: what it contains.
 
     Use for questions about a source itself rather than about a fact inside
@@ -859,7 +1029,7 @@ async def describe_source(
     within=<document_id>.
     """
     offset = max(0, offset)
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx) as (container, user, assistant_id):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         sources = _source_scopes(assistant)
         if not sources:
@@ -921,6 +1091,19 @@ async def describe_source(
             if targets
             else []
         )
+        # Originals for the sampled documents and for every spreadsheet on
+        # the page, so a tabular question can go straight to the table tools.
+        tabular = [
+            listing
+            for listing in kept
+            if listing.title is not None and retain_original_bytes(listing.title)
+        ]
+        links = await _original_links(
+            container,
+            user=user,
+            blob_ids=[listing.id for listing in [*targets, *tabular]],
+            titles={listing.id: listing.label for listing in [*targets, *tabular]},
+        )
 
     logger.info(
         "[RAG] describe_source assistant=%s scope=%s total=%d offset=%d titles=%d "
@@ -932,14 +1115,17 @@ async def describe_source(
         len(title_lines),
         len(excerpts),
     )
-    return _overview_content(
-        scope=scope,
-        total=total,
-        offset=offset,
-        title_lines=title_lines,
-        excerpts=excerpts,
-        excerpt_titles={listing.id: listing.label for listing in targets},
-    )
+    return [
+        *_overview_content(
+            scope=scope,
+            total=total,
+            offset=offset,
+            title_lines=title_lines,
+            excerpts=excerpts,
+            excerpt_titles={listing.id: listing.label for listing in targets},
+        ),
+        *links,
+    ]
 
 
 @mcp.tool(title="List knowledge sources")

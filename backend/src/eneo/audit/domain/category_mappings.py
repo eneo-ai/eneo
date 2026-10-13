@@ -130,6 +130,7 @@ CATEGORY_MAPPINGS = {
     ActionType.INTEGRATION_CONNECTED.value: "integration_events",
     ActionType.INTEGRATION_DISCONNECTED.value: "integration_events",
     ActionType.INTEGRATION_KNOWLEDGE_CREATED.value: "integration_events",
+    ActionType.INTEGRATION_KNOWLEDGE_UPDATED.value: "integration_events",
     ActionType.INTEGRATION_KNOWLEDGE_DELETED.value: "integration_events",
     ActionType.INTEGRATION_KNOWLEDGE_SYNCED.value: "integration_events",
     ActionType.WEBSITE_CREATED.value: "integration_events",

@@ -315,6 +315,73 @@ async def test_original_download_reresolves_reference_and_closes_lazy_stream(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_original_download_revalidates_by_content_digest(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+):
+    """A tool runtime caches an original by its entity tag and revalidates on
+    every call, so the download carries the content digest as ``ETag`` and
+    answers a matching ``If-None-Match`` with 304 after the same access checks."""
+    payload = b"knowledge bytes the runtime caches"
+    async with db_container() as container:
+        blob = await _seed_blob(container, title="revalidated download")
+        async with _original(container, payload) as original:
+            prepared = await container.info_blob_service()._prepare_original(
+                InfoBlobAdd(
+                    text=blob.text,
+                    title=blob.title,
+                    group_id=blob.group_id,
+                    tenant_id=blob.tenant_id,
+                    user_id=blob.user_id,
+                ),
+                original,
+            )
+            await InfoBlobRepository(container.session()).add_original_reference(
+                info_blob_id=blob.id,
+                content_id=prepared.id,
+                original_filename="cached.csv",
+            )
+        token = container.auth_service().create_access_token_for_user(container.user())
+        blob_id = blob.id
+
+    signed = await client.post(
+        f"/api/v1/info-blobs/{blob_id}/original/signed-url/",
+        json={"content_disposition": "attachment"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert signed.status_code == 200, signed.text
+    parsed = urlsplit(signed.json()["url"])
+    location = f"{parsed.path}?{parsed.query}"
+
+    first = await client.get(location)
+    assert first.status_code == 200, first.text
+    assert first.content == payload
+    etag = first.headers["ETag"]
+    assert etag == f'"{sha256(payload).hexdigest()}"'
+    assert first.headers["Cache-Control"] == "private, no-cache"
+
+    revalidated = await client.get(location, headers={"If-None-Match": etag})
+    assert revalidated.status_code == 304
+    assert revalidated.content == b""
+    assert revalidated.headers["ETag"] == etag
+
+    weak = await client.get(location, headers={"If-None-Match": f'W/{etag}, "other"'})
+    assert weak.status_code == 304
+
+    changed = await client.get(location, headers={"If-None-Match": '"stale"'})
+    assert changed.status_code == 200
+    assert changed.content == payload
+
+    # Revalidation never bypasses the token: a forged query still fails.
+    forged = await client.get(
+        f"{parsed.path}?token=not-a-token", headers={"If-None-Match": etag}
+    )
+    assert forged.status_code in (401, 403)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_original_download_follows_space_membership_within_the_tenant(
     client,
     db_container,

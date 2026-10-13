@@ -1175,10 +1175,25 @@ async def update_integration_knowledge(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
+    user = container.user()
     knowledge = await service.update_knowledge_name(
         space_id=id,
         integration_knowledge_id=integration_knowledge_id,
         name=data.name,
+    )
+
+    space = await container.space_repo().one(id=id)
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.INTEGRATION_KNOWLEDGE_UPDATED,
+        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
+        entity_id=integration_knowledge_id,
+        description=(
+            f"Renamed {knowledge.integration_type} knowledge to "
+            f"'{knowledge.name}' in space '{space.name}'"
+        ),
+        metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space),
     )
     return IntegrationKnowledgeAssembler.to_space_knowledge_model(knowledge)
 

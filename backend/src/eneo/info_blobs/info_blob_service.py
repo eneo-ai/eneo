@@ -415,7 +415,19 @@ class InfoBlobService:
         *,
         embedding_model: "EmbeddingModel",
         original: PreparedKnowledgeOriginal | None = None,
+        attach_original_in_place: bool = False,
     ) -> InfoBlobInDB:
+        """Publish ``info_blob`` as the active version of its source.
+
+        Only the active version keeps a claim on original bytes: a superseded
+        version releases its reference, and a new version whose bytes are
+        unchanged shares the existing content object instead of storing a copy.
+
+        An original arriving for unchanged text normally starts a new version,
+        as a re-upload does. ``attach_original_in_place`` instead attaches it
+        to the active version without re-embedding; synchronisation uses this
+        when it starts retaining originals for documents it already indexed.
+        """
         if info_blob.content_hash is None:
             info_blob.content_hash = sha256(info_blob.text.encode("utf-8")).digest()
 
@@ -458,28 +470,62 @@ class InfoBlobService:
                 await self.repo.refresh_publication_metadata(active.id, info_blob)
                 return await self.update_info_blob_size(active.id)
 
-            source_id = active.source_id if active is not None else None
-            if active is not None and not await self.repo.supersede(active.id):
-                raise RuntimeError(
-                    "The active knowledge version changed during publish"
-                )
-
-            size_of_text = await self.quota_service.add_text(info_blob.text)
-            info_blob.size = size_of_text
-            published = await self.repo.add(info_blob, source_id=source_id)
-            await self.datastore.add(
-                info_blob=published,
-                embedding_model=embedding_model,
-            )
-            if original is not None:
+            if (
+                attach_original_in_place
+                and match.same_searchable_content
+                and original is not None
+                and existing_original is None
+            ):
+                # Unchanged text that now comes with an original: attach it
+                # to the active version without re-chunking or re-embedding.
+                assert active is not None
                 prepared = await self._prepare_original(info_blob, original)
                 await self.repo.add_original_reference(
-                    info_blob_id=published.id,
+                    info_blob_id=active.id,
                     content_id=prepared.id,
                     original_filename=original.original_filename,
                 )
-            updated = await self.update_info_blob_size(published.id)
-            await self.quota_service.ensure_capacity(0)
+                await self.repo.refresh_publication_metadata(active.id, info_blob)
+                updated = await self.update_info_blob_size(active.id)
+                await self.quota_service.ensure_capacity(0)
+            else:
+                source_id = active.source_id if active is not None else None
+                if active is not None and not await self.repo.supersede(active.id):
+                    raise RuntimeError(
+                        "The active knowledge version changed during publish"
+                    )
+
+                size_of_text = await self.quota_service.add_text(info_blob.text)
+                info_blob.size = size_of_text
+                published = await self.repo.add(info_blob, source_id=source_id)
+                await self.datastore.add(
+                    info_blob=published,
+                    embedding_model=embedding_model,
+                )
+                if original is not None:
+                    if (
+                        match.same_original
+                        and existing_original is not None
+                        and existing_original.usable
+                    ):
+                        # Same bytes behind new text: share the content object.
+                        content_id = existing_original.content_id
+                    else:
+                        prepared = await self._prepare_original(info_blob, original)
+                        content_id = prepared.id
+                    await self.repo.add_original_reference(
+                        info_blob_id=published.id,
+                        content_id=content_id,
+                        original_filename=original.original_filename,
+                    )
+                if active is not None and existing_original is not None:
+                    # The superseded version keeps its text, not its bytes.
+                    # Release after the new reference exists so a shared
+                    # object never drops to zero references in between.
+                    await self.repo.release_original_reference(active.id)
+                    await self.update_info_blob_size(active.id)
+                updated = await self.update_info_blob_size(published.id)
+                await self.quota_service.ensure_capacity(0)
 
         enforce_quota_on_commit(
             self.repo.session,
@@ -529,6 +575,19 @@ class InfoBlobService:
         info_blob_updated = await self.repo.update(info_blob)
 
         return (await self._project_original_availability([info_blob_updated]))[0]
+
+    async def release_original_without_validation(
+        self, info_blob_id: UUID
+    ) -> InfoBlobInDB:
+        """Drop a version's original bytes while keeping its indexed text.
+
+        For a synchronisation that learns the file changed but could not
+        retain the new bytes: the attached original would otherwise keep
+        serving the old table to the tools. The size is recomputed so quota
+        accounting sees the release.
+        """
+        await self.repo.release_original_reference(info_blob_id)
+        return await self.update_info_blob_size(info_blob_id)
 
     async def update_info_blob_size(self, info_blob_id: UUID):
         updated_info_blob = await self.repo.update_size(info_blob_id=info_blob_id)

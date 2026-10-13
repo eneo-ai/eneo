@@ -18,6 +18,7 @@ from eneo.info_blobs.info_blob import (
     InfoBlobInDB,
     PreparedKnowledgeOriginal,
 )
+from eneo.info_blobs.originals import prepared_knowledge_original
 from eneo.jobs.job_models import Task, failure_code_for_exception
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import Transcription, UploadInfoBlob
@@ -95,28 +96,11 @@ async def _prepared_knowledge_original(
     container: Container,
     captured_original: CapturedKnowledgeOriginal,
 ) -> AsyncGenerator[PreparedKnowledgeOriginal]:
-    if captured_original.storage_kind is StorageKind.POSTGRES_INLINE:
-        yield PreparedKnowledgeOriginal(
-            job_id=captured_original.job_id,
-            original_filename=captured_original.original_filename,
-            policy_revision=captured_original.policy_revision,
-            storage_kind=captured_original.storage_kind,
-            captured=captured_original.captured,
-        )
-        return
-
-    object_content = container.object_content_service()
-    async with object_content.upload_for_publication(
-        (captured_original.captured,)
-    ) as publication:
-        yield PreparedKnowledgeOriginal(
-            job_id=captured_original.job_id,
-            original_filename=captured_original.original_filename,
-            policy_revision=captured_original.policy_revision,
-            storage_kind=captured_original.storage_kind,
-            captured=captured_original.captured,
-            publication=publication,
-        )
+    async with prepared_knowledge_original(
+        object_content=container.object_content_service(),
+        captured_original=captured_original,
+    ) as prepared:
+        yield prepared
 
 
 async def _precheck_knowledge_upload_capacity(
@@ -516,10 +500,14 @@ async def upload_info_blob_task(
                 embedding_model_id=embedding_model.id,
                 original=captured_original,
             )
+            # A knowledge upload always retains its original, so a large
+            # spreadsheet is indexed as schema plus sample; the table tools
+            # read the rows from the original.
             text = await container.text_extractor().extract_bounded(
                 filepath,
                 params.mimetype,
                 params.filename,
+                index_tabular=True,
             )
             if not text.strip():
                 raise NoExtractableTextError(params.filename)

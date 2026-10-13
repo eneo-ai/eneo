@@ -13,12 +13,16 @@ import pytest
 
 from eneo.authentication.signed_urls import (
     REDACTED_TOKEN,
+    build_signed_info_blob_original_download_url,
     build_signed_original_download_url,
     looks_like_reference_url,
     parse_file_reference_url,
+    parse_original_reference_url,
     redact_reference_tokens,
     reference_file_ids,
     restore_reference_tokens,
+    use_current_file_references,
+    verify_eneo_original_reference,
 )
 
 
@@ -293,3 +297,99 @@ def test_tokens_are_masked_even_when_the_original_download_path_is_malformed(tai
         ):
             redacted = redact_reference_tokens_in_json(raw[:length])
             assert redacted == raw[:token_start] + "REDACTED"
+
+
+class TestKnowledgeOriginalReferences:
+    """Knowledge-document originals share the reference-link shape with files.
+
+    Every helper that recognizes, masks, restores or repairs a reference
+    treats the two routes alike; only the purpose-separated token and the
+    narrower file parser tell them apart.
+    """
+
+    def _info_blob_url(self, info_blob_id, tenant_id=None, base_url="https://e.ex"):
+        return build_signed_info_blob_original_download_url(
+            info_blob_id=info_blob_id,
+            base_url=base_url,
+            expires_in=900,
+            tenant_id=tenant_id or uuid4(),
+        )
+
+    def test_generic_parser_names_the_kind_and_file_parser_declines(self):
+        info_blob_id = uuid4()
+        url = self._info_blob_url(info_blob_id)
+
+        kind, parsed_id, token = parse_original_reference_url(url)
+
+        assert (kind, parsed_id, token) == (
+            "info_blob",
+            info_blob_id,
+            url.split("token=")[1],
+        )
+        assert parse_file_reference_url(url) is None
+        assert looks_like_reference_url(url)
+
+    def test_file_links_keep_their_kind(self):
+        file_id = uuid4()
+        parsed = parse_original_reference_url(_signed_url(file_id))
+
+        assert parsed is not None
+        assert parsed[0] == "file"
+        assert parsed[1] == file_id
+
+    def test_knowledge_links_are_found_masked_restored_and_repaired(self):
+        info_blob_id = uuid4()
+        url = self._info_blob_url(info_blob_id)
+        payload = {"file": {"url": url}, "note": f"see {url}"}
+
+        assert reference_file_ids(payload) == {info_blob_id}
+        redacted = redact_reference_tokens(payload)
+        assert f"token={REDACTED_TOKEN}" in redacted["file"]["url"]
+        assert reference_file_ids(redacted) == set()
+        assert reference_file_ids(redacted, include_redacted=True) == {info_blob_id}
+        assert restore_reference_tokens(redacted, {info_blob_id: url}) == payload
+        damaged = url.split("?")[0] + "LITERALLY?token=stale"
+        assert use_current_file_references(damaged, {info_blob_id: url}) == url
+
+    def test_verification_requires_matching_audience_resource_and_tenant(self):
+        tenant_id = uuid4()
+        info_blob_id = uuid4()
+        file_id = uuid4()
+        knowledge_url = self._info_blob_url(info_blob_id, tenant_id)
+        file_url = build_signed_original_download_url(
+            file_id=file_id,
+            base_url="https://e.ex",
+            expires_in=900,
+            tenant_id=tenant_id,
+        )
+
+        assert verify_eneo_original_reference(knowledge_url, tenant_id=tenant_id) == (
+            "info_blob",
+            info_blob_id,
+        )
+        assert verify_eneo_original_reference(file_url, tenant_id=tenant_id) == (
+            "file",
+            file_id,
+        )
+        # Another tenant's token never admits a link into this conversation.
+        assert verify_eneo_original_reference(knowledge_url, tenant_id=uuid4()) is None
+        # A file token presented on the knowledge route (and vice versa) fails
+        # the audience check even though the id in the path matches.
+        file_token = file_url.split("token=")[1]
+        swapped = f"https://e.ex/api/v1/info-blobs/{file_id}/original/download/?token={file_token}"
+        assert verify_eneo_original_reference(swapped, tenant_id=tenant_id) is None
+        knowledge_token = knowledge_url.split("token=")[1]
+        swapped_back = (
+            f"https://e.ex/api/v1/files/{info_blob_id}/original/download/"
+            f"?token={knowledge_token}"
+        )
+        assert verify_eneo_original_reference(swapped_back, tenant_id=tenant_id) is None
+        # A token for one document does not unlock another document's path.
+        other = f"https://e.ex/api/v1/info-blobs/{uuid4()}/original/download/?token={knowledge_token}"
+        assert verify_eneo_original_reference(other, tenant_id=tenant_id) is None
+        assert (
+            verify_eneo_original_reference(
+                "https://e.ex/api/v1/users/me", tenant_id=tenant_id
+            )
+            is None
+        )

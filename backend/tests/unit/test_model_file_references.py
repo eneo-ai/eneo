@@ -79,6 +79,31 @@ def test_tool_echo_and_legacy_history_never_restore_credentials_to_model():
     assert original["history"].startswith("https://")
 
 
+def test_knowledge_document_links_in_history_become_handles_too():
+    # A knowledge document's original shares the handle namespace: history
+    # that carries its (redacted) link maps to the same credential-free handle,
+    # and an unknown document stays masked.
+    document_id, unknown = uuid4(), uuid4()
+
+    def knowledge_link(blob_id, token="test-secret"):
+        return (
+            f"https://eneo.example/api/v1/info-blobs/{blob_id}"
+            f"/original/download/?token={token}"
+        )
+
+    current = knowledge_link(document_id)
+    result = model_file_references(
+        {
+            "known": knowledge_link(document_id, "REDACTED"),
+            "unknown": knowledge_link(unknown),
+        },
+        {document_id: current},
+    )
+    assert result["known"] == file_handle(document_id)
+    assert result["unknown"].endswith("token=REDACTED")
+    assert "test-secret" not in str(result)
+
+
 def test_model_schema_accepts_handles_and_normal_urls_without_changing_provider_contract():
     provider = {
         "type": "object",
