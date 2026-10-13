@@ -4,6 +4,7 @@
   import { IconLinkExternal } from "@eneo/icons/link-external";
   import { Page } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { previewLinkLabel } from "$lib/features/integrations/IntegrationData";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
   import IntegrationActions from "../IntegrationActions.svelte";
@@ -23,17 +24,21 @@
     ) ?? data.knowledge
   );
 
-  let parent = $derived(
-    knowledge.wrapper_id
-      ? {
-          title: knowledge.wrapper_name || m.integrations(),
-          href: `/spaces/${$currentSpace.routeId}/knowledge/integrations/wrapper/${knowledge.wrapper_id}`
-        }
-      : {
-          title: m.integrations(),
-          href: `/spaces/${$currentSpace.routeId}/knowledge?tab=integrations`
-        }
-  );
+  let parents = $derived.by(() => {
+    const integrations = {
+      title: m.integrations(),
+      href: `/spaces/${$currentSpace.routeId}/knowledge?tab=integrations`
+    };
+    if (!knowledge.wrapper_id) return [integrations];
+    return [
+      integrations,
+      {
+        title: knowledge.wrapper_name || m.integrations(),
+        href: `/spaces/${$currentSpace.routeId}/knowledge/integrations/wrapper/${knowledge.wrapper_id}`
+      }
+    ];
+  });
+  let parent = $derived(parents[parents.length - 1]);
 
   // The item was deleted from its actions menu: this page has nothing left to show.
   $effect(() => {
@@ -57,12 +62,12 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title {parent} title={knowledge.name} truncate></Page.Title>
+    <Page.Title {parents} title={knowledge.name} truncate></Page.Title>
     <div class="flex-grow"></div>
     <Page.Flex>
       {#if knowledge.url}
         <Button variant="outline" href={knowledge.url} target="_blank" rel="noopener noreferrer">
-          {m.open_in_sharepoint()}
+          {previewLinkLabel(knowledge.integration_type)}
           <IconLinkExternal size="sm" data-icon="inline-end" />
         </Button>
       {/if}
@@ -70,14 +75,17 @@
     </Page.Flex>
   </Page.Header>
   <Page.Main>
-    <IntegrationDocumentsView
-      {knowledge}
-      space={$currentSpace}
-      initialDocuments={data.documents}
-      initialSkipped={data.skipped}
-      initialTab={data.initialTab}
-      onShowSyncHistory={() => (showSyncHistoryDialog = true)}
-    />
+    <!-- The view seeds its table from the load data once; another item means a fresh view. -->
+    {#key data.knowledge.id}
+      <IntegrationDocumentsView
+        {knowledge}
+        space={$currentSpace}
+        initialDocuments={data.documents}
+        initialSkipped={data.skipped}
+        initialTab={data.initialTab}
+        onShowSyncHistory={() => (showSyncHistoryDialog = true)}
+      />
+    {/key}
     <SyncHistoryDialog {knowledge} bind:open={showSyncHistoryDialog}></SyncHistoryDialog>
   </Page.Main>
 </Page.Root>

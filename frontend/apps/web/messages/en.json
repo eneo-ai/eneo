@@ -1309,6 +1309,7 @@
   "loading_ellipsis": "Loading...",
   "select_ellipsis": "Select...",
   "open_in_sharepoint": "Open in SharePoint",
+  "open_in_confluence": "Open in Confluence",
   "breadcrumb": "Breadcrumb",
   "template_singular": "template",
   "template_plural": "templates",

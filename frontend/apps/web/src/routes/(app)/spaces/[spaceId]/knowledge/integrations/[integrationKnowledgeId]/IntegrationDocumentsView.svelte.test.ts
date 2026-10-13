@@ -47,7 +47,9 @@ vi.mock("$lib/core/Eneo", () => ({
   })
 }));
 vi.mock("$lib/features/jobs/JobManager", () => ({
-  jobCompletionEvents: api.jobCompletionEvents
+  jobCompletionEvents: api.jobCompletionEvents,
+  // The import dialogs behind the integration data need a job manager.
+  getJobManager: () => ({ startFastUpdatePolling: vi.fn() })
 }));
 
 import IntegrationDocumentsView from "./IntegrationDocumentsView.svelte";
@@ -236,13 +238,15 @@ describe("IntegrationDocumentsView", () => {
     await expect.element(page.getByRole("button", { name: m.previous() })).toBeEnabled();
   });
 
-  it("groups the skipped files by reason and notes the ones the capped list leaves out", async () => {
+  it("groups the skipped files by translated reason and notes the ones the capped list leaves out", async () => {
     show({
       initialSkipped: {
         items: [
-          { file: "scan1.pdf", reason: "Scanned PDF without a text layer" },
+          { file: "scan1.pdf", reason: "No text layer (scanned document; OCR is not supported)" },
           { file: "a.xyz", reason: "Unsupported format" },
-          { file: "scan2.pdf", reason: "Scanned PDF without a text layer" }
+          { file: "scan2.pdf", reason: "No text layer (scanned document; OCR is not supported)" },
+          { file: "b.pdf", reason: "Error: Incomplete download of 'b.pdf' (1 of 2 bytes)" },
+          { file: "c.pdf", reason: "Error: Incomplete download of 'c.pdf' (3 of 4 bytes)" }
         ],
         total: 17,
         truncated: true,
@@ -255,26 +259,58 @@ describe("IntegrationDocumentsView", () => {
     });
     await skippedTab.click();
 
-    await expect
-      .element(
-        page.getByRole("heading", {
-          name: m.integration_skipped_group_heading({
-            reason: "Scanned PDF without a text layer",
-            count: 2
+    for (const [reason, count] of [
+      [m.skip_reason_no_text_layer(), 2],
+      [m.skip_reason_incomplete_download(), 2],
+      ["Unsupported format", 1]
+    ] as const) {
+      await expect
+        .element(
+          page.getByRole("heading", {
+            name: m.integration_skipped_group_heading({ reason, count })
           })
-        })
-      )
-      .toBeVisible();
+        )
+        .toBeVisible();
+    }
+    await expect.element(page.getByText("scan2.pdf")).toBeVisible();
+    await expect.element(page.getByText(m.skipped_and_n_more({ count: 12 }))).toBeVisible();
+    await expectNoAxeViolations();
+  });
+
+  it("follows the tab the navigation asks for", async () => {
+    const { rerender } = show();
+    await expect
+      .element(page.getByRole("tab", { name: m.documents() }))
+      .toHaveAttribute("aria-selected", "true");
+
+    await rerender({ initialTab: "skipped" });
+
     await expect
       .element(
-        page.getByRole("heading", {
-          name: m.integration_skipped_group_heading({ reason: "Unsupported format", count: 1 })
-        })
+        page.getByRole("tab", { name: m.integration_documents_skipped_tab_count({ count: 0 }) })
       )
+      .toHaveAttribute("aria-selected", "true");
+  });
+
+  it("falls back to the last page when the requested one is past the end", async () => {
+    const firstPage = pageOf(
+      Array.from({ length: 50 }, (_, index) => doc(index + 1)),
+      0,
+      60
+    );
+    // Documents were deleted between the two requests: 60 became 40.
+    api.listDocuments
+      .mockResolvedValueOnce(pageOf([], 50, 40))
+      .mockResolvedValueOnce(pageOf([doc(40)], 0, 40));
+    show({ initialDocuments: firstPage });
+
+    await page.getByRole("button", { name: m.next() }).click();
+
+    await expect.element(page.getByText("Protokoll KS 2026-40.pdf")).toBeVisible();
+    expect(api.listDocuments.mock.calls.map(([call]) => call.offset)).toEqual([50, 0]);
+    await expect
+      .element(page.getByText(m.integration_documents_showing_range({ from: 1, to: 1, total: 40 })))
       .toBeVisible();
-    await expect.element(page.getByText("scan2.pdf")).toBeVisible();
-    await expect.element(page.getByText(m.skipped_and_n_more({ count: 14 }))).toBeVisible();
-    await expectNoAxeViolations();
   });
 
   it("says so when the latest sync skipped nothing", async () => {

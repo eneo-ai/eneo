@@ -4,6 +4,7 @@ import {
   documentsPageRange,
   groupSkippedByReason,
   integrationDocumentsHref,
+  lastPageOffset,
   skippedDocumentsNotListed,
   toggleDocumentsSort
 } from "./integrationDocuments";
@@ -73,5 +74,18 @@ describe("integrationDocumentsHref", () => {
     expect(integrationDocumentsHref("space-1", "ik-1", "skipped")).toBe(
       "/spaces/space-1/knowledge/integrations/ik-1?tab=skipped"
     );
+  });
+});
+
+describe("lastPageOffset", () => {
+  it.each([
+    [0, 50, 0],
+    [1, 50, 0],
+    [50, 50, 0],
+    [51, 50, 50],
+    [312, 50, 300],
+    [40, 0, 0]
+  ])("total %i with limit %i starts its last page at %i", (total, limit, expected) => {
+    expect(lastPageOffset({ total_count: total }, limit)).toBe(expected);
   });
 });

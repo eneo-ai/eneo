@@ -8,5 +8,5 @@ export const ConfluenceIntegrationData: IntegrationData = {
   displayName: "Confluence",
   importHint: "Import a Confluence space into your knowledge",
   ImportDialog: ConfluenceImportDialog,
-  previewLinkLabel: "Open in Confluence"
+  previewLinkLabel: "open_in_confluence"
 };
