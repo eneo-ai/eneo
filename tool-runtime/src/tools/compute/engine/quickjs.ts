@@ -11,8 +11,11 @@ import {
   type QuickJSWASMModule,
 } from "quickjs-emscripten-core";
 import variant from "@jitl/quickjs-ng-wasmfile-release-sync";
-import { MAX_LOG_LINE_CHARS, type ComputeConfig } from "../config";
-import type { ComputeJob, ComputeOutcome, ScriptErrorCode } from "../ports";
+import { writeFile } from "node:fs/promises";
+import { toCsv } from "../../files/csv";
+import { MAX_LOG_LINE_CHARS, PREVIEW_ROWS, type ComputeConfig } from "../config";
+import type { ComputeExport, ComputeJob, ComputeOutcome, ScriptErrorCode } from "../ports";
+import { asTabular, describeShape, previewRows } from "../shape";
 
 const STACK_BYTES = 512 * 1024;
 const FILENAME = "script.js";
@@ -111,6 +114,7 @@ function serialize(
   vm: QuickJSContext,
   handle: QuickJSHandle,
   maxBytes: number,
+  exporting: boolean,
 ): { result: unknown } | { error: Failure } {
   if (vm.typeof(handle) === "undefined") return { result: null };
   const stringify = vm.evalCode("(value) => JSON.stringify(value)", "serialize.js");
@@ -136,13 +140,52 @@ function serialize(
         error: {
           code: "RESULT_TOO_LARGE",
           name: "RangeError",
-          message: `The returned value exceeds ${maxBytes} bytes as JSON. Return a summary or a smaller slice.`,
+          message: exporting
+            ? `The returned value exceeds ${maxBytes} bytes as JSON. Return fewer rows or columns.`
+            : `The returned value exceeds ${maxBytes} bytes as JSON. Return a summary or a smaller slice, or set export=true to deliver a tabular value as a CSV file.`,
         },
       };
     return { result: JSON.parse(text) };
   } finally {
     fn.dispose();
   }
+}
+/**
+ * Writes the returned table to the job's export file and keeps a preview of it, in the shape
+ * the script returned, that fits the inline result limit. A value that is not a table is a
+ * script-level failure the model can fix by reshaping it or dropping export.
+ */
+async function exportResult(
+  value: unknown,
+  target: ComputeExport,
+  config: ComputeConfig,
+): Promise<Pick<ComputeOutcome, "result" | "export"> | { error: Failure }> {
+  const table = asTabular(value);
+  if (!table)
+    return {
+      error: {
+        code: "RESULT_NOT_TABULAR",
+        name: "TypeError",
+        message: `export=true needs a tabular value: an array of objects with the same keys, or an array of arrays whose first row holds the column names. The script returned ${describeShape(value)}. Reshape it (for example rows.map((v) => ({ value: v }))) or call again with export=false.`,
+      },
+    };
+  const rows = table.rows.slice(0, target.rowLimit);
+  await writeFile(target.outputPath, toCsv(table.columns, rows), { mode: 0o600 });
+  let count = Math.min(PREVIEW_ROWS, rows.length);
+  let preview = previewRows(value as unknown[], table.form, count);
+  while (count > 0 && Buffer.byteLength(JSON.stringify(preview)) > config.max_result_bytes) {
+    count = Math.floor(count / 2);
+    preview = previewRows(value as unknown[], table.form, count);
+  }
+  return {
+    result: preview,
+    export: {
+      columns: table.columns,
+      rows: rows.length,
+      truncated: table.rows.length > rows.length,
+      preview_rows: count,
+    },
+  };
 }
 export async function runJavaScript(
   job: ComputeJob,
@@ -154,7 +197,9 @@ export async function runJavaScript(
   const logs: string[] = [];
   const dropped = { count: 0 };
   const started = performance.now();
-  const finish = (partial: { result?: unknown } | { error: Failure }): ComputeOutcome => ({
+  const finish = (
+    partial: Pick<ComputeOutcome, "result" | "export"> | { error: Failure },
+  ): ComputeOutcome => ({
     ok: !("error" in partial),
     ...partial,
     logs,
@@ -197,11 +242,20 @@ export async function runJavaScript(
         state.error.dispose();
         return finish({ error: failure });
       }
-      try {
-        return finish(serialize(vm, state.value, config.max_result_bytes));
-      } finally {
-        state.value.dispose();
-      }
+      const serialized = (() => {
+        try {
+          return serialize(
+            vm,
+            state.value,
+            job.export ? job.export.maxBytes : config.max_result_bytes,
+            job.export !== undefined,
+          );
+        } finally {
+          state.value.dispose();
+        }
+      })();
+      if ("error" in serialized || !job.export) return finish(serialized);
+      return finish(await exportResult(serialized.result, job.export, config));
     } finally {
       promise.dispose();
     }

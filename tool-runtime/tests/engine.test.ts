@@ -1,10 +1,44 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { computeConfigSchema } from "../src/tools/compute/config";
 import { runJavaScript } from "../src/tools/compute/engine/quickjs";
+import type { ComputeExport } from "../src/tools/compute/ports";
+import { asTabular, describeShape, previewRows } from "../src/tools/compute/shape";
 
 const config = computeConfigSchema.parse({});
 const run = (code: string, input: unknown = null, overrides: Partial<typeof config> = {}) =>
   runJavaScript({ kind: "compute", code, input }, { ...config, ...overrides });
+/** Runs with an export target in a fresh directory and returns the outcome and the CSV. */
+async function runExport(
+  code: string,
+  target: Partial<Omit<ComputeExport, "outputPath">> = {},
+  overrides: Partial<typeof config> = {},
+) {
+  const directory = await mkdtemp(join(tmpdir(), "eneo-engine-export-"));
+  try {
+    const outputPath = join(directory, "result.csv");
+    const outcome = await runJavaScript(
+      {
+        kind: "compute",
+        code,
+        input: null,
+        export: {
+          outputPath,
+          rowLimit: config.export_row_limit,
+          maxBytes: config.max_export_bytes,
+          ...target,
+        },
+      },
+      { ...config, ...overrides },
+    );
+    const csv = await readFile(outputPath, "utf8").catch(() => undefined);
+    return { outcome, csv };
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
 
 describe("sandbox engine", () => {
   test("returns the value of return, exposes input and captures console output", async () => {
@@ -115,5 +149,120 @@ describe("sandbox engine", () => {
     await run("globalThis.leak = 42;");
     const next = await run("return typeof leak;");
     expect(next.result).toBe("undefined");
+  });
+});
+
+describe("tabular export", () => {
+  test("asTabular reads records with a union of keys and matrices with a header row", () => {
+    expect(asTabular([{ a: 1, b: "x" }, { a: 2, c: true }])).toEqual({
+      form: "records",
+      columns: ["a", "b", "c"],
+      rows: [
+        [1, "x", null],
+        [2, null, true],
+      ],
+    });
+    expect(asTabular([["year", 2026], [1, 2], [3]])).toEqual({
+      form: "matrix",
+      columns: ["year", "2026"],
+      rows: [
+        [1, 2],
+        [3, null],
+      ],
+    });
+    expect(asTabular([["a", "b"]])).toEqual({ form: "matrix", columns: ["a", "b"], rows: [] });
+    // Nested values stay as they are; the CSV writer renders them as JSON text.
+    expect(asTabular([{ a: { n: 1 } }])!.rows).toEqual([[{ n: 1 }]]);
+  });
+  test("asTabular rejects what is not a table", () => {
+    for (const value of [
+      [],
+      [1, 2],
+      [{}],
+      { a: 1 },
+      "x",
+      42,
+      null,
+      [{ a: 1 }, [1]],
+      [["a"], [1, 2]],
+      [[{ k: 1 }], [1]],
+      [[], [1]],
+    ])
+      expect(asTabular(value)).toBeUndefined();
+  });
+  test("describeShape names the returned value for the error message", () => {
+    expect(describeShape(42)).toBe("a number");
+    expect(describeShape([1, 2, 3])).toBe("an array of 3 numbers");
+    expect(describeShape(["x"])).toBe("an array of 1 string");
+    expect(describeShape([1, "x"])).toBe("an array of 2 mixed values");
+    expect(describeShape({ a: 1, b: 2 })).toBe("an object with 2 keys");
+    expect(describeShape([])).toBe("an empty array");
+    expect(describeShape(null)).toBe("null");
+    expect(previewRows([["h"], [1], [2]], "matrix", 1)).toEqual([["h"], [1]]);
+  });
+  test("writes the table as CSV and keeps the first rows as a preview in the script's shape", async () => {
+    const { outcome, csv } = await runExport(
+      `return Array.from({ length: 30 }, (_, i) => ({ id: i + 1, name: "r" + i, note: i === 2 ? 'say "hi", twice' : null }));`,
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.export).toEqual({
+      columns: ["id", "name", "note"],
+      rows: 30,
+      truncated: false,
+      preview_rows: 20,
+    });
+    const preview = outcome.result as Record<string, unknown>[];
+    expect(preview).toHaveLength(20);
+    expect(preview[0]).toEqual({ id: 1, name: "r0", note: null });
+    const lines = csv!.split("\r\n");
+    expect(lines[0]).toBe("id,name,note");
+    expect(lines[3]).toBe('3,r2,"say ""hi"", twice"');
+    expect(lines).toHaveLength(32); // header, 30 rows, trailing newline
+  });
+  test("a matrix keeps its header in the preview and pads short rows in the file", async () => {
+    const { outcome, csv } = await runExport(`return [["a", "b"], [1, 2], [3]];`);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result).toEqual([["a", "b"], [1, 2], [3]]);
+    expect(outcome.export).toMatchObject({ columns: ["a", "b"], rows: 2, preview_rows: 2 });
+    expect(csv).toBe("a,b\r\n1,2\r\n3,\r\n");
+  });
+  test("a value that is not a table fails with a message the model can act on", async () => {
+    const { outcome, csv } = await runExport("return 42;");
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error).toMatchObject({ code: "RESULT_NOT_TABULAR" });
+    expect(outcome.error!.message).toContain("The script returned a number");
+    expect(outcome.error!.message).toContain("export=false");
+    expect(csv).toBeUndefined();
+  });
+  test("stops at the row limit and says so", async () => {
+    const { outcome, csv } = await runExport(
+      `return Array.from({ length: 30 }, (_, i) => ({ id: i }));`,
+      { rowLimit: 5 },
+    );
+    expect(outcome.export).toMatchObject({ rows: 5, truncated: true, preview_rows: 5 });
+    expect(csv!.split("\r\n")).toHaveLength(7);
+  });
+  test("shrinks the preview until it fits the inline result limit", async () => {
+    const { outcome } = await runExport(
+      `return Array.from({ length: 30 }, (_, i) => ({ id: i, text: "x".repeat(200) }));`,
+      {},
+      { max_result_bytes: 1024 },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.export!.rows).toBe(30);
+    expect(outcome.export!.preview_rows).toBeLessThan(20);
+    expect(Buffer.byteLength(JSON.stringify(outcome.result))).toBeLessThanOrEqual(1024);
+  });
+  test("a value above the inline limit exports when it fits the export limit", async () => {
+    const code = `return Array.from({ length: 50 }, (_, i) => ({ id: i, text: "y".repeat(100) }));`;
+    const inline = await run(code, null, { max_result_bytes: 1024 });
+    expect(inline.error).toMatchObject({ code: "RESULT_TOO_LARGE" });
+    expect(inline.error!.message).toContain("export=true");
+    const { outcome } = await runExport(code, {}, { max_result_bytes: 1024 });
+    expect(outcome.ok).toBe(true);
+    expect(outcome.export!.rows).toBe(50);
+    const tooBig = await runExport(code, { maxBytes: 1024 }, { max_result_bytes: 1024 });
+    expect(tooBig.outcome.error).toMatchObject({ code: "RESULT_TOO_LARGE" });
+    expect(tooBig.outcome.error!.message).not.toContain("export=true");
   });
 });

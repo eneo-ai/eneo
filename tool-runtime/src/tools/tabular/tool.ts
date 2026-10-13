@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { ToolError } from "../../errors";
+import { exportFilename, MAX_EXPORT_BYTES } from "../files/csv";
 import {
   RichResult,
   type CallContext,
@@ -55,22 +56,7 @@ const ROWS_SHOWN =
 const NO_ROWS_MATCHED =
   "No rows matched. Compare the filter values with the value lists and examples from inspect_table: string comparison is exact and case-sensitive, so use the listed spelling or ILIKE. Say which filter found nothing instead of reporting that the data is missing.";
 
-// An exported result travels as a file; Eneo admits generated files up to 20 MiB by default.
-const MAX_EXPORT_BYTES = 20 * 1024 * 1024;
-
-/** A download name for an exported result; never a path, always .csv. */
-export function exportFilename(input: string | undefined): string {
-  const base = (input ?? "")
-    .normalize("NFC")
-    .replace(/\.csv$/i, "")
-    .replace(/[\u0000-\u001f\u007f-\u009f"\\/:;*?<>|]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^\.+/, "")
-    .slice(0, 100)
-    .trim();
-  return `${base || "resultat"}.csv`;
-}
+export { exportFilename };
 
 const fileRef = fileReference;
 const sheetName = z
