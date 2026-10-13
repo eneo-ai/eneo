@@ -12867,7 +12867,7 @@ export interface components {
       /** Folder Path */
       folder_path?: string | null;
       /** Selected Item Type */
-      selected_item_type?: ("file" | "folder" | "site_root") | null;
+      selected_item_type?: string | null;
       /**
        * Resource Type
        * @default site
@@ -12888,7 +12888,7 @@ export interface components {
       /** Folder Path */
       folder_path?: string | null;
       /** Selected Item Type */
-      selected_item_type?: ("file" | "folder" | "site_root") | null;
+      selected_item_type?: string | null;
       /**
        * Resource Type
        * @default site

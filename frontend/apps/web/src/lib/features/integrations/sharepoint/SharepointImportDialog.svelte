@@ -453,7 +453,7 @@
 
     try {
       const site = selectedSite;
-      const resourceType = site.type === "onedrive" ? "onedrive" : "site";
+      const resourceType = site.type === "onedrive" ? ("onedrive" as const) : ("site" as const);
       const batchItems = dedupedSelection.effectiveEntries.map((entry) => ({
         key: site.key,
         name: entry.importName.trim() || entry.item.name,

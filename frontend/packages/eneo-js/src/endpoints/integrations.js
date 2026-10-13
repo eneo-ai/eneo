@@ -93,7 +93,7 @@ export function initIntegrations(client) {
        * Preview to knowledge items that can be imported through this integration
        * @param {Object} args
        * @param {{id: string}} args.integration UserIntegration
-       * @param {import('../types/resources').IntegrationKnowledgePreview & {folder_id?: string, folder_path?: string, resource_type?: string}} args.preview The preview item received from calling the preview
+       * @param {import('../types/resources').IntegrationKnowledgePreview & {folder_id?: string, folder_path?: string, resource_type?: "site" | "onedrive"}} args.preview The preview item received from calling the preview
        * @param {{id: string}} args.space Space to add this to
        * @param {{id: string}} args.embedding_model Embedding model to use
        *
@@ -139,7 +139,7 @@ export function initIntegrations(client) {
        *   folder_id?: string,
        *   folder_path?: string,
        *   type?: string,
-       *   resource_type?: string
+       *   resource_type?: "site" | "onedrive"
        * }>} args.items
        * @param {string=} args.wrapper_name
        * @param {{id: string}} args.space Space to add this to
