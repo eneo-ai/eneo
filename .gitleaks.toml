@@ -52,3 +52,10 @@ condition = "AND"
 paths = ['''^backend/tests/integration/test_model_provider_outbound_headers\.py$''']
 regexTarget = "secret"
 regexes = ['''^sk-test-12345678$''']
+
+[[rules.allowlists]]
+description = "Keyword-argument pair in SharePoint sync tests that the generic rule reads as a token"
+condition = "AND"
+paths = ['''^backend/tests/unittests/integration/test_sharepoint_content_service\.py$''']
+regexTarget = "secret"
+regexes = ['''^integration_knowledge_id=ik\.id$''']
