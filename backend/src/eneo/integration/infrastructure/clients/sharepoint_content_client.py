@@ -1,5 +1,4 @@
 import asyncio
-import json
 from typing import Any, Awaitable, Callable, Optional, Sequence, cast
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 from uuid import UUID
@@ -11,7 +10,8 @@ from eneo.integration.infrastructure.content_service.sharepoint_metadata import 
 )
 from eneo.integration.infrastructure.content_service.types import SharePointItem
 from eneo.integration.infrastructure.content_service.utils import (
-    process_sharepoint_response,
+    ExtractionResult,
+    extract_sharepoint_content,
 )
 from eneo.libs.clients import BaseClient
 from eneo.libs.clients.throttle_retry import (
@@ -51,6 +51,26 @@ def _strip_query_param(url: str, name: str) -> str:
 def _token_from_delta_link(delta_link: str) -> Optional[str]:
     query_params: dict[str, list[str]] = parse_qs(urlparse(delta_link).query)
     return query_params.get("token", [None])[0]
+
+
+class IncompleteDownloadError(Exception):
+    """The body ended before the announced Content-Length.
+
+    Partial bytes must never be parsed: a truncated PDF or ZIP looks like a
+    corrupt or empty file and would be mistaken for one.
+    """
+
+
+class SharePointContentUnavailable(Exception):
+    """A download completed but yielded no text for a non-empty-file reason.
+
+    ``reason`` is the user-facing skip reason; ``str()`` drops the ``Error:``
+    prefix so callers that format ``f"Error: {e}"`` do not double it.
+    """
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(reason.removeprefix("Error: "))
 
 
 class DeltaTokenExpiredException(Exception):
@@ -337,49 +357,46 @@ class SharePointContentClient(BaseClient):
                     f"({len(payload)} > {self.max_download_bytes} bytes)"
                 )
 
+        if content_length is not None and len(payload) != content_length:
+            raise IncompleteDownloadError(
+                f"Incomplete download of '{file_name}' "
+                f"({len(payload)} of {content_length} bytes)"
+            )
+
         return bytes(payload)
 
     async def _download_file_content(
         self,
         download_url: str,
         file_name: str,
-    ) -> tuple[str, str]:
+    ) -> ExtractionResult:
         # Streams the body directly off the raw session to enforce the size
         # limit, bypassing WrappedAiohttpClient — so throttling retry must be
         # applied here explicitly.
-        async def _download() -> tuple[str, str]:
+        async def _download() -> ExtractionResult:
             async with self.client.client.get(
                 download_url, headers=self.headers
             ) as response:
                 response.raise_for_status()
                 content_type = response.headers.get("Content-Type", "")
-                content_type_lower = content_type.lower()
-                payload = await self._read_response_with_size_limit(response, file_name)
-
-                if "application/json" in content_type_lower:
-                    decoded = payload.decode(
-                        response.charset or "utf-8", errors="replace"
+                charset = response.charset
+                try:
+                    payload = await self._read_response_with_size_limit(
+                        response, file_name
                     )
-                    try:
-                        return str(json.loads(decoded)), content_type
-                    except json.JSONDecodeError:
-                        return decoded, content_type
+                except IncompleteDownloadError as e:
+                    logger.warning(str(e))
+                    return ExtractionResult.error(str(e), content_type)
 
-                if (
-                    "text/" in content_type_lower
-                    or "application/xml" in content_type_lower
-                ):
-                    return (
-                        payload.decode(response.charset or "utf-8", errors="replace"),
-                        content_type,
-                    )
-
-                text, detected_content_type = process_sharepoint_response(
-                    response_content=payload,
-                    content_type=content_type,
-                    filename=file_name,
-                )
-                return text, detected_content_type
+            # Parsers are CPU-bound and synchronous; keep the event loop free
+            # for the other requests of the sync.
+            return await asyncio.to_thread(
+                extract_sharepoint_content,
+                payload,
+                content_type,
+                file_name,
+                charset=charset,
+            )
 
         return await retry_on_throttle(
             _download,
@@ -743,56 +760,61 @@ class SharePointContentClient(BaseClient):
             logger.error(f"SharePoint API error when getting page content: {e}")
             raise
 
-    async def get_file_content_by_id(
+    async def get_file_extraction_by_id(
         self, drive_id: str, item_id: str
-    ) -> tuple[str, str]:
-        """
-        Get the content of a file by its ID.
+    ) -> ExtractionResult:
+        """Download a file and extract its text.
 
-        Args:
-            drive_id: The ID of the drive containing the file
-            item_id: The ID of the file
-
-        Returns:
-            Tuple of (extracted text, content type)
+        Returns a result rather than raising for anything that happens after
+        the HTTP exchange, so callers can tell "no text" from "failed".
         """
         try:
-            file_info = await self.get_file_metadata(drive_id, item_id)
-            file_name = file_info.get("name", "")
-
-            download_url = file_info.get("@microsoft.graph.downloadUrl")
-            if not download_url:
-                raise ValueError(
-                    f"No download URL available for file '{file_name}' (item_id={item_id})"
-                )
-
-            return await self._download_file_content(
-                download_url=download_url,
-                file_name=file_name,
-            )
+            return await self._download_by_id(drive_id, item_id)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
                 logger.info(
                     "SharePoint token expired while getting file content, refreshing..."
                 )
                 await self.refresh_token()
-
-                file_info = await self.get_file_metadata(drive_id, item_id)
-                file_name = file_info.get("name", "")
-
-                download_url = file_info.get("@microsoft.graph.downloadUrl")
-                if not download_url:
-                    raise ValueError(
-                        f"No download URL available for file '{file_name}' (item_id={item_id}) after token refresh"
-                    )
-
-                return await self._download_file_content(
-                    download_url=download_url,
-                    file_name=file_name,
+                return await self._download_by_id(
+                    drive_id, item_id, after_token_refresh=True
                 )
-            else:
-                logger.error(f"SharePoint API error when getting file content: {e}")
-                raise
+            logger.error(f"SharePoint API error when getting file content: {e}")
+            raise
+
+    async def _download_by_id(
+        self, drive_id: str, item_id: str, *, after_token_refresh: bool = False
+    ) -> ExtractionResult:
+        file_info = await self.get_file_metadata(drive_id, item_id)
+        file_name = file_info.get("name", "")
+
+        download_url = file_info.get("@microsoft.graph.downloadUrl")
+        if not download_url:
+            suffix = " after token refresh" if after_token_refresh else ""
+            raise ValueError(
+                f"No download URL available for file '{file_name}' "
+                f"(item_id={item_id}){suffix}"
+            )
+
+        return await self._download_file_content(
+            download_url=download_url,
+            file_name=file_name,
+        )
+
+    async def get_file_content_by_id(
+        self, drive_id: str, item_id: str
+    ) -> tuple[str, str]:
+        """``(text, content_type)`` view of :meth:`get_file_extraction_by_id`.
+
+        An empty text means the parser found nothing in a complete download;
+        every other non-text outcome raises :class:`SharePointContentUnavailable`.
+        """
+        result = await self.get_file_extraction_by_id(drive_id, item_id)
+        if result.text is not None:
+            return result.text, result.content_type
+        if result.is_no_text:
+            return "", result.content_type
+        raise SharePointContentUnavailable(result.skip_reason or "")
 
     async def _get_delta_page(self, link: str) -> dict[str, Any]:
         """One delta page; drops the list item expansion if Graph rejects it.

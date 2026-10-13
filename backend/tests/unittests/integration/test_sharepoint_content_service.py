@@ -20,6 +20,12 @@ from eneo.integration.infrastructure.content_service.sharepoint_content_service 
     SimpleSharePointToken,
     extract_text_from_canvas_layout,
 )
+from eneo.integration.infrastructure.content_service.utils import (
+    EMPTY_CONTENT_REASON,
+    NO_TEXT_LAYER_REASON,
+    NO_TEXT_REASONS,
+    ExtractionResult,
+)
 
 
 @pytest.fixture
@@ -1415,10 +1421,7 @@ class TestDeltaChangesProcessing:
                 ],
                 "new-delta-token",
             )
-            mock_client.get_file_content_by_id.return_value = (
-                "[No readable text found]",
-                None,
-            )
+            mock_client.get_file_content_by_id.return_value = ("", None)
             mock_client_class.return_value = mock_client
 
             with patch.object(
@@ -1658,10 +1661,16 @@ class TestOneDriveFolderTraversal:
         )
         mock_client.get_folder_items.assert_not_called()
 
-    async def test_full_sync_unextractable_file_deletes_existing_local_blob(
-        self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
+    @pytest.mark.parametrize("reason", sorted(NO_TEXT_REASONS))
+    async def test_full_sync_no_text_file_deletes_existing_local_blob(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        mock_integration_knowledge,
+        reason,
     ):
-        """Full sync should clear stale blobs for still-present unextractable files."""
+        """A parser that completed and found nothing clears the stale blob."""
         mock_integration_knowledge.size = 100
         mock_dependencies[
             "integration_knowledge_repo"
@@ -1676,9 +1685,8 @@ class TestOneDriveFolderTraversal:
         )
 
         mock_client = AsyncMock()
-        mock_client.get_file_content_by_id.return_value = (
-            "[Could not extract text from PowerPoint presentation]",
-            None,
+        mock_client.get_file_extraction_by_id.return_value = ExtractionResult.no_text(
+            reason
         )
         stats = service._initialize_stats()
 
@@ -1711,14 +1719,44 @@ class TestOneDriveFolderTraversal:
         )
         assert mock_integration_knowledge.size == 60
         assert stats["files_deleted"] == 1
-        assert stats["skipped_details"] == [
-            {"file": "slides.pptx", "reason": "Empty or unreadable content"}
-        ]
+        assert len(stats["skipped_details"]) == 1
+        assert stats["skipped_details"][0]["file"] == "slides.pptx"
+        assert stats["skipped_details"][0]["reason"] in NO_TEXT_REASONS
 
-    async def test_full_sync_download_error_does_not_delete_existing_local_blob(
-        self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
+    @pytest.mark.parametrize(
+        ("outcome", "expected_reason"),
+        [
+            (Exception("Graph timeout"), "Error: Graph timeout"),
+            (
+                ExtractionResult.error("Corrupt or malformed file"),
+                "Error: Corrupt or malformed file",
+            ),
+            (
+                ExtractionResult.error(
+                    "Incomplete download of 'still-readable.docx' (10 of 20 bytes)"
+                ),
+                "Error: Incomplete download of 'still-readable.docx' (10 of 20 bytes)",
+            ),
+            (
+                ExtractionResult.skipped("Exceeds extraction limit (1000 PDF pages)"),
+                "Exceeds extraction limit (1000 PDF pages)",
+            ),
+            (
+                ExtractionResult.skipped("Unsupported file type (binary)"),
+                "Unsupported file type (binary)",
+            ),
+        ],
+    )
+    async def test_full_sync_failure_does_not_delete_existing_local_blob(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        mock_integration_knowledge,
+        outcome,
+        expected_reason,
     ):
-        """Transient download errors should remain non-destructive skips."""
+        """Errors, truncated downloads and limits are non-destructive skips."""
         mock_dependencies[
             "integration_knowledge_repo"
         ].one.return_value = mock_integration_knowledge
@@ -1729,34 +1767,185 @@ class TestOneDriveFolderTraversal:
         )
 
         mock_client = AsyncMock()
-        mock_client.get_file_content_by_id.side_effect = Exception("Graph timeout")
+        if isinstance(outcome, Exception):
+            mock_client.get_file_extraction_by_id.side_effect = outcome
+        else:
+            mock_client.get_file_extraction_by_id.return_value = outcome
         stats = service._initialize_stats()
 
-        await service._process_folder_results(
-            site_id="site-123",
-            drive_id="drive-123",
-            resource_type="site",
-            client=mock_client,
-            results=[
-                {
-                    "id": "item-123",
-                    "name": "still-readable.docx",
-                    "webUrl": "https://example.com/still-readable.docx",
-                    "parentReference": {"driveId": "drive-123"},
-                }
-            ],
-            integration_knowledge_id=mock_integration_knowledge.id,
-            token=mock_oauth_token,
-            processed_items=set(),
-            stats=stats,
-        )
+        with patch.object(service, "_process_info_blob", AsyncMock()) as mock_process:
+            await service._process_folder_results(
+                site_id="site-123",
+                drive_id="drive-123",
+                resource_type="site",
+                client=mock_client,
+                results=[
+                    {
+                        "id": "item-123",
+                        "name": "still-readable.docx",
+                        "webUrl": "https://example.com/still-readable.docx",
+                        "parentReference": {"driveId": "drive-123"},
+                    }
+                ],
+                integration_knowledge_id=mock_integration_knowledge.id,
+                token=mock_oauth_token,
+                processed_items=set(),
+                stats=stats,
+            )
 
+        mock_process.assert_not_called()
         mock_dependencies[
             "info_blob_service"
         ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
         assert stats["files_deleted"] == 0
         assert stats["skipped_details"] == [
-            {"file": "still-readable.docx", "reason": "Error: Graph timeout"}
+            {"file": "still-readable.docx", "reason": expected_reason}
+        ]
+
+
+class TestGetFileContent:
+    """``_get_file_content`` keeps its ``(content, skip_reason)`` shape and the
+    delete guard only accepts a completed parse that found nothing."""
+
+    ITEM = {
+        "id": "item-1",
+        "name": "Report.PDF",
+        "file": {},
+        "parentReference": {"driveId": "drive-1"},
+    }
+
+    async def test_text_is_returned_without_a_reason(self, service):
+        client = AsyncMock()
+        client.get_file_extraction_by_id.return_value = ExtractionResult.ok("Body")
+
+        assert await service._get_file_content(client, self.ITEM) == ("Body", None)
+        client.get_file_extraction_by_id.assert_awaited_once_with(
+            drive_id="drive-1", item_id="item-1"
+        )
+
+    @pytest.mark.parametrize(
+        ("outcome", "expected_reason", "positive"),
+        [
+            (
+                ExtractionResult.no_text(NO_TEXT_LAYER_REASON),
+                NO_TEXT_LAYER_REASON,
+                True,
+            ),
+            (
+                ExtractionResult.no_text(EMPTY_CONTENT_REASON),
+                EMPTY_CONTENT_REASON,
+                True,
+            ),
+            (
+                ExtractionResult.error("Corrupt or malformed file"),
+                "Error: Corrupt or malformed file",
+                False,
+            ),
+            (
+                ExtractionResult.error("Incomplete download of 'x' (1 of 2 bytes)"),
+                "Error: Incomplete download of 'x' (1 of 2 bytes)",
+                False,
+            ),
+            (
+                ExtractionResult.skipped("Unsupported file type (.xlsb)"),
+                "Unsupported file type (.xlsb)",
+                False,
+            ),
+            (RuntimeError("Graph timeout"), "Error: Graph timeout", False),
+            (
+                ValueError("SharePoint file 'x' exceeds max download size (1 > 0)"),
+                "File too large (exceeds 50 MB limit)",
+                False,
+            ),
+        ],
+    )
+    async def test_only_a_completed_parse_without_text_is_positive(
+        self, service, outcome, expected_reason, positive
+    ):
+        client = AsyncMock()
+        if isinstance(outcome, Exception):
+            client.get_file_extraction_by_id.side_effect = outcome
+        else:
+            client.get_file_extraction_by_id.return_value = outcome
+
+        content, skip_reason = await service._get_file_content(client, self.ITEM)
+
+        assert (content, skip_reason) == (None, expected_reason)
+        assert (
+            service._is_positive_unextractable_result(content, skip_reason) is positive
+        )
+
+    def test_real_text_is_never_a_positive_unextractable_result(self, service):
+        assert service._is_positive_unextractable_result("Body", None) is False
+        assert (
+            service._is_positive_unextractable_result("Body", EMPTY_CONTENT_REASON)
+            is False
+        )
+        assert service._is_positive_unextractable_result(None, None) is False
+
+    @pytest.mark.parametrize(
+        "item",
+        [
+            {
+                "id": "f",
+                "name": "Folder",
+                "folder": {"childCount": 0},
+                "parentReference": {"driveId": "d"},
+            },
+            {"id": "x", "name": "a.pdf", "file": {}, "parentReference": {}},
+            {"name": "a.pdf", "file": {}, "parentReference": {"driveId": "d"}},
+        ],
+    )
+    async def test_items_without_content_are_skipped_silently(self, service, item):
+        client = AsyncMock()
+
+        assert await service._get_file_content(client, item) == (None, None)
+        client.get_file_extraction_by_id.assert_not_called()
+
+    async def test_unsupported_extension_is_decided_before_download(self, service):
+        client = AsyncMock()
+        item = {**self.ITEM, "name": "Old.DOC"}
+
+        content, skip_reason = await service._get_file_content(client, item)
+
+        assert content is None
+        assert skip_reason == "Unsupported file type (legacy Word .doc, save as .docx)"
+        client.get_file_extraction_by_id.assert_not_called()
+
+    async def test_delete_helper_refuses_non_positive_reasons(
+        self, service, mock_integration_knowledge
+    ):
+        with pytest.raises(AssertionError):
+            await service._delete_local_blob_for_unextractable_item(
+                item_id="item-1",
+                item_name="a.pdf",
+                integration_knowledge=mock_integration_knowledge,
+                integration_knowledge_id=mock_integration_knowledge.id,
+                stats=service._initialize_stats(),
+                reason="Error: Corrupt or malformed file",
+            )
+
+    async def test_delete_helper_records_the_given_reason(
+        self, service, mock_dependencies, mock_integration_knowledge
+    ):
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+        stats = service._initialize_stats()
+
+        await service._delete_local_blob_for_unextractable_item(
+            item_id="item-1",
+            item_name="scan.pdf",
+            integration_knowledge=mock_integration_knowledge,
+            integration_knowledge_id=mock_integration_knowledge.id,
+            stats=stats,
+            reason=NO_TEXT_LAYER_REASON,
+        )
+
+        assert stats["skipped_details"] == [
+            {"file": "scan.pdf", "reason": NO_TEXT_LAYER_REASON}
         ]
 
 
@@ -2143,43 +2332,6 @@ class TestOutOfScopeFolderSubtreeCleanup:
 
         mock_enum.assert_not_called()
         repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
-
-
-class TestIsUnextractableContent:
-    """Extraction sentinels must not be treated as real document content."""
-
-    def test_empty_and_whitespace_are_unextractable(self):
-        from eneo.integration.infrastructure.content_service.utils import (
-            is_unextractable_content,
-        )
-
-        assert is_unextractable_content("") is True
-        assert is_unextractable_content("   \n\t ") is True
-        assert is_unextractable_content(None) is True
-
-    def test_sentinel_strings_are_unextractable(self):
-        from eneo.integration.infrastructure.content_service.utils import (
-            is_unextractable_content,
-        )
-
-        assert is_unextractable_content("[No readable text found]") is True
-        assert (
-            is_unextractable_content(
-                "  [Could not extract text from PowerPoint presentation]  "
-            )
-            is True
-        )
-        assert (
-            is_unextractable_content("[Could not extract text from Excel spreadsheet]")
-            is True
-        )
-
-    def test_real_text_is_extractable(self):
-        from eneo.integration.infrastructure.content_service.utils import (
-            is_unextractable_content,
-        )
-
-        assert is_unextractable_content("Real document content here.") is False
 
 
 class TestFullSyncReconciliation:

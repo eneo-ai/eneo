@@ -38,6 +38,9 @@ from eneo.integration.infrastructure.content_service.types import (
     SyncStats,
 )
 from eneo.integration.infrastructure.content_service.utils import (
+    EMPTY_CONTENT_REASON,
+    FILE_TOO_LARGE_REASON,
+    NO_TEXT_REASONS,
     file_extension_to_type,
     is_unextractable_content,
 )
@@ -1474,8 +1477,11 @@ class SharePointContentService:
         integration_knowledge: "IntegrationKnowledge",
         integration_knowledge_id: UUID,
         stats: SyncStats,
+        reason: str = EMPTY_CONTENT_REASON,
     ) -> None:
-        reason = "Empty or unreadable content"
+        # Only a parser that ran to completion on a complete download and
+        # found nothing may remove the local copy; see NO_TEXT_REASONS.
+        assert reason in NO_TEXT_REASONS, reason
         stats["skipped_items"] += 1
         stats["skipped_details"].append({"file": item_name, "reason": reason})
         await self._delete_local_sharepoint_item(
@@ -1491,9 +1497,7 @@ class SharePointContentService:
     def _is_positive_unextractable_result(
         content: Optional[str], skip_reason: Optional[str]
     ) -> bool:
-        if content is not None:
-            return is_unextractable_content(content)
-        return skip_reason == "Empty or unreadable content"
+        return content is None and skip_reason in NO_TEXT_REASONS
 
     async def _delete_out_of_scope_folder_subtree(
         self,
@@ -2404,18 +2408,18 @@ class SharePointContentService:
             return None, skip_reason
 
         try:
-            content, _ = await client.get_file_content_by_id(
+            result = await client.get_file_extraction_by_id(
                 drive_id=drive_id, item_id=item_id
             )
-            if not content:
-                return None, "Empty or unreadable content"
-            return content, None
-
         except ValueError as e:
             if "exceeds max download size" in str(e):
-                return None, "File too large (exceeds 50 MB limit)"
+                return None, FILE_TOO_LARGE_REASON
             logger.error(f"Error getting file content for {item_name}: {e}")
             return None, f"Error: {e}"
         except Exception as e:
             logger.error(f"Error getting file content for {item_name}: {e}")
             return None, f"Error: {e}"
+
+        if result.text is not None:
+            return result.text, None
+        return None, result.skip_reason
