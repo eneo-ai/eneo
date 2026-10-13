@@ -506,6 +506,10 @@ class SpaceFactory:
                     drive_id=getattr(i, "drive_id", None),
                     wrapper_id=getattr(i, "wrapper_id", None),
                     wrapper_name=getattr(i, "wrapper_name", None),
+                    last_sync_status=getattr(i, "last_sync_status", None),
+                    last_sync_error=getattr(i, "last_sync_error", None),
+                    last_sync_attempted_at=getattr(i, "last_sync_attempted_at", None),
+                    document_count=getattr(i, "document_count", None),
                 )
             )
 
