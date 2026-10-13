@@ -266,3 +266,73 @@ describe("tabular export", () => {
     expect(tooBig.outcome.error!.message).not.toContain("export=true");
   });
 });
+
+describe("prelude", () => {
+  test("Decimal gives exact arithmetic and returns as a string", async () => {
+    const outcome = await run(
+      `return [new Decimal("0.1").plus("0.2").toString(), new Decimal(1234.5).times(1.12).toFixed(2), new Decimal("0.1").plus("0.2"), 0.1 + 0.2];`,
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result).toEqual(["0.3", "1382.64", "0.3", 0.30000000000000004]);
+  });
+  test("fmt formats numbers, percentages and dates the Swedish way", async () => {
+    const outcome = await run(
+      `return {
+        a: fmt.number(1234.5, { decimals: 2 }), b: fmt.number(-1234567.891), c: fmt.number("1000"),
+        d: fmt.number(new Decimal("2.5"), { decimals: 0 }), e: fmt.number(1e21), f: fmt.number(0.000001),
+        g: fmt.percent(0.256), h: fmt.percent(1, 0), i: fmt.percent(-0.0005, 2),
+        j: fmt.date("2026-10-13T22:30:00Z"), k: fmt.datetime(new Date(Date.UTC(2026, 0, 2, 9, 5))),
+      };`,
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result).toEqual({
+      a: "1\u00a0234,50",
+      b: "-1\u00a0234\u00a0567,891",
+      c: "1\u00a0000",
+      d: "3",
+      e: "1\u00a0000\u00a0000\u00a0000\u00a0000\u00a0000\u00a0000\u00a0000",
+      f: "0,000001",
+      g: "25,6\u00a0%",
+      h: "100\u00a0%",
+      i: "-0,05\u00a0%",
+      j: "2026-10-13",
+      k: "2026-01-02 09:05",
+    });
+    const bad = await run(`return fmt.number("abc");`);
+    expect(bad.ok).toBe(false);
+    expect(bad.error!.message).toContain("not a number");
+  });
+  test("the installed globals are hidden from enumeration and cannot be replaced or deleted", async () => {
+    const outcome = await run(
+      `const before = Object.keys(globalThis).sort();
+       let replaced = "kept";
+       try { globalThis.fmt = 1; replaced = typeof fmt === "number" ? "replaced" : "kept"; } catch { replaced = "threw"; }
+       let deleted = "kept";
+       try { deleted = delete globalThis.Decimal ? "deleted" : "kept"; } catch { deleted = "threw"; }
+       let fmtMutated = "kept";
+       try { fmt.number = () => "x"; fmtMutated = fmt.number(1) === "x" ? "mutated" : "kept"; } catch { fmtMutated = "threw"; }
+       // A script may configure Decimal for its own run; the next call starts afresh.
+       Decimal.set({ precision: 5 });
+       return { before, replaced, deleted, fmtMutated, frozen: Object.isFrozen(fmt), third: new Decimal(1).div(3).toString() };`,
+    );
+    expect(outcome.ok).toBe(true);
+    const result = outcome.result as Record<string, unknown>;
+    expect(result.before as string[]).not.toContain("Decimal");
+    expect(result.before as string[]).not.toContain("fmt");
+    // Strict-mode scripts throw on these; a sloppy script just keeps what was there.
+    expect(["kept", "threw"]).toContain(result.replaced as string);
+    expect(["kept", "threw"]).toContain(result.deleted as string);
+    expect(["kept", "threw"]).toContain(result.fmtMutated as string);
+    expect(result.frozen).toBe(true);
+    expect(result.third).toBe("0.33333");
+    // The library default of 20 significant digits is back for the next call.
+    expect((await run("return new Decimal(1).div(3).toString();")).result).toBe(
+      "0.33333333333333333333",
+    );
+  });
+  test("installing the prelude costs little of a call", async () => {
+    const started = performance.now();
+    for (let i = 0; i < 5; i++) expect((await run("return 1;")).ok).toBe(true);
+    expect((performance.now() - started) / 5).toBeLessThan(50);
+  });
+});

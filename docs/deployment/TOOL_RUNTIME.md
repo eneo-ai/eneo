@@ -228,9 +228,11 @@ level. Check the start-up line and the points above before raising it.
 `run_javascript` runs model-written JavaScript over bounded JSON input and
 returns bounded JSON output.
 
-- Each call runs in a fresh QuickJS (WebAssembly) runtime. It sees only `input`
-  and `console`, with no network, filesystem, timers, imports, host APIs or
-  environment, and keeps no state between calls.
+- Each call runs in a fresh QuickJS (WebAssembly) runtime. It sees only `input`,
+  `console` and two preinstalled, frozen globals (`Decimal` from decimal.js for
+  exact decimal arithmetic and `fmt` for Swedish number and date formatting,
+  since QuickJS has no Intl), with no network, filesystem, timers, imports, host
+  APIs or environment, and keeps no state between calls.
 - Each call runs in a separate child process that inherits nothing but `PATH`
   and a private temporary directory. The bearer token never reaches it.
 - Limits: 20,000 characters of code, 64 KiB input, 256 KiB result, 100 log

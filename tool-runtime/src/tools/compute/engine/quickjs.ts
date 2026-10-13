@@ -16,6 +16,7 @@ import { toCsv } from "../../files/csv";
 import { MAX_LOG_LINE_CHARS, PREVIEW_ROWS, type ComputeConfig } from "../config";
 import type { ComputeExport, ComputeJob, ComputeOutcome, ScriptErrorCode } from "../ports";
 import { asTabular, describeShape, previewRows } from "../shape";
+import { loadPrelude } from "./prelude";
 
 const STACK_BYTES = 512 * 1024;
 const FILENAME = "script.js";
@@ -191,7 +192,7 @@ export async function runJavaScript(
   job: ComputeJob,
   config: ComputeConfig,
 ): Promise<ComputeOutcome> {
-  const QuickJS = await loadEngine();
+  const [QuickJS, prelude] = await Promise.all([loadEngine(), loadPrelude()]);
   const runtime = QuickJS.newRuntime();
   const vm = runtime.newContext();
   const logs: string[] = [];
@@ -209,6 +210,15 @@ export async function runJavaScript(
   try {
     runtime.setMemoryLimit(config.memory_mb * 1024 * 1024);
     runtime.setMaxStackSize(STACK_BYTES);
+    // The prelude (Decimal, fmt) is trusted code evaluated inside the memory limit but before
+    // the script's deadline starts, so the script keeps its whole time budget.
+    const installed = vm.evalCode(prelude, "prelude.js", { type: "global", strict: true });
+    if (installed.error) {
+      const failure = describeError(vm, installed.error);
+      installed.error.dispose();
+      throw new Error(`The compute prelude failed to install: ${failure.message}`);
+    }
+    installed.value.dispose();
     runtime.setInterruptHandler(shouldInterruptAfterDeadline(Date.now() + config.timeout_ms));
     installConsole(vm, logs, config.max_log_lines, dropped);
     installInput(vm, job.input);

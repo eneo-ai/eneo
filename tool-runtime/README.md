@@ -73,7 +73,7 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
 | `src/server.ts`              | Bearer check, Origin refusal, body/result bounds, MCP    |
 | `src/sandbox.ts`             | One child process per job (only `PATH` and `TMPDIR` in its env, watchdog, tmpdir) |
 | `src/child.ts`               | Child entrypoint                                         |
-| `src/tools/compute/`         | QuickJS engine, limits and the tool definition           |
+| `src/tools/compute/`         | QuickJS engine, limits, the tool definition, the result view and the prelude (`Decimal`, `fmt`) a script finds installed |
 | `src/tools/tabular/`         | Download policy, parsed-sheet cache, DuckDB/XLSX engines |
 | `src/tools/documents/`       | Markdown parser, DOCX/PDF/XLSX renderers, Word templates |
 | `scripts/render_pdf.py`      | The WeasyPrint sidecar the PDF renderer spawns            |
@@ -123,7 +123,10 @@ A view lives next to its tool (`src/tools/<tool>/view/`: `index.html`,
 `main.tsx`, and `index.ts`, which loads the built page). To add one, write
 those files and add the view to `VIEWS` in `scripts/build-views.ts`.
 
-`bun run build:views` builds every view with Vite into one self-contained page
+`bun run build:prelude` bundles `src/tools/compute/prelude/` (decimal.js and the
+Swedish `fmt` helpers) into `dist/prelude/compute.js`, evaluated in every fresh
+QuickJS context before the script; the libraries are build-time dependencies
+only. `bun run build:views` builds every view with Vite into one self-contained page
 under `dist/views/` (ignored by git). `bun run dev` and `bun run test` build
 them first, and the image builds them in its own stage, so React, Astryx and
 Vite are development dependencies only. A page larger than the 2 MB a host
