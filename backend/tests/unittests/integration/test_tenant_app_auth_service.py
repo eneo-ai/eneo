@@ -215,6 +215,38 @@ async def test_force_refresh_bypasses_cache(
         assert mock_client.post.call_count == 2
 
 
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        pytest.param("client_secret", "rotated-secret", id="secret"),
+        pytest.param("client_id", "other-client-id", id="client-id"),
+        pytest.param("tenant_domain", "other.onmicrosoft.com", id="tenant-domain"),
+    ],
+)
+async def test_changed_credentials_miss_the_cache_without_a_clear(
+    service, mock_tenant_app, mock_httpx_response, field, value
+):
+    """Another process keeps its cache after a reconfigure; only the
+    credentials themselves can tell it the cached token is stale."""
+    with patch("httpx.AsyncClient") as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.post.return_value = mock_httpx_response
+        mock_client_class.return_value = mock_client
+
+        await service.get_access_token(mock_tenant_app)
+        setattr(mock_tenant_app, field, value)
+        await service.get_access_token(mock_tenant_app)
+        await service.get_access_token(mock_tenant_app)
+
+        assert mock_client.post.call_count == 2
+        sent = mock_client.post.call_args
+        assert any(
+            value in part for part in (sent.args[0], *sent.kwargs["data"].values())
+        )
+
+
 async def test_cache_clear_invalidates_token(
     service, mock_tenant_app, mock_httpx_response
 ):
