@@ -13,8 +13,9 @@
   flex-direction: column;
   border-top: 1px solid var(--color-border);
 }
-.eneo-details > [role="tablist"] {
-  padding: 0 var(--spacing-3);
+/* Astryx draws the strip as a nav; it gets the toolbar's inset and room above the tabs. */
+.eneo-details > .astryx-tab-list {
+  padding: var(--spacing-2) var(--spacing-3) 0;
 }
 .eneo-panel {
   display: flex;
