@@ -209,6 +209,9 @@ class SpaceRole(BaseModel):
 
 
 class SpacePublic(SpaceDashboard):
+    organization_space_id: UUID | None = Field(
+        description="Organization space identity, independent of the caller's membership."
+    )
     enabled_capabilities: list[CapabilityPurpose] = Field(
         default_factory=list[CapabilityPurpose]
     )

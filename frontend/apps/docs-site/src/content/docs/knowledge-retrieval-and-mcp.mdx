@@ -59,10 +59,20 @@ file attachments and existing knowledge selectors together. **Bilagor**
 shows whether it is loaded before every answer or opened on demand; changing
 its reading mode does not move it out of Attachments.
 
-**Kunskap** (Knowledge) and **Organisationskunskap** (Organization knowledge)
-are separate sections below the attachments and uploader. The knowledge summary
-states whether searches run on demand or before every answer. Personal and
-organization knowledge retain their existing selectors and origins.
+Below the attachments and uploader, **Kunskap** (Knowledge) contains sources
+owned by the current space, **Organisationskunskap** (Organization knowledge)
+contains sources owned by the organization space, and **Kunskap delad från andra
+ytor** (Knowledge shared from other spaces) contains sources owned by another
+space and shared into this space. Organization identity comes from the current
+space's API response, independently of whether the user can open the organization
+space. Sources with unknown ownership remain visible in Knowledge; when organization
+identity is unavailable, other-space sources appear in the shared section.
+
+The available options and selected sources use the same ownership classification.
+Every selected source remains visible and removable, including when its embedding
+model is disabled. The knowledge summary states whether searches run on demand or
+before every answer. These sections describe ownership; they do not grant access
+or change sharing permissions.
 
 Use **Ändra** (Change) on a file to choose between **Öppna vid behov** (Open
 when needed) and **Läs in inför varje svar** (Load before every answer). The

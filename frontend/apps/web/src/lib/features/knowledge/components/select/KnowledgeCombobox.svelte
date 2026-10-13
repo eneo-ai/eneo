@@ -11,7 +11,7 @@
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import IntegrationVendorIcon from "$lib/features/integrations/components/IntegrationVendorIcon.svelte";
   import { getAvailableKnowledge } from "../../getAvailableKnowledge";
-  import { partitionByOrigin } from "./knowledgeOrigin";
+  import { partitionByOrigin, type KnowledgeOrigin } from "./knowledgeOrigin";
   import {
     dedupeById,
     getIntegrationKnowledgeOptions,
@@ -22,14 +22,14 @@
   type Space = Parameters<typeof getAvailableKnowledge>[0];
 
   type Props = {
-    origin: "personal" | "organization";
+    origin: KnowledgeOrigin;
     space: Space;
     currentSpaceId: string | undefined;
+    organizationSpaceId: string | undefined;
     selectedCollections: GroupSparse[] | undefined;
     selectedWebsites: WebsiteSparse[] | undefined;
     selectedIntegrationKnowledge: Space["knowledge"]["integrationKnowledge"] | undefined;
     inDialog?: boolean;
-    aria?: Record<string, string>;
     onAddCollection: (collection: GroupSparse) => void;
     onAddWebsite: (website: WebsiteSparse) => void;
     onAddIntegration: (entry: IntegrationEntry) => void;
@@ -39,11 +39,11 @@
     origin,
     space,
     currentSpaceId,
+    organizationSpaceId,
     selectedCollections,
     selectedWebsites,
     selectedIntegrationKnowledge,
     inDialog = false,
-    aria = {},
     onAddCollection,
     onAddWebsite,
     onAddIntegration
@@ -52,8 +52,6 @@
   let open = $state(false);
   let filter = $state("");
   let triggerRef = $state<HTMLButtonElement | null>(null);
-
-  const originBucket = $derived(origin === "personal" ? "personal" : "org");
 
   // getAvailableKnowledge already applies the text filter and embedding-model compatibility,
   // so the Command component must not filter again (shouldFilter={false} below).
@@ -67,7 +65,7 @@
     )
   );
 
-  /** The available sections, restricted to this combobox's origin (personal or organization). */
+  /** The available sections, restricted to this combobox's ownership origin. */
   const sections = $derived.by(() => {
     const out: Array<{
       key: string;
@@ -80,14 +78,21 @@
     }> = [];
 
     for (const [modelId, section] of Object.entries(available.sections)) {
-      const groups = partitionByOrigin(dedupeById(section.groups), currentSpaceId)[originBucket];
-      const websites = partitionByOrigin(dedupeById(section.websites), currentSpaceId)[
-        originBucket
-      ];
+      const groups = partitionByOrigin(
+        dedupeById(section.groups),
+        currentSpaceId,
+        organizationSpaceId
+      )[origin];
+      const websites = partitionByOrigin(
+        dedupeById(section.websites),
+        currentSpaceId,
+        organizationSpaceId
+      )[origin];
       const integration = partitionByOrigin(
         dedupeById(section.integrationKnowledge),
-        currentSpaceId
-      )[originBucket];
+        currentSpaceId,
+        organizationSpaceId
+      )[origin];
       const integrationOptions = getIntegrationKnowledgeOptions(
         integration,
         selectedIntegrationKnowledge ?? []
@@ -110,10 +115,18 @@
   });
 
   const triggerLabel = $derived(
-    origin === "personal" ? m.add_knowledge_personal() : m.add_knowledge_organization()
+    {
+      space: m.add_knowledge_space(),
+      organization: m.add_knowledge_organization(),
+      shared: m.add_knowledge_shared()
+    }[origin]
   );
   const emptyLabel = $derived(
-    origin === "personal" ? m.no_personal_sources() : m.no_organization_sources()
+    {
+      space: m.no_space_sources(),
+      organization: m.no_organization_sources(),
+      shared: m.no_shared_sources()
+    }[origin]
   );
 
   function selectAndClose(action: () => void) {
@@ -129,7 +142,6 @@
     {#snippet child({ props })}
       <button
         {...props}
-        {...aria}
         bind:this={triggerRef}
         type="button"
         class="border-default text-secondary hover:border-stronger hover:bg-hover-dimmer hover:text-primary focus-visible:ring-stronger flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
