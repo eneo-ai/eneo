@@ -271,3 +271,18 @@ async def test_linux_extractor_stops_when_its_worker_is_killed(tmp_path):
         if parent.returncode is None:
             parent.kill()
             await parent.wait()
+
+
+async def test_index_tabular_reaches_the_extraction_child(tmp_path: Path) -> None:
+    """Knowledge indexing samples a large table; the default keeps every row."""
+    path = tmp_path / "people.csv"
+    path.write_text("id,name\n" + "".join(f"{i},person-{i}\n" for i in range(30_000)))
+    extractor = TextExtractor()
+
+    complete = await extractor.extract_bounded(path, "text/csv", "people.csv")
+    sampled = await extractor.extract_bounded(
+        path, "text/csv", "people.csv", index_tabular=True
+    )
+
+    assert complete.endswith("29999,person-29999")
+    assert sampled.startswith("File: people.csv\n\nLarge table: 30000 rows.")

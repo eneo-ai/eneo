@@ -26,6 +26,7 @@ from eneo.integration.infrastructure.content_service.types import (
 )
 from eneo.integration.infrastructure.content_service.utils import (
     process_sharepoint_response,
+    sync_index_text,
 )
 
 FIXTURE_DRIVE_ID = "fixture-drive"
@@ -124,17 +125,17 @@ class LocalFolderSharePointClient(SharePointContentClient):
         content_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
         data = payload if retain_original_bytes(file_name, content_type) else None
         if content_type.startswith("text/"):
-            return SharePointFileContent(
-                text=payload.decode("utf-8", errors="replace"),
-                content_type=content_type,
-                file_name=file_name,
-                data=data,
+            text, detected = payload.decode("utf-8", errors="replace"), content_type
+        else:
+            text, detected = process_sharepoint_response(
+                response_content=payload, content_type=content_type, filename=file_name
             )
-        text, detected = process_sharepoint_response(
-            response_content=payload, content_type=content_type, filename=file_name
-        )
         return SharePointFileContent(
-            text=text, content_type=detected, file_name=file_name, data=data
+            text=text,
+            content_type=detected,
+            file_name=file_name,
+            data=data,
+            index_text=sync_index_text(file_name, text, retained=data is not None),
         )
 
     # --- delta: full syncs only -------------------------------------------

@@ -500,10 +500,14 @@ async def upload_info_blob_task(
                 embedding_model_id=embedding_model.id,
                 original=captured_original,
             )
+            # A knowledge upload always retains its original, so a large
+            # spreadsheet is indexed as schema plus sample; the table tools
+            # read the rows from the original.
             text = await container.text_extractor().extract_bounded(
                 filepath,
                 params.mimetype,
                 params.filename,
+                index_tabular=True,
             )
             if not text.strip():
                 raise NoExtractableTextError(params.filename)
