@@ -46,6 +46,9 @@ if TYPE_CHECKING:
     from eneo.integration.domain.repositories.oauth_token_repo import (
         OauthTokenRepository,
     )
+    from eneo.integration.infrastructure.auth_service.org_token_provider import (
+        OrgTokenProvider,
+    )
     from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
         ServiceAccountAuthService,
     )
@@ -132,6 +135,7 @@ class IntegrationKnowledgeService:
         tenant_sharepoint_app_repo: TenantSharePointAppRepositoryProtocol,
         tenant_app_auth_service: "TenantAppAuthService",
         service_account_auth_service: "ServiceAccountAuthService | None" = None,
+        org_token_provider: "OrgTokenProvider | None" = None,
     ) -> None:
         super().__init__()
         self.job_service = job_service
@@ -148,6 +152,7 @@ class IntegrationKnowledgeService:
         )
         self.tenant_app_auth_service = tenant_app_auth_service
         self.service_account_auth_service = service_account_auth_service
+        self.org_token_provider = org_token_provider
 
     async def require_sync_log_access(self, integration_knowledge_id: UUID) -> None:
         """Sync history follows knowledge read access, not connection ownership."""
@@ -170,6 +175,8 @@ class IntegrationKnowledgeService:
         self, tenant_app: "TenantSharePointApp"
     ) -> str:
         """Resolve tenant app access token and persist service-account token rotation."""
+        if self.org_token_provider is not None:
+            return await self.org_token_provider.get_access_token(tenant_app)
         if tenant_app.is_service_account() and not self.service_account_auth_service:
             raise BadRequestException("ServiceAccountAuthService not configured")
         from eneo.integration.infrastructure.auth_service.org_token_provider import (
