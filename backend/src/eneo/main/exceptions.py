@@ -92,6 +92,7 @@ class ErrorCodes(int, Enum):
     SKILL_REMOVAL_BUSY = 9062
     WEBSITE_CRAWL_ACTIVE = 9063
     WEBSITE_CRAWL_CLEANUP_PENDING = 9064
+    ASSISTANT_PUBLISHED_AS_WIDGET = 9070
 
 
 class NotFoundException(Exception):

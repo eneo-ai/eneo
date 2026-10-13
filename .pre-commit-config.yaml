@@ -70,7 +70,7 @@ repos:
         entry: bash -c 'cd frontend && bunx --bun prettier --write --ignore-unknown "${@/#frontend\//}"' --
         language: system
         files: ^frontend/(apps|packages)/[^/]+/.*\.(svelte|ts|tsx|js|jsx|css|scss|json|md|yaml|yml|html)$
-        exclude: ^frontend/[^/]+/[^/]+/(\.svelte-kit|node_modules|build|dist)/
+        exclude: ^frontend/[^/]+/[^/]+/(\.svelte-kit|node_modules|build|dist)/|^frontend/packages/widget-loader/releases/
         stages: [pre-commit]
 
   # Frontend: lint changed Svelte/TS/JS files

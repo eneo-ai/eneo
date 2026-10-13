@@ -86,6 +86,8 @@ async def _worker_main() -> None:
                         "procfs_vmhwm" if sys.platform == "linux" else "getrusage"
                     ),
                     "cpu_seconds": usage.ru_utime + usage.ru_stime,
+                    "application_loaded": "eneo.main.container.container"
+                    in sys.modules,
                 }
             )
         )

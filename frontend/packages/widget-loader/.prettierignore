@@ -1,0 +1,4 @@
+node_modules
+dist
+# Pinned release assets are served byte for byte (SRI); never reformat them.
+releases

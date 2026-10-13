@@ -12,10 +12,12 @@ from eneo.assistants.assistant_service import (
     _attach_generated_file_ids,
 )
 from eneo.questions.question import ToolCallInfo
+from tests.fixtures import TEST_USER
 
 
 def _service() -> AssistantService:
     service = AssistantService.__new__(AssistantService)
+    service.user = TEST_USER
     service.file_service = AsyncMock()
     return service
 

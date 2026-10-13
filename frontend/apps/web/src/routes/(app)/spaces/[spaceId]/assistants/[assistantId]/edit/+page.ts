@@ -18,7 +18,8 @@ export const load = async (event) => {
     promptGuideAvailability,
     skills,
     skillConfiguration,
-    documentTemplates
+    documentTemplates,
+    widgetStatus
   ] = await Promise.all([
     eneo.assistants.get({ id: event.params.assistantId }),
     eneo.assistants.listMCPServers({ id: event.params.assistantId }),
@@ -43,7 +44,9 @@ export const load = async (event) => {
         })
       : Promise.resolve({ bindings: [], runtime: null }),
     // The organisation's document templates, for the file-creation capability's choice.
-    eneo.documentTemplates.listAvailable().catch(() => ({ items: [] }))
+    eneo.documentTemplates.listAvailable().catch(() => ({ items: [] })),
+    // Anyone who can read the assistant may ask, widget permission or not.
+    eneo.assistants.getWidgetStatus({ id: event.params.assistantId }).catch(() => null)
   ]);
 
   // Help assistants are edited in the admin UI, not in a space. If someone
@@ -60,6 +63,8 @@ export const load = async (event) => {
     skillBindings: skillConfiguration.bindings,
     skillRuntime: skillConfiguration.runtime,
     supportsDirectSkills,
-    documentTemplates: documentTemplates.items
+    documentTemplates: documentTemplates.items,
+    // Visitors get the assistant as configured, tools included.
+    servesActiveWidget: widgetStatus?.serves_active_widget ?? false
   };
 };

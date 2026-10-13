@@ -2,6 +2,7 @@ import { browser } from "$app/environment";
 import { splitPendingInref } from "./inrefBuffer";
 import { PAGINATION } from "$lib/core/constants";
 import { toastError } from "$lib/core/errors";
+import { m } from "$lib/paraglide/messages";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { waitFor } from "$lib/core/waitFor";
@@ -304,8 +305,13 @@ export class ChatService {
   #streamGen = 0;
   #producerFlushThreshold = 2048; // Safety flush for background tabs or fast streams
 
-  constructor(data: Parameters<typeof this.init>[0]) {
+  // Off for the widget, which reports a broken-off answer itself; the
+  // signed-in chat writes the failure into the answer.
+  #inlineStreamErrors = true;
+
+  constructor(data: Parameters<typeof this.init>[0] & { inlineStreamErrors?: boolean }) {
     this.#eneo = data.eneo;
+    this.#inlineStreamErrors = data.inlineStreamErrors ?? true;
     this.init(data);
   }
 
@@ -662,7 +668,12 @@ export class ChatService {
     }
   }
 
-  async loadConversation(conversation: { id: string }) {
+  /**
+   * Load a conversation into the view. Failures are toasted and swallowed for
+   * the signed-in app; callers that must react to a gone session (the widget
+   * restoring one from storage) pass `rethrow`.
+   */
+  async loadConversation(conversation: { id: string }, options?: { rethrow?: boolean }) {
     try {
       const loaded = await this.#eneo.conversations.get(conversation);
       this.#resetConversationDiagnostics();
@@ -671,6 +682,7 @@ export class ChatService {
       this.#clearPreflight();
       return loaded;
     } catch (e) {
+      if (options?.rethrow) throw e;
       toastError(e);
       console.error(e);
     }
@@ -1041,9 +1053,13 @@ export class ChatService {
           this.#clearDiagnosticsPending(ref.id);
           console.error(error);
           throw error;
+        } else if (!this.#inlineStreamErrors) {
+          // The partial answer stays as it arrived; the caller says it broke off.
+          console.error(error);
+          throw error;
         } else {
           // Error during streaming — show inline in the conversation
-          let message = "We encountered an error processing your request.";
+          let message: string = m.chat_stream_error_inline();
           if (error instanceof EneoError) {
             message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
           } else if (error instanceof Object && "message" in error && "name" in error) {

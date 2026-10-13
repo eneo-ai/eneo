@@ -94,6 +94,21 @@ export function initAssistants(client) {
     },
 
     /**
+     * Whether an active web widget publishes the assistant. Anyone who can read
+     * the assistant may ask; nothing else about the widget is revealed.
+     * @param {{id: string}} params
+     * @returns {Promise<{serves_active_widget: boolean}>}
+     * @throws {EneoError}
+     * */
+    getWidgetStatus: async ({ id }) => {
+      const res = await client.fetch("/api/v1/assistants/{id}/widget-status/", {
+        method: "get",
+        params: { path: { id } }
+      });
+      return res;
+    },
+
+    /**
      * Update an existing assistant.
      * @param {Object} params
      * @param {{id: string} | Assistant} params.assistant The assistant you want to update
