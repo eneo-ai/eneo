@@ -257,6 +257,8 @@ When an administrator imports into a shared space, Eneo uses the centralized cre
 4. Select the folders you want to import
 5. Click **Import**
 
+The dialog ends with **Import queued** and the items start their first synchronization in the background; see [After an import](#after-an-import) for what happens next.
+
 The available sites depend on which authentication method is configured:
 
 - **Service Account**: Only sites the service account has been granted access to are shown
@@ -291,7 +293,7 @@ Files from SharePoint are read with the same parsers and extraction limits as fi
 - **Text files**: Plain text, Markdown, CSV/TSV, JSON, XML, HTML, YAML, logs and reStructuredText
 - **Web content**: SharePoint pages (text content only)
 
-Everything else is skipped with a reason that the [sync history](#sync-status-and-history) shows next to the file name:
+Everything else is skipped with a reason that the [sync history](#sync-status-and-history) and the item's [**Not indexed** tab](#the-not-indexed-tab) show next to the file name:
 
 - **Unsupported file type (…)** – images, video, audio, archives, executables, fonts, and Office family formats without a parser. Legacy Word and PowerPoint files are named with a hint, for example _Unsupported file type (legacy Word .doc, save as .docx)_; OneNote, Outlook `.msg`, rich text `.rtf` and OpenDocument files are also unsupported. These files are not downloaded.
 - **No text layer (scanned document; OCR is not supported)** – a PDF whose pages carry no characters. Eneo does not run OCR.
@@ -339,15 +341,50 @@ Transient throttling from Microsoft Graph (HTTP 429/503) during large imports is
 Each SharePoint item in a space's **Knowledge** list shows how its last synchronization went:
 
 - A status badge: **Never synced**, **Synced**, **Sync failed** or **Empty** (the last sync succeeded but no document is indexed, for example because every file was skipped).
-- The number of indexed documents.
+- The number of indexed documents. Both the number and the item's name open the item's [documents page](#imported-documents).
 - **Last synced:** the time of the last successful synchronization. It moves on every successful run, also when nothing had changed, so a healthy item never looks stale. An item that has only ever failed shows **Last attempt:** instead.
 - For a failed sync, **Show error** reveals the error text.
 
-A site-level row that groups several imported items shows the combined picture: **Sync failed** with each failing item named if any of them failed, otherwise the documents of all items added up. Its actions menu has **Resync all items**, which queues a full synchronization of every item under the site; a single item has **Full Sync** in its own menu.
+A site-level row that groups several imported items shows the combined picture: **Sync failed** with each failing item named if any of them failed, otherwise the documents of all items added up. Its actions menu has **Resync all items**, which queues a full synchronization of every item under the site; a single item has **Full Sync** in its own menu. Opening the site row shows its items as a [folder tree](#the-site-page).
 
 The timeline link opens the **Sync History** dialog, which lists every synchronization with its type (full or delta), result, duration and a summary of what happened: files synced, files deleted, pages synced, items unchanged and items skipped. Unchanged items are files Eneo had already indexed in the same version, so nothing was re-processed; they are counted separately from skipped files. The skipped list names each file with its exact reason (see [Supported File Types](#supported-file-types)). At most 50 skipped files are listed per run; when more were skipped the list ends with _and N more_. A **Reconciliation warning** appears when a full synchronization could not safely clean up documents that no longer exist in SharePoint, either because the site could not be listed completely or because the number of missing documents was above the safety cap; the documents are kept, and the next successful full synchronization tries again.
 
 Items whose last sync failed or indexed nothing are also flagged when you pick knowledge for an assistant. In the chat, an assistant whose knowledge is inserted into every message shows _No sources found in the knowledge_ under an answer that used no sources, so an empty or broken source does not pass unnoticed.
+
+### Imported Documents
+
+Each imported item has its own page that shows what the last synchronization indexed and which files it left out. Open it from the space's **Knowledge** list by clicking the item's name or its document count, or from the **Show** button in the notice that appears when an import's first sync finishes. Anyone who can see the space's integrations can open the page.
+
+The page is titled with the item's name, with a breadcrumb back to **Integrations** and, for an item imported from a site, to that site's page. It shows the **SharePoint folder** path, the same sync status as the list (badge, document count, last sync, error text and webhook status), the **Open in SharePoint** button and the item's actions menu, followed by two tabs. If a synchronization finishes while the page is open, both tabs refresh themselves.
+
+#### The Documents tab
+
+**Documents** lists the indexed documents, 50 per page:
+
+- **Name** opens a preview of the extracted text. From the preview you can copy the text, **Download extracted text** or **Download original**. The link icon at the end of the row opens the file in SharePoint.
+- **Path** is the folder below the imported folder; a file that sits directly in the imported folder has an empty path. The list is sorted by path by default, so files are grouped the way they are in SharePoint.
+- **Size** is the file's size and **Updated** is when Eneo last indexed the document.
+- **Properties** shows the file's [document properties](#document-properties-library-columns) when the library has any.
+
+The search box matches the name or the path. Each of the four column headings sorts the list, ascending on the first click and reversed on the next. Below the table, _Showing 1–50 of N_ gives the position in the list beside the **Total size** of every indexed document, with **Previous** and **Next** to page.
+
+An item that has not synced yet reads _No documents yet. The first sync runs in the background._ An item whose sync indexed nothing reads _No documents could be indexed_ with the link **See which files were not indexed**, which switches to the other tab.
+
+#### The Not indexed tab
+
+**Not indexed (N)** lists the files that the latest synchronization skipped, introduced by _From the sync on …_. The files are grouped by reason, largest group first, with each heading showing the reason and the number of files, for example _Unsupported file type (legacy Word .doc, save as .docx) (12)_. The reasons are the ones listed under [Supported File Types](#supported-file-types), shown in your language; in English they read _Unsupported file type (…)_, _No text layer (scanned document; OCR is not supported)_, _Empty or unreadable content_, _File too large (exceeds the N MB limit)_, _Exceeds the extraction limit (N bytes of text)_ or _(N PDF pages)_, _Incomplete download_, _Password-protected file_, _Corrupt or malformed file_, and _Error: …_ for anything else.
+
+The number in the tab name counts every skipped file, but the list itself holds at most 50 files, the same cap as the sync history; when more were skipped it ends with _and N more_. When the latest sync skipped nothing, the tab reads _Every file in the latest sync was indexed._ The tab only reflects the latest synchronization: a file that was skipped earlier but indexed since is no longer listed. The page can also be opened straight on this tab, which is what the completion notice does when an import indexed nothing but skipped files.
+
+#### The site page
+
+A site row in the **Knowledge** list opens the site page, which lists the items imported from that site as a folder tree. An item imported from a folder inside another imported folder is nested under it, whole-site imports come first and siblings are sorted by name. Every item that has nested items under it has an **Expand folder** / **Collapse folder** button; all of them start expanded. The filter box above the tree matches item names and keeps the parents needed to reach a match. Each row has the same status, link and actions as in the **Knowledge** list, and its name and document count open the item's documents page.
+
+#### After an import
+
+The import dialog's last step is **Import queued**: _N items were queued. The first sync runs in the background and you get a notice when each item finishes._ If some items could not be queued, the step adds _N items could not be queued._ **Show the import** closes the dialog and opens the site page when the items belong to a site, the documents page when a single item was imported, and otherwise the **Integrations** tab.
+
+When an item's first synchronization finishes, a notice reports the result: _Name: N documents indexed, N skipped_, with a **Show** button that opens the item's documents page, on the **Not indexed** tab if nothing was indexed but files were skipped. A first synchronization that fails shows _Name: the first sync failed_ followed by the error text. The notice appears while you are in the space the import belongs to; if you have moved to another space, it waits until you return.
 
 ### Removing an Imported Folder
 
