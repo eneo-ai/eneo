@@ -13,6 +13,9 @@ from eneo.integration.domain.entities.tenant_sharepoint_app import (
     AUTH_METHOD_SERVICE_ACCOUNT,
     TenantSharePointApp,
 )
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    OrgTokenProvider,
+)
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountTokenResult,
 )
@@ -27,6 +30,9 @@ from eneo.integration.presentation.admin_sharepoint_router import (
     renew_expired_subscriptions,
     restart_service_account_auth,
     service_account_auth_callback,
+)
+from eneo.integration.presentation.admin_sharepoint_router import (
+    test_sharepoint_app_credentials as app_credentials_endpoint,
 )
 from eneo.settings.encryption_service import EncryptionService
 
@@ -166,7 +172,11 @@ async def test_token_helper_persists_rotated_service_account_refresh_token():
         "access_token": "service-account-access-token",
         "refresh_token": "new-refresh-token",
     }
-    container.service_account_auth_service.return_value = service_account_auth
+    container.org_token_provider.return_value = OrgTokenProvider(
+        tenant_app_repo=tenant_app_repo,
+        tenant_app_auth_service=AsyncMock(),
+        service_account_auth_service=service_account_auth,
+    )
 
     token = await _get_sharepoint_token_for_user_integration(
         user_integration=user_integration,
@@ -301,6 +311,37 @@ async def test_reauth_state_carries_no_secret_and_callback_reuses_stored_app():
     assert configure_kwargs["refresh_token"] == "new-refresh"
     assert result.id == app.id
     assert redis.store == {}
+
+
+@pytest.mark.asyncio
+async def test_testing_without_a_body_round_trips_the_stored_app():
+    container, user = _build_container_with_admin_user()
+    app = _service_account_app(user.tenant_id)
+    container.tenant_sharepoint_app_service.return_value.get_active_app_for_tenant = (
+        AsyncMock(return_value=app)
+    )
+    provider = AsyncMock()
+    provider.test_connection.return_value = (False, "AADSTS50173: revoked")
+    container.org_token_provider.return_value = provider
+
+    result = await app_credentials_endpoint(container=container)
+
+    provider.test_connection.assert_awaited_once_with(app)
+    assert (result.success, result.error_message) == (False, "AADSTS50173: revoked")
+
+
+@pytest.mark.asyncio
+async def test_testing_without_a_body_requires_a_stored_app():
+    container, _ = _build_container_with_admin_user()
+    container.tenant_sharepoint_app_service.return_value.get_active_app_for_tenant = (
+        AsyncMock(return_value=None)
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await app_credentials_endpoint(container=container)
+
+    assert exc_info.value.status_code == 400
+    container.org_token_provider.assert_not_called()
 
 
 def test_require_sharepoint_webhook_client_state_raises_when_missing():

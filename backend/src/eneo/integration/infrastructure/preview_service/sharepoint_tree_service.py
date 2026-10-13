@@ -3,6 +3,7 @@ from uuid import UUID
 
 from eneo.integration.domain.entities.oauth_token import SharePointToken
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
+    AccessTokenProvider,
     SharePointContentClient,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_metadata import (
@@ -31,10 +32,13 @@ TokenRefreshCallback = Callable[[UUID], Awaitable[Dict[str, str]]]
 
 class SharePointTreeService:
     def __init__(
-        self, token_refresh_callback: Optional[TokenRefreshCallback] = None
+        self,
+        token_refresh_callback: Optional[TokenRefreshCallback] = None,
+        access_token_provider: Optional[AccessTokenProvider] = None,
     ) -> None:
         super().__init__()
         self.token_refresh_callback = token_refresh_callback
+        self.access_token_provider = access_token_provider
 
     async def get_folder_tree(
         self,
@@ -77,6 +81,7 @@ class SharePointTreeService:
             api_token=token.access_token,
             token_id=token.id,
             token_refresh_callback=self.token_refresh_callback,
+            access_token_provider=self.access_token_provider,
             # Files in the picker show the library columns that will follow
             # them on import, so people can see what is searchable before
             # choosing.
@@ -284,6 +289,7 @@ class SharePointTreeService:
             api_token=token.access_token,
             token_id=token.id,
             token_refresh_callback=self.token_refresh_callback,
+            access_token_provider=self.access_token_provider,
             include_list_item_fields=True,
         ) as content_client:
             actual_drive_id = drive_id

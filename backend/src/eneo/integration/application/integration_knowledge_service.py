@@ -170,24 +170,22 @@ class IntegrationKnowledgeService:
         self, tenant_app: "TenantSharePointApp"
     ) -> str:
         """Resolve tenant app access token and persist service-account token rotation."""
-        if tenant_app.is_service_account():
-            if not self.service_account_auth_service:
-                raise BadRequestException("ServiceAccountAuthService not configured")
+        if tenant_app.is_service_account() and not self.service_account_auth_service:
+            raise BadRequestException("ServiceAccountAuthService not configured")
+        from eneo.integration.infrastructure.auth_service.org_token_provider import (
+            OrgTokenProvider,
+        )
+        from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
+            ServiceAccountAuthService,
+        )
 
-            token_data = await self.service_account_auth_service.refresh_access_token(
-                tenant_app
-            )
-            access_token = token_data["access_token"]
-            new_refresh_token = token_data.get("refresh_token")
-            if (
-                new_refresh_token
-                and new_refresh_token != tenant_app.service_account_refresh_token
-            ):
-                tenant_app.update_refresh_token(new_refresh_token)
-                await self.tenant_sharepoint_app_repo.update(tenant_app)
-            return access_token
-
-        return await self.tenant_app_auth_service.get_access_token(tenant_app)
+        provider = OrgTokenProvider(
+            tenant_app_repo=self.tenant_sharepoint_app_repo,
+            tenant_app_auth_service=self.tenant_app_auth_service,
+            service_account_auth_service=self.service_account_auth_service
+            or ServiceAccountAuthService(),
+        )
+        return await provider.get_access_token(tenant_app)
 
     async def create_space_integration_knowledge(
         self,

@@ -733,7 +733,7 @@ class TestRemoveKnowledge:
 
         # Verify tenant_app_auth_service was called (not service_account)
         tenant_app_auth_service.get_access_token.assert_called_once_with(
-            tenant_app_client_credentials
+            tenant_app_client_credentials, force_refresh=False
         )
 
     async def test_remove_knowledge_service_account_uses_service_account_auth(
@@ -1082,7 +1082,7 @@ class TestCreateSpaceIntegrationKnowledge:
 
         # Verify tenant_app_auth_service was called
         tenant_app_auth_service.get_access_token.assert_called_once_with(
-            tenant_app_client_credentials
+            tenant_app_client_credentials, force_refresh=False
         )
         # Verify job was queued with tenant_app_id
         job_service.queue_job.assert_called_once()

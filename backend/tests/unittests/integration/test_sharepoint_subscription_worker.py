@@ -14,6 +14,9 @@ import pytest
 from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    OrgTokenProvider,
+)
 from eneo.integration.infrastructure.sharepoint_subscription_worker import (
     SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES,
     SHAREPOINT_SYNC_TASKS,
@@ -62,6 +65,13 @@ def mock_container():
     container.tenant_app_auth_service = MagicMock(return_value=AsyncMock())
     container.service_account_auth_service = MagicMock(return_value=AsyncMock())
     container.sharepoint_subscription_service = MagicMock(return_value=AsyncMock())
+    container.org_token_provider = MagicMock(
+        side_effect=lambda: OrgTokenProvider(
+            tenant_app_repo=container.tenant_sharepoint_app_repo(),
+            tenant_app_auth_service=container.tenant_app_auth_service(),
+            service_account_auth_service=container.service_account_auth_service(),
+        )
+    )
 
     # Mock session — begin/begin_nested return async context managers
     mock_session = AsyncMock()
@@ -145,7 +155,7 @@ class TestGetTokenForSubscription:
         assert token is not None
         assert token.access_token == "tenant-app-access-token"
         mock_container.tenant_app_auth_service().get_access_token.assert_called_once_with(
-            tenant_app
+            tenant_app, force_refresh=False
         )
 
     @pytest.mark.asyncio

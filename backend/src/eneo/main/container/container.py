@@ -159,6 +159,9 @@ from eneo.integration.application.user_integration_service import (
 from eneo.integration.infrastructure.auth_service.confluence_auth_service import (
     ConfluenceAuthService,
 )
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    OrgTokenProvider,
+)
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
 )
@@ -1438,6 +1441,7 @@ class Container(containers.DeclarativeContainer):
     tenant_sharepoint_app_service = providers.Factory(
         TenantSharePointAppService,
         tenant_app_repo=tenant_sharepoint_app_repo,
+        tenant_app_auth_service=tenant_app_auth_service,
     )
 
     # SharePoint auth service with tenant app support
@@ -1449,6 +1453,12 @@ class Container(containers.DeclarativeContainer):
     # Service account auth service for delegated permissions via service account
     service_account_auth_service = providers.Factory(
         ServiceAccountAuthService,
+    )
+    org_token_provider = providers.Factory(
+        OrgTokenProvider,
+        tenant_app_repo=tenant_sharepoint_app_repo,
+        tenant_app_auth_service=tenant_app_auth_service,
+        service_account_auth_service=service_account_auth_service,
     )
 
     oauth2_service = providers.Factory(
@@ -1476,6 +1486,7 @@ class Container(containers.DeclarativeContainer):
         tenant_app_auth_service=tenant_app_auth_service,
         oauth_token_service=oauth_token_service,
         service_account_auth_service=service_account_auth_service,
+        org_token_provider=org_token_provider,
     )
 
     sharepoint_subscription_service = providers.Factory(
@@ -1560,6 +1571,7 @@ class Container(containers.DeclarativeContainer):
         tenant_app_auth_service=tenant_app_auth_service,
         service_account_auth_service=service_account_auth_service,
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+        org_token_provider=org_token_provider,
     )
     integration_preview_service = providers.Factory(
         IntegrationPreviewService,

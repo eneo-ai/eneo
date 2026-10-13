@@ -207,23 +207,7 @@ async def _get_sharepoint_token_for_user_integration(
                 f"TenantSharePointApp {user_integration.tenant_app_id} not found"
             )
 
-        if tenant_app.is_service_account():
-            service_account_auth = container.service_account_auth_service()
-            token_result = await service_account_auth.refresh_access_token(tenant_app)
-            new_refresh_token = token_result.get("refresh_token")
-            if (
-                new_refresh_token
-                and new_refresh_token != tenant_app.service_account_refresh_token
-            ):
-                tenant_app.update_refresh_token(new_refresh_token)
-                await tenant_app_repo.update(tenant_app)
-            return cast(
-                SharePointTokenProtocol,
-                _SimpleGraphToken(token_result["access_token"]),
-            )
-
-        tenant_app_auth = container.tenant_app_auth_service()
-        access_token = await tenant_app_auth.get_access_token(tenant_app)
+        access_token = await container.org_token_provider().get_access_token(tenant_app)
         return cast(SharePointTokenProtocol, _SimpleGraphToken(access_token))
 
     token = await oauth_token_service.get_oauth_token_by_user_integration(
@@ -474,12 +458,15 @@ async def get_sharepoint_app(
     response_model=TenantAppTestResult,
     summary="Test SharePoint app credentials",
     description=(
-        "Test if the provided SharePoint app credentials are valid by attempting "
-        "to acquire an access token. This does not save the credentials. "
-        "Requires admin role."
+        "With a body: test the given tenant-app credentials by acquiring an access "
+        "token, without saving them. Without a body: do a full token round trip "
+        "with the stored app (client credentials for tenant apps, the refresh "
+        "token for service accounts) and record the outcome as the app's "
+        "credential health. Requires admin role."
     ),
     responses={
         200: {"description": "Test completed (check success field in response)"},
+        400: {"description": "No SharePoint app is configured to test"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
     },
@@ -490,10 +477,12 @@ async def get_sharepoint_app(
     reason="Organization administration requires the admin permission.",
 )
 async def test_sharepoint_app_credentials(
-    app_config: Annotated[TenantSharePointAppCreate, Body()],
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    app_config: Annotated[Optional[TenantSharePointAppCreate], Body()] = None,
 ) -> TenantAppTestResult:
     """Test SharePoint app credentials without saving them."""
+    if app_config is None:
+        return await _test_stored_sharepoint_app(container)
     try:
         user = container.user()
         logger.info(
@@ -537,6 +526,31 @@ async def test_sharepoint_app_credentials(
             error_message=str(e),
             details=None,
         )
+
+
+async def _test_stored_sharepoint_app(container: Container) -> TenantAppTestResult:
+    user = container.user()
+    tenant_app_service: TenantSharePointAppService = (
+        container.tenant_sharepoint_app_service()
+    )
+    app = await tenant_app_service.get_active_app_for_tenant(user.tenant_id)
+    if app is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active SharePoint app is configured for this organization.",
+        )
+    success, error_msg = await container.org_token_provider().test_connection(app)
+    logger.info(
+        "Tested stored SharePoint app %s for tenant %s: %s",
+        app.id,
+        user.tenant_id,
+        "ok" if success else "failed",
+    )
+    return TenantAppTestResult(
+        success=success,
+        error_message=error_msg,
+        details="Token acquired successfully" if success else None,
+    )
 
 
 @router.delete(

@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.integration.domain.entities.integration_preview import IntegrationPreview
+from eneo.integration.infrastructure.graph_errors import user_facing_sharepoint_error
 from eneo.main.exceptions import BadRequestException
 
 if TYPE_CHECKING:
@@ -38,16 +39,28 @@ class IntegrationPreviewService:
         connection = await self.user_integration_service.get_authorized_integration(
             user_integration_id
         )
-        if connection.tenant_app is not None:
-            return await self.sharepoint_preview_service.get_preview_info_with_app(
-                tenant_app=connection.tenant_app
-            )
+        try:
+            if connection.tenant_app is not None:
+                return await self.sharepoint_preview_service.get_preview_info_with_app(
+                    tenant_app=connection.tenant_app
+                )
 
-        token = await self.oauth_token_repo.one(
-            user_integration_id=connection.integration.id
-        )
-        if token.token_type.is_confluence:
-            return await self.confluence_preview_service.get_preview_info(token=token)
-        if token.token_type.is_sharepoint:
-            return await self.sharepoint_preview_service.get_preview_info(token=token)
+            token = await self.oauth_token_repo.one(
+                user_integration_id=connection.integration.id
+            )
+            if token.token_type.is_confluence:
+                return await self.confluence_preview_service.get_preview_info(
+                    token=token
+                )
+            if token.token_type.is_sharepoint:
+                return await self.sharepoint_preview_service.get_preview_info(
+                    token=token
+                )
+        except BadRequestException:
+            raise
+        except Exception as exc:
+            message = user_facing_sharepoint_error(exc)
+            if message is None:
+                raise
+            raise BadRequestException(message) from exc
         raise BadRequestException(f"Unsupported integration type: {token.token_type}")

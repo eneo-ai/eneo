@@ -90,7 +90,9 @@ async def test_organization_selection_uses_its_approved_app(
     token_router.oauth_token_service.get_oauth_token_by_user_integration.assert_not_awaited()
     if auth_method == "service_account":
         assert case.app.service_account_refresh_token == "rotated-refresh"
-        token_router.tenant_app_service.update.assert_awaited_once_with(case.app)
+        token_router.tenant_app_service.tenant_app_repo.update.assert_awaited_once_with(
+            case.app
+        )
 
 
 async def test_missing_oauth_token_is_an_explicit_failure(
