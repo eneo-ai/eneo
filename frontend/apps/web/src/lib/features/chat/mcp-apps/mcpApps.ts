@@ -49,7 +49,12 @@ export function appViewTitle(call: McpAppCall | null | undefined): string {
  * apart in a list.
  */
 export function appViewSubject(call: McpAppCall): string | null {
-  const title = call.arguments?.title;
+  return titleArgument(call.arguments);
+}
+
+/** The `title` a call names its result by (a chart's title, a table's caption), or null. */
+export function titleArgument(args: Record<string, unknown> | null | undefined): string | null {
+  const title = args?.title;
   return typeof title === "string" && title.trim() ? title.trim() : null;
 }
 

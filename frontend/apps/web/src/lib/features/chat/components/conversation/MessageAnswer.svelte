@@ -7,10 +7,18 @@
   import MessageEneoInfoBlob from "./MessageEneoInfoBlob.svelte";
   import MessageDocumentLink from "./MessageDocumentLink.svelte";
   import McpImageAttachments from "./McpImageAttachments.svelte";
-  import { isChartDocumentAsset } from "../../mcp-apps/mcpApps";
+  import {
+    appViewCalls,
+    appViewSubject,
+    appViewTitle,
+    isChartDocumentAsset,
+    titleArgument
+  } from "../../mcp-apps/mcpApps";
   import McpAppFrames from "../../mcp-apps/McpAppFrames.svelte";
+  import { getMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
   import InternalToolStep from "./InternalToolStep.svelte";
+  import ToolStepIcon from "./ToolStepIcon.svelte";
   import SkillActivationStep from "./SkillActivationStep.svelte";
   import { dynamicColour } from "$lib/core/colours";
   import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
@@ -19,10 +27,12 @@
   import {
     capabilityProviderDetail,
     internalToolDoneLabel,
-    isBuiltinToolCall,
     isSkillActivation,
     serverDisplayName,
-    toolDisplayName
+    toolDisplayName,
+    toolStepIcon,
+    toolStepKind,
+    type ToolStepKind
   } from "../../internalToolLabels";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
@@ -37,6 +47,8 @@
   const chat = getChatService();
   const attachmentUrls = getAttachmentUrlService();
   const preview = getFilePreview();
+  // Undefined where the conversation has no side panel; views then stay inline.
+  const appPane = getMcpAppPane();
 
   const { current, isLast } = getMessageContext();
   const message = $derived(current());
@@ -66,6 +78,7 @@
           is_internal?: boolean | null;
           is_bundled?: boolean | null;
           generated_file_ids?: string[] | null;
+          app_view?: unknown;
         }>
       | undefined
   );
@@ -153,6 +166,16 @@
         (candidate) => isDocument(candidate) && fileIds.includes(candidate.id)
       );
       const createsFile = tc.purpose === "file_creation";
+      // The view of the call's result, once the panel can show it: the step
+      // names it and opens it, as it does a document.
+      const appCall = appViewCalls([tc])[0];
+      const view =
+        appCall && appPane?.offered.has(appCall.tool_call_id)
+          ? {
+              name: appViewSubject(appCall) ?? appViewTitle(appCall),
+              open: () => appPane.open(appCall.tool_call_id)
+            }
+          : null;
       // A document being written is named as soon as its title has arrived.
       const writingTitle = createsFile
         ? ((tc.arguments?.title as string | undefined) ??
@@ -206,29 +229,52 @@
           toolName,
         serverName: serverDisplayName(tc.server_name, tc.purpose, tc.is_internal),
         identity: `${tc.server_name} · ${tc.tool_name}`,
-        detail: readFileDetail(tc) ?? capabilityProviderDetail(tc),
+        // A result's title (a chart's, a table's) is the step's detail unless
+        // the step already names it: as a view, or as a document being written.
+        detail:
+          readFileDetail(tc) ??
+          (view || createsFile ? null : titleArgument(tc.arguments)) ??
+          capabilityProviderDetail(tc),
         skillName: isSkillActivation(tc) ? (tc.title ?? tc.tool_name) : null,
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
         status,
         previousAttempt: status === "failed" && !isSkillActivation(tc) && previousAttempts.has(i),
-        // Capability calls render as built-in steps whichever provider served
-        // them; general external servers keep their cards.
-        internal: isBuiltinToolCall(tc)
+        // Function steps (capability calls, whichever provider served them)
+        // and context steps (Eneo's own lookups) render as slim lines in runs
+        // of their kind; general external servers keep their cards.
+        kind: toolStepKind(tc),
+        // A Skill activation sets up the work that follows: it belongs to
+        // whichever slim run it sits in rather than to a kind of its own.
+        neutral: isSkillActivation(tc),
+        icon: toolStepIcon(tc.purpose),
+        view
       };
     })
   );
-  // Built-in loopback tools render as slim thinking-style lines in the message
-  // flow; only external MCP calls keep their cards in the reasoning trace.
+  // Built-in tools render as slim thinking-style lines in the message flow;
+  // only external MCP calls keep their cards in the reasoning trace.
   // Contiguous steps of the same kind group into runs that render in call
-  // order, so the trace stays chronological when a turn mixes both kinds
-  // (e.g. a knowledge search followed by web tools).
+  // order, so the trace stays chronological when a turn mixes kinds (e.g. a
+  // knowledge search followed by a chart), and a lookup never folds into the
+  // work that followed it.
   const stepRuns = $derived.by(() => {
-    const runs: { internal: boolean; steps: typeof tracedSteps }[] = [];
+    const runs: { kind: ToolStepKind; steps: typeof tracedSteps }[] = [];
     for (const step of tracedSteps) {
       const last = runs[runs.length - 1];
-      if (last && last.internal === step.internal) last.steps.push(step);
-      else runs.push({ internal: step.internal, steps: [step] });
+      // A neutral step joins the slim run around it, and a run of only
+      // neutral steps takes the kind of the first step that follows them.
+      const joins =
+        last !== undefined &&
+        last.kind !== "external" &&
+        step.kind !== "external" &&
+        (step.kind === last.kind || step.neutral || last.steps.every((s) => s.neutral));
+      if (joins) {
+        last.steps.push(step);
+        if (!step.neutral) last.kind = step.kind;
+      } else {
+        runs.push({ kind: step.kind, steps: [step] });
+      }
     }
     return runs;
   });
@@ -251,6 +297,16 @@
     const servers = [...new Set(steps.map((step) => step.serverName))].join(" · ");
     return `${servers} · ${m.internal_tool_steps_count({ count: steps.length })}`;
   };
+  // The functions a run used, in call order, shown as a cluster of their icons
+  // before the summary; past this many the rest count as "+N".
+  const MAX_RUN_ICONS = 3;
+  const runIcons = (steps: typeof tracedSteps) => {
+    const icons: NonNullable<(typeof tracedSteps)[number]["icon"]>[] = [];
+    for (const step of steps) {
+      if (step.icon && !icons.includes(step.icon)) icons.push(step.icon);
+    }
+    return icons;
+  };
   // A step that created a document is that document's place in the chat, so
   // it never folds away with the others.
   const createdDocument = (step: (typeof tracedSteps)[number]) =>
@@ -259,7 +315,9 @@
   // calls recorded their files) keep a card, so each stays reachable.
   const unclaimedDocumentIds = $derived.by(() => {
     const claimed = new Set(
-      tracedSteps.flatMap((step) => (step.internal && step.document ? [step.document.file.id] : []))
+      tracedSteps.flatMap((step) =>
+        step.kind !== "external" && step.document ? [step.document.file.id] : []
+      )
     );
     return new Set(
       message.generated_files
@@ -363,14 +421,14 @@
   <!-- Reasoning text belongs at the top of the trace: it rides in the first
        run's box when that run is external, otherwise it gets its own box so
        it never renders below tool activity it preceded. -->
-  {#if reasoningText.trim().length > 0 && (stepRuns.length === 0 || stepRuns[0].internal)}
+  {#if reasoningText.trim().length > 0 && (stepRuns.length === 0 || stepRuns[0].kind !== "external")}
     <div class="mb-4">
       <ReasoningTrace reasoning={reasoningText} working={toolsStillExecuting} />
     </div>
   {/if}
 
   {#each stepRuns as run, runIndex (runIndex)}
-    {#if !run.internal}
+    {#if run.kind === "external"}
       <div class="mb-4">
         <ReasoningTrace
           steps={run.steps}
@@ -387,7 +445,9 @@
       {@const foldable = run.steps.filter((step) => !createdDocument(step))}
       {@const folded = !working && foldable.length > 1}
       {@const visibleSteps = working ? run.steps.slice(-1) : run.steps}
-      <div class="mb-4 flex flex-col gap-0.5">
+      <!-- Function rows carry a chip taller than their text, so they get more air than rows of plain text. -->
+      {@const rowGap = run.kind === "function" ? "gap-1.5" : "gap-0.5"}
+      <div class="mb-4 flex flex-col {rowGap}">
         {#if folded}
           <button
             type="button"
@@ -403,6 +463,22 @@
                 ? 'rotate-90'
                 : ''}"
             />
+            {#if run.kind === "function"}
+              {@const icons = runIcons(run.steps)}
+              <!-- The summary text names the functions; the cluster only shows them. -->
+              <span class="flex shrink-0 items-center gap-1" aria-hidden="true">
+                {#each icons.slice(0, MAX_RUN_ICONS) as icon, i (i)}
+                  <ToolStepIcon {icon} />
+                {/each}
+                {#if icons.length > MAX_RUN_ICONS}
+                  <span
+                    class="bg-secondary text-muted flex size-5 items-center justify-center rounded-md text-[10px] font-medium"
+                  >
+                    +{icons.length - MAX_RUN_ICONS}
+                  </span>
+                {/if}
+              </span>
+            {/if}
             {#if runFailed(run)}
               <X class="text-negative-default h-3.5 w-3.5 shrink-0" />
             {/if}
@@ -410,7 +486,7 @@
           </button>
         {/if}
         {#if !folded || openInternalRuns.has(runIndex)}
-          <div class="flex flex-col gap-0.5 {folded ? 'pl-7' : ''}">
+          <div class="flex flex-col {rowGap} {folded ? 'pl-7' : ''}">
             {#each visibleSteps as step, i (step.toolCallId ?? i)}
               {#if step.skillName !== null}
                 <SkillActivationStep
@@ -431,6 +507,8 @@
                   status={step.status}
                   previousAttempt={step.previousAttempt}
                   document={step.document}
+                  icon={step.icon}
+                  view={step.view}
                   onLoadResult={step.toolCallId
                     ? () => chat.getToolCallResult(step.toolCallId!)
                     : undefined}
@@ -449,6 +527,7 @@
               status={step.status}
               document={step.document}
               detail={step.detail}
+              icon={step.icon}
             />
           {/each}
         {/if}
