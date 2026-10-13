@@ -26,6 +26,7 @@ from eneo.integration.infrastructure.content_service.utils import (
     ExtractionResult,
     detect_content_type,
     extract_sharepoint_content,
+    file_too_large_reason,
     is_unextractable_content,
 )
 from tests.unittests.integration.sharepoint_fixtures import (
@@ -369,3 +370,16 @@ class TestExtractionResultInvariants:
         assert is_unextractable_content(None) is True
         assert is_unextractable_content("  \n\t ") is True
         assert is_unextractable_content("Real document content here.") is False
+
+
+class TestFileTooLargeReason:
+    @pytest.mark.parametrize(
+        ("limit_bytes", "expected"),
+        [
+            (50 * 1024 * 1024, "File too large (exceeds 50 MB limit)"),
+            (10 * 1024 * 1024, "File too large (exceeds 10 MB limit)"),
+            (1536 * 1024, "File too large (exceeds 1.5 MB limit)"),
+        ],
+    )
+    def test_names_the_configured_limit(self, limit_bytes, expected):
+        assert file_too_large_reason(limit_bytes) == expected

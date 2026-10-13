@@ -34,7 +34,13 @@ logger = getLogger(__name__)
 
 NO_TEXT_LAYER_REASON = "No text layer (scanned document; OCR is not supported)"
 EMPTY_CONTENT_REASON = "Empty or unreadable content"
-FILE_TOO_LARGE_REASON = "File too large (exceeds 50 MB limit)"
+
+
+def file_too_large_reason(limit_bytes: int) -> str:
+    """Skip reason for a download above ``SHAREPOINT_MAX_DOWNLOAD_BYTES``."""
+    limit_mb = limit_bytes / (1024 * 1024)
+    return f"File too large (exceeds {limit_mb:g} MB limit)"
+
 
 # The parser ran to completion and found nothing. Only these reasons may
 # remove an existing index entry; every other outcome is non-destructive.

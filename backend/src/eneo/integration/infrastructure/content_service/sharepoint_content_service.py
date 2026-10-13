@@ -40,15 +40,16 @@ from eneo.integration.infrastructure.content_service.types import (
 )
 from eneo.integration.infrastructure.content_service.utils import (
     EMPTY_CONTENT_REASON,
-    FILE_TOO_LARGE_REASON,
     NO_TEXT_REASONS,
     error_reason,
     file_extension_to_type,
+    file_too_large_reason,
     is_unextractable_content,
 )
 from eneo.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
 )
+from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -2359,7 +2360,9 @@ class SharePointContentService:
             )
         except ValueError as e:
             if "exceeds max download size" in str(e):
-                return None, FILE_TOO_LARGE_REASON
+                return None, file_too_large_reason(
+                    get_settings().sharepoint_max_download_bytes
+                )
             logger.error(
                 f"Error getting file content for {item_name}: {e}", exc_info=True
             )
