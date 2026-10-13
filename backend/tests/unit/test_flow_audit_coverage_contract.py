@@ -601,6 +601,9 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "flow_security_classification_router.preview_flow_security_classification"
         )
     ),
+    "list_flow_tool_options": _no_business_event(
+        owner="flow_tool_options_router.list_flow_tool_options"
+    ),
     "validate_flow_package": _no_business_event(
         owner="flow_package_router.validate_flow_package"
     ),

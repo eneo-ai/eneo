@@ -26,6 +26,7 @@ from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.runtime import tasks as flow_runtime_tasks
 from eneo.main.exceptions import BadRequestException
+from eneo.mcp_servers.domain.unattended_tool_refusal import UnattendedToolRefusal
 from eneo.prompts.api.prompt_models import PromptCreate
 from tests.integration.flows.test_flow_assistant_update_siblings import (
     _admin_token_and_space,
@@ -299,3 +300,35 @@ async def test_every_path_counts_the_servers_level_and_keeps_using_its_session(
     assert ended.error is not None
     assert ended.error.code.value == "typed_io_tool_destination_blocked"
     assert evidence_level == 2
+
+
+async def test_the_tool_list_reads_the_stored_chain_for_the_flows_space(
+    db_container, tool_flow: ToolFlow
+) -> None:
+    # Kills the mutants where the container's service has no reader for the
+    # list, the list is read for another space, or the stored review state
+    # does not reach the refusal.
+    async with db_container() as container:
+        session = container.session()
+        session.add(
+            SpacesMCPServers(
+                space_id=tool_flow.space_id, mcp_server_id=tool_flow.server_id
+            )
+        )
+        session.add(
+            MCPServerTools(
+                mcp_server_id=tool_flow.server_id,
+                name="open_case",
+                requires_approval=True,
+            )
+        )
+        await session.flush()
+        options = await container.flow_service().list_tool_options(
+            flow_id=tool_flow.flow_id
+        )
+
+    assert [(o.tool_name, o.refusal, o.input_schema) for o in options] == [
+        ("lookup_case", None, _SCHEMA),
+        ("open_case", UnattendedToolRefusal.TOOL_WAITING_FOR_REVIEW, None),
+    ]
+    assert {o.mcp_server_id for o in options} == {tool_flow.server_id}

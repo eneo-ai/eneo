@@ -265,6 +265,7 @@ class FlowApiErrorCode(StrEnum):
     FORM_FIELD_NAME_DUPLICATE = "flow_form_field_name_duplicate"
     FORM_FIELD_NAME_DOT = "flow_form_field_name_dot"
     FORM_FIELD_NAME_TEMPLATE_DELIMITERS = "flow_form_field_name_template_delimiters"
+    TOOL_OPTIONS_TOO_LARGE = "flow_tool_options_too_large"
 
     STALE_REVISION = "stale_revision"
     UNKNOWN_STEP_ID = "unknown_step_id"

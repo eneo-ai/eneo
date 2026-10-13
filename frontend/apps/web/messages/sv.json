@@ -5034,6 +5034,7 @@
   "flow_error_flow_form_field_name_duplicate": "Två formulärfält använder samma tekniska namn; stora och små bokstäver räknas som samma. Ge varje fält ett eget namn och spara igen.",
   "flow_error_flow_form_field_name_dot": "Ett formulärfält har ett tekniskt namn som innehåller en punkt. Använd understreck i stället och spara igen.",
   "flow_error_flow_form_field_name_template_delimiters": "Ett formulärfält har ett tekniskt namn som innehåller dubbla klammerparenteser. Använd ett vanligt namn utan dem och spara igen.",
+  "flow_error_flow_tool_options_too_large": "Ytan erbjuder fler verktyg än redigeraren kan lista. En administratör för ytan kan stänga av de MCP-servrar som flödena inte behöver.",
   "flow_error_flow_template_too_large": "Word-mallen blir för stor när den packas upp eller består av för många delar. Använd en mindre eller enklare mall och försök igen.",
   "flow_error_stale_revision": "Flödet har ändrats sedan det lästes in, till exempel i en annan flik eller av en kollega. Läs in sidan igen och gör om din senaste ändring.",
   "flow_error_unknown_step_id": "Ändringen hänvisar till ett steg som inte finns i flödet. Läs in sidan igen och gör om din senaste ändring.",

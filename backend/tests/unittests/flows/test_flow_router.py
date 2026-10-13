@@ -338,6 +338,7 @@ def _enable_space_access(
     actor.can_publish_flows.return_value = can_publish
     actor_manager = MagicMock()
     actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     container.actor_manager.return_value = actor_manager
     _wire_flow_gate(container)
     user = getattr(container.user, "return_value", None)

@@ -12,11 +12,15 @@ from eneo.flows.api.flow_security_classification_router import (
 from eneo.flows.api.flow_template_router import (
     router as _template_router,
 )
+from eneo.flows.api.flow_tool_options_router import (
+    router as _tool_options_router,
+)
 
 router = _APIRouter()
 router.include_router(_authoring_router)
 router.include_router(_template_router)
 router.include_router(_security_classification_router)
+router.include_router(_tool_options_router)
 router.include_router(_http_test_router)
 
 __all__ = ["router"]

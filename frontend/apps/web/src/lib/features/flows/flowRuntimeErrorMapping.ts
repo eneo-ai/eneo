@@ -297,6 +297,7 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_form_field_name_duplicate: m.flow_error_flow_form_field_name_duplicate,
   flow_form_field_name_dot: m.flow_error_flow_form_field_name_dot,
   flow_form_field_name_template_delimiters: m.flow_error_flow_form_field_name_template_delimiters,
+  flow_tool_options_too_large: m.flow_error_flow_tool_options_too_large,
   flow_template_too_large: m.flow_error_flow_template_too_large,
   stale_revision: m.flow_error_stale_revision,
   unknown_step_id: m.flow_error_unknown_step_id,

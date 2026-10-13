@@ -57,7 +57,7 @@ from eneo.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
-    from eneo.actors.actors.space_actor import SpaceActor
+    from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceActor
     from eneo.apps import App
     from eneo.assistants.assistant import Assistant
     from eneo.completion_models.domain.completion_model import CompletionModel
@@ -84,6 +84,19 @@ def _empty_mcp_server_list() -> list["MCPServer"]:
 
 def _empty_connection_list() -> list["TranscriptionServiceConnection"]:
     return []
+
+
+def _require_space_read(actor: "SpaceActor") -> None:
+    if not actor.can_read_space():
+        raise UnauthorizedException(
+            "You do not have permission to read this space.",
+            code="forbidden_action",
+            context={
+                "resource_type": "space",
+                "action": "read",
+                "auth_layer": "domain_policy",
+            },
+        )
 
 
 @dataclass
@@ -246,36 +259,22 @@ class SpaceService:
 
     async def get_space(self, id: UUID) -> Space:
         space = await self.repo.one(id)
-
-        actor = self._get_actor(space)
-        if not actor.can_read_space():
-            raise UnauthorizedException(
-                "You do not have permission to read this space.",
-                code="forbidden_action",
-                context={
-                    "resource_type": "space",
-                    "action": "read",
-                    "auth_layer": "domain_policy",
-                },
-            )
-
+        _require_space_read(self._get_actor(space))
         return space
+
+    async def get_space_access_facts(self, id: UUID) -> "SpaceAccessFacts":
+        """The facts ``get_space``'s caller decides permissions on, with
+        ``get_space``'s refusals, for a caller that needs nothing else of the
+        space: they are read without the MCP catalog (``get_access_facts``)."""
+        access = await self.repo.get_access_facts(id)
+        _require_space_read(self.actor_manager.get_space_actor(access))
+        return access
 
     async def get_applications_projection(
         self, id: UUID
     ) -> SpaceApplicationsProjection:
         projection = await self.repo.get_applications_projection(id)
-        actor = self.actor_manager.get_space_actor(projection.access)
-        if not actor.can_read_space():
-            raise UnauthorizedException(
-                "You do not have permission to read this space.",
-                code="forbidden_action",
-                context={
-                    "resource_type": "space",
-                    "action": "read",
-                    "auth_layer": "domain_policy",
-                },
-            )
+        _require_space_read(self.actor_manager.get_space_actor(projection.access))
         return projection
 
     async def get_member_space_actors(self) -> list["SpaceActor"]:

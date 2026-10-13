@@ -494,6 +494,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/template-files/{file_id}/": {"delete"},
     "/api/v1/flows/{id}/template-inspect/": {"get"},
     "/api/v1/flows/{id}/security-classification/preview": {"post"},
+    "/api/v1/flows/{id}/tool-options": {"get"},
     "/api/v1/flows/{id}/runs/": {"get", "post"},
     "/api/v1/flows/{id}/runs/{run_id}/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/": {"get"},
@@ -630,6 +631,7 @@ NON_RUNTIME_REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
         "/api/v1/flows/{id}/security-classification/preview",
         "post",
     ): "preview_flow_security_classification",
+    ("/api/v1/flows/{id}/tool-options", "get"): "list_flow_tool_options",
     ("/api/v1/settings/flow-input-limits", "get"): "get_flow_input_limits",
     ("/api/v1/settings/flow-input-limits", "patch"): "update_flow_input_limits",
     (
@@ -762,6 +764,7 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
         "/api/v1/flows/{id}/security-classification/preview",
         "post",
     ): {"400", "403", "404"},
+    ("/api/v1/flows/{id}/tool-options", "get"): {"403", "404"},
     (
         "/api/v1/flows/{id}/runs/",
         "post",

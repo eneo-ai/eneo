@@ -14,13 +14,30 @@ from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 if TYPE_CHECKING:
-    from eneo.mcp_servers.application.unattended_tool_use import UnattendedToolFacts
+    from eneo.mcp_servers.application.unattended_tool_use import (
+        StoredToolFacts,
+        ToolsOfSpace,
+    )
 
 
 class UnattendedToolFactsSource(Protocol):
     async def read(
         self, *, tenant_id: UUID, space_id: UUID, mcp_server_id: UUID, tool_id: UUID
-    ) -> UnattendedToolFacts: ...
+    ) -> StoredToolFacts: ...
+
+
+class SpaceToolFactsSource(UnattendedToolFactsSource, Protocol):
+    """A facts source that can also list the tools of a space, for the
+    editor's list of tools a step can choose from."""
+
+    async def read_tools_of_space(
+        self,
+        *,
+        tenant_id: UUID,
+        space_id: UUID,
+        max_count: int,
+        max_text_bytes: int,
+    ) -> ToolsOfSpace: ...
 
 
 class ToolFactsReadOnce:
@@ -35,11 +52,11 @@ class ToolFactsReadOnce:
 
     def __init__(self, source: Callable[[], UnattendedToolFactsSource]) -> None:
         self._source = source
-        self._read: dict[tuple[UUID, UUID, UUID, UUID], UnattendedToolFacts] = {}
+        self._read: dict[tuple[UUID, UUID, UUID, UUID], StoredToolFacts] = {}
 
     async def read(
         self, *, tenant_id: UUID, space_id: UUID, mcp_server_id: UUID, tool_id: UUID
-    ) -> UnattendedToolFacts:
+    ) -> StoredToolFacts:
         key = (tenant_id, space_id, mcp_server_id, tool_id)
         if key not in self._read:
             self._read[key] = await self._source().read(

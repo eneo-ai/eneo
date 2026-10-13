@@ -14,7 +14,7 @@ purpose and by the space's security classification.
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -138,8 +138,15 @@ def select_provider_for_user(
     return next((p for p in providers if p.is_default_provider()), None)
 
 
+class ClassifiedServer(Protocol):
+    """What the classification comparison reads of a server."""
+
+    @property
+    def effective_security_classification(self) -> "SecurityClassification | None": ...
+
+
 def meets_security_classification(
-    provider: "MCPServer",
+    provider: ClassifiedServer,
     space_security_classification: "SecurityClassification | None",
 ) -> bool:
     """False when the space's classification is stricter than the provider's.

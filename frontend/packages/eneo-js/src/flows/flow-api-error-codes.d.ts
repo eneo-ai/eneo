@@ -226,6 +226,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   FORM_FIELD_NAME_DUPLICATE: "flow_form_field_name_duplicate";
   FORM_FIELD_NAME_DOT: "flow_form_field_name_dot";
   FORM_FIELD_NAME_TEMPLATE_DELIMITERS: "flow_form_field_name_template_delimiters";
+  TOOL_OPTIONS_TOO_LARGE: "flow_tool_options_too_large";
   STALE_REVISION: "stale_revision";
   UNKNOWN_STEP_ID: "unknown_step_id";
   DUPLICATE_STEP_ID: "duplicate_step_id";
@@ -459,6 +460,7 @@ export type FlowApiErrorCode =
   | "flow_form_field_name_duplicate"
   | "flow_form_field_name_dot"
   | "flow_form_field_name_template_delimiters"
+  | "flow_tool_options_too_large"
   | "stale_revision"
   | "unknown_step_id"
   | "duplicate_step_id"

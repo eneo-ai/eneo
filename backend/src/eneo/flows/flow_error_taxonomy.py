@@ -1832,6 +1832,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Rename the form field at field_index in the error context without double curly brackets.",
         user_action="Use a plain technical name without double curly brackets.",
     ),
+    FlowApiErrorCode.TOOL_OPTIONS_TOO_LARGE: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The general MCP servers the space has activated offer more tools, or more text in them, than one list answer may hold.",
+        consumer_action="Do not retry unchanged; the error context gives both limits.",
+        user_action="Ask a space administrator to switch off the MCP servers the flows in this space do not need.",
+    ),
     FlowApiErrorCode.TEMPLATE_TOO_LARGE: _entry(
         category="Template asset",
         surfaced_through="API error response",

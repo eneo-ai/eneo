@@ -100,20 +100,23 @@ async def require_flow_assistant_read_access(
     container: Container,
     *,
     flow_id: UUID,
-) -> flow_access_context.FlowAccessContext:
-    access_context = await flow_access_context.resolve_flow_access_context(
+) -> None:
+    """Refuse a caller who may not edit flows in the flow's space.
+
+    Its callers read nothing of the space, so the check reads the space
+    without its MCP catalog."""
+    actor = await flow_access_context.resolve_flow_space_actor(
         request,
         container,
         flow_id=flow_id,
         required_access=FlowApiAction.EDIT,
     )
-    if access_context.actor is None or not access_context.actor.can_edit_flows():
+    if not actor.can_edit_flows():
         raise FlowUnauthorizedException(
             "You do not have permission to edit flows in this space.",
             code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
-    return access_context
 
 
 @router.post(

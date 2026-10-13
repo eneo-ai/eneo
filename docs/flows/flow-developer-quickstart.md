@@ -141,6 +141,19 @@ setup notes, 20 entries per recommendation/exclusion list, and 1,000 normalized
 characters per entry. It must not contain local knowledge content or
 configuration.
 
+An editor lists the tools a step can choose with
+`GET /api/v1/flows/{id}/tool-options`: the tools of the MCP servers the flow's
+space has activated, each with its approved input schema and a `refusal` that
+is `null` when no level of the MCP decision refuses the tool now. Refused tools
+are listed with the refusal; the tools of a server that is not a general one
+(a capability provider or one of Eneo's own servers) are not.
+A personal space has no MCP servers, so its list is empty. It needs the
+permission to edit flows in the space. One database statement reads the list
+and returns it only up to the first tool past 1,000 tools or past 8 MiB of
+the text it returns (server name, tool name, approved description and approved
+input schema); such a list is refused with 413
+`flow_tool_options_too_large`, never listed in part.
+
 ### Speaker mapping (`speaker_mapping`)
 
 A `speaker_mapping` step follows a `transcribe_only` step whose transcript has

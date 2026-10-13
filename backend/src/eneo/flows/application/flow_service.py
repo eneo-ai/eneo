@@ -13,6 +13,10 @@ from eneo.assistants.assistant_update import (
     AssistantUpdateCommand,
 )
 from eneo.files.file_models import File
+from eneo.flows.application.flow_tool_options import (
+    FlowToolOption,
+    read_flow_tool_options,
+)
 from eneo.flows.application.flow_tool_publication import (
     pin_tool_steps,
     published_input_config,
@@ -37,7 +41,11 @@ from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationError,
 )
 from eneo.flows.domain.step_config import clean_inactive_step_config
-from eneo.flows.domain.tool_facts import ToolFactsReadOnce, UnattendedToolFactsSource
+from eneo.flows.domain.tool_facts import (
+    SpaceToolFactsSource,
+    ToolFactsReadOnce,
+    UnattendedToolFactsSource,
+)
 from eneo.flows.domain.tool_input import PublishedToolInputConfig
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -139,7 +147,7 @@ class FlowService:
         template_asset_service: FlowTemplateAssetService | None = None,
         encryption_service: EncryptionService | None = None,
         space_service: SpaceService | None = None,
-        tool_facts_reader: UnattendedToolFactsSource | None = None,
+        tool_facts_reader: SpaceToolFactsSource | None = None,
     ):
         self.user = user
         self.flow_repo = flow_repo
@@ -150,10 +158,10 @@ class FlowService:
         self.space_service = space_service
         self.tool_facts_reader = tool_facts_reader
 
-    def _require_tool_facts_reader(self) -> UnattendedToolFactsSource:
+    def _require_tool_facts_reader(self) -> SpaceToolFactsSource:
         if self.tool_facts_reader is None:
             raise RuntimeError(
-                "FlowService requires tool_facts_reader for a flow with a tool step."
+                "FlowService requires tool_facts_reader to read the MCP tool decision."
             )
         return self.tool_facts_reader
 
@@ -932,6 +940,18 @@ class FlowService:
             space=space,
             security_enabled=self.user.tenant.security_enabled,
             tool_facts_reader=self._require_tool_facts_reader,
+            tenant_id=self.user.tenant_id,
+            space_id=flow.space_id,
+        )
+
+    async def list_tool_options(self, *, flow_id: UUID) -> list[FlowToolOption]:
+        """The tools of the general servers the flow's space has activated, in
+        the reader's order, each with what the decision says about it now;
+        writes nothing. Refused when they exceed the list's bounds
+        (``read_flow_tool_options``)."""
+        flow = await self.get_flow(flow_id)
+        return await read_flow_tool_options(
+            self._require_tool_facts_reader(),
             tenant_id=self.user.tenant_id,
             space_id=flow.space_id,
         )

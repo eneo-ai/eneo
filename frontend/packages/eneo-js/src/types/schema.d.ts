@@ -6065,6 +6065,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/tool-options": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Tool Options
+     * @description List the tools of the MCP servers the flow's space has activated, with the approved description and input schema of each. A tool that a level of the MCP decision refuses is listed on purpose, with the `refusal` that names the level, so an author can ask the person it names; only the tools of servers that are not general ones (a capability provider or one of Eneo's own servers), which no administrator can make usable by a flow, are left out, switched on or not. A `refusal` of null means that no level of that decision refuses the tool now: publish also requires the approved input schema to be a valid JSON Schema (`typed_io_tool_invalid_schema`) and checks the step's security classification, which this list does not judge, and the decision is asked again at publish and at run. A tool a step already uses is absent when its server is no longer activated in the space. A personal space has no MCP servers, so its list is empty; publish refuses a tool step there with `space_is_personal`. It needs the permission to edit flows in the space, checked on the space read without any MCP server's tools. The answer is not paged: one database statement reads the list in its order, and when the tools number more than 1000 or the text they return (the server name, the tool name, the approved description and the approved input schema as its JSON text) takes more than 8388608 bytes, it returns them only up to the first tool past the bound, and the list is refused with 413 `flow_tool_options_too_large`, never cut short.
+     */
+    get: operations["list_flow_tool_options"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/unpublish/": {
     parameters: {
       query?: never;
@@ -18293,6 +18313,7 @@ export interface components {
       | "flow_form_field_name_duplicate"
       | "flow_form_field_name_dot"
       | "flow_form_field_name_template_delimiters"
+      | "flow_tool_options_too_large"
       | "stale_revision"
       | "unknown_step_id"
       | "duplicate_step_id"
@@ -27019,6 +27040,84 @@ export interface components {
       step_id: string;
       /** Step Order */
       step_order: number;
+    };
+    /** FlowToolOptionPublic */
+    FlowToolOptionPublic: {
+      /**
+       * Input Schema
+       * @description The tool's input schema as an administrator last approved it, the one a flow checks a step's arguments against; null when the tool declares none or has not been approved yet. A change the server made and nobody has approved is not shown.
+       */
+      input_schema: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       * @description The MCP server that offers the tool.
+       */
+      mcp_server_id: string;
+      /**
+       * Mcp Server Name
+       * @description The server's name.
+       */
+      mcp_server_name: string;
+      /** @description Null when no level of the MCP decision refuses the tool now; publish also checks the approved schema and the step's security classification, and a run asks the decision again. Otherwise the level that refuses it, the same value a run's `tool_refusal` carries. */
+      refusal: components["schemas"]["UnattendedToolRefusal"] | null;
+      /**
+       * Tool Description
+       * @description The tool's description as an administrator last approved it; null when the server gave none or the tool has not been approved yet.
+       */
+      tool_description: string | null;
+      /**
+       * Tool Id
+       * Format: uuid
+       * @description The tool, to put in a step's tool configuration.
+       */
+      tool_id: string;
+      /**
+       * Tool Name
+       * @description The tool's name at its server.
+       */
+      tool_name: string;
+    };
+    /**
+     * FlowToolOptionsPublic
+     * @example {
+     *       "items": [
+     *         {
+     *           "input_schema": {
+     *             "properties": {
+     *               "case_id": {
+     *                 "type": "string"
+     *               }
+     *             },
+     *             "type": "object"
+     *           },
+     *           "mcp_server_id": "00000000-0000-0000-0000-000000000201",
+     *           "mcp_server_name": "Case register",
+     *           "refusal": null,
+     *           "tool_description": "Fetch one case by its number.",
+     *           "tool_id": "00000000-0000-0000-0000-000000000301",
+     *           "tool_name": "lookup_case"
+     *         },
+     *         {
+     *           "input_schema": null,
+     *           "mcp_server_id": "00000000-0000-0000-0000-000000000201",
+     *           "mcp_server_name": "Case register",
+     *           "refusal": "tool_waiting_for_review",
+     *           "tool_description": null,
+     *           "tool_id": "00000000-0000-0000-0000-000000000302",
+     *           "tool_name": "close_case"
+     *         }
+     *       ]
+     *     }
+     */
+    FlowToolOptionsPublic: {
+      /**
+       * Items
+       * @description The tools of the MCP servers the flow's space has activated, in the order the reader returns them: server name, then tool name. A personal space has no MCP servers, so its list is empty. The tools of a server that is not a general one (a capability provider or one of Eneo's own servers) are left out.
+       */
+      items: components["schemas"]["FlowToolOptionPublic"][];
     };
     /** FlowTranscriptCorrectionRevisionBaselinePublic */
     FlowTranscriptCorrectionRevisionBaselinePublic: {
@@ -62637,6 +62736,124 @@ export interface operations {
            *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_flow_tool_options: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The tools of the space; a null `refusal` means no level of the MCP decision refuses the tool now. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "items": [
+           *         {
+           *           "input_schema": {
+           *             "properties": {
+           *               "case_id": {
+           *                 "type": "string"
+           *               }
+           *             },
+           *             "type": "object"
+           *           },
+           *           "mcp_server_id": "00000000-0000-0000-0000-000000000201",
+           *           "mcp_server_name": "Case register",
+           *           "refusal": null,
+           *           "tool_description": "Fetch one case by its number.",
+           *           "tool_id": "00000000-0000-0000-0000-000000000301",
+           *           "tool_name": "lookup_case"
+           *         },
+           *         {
+           *           "input_schema": null,
+           *           "mcp_server_id": "00000000-0000-0000-0000-000000000201",
+           *           "mcp_server_name": "Case register",
+           *           "refusal": "tool_waiting_for_review",
+           *           "tool_description": null,
+           *           "tool_id": "00000000-0000-0000-0000-000000000302",
+           *           "tool_name": "close_case"
+           *         }
+           *       ]
+           *     }
+           */
+          "application/json": components["schemas"]["FlowToolOptionsPublic"];
+        };
+      };
+      /** @description Caller lacks permission to edit flows in this space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_space_permission",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to edit flows in this space."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description `flow_tool_options_too_large`: the listed tools exceed the list's tool count or text byte limit; nothing is listed. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_tool_options_too_large",
+           *       "context": {
+           *         "max_text_bytes": 8388608,
+           *         "max_tool_count": 1000
+           *       },
+           *       "eneo_error_code": 9015,
+           *       "message": "The space offers more tools than the editor can list. A space administrator can switch off the MCP servers flows do not need."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

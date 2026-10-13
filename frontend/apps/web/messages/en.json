@@ -5034,6 +5034,7 @@
   "flow_error_flow_form_field_name_duplicate": "Two form fields use the same technical name; upper and lower case count as the same. Give each field its own name and save again.",
   "flow_error_flow_form_field_name_dot": "A form field has a technical name that contains a dot. Use an underscore instead and save again.",
   "flow_error_flow_form_field_name_template_delimiters": "A form field has a technical name that contains double curly brackets. Use a plain name without them and save again.",
+  "flow_error_flow_tool_options_too_large": "The space offers more tools than the editor can list. A space administrator can switch off the MCP servers flows do not need.",
   "flow_error_flow_template_too_large": "The Word template is too large once unpacked or consists of too many parts. Use a smaller or simpler template and try again.",
   "flow_error_stale_revision": "The flow has changed since it was loaded, for example in another tab or by a colleague. Reload the page and redo your latest change.",
   "flow_error_unknown_step_id": "The change refers to a step that is not in the flow. Reload the page and redo your latest change.",

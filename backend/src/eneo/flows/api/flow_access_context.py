@@ -185,18 +185,10 @@ async def resolve_flow_access_context(
     require_published_for_service_key: bool = False,
     scope_mismatch_message: str = "API key space scope does not match requested flow.",
 ) -> FlowAccessContext:
-    scope_filter = get_scope_filter(request)
-    _ensure_flow_scope_type_allowed(
-        scope_filter,
-        scope_mismatch_message=scope_mismatch_message,
-    )
-
-    flow_service = container.flow_service()
-    flow = await flow_service.get_flow(flow_id)
-    _ensure_flow_reachable(
+    flow, scope_filter = await _reachable_flow(
+        request,
         container,
-        flow,
-        scope_filter=scope_filter,
+        flow_id=flow_id,
         required_access=required_access,
         allow_service_key_principals=allow_service_key_principals,
         require_published_for_service_key=require_published_for_service_key,
@@ -209,6 +201,57 @@ async def resolve_flow_access_context(
         space=space,
         actor=actor,
     )
+
+
+async def resolve_flow_space_actor(
+    request: Request,
+    container: Container,
+    *,
+    flow_id: UUID,
+    required_access: FlowApiAction,
+) -> SpaceActor:
+    """``resolve_flow_access_context``'s refusals and actor for a user
+    principal, for a caller that needs only the permission decision: the
+    space is read without the MCP catalog (``get_space_access_facts``)."""
+    flow, _ = await _reachable_flow(
+        request,
+        container,
+        flow_id=flow_id,
+        required_access=required_access,
+        allow_service_key_principals=False,
+        require_published_for_service_key=False,
+        scope_mismatch_message="API key space scope does not match requested flow.",
+    )
+    access = await container.space_service().get_space_access_facts(flow.space_id)
+    return container.actor_manager().get_space_actor(access)
+
+
+async def _reachable_flow(
+    request: Request,
+    container: Container,
+    *,
+    flow_id: UUID,
+    required_access: FlowApiAction,
+    allow_service_key_principals: bool,
+    require_published_for_service_key: bool,
+    scope_mismatch_message: str,
+) -> tuple[Flow, ScopeFilter]:
+    scope_filter = get_scope_filter(request)
+    _ensure_flow_scope_type_allowed(
+        scope_filter,
+        scope_mismatch_message=scope_mismatch_message,
+    )
+    flow = await container.flow_service().get_flow(flow_id)
+    _ensure_flow_reachable(
+        container,
+        flow,
+        scope_filter=scope_filter,
+        required_access=required_access,
+        allow_service_key_principals=allow_service_key_principals,
+        require_published_for_service_key=require_published_for_service_key,
+        scope_mismatch_message=scope_mismatch_message,
+    )
+    return flow, scope_filter
 
 
 async def resolve_space_access_context(
