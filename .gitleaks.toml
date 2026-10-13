@@ -58,4 +58,4 @@ description = "Keyword-argument pair in SharePoint sync tests that the generic r
 condition = "AND"
 paths = ['''^backend/tests/unittests/integration/test_sharepoint_content_service\.py$''']
 regexTarget = "secret"
-regexes = ['''^integration_knowledge_id=ik\.id$''']
+regexes = ['''^integration_knowledge_id=(?:ik\.id|knowledge_id)$''']

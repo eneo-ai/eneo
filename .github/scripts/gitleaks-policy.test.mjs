@@ -21,6 +21,7 @@ const examples = [
   ["frontend/apps/web-next/src/lib/api/schema.d.ts", ["ina_", "6f2c9b3a8f...7b31"]],
   ["backend/tests/integration/test_model_provider_outbound_headers.py", ["sk-test-", "12345678"]],
   ["backend/tests/unittests/integration/test_sharepoint_content_service.py", ["integration_knowledge_id=", "ik.id"]],
+  ["backend/tests/unittests/integration/test_sharepoint_content_service.py", ["integration_knowledge_id=", "knowledge_id"]],
 ].map(([path, parts]) => ({ path, value: parts.join("") }));
 
 function repository(t) {
