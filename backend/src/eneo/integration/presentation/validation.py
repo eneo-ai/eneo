@@ -21,6 +21,11 @@ FOLDER_PATH_MAX_LENGTH = 2048
 SELECTED_ITEM_TYPES = ("file", "folder", "site_root")
 RESOURCE_TYPES = ("site", "onedrive")
 
+# SharePoint selections carry one of SELECTED_ITEM_TYPES; Confluence imports
+# echo the space type Confluence reports ("global", "personal", ...).
+SELECTED_ITEM_TYPE_PATTERN = r"^[a-z_]*$"
+SELECTED_ITEM_TYPE_MAX_LENGTH = 32
+
 
 def validate_folder_path(value: Optional[str]) -> Optional[str]:
     """Reject paths with ``..`` segments; the pattern already rejects the rest."""

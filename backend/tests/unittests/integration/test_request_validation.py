@@ -29,7 +29,13 @@ def _create(**fields):
         pytest.param(
             {"folder_id": "01ABCDEF", "selected_item_type": "folder"}, id="folder"
         ),
-        pytest.param({"key": "~712020:1f3a9c2e-5b7d"}, id="confluence-personal-space"),
+        pytest.param(
+            {"key": "~712020:1f3a9c2e-5b7d", "selected_item_type": "personal"},
+            id="confluence-personal-space",
+        ),
+        pytest.param(
+            {"key": "DOCS", "selected_item_type": "global"}, id="confluence-space"
+        ),
         pytest.param({"folder_path": "/Shared Documents/Policies (2024)/"}, id="path"),
         pytest.param({"folder_path": ""}, id="empty-path"),
         pytest.param({"selected_item_type": "site_root"}, id="site-root"),
@@ -55,7 +61,8 @@ def test_graph_shaped_selections_are_accepted(fields):
         pytest.param({"folder_path": "/a//b"}, id="path-empty-segment"),
         pytest.param({"folder_path": "/a\x00b"}, id="path-control-char"),
         pytest.param({"folder_path": "/" + "a" * 2048}, id="path-too-long"),
-        pytest.param({"selected_item_type": "library"}, id="unknown-item-type"),
+        pytest.param({"selected_item_type": "Site Root"}, id="item-type-chars"),
+        pytest.param({"selected_item_type": "a" * 33}, id="item-type-too-long"),
         pytest.param({"resource_type": "teams"}, id="unknown-resource-type"),
     ],
 )
