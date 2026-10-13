@@ -137,11 +137,12 @@ holding the rest. The tool tells the model when the reader sees the value
 
 ### Enabling the Charts function after upgrading
 
-Apply migration `202610081100`, then add **Built into Eneo** under
-**Admin → Tools → Functions → Charts** and activate it. Enable **Charts** on the
-space and assistant, and grant its role permission. Existing roles receive no
-automatic permission grant; new predefined roles include it. The migration
-only widens the capability constraints and preserves all existing settings.
+Apply migrations `202610081100` and `202610091100`, then add **Built into
+Eneo** under **Admin → Tools → Functions → Charts** and activate it. Enable
+**Charts** on the space and assistant. The predefined Owner role holds the
+`charts` permission, on upgrade as on a new install; an administrator opts
+other roles in, as for file creation on new installs. The migrations only
+widen the capability constraints and preserve all existing settings.
 Existing bundled general chart servers keep their current attachments and
 can coexist with the new provider. Retire those general servers through the
 admin UI after configuring the function to avoid offering the same tool twice.
