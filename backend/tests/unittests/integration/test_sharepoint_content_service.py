@@ -161,7 +161,7 @@ class TestTokenHandling:
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.get_default_drive_id.return_value = "drive-123"
-            mock_client.get_documents_in_drive.return_value = []
+            mock_client.get_drive_root_children.return_value = []
             mock_client.get_site_pages.return_value = {"value": []}
             mock_client.initialize_delta_token.return_value = "delta-token"
             mock_client_class.return_value = mock_client
@@ -197,7 +197,7 @@ class TestTokenHandling:
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.get_default_drive_id.return_value = "drive-123"
-            mock_client.get_documents_in_drive.return_value = []
+            mock_client.get_drive_root_children.return_value = []
             mock_client.get_site_pages.return_value = {"value": []}
             mock_client.initialize_delta_token.return_value = "delta-token"
             mock_client_class.return_value = mock_client
@@ -240,7 +240,7 @@ class TestTokenHandling:
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.get_default_drive_id.return_value = "drive-123"
-            mock_client.get_documents_in_drive.return_value = []
+            mock_client.get_drive_root_children.return_value = []
             mock_client.get_site_pages.return_value = {"value": []}
             mock_client.initialize_delta_token.return_value = "delta-token"
             mock_client_class.return_value = mock_client
@@ -1864,7 +1864,7 @@ class TestSyncLogging:
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.get_default_drive_id.return_value = "drive-123"
-            mock_client.get_documents_in_drive.return_value = [
+            mock_client.get_drive_root_children.return_value = [
                 {
                     "id": "file-1",
                     "name": "doc.txt",
@@ -2444,7 +2444,7 @@ class TestEnumerateAuthoritativeItemIds:
 
     async def test_site_recurses_files_and_pages_excluding_folders(self, service):
         client = AsyncMock()
-        client.get_documents_in_drive.return_value = [
+        client.get_drive_root_children.return_value = [
             {"id": "folder-1", "folder": {}},
             {"id": "file-1", "file": {}},
         ]
@@ -2481,7 +2481,7 @@ class TestEnumerateAuthoritativeItemIds:
         """A failed listing must raise so reconciliation never treats a partial
         enumeration as authoritative."""
         client = AsyncMock()
-        client.get_documents_in_drive.side_effect = RuntimeError("graph throttled")
+        client.get_drive_root_children.side_effect = RuntimeError("graph throttled")
 
         with pytest.raises(RuntimeError):
             await service._enumerate_authoritative_item_ids(
@@ -2620,7 +2620,6 @@ def _mock_graph_client(mock_client_class, **attrs):
     mock_client.__aexit__.return_value = None
     mock_client.get_default_drive_id.return_value = "drive-456"
     mock_client.get_drive_root_children.return_value = []
-    mock_client.get_documents_in_drive.return_value = []
     mock_client.get_site_pages.return_value = {"value": []}
     mock_client.initialize_delta_token.return_value = "delta-token"
     for name, value in attrs.items():
@@ -2843,3 +2842,37 @@ class TestReconcileWarnings:
             )
 
         assert "reconcile_warning" not in stats
+
+
+class TestFullSyncUsesStoredDrive:
+    """Enumeration and reconciliation run against the drive the knowledge is bound to."""
+
+    async def test_root_listing_and_reconciliation_use_the_stored_drive(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik = _real_integration_knowledge(drive_id="drive-stored")
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            client = _mock_graph_client(mock_client_class)
+            client.get_default_drive_id.return_value = "drive-default"
+            await service.pull_content(
+                token_id=mock_oauth_token.id,
+                integration_knowledge_id=ik.id,
+                site_id="site-123",
+            )
+
+        listed_drives = {
+            call.args[0] for call in client.get_drive_root_children.await_args_list
+        }
+        assert listed_drives == {"drive-stored"}
+        client.get_documents_in_drive.assert_not_called()
+        client.get_default_drive_id.assert_not_called()

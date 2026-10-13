@@ -1063,14 +1063,10 @@ class SharePointContentService:
                 else:
                     integration_knowledge.selected_item_type = "site_root"
 
-                    if resource_type == "onedrive":
-                        data = await content_client.get_drive_root_children(
-                            actual_drive_id
-                        )
-                    else:
-                        data = await content_client.get_documents_in_drive(
-                            site_id=require_text(site_id_value, "site_id")
-                        )
+                    # Enumerate the drive the knowledge is bound to; asking Graph for
+                    # the site's default drive again would silently diverge from the
+                    # drive the delta token and reconciliation operate on.
+                    data = await content_client.get_drive_root_children(actual_drive_id)
 
                     if data:
                         await self._process_documents(
@@ -1690,7 +1686,7 @@ class SharePointContentService:
             elif not site_id:
                 raise ValueError("site_id required to enumerate SharePoint drive items")
             elif not current_folder_id:
-                results = await client.get_documents_in_drive(site_id=site_id)
+                results = await client.get_drive_root_children(drive_id)
             else:
                 results = await client.get_folder_items(
                     site_id=site_id, drive_id=drive_id, folder_id=current_folder_id
@@ -1855,7 +1851,7 @@ class SharePointContentService:
                 )
                 return
             if not folder_id:
-                results = await client.get_documents_in_drive(site_id=site_id)
+                results = await client.get_drive_root_children(drive_id)
             else:
                 results = await client.get_folder_items(
                     site_id=site_id,
