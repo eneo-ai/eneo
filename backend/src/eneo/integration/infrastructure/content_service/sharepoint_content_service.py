@@ -389,48 +389,68 @@ class SharePointContentService:
             return self._format_summary_for_job(summary_stats)
 
         except Exception as e:
-            failed_at = datetime.now(timezone.utc)
             await self._record_sync_failure(
-                resolved_integration_knowledge_id, str(e), failed_at
+                resolved_integration_knowledge_id,
+                str(e),
+                sync_type="full",
+                started_at=started_at,
+                metadata=_sync_metadata(trigger=sync_trigger, recovery=recovery),
             )
-            if self.sync_log_repo and resolved_integration_knowledge_id is not None:
-                sync_log = SyncLog(
-                    integration_knowledge_id=resolved_integration_knowledge_id,
-                    sync_type="full",
-                    status="error",
-                    started_at=started_at,
-                    completed_at=failed_at,
-                    error_message=str(e),
-                    metadata=_sync_metadata(trigger=sync_trigger, recovery=recovery),
-                )
-                await self.sync_log_repo.add(sync_log)
-
             logger.error(f"Error in pull_content: {e}", exc_info=True)
             raise
 
     async def _record_sync_failure(
-        self, integration_knowledge_id: UUID | None, error: str, at: datetime
+        self,
+        integration_knowledge_id: UUID | None,
+        error: str,
+        *,
+        sync_type: str,
+        started_at: datetime,
+        metadata: SyncMetadata,
     ) -> None:
-        """Persist the failure before re-raising.
+        """Persist the failure before re-raising; never raises itself.
 
         The worker commits on a soft failure (see
         ``_schedule_post_commit_change_keys``), so the status written here is what
         the UI shows. A fresh read keeps half-applied in-memory state (a delta
-        token that was never confirmed, a stale size) out of the row.
+        token that was never confirmed, a stale size) out of the row. Each
+        write is attempted on its own so a broken status row still leaves a
+        sync log, and neither can replace the exception being recorded.
         """
         if integration_knowledge_id is None:
             return
+        failed_at = datetime.now(timezone.utc)
         try:
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
             )
-            integration_knowledge.mark_sync_failed(error, at)
+            integration_knowledge.mark_sync_failed(error, failed_at)
             await self.integration_knowledge_repo.update(obj=integration_knowledge)
-        except Exception as exc:
-            logger.warning(
-                "Could not record sync failure for integration knowledge %s: %s",
+        except Exception:
+            logger.error(
+                "Could not record sync failure on integration knowledge %s",
                 integration_knowledge_id,
-                exc,
+                exc_info=True,
+            )
+        if self.sync_log_repo is None:
+            return
+        try:
+            await self.sync_log_repo.add(
+                SyncLog(
+                    integration_knowledge_id=integration_knowledge_id,
+                    sync_type=sync_type,
+                    status="error",
+                    started_at=started_at,
+                    completed_at=failed_at,
+                    error_message=error,
+                    metadata=metadata,
+                )
+            )
+        except Exception:
+            logger.error(
+                "Could not write the error sync log for integration knowledge %s",
+                integration_knowledge_id,
+                exc_info=True,
             )
 
     async def process_delta_changes(
@@ -445,6 +465,7 @@ class SharePointContentService:
     ) -> str:
         started_at = datetime.now(timezone.utc)
         resolved_integration_knowledge_id: UUID | None = integration_knowledge_id
+        delegated_to_full_sync = False
 
         try:
             if tenant_app_id:
@@ -493,6 +514,7 @@ class SharePointContentService:
                     f"No delta token found for integration knowledge {integration_knowledge_id}, "
                     "falling back to full sync"
                 )
+                delegated_to_full_sync = True
                 return await self.pull_content(
                     token_id=token_id,
                     tenant_app_id=tenant_app_id,
@@ -548,6 +570,7 @@ class SharePointContentService:
                     await self.integration_knowledge_repo.update(
                         obj=integration_knowledge
                     )
+                    delegated_to_full_sync = True
                     return await self.pull_content(
                         token_id=token_id,
                         tenant_app_id=tenant_app_id,
@@ -827,22 +850,16 @@ class SharePointContentService:
                 return self._format_summary_for_job(summary_stats)
 
         except Exception as e:
-            failed_at = datetime.now(timezone.utc)
+            if delegated_to_full_sync:
+                # The full sync recorded the failure and its sync log itself.
+                raise
             await self._record_sync_failure(
-                resolved_integration_knowledge_id, str(e), failed_at
+                resolved_integration_knowledge_id,
+                str(e),
+                sync_type="delta",
+                started_at=started_at,
+                metadata=_sync_metadata(trigger=sync_trigger),
             )
-            if self.sync_log_repo and resolved_integration_knowledge_id is not None:
-                sync_log = SyncLog(
-                    integration_knowledge_id=resolved_integration_knowledge_id,
-                    sync_type="delta",
-                    status="error",
-                    started_at=started_at,
-                    completed_at=failed_at,
-                    error_message=str(e),
-                    metadata=_sync_metadata(trigger=sync_trigger),
-                )
-                await self.sync_log_repo.add(sync_log)
-
             logger.error(f"Error processing delta changes: {e}", exc_info=True)
             raise
 
@@ -926,15 +943,11 @@ class SharePointContentService:
                         refreshed_folder_path = self._folder_path_from_item(
                             cast(SharePointItem, item_info)
                         )
-                        if (
-                            refreshed_folder_path
-                            and refreshed_folder_path
-                            != integration_knowledge.folder_path
-                        ):
+                        if refreshed_folder_path:
                             integration_knowledge.folder_path = refreshed_folder_path
-                            await self.integration_knowledge_repo.update(
-                                obj=integration_knowledge
-                            )
+                        await self.integration_knowledge_repo.update(
+                            obj=integration_knowledge
+                        )
                         processed_items: set[str] = set()
                         await self._fetch_and_process_content(
                             site_id=site_id_value,
@@ -964,6 +977,9 @@ class SharePointContentService:
                             f"for integration knowledge {integration_knowledge_id}"
                         )
                         integration_knowledge.selected_item_type = "file"
+                        await self.integration_knowledge_repo.update(
+                            obj=integration_knowledge
+                        )
 
                         unsupported_reason = unsupported_file_reason(item_name)
                         if unsupported_reason:
@@ -1004,6 +1020,9 @@ class SharePointContentService:
                         return stats
                 else:
                     integration_knowledge.selected_item_type = "site_root"
+                    await self.integration_knowledge_repo.update(
+                        obj=integration_knowledge
+                    )
 
                     # Enumerate the drive the knowledge is bound to; asking Graph for
                     # the site's default drive again would silently diverge from the

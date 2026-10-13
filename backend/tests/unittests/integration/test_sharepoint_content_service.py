@@ -12,6 +12,9 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.orm import Session
 
+from eneo.integration.domain.entities.integration_knowledge import (
+    IntegrationKnowledge,
+)
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     DeltaTokenExpiredException,
 )
@@ -2803,10 +2806,6 @@ class TestProcessInfoBlobEmptyText:
 
 
 def _real_integration_knowledge(**overrides):
-    from eneo.integration.domain.entities.integration_knowledge import (
-        IntegrationKnowledge,
-    )
-
     fields = {
         "name": "Docs",
         "user_integration": MagicMock(),
@@ -2888,6 +2887,39 @@ class TestSyncStatus:
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
         assert sync_log.status == "error"
 
+    @pytest.mark.parametrize("mode", ["full", "delta"])
+    async def test_success_after_a_prior_error_clears_the_error(
+        self, service, mock_dependencies, mock_oauth_token, mode
+    ):
+        ik = _real_integration_knowledge(
+            delta_token="token-1" if mode == "delta" else None,
+            last_sync_status="error",
+            last_sync_error="Graph 503",
+            last_synced_at=None,
+        )
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(return_value=([], "token-2")),
+            )
+            if mode == "full":
+                await service.pull_content(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+            else:
+                await service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        assert ik.last_sync_status == "success"
+        assert ik.last_sync_error is None
+        assert ik.last_synced_at is not None
+
     async def test_delta_with_zero_changes_is_a_success_without_a_log(
         self, service, mock_dependencies, mock_oauth_token
     ):
@@ -2935,6 +2967,97 @@ class TestSyncStatus:
         assert ik.last_sync_error == "throttled"
         assert ik.last_sync_attempted_at is not None
         assert update.await_args.kwargs["obj"] is ik
+
+    @pytest.mark.parametrize(
+        ("delta_token", "delta_outcome", "recovery"),
+        [
+            (None, None, "missing_delta_token"),
+            ("token-1", DeltaTokenExpiredException("410"), "delta_token_expired"),
+        ],
+    )
+    async def test_a_failed_full_sync_fallback_is_recorded_once(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        delta_token,
+        delta_outcome,
+        recovery,
+    ):
+        ik = _real_integration_knowledge(delta_token=delta_token)
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+
+        with (
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+            patch.object(
+                service,
+                "_pull_content",
+                AsyncMock(side_effect=RuntimeError("Graph 503")),
+            ),
+        ):
+            _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(side_effect=delta_outcome),
+            )
+            with pytest.raises(RuntimeError, match="Graph 503"):
+                await service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        assert ik.last_sync_status == "error"
+        assert ik.last_sync_error == "Graph 503"
+        add = mock_dependencies["sync_log_repo"].add
+        add.assert_awaited_once()
+        sync_log = add.await_args.args[0]
+        assert sync_log.status == "error"
+        assert sync_log.sync_type == "full"
+        assert sync_log.metadata["recovery"] == recovery
+
+    async def test_failure_is_logged_even_when_the_status_row_cannot_be_written(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik = _real_integration_knowledge()
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.side_effect = [
+            ik,
+            RuntimeError("db gone"),
+        ]
+
+        with patch.object(
+            service, "_pull_content", AsyncMock(side_effect=RuntimeError("Graph 503"))
+        ):
+            with pytest.raises(RuntimeError, match="Graph 503"):
+                await service.pull_content(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        sync_log = mock_dependencies["sync_log_repo"].add.await_args.args[0]
+        assert sync_log.status == "error"
+        assert sync_log.error_message == "Graph 503"
+
+    async def test_a_failing_sync_log_write_never_replaces_the_error(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik = _real_integration_knowledge()
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        mock_dependencies["sync_log_repo"].add.side_effect = RuntimeError(
+            "sync_logs locked"
+        )
+
+        with patch.object(
+            service, "_pull_content", AsyncMock(side_effect=RuntimeError("Graph 503"))
+        ):
+            with pytest.raises(RuntimeError, match="Graph 503"):
+                await service.pull_content(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        assert ik.last_sync_status == "error"
+        assert ik.last_sync_error == "Graph 503"
 
     async def test_reconcile_warning_reaches_summary_and_sync_log(
         self, service, mock_dependencies, mock_oauth_token
@@ -3521,3 +3644,85 @@ class TestSiteRootExtractionOutcomes:
         assert sync_log.metadata["skipped_details"] == [
             {"file": "photo", "reason": EMPTY_CONTENT_REASON}
         ]
+
+
+class TestSelectedItemTypePersistence:
+    """The full sync corrects selected_item_type from Graph; the correction
+    must reach the row even though later steps re-read the knowledge."""
+
+    @pytest.mark.parametrize(
+        ("stale_type", "folder_id", "metadata", "expected"),
+        [
+            (
+                "folder",
+                "file-1",
+                {"id": "file-1", "name": "doc.txt", "webUrl": "https://x/doc.txt"},
+                "file",
+            ),
+            ("folder", None, None, "site_root"),
+            (
+                "site_root",
+                "folder-a",
+                {
+                    "id": "folder-a",
+                    "name": "A",
+                    "folder": {},
+                    "parentReference": {"path": "/drives/drive-456/root:/Docs"},
+                },
+                "folder",
+            ),
+        ],
+    )
+    async def test_correction_is_persisted(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        stale_type,
+        folder_id,
+        metadata,
+        expected,
+    ):
+        knowledge_id = uuid4()
+        repo = mock_dependencies["integration_knowledge_repo"]
+
+        # Like the mapper, every read yields a fresh entity: only an explicit
+        # update() carries an in-memory correction to the row.
+        async def fresh_read(**_) -> IntegrationKnowledge:
+            return _real_integration_knowledge(
+                id=knowledge_id, selected_item_type=stale_type, folder_id=folder_id
+            )
+
+        persisted: list[str] = []
+        repo.one = AsyncMock(side_effect=fresh_read)
+        repo.update = AsyncMock(
+            side_effect=lambda obj: persisted.append(obj.selected_item_type)
+        )
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+
+        with (
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+            patch.object(
+                service, "_process_info_blob", AsyncMock(return_value="embedded")
+            ),
+        ):
+            _mock_graph_client(
+                mock_client_class,
+                get_file_metadata=AsyncMock(return_value=metadata),
+                get_folder_items=AsyncMock(return_value=[]),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body")
+                ),
+            )
+            await service.pull_content(
+                token_id=mock_oauth_token.id, integration_knowledge_id=knowledge_id
+            )
+
+        assert expected in persisted
