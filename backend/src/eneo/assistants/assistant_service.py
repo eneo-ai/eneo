@@ -1548,6 +1548,17 @@ class AssistantService:
             validate_permission(self.user, Permission.ADMIN)
 
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        # Partial writes must validate against the latest committed model,
+        # prompt and attachments. Take the fit token before the parent row lock,
+        # matching governance lock order, and hold both until the request commits.
+        await acquire_personal_default_fit_lock(
+            session=self.repo.session,
+            tenant_id=self.user.tenant_id,
+            shared=True,
+        )
+        assert space.id is not None
+        await self.repo.lock(assistant_id, space.id)
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         # Check if user has permission to toggle insights
