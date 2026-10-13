@@ -28,6 +28,9 @@
     selectedItemKeySet: Set<string>;
     selectedPaths: string[];
     ancestorSelected?: boolean;
+    /** The one tree item in the tab order (roving tabindex); null leaves every item out. */
+    activeKey?: string | null;
+    onFocusKey?: (key: string) => void;
     onToggleSelect: (node: SharePointTreeItem) => void;
     onToggleExpanded: (node: SharePointTreeNode) => void;
     onRetryLoad: (node: SharePointTreeNode) => void;
@@ -38,6 +41,8 @@
     selectedItemKeySet,
     selectedPaths,
     ancestorSelected = false,
+    activeKey = null,
+    onFocusKey,
     onToggleSelect,
     onToggleExpanded,
     onRetryLoad
@@ -79,11 +84,16 @@
     hasSelectedSharePointDescendant(selectedPaths, currentNode.path)}
   {@const checkboxId = `sharepoint-item-${currentNode.id}`}
   {@const expanded = currentNode.expanded}
-
   <li
     role="treeitem"
+    aria-label={currentNode.name}
     aria-selected={selected}
+    aria-checked={selected ? "true" : indeterminate ? "mixed" : "false"}
     aria-expanded={currentNode.type === "folder" && currentNode.has_children ? expanded : undefined}
+    tabindex={selectionKey === activeKey ? 0 : -1}
+    data-tree-key={selectionKey}
+    class="focus-visible:ring-stronger outline-none focus-visible:ring-2 focus-visible:ring-inset"
+    onfocusin={() => onFocusKey?.(selectionKey)}
   >
     <div
       class="border-border flex min-h-11 w-full min-w-0 items-center gap-2 border-b px-3 text-left transition-colors
@@ -96,6 +106,7 @@
         {indeterminate}
         disabled={parentSelected}
         title={parentSelected ? m.sharepoint_selected_by_parent() : undefined}
+        tabindex={-1}
         onCheckedChange={() => onToggleSelect(currentNode)}
       />
 
@@ -106,6 +117,7 @@
           aria-label={expanded
             ? m.sharepoint_collapse_folder_named({ name: currentNode.name })
             : m.sharepoint_expand_folder_named({ name: currentNode.name })}
+          tabindex={-1}
           onclick={() => onToggleExpanded(currentNode)}
         >
           <ChevronRight
@@ -216,6 +228,13 @@
           {#each currentNode.children ?? [] as child (buildSharePointSelectionKey(child))}
             {@render renderNode(child, selected)}
           {/each}
+        {/if}
+        {#if currentNode.childrenTruncated && !currentNode.loading && !currentNode.loadError}
+          <li role="none">
+            <p class="text-muted-foreground px-4 py-2 text-xs" role="status">
+              {m.sharepoint_tree_truncated()}
+            </p>
+          </li>
         {/if}
       </ul>
     {/if}
