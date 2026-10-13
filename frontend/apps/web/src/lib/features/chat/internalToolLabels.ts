@@ -163,6 +163,10 @@ const CAPABILITY_STEPS: Record<
   file_creation: {
     running: () => m.tool_file_creation(),
     done: () => m.tool_file_creation_done()
+  },
+  compute: {
+    running: () => m.tool_compute(),
+    done: () => m.tool_compute_done()
   }
 };
 

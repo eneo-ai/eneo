@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { ToolError } from "../../errors";
+import { exportFilename, MAX_EXPORT_BYTES } from "../files/csv";
 import {
   RichResult,
   type CallContext,
@@ -55,22 +56,7 @@ const ROWS_SHOWN =
 const NO_ROWS_MATCHED =
   "No rows matched. Compare the filter values with the value lists and examples from inspect_table: string comparison is exact and case-sensitive, so use the listed spelling or ILIKE. Say which filter found nothing instead of reporting that the data is missing.";
 
-// An exported result travels as a file; Eneo admits generated files up to 20 MiB by default.
-const MAX_EXPORT_BYTES = 20 * 1024 * 1024;
-
-/** A download name for an exported result; never a path, always .csv. */
-export function exportFilename(input: string | undefined): string {
-  const base = (input ?? "")
-    .normalize("NFC")
-    .replace(/\.csv$/i, "")
-    .replace(/[\u0000-\u001f\u007f-\u009f"\\/:;*?<>|]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^\.+/, "")
-    .slice(0, 100)
-    .trim();
-  return `${base || "resultat"}.csv`;
-}
+export { exportFilename };
 
 const fileRef = fileReference;
 const sheetName = z
@@ -321,7 +307,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       name: "inspect_table",
       title: "Inspect table",
       description:
-        "Start here when the user wants to view, browse, filter, sort or analyse an attached CSV, TSV or Excel (.xlsx) file. For a native row selection, pass source_rows and sheet unchanged to inspect_table and query_table; the source is filtered before SQL. Pass each file's signed url and filename from the attachment reference, unchanged. Returns sheet names, column names and types, column value profiles, parsed and rejected row counts and up to five sample rows per sheet. These samples describe the file, not the requested result: follow with query_table to show the requested rows or calculate an answer over the full dataset. Do not ask the user to name tools or choose an interactive display. Report rejected rows and missing saved formula results as coverage limitations. Formulas are not recalculated; saved results may be outdated.",
+        "Start here for any question about an attached CSV, TSV or Excel (.xlsx) file, including what it contains, and when the user wants to view, browse, filter, sort or analyse it. For a native row selection, pass source_rows and sheet unchanged to inspect_table and query_table; the source is filtered before SQL. Pass each file's signed url and filename from the attachment reference, unchanged. Returns sheet names, column names and types, column value profiles, parsed and rejected row counts and up to five sample rows per sheet. These samples describe the file, not the requested result: follow with query_table to show the requested rows or calculate an answer over the full dataset. Do not ask the user to name tools or choose an interactive display. Report rejected rows and missing saved formula results as coverage limitations. Formulas are not recalculated; saved results may be outdated.",
       inputSchema: inspectInput.shape,
       readOnly: true,
       async execute(raw, ctx) {

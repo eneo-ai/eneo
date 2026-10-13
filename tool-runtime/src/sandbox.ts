@@ -70,6 +70,8 @@ export type JobPaths = { read?: string[]; write?: string[] };
 export function jobPaths(job: SandboxJob["job"]): JobPaths {
   switch (job.kind) {
     case "compute":
+      // An exported table is written into a directory this process made for the job.
+      return job.export ? { write: [dirname(job.export.outputPath)] } : {};
     case "env":
     case "confinement":
       return {};

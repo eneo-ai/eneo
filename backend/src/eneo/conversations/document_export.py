@@ -23,6 +23,7 @@ from uuid import UUID
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
+from jsonschema.protocols import Validator
 from pydantic import BaseModel
 
 from eneo.authentication.signed_urls import build_signed_original_download_url
@@ -46,8 +47,6 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
 )
 
 if TYPE_CHECKING:
-    from jsonschema.protocols import Validator
-
     from eneo.assistants.assistant_service import AssistantService
     from eneo.document_templates.domain import DocumentTemplateReference
     from eneo.files.file_models import File
@@ -161,7 +160,7 @@ def export_compatibility(
         return unavailable("incompatible_tool")
     if arguments["format"] not in formats:
         return unavailable("format_unsupported")
-    validator = cast("Validator", Draft202012Validator(schema))
+    validator = cast(Validator, Draft202012Validator(schema))
     if not validator.is_valid(arguments):
         return unavailable("document_unsupported")
     return DocumentExportFormatAvailability(available=True)

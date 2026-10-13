@@ -330,6 +330,10 @@ class Settings(BaseSettings):
     mcp_tool_file_max_count: int = 4
     mcp_circuit_breaker_failure_threshold: int = 5
     mcp_circuit_breaker_cooldown_seconds: int = 60
+    # How long a backend process keeps the bundled runtime's tool catalog
+    # before listing it again. A rebuilt view or a changed tool reaches chats
+    # only after the next listing, so development installs set this low.
+    bundled_catalog_ttl_seconds: int = 300
 
     # MCP Apps (io.modelcontextprotocol/ui): interactive HTML views declared
     # by MCP tools and rendered in sandboxed iframes in assistant chat.
@@ -1011,6 +1015,13 @@ class Settings(BaseSettings):
             logging.error(
                 "MCP_CIRCUIT_BREAKER_COOLDOWN_SECONDS must be greater than zero. Current value: %s",
                 self.mcp_circuit_breaker_cooldown_seconds,
+            )
+            sys.exit(1)
+
+        if self.bundled_catalog_ttl_seconds < 0:
+            logging.error(
+                "BUNDLED_CATALOG_TTL_SECONDS must be zero or greater. Current value: %s",
+                self.bundled_catalog_ttl_seconds,
             )
             sys.exit(1)
 

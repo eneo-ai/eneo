@@ -205,6 +205,7 @@
           ) ??
           toolName,
         serverName: serverDisplayName(tc.server_name, tc.purpose, tc.is_internal),
+        identity: `${tc.server_name} · ${tc.tool_name}`,
         detail: readFileDetail(tc) ?? capabilityProviderDetail(tc),
         skillName: isSkillActivation(tc) ? (tc.title ?? tc.tool_name) : null,
         args: tc.arguments,
@@ -423,6 +424,7 @@
                   runningLabel={step.toolName}
                   doneLabel={step.doneLabel}
                   serverName={step.serverName}
+                  identity={step.identity}
                   detail={step.detail}
                   args={step.args}
                   toolCallId={step.toolCallId}
@@ -443,6 +445,7 @@
               runningLabel={step.toolName}
               doneLabel={step.doneLabel}
               serverName={step.serverName}
+              identity={step.identity}
               status={step.status}
               document={step.document}
               detail={step.detail}

@@ -35,4 +35,11 @@ describe("chart result presentation", () => {
   it("uses the localized title for the bundled chart", () => {
     expect(appViewTitle(appViewCalls([chart])[0])).toBe("mcp_app_chart_title");
   });
+  it("uses the localized title for the bundled calculation", () => {
+    const compute = { ...chart, tool_call_id: "compute-call", tool_name: "run_javascript" };
+    expect(appViewTitle(appViewCalls([compute])[0])).toBe("mcp_app_compute_title");
+    expect(appViewTitle(appViewCalls([{ ...compute, is_bundled: false, title: "Ext" }])[0])).toBe(
+      "Ext"
+    );
+  });
 });
