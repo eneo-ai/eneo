@@ -362,15 +362,29 @@ class TextExtractor:
             )
 
     @classmethod
-    def extract_from_delimited(cls, filepath: Path, filename: str | None = None) -> str:
-        """CSV or TSV: the file itself while it fits the index budget, else a sample."""
+    def extract_from_delimited(
+        cls,
+        filepath: Path,
+        filename: str | None = None,
+        *,
+        index_tabular: bool = False,
+    ) -> str:
+        """CSV or TSV as text; ``index_tabular`` samples a table over the index budget.
+
+        The sample is for the search index of a knowledge source whose original
+        is retained for the table tools. A chat attachment keeps every row: its
+        text is all the model has.
+        """
         display_name = filename or filepath.name
-        return delimited_index_text(
-            display_name, cls.extract_from_plain_text(filepath, display_name)
-        )
+        text = cls.extract_from_plain_text(filepath, display_name)
+        if not index_tabular:
+            return text
+        return delimited_index_text(display_name, text)
 
     @staticmethod
-    def extract_from_xlsx(filepath: Path, filename: str | None = None) -> str:
+    def extract_from_xlsx(
+        filepath: Path, filename: str | None = None, *, index_tabular: bool = False
+    ) -> str:
         import pandas as pd
 
         display_name = filename or filepath.name
@@ -421,7 +435,7 @@ class TextExtractor:
                     parts.append("\n".join(lines))
 
                 text = "\n\n".join(parts)
-                if fits_index_budget(text):
+                if not index_tabular or fits_index_budget(text):
                     return text
                 return tabular_sample_text(display_name, sheets)
             finally:
@@ -504,7 +518,15 @@ class TextExtractor:
         filename: str | None = None,
         *,
         limits: FileExtractionLimits | None = None,
+        index_tabular: bool = False,
     ) -> str:
+        """Extract a document's text.
+
+        ``index_tabular`` is for knowledge indexing of a spreadsheet whose
+        original is retained: a table over the index budget is then reduced to
+        schema plus sample (see :mod:`eneo.files.tabular_index`). Chat
+        attachments and other callers get the whole table.
+        """
         mimetype = mimetype or magic.from_file(filepath, mime=True)  # pyright: ignore[reportUnknownMemberType]  # python-magic stubs are incomplete
         # Use original filename for error messages, fallback to temp filepath
         display_name = filename or filepath.name
@@ -521,7 +543,9 @@ class TextExtractor:
             ):
                 extracted_text = self.extract_from_plain_text(filepath, display_name)
             case TextMimeTypes.TEXT_CSV | TextMimeTypes.APP_CSV:
-                extracted_text = self.extract_from_delimited(filepath, display_name)
+                extracted_text = self.extract_from_delimited(
+                    filepath, display_name, index_tabular=index_tabular
+                )
             case TextMimeTypes.PDF:
                 extracted_text = self.extract_from_pdf(
                     filepath, display_name, limits=limits
@@ -531,7 +555,9 @@ class TextExtractor:
             case TextMimeTypes.PPTX:
                 extracted_text = self.extract_from_pptx(filepath, display_name)
             case TextMimeTypes.XLSX | TextMimeTypes.XLS:
-                extracted_text = self.extract_from_xlsx(filepath, display_name)
+                extracted_text = self.extract_from_xlsx(
+                    filepath, display_name, index_tabular=index_tabular
+                )
             case _:
                 # Unknown mimetype: only treat as text if it is not binary.
                 # Guards against binary uploads (e.g. unsupported image formats)
@@ -549,6 +575,7 @@ class TextExtractor:
         filename: str | None = None,
         *,
         limits: FileExtractionLimits | None = None,
+        index_tabular: bool = False,
     ) -> str:
         from eneo.files.bounded_extraction import extract_in_process
 
@@ -556,5 +583,9 @@ class TextExtractor:
         # hint for legacy formats is raised here, before it is spawned.
         self._reject_legacy_format(mimetype, filename or filepath.name)
         return await extract_in_process(
-            filepath, mimetype, filename or filepath.name, limits=limits
+            filepath,
+            mimetype,
+            filename or filepath.name,
+            limits=limits,
+            index_tabular=index_tabular,
         )

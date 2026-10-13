@@ -69,6 +69,8 @@ class _Extractor:
         filepath: Path,
         mimetype: str,
         filename: str | None = None,
+        *,
+        index_tabular: bool = False,
     ) -> str:
         del filepath, mimetype, filename
         return self._text

@@ -929,6 +929,51 @@ async def test_new_upload_retains_exact_inline_original_and_counts_it_once(
         ).size == first_size
 
 
+async def test_releasing_an_original_keeps_the_text_and_recounts_the_size(
+    db_container,
+) -> None:
+    """A sync that cannot keep a changed file's bytes drops the stale original."""
+    text = "Rows a sync indexed from a workbook"
+    payload = b"workbook bytes the tools would otherwise keep serving"
+
+    async with db_container() as container:
+        group, embedding_model, _, _ = await _seed_active_document(
+            container,
+            text="Unrelated fixture",
+            title="unrelated.txt",
+        )
+        embeddings = AsyncMock()
+        embeddings.get_embeddings.side_effect = _embedding_result
+        container.create_embeddings_service.override(providers.Object(embeddings))
+
+        async with _inline_original(
+            container, payload, filename="sales.xlsx"
+        ) as original:
+            published = await container.text_processor().process_text(
+                text=text,
+                title="sales.xlsx",
+                embedding_model=embedding_model,
+                group_id=group.id,
+                original=original,
+            )
+
+        repo = InfoBlobRepository(container.session())
+        attached = await repo.get_original(published.id)
+        assert attached is not None
+        assert attached.size_bytes == len(payload)
+
+        released = (
+            await container.info_blob_service().release_original_without_validation(
+                published.id
+            )
+        )
+
+        assert await repo.get_original(published.id) is None
+        assert released.size == published.size - len(payload)
+        assert released.text == text
+        assert released.version_state == InfoBlobVersionState.ACTIVE.value
+
+
 async def test_identical_healthy_reupload_keeps_version_and_refreshes_filename(
     db_container,
 ) -> None:

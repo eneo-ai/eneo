@@ -54,6 +54,8 @@ def main() -> int:
     limits = FileExtractionLimits.model_validate_json(sys.argv[4])
     filepath = Path(sys.argv[5])
     mimetype, filename = sys.argv[6:8]
+    # Optional trailing flag: knowledge indexing samples large spreadsheets.
+    index_tabular = len(sys.argv) > 8 and sys.argv[8] == "1"
     try:
         if zipfile.is_zipfile(filepath):
             with zipfile.ZipFile(filepath) as archive:
@@ -65,7 +67,11 @@ def main() -> int:
                 ):
                     return ExtractionExit.LIMIT
         text = TextExtractor().extract(
-            filepath, mimetype or None, filename, limits=limits
+            filepath,
+            mimetype or None,
+            filename,
+            limits=limits,
+            index_tabular=index_tabular,
         )
         if len(text) > limits.max_output_bytes:
             return ExtractionExit.LIMIT

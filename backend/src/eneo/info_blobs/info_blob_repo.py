@@ -56,6 +56,8 @@ class InfoBlobOriginal:
     state: ContentState
     original_filename: str
     media_type: str | None = None
+    # Stored size of the bytes; what a version releases when it is superseded.
+    size_bytes: int = 0
 
     @property
     def usable(self) -> bool:
@@ -398,6 +400,7 @@ class InfoBlobRepository:
                 ObjectContents.access_class,
                 ObjectContents.state,
                 ObjectContents.verified_media_type,
+                ObjectContents.size_bytes,
             )
             .select_from(InfoBlobContentReferences)
             .join(
@@ -416,6 +419,7 @@ class InfoBlobRepository:
             state=ContentState(row.state),
             original_filename=row.original_filename,
             media_type=row.verified_media_type,
+            size_bytes=int(row.size_bytes or 0),
         )
 
     async def get_original(self, info_blob_id: UUID) -> InfoBlobOriginal | None:

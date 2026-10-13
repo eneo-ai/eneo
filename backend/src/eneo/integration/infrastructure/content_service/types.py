@@ -61,12 +61,19 @@ class SharePointFileContent:
     The extracted text is always present; the bytes only for the kinds of
     file whose original is kept (see ``content_service.originals``), so a
     large presentation never sits in memory longer than its extraction.
+
+    ``index_text`` is the schema-plus-sample form of a table over the index
+    budget. Publication indexes it only when the original is actually
+    retained, since the sample tells the model the table tools hold the full
+    file; otherwise the complete ``text`` is indexed. None when the text
+    itself is what gets indexed.
     """
 
     text: str
     content_type: str
     file_name: str
     data: bytes | None = None
+    index_text: str | None = None
 
 
 class SyncStats(TypedDict):

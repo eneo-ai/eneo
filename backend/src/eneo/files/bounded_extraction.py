@@ -39,6 +39,7 @@ async def extract_in_process(
     filename: str,
     *,
     limits: FileExtractionLimits | None = None,
+    index_tabular: bool = False,
 ) -> str:
     global _process_slots
     configured = get_file_extraction_limits()
@@ -68,6 +69,7 @@ async def extract_in_process(
                 str(filepath.resolve()),
                 mimetype or "",
                 filename,
+                "1" if index_tabular else "0",
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,

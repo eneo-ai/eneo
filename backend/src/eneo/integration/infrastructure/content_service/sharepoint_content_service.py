@@ -4,6 +4,7 @@ import unicodedata
 from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timezone
+from enum import Enum
 from typing import TYPE_CHECKING, Optional, cast
 from urllib.parse import unquote
 from uuid import UUID, uuid4
@@ -70,6 +71,7 @@ from eneo.object_content.runtime import object_content_runtime
 
 if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
+    from eneo.info_blobs.info_blob_repo import InfoBlobOriginal
     from eneo.info_blobs.info_blob_service import InfoBlobService
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
@@ -104,6 +106,26 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+
+class _Unresolved:
+    """Marker for "the caller did not look this up"; distinct from None."""
+
+
+_UNRESOLVED = _Unresolved()
+
+
+class _AttachedOriginal(Enum):
+    """How the active version's original relates to the downloaded file."""
+
+    # The attached bytes are the file's bytes (or there is nothing to compare).
+    CURRENT = "current"
+    # Retained new bytes differ from the attached ones: publish, attach them.
+    REPLACE = "replace"
+    # The file changed but its bytes were not retained: the attached original
+    # would serve the previous table, so it has to go.
+    STALE = "stale"
+
 
 # Full-sync reconciliation safety guard: cap deletions at the LARGER of a fraction
 # of the indexed set and a small absolute floor. The floor only lets a tiny KB churn
@@ -1401,21 +1423,54 @@ class SharePointContentService:
         text: str,
         filename: str,
         stats: SyncStats,
+        replaces: "InfoBlobOriginal | None" = None,
     ) -> bool:
         """Whether keeping ``original`` stays within the tenant's retained size.
 
         Quota is otherwise enforced when the whole sync commits, where one
         oversized original would roll back every document. Checking per item
         lets the sync keep the text and drop only the bytes.
+
+        Only the growth counts. Unchanged bytes share the stored object, and a
+        changed table releases the bytes the superseded version held, so a
+        same-size edit near the quota is not dropped (and the old table not
+        left attached) because its replacement was charged as new storage.
         """
+        if (
+            replaces is not None
+            and replaces.usable
+            and replaces.sha256 == original.captured.sha256
+        ):
+            new_bytes = 0
+        else:
+            released = replaces.size_bytes if replaces is not None else 0
+            new_bytes = max(original.captured.size_bytes - released, 0)
         try:
             await self.info_blob_service.quota_service.ensure_capacity(
-                original.captured.size_bytes + len(text.encode("utf-8"))
+                new_bytes + len(text.encode("utf-8"))
             )
         except QuotaExceededException:
             self._note_original_not_kept(stats, filename, "quota")
             return False
         return True
+
+    async def _existing_blob_for(
+        self,
+        *,
+        title: str,
+        sharepoint_item_id: Optional[str],
+        integration_knowledge: "IntegrationKnowledge",
+    ) -> Optional[InfoBlobInDB]:
+        """The active version this file would supersede, if any."""
+        if sharepoint_item_id:
+            return await self.info_blob_service.repo.get_by_sharepoint_item_and_integration_knowledge(
+                sharepoint_item_id=sharepoint_item_id,
+                integration_knowledge_id=integration_knowledge.id,
+            )
+        return await self.info_blob_service.repo.get_by_title_and_integration_knowledge(
+            title=title,
+            integration_knowledge_id=integration_knowledge.id,
+        )
 
     async def _publish_file(
         self,
@@ -1445,20 +1500,51 @@ class SharePointContentService:
         )
         if media_type is None and unextractable:
             return False
+
+        existing_blob: InfoBlobInDB | None | _Unresolved = _UNRESOLVED
+        existing_original: Optional[InfoBlobOriginal] = None
+        incoming_sha: Optional[bytes] = None
+        if content.data is not None:
+            # A tabular file is compared with the bytes already attached: the
+            # quota check credits what a replacement releases, and a dropped
+            # original must never leave the previous table serving the tools.
+            incoming_sha = hashlib.sha256(content.data).digest()
+            existing_blob = await self._existing_blob_for(
+                title=title,
+                sharepoint_item_id=sharepoint_item_id,
+                integration_knowledge=integration_knowledge,
+            )
+            if existing_blob is not None:
+                existing_original = await self.info_blob_service.repo.get_original(
+                    existing_blob.id
+                )
+
+        # The sample form tells the model the table tools hold the full file,
+        # which is only true once the original is retained.
+        index_text = (
+            content.index_text if content.index_text is not None else content.text
+        )
         async with self._prepared_original(
             filename=filename, media_type=media_type, data=content.data, stats=stats
         ) as original:
             if original is not None and not await self._original_fits_quota(
-                original, text=content.text, filename=filename, stats=stats
+                original,
+                text=index_text,
+                filename=filename,
+                stats=stats,
+                replaces=existing_original,
             ):
                 original = None
             if original is None and unextractable:
                 return False
-            text = (
-                build_tabular_placeholder_text(filename, cast(bytes, content.data))
-                if unextractable
-                else content.text
-            )
+            if unextractable:
+                text = build_tabular_placeholder_text(
+                    filename, cast(bytes, content.data)
+                )
+            elif original is not None:
+                text = index_text
+            else:
+                text = content.text
             await self._process_info_blob(
                 title=title,
                 text=text,
@@ -1467,23 +1553,55 @@ class SharePointContentService:
                 sharepoint_item_id=sharepoint_item_id,
                 source_metadata=source_metadata,
                 original=original,
+                existing_blob=existing_blob,
+                existing_original=existing_original,
+                incoming_sha=incoming_sha,
+                stats=stats,
             )
         return True
 
-    async def _original_already_attached(
-        self,
-        existing_blob: InfoBlobInDB,
+    @staticmethod
+    def _attached_original_state(
+        existing_original: "InfoBlobOriginal | None",
         original: Optional[PreparedKnowledgeOriginal],
-    ) -> bool:
-        """Whether the active version already holds these exact bytes."""
-        if original is None:
-            return True
-        existing = await self.info_blob_service.repo.get_original(existing_blob.id)
-        return (
-            existing is not None
-            and existing.usable
-            and existing.sha256 == original.captured.sha256
+        incoming_sha: Optional[bytes],
+    ) -> "_AttachedOriginal":
+        """How the active version's original relates to the file just downloaded.
+
+        ``incoming_sha`` is the digest of the downloaded bytes, whether or not
+        they could be retained as ``original``.
+        """
+        if original is not None:
+            incoming_sha = original.captured.sha256
+        if incoming_sha is None:
+            # No bytes by policy (not a tabular file): nothing to compare.
+            return _AttachedOriginal.CURRENT
+        attached_sha = (
+            existing_original.sha256
+            if existing_original is not None and existing_original.usable
+            else None
         )
+        if attached_sha == incoming_sha:
+            return _AttachedOriginal.CURRENT
+        if original is not None:
+            return _AttachedOriginal.REPLACE
+        if attached_sha is None:
+            return _AttachedOriginal.CURRENT
+        # The table changed but its new bytes were not kept (quota, size,
+        # storage): the attached original would serve the previous table.
+        return _AttachedOriginal.STALE
+
+    async def _apply_size_delta(
+        self,
+        integration_knowledge: "IntegrationKnowledge",
+        previous_blob_size: int,
+        new_blob_size: int,
+    ) -> None:
+        current_size = safe_int(getattr(integration_knowledge, "size", 0))
+        size_delta = new_blob_size - previous_blob_size
+        if size_delta:
+            integration_knowledge.size = max(0, current_size + size_delta)
+            await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
     async def _process_info_blob(
         self,
@@ -1495,17 +1613,16 @@ class SharePointContentService:
         source_metadata: Optional[list[SourceMetadataEntry]] = None,
         *,
         original: Optional[PreparedKnowledgeOriginal] = None,
+        existing_blob: "InfoBlobInDB | None | _Unresolved" = _UNRESOLVED,
+        existing_original: "InfoBlobOriginal | None | _Unresolved" = _UNRESOLVED,
+        incoming_sha: Optional[bytes] = None,
+        stats: Optional[SyncStats] = None,
     ) -> None:
-        existing_blob = None
-        if sharepoint_item_id:
-            existing_blob = await self.info_blob_service.repo.get_by_sharepoint_item_and_integration_knowledge(
-                sharepoint_item_id=sharepoint_item_id,
-                integration_knowledge_id=integration_knowledge.id,
-            )
-        else:
-            existing_blob = await self.info_blob_service.repo.get_by_title_and_integration_knowledge(
+        if isinstance(existing_blob, _Unresolved):
+            existing_blob = await self._existing_blob_for(
                 title=title,
-                integration_knowledge_id=integration_knowledge.id,
+                sharepoint_item_id=sharepoint_item_id,
+                integration_knowledge=integration_knowledge,
             )
 
         previous_blob_size = safe_int(existing_blob.size) if existing_blob else 0
@@ -1525,34 +1642,69 @@ class SharePointContentService:
             existing_blob is not None
             and existing_blob.content_hash is not None
             and existing_blob.content_hash == content_hash
-            and await self._original_already_attached(existing_blob, original)
         ):
-            # Content is byte-for-byte unchanged: skip the expensive re-chunk +
-            # re-embed. Still cheaply refresh title/url if they drifted (e.g. a
-            # rename/move surfaced by a full sync, which has no cTag dedup) so the
-            # displayed name and citation URL do not go stale. An original that
-            # is missing or differs falls through: publication attaches it
-            # without re-embedding unchanged text.
-            if (
-                existing_blob.title != title
-                or existing_blob.url != url
-                or (existing_blob.source_metadata or []) != source_metadata
-            ):
-                await self.info_blob_service.repo.update(
-                    InfoBlobUpdate(
-                        id=existing_blob.id,
-                        user_id=self.user.id,
-                        title=title,
-                        url=url,
-                        source_metadata=source_metadata,
-                    )
+            if isinstance(existing_original, _Unresolved):
+                existing_original = (
+                    await self.info_blob_service.repo.get_original(existing_blob.id)
+                    if incoming_sha is not None or original is not None
+                    else None
                 )
-            logger.debug(
-                "Skipping re-embed for unchanged SharePoint content: %s (item_id=%s)",
-                title,
-                sharepoint_item_id,
+            state = self._attached_original_state(
+                existing_original, original, incoming_sha
             )
-            return
+            # REPLACE (a retained original that is not the attached one) falls
+            # through: publication attaches it without re-embedding.
+            if state is not _AttachedOriginal.REPLACE:
+                if state is _AttachedOriginal.STALE:
+                    updated = await self.info_blob_service.release_original_without_validation(
+                        existing_blob.id
+                    )
+                    await self._apply_size_delta(
+                        integration_knowledge,
+                        previous_blob_size,
+                        safe_int(getattr(updated, "size", 0)),
+                    )
+                    if stats is not None:
+                        stats["skipped_details"].append(
+                            {
+                                "file": title,
+                                "reason": (
+                                    "Previous original removed: the table "
+                                    "changed but its new bytes were not kept"
+                                ),
+                            }
+                        )
+                    logger.info(
+                        "Released the stale original of %s (item_id=%s): the file "
+                        "changed and its new bytes were not retained",
+                        title,
+                        sharepoint_item_id,
+                    )
+                # Content is byte-for-byte unchanged: skip the expensive
+                # re-chunk + re-embed. Still cheaply refresh title/url if they
+                # drifted (e.g. a rename/move surfaced by a full sync, which
+                # has no cTag dedup) so the displayed name and citation URL do
+                # not go stale.
+                if (
+                    existing_blob.title != title
+                    or existing_blob.url != url
+                    or (existing_blob.source_metadata or []) != source_metadata
+                ):
+                    await self.info_blob_service.repo.update(
+                        InfoBlobUpdate(
+                            id=existing_blob.id,
+                            user_id=self.user.id,
+                            title=title,
+                            url=url,
+                            source_metadata=source_metadata,
+                        )
+                    )
+                logger.debug(
+                    "Skipping re-embed for unchanged SharePoint content: %s (item_id=%s)",
+                    title,
+                    sharepoint_item_id,
+                )
+                return
 
         info_blob_add = InfoBlobAdd(
             title=title,
@@ -1575,12 +1727,11 @@ class SharePointContentService:
             attach_original_in_place=True,
         )
 
-        current_size = safe_int(getattr(integration_knowledge, "size", 0))
-        new_blob_size = safe_int(getattr(info_blob, "size", 0))
-        size_delta = new_blob_size - previous_blob_size
-        if size_delta:
-            integration_knowledge.size = max(0, current_size + size_delta)
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+        await self._apply_size_delta(
+            integration_knowledge,
+            previous_blob_size,
+            safe_int(getattr(info_blob, "size", 0)),
+        )
 
     async def _delete_local_sharepoint_item(
         self,

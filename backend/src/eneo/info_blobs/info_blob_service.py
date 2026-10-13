@@ -576,6 +576,19 @@ class InfoBlobService:
 
         return (await self._project_original_availability([info_blob_updated]))[0]
 
+    async def release_original_without_validation(
+        self, info_blob_id: UUID
+    ) -> InfoBlobInDB:
+        """Drop a version's original bytes while keeping its indexed text.
+
+        For a synchronisation that learns the file changed but could not
+        retain the new bytes: the attached original would otherwise keep
+        serving the old table to the tools. The size is recomputed so quota
+        accounting sees the release.
+        """
+        await self.repo.release_original_reference(info_blob_id)
+        return await self.update_info_blob_size(info_blob_id)
+
     async def update_info_blob_size(self, info_blob_id: UUID):
         updated_info_blob = await self.repo.update_size(info_blob_id=info_blob_id)
         assert updated_info_blob is not None

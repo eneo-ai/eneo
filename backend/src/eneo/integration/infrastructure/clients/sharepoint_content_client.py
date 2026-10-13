@@ -6,7 +6,6 @@ from uuid import UUID
 
 import aiohttp
 
-from eneo.files.tabular_index import delimited_index_text
 from eneo.integration.infrastructure.content_service.originals import (
     retain_original_bytes,
 )
@@ -19,6 +18,7 @@ from eneo.integration.infrastructure.content_service.types import (
 )
 from eneo.integration.infrastructure.content_service.utils import (
     process_sharepoint_response,
+    sync_index_text,
 )
 from eneo.libs.clients import BaseClient
 from eneo.libs.clients.throttle_retry import (
@@ -375,39 +375,30 @@ class SharePointContentClient(BaseClient):
                         text = str(json.loads(decoded))
                     except json.JSONDecodeError:
                         text = decoded
-                    return SharePointFileContent(
-                        text=text,
-                        content_type=content_type,
-                        file_name=file_name,
-                        data=data,
-                    )
-
-                if (
+                    detected_content_type = content_type
+                elif (
                     "text/" in content_type_lower
                     or "application/xml" in content_type_lower
                 ):
                     text = payload.decode(response.charset or "utf-8", errors="replace")
-                    if data is not None:
-                        # A delimited table whose original is kept: indexed
-                        # whole while it fits, otherwise schema and a sample.
-                        text = delimited_index_text(file_name, text)
-                    return SharePointFileContent(
-                        text=text,
+                    detected_content_type = content_type
+                else:
+                    text, detected_content_type = process_sharepoint_response(
+                        response_content=payload,
                         content_type=content_type,
-                        file_name=file_name,
-                        data=data,
+                        filename=file_name,
                     )
-
-                text, detected_content_type = process_sharepoint_response(
-                    response_content=payload,
-                    content_type=content_type,
-                    filename=file_name,
-                )
+                # The text is complete; a table over the index budget also
+                # carries its schema-plus-sample form, which publication
+                # indexes only once the original is known to be retained.
                 return SharePointFileContent(
                     text=text,
                     content_type=detected_content_type,
                     file_name=file_name,
                     data=data,
+                    index_text=sync_index_text(
+                        file_name, text, retained=data is not None
+                    ),
                 )
 
         return await retry_on_throttle(
