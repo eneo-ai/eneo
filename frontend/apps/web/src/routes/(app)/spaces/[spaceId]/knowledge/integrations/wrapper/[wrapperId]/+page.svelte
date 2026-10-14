@@ -1,12 +1,8 @@
 <script lang="ts">
-  import { Page } from "$lib/components/layout";
+  import { goto } from "$app/navigation";
+  import { groupIntegrationSources } from "$lib/features/integrations/sources";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { derived } from "svelte/store";
-  import type { IntegrationKnowledge } from "@eneo/eneo-js";
-  import IntegrationTreeTable from "../../IntegrationTreeTable.svelte";
-  import SharePointWrapperActions from "../../SharePointWrapperActions.svelte";
-  import SyncHistoryDialog from "../../SyncHistoryDialog.svelte";
-  import { m } from "$lib/paraglide/messages";
+  import SourcePage from "../../source/SourcePage.svelte";
 
   let { data } = $props();
 
@@ -14,88 +10,29 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  // Re-derive items from currentSpace to stay reactive after renames/deletes/syncs
-  const wrapperItems = derived(currentSpace, ($currentSpace) =>
+  // Re-read the items from the space so renames, syncs and deletions show without a reload.
+  let items = $derived(
     $currentSpace.knowledge.integrationKnowledge.filter(
-      (k) => k.wrapper_id === data.wrapperId && k.space_id === $currentSpace.id
+      (item) => item.wrapper_id === data.wrapperId && item.space_id === $currentSpace.id
     )
   );
+  let source = $derived(items.length > 0 ? groupIntegrationSources(items)[0] : null);
 
-  const wrapperName = derived(wrapperItems, ($wrapperItems) => {
-    if ($wrapperItems.length > 0) {
-      const first = $wrapperItems[0];
-      if (typeof first.wrapper_name === "string" && first.wrapper_name.trim().length > 0) {
-        return first.wrapper_name;
-      }
-      return first.name;
-    }
-    return data.wrapperName;
-  });
+  let isAdmin = $derived(
+    data.user?.roles?.some((role: { permissions?: string[] }) =>
+      role.permissions?.includes("admin")
+    ) ?? false
+  );
 
-  // Wrapper permissions
-  const wrapperPermissions = derived(wrapperItems, ($wrapperItems) => {
-    if ($wrapperItems.length === 0) return { canEdit: false, canDelete: false };
-    const permissions = $wrapperItems[0].permissions ?? [];
-    return {
-      canEdit: permissions.includes("edit"),
-      canDelete: permissions.includes("delete")
-    };
-  });
-
-  // Sync history state
-  let selectedIntegrationForSyncHistory: IntegrationKnowledge | null = $state(null);
-  let showSyncHistoryDialog = $state(false);
-
-  function handleSelectIntegration(integration: IntegrationKnowledge) {
-    selectedIntegrationForSyncHistory = integration;
-    showSyncHistoryDialog = true;
-  }
-
+  // The wrapper was deleted from its actions menu: this page has nothing left to show.
   $effect(() => {
-    if (!showSyncHistoryDialog) {
-      selectedIntegrationForSyncHistory = null;
+    if (items.length === 0 && $currentSpace.id === data.currentSpace.id) {
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic space route
+      void goto(`/spaces/${$currentSpace.routeId}/knowledge?tab=integrations`);
     }
   });
 </script>
 
-<svelte:head>
-  <title>
-    Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {$wrapperName}
-  </title>
-</svelte:head>
-
-<Page.Root>
-  <Page.Header>
-    <Page.Title
-      parent={{
-        title: m.integrations(),
-        href: `/spaces/${$currentSpace.routeId}/knowledge?tab=integrations`
-      }}
-      title={$wrapperName}
-    ></Page.Title>
-    <div class="flex-grow"></div>
-    <Page.Flex>
-      {#if $wrapperPermissions.canEdit || $wrapperPermissions.canDelete}
-        <SharePointWrapperActions
-          wrapperId={data.wrapperId}
-          wrapperName={$wrapperName}
-          itemCount={$wrapperItems.length}
-          items={$wrapperItems}
-          canEdit={$wrapperPermissions.canEdit}
-          canDelete={$wrapperPermissions.canDelete}
-        />
-      {/if}
-    </Page.Flex>
-  </Page.Header>
-  <Page.Main>
-    <IntegrationTreeTable
-      items={$wrapperItems}
-      spaceRouteId={$currentSpace.routeId}
-      onShowSyncHistory={handleSelectIntegration}
-    />
-    <SyncHistoryDialog
-      knowledge={selectedIntegrationForSyncHistory}
-      bind:open={showSyncHistoryDialog}
-    ></SyncHistoryDialog>
-  </Page.Main>
-</Page.Root>
+{#if source}
+  <SourcePage {source} {isAdmin} />
+{/if}

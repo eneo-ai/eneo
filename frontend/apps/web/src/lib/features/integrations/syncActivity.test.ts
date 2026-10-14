@@ -1,10 +1,14 @@
+import type { IntegrationKnowledge } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
 import {
+  activityKind,
+  groupActivityByDay,
+  mergeActivity,
   readSyncLogExtras,
   skippedNotListed,
-  summarizeSyncLogPage,
+  summarizeActivity,
   type SyncLog
-} from "./syncHistory";
+} from "./syncActivity";
 
 function log(overrides: Partial<SyncLog>): SyncLog {
   return {
@@ -24,6 +28,9 @@ function log(overrides: Partial<SyncLog>): SyncLog {
     ...overrides
   } as SyncLog;
 }
+
+const itemA = { id: "a", name: "A" } as IntegrationKnowledge;
+const itemB = { id: "b", name: "B" } as IntegrationKnowledge;
 
 describe("readSyncLogExtras", () => {
   it("reads the unchanged count, the truncation flag and the reconcile warning", () => {
@@ -57,14 +64,53 @@ describe("skippedNotListed", () => {
   });
 });
 
-describe("summarizeSyncLogPage", () => {
-  it("adds up successful syncs only and counts every sync on the page", () => {
+describe("activityKind", () => {
+  it.each([
+    [{ status: "error", files_processed: 3 }, "failed"],
+    [{ status: "in_progress" }, "running"],
+    [{ files_deleted: 1 }, "changed"],
+    [{ skipped_items: 2 }, "changed"],
+    [{}, "unchanged"]
+  ] as const)("%o → %s", (overrides, kind) => {
+    expect(activityKind(log(overrides))).toBe(kind);
+  });
+});
+
+describe("the activity timeline", () => {
+  const entries = mergeActivity([
+    { item: itemA, logs: [log({ id: "a1", started_at: "2026-10-13T08:00:00" })] },
+    {
+      item: itemB,
+      logs: [
+        log({ id: "b1", started_at: "2026-10-13T18:00:00", status: "error" }),
+        log({ id: "b2", started_at: "2026-10-12T09:00:00", files_processed: 4, files_deleted: 1 })
+      ]
+    }
+  ]);
+
+  it("merges every item's logs newest first", () => {
+    expect(entries.map((entry) => [entry.log.id, entry.item.id])).toEqual([
+      ["b1", "b"],
+      ["a1", "a"],
+      ["b2", "b"]
+    ]);
+  });
+
+  it("groups by local day in order", () => {
     expect(
-      summarizeSyncLogPage([
-        log({ files_processed: 3, files_deleted: 1, pages_processed: 2 }),
-        log({ status: "error", files_processed: 9 }),
-        log({ files_processed: 2 })
-      ])
-    ).toEqual({ syncs: 3, successful: 2, files: 5, deleted: 1, pages: 2 });
+      groupActivityByDay(entries).map((day) => [day.day, day.entries.map((e) => e.log.id)])
+    ).toEqual([
+      ["2026-10-13", ["b1", "a1"]],
+      ["2026-10-12", ["b2"]]
+    ]);
+  });
+
+  it("totals the syncs, failures and changes", () => {
+    expect(summarizeActivity(entries)).toEqual({
+      syncs: 3,
+      failed: 1,
+      changedFiles: 4,
+      deleted: 1
+    });
   });
 });

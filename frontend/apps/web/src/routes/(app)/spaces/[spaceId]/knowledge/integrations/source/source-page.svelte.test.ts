@@ -1,0 +1,260 @@
+import type { IntegrationKnowledge } from "@eneo/eneo-js";
+import { page } from "vitest/browser";
+import { readable, writable } from "svelte/store";
+import { render } from "vitest-browser-svelte";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import "../../../../../../../app.css";
+import { m } from "$lib/paraglide/messages";
+import { expectNoAxeViolations } from "$lib/test/axe";
+import type { IntegrationSkippedDocuments } from "$lib/features/integrations/integrationDocuments";
+import { groupIntegrationSources } from "$lib/features/integrations/sources";
+import type { IntegrationSyncProgress } from "$lib/features/integrations/syncProgress";
+
+const api = vi.hoisted(() => ({
+  listDocuments: vi.fn(),
+  listSkippedDocuments: vi.fn(),
+  getSyncLogs: vi.fn(),
+  getSyncProgress: vi.fn(),
+  route: {
+    url: new URL("http://localhost/spaces/space-1/knowledge/integrations/wrapper/w1"),
+    state: {} as Record<string, unknown>
+  }
+}));
+
+vi.mock("$app/state", () => ({ page: api.route }));
+vi.mock("$app/stores", () => ({ page: readable(api.route) }));
+vi.mock("$app/navigation", () => ({
+  afterNavigate: vi.fn(),
+  beforeNavigate: vi.fn(),
+  goto: vi.fn(),
+  invalidate: vi.fn(),
+  onNavigate: vi.fn(),
+  pushState: vi.fn(),
+  replaceState: vi.fn()
+}));
+vi.mock("$lib/core/Eneo", () => ({
+  getEneo: () => ({
+    integrations: {
+      knowledge: {
+        listDocuments: api.listDocuments,
+        listSkippedDocuments: api.listSkippedDocuments,
+        getSyncLogs: api.getSyncLogs,
+        getSyncProgress: api.getSyncProgress
+      }
+    },
+    infoBlobs: { get: vi.fn() }
+  })
+}));
+vi.mock("$lib/features/jobs/JobManager", () => ({
+  jobCompletionEvents: writable(null),
+  getJobManager: () => ({ startFastUpdatePolling: vi.fn() })
+}));
+
+const CREDENTIALS =
+  "SharePoint credentials are invalid or expired; an administrator must reconnect the integration";
+
+type Metadata = NonNullable<IntegrationKnowledge["metadata"]>;
+
+function knowledge(
+  id: string,
+  name: string,
+  fields: Partial<IntegrationKnowledge> = {},
+  metadata: Partial<Metadata> = {}
+): IntegrationKnowledge {
+  return {
+    id,
+    name,
+    integration_type: "sharepoint",
+    selected_item_type: "folder",
+    folder_path: `/Shared Documents/${name}`,
+    space_id: "space-1",
+    permissions: ["edit", "delete"],
+    url: `https://contoso.sharepoint.com/sites/ks/Shared%20Documents/${name}`,
+    wrapper_id: "w1",
+    wrapper_name: "Kommunstyrelsen",
+    embedding_model: { id: "model" },
+    ...fields,
+    metadata: {
+      size: 0,
+      last_sync_status: "success",
+      document_count: 4,
+      last_synced_at: "2026-10-13T08:00:00Z",
+      ...metadata
+    }
+  } as IntegrationKnowledge;
+}
+
+const protokoll = knowledge("ik-a", "Protokoll");
+const skannade = knowledge(
+  "ik-b",
+  "Skannade",
+  {},
+  { last_sync_status: "error", last_sync_error: CREDENTIALS, document_count: 2 }
+);
+
+const space = {
+  id: "space-1",
+  routeId: "space-1",
+  name: "Kommunstyrelsen",
+  personal: false,
+  knowledge: { integrationKnowledge: [protokoll, skannade] }
+};
+const currentSpace = writable(space);
+vi.mock("$lib/features/spaces/SpacesManager", () => ({
+  getSpacesManager: () => ({
+    state: { currentSpace },
+    refreshCurrentSpace: vi.fn(async () => {})
+  })
+}));
+
+import SourcePage from "./SourcePage.svelte";
+
+function skippedList(entries: [string, string][]): IntegrationSkippedDocuments {
+  return {
+    items: entries.map(([file, reason]) => ({ file, reason })),
+    total: entries.length,
+    truncated: false,
+    synced_at: null
+  };
+}
+
+function progressFor(id: string): IntegrationSyncProgress {
+  return {
+    integration_knowledge_id: id,
+    sync_type: "full",
+    phase: "processing",
+    started_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    total: 20,
+    done: 8,
+    indexed: 7,
+    unchanged: 0,
+    skipped: 1,
+    deleted: 0
+  };
+}
+
+function showWrapper(search = "") {
+  api.route.url = new URL(
+    `http://localhost/spaces/space-1/knowledge/integrations/wrapper/w1${search}`
+  );
+  const [source] = groupIntegrationSources([protokoll, skannade]);
+  return render(SourcePage, { source, isAdmin: false });
+}
+
+describe("source page", () => {
+  beforeEach(() => {
+    api.route.state = {};
+    api.listDocuments.mockReset().mockResolvedValue({
+      items: [],
+      total_count: 0,
+      limit: 50,
+      offset: 0,
+      total_size: 0
+    });
+    api.getSyncLogs.mockReset().mockResolvedValue({ items: [], total_count: 0 });
+    api.getSyncProgress.mockReset().mockResolvedValue({ items: [] });
+    api.listSkippedDocuments.mockReset().mockImplementation(async ({ knowledge: item }) =>
+      item.id === "ik-a"
+        ? skippedList([
+            ["scan.pdf", "No text layer (scanned document; OCR is not supported)"],
+            ["bild.png", "Unsupported file type (image)"]
+          ])
+        : skippedList([])
+    );
+    currentSpace.set(space);
+  });
+
+  it("opens on an overview of the folders, with the stopped sign-in called out", async () => {
+    showWrapper();
+
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Kommunstyrelsen");
+    const folders = page.getByRole("navigation", { name: m.integration_source_folders() });
+    await expect
+      .element(folders.getByRole("link", { name: m.integration_source_all_folders() }))
+      .toHaveAttribute("aria-current", "page");
+    await expect
+      .element(
+        page.getByRole("table", {
+          name: m.integration_source_folders_table_label({ name: "Kommunstyrelsen" })
+        })
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.integration_source_stopped_sign_in_title()))
+      .toBeVisible();
+    // One blocking sign-in problem plus one scanned file; the image is skipped on purpose.
+    await expect
+      .element(page.getByRole("tab", { name: `${m.integration_source_tab_problems()} 2` }))
+      .toBeVisible();
+    // The truncating page title belongs to the shared header; check what this page renders.
+    await expectNoAxeViolations({ exclude: [["h1"]] });
+  });
+
+  it("shows the documents of the folder the URL selects", async () => {
+    showWrapper("?folder=ik-a");
+
+    const folders = page.getByRole("navigation", { name: m.integration_source_folders() });
+    await expect
+      .element(folders.getByRole("link", { name: /Protokoll/ }))
+      .toHaveAttribute("aria-current", "page");
+    await expect.element(page.getByRole("heading", { name: "Protokoll", level: 2 })).toBeVisible();
+    await expect.poll(() => api.listDocuments.mock.calls.at(-1)?.[0].knowledge.id).toBe("ik-a");
+    await expect
+      .element(page.getByText(m.integration_source_folder_skipped_other({ count: 2 })))
+      .toBeVisible();
+  });
+
+  it("swaps the summary for live progress while a folder syncs", async () => {
+    api.getSyncProgress.mockResolvedValue({ items: [progressFor("ik-a")] });
+    showWrapper();
+
+    await expect
+      .element(page.getByRole("heading", { name: m.integration_progress_sync_running() }))
+      .toBeVisible();
+    const bar = page.getByRole("progressbar", {
+      name: m.integration_progress_label({ name: "Kommunstyrelsen" })
+    });
+    await expect.element(bar).toHaveAttribute("aria-valuenow", "8");
+    await expect.element(bar).toHaveAttribute("aria-valuemax", "20");
+    await expect
+      .element(page.getByText(m.integration_progress_readable({ count: 7 })))
+      .toBeVisible();
+    await expect.element(page.getByText("8/20")).toBeVisible();
+  });
+
+  it("lists the problems by cause on the problems tab", async () => {
+    api.route.state = { tab: "problems" };
+    showWrapper("?tab=problems");
+
+    await expect.element(page.getByText(m.integration_problem_credentials_title())).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: m.integration_problem_copy_admin_link() }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.integration_problems_fixable_heading({ count: 1 })))
+      .toBeVisible();
+    await expect.element(page.getByText("scan.pdf")).toBeVisible();
+    await expect
+      .element(page.getByText(m.integration_problems_intentional_heading({ count: 1 })))
+      .toBeVisible();
+    // The truncating page title belongs to the shared header; check what this page renders.
+    await expectNoAxeViolations({ exclude: [["h1"]] });
+  });
+
+  it("shows a source of one folder without a folder list", async () => {
+    const alone = knowledge("ik-c", "Rutiner", { wrapper_id: null, wrapper_name: null });
+    api.route.url = new URL("http://localhost/spaces/space-1/knowledge/integrations/ik-c");
+    render(SourcePage, { source: groupIntegrationSources([alone])[0], isAdmin: false });
+
+    await expect.poll(() => api.listDocuments.mock.calls.at(-1)?.[0].knowledge.id).toBe("ik-c");
+    expect(
+      page.getByRole("navigation", { name: m.integration_source_folders() }).elements()
+    ).toHaveLength(0);
+    await expect
+      .element(page.getByRole("link", { name: m.open_in_sharepoint() }).first())
+      .toHaveAttribute("href", alone.url as string);
+  });
+});

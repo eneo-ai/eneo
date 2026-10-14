@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { m } from "$lib/paraglide/messages";
-import { describeSkipReason } from "./skipReasons";
+import { describeSkipReason, skipReasonKind } from "./skipReasons";
 
 describe("describeSkipReason", () => {
   it.each([
@@ -39,5 +39,22 @@ describe("describeSkipReason", () => {
     ["Folder scope path unavailable", "Folder scope path unavailable"]
   ])("%s", (reason, expected) => {
     expect(describeSkipReason(reason)).toBe(expected);
+  });
+});
+
+describe("skipReasonKind", () => {
+  it.each([
+    ["Unsupported file type (image)", "unsupported_type"],
+    ["No text layer (scanned document; OCR is not supported)", "no_text_layer"],
+    ["Empty or unreadable content", "empty_content"],
+    ["File too large (exceeds 50 MB limit)", "file_too_large"],
+    ["Exceeds extraction limit (500 PDF pages)", "extraction_limit"],
+    ["Error: Incomplete download of 'a.pdf' (1 of 2 bytes)", "incomplete_download"],
+    ["Error: Password-protected file", "password_protected"],
+    ["Error: Corrupt or malformed file", "corrupt_file"],
+    ["Error: TimeoutError while extracting pdf", "error"],
+    ["Folder scope path unavailable", "error"]
+  ] as const)("%s", (reason, kind) => {
+    expect(skipReasonKind(reason)).toBe(kind);
   });
 });

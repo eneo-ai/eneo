@@ -1,14 +1,9 @@
-import { error } from "@sveltejs/kit";
+import { error, redirect } from "@sveltejs/kit";
 import type { IntegrationKnowledge } from "@eneo/eneo-js";
-import {
-  DEFAULT_INTEGRATION_DOCUMENTS_QUERY,
-  type IntegrationDocumentsPage,
-  type IntegrationDocumentsTab,
-  type IntegrationSkippedDocuments
-} from "$lib/features/integrations/integrationDocuments";
+import { sourceHref } from "$lib/features/integrations/sources";
 
 export const load = async (event) => {
-  const { eneo, currentSpace } = await event.parent();
+  const { currentSpace } = await event.parent();
   const integrationKnowledgeId = event.params.integrationKnowledgeId;
 
   const items: IntegrationKnowledge[] =
@@ -20,25 +15,21 @@ export const load = async (event) => {
     throw error(404);
   }
 
-  const [documents, skipped] = await Promise.all([
-    eneo.integrations.knowledge.listDocuments({
-      knowledge,
-      space: currentSpace,
-      ...DEFAULT_INTEGRATION_DOCUMENTS_QUERY
-    }) as Promise<IntegrationDocumentsPage>,
-    (
-      eneo.integrations.knowledge.listSkippedDocuments({
-        knowledge,
-        space: currentSpace
-      }) as Promise<IntegrationSkippedDocuments>
-    ).catch((err: unknown) => {
-      console.error("Could not load the skipped files of an integration item", err);
-      return null;
-    })
-  ]);
+  // An item imported with others lives on its wrapper's page, with its folder selected.
+  if (knowledge.wrapper_id && knowledge.integration_type === "sharepoint") {
+    const requestedTab = event.url.searchParams.get("tab");
+    throw redirect(
+      307,
+      sourceHref(
+        event.params.spaceId,
+        { kind: "wrapper", id: knowledge.wrapper_id },
+        {
+          folder: knowledge.id,
+          tab: requestedTab === "skipped" || requestedTab === "problems" ? "problems" : undefined
+        }
+      )
+    );
+  }
 
-  const initialTab: IntegrationDocumentsTab =
-    event.url.searchParams.get("tab") === "skipped" ? "skipped" : "documents";
-
-  return { knowledge, documents, skipped, initialTab };
+  return { knowledgeId: knowledge.id };
 };

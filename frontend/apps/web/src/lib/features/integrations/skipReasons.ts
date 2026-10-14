@@ -31,6 +31,35 @@ function describeError(detail: string): string {
   return m.skip_reason_error({ detail });
 }
 
+export type SkipReasonKind =
+  | "unsupported_type"
+  | "no_text_layer"
+  | "empty_content"
+  | "file_too_large"
+  | "extraction_limit"
+  | "incomplete_download"
+  | "password_protected"
+  | "corrupt_file"
+  | "error";
+
+/** Which of the sync's skip reasons a reason string is; anything unrecognised is an error. */
+export function skipReasonKind(reason: string): SkipReasonKind {
+  const trimmed = reason.trim();
+  if (trimmed === NO_TEXT_LAYER) return "no_text_layer";
+  if (trimmed === EMPTY_CONTENT) return "empty_content";
+  if (UNSUPPORTED_TYPE.test(trimmed)) return "unsupported_type";
+  if (FILE_TOO_LARGE.test(trimmed)) return "file_too_large";
+  if (EXTRACTION_LIMIT.test(trimmed)) return "extraction_limit";
+  const error = ERROR.exec(trimmed);
+  if (error) {
+    const detail = error[1];
+    if (INCOMPLETE_DOWNLOAD.test(detail)) return "incomplete_download";
+    if (detail === PASSWORD_PROTECTED) return "password_protected";
+    if (detail === CORRUPT_FILE) return "corrupt_file";
+  }
+  return "error";
+}
+
 /** The reason a sync skipped a file, in the viewer's language. */
 export function describeSkipReason(reason: string): string {
   const trimmed = reason.trim();

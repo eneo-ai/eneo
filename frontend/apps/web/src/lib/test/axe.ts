@@ -1,4 +1,4 @@
-import axe, { type AxeResults, type RunOptions } from "axe-core";
+import axe, { type AxeResults, type ElementContext, type RunOptions } from "axe-core";
 import { expect } from "vitest";
 
 // Component tests render fragments, not pages: landmark and heading rules
@@ -16,7 +16,7 @@ function describeViolations(violations: AxeResults["violations"]): string {
 
 /** Fails the test when axe finds a WCAG violation inside `context`. */
 export async function expectNoAxeViolations(
-  context: Element | Document = document,
+  context: ElementContext = document,
   options: RunOptions = {}
 ): Promise<void> {
   const rules = Object.fromEntries(PAGE_LEVEL_RULES.map((rule) => [rule, { enabled: false }]));

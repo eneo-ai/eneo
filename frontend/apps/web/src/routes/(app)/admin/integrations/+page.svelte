@@ -1,6 +1,6 @@
 <script lang="ts">
   import { writable } from "svelte/store";
-  import { Info, EllipsisVertical, RefreshCw, Trash2, Webhook } from "@lucide/svelte";
+  import { Info, EllipsisVertical, RefreshCw, Trash2 } from "@lucide/svelte";
   import { Page, Settings } from "$lib/components/layout";
   import type { PageProps } from "./$types";
   import IntegrationCard from "$lib/features/integrations/components/IntegrationCard.svelte";
@@ -12,10 +12,9 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import type { TenantIntegration, components } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
-  import { toastError } from "$lib/core/errors";
   import SharePointAppConfigDialog from "$lib/features/integrations/sharepoint/SharePointAppConfigDialog.svelte";
   import SharePointAuthHealth from "$lib/features/integrations/sharepoint/SharePointAuthHealth.svelte";
-  import { followServiceAccountSignIn } from "$lib/features/integrations/sharepoint/serviceAccountAuth";
+  import SharePointConnectionHealth from "$lib/features/integrations/sharepoint/SharePointConnectionHealth.svelte";
   import SharePointAppDeleteDialog from "$lib/features/integrations/sharepoint/SharePointAppDeleteDialog.svelte";
   import SharePointSetupFixtureLauncher from "$lib/features/integrations/sharepoint/SharePointSetupFixtureLauncher.svelte";
   import SharePointSubscriptions from "./SharePointSubscriptions.svelte";
@@ -45,16 +44,6 @@
     } catch {
       sharePointConfig = null;
       sharePointConfigStatus = "error";
-    }
-  });
-
-  const reauthServiceAccount = createAsyncState(async () => {
-    try {
-      followServiceAccountSignIn(
-        await data.eneo.integrations.admin.sharepoint.restartServiceAccountAuth()
-      );
-    } catch (error) {
-      toastError(error);
     }
   });
 
@@ -125,25 +114,6 @@
                         {/if}
                       </div>
 
-                      {#if sharePointConfigStatus === "configured" && sharePointConfig}
-                        <SharePointAuthHealth config={sharePointConfig} variant="details" />
-                      {/if}
-
-                      {@const needsReauth =
-                        sharePointConfigStatus === "configured" &&
-                        sharePointConfig?.auth_method === "service_account" &&
-                        sharePointConfig?.auth_status === "error"}
-                      {#if needsReauth}
-                        <Button
-                          class="w-full"
-                          disabled={reauthServiceAccount.isLoading}
-                          onclick={reauthServiceAccount}
-                        >
-                          {reauthServiceAccount.isLoading
-                            ? m.redirecting()
-                            : m.sharepoint_reauth_with_microsoft()}
-                        </Button>
-                      {/if}
                       <div class="flex min-w-0 items-center gap-2">
                         <Button
                           variant={sharePointConfigStatus === "configured" ? "outline" : "default"}
@@ -171,13 +141,6 @@
                               {/snippet}
                             </DropdownMenu.Trigger>
                             <DropdownMenu.Content align="end">
-                              <DropdownMenu.Item
-                                onclick={() => (showWebhookManagement = !showWebhookManagement)}
-                              >
-                                <Webhook aria-hidden="true" />
-                                {showWebhookManagement ? m.hide_webhooks() : m.manage_webhooks()}
-                              </DropdownMenu.Item>
-                              <DropdownMenu.Separator />
                               <DropdownMenu.Item
                                 variant="destructive"
                                 onclick={() => ($showDeleteAppDialog = true)}
@@ -210,13 +173,29 @@
               </IntegrationCard>
             {/each}
           </IntegrationGrid>
-
-          {#if showWebhookManagement && sharePointConfigStatus === "configured"}
-            <div class="border-border bg-background mt-6 rounded-lg border p-6">
-              <SharePointSubscriptions eneo={data.eneo} />
-            </div>
-          {/if}
         </Settings.Row>
+
+        {#if sharePointConfigStatus === "configured" && sharePointConfig}
+          <Settings.Row
+            fullWidth
+            title={m.sharepoint_health_row_title()}
+            description={m.sharepoint_health_row_description()}
+          >
+            <SharePointConnectionHealth
+              eneo={data.eneo}
+              config={sharePointConfig}
+              subscriptionsOpen={showWebhookManagement}
+              onEdit={() => ($showSharePointConfigDialog = true)}
+              onToggleSubscriptions={() => (showWebhookManagement = !showWebhookManagement)}
+              onConfigChanged={() => loadSharePointStatus()}
+            />
+            {#if showWebhookManagement}
+              <div class="border-default mt-4 rounded-lg border p-6">
+                <SharePointSubscriptions eneo={data.eneo} />
+              </div>
+            {/if}
+          </Settings.Row>
+        {/if}
 
         <Settings.Row
           fullWidth

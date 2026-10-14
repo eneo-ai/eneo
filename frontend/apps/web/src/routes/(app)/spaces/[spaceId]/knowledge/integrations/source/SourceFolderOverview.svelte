@@ -1,0 +1,93 @@
+<script lang="ts">
+  import type { IntegrationKnowledge } from "@eneo/eneo-js";
+  import { IconLinkExternal } from "@eneo/icons/link-external";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Table from "$lib/components/ui/table/index.js";
+  import { formatRelativeTime } from "$lib/core/formatting/dateTime";
+  import { previewLinkLabel } from "$lib/features/integrations/IntegrationData";
+  import SourceStateBadge from "$lib/features/integrations/components/SourceStateBadge.svelte";
+  import {
+    buildIntegrationTree,
+    flattenIntegrationTree
+  } from "$lib/features/integrations/integrationTree";
+  import { itemState } from "$lib/features/integrations/sources";
+  import type { IntegrationSyncProgress } from "$lib/features/integrations/syncProgress";
+  import { m } from "$lib/paraglide/messages";
+  import IntegrationActions from "../IntegrationActions.svelte";
+
+  interface Props {
+    items: IntegrationKnowledge[];
+    progress: Record<string, IntegrationSyncProgress>;
+    sourceName: string;
+    hrefFor: (itemId: string) => string;
+  }
+
+  let { items, progress, sourceName, hrefFor }: Props = $props();
+
+  let rows = $derived(flattenIntegrationTree(buildIntegrationTree(items), () => true));
+</script>
+
+<Table.Root aria-label={m.integration_source_folders_table_label({ name: sourceName })}>
+  <Table.Header>
+    <Table.Row>
+      <Table.Head>{m.integration_source_folder()}</Table.Head>
+      <Table.Head>{m.status()}</Table.Head>
+      <Table.Head class="text-right">{m.documents()}</Table.Head>
+      <Table.Head>{m.integration_source_last_up_to_date()}</Table.Head>
+      <Table.Head class="w-[1%]"><span class="sr-only">{m.actions()}</span></Table.Head>
+    </Table.Row>
+  </Table.Header>
+  <Table.Body>
+    {#each rows as row (row.item.id)}
+      {@const item = row.item}
+      <Table.Row>
+        <Table.Cell class="max-w-[24rem]">
+          <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
+          <a
+            href={hrefFor(item.id)}
+            data-sveltekit-noscroll
+            data-sveltekit-replacestate
+            style:padding-left="{row.depth * 1.25}rem"
+            class="focus-visible:ring-stronger block truncate rounded font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+          >
+            {item.name}
+          </a>
+          <!-- eslint-enable svelte/no-navigation-without-resolve -->
+          {#if item.folder_path}
+            <span
+              class="text-secondary block truncate text-xs"
+              style:padding-left="{row.depth * 1.25}rem">{item.folder_path}</span
+            >
+          {/if}
+        </Table.Cell>
+        <Table.Cell><SourceStateBadge state={itemState(item, progress)} /></Table.Cell>
+        <Table.Cell class="text-right tabular-nums">
+          {progress[item.id] ? "–" : (item.metadata?.document_count ?? 0)}
+        </Table.Cell>
+        <Table.Cell class="text-secondary">
+          {item.metadata?.last_synced_at ? formatRelativeTime(item.metadata.last_synced_at) : "–"}
+        </Table.Cell>
+        <Table.Cell>
+          <div class="flex items-center justify-end gap-1">
+            {#if item.url}
+              <Button
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={m.integration_source_open_item_link({
+                  label: previewLinkLabel(item.integration_type),
+                  name: item.name
+                })}
+              >
+                <IconLinkExternal size="sm" />
+              </Button>
+            {/if}
+            <IntegrationActions knowledgeItem={item} />
+          </div>
+        </Table.Cell>
+      </Table.Row>
+    {/each}
+  </Table.Body>
+</Table.Root>

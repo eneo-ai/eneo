@@ -1,0 +1,307 @@
+<script lang="ts">
+  import type { Component } from "svelte";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import FileBox from "@lucide/svelte/icons/file-box";
+  import FileLock from "@lucide/svelte/icons/file-lock";
+  import FileMinus from "@lucide/svelte/icons/file-minus";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import FileX from "@lucide/svelte/icons/file-x";
+  import Lock from "@lucide/svelte/icons/lock";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import ScanText from "@lucide/svelte/icons/scan-text";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import Weight from "@lucide/svelte/icons/weight";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import CopyButton from "$lib/components/CopyButton.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
+  import type {
+    FileProblemCategory,
+    FileProblemGroup,
+    SourceProblems
+  } from "$lib/features/integrations/sourceProblems";
+  import { m } from "$lib/paraglide/messages";
+
+  interface Props {
+    /** Null until the skipped files have loaded. */
+    problems: SourceProblems | null;
+    isAdmin: boolean;
+    adminIntegrationsUrl: string;
+    folderHref: (itemId: string) => string;
+    /** The source has more than one item, so each file names its folder. */
+    showFolders: boolean;
+  }
+
+  let { problems, isAdmin, adminIntegrationsUrl, folderHref, showFolders }: Props = $props();
+
+  const categories: Record<
+    FileProblemCategory,
+    { icon: Component; title: () => string; advice: () => string }
+  > = {
+    no_text_layer: {
+      icon: ScanText,
+      title: m.integration_problem_no_text_layer_title,
+      advice: m.integration_problem_no_text_layer_advice
+    },
+    too_large: {
+      icon: Weight,
+      title: m.integration_problem_too_large_title,
+      advice: m.integration_problem_too_large_advice
+    },
+    too_much_text: {
+      icon: FileText,
+      title: m.integration_problem_too_much_text_title,
+      advice: m.integration_problem_too_much_text_advice
+    },
+    password_protected: {
+      icon: FileLock,
+      title: m.integration_problem_password_protected_title,
+      advice: m.integration_problem_password_protected_advice
+    },
+    corrupt: {
+      icon: FileX,
+      title: m.integration_problem_corrupt_title,
+      advice: m.integration_problem_corrupt_advice
+    },
+    empty: {
+      icon: FileMinus,
+      title: m.integration_problem_empty_title,
+      advice: m.integration_problem_empty_advice
+    },
+    transient: {
+      icon: RefreshCw,
+      title: m.integration_problem_transient_title,
+      advice: m.integration_problem_transient_advice
+    },
+    unsupported: {
+      icon: FileBox,
+      title: m.integration_problem_unsupported_title,
+      advice: m.integration_problem_unsupported_advice
+    }
+  };
+
+  let blockingCount = $derived(
+    problems ? (problems.credentials ? 1 : 0) + problems.failures.length : 0
+  );
+  let fixableCount = $derived(
+    problems?.fixable.reduce((sum, group) => sum + group.files.length, 0) ?? 0
+  );
+  let intentionalCount = $derived(
+    problems?.intentional.reduce((sum, group) => sum + group.files.length, 0) ?? 0
+  );
+  let nothingToShow = $derived(
+    problems !== null &&
+      blockingCount === 0 &&
+      fixableCount === 0 &&
+      intentionalCount === 0 &&
+      problems.unavailable.length === 0
+  );
+</script>
+
+{#snippet fileGroup(group: FileProblemGroup, open: boolean)}
+  {@const meta = categories[group.category]}
+  <Collapsible.Root {open} class="border-default border-b last:border-b-0">
+    <Collapsible.Trigger
+      class="hover:bg-hover-dimmer focus-visible:ring-stronger group flex w-full items-center gap-3 px-4 py-3 text-left focus-visible:ring-2 focus-visible:outline-none"
+    >
+      <span
+        class="flex size-8 shrink-0 items-center justify-center rounded-md {group.severity ===
+        'fixable'
+          ? 'bg-warning-dimmer text-warning-stronger'
+          : 'bg-secondary text-secondary'}"
+      >
+        <meta.icon class="size-4" aria-hidden="true" />
+      </span>
+      <span class="flex min-w-0 flex-1 flex-col">
+        <span class="font-medium">{meta.title()}</span>
+        <span class="text-secondary text-sm">{meta.advice()}</span>
+      </span>
+      <span class="shrink-0 text-sm font-medium tabular-nums">
+        {group.files.length === 1
+          ? m.integration_problem_files_one()
+          : m.integration_problem_files_other({ count: group.files.length })}
+      </span>
+      <ChevronDown
+        class="text-secondary size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180"
+        aria-hidden="true"
+      />
+    </Collapsible.Trigger>
+    <Collapsible.Content>
+      <ul class="flex flex-col px-4 pb-3 pl-15 text-sm">
+        <!-- The same file name recurs across folders, so the key needs the position. -->
+        {#each group.files as file, index (`${index}:${file.item.id}:${file.file}`)}
+          <li
+            class="border-dimmer flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 border-t py-2"
+          >
+            <span class="min-w-0 break-all">
+              <span class="font-medium">{file.file}</span>
+              {#if showFolders}
+                <span class="text-secondary">
+                  ·
+                  <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
+                  <a
+                    href={folderHref(file.item.id)}
+                    class="focus-visible:ring-stronger rounded hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                    >{file.item.name}</a
+                  >
+                  <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                </span>
+              {/if}
+            </span>
+            <span class="text-secondary text-xs">{file.detail}</span>
+          </li>
+        {/each}
+      </ul>
+    </Collapsible.Content>
+  </Collapsible.Root>
+{/snippet}
+
+<div class="flex max-w-4xl flex-col gap-6">
+  {#if problems === null}
+    <div class="text-secondary flex items-center gap-2 text-sm" role="status">
+      <IconLoadingSpinner size="sm" class="animate-spin" />
+      <span>{m.loading()}</span>
+    </div>
+  {:else if nothingToShow}
+    <div class="flex items-center gap-3 py-6">
+      <CircleCheck class="text-positive-default size-6 shrink-0" aria-hidden="true" />
+      <div class="flex flex-col">
+        <p class="font-medium">{m.integration_problems_none_title()}</p>
+        <p class="text-secondary text-sm">{m.integration_problems_none_description()}</p>
+      </div>
+    </div>
+  {:else}
+    {#if blockingCount > 0}
+      <section aria-labelledby="problems-blocking" class="flex flex-col gap-3">
+        <h2
+          id="problems-blocking"
+          class="text-negative-stronger text-xs font-semibold tracking-wide uppercase"
+        >
+          {m.integration_problems_blocking_heading({ count: blockingCount })}
+        </h2>
+        {#if problems.credentials}
+          {@const credentials = problems.credentials}
+          <div
+            class="border-negative-default bg-negative-dimmer/40 flex gap-3 rounded-lg border p-4"
+          >
+            <span
+              class="bg-negative-dimmer text-negative-stronger flex size-8 shrink-0 items-center justify-center rounded-md"
+            >
+              <Lock class="size-4" aria-hidden="true" />
+            </span>
+            <div class="flex min-w-0 flex-1 flex-col gap-1.5">
+              <p class="font-medium">{m.integration_problem_credentials_title()}</p>
+              <p class="text-sm">{m.integration_problem_credentials_description()}</p>
+              {#if credentials.lastSyncedAt}
+                <p class="text-secondary text-xs">
+                  {m.integration_problem_last_successful_sync({
+                    time: formatDateTime(credentials.lastSyncedAt)
+                  })}
+                </p>
+              {/if}
+              <div class="flex flex-wrap items-center gap-3 pt-1">
+                <span class="text-sm">
+                  <span class="font-medium">{m.integration_problem_who_fixes()}</span>
+                  {m.integration_problem_who_fixes_admin()}
+                </span>
+                {#if isAdmin}
+                  <Button size="sm" href={adminIntegrationsUrl}>
+                    {m.integration_problem_open_admin()}
+                  </Button>
+                {:else}
+                  <CopyButton
+                    text={adminIntegrationsUrl}
+                    label={m.integration_problem_copy_admin_link()}
+                    showLabel
+                    variant="outline"
+                    size="sm"
+                  />
+                {/if}
+              </div>
+            </div>
+          </div>
+        {/if}
+        {#each problems.failures as failure (failure.item.id)}
+          <div class="border-negative-default flex gap-3 rounded-lg border p-4">
+            <span
+              class="bg-negative-dimmer text-negative-stronger flex size-8 shrink-0 items-center justify-center rounded-md"
+            >
+              <TriangleAlert class="size-4" aria-hidden="true" />
+            </span>
+            <div class="flex min-w-0 flex-1 flex-col gap-1.5">
+              <p class="font-medium">
+                {m.integration_problem_sync_failed_title({ name: failure.item.name })}
+              </p>
+              <p class="text-sm">{m.integration_problem_sync_failed_description()}</p>
+              {#if failure.message}
+                <details class="text-secondary text-xs">
+                  <summary class="cursor-pointer"
+                    >{m.integration_problem_technical_details()}</summary
+                  >
+                  <p class="mt-1 font-mono break-words">{failure.message}</p>
+                </details>
+              {/if}
+              {#if showFolders}
+                <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
+                <a
+                  href={folderHref(failure.item.id)}
+                  class="text-accent-default focus-visible:ring-stronger w-fit rounded text-sm font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                >
+                  {m.integration_problem_open_folder()}
+                </a>
+                <!-- eslint-enable svelte/no-navigation-without-resolve -->
+              {/if}
+            </div>
+          </div>
+        {/each}
+      </section>
+    {/if}
+
+    {#if fixableCount > 0}
+      <section aria-labelledby="problems-fixable" class="flex flex-col gap-3">
+        <h2
+          id="problems-fixable"
+          class="text-warning-stronger text-xs font-semibold tracking-wide uppercase"
+        >
+          {m.integration_problems_fixable_heading({ count: fixableCount })}
+        </h2>
+        <div class="border-default overflow-hidden rounded-lg border">
+          {#each problems.fixable as group, index (group.category)}
+            {@render fileGroup(group, index === 0)}
+          {/each}
+        </div>
+      </section>
+    {/if}
+
+    {#if intentionalCount > 0}
+      <section aria-labelledby="problems-intentional" class="flex flex-col gap-3">
+        <h2
+          id="problems-intentional"
+          class="text-secondary text-xs font-semibold tracking-wide uppercase"
+        >
+          {m.integration_problems_intentional_heading({ count: intentionalCount })}
+        </h2>
+        <div class="border-default overflow-hidden rounded-lg border">
+          {#each problems.intentional as group (group.category)}
+            {@render fileGroup(group, false)}
+          {/each}
+        </div>
+      </section>
+    {/if}
+
+    {#if problems.notListed > 0}
+      <p class="text-secondary text-sm italic">
+        {m.skipped_and_n_more({ count: problems.notListed })}
+      </p>
+    {/if}
+    {#if problems.unavailable.length > 0}
+      <p class="text-secondary text-sm" role="status">
+        {m.integration_problems_unavailable({
+          names: problems.unavailable.map((item) => item.name).join(", ")
+        })}
+      </p>
+    {/if}
+  {/if}
+</div>
