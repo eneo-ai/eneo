@@ -179,13 +179,24 @@ class IntegrationKnowledgeService:
         Membership is checked before the item is looked up so a non-member
         cannot probe which items a space holds.
         """
+        space = await self._space_with_readable_integrations(space_id)
+        return space.get_integration_knowledge(
+            integration_knowledge_id=integration_knowledge_id
+        )
+
+    async def list_readable_knowledge(
+        self, space_id: UUID
+    ) -> list[IntegrationKnowledge]:
+        """The items a space shows, for anyone who may read its integrations."""
+        space = await self._space_with_readable_integrations(space_id)
+        return list(space.integration_knowledge_list)
+
+    async def _space_with_readable_integrations(self, space_id: UUID) -> Space:
         space = await self.space_repo.one(id=space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not (actor.can_read_space() and actor.can_read_integrations()):
             raise UnauthorizedException()
-        return space.get_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id
-        )
+        return space
 
     async def _get_tenant_app_access_token(
         self, tenant_app: "TenantSharePointApp"

@@ -1,5 +1,7 @@
-"""Documents and skipped-file routes of a space's integration item, after authentication."""
+"""Documents, skipped-file and sync-progress routes of a space's integration items,
+after authentication."""
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -17,6 +19,9 @@ from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.integration.domain.entities.sync_log import SyncLog
+from eneo.integration.infrastructure.sharepoint_sync_progress import (
+    sync_progress_key,
+)
 from eneo.main.container.container import Container
 from eneo.server.exception_handlers import add_exception_handlers
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
@@ -35,6 +40,11 @@ class DocumentsAPI:
     knowledge: IntegrationKnowledge
     info_blobs: AsyncMock
     sync_logs: AsyncMock
+    progress_redis: AsyncMock
+
+    @property
+    def progress_url(self) -> str:
+        return f"/spaces/{self.space.id}/knowledge/integrations/sync-progress/"
 
     def url(self, path: str = "", knowledge_id: UUID | None = None) -> str:
         return (
@@ -111,6 +121,7 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
     )
     sync_logs = AsyncMock()
     sync_logs.get_by_integration_knowledge.return_value = []
+    progress_redis = AsyncMock()
 
     # Production DI for the service and actor policy; only the edges are
     # replaced, so missing wiring fails here too.
@@ -127,6 +138,7 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
         embedding_model_repo2=providers.Object(AsyncMock()),
         job_service=providers.Object(AsyncMock()),
         sharepoint_subscription_service=providers.Object(AsyncMock()),
+        redis_client=providers.Object(progress_redis),
     )
     app = FastAPI()
     app.include_router(router, prefix="/spaces")
@@ -139,7 +151,9 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
                     == "_get_container_with_user"
                 ):
                     app.dependency_overrides[dependency.call] = lambda: container
-    return DocumentsAPI(app, user, space, knowledge, info_blobs, sync_logs)
+    return DocumentsAPI(
+        app, user, space, knowledge, info_blobs, sync_logs, progress_redis
+    )
 
 
 async def _get(api: DocumentsAPI, url: str, **params):
@@ -354,3 +368,48 @@ async def test_skipped_documents_without_a_sync_log_is_empty(documents_api):
         "truncated": False,
         "synced_at": None,
     }
+
+
+async def test_sync_progress_lists_the_space_items_that_are_syncing(documents_api):
+    api = documents_api
+    idle = IntegrationKnowledge(
+        id=uuid4(),
+        name="Riktlinjer",
+        user_integration=api.knowledge.user_integration,
+        embedding_model=MagicMock(),
+        tenant_id=api.user.tenant_id,
+        space_id=uuid4(),
+    )
+    api.space.integration_knowledge_list.append(idle)
+    running = {
+        "integration_knowledge_id": str(api.knowledge.id),
+        "sync_type": "full",
+        "phase": "processing",
+        "started_at": "2026-10-14T09:00:00Z",
+        "updated_at": "2026-10-14T09:02:00Z",
+        "total": 120,
+        "done": 45,
+        "indexed": 30,
+        "unchanged": 12,
+        "skipped": 3,
+        "deleted": 1,
+    }
+    api.progress_redis.mget.return_value = [json.dumps(running).encode(), None]
+
+    response = await _get(api, api.progress_url)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"items": [running]}
+    api.progress_redis.mget.assert_awaited_once_with(
+        [sync_progress_key(api.knowledge.id), sync_progress_key(idle.id)]
+    )
+
+
+async def test_sync_progress_is_refused_to_non_members(documents_api):
+    api = documents_api
+    api.space.members = {}
+
+    response = await _get(api, api.progress_url)
+
+    assert response.status_code == 403, response.text
+    api.progress_redis.mget.assert_not_awaited()

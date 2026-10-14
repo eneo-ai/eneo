@@ -4967,6 +4967,26 @@ export interface paths {
     patch: operations["update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch"];
     trace?: never;
   };
+  "/api/v1/spaces/{id}/knowledge/integrations/sync-progress/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Integration Knowledge Sync Progress
+     * @description Live progress of the integration knowledge syncs running in a space. Items that are not syncing are absent.
+     */
+    get: operations["get_integration_knowledge_sync_progress_api_v1_spaces__id__knowledge_integrations_sync_progress__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/": {
     parameters: {
       query?: never;
@@ -15616,6 +15636,77 @@ export interface components {
        * @description When the sync the list comes from finished or started
        */
       synced_at?: string | null;
+    };
+    /**
+     * IntegrationSyncProgress
+     * @description Live progress of a SharePoint sync that is running now.
+     *
+     *     `total` counts the files and site pages the sync has listed so far. A full
+     *     sync lists each folder when it reaches it, so `total` is null until the
+     *     first listing returns and then grows as subfolders are found; it never
+     *     drops below `done`. A delta sync cannot cheaply tell which of its changes
+     *     are files in scope, so its `total` stays null.
+     */
+    IntegrationSyncProgress: {
+      /**
+       * Integration Knowledge Id
+       * Format: uuid
+       */
+      integration_knowledge_id: string;
+      /**
+       * Sync Type
+       * @enum {string}
+       */
+      sync_type: "full" | "delta";
+      /**
+       * Phase
+       * @description discovering: resolving scope and listing changes before files are handled; processing: handling files; finishing: orphan cleanup, delta token and summary
+       * @enum {string}
+       */
+      phase: "discovering" | "processing" | "finishing";
+      /**
+       * Started At
+       * Format: date-time
+       */
+      started_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       * @description When this progress was last written
+       */
+      updated_at: string;
+      /**
+       * Total
+       * @description Files and pages listed so far; null while unknown
+       */
+      total: number | null;
+      /**
+       * Done
+       * @description Files finished: indexed + unchanged + skipped
+       */
+      done: number;
+      /**
+       * Indexed
+       * @description Files and pages embedded in this sync
+       */
+      indexed: number;
+      /** Unchanged */
+      unchanged: number;
+      /** Skipped */
+      skipped: number;
+      /**
+       * Deleted
+       * @description Local documents removed in this sync
+       */
+      deleted: number;
+    };
+    /**
+     * IntegrationSyncProgressList
+     * @description Running syncs of a space's integration knowledge; idle items are absent.
+     */
+    IntegrationSyncProgressList: {
+      /** Items */
+      items: components["schemas"]["IntegrationSyncProgress"][];
     };
     /**
      * IntegrationType
@@ -42268,6 +42359,55 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_integration_knowledge_sync_progress_api_v1_spaces__id__knowledge_integrations_sync_progress__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IntegrationSyncProgressList"];
         };
       };
       /** @description Forbidden */

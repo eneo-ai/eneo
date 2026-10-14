@@ -1,6 +1,7 @@
 /** @typedef {import('../types/resources').Integration} Integration */
 /** @typedef {import('../types/resources').TenantIntegration} TenantIntegration */
 /** @typedef {import('../client/client').EneoError} EneoError */
+/** @typedef {import('../types/schema').components['schemas']['IntegrationSyncProgressList']} IntegrationSyncProgressList */
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
@@ -342,6 +343,29 @@ export function initIntegrations(client) {
             method: "get",
             params: {
               path: { id, integration_knowledge_id }
+            }
+          }
+        );
+        return res;
+      },
+
+      /**
+       * Live progress of the integration knowledge syncs running in a space.
+       * Items that are not syncing are absent from the list.
+       * @param {Object} args
+       * @param {{id: string}} args.space Space whose integration knowledge to check
+       *
+       * @returns {Promise<IntegrationSyncProgressList>}
+       * @throws {EneoError}
+       * */
+      getSyncProgress: async ({ space }) => {
+        const { id } = space;
+        const res = await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/sync-progress/",
+          {
+            method: "get",
+            params: {
+              path: { id }
             }
           }
         );

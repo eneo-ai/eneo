@@ -37,6 +37,7 @@ from eneo.integration.presentation.models import (
     IntegrationDocumentsPage,
     IntegrationKnowledgePublic,
     IntegrationSkippedDocuments,
+    IntegrationSyncProgressList,
 )
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
@@ -1167,6 +1168,32 @@ async def delete_integration_knowledge_wrapper(
         space_id=id,
         wrapper_id=wrapper_id,
     )
+
+
+# Declared before the {integration_knowledge_id} routes so "sync-progress" is
+# not read as an item id.
+@router.get(
+    "/{id}/knowledge/integrations/sync-progress/",
+    response_model=IntegrationSyncProgressList,
+    description="Live progress of the integration knowledge syncs running in a "
+    "space. Items that are not syncing are absent.",
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
+)
+async def get_integration_knowledge_sync_progress(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.integration_knowledge_service()
+    knowledge = await service.list_readable_knowledge(space_id=id)
+    items = await container.sharepoint_sync_progress_store().get_many(
+        [item.id for item in knowledge]
+    )
+    return IntegrationSyncProgressList(items=items)
 
 
 @router.patch(
