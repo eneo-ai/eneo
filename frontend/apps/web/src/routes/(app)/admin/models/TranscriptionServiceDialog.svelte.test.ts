@@ -93,6 +93,9 @@ it("shows the new service's test and lets a refused key be fixed in place", asyn
     check: {
       outcome: "credentials_rejected",
       identifies_speakers: null,
+      times_words: null,
+      reason: "credentials",
+      status_code: null,
       service_version: null,
       checked_at: "2026-10-09T07:00:00Z"
     }

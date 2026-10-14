@@ -52,6 +52,9 @@ const result = (outcome: TranscriptionServiceCheck["outcome"]): TranscriptionSer
   outcome,
   detail: "",
   identifies_speakers: true,
+  times_words: true,
+  reason: null,
+  status_code: null,
   service_version: null,
   checked_at: new Date().toISOString()
 });

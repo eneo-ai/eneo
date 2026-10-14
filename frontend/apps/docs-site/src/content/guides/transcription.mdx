@@ -2,13 +2,13 @@
 
 A flow that takes recorded audio turns it into text. This guide shows administrators and operators how to set up the three parts an organisation can use for that, and how to keep a speaker identification service working.
 
-| What you want                             | What you connect                                                                | Example server                                                                                    | Where in the admin interface                                                  |
-| ----------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| A transcript of a recording               | A transcription model on a model provider                                       | Any provider that serves a transcription model, such as [vadsa](https://github.com/eneo-ai/vadsa) | **Admin → Models → Transcription models**, section **Transcription models**   |
-| The text on screen while someone records  | A transcription model on a provider of type vLLM, marked for live transcription | vadsa                                                                                             | The same section, in the model's **Edit model** dialog                        |
-| Word times, and labels that say who spoke | A speaker identification service                                                | [Vemsa](https://github.com/eneo-ai/vemsa)                                                         | **Admin → Models → Transcription models**, section **Speaker identification** |
+| What you want                             | What you connect                                                                | Example server                                                                                    | Where in the admin interface                                                                   |
+| ----------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| A transcript of a recording               | A transcription model on a model provider                                       | Any provider that serves a transcription model, such as [vadsa](https://github.com/eneo-ai/vadsa) | **Admin → Models → Transcription models**, section **Transcription models**                    |
+| The text on screen while someone records  | A transcription model on a provider of type vLLM, marked for live transcription | vadsa                                                                                             | The same section, in the model's **Edit model** dialog                                         |
+| Word times, and labels that say who spoke | A speaker identification service                                                | [Vemsa](https://github.com/eneo-ai/vemsa)                                                         | **Admin → Models → Transcription models**, section **Word timings and speaker identification** |
 
-In the Swedish interface the path is **Administratör → Modeller → Transkription**, and the two sections are **Transkriberingsmodeller** and **Talaridentifiering**.
+In the Swedish interface the path is **Administratör → Modeller → Transkription**, and the two sections are **Transkriberingsmodeller** and **Ordtider och talaridentifiering**.
 
 Only flows use live transcription and speaker identification services.
 
@@ -82,7 +82,7 @@ Before you start, make sure that:
 - Eneo has an `ENCRYPTION_KEY`. Eneo stores the service's key encrypted and refuses to save it without one.
 - You are signed in as an administrator.
 
-1. Open **Admin → Models → Transcription models** and go to the **Speaker identification** section (**Talaridentifiering**).
+1. Open **Admin → Models → Transcription models** and go to the **Word timings and speaker identification** section (**Ordtider och talaridentifiering**).
 2. Choose **Connect service** (**Anslut tjänst**).
 3. Fill in the dialog:
 
@@ -130,9 +130,9 @@ The stored result, `last_check`, says whether the service identifies speakers (`
 A space administrator does this for each space. The service must be switched on, and its security class must not be lower than the space's.
 
 1. Open the space and choose **Settings** (**Inställningar**).
-2. Under **Advanced Settings** (**Avancerade inställningar**), find **Speaker identification** (**Talaridentifiering**). The row lists every service your organisation has connected, by name only.
+2. Under **Advanced Settings** (**Avancerade inställningar**), find **Word timings and speaker identification** (**Ordtider och talaridentifiering**). The row lists every service your organisation has connected, by name only.
 3. Switch the service on. Eneo saves the change at once.
-4. Check the result. Open a flow draft in the space and go to its **Transcription** stage. With transcription on, the **Speaker identification** switch can be turned on, and the service is listed under **Speaker identification service**.
+4. Check the result. Open a flow draft in the space and go to its **Transcription** stage. With transcription on, the service is listed under **Service** in the card **Word timings and speakers**.
 
 The list says which service is the organisation's default. A service that cannot be added shows the reason next to its name: "Turned off by an administrator." or "The security class is lower than the space's." A service that was added before it became unusable stays in the list with that reason, and you can still switch it off.
 
@@ -144,7 +144,7 @@ To replace a server without asking every author to choose again, [change the add
 
 An administrator can mark one service as the organisation's default, so that flow authors do not have to choose it in every flow.
 
-1. Open **Admin → Models → Transcription models** and go to the **Speaker identification** section.
+1. Open **Admin → Models → Transcription models** and go to the **Word timings and speaker identification** section.
 2. Open the service's actions menu (the **⋯** button) and choose **Edit** (**Redigera**).
 3. Tick **Default for new flows** (**Standard för nya flöden**) and save.
 4. Check the result. The service shows **Default** (**Standard**) in the list. Only one service can be the default: marking another one moves the mark.
@@ -160,25 +160,28 @@ What the default does:
 
 To mark the default through the API, send `{"is_default": true}` in the `PATCH` of the service.
 
-## Use speaker identification in a flow
+## Use word timings and speaker identification in a flow
 
-Flow authors choose speaker identification in the flow editor's **Transcription** stage (**Transkribering**). A published flow is read-only, so unpublish it to change these settings and publish it again to apply them.
+Flow authors choose these in the flow editor's **Transcription** stage (**Transkribering**), in the card **Word timings and speakers** (**Ordtider och talare**). A published flow is read-only, so unpublish it to change these settings and publish it again to apply them. The card says why it offers nothing when the space has no service it can use.
 
-1. Turn on **Speaker identification** (**Talaridentifiering**). The switch is off and cannot be used while the space has no service it can use.
-2. Under **Speaker identification service** (**Tjänst för talaridentifiering**), choose the service. The list shows the services the space can use. When your organisation has a default service that the space can use, Eneo fills it in when the draft is saved, and you can choose another. Otherwise choose the service yourself: Eneo never picks one on its own, also when the space has only one. A flow with speaker identification on cannot be published until a service is chosen: "No speaker identification service is chosen." (**Ingen tjänst för talaridentifiering är vald.**) Turning speaker identification off also clears the choice.
-3. Leave **Maximum number of speakers** (**Högst antal talare**), which appears when a service is chosen, empty to let the service count the speakers. The empty field shows "Automatic". Enter a whole number of at least 1 to set the most speakers the service may label.
-4. Publish the flow.
-5. Check the result. Run the flow with a recording of two people. Each line of the transcript starts with a time range and a label, such as `[00:00:12 - 00:00:15] SPEAKER_00:`. When the step has finished, its details in the run name the service that labelled it, under **Advanced** (**Avancerad**).
+1. Under **Service** (**Tjänst**), choose the service. The list shows the services the space can use, and **None – text only** (**Ingen – bara text**). When your organisation has a default service that the space can use, Eneo fills it in when the draft is saved, and you can choose another. Otherwise choose the service yourself: Eneo never picks one on its own, also when the space has only one. The line under the list says what the choice means, for example that audio and transcript are sent to the service for word timings.
+2. With a service, every word of the transcript gets a time: a reader can click a word and hear it, and the word being said lights up. The text the flow's next steps read stays the transcription model's own text, so word timings add no tokens. Choosing **None – text only** keeps the transcript as text: no audio goes to a service, and speakers cannot be identified.
+3. Turn on **Identify speakers** (**Identifiera talare**) to also label who says what. Turning it off keeps the service, and the words are still timed. A flow with speaker identification on cannot be published until a service is chosen: "No speaker identification service is chosen." (**Ingen tjänst för talaridentifiering är vald.**)
+4. Leave **Maximum number of speakers** (**Högst antal talare**), which appears when speakers are identified, empty to let the service count the speakers. The empty field shows "Automatic". Enter a whole number of at least 1 to set the most speakers the service may label.
+5. Publish the flow.
+6. Check the result. Run the flow with a recording of two people. With speakers identified, each line of the transcript starts with a time range and a label, such as `[00:00:12 - 00:00:15] SPEAKER_00:`. When the step has finished, its details in the run name the service that labelled it, under **Advanced** (**Avancerad**).
+
+When the words could not be timed, for example because the service did not answer, the step still finishes with the model's text, and the transcription records `word_timing` as `{"status": "failed", "reason": ...}`. A flow that identifies speakers fails the step instead, since the labels are part of what it promised.
 
 A chosen service is never replaced by another. If it can no longer be used in the space, the editor names the service and says why, and the flow gets no word times and identifies no speakers until you choose again.
 
-A step that maps speakers to names, **Review transcript** (**Granska transkript**), needs the labels. A flow with such a step labels speakers in every run, so the editor keeps the **Speaker identification** switch on, and the flow cannot be published without a chosen service. When the chosen service can no longer be used, Eneo's run dialog says so before anything is recorded: "This flow cannot be run right now" (**Flödet kan inte köras just nu**), with the reason. An app sees the same reason in the run contract as `transcription.speaker_labels.unavailable_reason`, see [Check that speaker labels can be produced](/guides/flows/integrating-flows#check-that-speaker-labels-can-be-produced).
+A step that maps speakers to names, **Review transcript** (**Granska transkript**), needs the labels. A flow with such a step labels speakers in every run, so the editor keeps **Identify speakers** on and does not offer **None – text only**, and the flow cannot be published without a chosen service. When the chosen service can no longer be used, Eneo's run dialog says so before anything is recorded: "This flow cannot be run right now" (**Flödet kan inte köras just nu**), with the reason. An app sees the same reason in the run contract as `transcription.speaker_labels.unavailable_reason`, see [Check that speaker labels can be produced](/guides/flows/integrating-flows#check-that-speaker-labels-can-be-produced).
 
 An app that starts runs through the API can choose labels and a speaker limit for each run. See [Live text and speaker labels](/guides/flows/integrating-flows#live-text-and-speaker-labels).
 
 ## Change, switch off or remove a service
 
-Open **Admin → Models → Transcription models** and go to the **Speaker identification** section.
+Open **Admin → Models → Transcription models** and go to the **Word timings and speaker identification** section.
 
 **Change the name or security class.** Open the service's actions menu and choose **Edit** (**Redigera**). The stored status is kept. If you lower the security class below a space's class, that space can no longer use the service.
 
@@ -208,8 +211,8 @@ After you switch off or remove a service, or take away a space's access:
 | The connection shows **Accepting jobs**, but runs fail with `typed_io_speaker_identification_failed` | The model wrote the text and the service then failed. The flow execution worker cannot reach the address, the service refused the key or the job, the job failed or was cancelled on the service, or the service cannot label a transcript it did not write.                                                                                                                                                      | Read `transcription_failure_kind` (`input`, `capacity`, `provider`, `internal` or `cancelled`) and `transcription_service_reason` in the run error's `details`. Test the connection, check that `task-execution-worker` reaches the address, and read the service's log. The person can run again. A flow that lets a run choose speaker labels can also be run without them. |
 | A run fails with `typed_io_speaker_service_unavailable`                                              | The run needs speaker labels, but the service the flow chose cannot be used in the flow's space. Eneo stops the step before it transcribes anything. The run was started through the API without checking the run contract, or the service became unusable after the run was created.                                                                                                                             | Read `speaker_service_gap` in the run error's `details` and use the table below.                                                                                                                                                                                                                                                                                              |
 | A run fails with `flow_step_timeout` while speakers are identified                                   | The step's time limit ran out while the job waited or ran on the service. With `transcription_failure_kind` set to `capacity`, the service kept refusing the job because its queue was full.                                                                                                                                                                                                                      | Check the service's queue and workers. Raise its queue limits, or the step's time limit.                                                                                                                                                                                                                                                                                      |
-| Transcripts have no word times                                                                       | The flow chose no service, or the service could not time the words. The step's transcription details record `word_timing` with a `reason`: `unavailable` (the service could not be used or reached), `unsupported` (the service does not accept the `timestamp` task), `credentials` (the key was refused), `failed` (the job failed on the service) or `no_timings` (the service returned no usable word times). | Check the flow's **Transcription** stage and the space's **Speaker identification** setting. For `unsupported`, upgrade the service; otherwise test the connection and read the service's log.                                                                                                                                                                                |
-| Transcripts have no speaker labels                                                                   | The flow has speaker identification off, the run chose no labels, or the flow's chosen service could not be used when the run was created. In the last case the run dialog said "Speakers are not identified in this run".                                                                                                                                                                                        | Check the flow's **Transcription** stage and the space's **Speaker identification** setting.                                                                                                                                                                                                                                                                                  |
+| Transcripts have no word times                                                                       | The flow chose no service, or the service could not time the words. The step's transcription details record `word_timing` with a `reason`: `unavailable` (the service could not be used or reached), `unsupported` (the service does not accept the `timestamp` task), `credentials` (the key was refused), `failed` (the job failed on the service) or `no_timings` (the service returned no usable word times). | Check the flow's **Transcription** stage and the space's **Word timings and speaker identification** setting. For `unsupported`, upgrade the service; otherwise test the connection and read the service's log.                                                                                                                                                               |
+| Transcripts have no speaker labels                                                                   | The flow has speaker identification off, the run chose no labels, or the flow's chosen service could not be used when the run was created. In the last case the run dialog said "Speakers are not identified in this run".                                                                                                                                                                                        | Check the flow's **Transcription** stage and the space's **Word timings and speaker identification** setting.                                                                                                                                                                                                                                                                 |
 
 `speaker_service_gap` has one of two values:
 

@@ -39,6 +39,7 @@
   import { m } from "$lib/paraglide/messages";
   import TranscriptionServiceCheckStatus from "./TranscriptionServiceCheckStatus.svelte";
   import TranscriptionServiceDialog from "./TranscriptionServiceDialog.svelte";
+  import { describeCheck } from "./transcriptionServiceCheck";
 
   type Props = {
     /** Null when the list could not be read. */
@@ -314,17 +315,21 @@
                     {m.speaker_service_testing()}
                   </span>
                 {:else if service.last_check}
-                  <div class="flex flex-col items-start">
+                  {@const note = describeCheck(service.last_check).note}
+                  <div class="flex flex-col items-start gap-0.5">
                     <TranscriptionServiceCheckStatus check={service.last_check} />
-                    <time
-                      class="text-muted-foreground text-xs"
-                      datetime={service.last_check.checked_at}
-                      title={formatDateTime(service.last_check.checked_at)}
-                    >
-                      {m.speaker_service_checked({
-                        when: checkedAgo(service.last_check.checked_at)
-                      })}
-                    </time>
+                    <!-- What the service does for flows, or why it failed, then when that was seen. -->
+                    <span class="text-muted-foreground text-xs">
+                      {#if note}{note} ·{/if}
+                      <time
+                        datetime={service.last_check.checked_at}
+                        title={formatDateTime(service.last_check.checked_at)}
+                      >
+                        {m.speaker_service_checked({
+                          when: checkedAgo(service.last_check.checked_at)
+                        })}
+                      </time>
+                    </span>
                   </div>
                 {:else}
                   <span class="text-muted-foreground text-sm">
