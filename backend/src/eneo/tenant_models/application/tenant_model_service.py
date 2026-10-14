@@ -188,12 +188,16 @@ async def _audit(
     changes: dict[str, Any] | None = None,
 ) -> None:
     """Log a tenant-model write to the audit log. No-op when no audit
-    service is wired (e.g. unit tests using a stub container)."""
+    service is wired (e.g. unit tests using a stub container).
+
+    The actor is derived from ``user`` by the audit service: a service key
+    carries a synthetic user whose id is no ``users`` row, and passing it as
+    ``actor_id`` would violate the audit log's foreign key."""
     if audit_service is None:
         return
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=action,
         entity_type=entity_type,
         entity_id=target.id,
