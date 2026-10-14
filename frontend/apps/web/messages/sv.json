@@ -4995,7 +4995,7 @@
   "flow_error_typed_io_tool_classification_changed": "Säkerhetsklassen för verktygets MCP-server ändrades efter att körningen startade. Starta körningen igen.",
   "flow_error_typed_io_tool_changed": "Verktyget har ändrats sedan flödet publicerades. Publicera flödet igen för att använda verktyget som det ser ut nu.",
   "flow_error_typed_io_tool_invalid_arguments": "Värdena som skickades till verktyget passar inte det verktyget tar emot. Kontrollera stegets verktygsargument.",
-  "flow_error_typed_io_tool_destination_blocked": "Verktygets serveradress är inte tillåten för flöden.",
+  "flow_error_typed_io_tool_destination_blocked": "Verktygets serveradress är inte tillåten för flöden, eller så kräver servern en autentiseringsuppgift och adressen använder inte https.",
   "flow_error_typed_io_tool_connection_error": "Verktygets server gick inte att nå, eller så misslyckades anropet.",
   "flow_error_typed_io_tool_timeout": "Verktyget svarade inte i tid.",
   "flow_error_typed_io_tool_reported_error": "Verktyget rapporterade ett fel.",
