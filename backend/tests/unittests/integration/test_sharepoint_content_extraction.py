@@ -35,6 +35,7 @@ from tests.unittests.integration.sharepoint_fixtures import (
     PPTX_MIME,
     XLSX_MIME,
     docx_bytes,
+    header_only_xlsx_bytes,
     pdf_bytes,
     pptx_bytes,
     xlsx_bytes,
@@ -57,6 +58,12 @@ class TestSupportedFormats:
                 XLSX_MIME,
                 lambda t: xlsx_bytes([["Name", "Value"], ["Rent", 100]]),
                 "Name: Rent | Value: 100",
+            ),
+            (
+                "names.xlsx",
+                XLSX_MIME,
+                lambda t: header_only_xlsx_bytes(),
+                "Sheet: Budget | headers: Name | Value",
             ),
             ("deck.pptx", PPTX_MIME, lambda t: pptx_bytes("Roadmap Q3"), "Roadmap Q3"),
             (
