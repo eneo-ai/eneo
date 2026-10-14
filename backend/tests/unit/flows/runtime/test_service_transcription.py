@@ -307,6 +307,14 @@ def _with_lines(**changes: object) -> dict[str, object]:
             ),
             "no_timings",
         ),
+        (
+            _timing_service(
+                result=_with_first_words(
+                    [{"word": "Hej och", "start": 0.0, "end": 0.8, "probability": 0.9}]
+                )
+            ),
+            "no_timings",
+        ),
         (_timing_service(result=_with_lines(speaker="SPEAKER_00")), "no_timings"),
         (
             _timing_service(result=_with_lines(text="Adjö.")),
@@ -326,6 +334,7 @@ def _with_lines(**changes: object) -> dict[str, object]:
         "a-line-partly-timed",
         "a-word-the-line-does-not-say",
         "a-word-ending-before-it-starts",
+        "one-entry-for-the-whole-line",
         "lines-with-speakers",
         "other-words",
         "lines-not-the-text",

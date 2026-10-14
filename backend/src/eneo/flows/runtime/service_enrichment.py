@@ -240,7 +240,13 @@ _WORD_WINDOW_SLACK_S = 0.5
 
 def _timed_word_by_word(line: TranscriptSegment) -> bool:
     words = line.words
-    if not words or _tokens(word.word for word in words) != _tokens([line.text]):
+    # One entry per word: an entry that holds several (a whole sentence) gives
+    # them all one time, and nothing could be sought or lit word by word.
+    if (
+        not words
+        or any(len(word.word.split()) != 1 for word in words)
+        or _tokens(word.word for word in words) != _tokens([line.text])
+    ):
         return False
     previous_start = line.start - _WORD_WINDOW_SLACK_S
     for word in words:

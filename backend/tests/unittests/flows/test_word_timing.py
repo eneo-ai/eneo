@@ -395,7 +395,10 @@ async def test_the_parts_of_one_recording_are_timed_part_by_part(
                     "start": 0.0,
                     "end": 5.2,
                     "text": other,
-                    "words": [{"word": other, "start": 0.0, "end": 5.2}],
+                    "words": [
+                        {"word": word, "start": index, "end": index + 1.0}
+                        for index, word in enumerate(other.split())
+                    ],
                 }
             ],
         },
