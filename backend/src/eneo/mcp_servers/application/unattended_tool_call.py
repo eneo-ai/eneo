@@ -2,7 +2,9 @@
 
 A fresh connection per call: connect, initialize, call and close share one
 time budget, the answer is refused while it arrives if it is larger than the
-caller accepts, and no redirect is followed. Whether the call is allowed is
+caller accepts, and no redirect is followed. Every request of the call goes
+through the HTTP client the caller's factory builds, so the caller decides
+which addresses the call may connect to. Whether the call is allowed is
 decided before, by ``unattended_tool_refusal``.
 """
 
@@ -14,7 +16,11 @@ from eneo.main.exceptions import (
     MCPClientError,
     MCPToolCallTimedOut,
 )
-from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient, MCPToolAnswer
+from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    MCPClient,
+    MCPHttpClientFactory,
+    MCPToolAnswer,
+)
 
 if TYPE_CHECKING:
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
@@ -91,8 +97,10 @@ class UnattendedToolCaller:
         *,
         max_answer_bytes: int,
         timeout_seconds: int,
+        http_client_factory: MCPHttpClientFactory,
     ) -> MCPToolAnswer:
-        """Call ``tool_name`` with the server's stored credential.
+        """Call ``tool_name`` with the server's stored credential, every
+        request through a client ``http_client_factory`` builds.
 
         Raises MCPToolCallTimedOut when the exchange (connect, initialize,
         the call, close) has not ended after ``timeout_seconds``, whatever
@@ -128,6 +136,7 @@ class UnattendedToolCaller:
             tool_call_timeout=timeout_seconds,
             tool_call_max_bytes=max_answer_bytes,
             terminate_session_on_close=False,
+            http_client_factory=http_client_factory,
         )
         # A task of its own: the client closes on the task that connected,
         # and it answers a cancellation during connect or close with a failed

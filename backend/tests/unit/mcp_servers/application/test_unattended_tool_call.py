@@ -10,6 +10,7 @@ import time
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
+import httpx
 import pytest
 from cryptography.fernet import Fernet
 from fastapi import Request
@@ -29,7 +30,12 @@ from eneo.mcp_servers.application.unattended_tool_call import (
 )
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 from eneo.mcp_servers.infrastructure.client import mcp_client
-from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient, MCPToolAnswer
+from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    MCPClient,
+    MCPHttpClientFactory,
+    MCPToolAnswer,
+    SdkHttpClientFactory,
+)
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
     MCPProxySessionFactory,
 )
@@ -60,13 +66,20 @@ def _server(url: str) -> MCPServer:
     return MCPServer(tenant_id=uuid4(), name="one-tool", http_url=url)
 
 
-async def _call(url: str, *, max_answer_bytes: int = 1024 * 1024, timeout: int = 5):
+async def _call(
+    url: str,
+    *,
+    max_answer_bytes: int = 1024 * 1024,
+    timeout: int = 5,
+    http_client_factory: MCPHttpClientFactory | None = None,
+):
     return await UnattendedToolCaller(MCPProxySessionFactory()).call(
         _server(url),
         "lookup",
         {"from": "2026-01-01"},
         max_answer_bytes=max_answer_bytes,
         timeout_seconds=timeout,
+        http_client_factory=http_client_factory or SdkHttpClientFactory(),
     )
 
 
@@ -166,7 +179,12 @@ async def test_every_request_carries_the_credential_stored_for_the_server() -> N
             http_auth_config_schema={"token": encryption.encrypt("stored-token")},
         )
         await UnattendedToolCaller(MCPProxySessionFactory(encryption)).call(
-            server, "lookup", {}, max_answer_bytes=CEILING, timeout_seconds=5
+            server,
+            "lookup",
+            {},
+            max_answer_bytes=CEILING,
+            timeout_seconds=5,
+            http_client_factory=SdkHttpClientFactory(),
         )
 
     assert sent == {"Bearer stored-token"}
@@ -198,7 +216,12 @@ async def test_a_stored_credential_that_cannot_be_read_is_a_failed_call(
         )
         with pytest.raises(MCPClientError) as failure:
             await UnattendedToolCaller(MCPProxySessionFactory(reading)).call(
-                server, "lookup", {}, max_answer_bytes=CEILING, timeout_seconds=5
+                server,
+                "lookup",
+                {},
+                max_answer_bytes=CEILING,
+                timeout_seconds=5,
+                http_client_factory=SdkHttpClientFactory(),
             )
 
     assert type(failure.value) is MCPClientError
@@ -523,20 +546,38 @@ async def test_an_exchange_stopped_while_it_connects_stops_asking_the_server() -
     # answers an initialize: the budget ends during connect, the client then
     # asks the server why the connect failed, and that request is held too.
     # Stopped once, the exchange stays on that request for as long as the
-    # server likes, with the connection and the credential.
+    # server likes, with the connection and the credential. Also kills the
+    # mutant that asks that question with an HTTP client of its own instead
+    # of one the caller's factory builds (an unattended call then reaches an
+    # address nobody vetted).
     app = one_tool_app(
         lambda request_id: tool_result(request_id, _text("never asked")),
         before_initialize=lambda: app.state.shutting_down.wait(),
     )
+    sent_through_the_factory: list[str] = []
+
+    class Recording(SdkHttpClientFactory):
+        def __call__(
+            self, *, headers: dict[str, str], timeout: httpx.Timeout
+        ) -> httpx.AsyncClient:
+            client = super().__call__(headers=headers, timeout=timeout)
+
+            async def note(request: httpx.Request) -> None:
+                sent_through_the_factory.append(json.loads(request.content)["method"])
+
+            client.event_hooks["request"].append(note)
+            return client
+
     async with serve_test_app(app) as url:
         started = time.monotonic()
         with pytest.raises(MCPToolCallTimedOut, match="within 1s"):
-            await _call(url, timeout=1)
+            await _call(url, timeout=1, http_client_factory=Recording())
         elapsed = time.monotonic() - started
         still_running = _exchanges_still_running()
 
     assert elapsed < ONE_SECOND_BUDGET_ENDS_BY
     assert still_running == 0
+    assert sent_through_the_factory == app.state.requests == ["initialize"] * 2
     assert app.state.requests == ["initialize", "initialize"]
 
 
@@ -552,7 +593,7 @@ async def test_an_exchange_that_does_not_stop_when_told_is_let_go_and_ends_alone
     loop = asyncio.get_running_loop()
     goes_on_for = 3 * EXCHANGE_STOP_GRACE_SECONDS
 
-    async def question_that_does_not_stop(_: str, __: dict[str, str]) -> str:
+    async def question_that_does_not_stop(*_: object, **__: object) -> str:
         ends = loop.time() + goes_on_for
         while (left := ends - loop.time()) > 0:
             try:

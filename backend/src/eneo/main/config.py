@@ -380,9 +380,9 @@ class Settings(BaseSettings):
     # MCP server, and a server on the internal network is the normal case, while
     # an HTTP address is written by a flow author. Loopback, link-local and
     # metadata addresses are refused whatever this says. The registered address
-    # is vetted before the call; the call follows no redirect; the name is
-    # resolved again by the MCP client when it connects (not a pinned
-    # connection).
+    # is vetted before the call, and every connection the call opens is to an
+    # address this policy allows when it is opened; the call follows no
+    # redirect.
     flow_tool_allow_private_networks: bool = True
     # Threads that resolve host names for flow HTTP. A lookup that stalls holds
     # its thread, so this bounds how much name resolution a burst of unreachable

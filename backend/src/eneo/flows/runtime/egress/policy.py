@@ -18,6 +18,7 @@ import ipaddress
 import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
+from enum import StrEnum
 
 import anyio
 
@@ -93,9 +94,22 @@ class DestinationUnresolvable(Exception):
         self.host = host
 
 
+class FlowOutboundTraffic(StrEnum):
+    """What a flow's outbound connections are for, as its logs name it."""
+
+    HTTP = "Flow HTTP"
+    MCP_TOOL_CALL = "Flow MCP tool call"
+
+
 class FlowDestinationPolicy:
-    def __init__(self, *, allow_private_networks: bool) -> None:
+    def __init__(
+        self,
+        *,
+        allow_private_networks: bool,
+        traffic: FlowOutboundTraffic = FlowOutboundTraffic.HTTP,
+    ) -> None:
         self.allow_private_networks = allow_private_networks
+        self.traffic = traffic
 
     def allows(self, ip: IPAddress) -> bool:
         if is_ipv4_transition_form(ip) or is_metadata_endpoint(ip):
@@ -180,7 +194,8 @@ async def vet_destination(
     refused = [str(a) for a in addresses if not policy.allows(a)]
     if refused:
         logger.warning(
-            "Flow HTTP refused destination %s (%s): not an allowed network",
+            "%s refused destination %s (%s): not an allowed network",
+            policy.traffic.value,
             host,
             ", ".join(refused),
         )

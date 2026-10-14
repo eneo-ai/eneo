@@ -467,10 +467,9 @@ FLOW_HTTP_ALLOW_PRIVATE_NETWORKS=false
 # only an instance administrator registers an MCP server, and internal servers
 # are the normal case. false allows servers on public addresses only. Loopback,
 # link-local and metadata addresses are refused either way. The registered
-# address is vetted before the call; the call follows no redirect; the name is
-# resolved again by the MCP client when it connects (not a pinned connection).
-# The MCP client makes the call and honours HTTP(S)_PROXY / ALL_PROXY, unlike
-# flow HTTP requests. Set on worker.
+# address is vetted before the call, and every connection the call opens is
+# vetted again when it is opened; the call follows no redirect. Like flow HTTP
+# requests, the call ignores HTTP(S)_PROXY / ALL_PROXY. Set on worker.
 FLOW_TOOL_ALLOW_PRIVATE_NETWORKS=true
 # Deadline for an MCP tool call, in seconds. For a flow step that takes its
 # input from a tool it bounds resolving the server's name and, separately, the
