@@ -8,7 +8,7 @@ does not import what output_processing imports.
 from __future__ import annotations
 
 import re
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, NoReturn, Protocol, cast
@@ -31,8 +31,10 @@ LOCAL_SCHEMA_REGISTRY = Registry[Schema](retrieve=_refuse_schema_retrieval)
 # they cannot evaluate: no metaschema fit, an unresolved or cyclic reference, a JSON
 # pointer that is not an array index, a draft-03 crawl of a malformed keyword, and a
 # schema the metaschema check never read (a $ref into `default`) with a null, unknown
-# or unhashable `type` or `$schema`, and an expression `re` cannot compile.
+# or unhashable `type` or `$schema`, an invalid numerical constraint, and an
+# expression `re` cannot compile.
 CONTRACT_FAILURES = (
+    ZeroDivisionError,
     re.error,
     jsonschema.SchemaError,
     UnknownType,
@@ -48,6 +50,8 @@ class SchemaValidator(Protocol):
     def validate(self, instance: Any) -> None: ...
 
     def iter_errors(self, instance: Any) -> Iterator[jsonschema.ValidationError]: ...
+
+    def evolve(self, *, schema: Schema) -> "SchemaValidator": ...
 
 
 def dialect_of(schema: Schema) -> type[Validator]:
@@ -68,6 +72,27 @@ def build_schema_validator(
         dialect_of(schema)(
             schema, registry=LOCAL_SCHEMA_REGISTRY, format_checker=format_checker
         ),
+    )
+
+
+# The drafts whose "$ref" stands for its whole schema object: a keyword beside
+# it is not evaluated.
+_REF_IGNORES_SIBLINGS: frozenset[type[Validator]] = frozenset(
+    {
+        jsonschema.Draft3Validator,
+        jsonschema.Draft4Validator,
+        jsonschema.Draft6Validator,
+        jsonschema.Draft7Validator,
+    }
+)
+
+
+def ref_ignores_siblings(schema: Mapping[str, object]) -> bool:
+    """Whether validating against ``schema`` reads none of the keywords beside
+    its top-level ``$ref``: it has one, and the draft it names (read as the
+    validator reads it) is 3, 4, 6 or 7."""
+    return (
+        schema.get("$ref") is not None and dialect_of(schema) in _REF_IGNORES_SIBLINGS
     )
 
 
@@ -121,6 +146,19 @@ class ContractNotEvaluable:
 ContractFinding = ContractViolation | ContractNotEvaluable | None
 
 
+def _violation(error: jsonschema.ValidationError) -> ContractViolation:
+    rule = error.validator if isinstance(error.validator, str) else None
+    if rule == "type":
+        detail = f"Value is not of type {error.validator_value!r}."
+    elif rule == "required":
+        detail = error.message
+    elif rule == "additionalProperties":
+        detail = "Additional properties are not allowed."
+    else:
+        detail = f"Value does not satisfy schema rule '{rule}'."
+    return ContractViolation(path=tuple(error.absolute_path), rule=rule, detail=detail)
+
+
 def evaluate_contract(data: object, schema: Schema) -> ContractFinding:
     """The first error of ``data`` against ``schema``, ContractNotEvaluable
     when the schema is not a valid schema of the draft it names or cannot be
@@ -130,18 +168,46 @@ def evaluate_contract(data: object, schema: Schema) -> ContractFinding:
         with _panic_as_recursion():
             build_schema_validator(schema).validate(data)
     except jsonschema.ValidationError as exc:
-        rule = exc.validator if isinstance(exc.validator, str) else None
-        if rule == "type":
-            detail = f"Value is not of type {exc.validator_value!r}."
-        elif rule == "required":
-            detail = exc.message
-        elif rule == "additionalProperties":
-            detail = "Additional properties are not allowed."
-        else:
-            detail = f"Value does not satisfy schema rule '{rule}'."
-        return ContractViolation(
-            path=tuple(exc.absolute_path), rule=rule, detail=detail
-        )
+        return _violation(exc)
     except CONTRACT_FAILURES:
         return ContractNotEvaluable()
     return None
+
+
+def property_schema(schema: Mapping[str, object], name: str) -> Schema | None:
+    """The subschema that the top-level ``properties`` of ``schema`` gives
+    for ``name``, which validating an object that holds ``name`` always
+    applies to its value. None when validation reads none: ``properties`` is
+    absent or no object, does not name ``name``, or stands beside a
+    top-level ``$ref`` that hides its siblings (``ref_ignores_siblings``)."""
+    properties = schema.get("properties")
+    if ref_ignores_siblings(schema) or not isinstance(properties, Mapping):
+        return None
+    subschema = cast(Mapping[str, object], properties).get(name)
+    if isinstance(subschema, bool):
+        return subschema
+    if isinstance(subschema, Mapping):
+        return cast(Mapping[str, object], subschema)
+    return None
+
+
+def evaluate_property(
+    value: object, *, schema: Mapping[str, object], name: str, subschema: Schema
+) -> ContractFinding:
+    """The first error of ``value`` against ``subschema``, the property
+    ``name`` of ``schema`` (``property_schema``), evaluated as validating an
+    object that holds the value under that name evaluates it: its
+    references resolve within ``schema``. ContractNotEvaluable when it cannot
+    be evaluated, None when the value fits. ``schema`` is one that
+    ``check_metaschema`` accepted; this does not check it again."""
+    try:
+        with _panic_as_recursion():
+            # A schema of this one property, run with the resolver of the
+            # whole schema.
+            one_property = build_schema_validator(schema).evolve(
+                schema={"properties": {name: subschema}}
+            )
+            error = next(iter(one_property.iter_errors({name: value})), None)
+    except CONTRACT_FAILURES:
+        return ContractNotEvaluable()
+    return None if error is None else _violation(error)

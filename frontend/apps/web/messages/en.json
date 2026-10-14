@@ -5022,6 +5022,7 @@
   "flow_tool_argument_step_not_earlier": "The argument “{argument}” reads from a step that has not run when this step runs. Choose a variable from an earlier step.",
   "flow_tool_argument_unknown_reference": "The argument “{argument}” reads a variable the run does not have. Choose another variable.",
   "flow_tool_argument_missing_required": "The argument “{argument}” is required but has no value. Give it a fixed value or choose a variable.",
+  "flow_tool_argument_outside_schema": "The fixed value of the argument “{argument}” does not fit what the tool accepts for it. Change the value or choose a variable.",
   "flow_run_error_tool_text_label": "The tool's own error text",
   "flow_tool_missing_tool": "Choose a tool.",
   "flow_tool_config_title": "Tool call",

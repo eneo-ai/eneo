@@ -99,7 +99,8 @@ describe("tool step refusals", () => {
       "nested_reference",
       "step_not_earlier",
       "unknown_reference",
-      "missing_required"
+      "missing_required",
+      "outside_schema"
     ];
     const facts = [
       ...Object.keys(levels).map((refusal) => identity("typed_io_tool_not_allowed", { refusal })),
@@ -112,7 +113,7 @@ describe("tool step refusals", () => {
     const sentences = facts.flatMap((fact) =>
       fact?.toolRefusal ? [describeToolStepRefusal(fact.toolRefusal)] : []
     );
-    expect(new Set(sentences).size).toBe(21);
+    expect(new Set(sentences).size).toBe(22);
   });
 
   // Kills: the invalid-schema refusal, which carries no issue_code, is not

@@ -1,39 +1,17 @@
-"""The check of a tool step's arguments against the tool's approved input
-schema, in a child process with a hard time limit.
+"""Bounded tool schema checks in a killable child, shared by publish and runs.
 
-The schema comes from an MCP server. jsonschema matches its expressions
-("pattern", the names of "patternProperties", also where
-"additionalProperties" and "unevaluatedProperties" read them) with Python's
-re, which has no time limit and holds the GIL while it backtracks. In the
-worker's process such a check would stop the event loop (heartbeats,
-cancellation) for as long as it runs, also on a thread, and a thread cannot
-be stopped. A child process can be killed.
+A schema can hold the GIL while matching an expression or expand references
+without a bound. A thread cannot stop that work. One child serves one event
+loop's checks, serialized over a local Pipe. A fresh interpreter starts only
+the checker entry module, never the server's or worker's main script.
 
-One child per worker process, started at the first check with the "spawn"
-start method (a fork of a process that runs an event loop and threads can
-copy a lock in its held state), and spoken to over a Pipe: the arguments and
-the schema go as JSON text, the answer comes back as typed plain data. It
-imports this module and domain/schema_engine (jsonschema and referencing,
-nothing of the application), and spawn runs the worker's entry script in it
-again as __mp_main__, as for the PDF extraction in files/text.py.
+One owned thread handles every framed pipe read and write, including partial
+messages. The deadline starts before the request is written, after the child's
+ready message. Cancellation or timeout kills the child before waiting for that
+thread and closing its connection. The next check starts a new child.
 
-Every read and write on the pipe runs on one thread the checker owns, and the
-event loop awaits it: a child that stops reading, or that sends a message in
-parts, holds that thread and not the loop. A check that ends early kills the
-child first, which ends the thread's read or write at once, and closes the
-pipe only after that call has returned.
-
-Checks are serialized on the child. A check takes milliseconds, and a worker
-runs at most task_execution_max_jobs runs at once (4 by default), so a check
-waits for at most that many minus one earlier checks. Each check gets
-TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS from the moment it is handed to the pipe
-thread to its answer (its writes, the check in the child, the read), not
-counting that wait or the start of a new child.
-
-The child does not outlive its worker by more than the check limit and one
-second: a worker that exits kills it (it is a daemon), an idle child ends when
-its pipe closes, and a check carries an alarm that ends the child when no one
-has stopped it in time.
+An idle child ends on parent pipe EOF; active work carries an alarm that ends
+the child within the check limit plus one second if its parent disappears.
 """
 
 from __future__ import annotations
@@ -42,90 +20,130 @@ import asyncio
 import concurrent.futures
 import json
 import logging
-import multiprocessing
 import signal
+import subprocess
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from enum import Enum, auto
+from multiprocessing import Pipe
 from multiprocessing.connection import Connection
-from multiprocessing.process import BaseProcess
+from pathlib import Path
+from typing import Literal, overload
 
 from eneo.flows.domain.schema_engine import (
     ContractFinding,
     ContractNotEvaluable,
     ContractViolation,
     evaluate_contract,
+    evaluate_property,
+    property_schema,
 )
 
 logger = logging.getLogger(__name__)
 
-# How long one check of a tool's arguments may take, from its hand-over to the
-# pipe thread to its answer, not counting the wait for earlier checks or the
-# start of a new child (_START_TIMEOUT_SECONDS). A real tool's
-# arguments are checked in milliseconds; the limit leaves room for a loaded host
-# and stays far inside a step's time.
+# Includes the pipe writes, evaluation and answer, but not earlier checks or
+# child startup. Ordinary arguments take milliseconds; this leaves host headroom.
 TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS = 2.0
-# How long starting a child may take: a fresh interpreter that imports
-# jsonschema, about 0.15 s on an idle host. A start that takes longer is a
-# fault of the host, not of the schema, so the limit is generous.
+# Importing jsonschema takes about 0.15 s on an idle host. Startup failure is a
+# host fault, so it has a separate, generous budget.
 _START_TIMEOUT_SECONDS = 10.0
-
-_SPAWN = multiprocessing.get_context("spawn")
 
 
 class ToolArgumentCheckFailed(Exception):
-    """The check could not run on this worker: its process did not start in
-    time, ended, or answered out of protocol. A fault of the host, not of
-    the schema or the arguments."""
+    """The child failed to start, ended or answered out of protocol: a host fault."""
 
 
 class ToolArgumentsNotJson(Exception):
-    """The arguments cannot be written as JSON text: a NaN or an infinity
-    (JSON has no such number), or nesting deeper than the encoder takes."""
+    """Arguments contain a non-JSON number or exceed the JSON encoder's nesting."""
 
 
 @dataclass(frozen=True, slots=True)
 class ArgumentCheckUnfinished:
-    """The arguments could not be checked against the schema: the check ran
-    past its limit (``timed_out``), or raised inside the child."""
+    """A check exceeded its deadline or raised inside the child."""
 
     timed_out: bool
 
 
+@dataclass(frozen=True, slots=True)
+class FixedPropertyViolation:
+    """A fixed property's violation with its known argument name.
+
+    A false subschema's error path can be empty, so the name comes from the
+    requested property rather than from the validator's error path.
+    """
+
+    argument: str
+    violation: ContractViolation
+
+
 ToolArgumentCheckResult = ContractFinding | ArgumentCheckUnfinished
+FixedPropertyCheckResult = (
+    FixedPropertyViolation | ContractNotEvaluable | ArgumentCheckUnfinished | None
+)
+_CheckAnswer = ContractFinding | FixedPropertyViolation
+
+
+class _Operation(Enum):
+    FULL_ARGUMENTS = auto()
+    FIXED_PROPERTIES = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class _Request:
+    operation: _Operation
+    arguments_text: bytes
+    schema_text: bytes
 
 
 @dataclass(frozen=True, slots=True)
 class _Ready:
-    """The child's first message: it has imported what it checks with, so
-    the import counts against the start's limit and not against a check's."""
+    """Imports completed; the check's deadline can start after this message."""
 
 
 @dataclass(frozen=True, slots=True)
 class _CheckRaised:
-    """A check that raised inside the child, by its exception's type."""
-
     exception: str
 
 
-def _serve(connection: Connection, alarm_seconds: float) -> None:
-    """The child: answers each check (the arguments, then the schema, as JSON
-    text) until the parent closes its end of the pipe."""
-    # A check whose worker was killed is never stopped by it: the alarm's
-    # default action ends the child instead.
+def _fixed_properties(
+    fixed: Mapping[str, object], schema: Mapping[str, object]
+) -> FixedPropertyViolation | ContractNotEvaluable | None:
+    unfinished = False
+    for name, value in fixed.items():
+        subschema = property_schema(schema, name)
+        if subschema is None:
+            continue
+        finding = evaluate_property(
+            value, schema=schema, name=name, subschema=subschema
+        )
+        if isinstance(finding, ContractViolation):
+            return FixedPropertyViolation(argument=name, violation=finding)
+        unfinished |= isinstance(finding, ContractNotEvaluable)
+    return ContractNotEvaluable() if unfinished else None
+
+
+def serve_tool_argument_checks(connection: Connection, alarm_seconds: float) -> None:
+    """Serve framed requests until parent EOF, with an alarm on active work."""
     signal.signal(signal.SIGALRM, signal.SIG_DFL)
     connection.send(_Ready())
     while True:
         try:
-            arguments_text = connection.recv_bytes()
-            schema_text = connection.recv_bytes()
+            request = connection.recv()
         except EOFError:
             return
         signal.setitimer(signal.ITIMER_REAL, alarm_seconds)
         try:
-            arguments: object = json.loads(arguments_text)
-            schema: Mapping[str, object] = json.loads(schema_text)
-            answer = evaluate_contract(arguments, schema)
-        except Exception as exc:  # the child's boundary: the parent logs it
+            if not isinstance(request, _Request):
+                raise TypeError("Unexpected tool check request")
+            arguments: dict[str, object] = json.loads(request.arguments_text)
+            schema: dict[str, object] = json.loads(request.schema_text)
+            answer: _CheckAnswer | _CheckRaised
+            if request.operation is _Operation.FULL_ARGUMENTS:
+                answer = evaluate_contract(arguments, schema)
+            else:
+                answer = _fixed_properties(arguments, schema)
+        except Exception as exc:  # the child's boundary: the parent logs the type
             answer = _CheckRaised(type(exc).__name__)
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
@@ -134,30 +152,34 @@ def _serve(connection: Connection, alarm_seconds: float) -> None:
 
 @dataclass(frozen=True, slots=True)
 class _Child:
-    process: BaseProcess
+    process: subprocess.Popen[bytes]
     connection: Connection
 
 
 def _start_child() -> _Child:
-    ours, theirs = _SPAWN.Pipe()
-    process = _SPAWN.Process(
-        target=_serve,
-        args=(theirs, TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS + 1),
-        name="flow-tool-argument-check",
-        daemon=True,
-    )
-    process.start()
-    # Only the child holds its end now, so its exit reads as EOF here.
-    theirs.close()
+    ours, theirs = Pipe()
+    try:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().with_name("tool_argument_check_child.py")),
+                str(theirs.fileno()),
+                str(TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS + 1),
+            ],
+            pass_fds=(theirs.fileno(),),
+        )
+    except OSError:
+        ours.close()
+        raise
+    finally:
+        # Only the child holds its end now, so its exit reads as EOF here.
+        theirs.close()
     return _Child(process, ours)
 
 
-def _exchange(
-    connection: Connection, arguments_text: bytes, schema_text: bytes
-) -> object:
-    """One check on the pipe thread: both writes and the read of the answer."""
-    connection.send_bytes(arguments_text)
-    connection.send_bytes(schema_text)
+def _exchange(connection: Connection, request: _Request) -> object:
+    """The whole exchange belongs to the pipe thread, including both writes."""
+    connection.send(request)
     answer: object = connection.recv()
     return answer
 
@@ -167,7 +189,7 @@ def _json_text(value: Mapping[str, object]) -> bytes:
 
 
 class ToolArgumentChecker:
-    """Checks one call at a time on one child."""
+    """Checks one request at a time on one child of the current event loop."""
 
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -181,15 +203,46 @@ class ToolArgumentChecker:
     async def check(
         self, arguments: Mapping[str, object], schema: Mapping[str, object]
     ) -> ToolArgumentCheckResult:
-        """``evaluate_contract(arguments, schema)``, in the child, or
-        ArgumentCheckUnfinished: when it runs past
-        TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS the child is killed.
+        """Validate the full object, including its schema's metaschema.
 
-        Raises ToolArgumentsNotJson for arguments that are no JSON text, and
-        ToolArgumentCheckFailed when the child does not start within
-        _START_TIMEOUT_SECONDS, ends or answers out of protocol. A child that
-        failed, or whose check was cancelled, is killed, and the next check
-        starts a new one."""
+        Raises ToolArgumentsNotJson for non-JSON arguments and
+        ToolArgumentCheckFailed for host faults. Cancellation and deadlines
+        kill the child; the next check starts a new one.
+        """
+        return await self._check(arguments, schema, _Operation.FULL_ARGUMENTS)
+
+    async def check_fixed_properties(
+        self, fixed: Mapping[str, object], schema: Mapping[str, object]
+    ) -> FixedPropertyCheckResult:
+        """Check properties of an already admitted schema with its root resolver.
+
+        This checks neither absent/bound arguments nor the full object's rules.
+        Unfinished checks and host faults have the same boundary as ``check``.
+        """
+        return await self._check(fixed, schema, _Operation.FIXED_PROPERTIES)
+
+    @overload
+    async def _check(
+        self,
+        arguments: Mapping[str, object],
+        schema: Mapping[str, object],
+        operation: Literal[_Operation.FULL_ARGUMENTS],
+    ) -> ToolArgumentCheckResult: ...
+
+    @overload
+    async def _check(
+        self,
+        arguments: Mapping[str, object],
+        schema: Mapping[str, object],
+        operation: Literal[_Operation.FIXED_PROPERTIES],
+    ) -> FixedPropertyCheckResult: ...
+
+    async def _check(
+        self,
+        arguments: Mapping[str, object],
+        schema: Mapping[str, object],
+        operation: _Operation,
+    ) -> ToolArgumentCheckResult | FixedPropertyCheckResult:
         try:
             arguments_text = _json_text(arguments)
         except (RecursionError, ValueError) as exc:
@@ -199,9 +252,10 @@ class ToolArgumentChecker:
         except (RecursionError, ValueError):
             logger.warning("A tool's input schema cannot be written as JSON text.")
             return ArgumentCheckUnfinished(timed_out=False)
+        request = _Request(operation, arguments_text, schema_text)
         async with self._lock_of_running_loop():
             try:
-                answer = await self._ask(arguments_text, schema_text)
+                answer = await self._ask(request)
             except TimeoutError:
                 exit_code = self._end_child()
                 logger.warning(
@@ -221,8 +275,7 @@ class ToolArgumentChecker:
                 )
                 raise
             except BaseException:
-                # The child may still be checking, and its late answer would
-                # be read as the next check's.
+                # A late answer must never be read as the next check's result.
                 self._end_child()
                 raise
         if isinstance(answer, _CheckRaised):
@@ -235,17 +288,12 @@ class ToolArgumentChecker:
     def _lock_of_running_loop(self) -> asyncio.Lock:
         loop = asyncio.get_running_loop()
         if loop is not self._loop:
-            # A lock belongs to one event loop, and a child that served
-            # another loop may still owe that loop an answer.
+            # A child serving another loop may still owe that loop an answer.
             self._end_child()
             self._loop, self._lock = loop, asyncio.Lock()
         return self._lock
 
-    async def _ask(
-        self, arguments_text: bytes, schema_text: bytes
-    ) -> ContractFinding | _CheckRaised:
-        """Raises TimeoutError when the check runs past its limit, and
-        ToolArgumentCheckFailed for a fault of the child."""
+    async def _ask(self, request: _Request) -> _CheckAnswer | _CheckRaised:
         try:
             child = self._child or await self._started_child()
         except (EOFError, OSError) as exc:
@@ -253,12 +301,18 @@ class ToolArgumentChecker:
         async with asyncio.timeout(TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS):
             try:
                 answer = await self._on_pipe_thread(
-                    lambda: _exchange(child.connection, arguments_text, schema_text)
+                    lambda: _exchange(child.connection, request)
                 )
             except (EOFError, OSError) as exc:
                 raise ToolArgumentCheckFailed("its process ended") from exc
-        if answer is None or isinstance(
-            answer, ContractViolation | ContractNotEvaluable | _CheckRaised
+        if answer is None or isinstance(answer, ContractNotEvaluable | _CheckRaised):
+            return answer
+        if request.operation is _Operation.FULL_ARGUMENTS and isinstance(
+            answer, ContractViolation
+        ):
+            return answer
+        if request.operation is _Operation.FIXED_PROPERTIES and isinstance(
+            answer, FixedPropertyViolation
         ):
             return answer
         raise ToolArgumentCheckFailed(f"its process answered {type(answer).__name__}")
@@ -281,24 +335,17 @@ class ToolArgumentChecker:
         return await asyncio.wrap_future(self._pipe_call)
 
     def _end_child(self) -> int | None:
-        """Kill the child, if any; its exit code before the kill (None while
-        it ran)."""
+        """Kill before waiting for the pipe call or closing its connection."""
         child, self._child = self._child, None
         pipe_call, self._pipe_call = self._pipe_call, None
         if child is None:
             return None
-        child.process.join(0)
-        exit_code = child.process.exitcode
+        exit_code = child.process.poll()
         child.process.kill()
-        # A killed child ends at once, also a stopped one, so the join does not
-        # hold the event loop.
-        child.process.join()
+        child.process.wait()
         if pipe_call is not None:
-            # The child's end of the pipe closed when it died, so a read or
-            # write the thread is in fails at once (EOF, broken pipe), and this
-            # waits only until the thread leaves that call. The parent's end is
-            # closed after it: never under a running call, and its number is
-            # not reused for the next child's pipe while the call holds it.
+            # Death closes the peer FD, releasing any partial read or write.
+            # Close ours only after the thread leaves it, avoiding FD reuse.
             concurrent.futures.wait((pipe_call,))
         child.connection.close()
         return exit_code
@@ -310,6 +357,12 @@ _CHECKER = ToolArgumentChecker()
 async def check_tool_arguments(
     arguments: Mapping[str, object], schema: Mapping[str, object]
 ) -> ToolArgumentCheckResult:
-    """The result of ``arguments`` against ``schema``, from this worker's
-    child process (ToolArgumentChecker.check)."""
+    """Check a run's full arguments with this event loop's killable checker."""
     return await _CHECKER.check(arguments, schema)
+
+
+async def check_fixed_tool_properties(
+    fixed: Mapping[str, object], schema: Mapping[str, object]
+) -> FixedPropertyCheckResult:
+    """Check publish's fixed properties with the same killable checker."""
+    return await _CHECKER.check_fixed_properties(fixed, schema)

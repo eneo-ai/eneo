@@ -16,10 +16,10 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from eneo.flows.domain.canonical_json_hash import canonical_json_hash
+from eneo.flows.domain.schema_engine import ref_ignores_siblings
 from eneo.flows.enums import FlowInputType
 from eneo.flows.flow_validators_template import EXACT_TEMPLATE_EXPRESSION_PATTERN
 from eneo.flows.http_transport.authored_config import ConfigPath
-from eneo.flows.output_processing import ref_ignores_siblings
 from eneo.flows.variable_resolver import TEMPLATE_VARIABLE_PATTERN
 from eneo.json_types import JsonValue
 
@@ -37,6 +37,9 @@ class ToolArgumentProblem(StrEnum):
     NESTED_REFERENCE = "nested_reference"
     # The step gives no value for an argument the tool's input schema requires.
     MISSING_REQUIRED = "missing_required"
+    # The step's fixed value for an argument is one that the tool's input
+    # schema refuses for that argument.
+    OUTSIDE_SCHEMA = "outside_schema"
 
 
 class ToolArgumentError(ValueError):

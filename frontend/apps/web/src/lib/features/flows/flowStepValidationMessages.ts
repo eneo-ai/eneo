@@ -230,7 +230,8 @@ const TOOL_ARGUMENT_SENTENCES = {
   nested_reference: m.flow_tool_argument_nested_reference,
   step_not_earlier: m.flow_tool_argument_step_not_earlier,
   unknown_reference: m.flow_tool_argument_unknown_reference,
-  missing_required: m.flow_tool_argument_missing_required
+  missing_required: m.flow_tool_argument_missing_required,
+  outside_schema: m.flow_tool_argument_outside_schema
 };
 type ToolArgumentProblem = keyof typeof TOOL_ARGUMENT_SENTENCES;
 
