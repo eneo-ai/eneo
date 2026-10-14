@@ -67,7 +67,7 @@ REDUCE_RESERVE_SHARE = 0.3
 
 # All digests in one process share this cap, whatever the per-digest
 # concurrency: gunicorn runs several workers, each with its own.
-_PROCESS_SLOTS = asyncio.Semaphore(8)
+_PROCESS_SLOTS = asyncio.Semaphore(16)
 
 _KEY = re.compile(r"\[(D\d+)\]")
 
@@ -256,8 +256,9 @@ async def _acquire(semaphore: asyncio.Semaphore, deadline: Deadline) -> None:
     if remaining <= 0:
         raise DigestDeadlineExceeded()
     try:
-        await asyncio.wait_for(semaphore.acquire(), remaining)
-    except asyncio.TimeoutError:
+        async with asyncio.timeout(remaining):
+            await semaphore.acquire()
+    except TimeoutError:
         raise DigestDeadlineExceeded() from None
 
 
@@ -322,11 +323,11 @@ class ProviderCalls:
             if remaining <= 0:
                 raise DigestDeadlineExceeded()
             try:
-                completion = await asyncio.wait_for(
-                    self.digest_model.adapter.get_response(context, kwargs),
-                    timeout=min(CALL_TIMEOUT_SECONDS, remaining),
-                )
-            except asyncio.TimeoutError:
+                async with asyncio.timeout(min(CALL_TIMEOUT_SECONDS, remaining)):
+                    completion = await self.digest_model.adapter.get_response(
+                        context, kwargs
+                    )
+            except TimeoutError:
                 if self.deadline.remaining() <= 0:
                     raise DigestDeadlineExceeded() from None
                 raise ProviderCallTimeout() from None

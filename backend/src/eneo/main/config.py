@@ -323,7 +323,7 @@ class Settings(BaseSettings):
     # Most text segments (one map call each) a single digest may process.
     digest_max_segments: int = 120
     # Concurrent model calls one digest issues.
-    digest_concurrency: int = 4
+    digest_concurrency: int = 8
     mcp_tool_output_max_chars: int = 32768
     # Decoded size cap for a single MCP image content block; larger images
     # are dropped before they can be persisted as generated files.

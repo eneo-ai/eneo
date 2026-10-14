@@ -28,11 +28,21 @@ import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from functools import partial
+from typing import Literal, TypeVar
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+class _Skipped:
+    """A map segment never sent: the run was cancelled or out of time."""
+
+
+_SKIPPED = _Skipped()
 
 NOT_RELEVANT = "NOT_RELEVANT"
 _DATE_LINE = re.compile(r"^\s*Date:\s*(\S.*?)\s*$", re.IGNORECASE)
@@ -312,6 +322,7 @@ class _Run:
         self.reduce_reserve = reduce_reserve_seconds
         self.should_stop = should_stop
         self.map_batch = max(1, map_batch)
+        self.window = asyncio.Semaphore(self.map_batch)
         self.now = now
         self.progress = {
             p.item.key: ItemProgress(planned=len(p.segments)) for p in plan.items
@@ -340,6 +351,19 @@ class _Run:
     def note_reason(self, reason: str) -> None:
         if reason not in self.reasons:
             self.reasons.append(reason)
+
+    async def _windowed(self, jobs: Sequence[Callable[[], Awaitable[T]]]) -> list[T]:
+        """Run ``jobs`` with at most ``map_batch`` in flight, results in order.
+
+        A sliding window: each job starts as a slot frees, so one slow call
+        delays only itself and not a whole round.
+        """
+
+        async def run(job: Callable[[], Awaitable[T]]) -> T:
+            async with self.window:
+                return await job()
+
+        return list(await asyncio.gather(*(run(job) for job in jobs)))
 
     async def check_stop(self) -> bool:
         if self.cancelled:
@@ -398,38 +422,37 @@ class _Run:
             p.item.key: [] for p in self.plan.items
         }
         system = map_prompt(self.instruction, self.budgets.map_words)
-        position = 0
-        while position < len(tasks):
+
+        async def one(p: PlannedItem, index: int) -> str | None | _Skipped:
+            # Checked as a slot frees, so a cancel or the reduce reserve stops
+            # admission within one call rather than one round.
             if await self.check_stop():
-                break
+                return _SKIPPED
             if self.out_of_time(self.reduce_reserve):
                 self.deadline_hit = True
                 self.note_reason("deadline")
-                break
-            batch = tasks[position : position + self.map_batch]
-            position += len(batch)
-            results = await asyncio.gather(
-                *(
-                    self.call(
-                        system,
-                        f"{_item_header(p.item)} (segment {index + 1} of "
-                        f"{len(p.segments)})\n\n{p.segments[index]}",
-                        self.budgets.map_max_tokens,
-                    )
-                    for p, index in batch
-                )
+                return _SKIPPED
+            return await self.call(
+                system,
+                f"{_item_header(p.item)} (segment {index + 1} of "
+                f"{len(p.segments)})\n\n{p.segments[index]}",
+                self.budgets.map_max_tokens,
             )
-            for (p, index), text in zip(batch, results):
-                progress = self.progress[p.item.key]
-                if text is None:
-                    progress.failed += 1
-                    if not self.deadline_hit:
-                        self.failed.append(f"{p.item.key} segment {index + 1}")
-                    continue
-                progress.processed += 1
-                date, body, relevant = parse_map_output(text)
-                if relevant:
-                    notes[p.item.key].append((date, body))
+
+        results = await self._windowed([partial(one, p, index) for p, index in tasks])
+        for (p, index), text in zip(tasks, results):
+            if isinstance(text, _Skipped):
+                continue
+            progress = self.progress[p.item.key]
+            if text is None:
+                progress.failed += 1
+                if not self.deadline_hit:
+                    self.failed.append(f"{p.item.key} segment {index + 1}")
+                continue
+            progress.processed += 1
+            date, body, relevant = parse_map_output(text)
+            if relevant:
+                notes[p.item.key].append((date, body))
         if self.failed:
             self.note_reason("failed segments")
         return notes
@@ -458,30 +481,25 @@ class _Run:
             )
             pending.append((p, joined))
 
-        for start in range(0, len(pending), self.map_batch):
-            batch = pending[start : start + self.map_batch]
+        async def merge(p: PlannedItem, joined: str) -> str | None:
             if await self.check_stop():
-                for p, joined in batch:
-                    result.append(self._fallback_note(p, joined))
-                continue
-            texts = await asyncio.gather(
-                *(
-                    self.call(
-                        system,
-                        f"{_item_header(p.item)}\n\n{joined}",
-                        self.budgets.item_max_tokens,
-                    )
-                    for p, joined in batch
-                )
+                return None
+            return await self.call(
+                system,
+                f"{_item_header(p.item)}\n\n{joined}",
+                self.budgets.item_max_tokens,
             )
-            for (p, joined), text in zip(batch, texts):
-                if text is None:
-                    result.append(self._fallback_note(p, joined))
-                else:
-                    date, body, _ = parse_map_output(text)
-                    result.append(
-                        _Note((p.item.key,), _format_note(p.item, date, body))
-                    )
+
+        texts = await self._windowed(
+            [partial(merge, p, joined) for p, joined in pending]
+        )
+        for (p, joined), text in zip(pending, texts):
+            if text is None:
+                result.append(self._fallback_note(p, joined))
+            else:
+                date, body, _ = parse_map_output(text)
+                result.append(_Note((p.item.key,), _format_note(p.item, date, body)))
+
         return result
 
     def _fallback_note(self, p: PlannedItem, joined: str) -> _Note:
@@ -533,25 +551,24 @@ class _Run:
         for batch in batches:
             grouped.append(notes[cursor : cursor + len(batch)])
             cursor += len(batch)
-        merged: list[_Note] = []
-        for start in range(0, len(grouped), self.map_batch):
-            chunk = grouped[start : start + self.map_batch]
-            texts = await asyncio.gather(
-                *(
-                    self.call(
-                        system,
-                        "\n\n---\n\n".join(n.text for n in group),
-                        self.budgets.batch_max_tokens,
-                    )
-                    for group in chunk
+        texts = await self._windowed(
+            [
+                partial(
+                    self.call,
+                    system,
+                    "\n\n---\n\n".join(n.text for n in group),
+                    self.budgets.batch_max_tokens,
                 )
-            )
-            for group, text in zip(chunk, texts):
-                keys = tuple(dict.fromkeys(k for n in group for k in n.keys))
-                if text is None:
-                    merged.extend(group)
-                else:
-                    merged.append(_Note(keys, text.strip()))
+                for group in grouped
+            ]
+        )
+        merged: list[_Note] = []
+        for group, text in zip(grouped, texts):
+            keys = tuple(dict.fromkeys(k for n in group for k in n.keys))
+            if text is None:
+                merged.extend(group)
+            else:
+                merged.append(_Note(keys, text.strip()))
         return merged
 
     def _first_fitting(
@@ -651,9 +668,13 @@ async def run_digest(
     ``deadline`` is a ``now()`` timestamp after which no call starts; map
     admission already stops when less than ``reduce_reserve_seconds`` remain
     so the reduces get their share. ``should_stop`` is awaited before each
-    map batch and each reduce level; True ends the run as ``cancelled`` with
-    the usage spent so far. ``map_batch`` calls run concurrently; the caller
-    bounds the provider side with its own semaphore inside ``complete``.
+    map call and each reduce level; True ends the run as ``cancelled`` with
+    the usage spent so far. At most ``map_batch`` calls are in flight; the
+    caller bounds the provider side with its own semaphore inside ``complete``.
+
+    A cancellation from outside (the request's task torn down) is logged with
+    the work done so far before it propagates, since no result reaches the
+    caller then.
     """
     run = _Run(
         plan,
@@ -667,6 +688,23 @@ async def run_digest(
         map_batch=map_batch,
         now=now,
     )
+    try:
+        return await _stages(run, plan)
+    except asyncio.CancelledError:
+        progress = run.progress.values()
+        logger.info(
+            "[digest] cancelled from outside: calls=%d segments=%d/%d "
+            "tokens_in=%d tokens_out=%d",
+            run.llm_calls,
+            sum(p.processed for p in progress),
+            sum(p.planned for p in progress),
+            run.usage.input_tokens,
+            run.usage.output_tokens,
+        )
+        raise
+
+
+async def _stages(run: _Run, plan: DigestPlan) -> DigestResult:
     if not plan.items:
         return run.result("")
     if await run.check_stop():

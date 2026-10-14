@@ -351,7 +351,7 @@ async def test_deadline_at_the_final_call_hands_back_the_notes():
 
 async def test_should_stop_returns_cancelled_with_usage_spent():
     model = _ScriptedModel()
-    stops = iter([False, False, True])  # run start, batch 1, batch 2
+    stops = iter([False, False, False, True])  # run start, then one per map call
 
     async def should_stop() -> bool:
         return next(stops, True)

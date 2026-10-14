@@ -212,8 +212,8 @@ answer. When everything fits one call, a single call answers directly.
 - **Bounds.** One absolute deadline (`DIGEST_TIMEOUT_SECONDS`, default 300)
   covers loading, queueing, retries and every model call; map admission stops
   when less than 30 % remains so the merges finish. At most
-  `DIGEST_MAX_SEGMENTS` (120) segments per digest, `DIGEST_CONCURRENCY` (4)
-  concurrent calls per digest and 8 per backend process. Rate limits and
+  `DIGEST_MAX_SEGMENTS` (120) segments per digest, `DIGEST_CONCURRENCY` (8)
+  concurrent calls per digest and 16 per backend process. Rate limits and
   provider outages are retried with backoff inside the deadline. The loopback
   knowledge and files servers get `DIGEST_TIMEOUT_SECONDS` as their tool-call
   budget, so a hung search or read also waits that long.

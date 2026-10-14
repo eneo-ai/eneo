@@ -51,7 +51,9 @@ async def _seed_document(
     blob = InfoBlobs(
         title=title,
         text=text,
-        size=len(text.encode("utf-8")),
+        # Storage accounting, deliberately far from the text length: the
+        # digest queries must measure the text itself.
+        size=40 * len(text.encode("utf-8")) + 1000,
         content_hash=sha256(text.encode("utf-8")).digest(),
         source_id=uuid4(),
         version_state=(

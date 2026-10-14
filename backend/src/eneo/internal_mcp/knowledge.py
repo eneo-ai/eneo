@@ -246,8 +246,9 @@ def _matching_sources(assistant, ref: str) -> list[KnowledgeScope]:
     argument address all of them without a scope-kind discriminator.
 
     The name fallback exists because models tend to pass back the name they were
-    shown rather than the id beside it. It can only ever match inside the
-    assistant's own scope, so it grants no reach.
+    shown rather than the id beside it, either bare or as the catalog label
+    ("Collection 'Minutes'"). It can only ever match inside the assistant's
+    own scope, so it grants no reach.
     """
     candidates = _source_scopes(assistant)
     ref = ref.strip()
@@ -259,7 +260,10 @@ def _matching_sources(assistant, ref: str) -> list[KnowledgeScope]:
         return [scope for scope in candidates if scope.source_id == wanted]
 
     folded = ref.casefold()
-    return [scope for scope in candidates if scope.name.casefold() == folded]
+    by_name = [scope for scope in candidates if scope.name.casefold() == folded]
+    if by_name:
+        return by_name
+    return [scope for scope in candidates if scope.label.casefold() == folded]
 
 
 def _ambiguous_source_message(ref: str) -> str:

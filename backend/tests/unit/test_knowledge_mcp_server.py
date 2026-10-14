@@ -486,6 +486,13 @@ class TestMatchingSources:
 
         assert _matching_sources(assistant, "waste faq")[0].source_id == cid
         assert _matching_sources(assistant, "  Waste FAQ ")[0].source_id == cid
+        # The catalog label the model was shown works as well as the bare name.
+        assert (
+            _matching_sources(assistant, "Collection 'Waste FAQ'")[0].source_id == cid
+        )
+        assert (
+            _matching_sources(assistant, "collection 'waste faq'")[0].source_id == cid
+        )
 
     def test_duplicate_names_are_reported_as_several_matches(self):
         assistant = _assistant_with_sources(

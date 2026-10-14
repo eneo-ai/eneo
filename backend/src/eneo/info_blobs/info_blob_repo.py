@@ -990,8 +990,11 @@ class InfoBlobRepository:
         Lets a digest refuse an obviously oversized selection before loading
         a single text.
         """
+        # ``size`` is storage accounting (text plus embeddings), many times
+        # the text itself; the digest plans on characters of text.
         stmt = sa.select(
-            sa.func.count(), sa.func.coalesce(sa.func.sum(InfoBlobs.size), 0)
+            sa.func.count(),
+            sa.func.coalesce(sa.func.sum(sa.func.length(InfoBlobs.text)), 0),
         ).where(
             self._source_filter(group_ids, website_ids, integration_knowledge_ids),
             active_info_blob_version(),
