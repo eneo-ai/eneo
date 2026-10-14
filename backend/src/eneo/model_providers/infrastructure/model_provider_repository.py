@@ -180,6 +180,7 @@ class ModelProviderRepository:
             CompletionModels,
             EmbeddingModels,
             ImageModels,
+            RerankModels,
             TranscriptionModels,
         )
 
@@ -210,9 +211,16 @@ class ModelProviderRepository:
             .where(ImageModels.provider_id == provider_id)
         )
 
+        rerank_count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(RerankModels)
+            .where(RerankModels.provider_id == provider_id)
+        )
+
         return (
             (completion_count or 0)
             + (embedding_count or 0)
             + (transcription_count or 0)
             + (image_count or 0)
+            + (rerank_count or 0)
         )

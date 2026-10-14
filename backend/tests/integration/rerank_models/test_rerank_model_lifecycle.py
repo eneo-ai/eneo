@@ -14,7 +14,13 @@ import pytest
 from sqlalchemy import select
 
 from eneo.database.tables.ai_models_table import RerankModels
+from eneo.database.tables.security_classifications_table import (
+    SecurityClassification,
+)
 from eneo.main.exceptions import NameCollisionException, NotFoundException
+from eneo.model_providers.infrastructure.model_provider_repository import (
+    ModelProviderRepository,
+)
 from eneo.rerank_models.application.rerank_model_crud_service import (
     RerankModelCRUDService,
 )
@@ -25,6 +31,9 @@ from eneo.rerank_models.infrastructure.rerank_model_cleanup_worker import (
 from eneo.rerank_models.presentation.tenant_rerank_models_router import (
     TenantRerankModelCreate,
     TenantRerankModelUpdate,
+)
+from eneo.security_classifications.domain.repositories.security_classification_repo_impl import (  # noqa: E501
+    SecurityClassificationRepoImpl,
 )
 from eneo.tenant_models.application.tenant_model_service import (
     TenantRerankModelService,
@@ -219,3 +228,46 @@ class TestRerankModelCleanupWorker:
                 )
             ).scalar_one_or_none()
             assert row is None
+
+
+class TestRerankModelReferenceGuards:
+    """Rerank rows count where the other model types count, so an admin cannot
+    delete a provider or a classification out from under a rerank model."""
+
+    async def test_provider_deletion_counts_rerank_models(
+        self, db_container, rerank_model_factory, admin_user
+    ):
+        async with db_container() as container:
+            session = container.session()
+            model = await rerank_model_factory(session, "guarded")
+            repo = ModelProviderRepository(
+                session=session, tenant_id=admin_user.tenant_id
+            )
+
+            assert await repo.count_models_for_provider(model.provider_id) == 1
+
+    async def test_classification_usage_counts_live_rerank_models_only(
+        self, db_container, rerank_model_factory, admin_user
+    ):
+        async with db_container() as container:
+            session = container.session()
+            classification = SecurityClassification(
+                tenant_id=admin_user.tenant_id, name="Confidential", security_level=2
+            )
+            session.add(classification)
+            await session.flush()
+            live = await rerank_model_factory(
+                session, "live", security_classification_id=classification.id
+            )
+            gone = await rerank_model_factory(
+                session, "gone", security_classification_id=classification.id
+            )
+            gone.deleted_at = datetime.now(timezone.utc)
+            await session.flush()
+
+            usages = await SecurityClassificationRepoImpl(
+                session, admin_user
+            ).count_usages(classification.id)
+
+            assert usages["rerank_models"] == 1
+            assert live.security_classification_id == classification.id
