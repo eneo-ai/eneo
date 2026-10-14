@@ -109,7 +109,7 @@ describe("ImportCompletionToasts", () => {
     api.goto.mockClear();
     api.toastSuccess.mockClear();
     api.toastError.mockClear();
-    api.refreshCurrentSpace.mockClear();
+    api.refreshCurrentSpace.mockReset().mockImplementation(async () => {});
     api.jobs = [];
     spaces.currentSpace.set(space("space-1"));
     pendingImports.set([]);
@@ -201,11 +201,17 @@ describe("ImportCompletionToasts", () => {
     pendingImports.set([item]);
     api.jobs = [{ id: "job-1", status: "complete" }];
     spaces.currentSpace.set(space("space-2"));
+    // The real refresh publishes a new space object with the same id.
+    api.refreshCurrentSpace.mockImplementation(async () => {
+      spaces.currentSpace.set({ ...get(spaces.currentSpace) });
+    });
     render(ImportCompletionToasts);
 
     events.set({ timestamp: Date.now(), jobId: "any" });
     await settle();
 
+    // Once on mount and once for the event; the refreshes themselves queue nothing.
+    expect(api.refreshCurrentSpace).toHaveBeenCalledTimes(2);
     expect(api.toastSuccess).not.toHaveBeenCalled();
     expect(api.toastError).not.toHaveBeenCalled();
     expect(get(pendingImports)).toEqual([item]);
@@ -225,5 +231,7 @@ describe("ImportCompletionToasts", () => {
       m.integration_import_result_toast({ name: "Protokoll 2026", indexed: 3, skipped: 0 })
     );
     expect(get(pendingImports)).toEqual([]);
+    await settle();
+    expect(api.refreshCurrentSpace).toHaveBeenCalledTimes(3);
   });
 });
