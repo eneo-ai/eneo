@@ -2,9 +2,13 @@
 
 Rerank models become a catalog model type next to completion, embedding,
 transcription and image: ``rerank_models`` carries tenant/provider ownership,
-enablement, default, security classification and soft delete. Nothing
-references the table yet; the retrieval step and the per-assistant choice
-follow in later tasks (#1035).
+enablement, default, security classification and soft delete.
+
+``assistants.rerank_model_id`` is the per-assistant choice, nullable and
+``ON DELETE SET NULL`` so a reranker can be removed while assistants point at
+it and they fall back to vector order. The retrieval step that reads it and
+the editor that writes it follow in later tasks (#1035); the column lands
+here to keep the feature to one migration.
 
 Revision ID: 202610141000
 Revises: 202610131800
@@ -111,8 +115,30 @@ def upgrade() -> None:
         """
     )
 
+    op.add_column(
+        "assistants",
+        sa.Column("rerank_model_id", postgresql.UUID(as_uuid=True), nullable=True),
+    )
+    op.create_foreign_key(
+        "fk_assistants_rerank_model_id_rerank_models",
+        "assistants",
+        "rerank_models",
+        ["rerank_model_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_index("ix_assistants_rerank_model_id", "assistants", ["rerank_model_id"])
+
 
 def downgrade() -> None:
+    op.drop_index("ix_assistants_rerank_model_id", table_name="assistants")
+    op.drop_constraint(
+        "fk_assistants_rerank_model_id_rerank_models",
+        "assistants",
+        type_="foreignkey",
+    )
+    op.drop_column("assistants", "rerank_model_id")
+
     op.execute("DROP INDEX IF EXISTS uq_rerank_models_active_nickname")
     op.drop_index("ix_rerank_models_deleted_at", table_name="rerank_models")
     op.drop_index("ix_rerank_models_provider_id", table_name="rerank_models")

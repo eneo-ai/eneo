@@ -71,6 +71,15 @@ def _table_exists(conn) -> bool:
         return bool(cur.fetchone()[0])
 
 
+def _assistant_column_exists(conn) -> bool:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'assistants' AND column_name = 'rerank_model_id'"
+        )
+        return cur.fetchone() is not None
+
+
 def _index_names(conn) -> set[str]:
     with conn.cursor() as cur:
         cur.execute(
@@ -98,8 +107,9 @@ class TestRerankModelsRoundTrip:
             "ix_rerank_models_deleted_at",
             "uq_rerank_models_active_nickname",
         } <= _index_names(conn)
+        assert _assistant_column_exists(conn)
 
-    def test_downgrade_drops_table(self, round_trip_db):
+    def test_downgrade_drops_table_and_assistant_column(self, round_trip_db):
         conn = round_trip_db["conn"]
         cfg = round_trip_db["cfg"]
 
@@ -107,6 +117,7 @@ class TestRerankModelsRoundTrip:
 
         assert _current_revision(conn) == PRE_REVISION
         assert not _table_exists(conn)
+        assert not _assistant_column_exists(conn)
 
     def test_round_trip_recreates_table(self, round_trip_db):
         conn = round_trip_db["conn"]

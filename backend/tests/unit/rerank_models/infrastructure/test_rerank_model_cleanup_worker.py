@@ -27,6 +27,6 @@ class TestFindCandidates:
 
 
 class TestHasBlockingRefs:
-    async def test_nothing_references_a_rerank_model(self):
-        # No table points at rerank_models yet; the worker never skips.
+    async def test_assistant_references_never_block(self):
+        # assistants.rerank_model_id is SET NULL; the worker never skips.
         assert await _has_blocking_refs(AsyncMock(), uuid4()) is False

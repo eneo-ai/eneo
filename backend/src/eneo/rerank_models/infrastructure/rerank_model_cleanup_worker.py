@@ -1,8 +1,10 @@
 """Weekly lifecycle cleanup of soft-deleted rerank models.
 
 A rerank model becomes a tombstone when it is soft-deleted (``deleted_at``
-set). Nothing references the table yet, so every tombstone is removed on the
-next run; the explicit check keeps the shape of the other model-type workers.
+set). The only reference, ``assistants.rerank_model_id``, is ON DELETE SET
+NULL: assistants that still point at the tombstone fall back to vector order
+once it is gone, so nothing ever blocks the removal. The explicit check keeps
+the shape of the other model-type workers.
 """
 
 import logging
@@ -36,7 +38,7 @@ async def _find_candidates(session: AsyncSession, limit: int) -> list[Candidate]
 
 
 async def _has_blocking_refs(session: AsyncSession, model_id: UUID) -> bool:
-    # No table points at rerank_models.
+    # assistants.rerank_model_id is SET NULL, never a blocker.
     return False
 
 

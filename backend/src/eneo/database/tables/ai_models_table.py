@@ -233,9 +233,9 @@ class RerankModels(BasePublic):
 
     Same catalog shape as the other model types (tenant/provider ownership,
     enablement, default, classification, soft delete). `name` is the model
-    identifier sent to the provider, `nickname` the display name. Nothing
-    references the table yet; the retrieval step and the per-assistant choice
-    follow in later tasks (#1035).
+    identifier sent to the provider, `nickname` the display name. Referenced
+    by `assistants.rerank_model_id` (SET NULL); the retrieval step that reads
+    it and the editor that writes it follow in later tasks (#1035).
     """
 
     name: Mapped[str] = mapped_column()

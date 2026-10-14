@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import select
 
 from eneo.database.tables.ai_models_table import RerankModels
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.security_classifications_table import (
     SecurityClassification,
 )
@@ -271,3 +272,44 @@ class TestRerankModelReferenceGuards:
 
             assert usages["rerank_models"] == 1
             assert live.security_classification_id == classification.id
+
+
+class TestAssistantReference:
+    async def test_assistant_falls_back_when_its_reranker_is_removed(
+        self,
+        db_container,
+        rerank_model_factory,
+        completion_model_factory,
+        assistant_factory,
+        admin_user,
+    ):
+        """B9: a reranker can be removed while assistants point at it. The
+        tombstone keeps the reference until the cleanup worker hard-deletes
+        it, and the FK's SET NULL then clears the assistant's choice."""
+        async with db_container() as container:
+            session = container.session()
+            reranker = await rerank_model_factory(session, "chosen")
+            completion = await completion_model_factory(session, "gpt-4")
+            assistant = await assistant_factory(
+                session, "Uses reranker", completion.id, rerank_model_id=reranker.id
+            )
+            reranker_id, assistant_id = reranker.id, assistant.id
+            await TenantRerankModelService(session=session, user=admin_user).delete(
+                reranker_id
+            )
+            await session.refresh(assistant)
+            assert assistant.rerank_model_id == reranker_id
+
+        async with db_container() as container:
+            await cleanup_orphaned_rerank_models(container)
+
+        async with db_container() as container:
+            session = container.session()
+            row = (
+                await session.execute(
+                    select(Assistants.rerank_model_id).where(
+                        Assistants.id == assistant_id
+                    )
+                )
+            ).scalar_one()
+            assert row is None
