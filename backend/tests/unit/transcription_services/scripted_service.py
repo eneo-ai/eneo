@@ -63,7 +63,7 @@ class ScriptedService:
     def __init__(
         self,
         *,
-        submit_responses: list[httpx.Response] | None = None,
+        submit_responses: list[httpx.Response | Exception] | None = None,
         status_responses: list[httpx.Response | Exception] | None = None,
         result_responses: list[httpx.Response] | None = None,
         cancel_responses: list[httpx.Response] | None = None,
@@ -80,7 +80,10 @@ class ScriptedService:
         self.requests.append(request)
         path = request.url.path
         if request.method == "POST" and path == "/v1/jobs":
-            return self.submit_responses.pop(0)
+            response = self.submit_responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
         if request.method == "GET" and path == f"/v1/jobs/{JOB_ID}":
             response = self.status_responses.pop(0)
             if isinstance(response, Exception):

@@ -11,7 +11,7 @@ from eneo.flows.flow_error_taxonomy import (
     validate_flow_error_taxonomy,
 )
 from eneo.flows.flow_run_error import FlowRunError
-from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
+from eneo.flows.runtime.service_transcription import ServiceFlowTranscriber
 from eneo.flows.runtime.transcription import transcribe_audio_input
 from eneo.main.config import get_settings
 from eneo.main.exceptions import TypedIOValidationException
@@ -67,7 +67,7 @@ async def test_oversized_audio_is_a_final_typed_refusal_before_provider_work(
     monkeypatch.setattr(remote, "label_speakers", label_speakers)
     retry_sleep = AsyncMock()
     monkeypatch.setattr(adapter._transcribe_chunk.retry, "sleep", retry_sleep)
-    transcriber = DiarizingFlowTranscriber(registry, remote)
+    transcriber = ServiceFlowTranscriber(registry, remote)
     file = _audio_file(name="recording.wav")
     file.blob = source.read_bytes()
     download = spool_contract.downloads([file])
@@ -157,7 +157,7 @@ def test_audio_refusal_has_non_retryable_typed_taxonomy():
 async def test_local_preparation_decodes_once(recording, ffmpeg, monkeypatch):
     from types import SimpleNamespace
 
-    from eneo.flows.runtime.diarizing_transcription import RegistryFlowTranscriber
+    from eneo.flows.runtime.service_transcription import RegistryFlowTranscriber
     from tests.unittests.flows.audio_spool_test_support import AudioDownloads
 
     source, _, temp_dir = recording

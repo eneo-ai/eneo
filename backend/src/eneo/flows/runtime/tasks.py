@@ -54,10 +54,6 @@ from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRow,
 )
-from eneo.flows.runtime.diarizing_transcription import (
-    DiarizingFlowTranscriber,
-    RegistryFlowTranscriber,
-)
 from eneo.flows.runtime.execution_heartbeat import (
     FlowExecutionOwnershipLost,
     execution_heartbeats,
@@ -71,6 +67,10 @@ from eneo.flows.runtime.flow_run_actor import (
 from eneo.flows.runtime.flow_runtime_trace import FlowRunSpanContext, trace_flow_run
 from eneo.flows.runtime.flow_webhook_delivery import FlowWebhookDeliveryResult
 from eneo.flows.runtime.remote_transcription import connect_speaker_service
+from eneo.flows.runtime.service_transcription import (
+    RegistryFlowTranscriber,
+    ServiceFlowTranscriber,
+)
 from eneo.flows.runtime.transcription import FlowTranscribers
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
@@ -958,13 +958,13 @@ def _flow_transcribers(
     repository: TranscriptionServiceConnectionRepository,
     encryption: "EncryptionService",
 ) -> FlowTranscribers:
-    """The flow's model transcribes; a step that labels speakers adds the
-    speaker service it resolved from the flow's space."""
+    """The flow's model transcribes; a step whose flow chose a transcription
+    service adds the service it resolved from the flow's space."""
 
     async def with_speaker_service(
         connection: "TranscriptionServiceConnection",
     ) -> FlowStepTranscriber:
-        return DiarizingFlowTranscriber(
+        return ServiceFlowTranscriber(
             registry_transcriber,
             await connect_speaker_service(
                 connection.id,
