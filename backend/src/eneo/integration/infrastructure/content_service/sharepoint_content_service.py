@@ -49,6 +49,10 @@ from eneo.integration.infrastructure.content_service.utils import (
 from eneo.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
 )
+from eneo.integration.infrastructure.sharepoint_sync_progress import (
+    SharePointSyncProgressStore,
+    SyncProgressReporter,
+)
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 
@@ -207,6 +211,7 @@ class SharePointContentService:
         sync_log_repo: "SyncLogRepository | None" = None,
         change_key_service: "OfficeChangeKeyService | None" = None,
         org_token_provider: "OrgTokenProvider | None" = None,
+        sync_progress_store: SharePointSyncProgressStore | None = None,
     ) -> None:
         super().__init__()
         self.org_token_provider = org_token_provider
@@ -230,6 +235,7 @@ class SharePointContentService:
         # instance (one sync job). Failed reads are cached as None so a drive
         # whose columns cannot be read is asked only once.
         self._column_catalogs: dict[str, Optional[SharePointColumnCatalog]] = {}
+        self._progress = SyncProgressReporter(sync_progress_store)
 
     async def _refresh_service_account_access_token(
         self, tenant_app: TenantSharePointApp
@@ -293,6 +299,7 @@ class SharePointContentService:
         resolved_integration_knowledge_id: UUID | None = integration_knowledge_id
 
         try:
+            await self._progress.begin(integration_knowledge_id, "full")
             if tenant_app_id:
                 tenant_app = await self.tenant_sharepoint_app_repo.get_by_id(
                     app_id=tenant_app_id
@@ -351,6 +358,7 @@ class SharePointContentService:
                 stats=stats,
                 access_token_provider=access_token_provider,
             )
+            await self._progress.set_phase("finishing", stats)
             summary_stats = self._build_summary_stats(stats)
 
             integration_knowledge = await self.integration_knowledge_repo.one(
@@ -421,6 +429,8 @@ class SharePointContentService:
             )
             logger.error(f"Error in pull_content: {e}", exc_info=True)
             raise
+        finally:
+            await self._progress.end()
 
     async def _record_sync_failure(
         self,
@@ -498,6 +508,7 @@ class SharePointContentService:
         delegated_to_full_sync = False
 
         try:
+            await self._progress.begin(integration_knowledge_id, "delta")
             if tenant_app_id:
                 tenant_app = await self.tenant_sharepoint_app_repo.get_by_id(
                     app_id=tenant_app_id
@@ -702,7 +713,9 @@ class SharePointContentService:
                         integration_knowledge.folder_path = refreshed_scope_path
                         folder_scope_path_unresolved = False
 
+                await self._progress.set_phase("processing", stats)
                 for item in changes:
+                    await self._progress.update(stats)
                     item_name = item.get("name", "")
                     item_id = item.get("id")
                     is_deleted = has_graph_facet(item, "deleted")
@@ -835,6 +848,7 @@ class SharePointContentService:
                         pending_change_keys=pending_change_keys,
                     )
 
+                await self._progress.set_phase("finishing", stats)
                 integration_knowledge.delta_token = new_delta_token
 
                 summary_stats = self._build_summary_stats(stats)
@@ -889,6 +903,8 @@ class SharePointContentService:
                 metadata=_sync_metadata(trigger=sync_trigger),
             )
             raise
+        finally:
+            await self._progress.end()
 
     async def _pull_content(
         self,
@@ -990,6 +1006,7 @@ class SharePointContentService:
                             stats=stats,
                             is_root_call=True,
                         )
+                        await self._progress.set_phase("finishing", stats)
                         await self._reconcile_indexed_blobs(
                             client=content_client,
                             integration_knowledge=integration_knowledge,
@@ -1009,6 +1026,8 @@ class SharePointContentService:
                         await self.integration_knowledge_repo.update(
                             obj=integration_knowledge
                         )
+                        self._progress.add_total(1)
+                        await self._progress.set_phase("processing", stats)
 
                         unsupported_reason = unsupported_file_reason(item_name)
                         if unsupported_reason:
@@ -1080,6 +1099,7 @@ class SharePointContentService:
                                 stats=stats,
                             )
 
+                    await self._progress.set_phase("finishing", stats)
                     await self._reconcile_indexed_blobs(
                         client=content_client,
                         integration_knowledge=integration_knowledge,
@@ -1105,7 +1125,10 @@ class SharePointContentService:
         resource_type: str,
         stats: SyncStats,
     ):
+        self._progress.add_total(self._file_count(documents))
+        await self._progress.set_phase("processing", stats)
         for document in documents:
+            await self._progress.update(stats)
             drive_id = document.get("parentReference", {}).get("driveId")
             site_id = document.get("parentReference", {}).get("siteId")
             item_id = document.get("id")
@@ -1172,7 +1195,10 @@ class SharePointContentService:
         integration_knowledge: "IntegrationKnowledge",
         stats: SyncStats,
     ):
+        self._progress.add_total(self._file_count(pages))
+        await self._progress.set_phase("processing", stats)
         for page in pages:
+            await self._progress.update(stats)
             site_id = page.get("parentReference", {}).get("siteId")
             page_id = page.get("id")
             if not site_id or not page_id:
@@ -1764,6 +1790,7 @@ class SharePointContentService:
 
         indexed_ids = {item_id for _, item_id in indexed}
         for descendant in descendants:
+            await self._progress.update(stats)
             descendant_id = descendant.get("id")
             if (
                 not descendant_id
@@ -2092,8 +2119,11 @@ class SharePointContentService:
         integration_knowledge = await self.integration_knowledge_repo.one(
             id=integration_knowledge_id
         )
+        self._progress.add_total(self._file_count(results))
+        await self._progress.set_phase("processing", stats)
 
         for item in results:
+            await self._progress.update(stats)
             item_id = item.get("id")
 
             if item_id in processed_items:
@@ -2332,6 +2362,10 @@ class SharePointContentService:
             "access_token": token.access_token,
             "refresh_token": token.refresh_token,
         }
+
+    @staticmethod
+    def _file_count(items: list[SharePointItem]) -> int:
+        return sum(1 for item in items if not item.get("folder"))
 
     def _get_item_type(self, item: SharePointItem) -> str:
         if item.get("folder"):

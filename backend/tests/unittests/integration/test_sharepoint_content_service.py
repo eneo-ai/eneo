@@ -5,6 +5,7 @@ for SharePoint integrations.
 """
 
 import asyncio
+import json
 import unicodedata
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -29,6 +30,10 @@ from eneo.integration.infrastructure.content_service.utils import (
     NO_TEXT_REASONS,
     ExtractionResult,
     extract_sharepoint_content,
+)
+from eneo.integration.infrastructure.sharepoint_sync_progress import (
+    SharePointSyncProgressStore,
+    sync_progress_key,
 )
 from tests.unittests.integration.sharepoint_fixtures import (
     XLSX_MIME,
@@ -3860,3 +3865,171 @@ class TestSelectedItemTypePersistence:
             )
 
         assert expected in persisted
+
+
+def _progress_phases(redis_client: AsyncMock) -> list[dict]:
+    """The first progress written in each phase, in order."""
+    firsts: list[dict] = []
+    for call in redis_client.set.await_args_list:
+        progress = json.loads(call.args[1])
+        if not firsts or firsts[-1]["phase"] != progress["phase"]:
+            firsts.append(progress)
+    return firsts
+
+
+class TestSyncProgress:
+    """A running sync publishes its progress and removes it when it ends."""
+
+    @pytest.fixture
+    def progress_redis(self):
+        return AsyncMock()
+
+    @pytest.fixture
+    def progress_service(self, mock_dependencies, progress_redis):
+        return SharePointContentService(
+            **mock_dependencies,
+            sync_progress_store=SharePointSyncProgressStore(progress_redis),
+        )
+
+    async def test_full_sync_total_grows_with_each_listing(
+        self, progress_service, progress_redis, mock_dependencies, mock_oauth_token
+    ):
+        ik = _real_integration_knowledge()
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+        subfolder = _delta_file(
+            "sub",
+            "Bilagor",
+            folder={"childCount": 1},
+            parentReference={"driveId": "drive-456", "siteId": "site-123"},
+        )
+        page = {"id": "page-1", "name": "Start", "parentReference": {"siteId": "s"}}
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            _mock_graph_client(
+                mock_client_class,
+                get_drive_root_children=AsyncMock(
+                    return_value=[
+                        _delta_file("a", "a.docx"),
+                        _delta_file("b", "b.docx"),
+                        subfolder,
+                    ]
+                ),
+                get_folder_items=AsyncMock(return_value=[_delta_file("c", "c.docx")]),
+                get_site_pages=AsyncMock(return_value={"value": [page]}),
+                get_page_content=AsyncMock(
+                    return_value={"title": "Start", "description": "Welcome"}
+                ),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body")
+                ),
+            )
+            with patch.object(
+                progress_service,
+                "_process_info_blob",
+                AsyncMock(
+                    side_effect=["embedded", "unchanged", "embedded", "embedded"]
+                ),
+            ):
+                await progress_service.pull_content(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        assert [
+            (p["sync_type"], p["phase"], p["total"], p["done"], p["indexed"])
+            for p in _progress_phases(progress_redis)
+        ] == [
+            ("full", "discovering", None, 0, 0),
+            ("full", "processing", 2, 0, 0),
+            ("full", "finishing", 4, 4, 3),
+        ]
+        progress_redis.delete.assert_awaited_once_with(sync_progress_key(ik.id))
+
+    async def test_delta_sync_counts_changes_without_a_total(
+        self, progress_service, progress_redis, mock_dependencies, mock_oauth_token
+    ):
+        ik = _real_integration_knowledge(delta_token="token-1")
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        _size_ledger(mock_dependencies["integration_knowledge_repo"], 100)
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[MagicMock(size=40)]
+        )
+        changes = [
+            _delta_file("a", "a.docx"),
+            _delta_file("b", "b.docx"),
+            {"id": "old", "name": "old.docx", "deleted": {"state": "deleted"}},
+        ]
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body")
+                ),
+            )
+            with patch.object(
+                progress_service,
+                "_process_info_blob",
+                AsyncMock(side_effect=["embedded", "unchanged"]),
+            ):
+                await progress_service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        assert [
+            (p["sync_type"], p["phase"], p["total"], p["done"], p["deleted"])
+            for p in _progress_phases(progress_redis)
+        ] == [
+            ("delta", "discovering", None, 0, 0),
+            ("delta", "processing", None, 0, 0),
+            ("delta", "finishing", None, 2, 1),
+        ]
+        progress_redis.delete.assert_awaited_once_with(sync_progress_key(ik.id))
+
+    @pytest.mark.parametrize("mode", ["full", "delta"])
+    async def test_a_failed_sync_removes_its_progress(
+        self,
+        progress_service,
+        progress_redis,
+        mock_dependencies,
+        mock_oauth_token,
+        mode,
+    ):
+        ik = _real_integration_knowledge(delta_token="token-1")
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            _mock_graph_client(
+                mock_client_class,
+                get_drive_root_children=AsyncMock(side_effect=RuntimeError("503")),
+                get_delta_changes=AsyncMock(side_effect=RuntimeError("503")),
+            )
+            with pytest.raises(RuntimeError, match="503"):
+                if mode == "full":
+                    await progress_service.pull_content(
+                        token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                    )
+                else:
+                    await progress_service.process_delta_changes(
+                        token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                    )
+
+        assert _progress_phases(progress_redis)[0]["sync_type"] == mode
+        progress_redis.delete.assert_awaited_once_with(sync_progress_key(ik.id))
+        assert ik.last_sync_status == "error"

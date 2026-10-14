@@ -362,6 +362,41 @@ class IntegrationSkippedDocuments(BaseModel):
     )
 
 
+class IntegrationSyncProgress(BaseModel):
+    """Live progress of a SharePoint sync that is running now.
+
+    `total` counts the files and site pages the sync has listed so far. A full
+    sync lists each folder when it reaches it, so `total` is null until the
+    first listing returns and then grows as subfolders are found; it never
+    drops below `done`. A delta sync cannot cheaply tell which of its changes
+    are files in scope, so its `total` stays null.
+    """
+
+    integration_knowledge_id: UUID
+    sync_type: Literal["full", "delta"]
+    phase: Literal["discovering", "processing", "finishing"] = Field(
+        description="discovering: resolving scope and listing changes before "
+        "files are handled; processing: handling files; finishing: orphan "
+        "cleanup, delta token and summary"
+    )
+    started_at: datetime
+    updated_at: datetime = Field(description="When this progress was last written")
+    total: Optional[int] = Field(
+        description="Files and pages listed so far; null while unknown"
+    )
+    done: int = Field(description="Files finished: indexed + unchanged + skipped")
+    indexed: int = Field(description="Files and pages embedded in this sync")
+    unchanged: int
+    skipped: int
+    deleted: int = Field(description="Local documents removed in this sync")
+
+
+class IntegrationSyncProgressList(BaseModel):
+    """Running syncs of a space's integration knowledge; idle items are absent."""
+
+    items: list[IntegrationSyncProgress]
+
+
 class PaginatedSyncLogList(BaseModel):
     """Paginated sync logs response with metadata."""
 
