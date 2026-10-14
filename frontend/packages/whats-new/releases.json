@@ -162,8 +162,8 @@
             "sv": "Se hur varje SharePoint-källa mår"
           },
           "body": {
-            "en": "Every SharePoint item in a space's Knowledge list now shows whether it is synced, failed or empty, how many documents it holds and when it last synced successfully, with the error text when a sync failed. The sync history names each skipped file with the reason, and a site row can resync all of its items at once. When an answer used none of the assistant's knowledge, the chat says so.",
-            "sv": "Varje SharePoint-objekt i ytans kunskapslista visar nu om det är synkat, har fel eller är tomt, hur många dokument det innehåller och när det senast synkades, med feltexten när en synkronisering misslyckats. Synkhistoriken namnger varje överhoppad fil med orsaken, och en webbplatsrad kan synka om alla sina objekt på en gång. När ett svar inte använde något ur assistentens kunskap säger chatten det."
+            "en": "Each SharePoint source in a space's Knowledge list now has one status (up to date, syncing, needs attention or waiting) and a live progress bar while it syncs. A banner tells you when sources stop updating and why, and the source's Activity tab shows every sync with what changed and which files were skipped. When an answer used none of the assistant's knowledge, the chat says so.",
+            "sv": "Varje SharePoint-källa i ytans kunskapslista har nu en enda status (aktuell, synkar, behöver åtgärd eller väntar) och ett förloppsfält medan den synkar. En banner säger till när källor slutar uppdateras och varför, och källans flik Aktivitet visar varje synk med vad som ändrades och vilka filer som hoppades över. När ett svar inte använde något ur assistentens kunskap säger chatten det."
           }
         },
         {
@@ -175,8 +175,8 @@
             "sv": "Se vad en SharePoint-import innehåller"
           },
           "body": {
-            "en": "Click a SharePoint item's name or document count in a space's Knowledge list to open its documents page. The Documents tab lists every indexed file with its folder, size and properties, lets you search and sort, and opens a preview of the text. The Not indexed tab groups the files the latest sync left out by reason, so you can see why a file is missing. When an import finishes its first sync, a notice tells you how many files were indexed and skipped.",
-            "sv": "Klicka på namnet eller antalet dokument för ett SharePoint-objekt i ytans kunskapslista för att öppna dess dokumentsida. Fliken Dokument listar varje indexerad fil med mapp, storlek och egenskaper, går att söka och sortera i och öppnar en förhandsvisning av texten. Fliken Ej indexerade grupperar filerna som den senaste synkroniseringen hoppade över efter orsak, så att du ser varför en fil saknas. När en imports första synkronisering är klar får du en notis om hur många filer som indexerades och hoppades över."
+            "en": "Open a SharePoint source from a space's Knowledge list to see its folders and the documents in each, with search, sorting and a preview of the text. The Problems tab groups the files that did not become searchable by cause, says what to do about each and points out when only an administrator can fix it. When an import finishes its first sync, a notice tells you how many files were indexed and skipped.",
+            "sv": "Öppna en SharePoint-källa i ytans kunskapslista för att se dess mappar och dokumenten i varje mapp, med sökning, sortering och förhandsvisning av texten. Fliken Problem grupperar filerna som inte blev sökbara efter orsak, säger vad du kan göra åt dem och visar när bara en administratör kan åtgärda felet. När en imports första synkronisering är klar får du en notis om hur många filer som indexerades och hoppades över."
           }
         },
         {
@@ -202,8 +202,8 @@
             "sv": "Kontrollera SharePoint-inloggningen och logga in igen"
           },
           "body": {
-            "en": "Under Admin > Integrations the SharePoint card shows whether the stored credentials still work, with Microsoft's error and guidance when they do not. A service account can be signed in again with one button, keeping the configuration and all imported knowledge.",
-            "sv": "Under Administration > Integrationer visar SharePoint-kortet om de sparade inloggningsuppgifterna fortfarande fungerar, med Microsofts fel och en vägledning när de inte gör det. Ett tjänstekonto kan loggas in igen med en knapp, och konfigurationen och all importerad kunskap behålls."
+            "en": "Under Admin > Integrations a health list shows whether the SharePoint sign-in, change notifications and connection still work, with Microsoft's error, guidance and the fix next to each check. A service account can be signed in again with one button, keeping the configuration and all imported knowledge.",
+            "sv": "Under Administration > Integrationer visar en hälsolista om SharePoint-inloggningen, ändringsaviseringarna och anslutningen fortfarande fungerar, med Microsofts fel, en vägledning och åtgärden bredvid varje kontroll. Ett tjänstekonto kan loggas in igen med en knapp, och konfigurationen och all importerad kunskap behålls."
           },
           "showMe": {
             "href": "/admin/integrations",

@@ -30,7 +30,7 @@ Organization connections, using either a service account or application permissi
 
 The connection you select determines which Microsoft account or application is used. Changing the destination space does not switch a personal connection to organization credentials; selecting a personal connection for a shared or organization space is rejected. Reading documents already imported into a space continues to follow that space's knowledge permissions; it does not grant permission to browse the connected SharePoint library.
 
-Sync history follows read access to the imported knowledge, including knowledge shared through an organization space or group membership. You do not need permission to create imports or use the Microsoft connection to read that history. Log entries and their counts are only available when you can read the corresponding knowledge in your Eneo tenant.
+A source's activity and problems follow read access to the imported knowledge, including knowledge shared through an organization space or group membership. You do not need permission to create imports or use the Microsoft connection to read them. Log entries and their counts are only available when you can read the corresponding knowledge in your Eneo tenant.
 
 ## Prerequisites
 
@@ -221,15 +221,15 @@ When the configuration is saved, the status displays as "Organization Configured
 
 ### Credential Health
 
-The SharePoint card on the integrations page, and the **Current Configuration** view in the configuration dialog, show whether the stored credentials still work:
+The SharePoint card on the integrations page shows the credential status as a badge. The **SharePoint connection** section below the cards, and the **Current Configuration** view in the configuration dialog, explain it:
 
 - **Credentials verified** – Microsoft accepted the credentials the last time Eneo used them. The time of the last successful sign-in is shown.
 - **Credential problem** – the last attempt was refused. Eneo shows short guidance for the common Microsoft errors (a wrong or expired client secret, a sign-in Microsoft requires to be repeated, a saved sign-in that is no longer valid), when it failed, and the Microsoft error text under **Technical details**.
 - **Credentials not verified yet** – the credentials have not been used since they were saved.
 
-The health is recorded every time Eneo acquires a token with the stored app – with the client credentials for a tenant app, with the stored refresh token for a service account. That happens during imports, synchronization, browsing in the import dialog and webhook renewal, so a broken secret or a revoked service-account sign-in becomes visible on the integrations page instead of only in job logs. To check the stored credentials right away, open the configuration dialog and click **Test Connection** in the **Current Configuration** view; it tests the stored credentials for either method with Microsoft and updates the credential status. A script can do the same through the admin API by calling `POST /api/v1/admin/sharepoint/app/test` without a request body; the outcome is recorded in the same way.
+The health is recorded every time Eneo acquires a token with the stored app – with the client credentials for a tenant app, with the stored refresh token for a service account. That happens during imports, synchronization, browsing in the import dialog and webhook renewal, so a broken secret or a revoked service-account sign-in becomes visible on the integrations page instead of only in job logs. To check the stored credentials right away, click **Run test** under **Test the connection** in the **SharePoint connection** section, or open the configuration dialog and click **Test Connection** in the **Current Configuration** view; it tests the stored credentials for either method with Microsoft and updates the credential status. A script can do the same through the admin API by calling `POST /api/v1/admin/sharepoint/app/test` without a request body; the outcome is recorded in the same way.
 
-For a service account with a credential problem, the card also offers **Sign in again with Microsoft**. See [Re-authenticating the Service Account](#re-authenticating-the-service-account).
+For a service account with a credential problem, the **SharePoint connection** section also offers **Sign in again with Microsoft**; for a tenant app it offers **Update configuration**. See [Re-authenticating the Service Account](#re-authenticating-the-service-account).
 
 ---
 
@@ -293,7 +293,7 @@ Files from SharePoint are read with the same parsers and extraction limits as fi
 - **Text files**: Plain text, Markdown, CSV/TSV, JSON, XML, HTML, YAML, logs and reStructuredText
 - **Web content**: SharePoint pages (text content only)
 
-Everything else is skipped with a reason that the [sync history](#sync-status-and-history) and the item's [**Not indexed** tab](#the-not-indexed-tab) show next to the file name:
+Everything else is skipped with a reason that the source's [**Problems**](#the-problems-tab) and [**Activity**](#the-activity-tab) tabs show next to the file name:
 
 - **Unsupported file type (…)** – images, video, audio, archives, executables, fonts, and Office family formats without a parser. Legacy Word and PowerPoint files are named with a hint, for example _Unsupported file type (legacy Word .doc, save as .docx)_; OneNote, Outlook `.msg`, rich text `.rtf` and OpenDocument files are also unsupported. These files are not downloaded.
 - **No text layer (scanned document; OCR is not supported)** – a PDF whose pages carry no characters. Eneo does not run OCR.
@@ -328,7 +328,7 @@ Documents imported before this feature gain their properties the next time they 
 
 ### Import Limits and Quotas
 
-Large SharePoint folders may take time to fully import. Eneo processes files in batches and shows progress in the **Jobs** panel. If you have quotas configured for your organization, imports count toward your storage usage.
+Large SharePoint folders may take time to fully import. Eneo processes files in batches and shows the [progress](#sync-progress) on the source and in the **Jobs** panel. If you have quotas configured for your organization, imports count toward your storage usage.
 
 By default, files larger than **50 MB** are skipped during import/sync to protect worker memory usage. You can change this limit with `SHAREPOINT_MAX_DOWNLOAD_BYTES`.
 
@@ -338,53 +338,61 @@ Transient throttling from Microsoft Graph (HTTP 429/503) during large imports is
 
 ### Sync Status and History
 
-Each SharePoint item in a space's **Knowledge** list shows how its last synchronization went:
+A space's **Knowledge** list has one row per SharePoint source: the items imported together (shown under the name given at import) or a single item imported on its own. Each row shows:
 
-- A status badge: **Never synced**, **Synced**, **Sync failed** or **Empty** (the last sync succeeded but no document is indexed, for example because every file was skipped).
-- The number of indexed documents. Both the number and the item's name open the item's [documents page](#imported-documents).
-- **Last synced:** the time of the last successful synchronization. It moves on every successful run, also when nothing had changed, so a healthy item never looks stale. An item that has only ever failed shows **Last attempt:** instead.
-- For a failed sync, **Show error** reveals the error text.
+- **Source**: the name, with what it holds, for example _5 folders_. The name opens the [source page](#imported-documents).
+- **Contents**: the number of indexed documents across the source.
+- **Status**: **Up to date**, **Syncing**, **Needs attention** (the latest sync of at least one item failed, with a **Show problems** link), **Empty** (synced, but no document is indexed, for example because every file was skipped) or **Waiting for first sync**. While a sync runs, the status is replaced by a progress bar, see [Sync progress](#sync-progress).
+- **Updated**: when the source was last synchronized successfully. It moves on every successful run, also when nothing had changed, so a healthy source never looks stale.
 
-A site-level row that groups several imported items shows the combined picture: **Sync failed** with each failing item named if any of them failed, otherwise the documents of all items added up. Its actions menu has **Resync all items**, which queues a full synchronization of every item under the site; a single item has **Full Sync** in its own menu. Opening the site row shows its items as a [folder tree](#the-site-page).
+When one or more sources stop updating, a banner above the list says so. If the cause is that the organization's SharePoint sign-in was refused, the banner says that an administrator needs to sign in again; existing documents can still be searched in the meantime.
 
-The timeline link opens the **Sync History** dialog, which lists every synchronization with its type (full or delta), result, duration and a summary of what happened: files synced, files deleted, pages synced, items unchanged and items skipped. Unchanged items are files Eneo had already indexed in the same version, so nothing was re-processed; they are counted separately from skipped files. The skipped list names each file with its exact reason (see [Supported File Types](#supported-file-types)). At most 50 skipped files are listed per run; when more were skipped the list ends with _and N more_. A **Reconciliation warning** appears when a full synchronization could not safely clean up documents that no longer exist in SharePoint, either because the site could not be listed completely or because the number of missing documents was above the safety cap; the documents are kept, and the next successful full synchronization tries again.
+The actions menu of a source imported together has **Resync all items**, which queues a full synchronization of every item in it; a single item has **Full Sync** in its own menu.
 
 Items whose last sync failed or indexed nothing are also flagged when you pick knowledge for an assistant. In the chat, an assistant whose knowledge is inserted into every message shows _No sources found in the knowledge_ under an answer that used no sources, so an empty or broken source does not pass unnoticed.
 
+#### Sync progress
+
+While a synchronization runs, the source's row shows a progress bar with the number of files done, and the source page replaces its summary with a progress panel: a bar split into searchable files and files that could not be read, the step the sync is on (**Find files**, **Read and index**, **Finish up**) and when it started. A full synchronization lists each folder when it reaches it, so the number of files found grows while the sync runs; the panel reads _N of M files found so far are done_. A delta synchronization from a change notification shows the files done without a total. Documents that are done can already be searched, and you can leave the page while the sync runs.
+
 ### Imported Documents
 
-Each imported item has its own page that shows what the last synchronization indexed and which files it left out. Open it from the space's **Knowledge** list by clicking the item's name or its document count, or from the **Show** button in the notice that appears when an import's first sync finishes. Anyone who can see the space's integrations can open the page.
+Each source has a page that shows its folders, what the synchronizations indexed and what went wrong. Open it by clicking the source's name in the **Knowledge** list, or from the **Show** button in the notice that appears when an import's first sync finishes. Anyone who can see the space's integrations can open the page.
 
-The page is titled with the item's name, with a breadcrumb back to **Integrations** and, for an item imported from a site, to that site's page. It shows the **SharePoint folder** path, the same sync status as the list (badge, document count, last sync, error text and webhook status), the **Open in SharePoint** button and the item's actions menu, followed by two tabs. If a synchronization finishes while the page is open, both tabs refresh themselves.
+The page is titled with the source's name, with a breadcrumb back to **Integrations**, and has the source's actions menu (and **Open in SharePoint** for a single item). Below the title, a summary shows **Searchable documents**, **Could not be read** (the files the latest syncs skipped), **Last up to date** and **Change notifications** (**On**, **Off**, or on for some of the folders). When the latest sync of an item failed, a notice above the summary says so and links to the problems. The page has three tabs: **Contents**, **Problems** and **Activity**.
 
-#### The Documents tab
+#### The Contents tab
 
-**Documents** lists the indexed documents, 50 per page:
+For a source with several items, the folders are listed on the left. An item imported from a folder inside another imported folder is nested under it, whole-site imports come first and siblings are sorted by name. Each folder shows its state (also read out to screen readers) and its number of documents, or the files done while it syncs. **All folders** shows a table of the folders with their status, number of documents, when each was last up to date, **Open in SharePoint** and the folder's actions menu. Selecting a folder shows its documents; the selected folder is part of the page address, so it can be linked to. A source imported as a single item shows its documents directly.
+
+The documents of a folder are listed 50 per page:
 
 - **Name** opens a preview of the extracted text. From the preview you can copy the text, **Download extracted text** or **Download original**. The link icon at the end of the row opens the file in SharePoint.
 - **Path** is the folder below the imported folder; a file that sits directly in the imported folder has an empty path. The list is sorted by path by default, so files are grouped the way they are in SharePoint.
 - **Size** is the file's size and **Updated** is when Eneo last indexed the document.
 - **Properties** shows the file's [document properties](#document-properties-library-columns) when the library has any.
 
-The search box matches the name or the path. Each of the four column headings sorts the list, ascending on the first click and reversed on the next. Below the table, _Showing 1–50 of N_ gives the position in the list beside the **Total size** of every indexed document, with **Previous** and **Next** to page.
+The search box matches the name or the path. Each of the four column headings sorts the list, ascending on the first click and reversed on the next. Below the table, _Showing 1–50 of N_ gives the position in the list beside the **Total size** of every indexed document, with **Previous** and **Next** to page. When the latest sync skipped files in the folder, a line above the list says how many, with a link to the **Problems** tab. When a synchronization of the folder finishes while the page is open, the list refreshes itself.
 
-An item that has not synced yet reads _No documents yet. The first sync runs in the background._ An item whose sync indexed nothing reads _No documents could be indexed_ with the link **See which files were not indexed**, which switches to the other tab.
+#### The Problems tab
 
-#### The Not indexed tab
+**Problems** collects what needs attention across the source's folders; the number on the tab counts the blocking problems and the files that can be fixed. It is split into three groups:
 
-**Not indexed (N)** lists the files that the latest synchronization skipped, introduced by _From the sync on …_. The files are grouped by reason, largest group first, with each heading showing the reason and the number of files, for example _Unsupported file type (legacy Word .doc, save as .docx) (12)_. The reasons are the ones listed under [Supported File Types](#supported-file-types), shown in your language; in English they read _Unsupported file type (…)_, _No text layer (scanned document; OCR is not supported)_, _Empty or unreadable content_, _File too large (exceeds the N MB limit)_, _Exceeds the extraction limit (N bytes of text)_ or _(N PDF pages)_, _Incomplete download_, _Password-protected file_, _Corrupt or malformed file_, and _Error: …_ for anything else.
+- **Stops the sync**: a refused SharePoint sign-in, which stops every folder from updating and can only be fixed by an administrator under **Admin > Integrations** (an administrator gets a button to go there, others can copy a link to send to one), and any other failed synchronization, with its technical details.
+- **Files that did not become searchable**: the skipped files grouped by cause, each with what to do about it, for example _Scanned documents without text_ (save the file as a searchable PDF), _Files that are too large_, _Too much text_, _Password-protected files_, _Damaged files_, _Files without text_ and _Temporary errors_ (tried again at the next sync). Each group opens to list its files with their folder and the exact reason.
+- **Skipped on purpose**: file types that are never used as knowledge, such as images and videos.
 
-The number in the tab name counts every skipped file, but the list itself holds at most 50 files, the same cap as the sync history; when more were skipped it ends with _and N more_. When the latest sync skipped nothing, the tab reads _Every file in the latest sync was indexed._ The tab only reflects the latest synchronization: a file that was skipped earlier but indexed since is no longer listed. The page can also be opened straight on this tab, which is what the completion notice does when an import indexed nothing but skipped files.
+The reasons are the ones listed under [Supported File Types](#supported-file-types). The lists reflect the latest synchronization of each folder: a file that was skipped earlier but indexed since is no longer listed. Each folder's list holds at most 50 files; when more were skipped, a line says how many are not listed.
 
-#### The site page
+#### The Activity tab
 
-A site row in the **Knowledge** list opens the site page, which lists the items imported from that site as a folder tree. An item imported from a folder inside another imported folder is nested under it, whole-site imports come first and siblings are sorted by name. Every item that has nested items under it has an **Expand folder** / **Collapse folder** button; all of them start expanded. The filter box above the tree matches item names and keeps the parents needed to reach a match. Each row has the same status, link and actions as in the **Knowledge** list, and its name and document count open the item's documents page.
+**Activity** replaces the sync history: a timeline of every folder's synchronizations, newest first and grouped by day. Each entry says what happened (for example _12 files synced, 1 file deleted_, _Everything up to date, no changes_ or _The sync failed_ with the reason), which folder it concerned, whether it was a full or a delta synchronization and how long it took. Unchanged items are files Eneo had already indexed in the same version, so nothing was re-processed; they are counted separately from skipped files. **Show N skipped** lists the files a run skipped with their reasons, at most 50 per run. A **Reconciliation warning** appears when a full synchronization could not safely clean up documents that no longer exist in SharePoint, either because the site could not be listed completely or because the number of missing documents was above the safety cap; the documents are kept, and the next successful full synchronization tries again. **Show older events** loads earlier synchronizations, and a summary beside the timeline totals the failed syncs, new or changed files and removed files among those shown.
 
 #### After an import
 
-The import dialog's last step is **Import queued**: _N items were queued. The first sync runs in the background and you get a notice when each item finishes._ If some items could not be queued, the step adds _N items could not be queued._ **Show the import** closes the dialog and opens the site page when the items belong to a site, the documents page when a single item was imported, and otherwise the **Integrations** tab.
+The import dialog's last step is **Import queued**: _N items were queued. The first sync runs in the background and you get a notice when each item finishes._ If some items could not be queued, the step adds _N items could not be queued._ **Show the import** closes the dialog and opens the source page, or the **Integrations** tab when the items do not form one source.
 
-When an item's first synchronization finishes, a notice reports the result: _Name: N documents indexed, N skipped_, with a **Show** button that opens the item's documents page, on the **Not indexed** tab if nothing was indexed but files were skipped. A first synchronization that fails shows _Name: the first sync failed_ followed by the error text. The notice appears while you are in the space the import belongs to; if you have moved to another space, it waits until you return.
+When an item's first synchronization finishes, a notice reports the result: _Name: N documents indexed, N skipped_, with a **Show** button that opens the source page with the item's folder selected, on the **Problems** tab if nothing was indexed but files were skipped. A first synchronization that fails shows _Name: the first sync failed_ followed by the error text. The notice appears while you are in the space the import belongs to; if you have moved to another space, it waits until you return.
 
 ### Removing an Imported Folder
 
@@ -438,9 +446,11 @@ Webhook subscriptions have a maximum lifetime of approximately 29 days according
 
 Each notification from Microsoft names the subscription it belongs to. Eneo matches it against the subscriptions it has stored and ignores notifications for unknown subscriptions or with the wrong `clientState`, so a stale subscription from an earlier installation cannot trigger synchronization.
 
+The **SharePoint connection** section lists four checks, each with its state and the fix next to it: **App registration in Entra ID** (the tenant domain and the end of the client ID, with **Change**), **Sign-in to Microsoft** (the credential health above, with what stops while it fails), **Change notifications from SharePoint** (how many watches are active, expired or failing to renew, with **Renew expired** and **Show watches**) and **Test the connection**. A badge in its heading sums up the worst state.
+
 ### Managing Webhooks
 
-Under **Admin** → **Integrations** → **Manage Webhooks** you can see all subscriptions with their site, owner, expiry time and health:
+Under **Admin** → **Integrations** → **SharePoint connection** → **Show watches** you can see all subscriptions with their site, owner, expiry time and health:
 
 - **Webhook Active**: The subscription is working normally
 - **Webhook Expiring Soon**: The subscription expires within 48 hours and will be renewed automatically on the next run
@@ -454,7 +464,7 @@ Each imported item in a space's knowledge list also shows its own webhook status
 
 A subscription is registered with the webhook address that was current when it was created. If `PUBLIC_ORIGIN` or `SHAREPOINT_WEBHOOK_NOTIFICATION_URL` changes, for example when Eneo moves to a new domain, Eneo notices the difference at the next renewal or synchronization and recreates the subscription with the new address instead of renewing it. Until then, Microsoft keeps posting to the old address.
 
-To switch every subscription immediately, restart the backend with the new address, then open **Admin** → **Integrations** → **Manage Webhooks** and click **Recreate all subscriptions**. After confirmation, every subscription is removed at Microsoft and created again with the current address, expired or not; imported knowledge and assistants are not affected. The result shows how many subscriptions were recreated and how many failed.
+To switch every subscription immediately, restart the backend with the new address, then open **Admin** → **Integrations** → **SharePoint connection** → **Show watches** and click **Recreate all subscriptions**. After confirmation, every subscription is removed at Microsoft and created again with the current address, expired or not; imported knowledge and assistants are not affected. The result shows how many subscriptions were recreated and how many failed.
 
 A script can do the same through the admin API, using a tenant API key with admin permission (see the [API overview](/docs/api)):
 
@@ -484,7 +494,7 @@ If Eneo is directly accessible on a public URL without an authenticating proxy, 
 
 If changes in SharePoint aren't synchronizing:
 
-1. Check the item's webhook status in the space's knowledge list and the subscription list under **Admin** → **Integrations** → **Manage Webhooks**
+1. Check the item's webhook status in the space's knowledge list and the subscription list under **Admin** → **Integrations** → **SharePoint connection** → **Show watches**
 2. Verify that Eneo's domain is reachable via HTTPS from the internet
 3. Check that the firewall allows incoming traffic from Microsoft's IP addresses
 4. If using an API gateway, verify that the webhook endpoints are accessible without authentication
@@ -530,8 +540,8 @@ If the interactive service-account sign-in fails with a Microsoft (AADSTS) error
 
 If imported files aren't updating:
 
-- Look at the item's status badge in the space's **Knowledge** list. **Sync failed** with **Show error** tells you why the last run failed; **Synced** with an old **Last synced** time means no run has happened, so check the webhook status on the item and under **Admin** → **Integrations** → **Manage Webhooks**.
-- Open the **Sync History** dialog to see what the last runs did. A file that is missing from the knowledge is usually listed as skipped with its reason, for example an unsupported format or a scanned PDF without a text layer.
+- Look at the source's status in the space's **Knowledge** list. **Needs attention** with **Show problems** tells you why the last run failed; **Up to date** with an old **Updated** time means no run has happened, so check **Change notifications** on the source page and under **Admin** → **Integrations** → **SharePoint connection** → **Show watches**.
+- Open the source's **Problems** tab to see why files are missing; a file that is missing from the knowledge is usually listed there with its cause, for example an unsupported format or a scanned PDF without a text layer. The **Activity** tab shows what the last runs did.
 - Check the credential health on the integrations page. A **Credential problem** stops every import and synchronization until the secret is updated or the service account signs in again.
 - Verify that the service account (when using service account method) still has access to the files.
 - Run **Full Sync** on the item, or **Resync all items** on the site row, to re-process everything.
@@ -599,15 +609,15 @@ The solution is the same as above: create a new secret in Microsoft Entra ID and
 
 This section only applies to the Service Account method. The service account stores a long-lived OAuth refresh token captured when the administrator signed in. Unlike the client secret, this token has no fixed expiration date shown in Azure Portal, but it can stop working if the service account's password is changed, a Conditional Access policy revokes it, or the account is inactive for an extended period (roughly 90 days).
 
-Eneo refreshes this token automatically as it is used, but there is no proactive renewal. If the refresh token becomes invalid, imports and background synchronization stop. The failure is shown as a **Credential problem** on the SharePoint card under **Admin** → **Integrations**, with Microsoft's error text and guidance, and the affected items show **Sync failed** in their spaces — there is no automatic re-authentication.
+Eneo refreshes this token automatically as it is used, but there is no proactive renewal. If the refresh token becomes invalid, imports and background synchronization stop. The failure is shown as a **Credential problem** on the SharePoint card under **Admin** → **Integrations**, with Microsoft's error text and guidance in the **SharePoint connection** section, and the affected sources show **Needs attention** in their spaces — there is no automatic re-authentication.
 
 To restore access, an administrator signs in again with the service account. The existing configuration is kept; you do not enter the client ID or secret again:
 
 1. Navigate to **Admin** → **Integrations**
-2. Click **Sign in again with Microsoft** on the SharePoint card (shown when the credential health reports a problem), or click **Configure** and use the same button in the **Current Configuration** view, where it is always available for a service account
+2. Click **Sign in again with Microsoft** in the **SharePoint connection** section (shown when the credential health reports a problem), or click **Configure** and use the same button in the **Current Configuration** view, where it is always available for a service account
 3. Log in with the service account at Microsoft; you are returned to Eneo and the configuration is updated
 
-Imported knowledge and existing webhook subscriptions are unaffected — only the authentication is renewed. Conditional Access or multi-factor requirements that block the sign-in are reported as guidance on the card; see [Service Account Sign-in Is Blocked](#service-account-sign-in-is-blocked).
+Imported knowledge and existing webhook subscriptions are unaffected — only the authentication is renewed. Conditional Access or multi-factor requirements that block the sign-in are reported as guidance in the **SharePoint connection** section; see [Service Account Sign-in Is Blocked](#service-account-sign-in-is-blocked).
 
 ---
 
