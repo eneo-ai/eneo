@@ -29,14 +29,37 @@ class ConnectionCheckOutcome(StrEnum):
     CREDENTIALS_REJECTED = "credentials_rejected"
 
 
+class ConnectionCheckReason(StrEnum):
+    """Why a check got no usable answer; a closed set that never quotes the
+    endpoint, the key or the transport's own text."""
+
+    # No connection was made, or no response came back.
+    UNREACHABLE = "unreachable"
+    # The answer did not arrive in time.
+    TIMEOUT = "timeout"
+    # The service answered with a status other than 200; the status is kept.
+    HTTP_STATUS = "http_status"
+    # The service answered 200 with something that is no readiness answer.
+    MALFORMED = "malformed"
+    # The service rejected the key.
+    CREDENTIALS = "credentials"
+
+
 @dataclass(frozen=True, slots=True)
 class LastConnectionCheck:
-    """The latest check of a connection's current endpoint and key."""
+    """The latest check of a connection's current endpoint and key.
+
+    ``reason`` is None when the service answered usably; ``status_code`` is
+    the status of an ``http_status`` answer.
+    """
 
     outcome: ConnectionCheckOutcome
     identifies_speakers: bool | None
     service_version: str | None
     checked_at: datetime
+    times_words: bool | None = None
+    reason: ConnectionCheckReason | None = None
+    status_code: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

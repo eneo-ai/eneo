@@ -25,6 +25,37 @@ RESULT_BODY = {
     "alignment": "segment_split",
 }
 
+# A timestamp job's result: the words of the transcript a flow's model wrote
+# (``Hej och välkomna.``), placed in time in reader lines without speakers.
+TIMED_BODY = {
+    "language": "sv",
+    "duration_seconds": 5.2,
+    "model": "whisper-1",
+    "text": "[00:00:00 - 00:00:02] Hej och\n[00:00:02 - 00:00:05] välkomna.",
+    "segments": [
+        {
+            "start": 0.0,
+            "end": 2.0,
+            "speaker": None,
+            "text": "Hej och",
+            "words": [
+                {"word": "Hej", "start": 0.0, "end": 0.4, "probability": 0.98},
+                {"word": "och", "start": 0.5, "end": 0.8, "probability": 0.91},
+            ],
+        },
+        {
+            "start": 2.4,
+            "end": 5.2,
+            "speaker": None,
+            "text": "välkomna.",
+            "words": [
+                {"word": "välkomna.", "start": 2.4, "end": 3.1, "probability": 0.0}
+            ],
+        },
+    ],
+    "alignment": "forced",
+}
+
 
 class ScriptedService:
     """Plays back a scripted sequence of responses per endpoint."""
