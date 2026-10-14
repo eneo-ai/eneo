@@ -773,6 +773,63 @@ def test_only_the_reference_engine_panic_is_reported_as_recursion(monkeypatch):
         validate_against_contract({}, {"type": "object"}, label="Step 2 output")
 
 
+class _ReferenceEnginePanic(BaseException):
+    """What pyo3 raises when rpds panics."""
+
+
+_ReferenceEnginePanic.__module__ = "pyo3_runtime"
+
+
+def _metaschema_check_panics(monkeypatch: pytest.MonkeyPatch) -> None:
+    build = schema_engine.build_schema_validator
+
+    class Panicking:
+        def validate(self, instance: object) -> None:
+            raise _ReferenceEnginePanic
+
+    monkeypatch.setattr(
+        schema_engine,
+        "build_schema_validator",
+        lambda schema, **kwargs: (
+            Panicking()
+            if schema is jsonschema.Draft202012Validator.META_SCHEMA
+            else build(schema, **kwargs)
+        ),
+    )
+
+
+_DRAFT_7 = {"$schema": "http://json-schema.org/draft-07/schema#", "type": "object"}
+
+
+@pytest.mark.parametrize(
+    "caller",
+    ["refuse-at-publish", "syntax-at-save", "paste-conversion", "evaluate"],
+)
+def test_every_metaschema_check_reports_a_reference_engine_panic_as_typed(
+    monkeypatch: pytest.MonkeyPatch, caller: str
+):
+    # Kills the mutant that guards only the evaluation of data against the
+    # contract: the check of the contract against its metaschema, which every
+    # caller below makes, then lets the panic of rpds (a BaseException) out
+    # instead of a typed refusal. No schema found so far makes rpds panic in
+    # that check; the panic stands in for the one a deeper engine stack could.
+    _metaschema_check_panics(monkeypatch)
+    schema = {"type": "object"}
+    if caller == "refuse-at-publish":
+        with pytest.raises(output_processing.ContractUnevaluable):
+            output_processing.refuse_unevaluable_contract(schema, label="Step 2")
+    elif caller == "syntax-at-save":
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            output_processing.validate_schema_syntax(schema, label="Step 2")
+        assert exc_info.value.code == "typed_io_invalid_schema"
+    elif caller == "paste-conversion":
+        assert output_processing.normalize_pasted_schema(_DRAFT_7) == _DRAFT_7
+    else:
+        assert schema_engine.evaluate_contract({}, schema) == (
+            schema_engine.ContractNotEvaluable()
+        )
+
+
 @pytest.mark.parametrize(
     "shape", ["reference-to-root", "draft-03-nested-extends", "invalid-keyword-value"]
 )

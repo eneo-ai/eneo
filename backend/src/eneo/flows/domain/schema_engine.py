@@ -87,11 +87,16 @@ def _panic_as_recursion() -> Generator[None]:
 
 
 def check_metaschema(schema: Schema, dialect: type[Validator]) -> None:
+    """Raise SchemaError for a schema that is not one of ``dialect``, and
+    RecursionError for one nested too deep to check, also when the limit
+    trips inside rpds, so that every caller can refuse it as a typed
+    failure."""
     validator = build_schema_validator(
         dialect.META_SCHEMA, format_checker=dialect.FORMAT_CHECKER
     )
     try:
-        validator.validate(schema)
+        with _panic_as_recursion():
+            validator.validate(schema)
     except jsonschema.ValidationError as exc:
         raise jsonschema.SchemaError.create_from(exc) from exc
 
