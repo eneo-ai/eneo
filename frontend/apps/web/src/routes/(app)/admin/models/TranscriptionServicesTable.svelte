@@ -106,11 +106,11 @@
 
   // Applies a saved service as the server returned it, its check included:
   // the server clears a check whose address or key changed, by anyone. A
-  // check still running tested settings this answer may have replaced: a new
-  // address or key from this page, an address moved by someone else, or a
-  // stored check the server cleared for a new key. Then its result is dropped.
-  // Any other change (the name, the default mark, switching it on) leaves it
-  // to answer, so connecting a service as the default still shows its test.
+  // check still running may have tested settings this answer replaced (another
+  // administrator can have changed the key, which no answer shows), so its
+  // result is dropped. A check this interrupted starts again, so connecting a
+  // service as the default still shows its test; a new address or key from
+  // this page starts one in update.
   //
   // The default mark belongs to the organisation, not to the row: only the
   // answer to a save that changed it (`marksDefault`) brings it, and takes it
@@ -127,14 +127,10 @@
         ? { ...service, is_default: false }
         : service;
     });
-    const replaced =
-      newSettings ||
-      next.endpoint_url !== current.endpoint_url ||
-      (current.last_check !== null && next.last_check === null);
-    if (replaced) {
-      checkRuns.set(next.id, (checkRuns.get(next.id) ?? 0) + 1);
-      checking.delete(next.id);
-    }
+    const interrupted = checking.has(next.id);
+    checkRuns.set(next.id, (checkRuns.get(next.id) ?? 0) + 1);
+    checking.delete(next.id);
+    if (interrupted && !newSettings) void runCheck(next.id);
     return true;
   }
 

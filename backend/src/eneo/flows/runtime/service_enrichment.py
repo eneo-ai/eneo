@@ -213,15 +213,17 @@ def _timed_lines(
     result: TranscriptionJobResult, spoken: Sequence[TranscriptSegment]
 ) -> tuple[TranscriptSegment, ...] | None:
     """The result's lines when they time the transcript that was sent: every
-    line has its words and labels no one, and together they say what the
-    model wrote. None otherwise; the lines were already dropped when they did
-    not render the service's own text."""
+    line labels no one and is timed word by word (its words say its text, in
+    order, each within the line), and together the lines say what the model
+    wrote. None otherwise, so partial or impossible timings are reported as
+    none rather than stored; the lines were already dropped when they did not
+    render the service's own text."""
     lines = result.segments
     if not lines or any(
-        not line.words
-        or line.speaker is not None
+        line.speaker is not None
         or line.speaker_attribution is not None
         or line.overlap_ids
+        or not _timed_word_by_word(line)
         for line in lines
     ):
         return None
@@ -230,6 +232,25 @@ def _timed_lines(
     ):
         return None
     return lines
+
+
+# How far a word may reach past its line's own window: the aligner pads windows.
+_WORD_WINDOW_SLACK_S = 0.5
+
+
+def _timed_word_by_word(line: TranscriptSegment) -> bool:
+    words = line.words
+    if not words or _tokens(word.word for word in words) != _tokens([line.text]):
+        return False
+    previous_start = line.start - _WORD_WINDOW_SLACK_S
+    for word in words:
+        if not (
+            previous_start <= word.start <= word.end
+            and word.end <= line.end + _WORD_WINDOW_SLACK_S
+        ):
+            return False
+        previous_start = word.start
+    return True
 
 
 def _tokens(texts: Iterable[str]) -> list[str]:

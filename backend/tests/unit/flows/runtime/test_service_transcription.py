@@ -208,6 +208,13 @@ async def test_a_token_without_letters_the_aligner_drops_still_times_the_words(
     assert result.transcript_segments == TIMED_LINES
 
 
+def _with_first_words(words: list[dict[str, object]]) -> dict[str, object]:
+    """TIMED_BODY with the first line's words replaced; its text stays."""
+    lines = [dict(line) for line in TIMED_BODY["segments"]]  # type: ignore[union-attr]
+    lines[0]["words"] = words
+    return {**TIMED_BODY, "segments": lines}
+
+
 def _with_lines(**changes: object) -> dict[str, object]:
     """TIMED_BODY with every line changed; the text still renders the lines."""
     lines = [{**line, **changes} for line in TIMED_BODY["segments"]]  # type: ignore[union-attr]
@@ -268,6 +275,38 @@ def _with_lines(**changes: object) -> dict[str, object]:
         ),
         (_timing_service(status_answer=status("cancelled")), "failed"),
         (_timing_service(result=_with_lines(words=[])), "no_timings"),
+        # Timings that do not time the line word by word are no timings: one word
+        # of two, a word the line does not say, or a word that ends before it starts.
+        (
+            _timing_service(
+                result=_with_first_words(
+                    [{"word": "Hej", "start": 0.0, "end": 0.4, "probability": 0.9}]
+                )
+            ),
+            "no_timings",
+        ),
+        (
+            _timing_service(
+                result=_with_first_words(
+                    [
+                        {"word": "Hej", "start": 0.0, "end": 0.4, "probability": 0.9},
+                        {"word": "Annat", "start": 0.5, "end": 0.8, "probability": 0.9},
+                    ]
+                )
+            ),
+            "no_timings",
+        ),
+        (
+            _timing_service(
+                result=_with_first_words(
+                    [
+                        {"word": "Hej", "start": 0.0, "end": 0.4, "probability": 0.9},
+                        {"word": "och", "start": 9.0, "end": 0.5, "probability": 0.9},
+                    ]
+                )
+            ),
+            "no_timings",
+        ),
         (_timing_service(result=_with_lines(speaker="SPEAKER_00")), "no_timings"),
         (
             _timing_service(result=_with_lines(text="Adjö.")),
@@ -284,6 +323,9 @@ def _with_lines(**changes: object) -> dict[str, object]:
         "job-failed",
         "job-cancelled",
         "lines-without-words",
+        "a-line-partly-timed",
+        "a-word-the-line-does-not-say",
+        "a-word-ending-before-it-starts",
         "lines-with-speakers",
         "other-words",
         "lines-not-the-text",

@@ -258,7 +258,7 @@ it("shows the test of a service connected as the default, though the mark is sav
   const running = deferred<TranscriptionServiceCheck>();
   create.mockImplementation(async () => timra);
   update.mockImplementation(async () => ({ ...timra, is_default: true }));
-  check.mockReturnValueOnce(running.promise);
+  check.mockReturnValueOnce(running.promise).mockImplementation(async () => result("ready"));
   render(TranscriptionServicesTable, { services: [], classifications: [] });
 
   await page.getByRole("button", { name: m.speaker_service_connect() }).click();
@@ -269,8 +269,8 @@ it("shows the test of a service connected as the default, though the mark is sav
   await page.getByRole("button", { name: m.speaker_service_connect_submit(), exact: true }).click();
   await vi.waitFor(() => expect(update).toHaveBeenCalledWith({ id: "s2" }, { is_default: true }));
 
-  // The mark changed neither the address nor the key: the running test still answers.
-  running.resolve(result("ready"));
+  // Saving the mark interrupted the test; it runs again and its answer is shown.
+  running.resolve({ ...result("unavailable"), reason: "timeout" });
   await expect
     .element(page.getByRole("dialog").getByText(m.speaker_service_check_words_and_speakers()))
     .toBeVisible();
@@ -375,11 +375,12 @@ it("reads a check timed a moment ahead of this clock as just now", async () => {
   await expect.element(time).toHaveTextContent(m.speaker_service_checked({ when: "nu" }));
 });
 
-it("drops a running check's answer once a save returns newer settings", async () => {
+it("drops a running check's answer once a save returns newer settings, and checks again", async () => {
   // The check tested the old address; another administrator moved the service
   // meanwhile, and the rename here answered with the cleared check.
   const running = deferred<TranscriptionServiceCheck>();
-  check.mockReturnValueOnce(running.promise);
+  const again = deferred<TranscriptionServiceCheck>();
+  check.mockReturnValueOnce(running.promise).mockReturnValueOnce(again.promise);
   update.mockImplementation(async () =>
     service({ name: "Vemsa Nord", endpoint_url: "https://vemsa-nord.sundsvall.se" })
   );
@@ -393,12 +394,15 @@ it("drops a running check's answer once a save returns newer settings", async ()
   await page.getByLabelText(m.name()).fill("Vemsa Nord");
   await page.getByRole("button", { name: m.save() }).click();
   const row = page.getByRole("row", { name: /Vemsa Nord/ });
-  await expect.element(row).toHaveTextContent(m.speaker_service_not_tested());
+  await expect.element(row).toHaveTextContent(m.speaker_service_testing());
 
   running.resolve(result("ready"));
   await settle();
   await expect.element(row).not.toHaveTextContent(m.speaker_service_status_ready());
-  await expect.element(row).toHaveTextContent(m.speaker_service_not_tested());
+  // The check it interrupted runs again, against the settings saved now.
+  expect(check).toHaveBeenCalledTimes(2);
+  again.resolve({ ...result("unavailable"), reason: "unreachable" });
+  await expect.element(row).toHaveTextContent(m.speaker_service_status_unavailable());
 });
 
 it("keeps a failed list inside its section, with a way to try again", async () => {
