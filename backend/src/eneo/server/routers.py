@@ -104,6 +104,12 @@ from eneo.prompt_library.presentation.prompt_library_router import (
     router as prompt_library_router,
 )
 from eneo.prompts.api.prompt_router import router as prompt_router
+from eneo.rerank_models.presentation.rerank_models_router import (
+    router as rerank_models_router,
+)
+from eneo.rerank_models.presentation.tenant_rerank_models_router import (
+    router as tenant_rerank_models_router,
+)
 from eneo.security_classifications.presentation.security_classification_router import (
     router as security_classifications_router,
 )
@@ -404,6 +410,12 @@ router.include_router(
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
+    rerank_models_router,
+    prefix="/rerank-models",
+    tags=["rerank-models"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
     model_providers_router,
     prefix="/admin/model-providers",
     tags=["admin", "model-providers"],
@@ -430,6 +442,12 @@ router.include_router(
 router.include_router(
     tenant_image_models_router,
     prefix="/admin/tenant-models/image",
+    tags=["admin", "tenant-models"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    tenant_rerank_models_router,
+    prefix="/admin/tenant-models/rerank",
     tags=["admin", "tenant-models"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
