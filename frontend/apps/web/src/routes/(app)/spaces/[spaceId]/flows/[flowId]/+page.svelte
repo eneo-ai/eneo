@@ -497,6 +497,9 @@
   const speakerServicePickId = $derived(
     wizardReferenceId(wizardMetadata.transcription_speaker_service)
   );
+  // A stored null is the author's "none": text only. An absent key is no
+  // choice yet, which the server fills with the organisation's default.
+  const speakerServiceChosenNone = $derived(wizardMetadata.transcription_speaker_service === null);
   // Speakers are labelled by the speaker identification service the flow
   // chose, among those granted to the space.
   const speakerServices = $derived($currentSpace.transcription_services ?? []);
@@ -1160,20 +1163,21 @@
                         labels={transcriptionDiarization}
                         required={speakersNamedByStep}
                         pickedId={speakerServicePickId}
+                        chosenNone={speakerServiceChosenNone}
                         disabled={$isPublished}
                         onLabelsChange={(checked) =>
-                          flowEditor.setWizardMetadata(
-                            // Switched off means no service: a choice nobody can see
-                            // would still let a run label speakers with it.
-                            checked
-                              ? { transcription_diarization: true }
-                              : {
-                                  transcription_diarization: false,
-                                  transcription_speaker_service: null
-                                }
-                          )}
+                          // The service stays: without speakers it still times the words.
+                          flowEditor.setWizardMetadata({ transcription_diarization: checked })}
                         onPick={(id) =>
-                          flowEditor.setWizardMetadata({ transcription_speaker_service: { id } })}
+                          flowEditor.setWizardMetadata(
+                            // None is text only: no word timings, and so no speakers.
+                            id === null
+                              ? {
+                                  transcription_speaker_service: null,
+                                  transcription_diarization: false
+                                }
+                              : { transcription_speaker_service: { id } }
+                          )}
                         maxSpeakers={wizardMetadata.transcription_max_speakers ?? null}
                         onMaxSpeakersChange={(value) =>
                           flowEditor.setWizardMetadata({ transcription_max_speakers: value })}

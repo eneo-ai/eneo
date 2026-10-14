@@ -1,8 +1,8 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <!--
-  The organisation's speaker identification services, as the second section of
-  the transcription tab. This list owns every change: each is saved as it is
+  The organisation's services for word timings and speaker identification (such
+  as Vemsa), as the second section of the transcription tab. This list owns every change: each is saved as it is
   made and applied from the response, one at a time per service, so a late
   answer never undoes a later change or brings back a removed service. The
   latest check is stored with the service, so every administrator sees it.
@@ -231,7 +231,7 @@
 
 <section
   aria-labelledby="{uid}-heading"
-  class="flex flex-col gap-4 border-t py-4"
+  class="mt-6 flex flex-col gap-4 border-t pt-6"
   data-tour="admin-speaker-identification"
 >
   <header class="flex flex-wrap items-start justify-between gap-3">
@@ -244,7 +244,8 @@
       </p>
     </div>
     {#if !loadFailed}
-      <Button onclick={() => openDialog(null)}>
+      <!-- Outline, as the models' own "Lägg till leverantör" above: the tab has no one primary action. -->
+      <Button variant="outline" onclick={() => openDialog(null)}>
         <Plus data-icon="inline-start" />
         {m.speaker_service_connect()}
       </Button>
