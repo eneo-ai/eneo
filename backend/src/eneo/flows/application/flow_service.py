@@ -32,7 +32,6 @@ from eneo.flows.domain.flow_step_validation import (
     FlowGraphIssueCode,
     FlowStepValidationError,
 )
-from eneo.flows.domain.speaker_mapping_config import steps_require_speaker_labels
 from eneo.flows.domain.step_config import clean_inactive_step_config
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -164,7 +163,6 @@ class FlowService:
         normalized_metadata, space = await self._fill_default_speaker_service(
             space_id=space_id,
             metadata_json=normalize_flow_metadata_for_write(metadata_json),
-            steps=steps,
         )
         self._validate_steps(steps, metadata_json=normalized_metadata)
         self._validate_variable_alias_collisions(
@@ -306,12 +304,11 @@ class FlowService:
             )
         space: Space | None = None
         if steps is not None or metadata_json is not NOT_PROVIDED:
-            # Read from the flow the write ends with: steps alone can start
-            # asking for speaker labels.
+            # Any draft write stores the default as the choice of a flow that
+            # has none, also when the write names no metadata.
             next_metadata, space = await self._fill_default_speaker_service(
                 space_id=existing.space_id,
                 metadata_json=next_metadata,
-                steps=next_steps,
             )
         # A step's own defect is reported before the classification, which
         # reads its configuration (create and publish validate first too).
@@ -780,23 +777,20 @@ class FlowService:
         *,
         space_id: UUID,
         metadata_json: FlowPersistedJsonObject | None,
-        steps: list[FlowStep],
     ) -> tuple[FlowPersistedJsonObject | None, Space | None]:
         """The metadata a draft write stores, with the organisation's default
-        speaker identification service as the flow's choice when it asks for
-        labels and chose none (see ``fill_default_speaker_service``). Only
-        draft writes call this; publishing never does.
+        transcription service as the flow's choice when it transcribes and
+        its author has made no choice (see ``fill_default_speaker_service``).
+        Only draft writes call this; publishing never does.
 
         Also returns the space when it was loaded, for the checks that follow."""
         if self.space_service is None or not lacks_speaker_service_choice(
-            metadata_json, steps
+            metadata_json
         ):
             return metadata_json, None
         space = await self.space_service.get_space(space_id)
         return (
-            fill_default_speaker_service(
-                metadata=metadata_json, steps=steps, space=space
-            ),
+            fill_default_speaker_service(metadata=metadata_json, space=space),
             space,
         )
 
@@ -809,27 +803,20 @@ class FlowService:
         publishing_steps: list[FlowStep] | None = None,
         space: Space | None = None,
     ) -> Space | None:
-        """Refuse a malformed transcription choice, a picked speaker service
-        the space may not use, and on publish (``publishing_steps``) a flow
+        """Refuse a malformed transcription choice, a chosen service the space
+        may not use (whether or not the flow labels speakers: the service
+        times the words too), and on publish (``publishing_steps``) a flow
         that asks for speaker labels without having chosen a service. A draft
-        may be saved before the choice is made. A saved draft keeps the pick
-        it has, as a space keeps its grants, so an administrator's later
-        change never blocks unrelated edits; publishing checks it again.
+        may be saved before the choice is made. A saved draft keeps the
+        choice it has, as a space keeps its grants, so an administrator's
+        later change never blocks unrelated edits; publishing checks it again.
 
         Returns the space (``space`` when the caller already loaded it) for
         the checks that follow, or None when none was needed."""
         config = transcription_config_for_write(metadata_json)
-        pick = config.speaker_service_in_use
+        pick = config.service_in_use
         if pick is not None and pick == kept_speaker_service_id(kept_metadata_json):
             pick = None
-        if (
-            publishing_steps is not None
-            and config.enabled
-            and steps_require_speaker_labels(publishing_steps)
-        ):
-            # A step's need overrides the flow's own setting, so a choice
-            # that is switched off is the one every run uses.
-            pick = config.speaker_service_id
         if self.space_service is None or (pick is None and publishing_steps is None):
             return space
         if space is None:

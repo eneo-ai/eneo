@@ -26,18 +26,19 @@ class FlowTranscriptionConfig:
     model_id: UUID | None
     language: str
     diarization: bool
-    # The service that labels speakers; None means the flow chose none, and
-    # nothing is chosen for it.
+    # The transcription service the author chose: it times the words, and
+    # labels the speakers when a run asks. None when the flow chose none or
+    # has not chosen; nothing is chosen for it at run time.
     speaker_service_id: UUID | None = None
     # The most speakers the service may label in a run that states no bound;
     # None lets the service count them.
     max_speakers: int | None = None
 
     @property
-    def speaker_service_in_use(self) -> UUID | None:
-        """The picked speaker service, while the flow transcribes and labels
-        speakers; a pick that is switched off is not used."""
-        return self.speaker_service_id if self.enabled and self.diarization else None
+    def service_in_use(self) -> UUID | None:
+        """The chosen service, while the flow transcribes: it times the words
+        of every transcript, whether or not the speakers are labelled."""
+        return self.speaker_service_id if self.enabled else None
 
     def diarize(self, speaker_labels: bool | None) -> bool:
         """Whether speakers are labelled: the run's own choice, else the flow's."""
@@ -137,12 +138,12 @@ class SpeakerServiceResolution:
 def resolve_speaker_service(
     config: FlowTranscriptionConfig, space: Space
 ) -> SpeakerServiceResolution:
-    """The service that would label this flow's speakers in ``space``, whether
-    or not labels are on: a run may switch them on.
+    """The service this flow chose, as ``space`` may use it now: it times the
+    words of the flow's transcripts and labels their speakers when a run asks.
 
-    Only the service the flow's author chose labels its speakers: nothing
-    stands in for a chosen service the space may no longer use, and nothing is
-    chosen for a flow that chose none, whatever the space has."""
+    Only the service the flow's author chose is used: nothing stands in for a
+    chosen service the space may no longer use, and nothing is chosen for a
+    flow that chose none, whatever the space has."""
     if config.speaker_service_id is None:
         return SpeakerServiceResolution(None, SpeakerServiceGap.NOT_CHOSEN)
     connection = space.usable_transcription_service(config.speaker_service_id)
