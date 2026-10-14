@@ -647,6 +647,8 @@ FLOW_INTERNAL_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "call_type",
             "http_method",
             "url_host",
+            # Not on a call to an MCP server: the server's address is named
+            # without its path there.
             "url_path",
             "status_code",
             "duration_ms",
