@@ -1,14 +1,46 @@
 # External transcription service for flow audio steps
 
-Flow `transcribe_only` steps can use an external speaker identification
-service (such as Vemsa). The flow's transcription model always writes the text;
-the service only identifies who is speaking. The flow transcript becomes the
-text with speaker labels (`[HH:MM:SS - HH:MM:SS] SPEAKER_00: ...` lines).
+Flow `transcribe_only` steps can use an external transcription service (such
+as Vemsa). The flow's transcription model always writes the text; the service
+places its words in time and, when the run labels speakers, identifies who is
+speaking. With speaker labels the flow transcript becomes the text with speaker
+labels (`[HH:MM:SS - HH:MM:SS] SPEAKER_00: ...` lines); without them it stays
+the model's text, and the word times are stored beside it.
 
 An administrator connects the service under Modeller, Transkription (the
 Talaridentifiering section) in the admin interface, with its address and API key, and gives each space
 access to it. There is no deployment environment variable for it. Knowledge
 uploads and app runs always use the model-registry path regardless.
+
+## How word timing works
+
+When a run labels no speakers and the flow chose a service, Eneo sends the
+service a `timestamp` job per audio file (each part of one recording on its
+own): the audio and the model's transcript as one segment per five-minute
+chunk, without speakers. The service force-aligns the words in those windows
+and returns them as reader lines without speakers (`alignment: forced`).
+
+- The step's text stays exactly the model's text, so later steps read no
+  timestamps. The timed lines are stored as the transcript's segments, and
+  their words in the words row, for playback that follows the audio word by
+  word. A regeneration of such a transcript renders plain lines without times.
+- The lines are admitted only when every line has words and no speaker, they
+  render the service's text, and together they say what the model wrote (a
+  token without a letter or digit, such as a lone dash, may be left out).
+- A timing that fails does not fail the step: it keeps what it would have
+  without a service, the model's text without segments (a live transcript
+  keeps its live passages). Cancellation, the step's own time limit and a
+  provider-call evidence gap still end the step.
+- The step's transcription metadata records the outcome as `word_timing`:
+  `{"status": "done"}`, or `{"status": "failed", "reason": ...}` with one of
+  `unavailable` (the chosen service could not be used: not usable in the space,
+  removed, or not reachable), `unsupported` (the service refused or ignored the
+  `timestamp` task), `credentials` (it rejected the key), `failed` (the job
+  failed or was cancelled, or its outcome was lost) or `no_timings` (the result
+  held no usable word times for the transcript). A step whose flow chose no
+  service, or that labels speakers, has no `word_timing`. With several files,
+  every file is timed or the step keeps no segments, and the first failure is
+  the reason.
 
 ## How speaker identification works
 
@@ -28,16 +60,16 @@ then Eneo to the service). The provider is trusted for text only:
   Empty chunks contribute no timestamp headings. If every file returns empty
   or whitespace-only text, the step fails with `typed_io_transcription_empty`.
 - A failure of the service after a successful transcription fails the step
-  (the author asked for speaker identification; silently dropping it would
-  hide that).
+  when the run labels speakers (the author asked for speaker identification;
+  silently dropping it would hide that).
 
 Speaker labels are assigned per audio file by the service; Eneo renumbers them
 so a multi-file transcript has unique labels, and records a speaker inventory
 in the step's transcription metadata. The metadata also names the connection
 that labelled the step (`speaker_service` and `speaker_service_id`), as it was
-named then; the run's step details show it in Avancerad. A follow-up
-`speaker_mapping` step (see `flow-developer-quickstart.md`) can map those
-labels to real participants.
+named then; the run's step details show it in Avancerad. A step that only had
+its words timed names no speaker service. A follow-up `speaker_mapping` step
+(see `flow-developer-quickstart.md`) can map those labels to real participants.
 
 The service's segments (`start`, `end`, `speaker`, `text` per rendered line)
 are admitted only when every entry is valid and their complete ordered rendering
@@ -71,11 +103,11 @@ file; its bytes remain fixed for checkpoint history and evidence.
 Connect the service in the admin interface under Modeller, Transkription, in the
 Talaridentifiering section:
 enter its base address (for example `https://vemsa.example.org`; a trailing
-`/v1` is removed) and its API key. Then give each space that needs speaker
-identification access to the connection. The backend API and the flow execution
-worker (`task-execution-worker`) both read the connection from Eneo, so no
-environment variables are needed on either. The operator steps are in the
-docs-site guide `guides/transcription.mdx`.
+`/v1` is removed) and its API key. Then give each space that needs word timings
+or speaker identification access to the connection. The backend API and the
+flow execution worker (`task-execution-worker`) both read the connection from
+Eneo, so no environment variables are needed on either. The operator steps are
+in the docs-site guide `guides/transcription.mdx`.
 
 Polling uses the step attempt's remaining execution budget. By default a step may
 use the whole invocation ceiling (`TASK_EXECUTION_TIMEOUT_SECONDS` minus the
@@ -93,6 +125,10 @@ finalization allowance) less what earlier steps of the run consumed; a step's
   Vemsa's reference compose publishes its API on `127.0.0.1`; set `VEMSA_BIND`
   to a private interface, or attach the API to a network the worker shares
   with Vemsa's `compose.eneo.yaml`.
+- The service must accept the `timestamp` and `diarize` tasks. A Vemsa
+  without `timestamp` refuses the timing jobs, so runs without speaker labels
+  keep the model's text without word times (`word_timing` reason
+  `unsupported`).
 - `VEMSA_MAX_AUDIO_BYTES` (default 2 GiB) must cover Eneo's audio upload
   limit. Eneo sends the original uploaded bytes (mp3 etc.), not decoded wav.
   The parts of one recording (`single_recording`) are the exception: they are
@@ -100,26 +136,34 @@ finalization allowance) less what earlier steps of the run consumed; a step's
 
 ## How it behaves
 
-- **Speaker identification** applies when the flow chose a connected service
-  that its space can use; otherwise the transcript has no speaker labels.
-  Nothing is chosen for a flow at run time (`resolve_speaker_service`): not
-  the space's only service, not a fallback when the chosen one becomes
-  unusable. A flow that asks for labels without a choice is refused at
-  publish (`flow_speaker_service_not_chosen`). An administrator may mark one
-  connection as the organisation's default (`is_default`); a draft that asks
-  for labels without a choice gets it stored as its choice when the draft is
-  written, where its space can use it. Publishing and running never read
-  the default.
+- **The service** is used by every run of a flow that chose a connected
+  service its space can use: it times the words, and labels the speakers
+  when the run asks for labels. Otherwise the transcript has no word times
+  and no speaker labels. Nothing is chosen for a flow at run time
+  (`resolve_speaker_service`): not the space's only service, not a fallback
+  when the chosen one becomes unusable. The wizard key
+  `transcription_speaker_service` holds the author's choice: absent means no
+  choice yet, `null` means none. A chosen service must be usable in the space
+  when it is written and when the flow is published, whatever the speaker
+  setting. A flow that asks for labels without a choice is refused at publish
+  (`flow_speaker_service_not_chosen`). An administrator may mark one
+  connection as the organisation's default (`is_default`); a draft that
+  transcribes and has made no choice gets it stored as its choice when the
+  draft is written, where its space can use it, and a choice of none is never
+  replaced. Publishing and running never read the default.
 - **The flow's transcription model is always required.** The flow's model
   selection and space governance apply; the selected model writes the text.
-- **Job flow**: one multipart `POST /v1/jobs` per audio file (with
-  `language` and `diarize` from the flow's transcription config), a
-  status poll every poll-interval, then `GET /v1/jobs/{id}/result`. Submission
-  is retried on rate limiting and outages; once a job id exists nothing
-  resubmits.
-- **Failures** of the service surface as the step error
-  `typed_io_speaker_identification_failed`: the model's text was written and
-  the service then failed on it. The run error's `details` carry
+- **Job flow**: one multipart `POST /v1/jobs` per audio file, a status poll
+  every poll-interval, then `GET /v1/jobs/{id}/result`. A diarize job sends
+  `task=diarize`, `diarize=true`, `language`, `model`, `segments` and, when
+  set, `max_speakers` and `include_speaker_review`. A timestamp job sends only
+  `task=timestamp`, `language`, `model` and `segments`. Submission is retried
+  on rate limiting and outages; once a job id exists nothing resubmits.
+- **Failures** of the service in a run that labels speakers surface as the
+  step error `typed_io_speaker_identification_failed`: the model's text was
+  written and the service then failed on it. A failed word timing only records
+  `word_timing` (see [How word timing works](#how-word-timing-works)). The run
+  error's `details` carry
   `transcription_failure_kind` and, when the service gave one,
   `transcription_service_reason`. A step that runs out of time stays
   `flow_step_timeout`. A cancelled or timed-out step asks the service to stop
@@ -154,7 +198,8 @@ transcript should show the service's canned speaker labels.
 | Step fails with `typed_io_speaker_service_unavailable` | The run labels speakers but the flow's chosen service cannot be used; `details.speaker_service_gap` is `picked_unavailable` (the flow's choice is not usable in the space; a choice is never substituted) or `not_chosen` (a version published before the publish refusal existed). |
 | Transcript has no speaker labels | Speaker identification is off for the flow (the Transcription stage of the flow editor), the run chose `speaker_labels: false`, the flow chose no service or its chosen service is not usable in the space (not granted, switched off, or below the space's security classification), or the service ran without diarization support; check its engine tier and extras. Also check the step for an `audio_diarization_skipped` diagnostic: the transcription produced no text to label. |
 | Step fails with `typed_io_speaker_identification_failed` and `transcription_failure_kind` is `input` | The service rejected the job with 413 or 422: the audio or the transcript exceeds its size limit (`VEMSA_MAX_AUDIO_BYTES`, `VEMSA_MAX_TRANSCRIPT_BYTES`), or the service does not accept `task=diarize` (an older Vemsa); upgrade it. |
-| Step fails with `typed_io_speaker_identification_failed` and the worker logs `remote_transcription.diarize_unsupported` | The service ignored `task=diarize` and transcribed with its own model (a Vemsa that predates the task); Eneo refuses that result because it did not come from the flow's model. Upgrade the service. |
+| Step fails with `typed_io_speaker_identification_failed` and the worker logs `remote_transcription.task_unsupported task=diarize` | The service ignored `task=diarize` and transcribed with its own model (a Vemsa that predates the task); Eneo refuses that result because it did not come from the flow's model. Upgrade the service. |
+| Transcript has no word times | Read `word_timing` in the step's transcription metadata. Absent: the flow chose no service, or the run labelled speakers. `unavailable`: the chosen service is not usable in the space or not reachable from the worker. `unsupported`: the service does not accept `task=timestamp`; upgrade it. `credentials`: the connection's key is not accepted. `failed` or `no_timings`: read the service's log for the job. |
 
 
 ## Speaker review rollout
@@ -276,7 +321,9 @@ its older per-step `rerunStep` helper is not this API.
   subsequent steps normally, including review gates and new output-file creation.
   It does not send reviewed text back to Vemsa for transcription or realignment.
 - The snapshot is rendered from original segments and saved corrections, then
-  existing speaker names are applied. Confirmed, provisional and explicit
+  existing speaker names are applied. A transcript whose segments name no
+  speaker renders as plain lines without times, like the text its step kept.
+  Confirmed, provisional and explicit
   unresolved attribution remain distinct. Raw segments and matching word evidence
   are copied separately, along with the correction revision and original editor.
 - The new run's `input_payload_json.transcript_regeneration` records source run
