@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.assistants.assistant_service import HelpAssistantTurn
 from eneo.help_assistants.application import helper_run_service as hrs
 from eneo.help_assistants.domain.helper_kind import HelperKind
 from eneo.services.service import DatastoreResult
@@ -61,7 +62,13 @@ async def test_helper_mcp_servers_forwarded_despite_knowledge(monkeypatch):
         AsyncMock(return_value=MagicMock()),
     )
     monkeypatch.setattr(
-        service, "_load_helper_assistant", AsyncMock(return_value=helper_assistant)
+        service,
+        "_load_helper_assistant",
+        AsyncMock(
+            return_value=HelpAssistantTurn(
+                assistant=helper_assistant, mcp_servers=[mcp_server]
+            )
+        ),
     )
     monkeypatch.setattr(service, "_check_helper_completion_model", MagicMock())
     monkeypatch.setattr(

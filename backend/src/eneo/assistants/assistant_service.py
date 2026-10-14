@@ -268,6 +268,14 @@ class AssistantPreflightBaseline:
     attachments: list[File]
 
 
+@dataclass(frozen=True)
+class HelpAssistantTurn:
+    """A help assistant and the general MCP servers its space lets it call now."""
+
+    assistant: Assistant
+    mcp_servers: list["MCPServer"]
+
+
 AT_TAG_PATTERN = r"<eneo-at-tag: @[^>]+>"
 
 
@@ -2176,13 +2184,43 @@ class AssistantService:
         :class:`NotFoundException`, so this can neither be used as a generic
         permission-skipping read nor to probe org-space assistants.
 
-        Callers are :class:`HelperRunService` (``run`` / ``continue_turn``) and
-        the availability endpoint, always with an id resolved server-side from
+        Callers are the availability endpoint and, through
+        :meth:`get_help_assistant_for_turn`, :class:`HelperRunService`
+        (``run`` / ``continue_turn``), always with an id resolved server-side from
         an active ``OrgSpaceAssistantRole`` or an existing ``HelperRun`` — never
         a client-supplied assistant id. ``continue_turn`` may legitimately load
         a *former* helper (the role was reassigned mid-conversation), which is
         why the assignment-history branch counts.
         """
+        space = await self._help_assistant_space(assistant_id)
+        return space.get_assistant(assistant_id=assistant_id)
+
+    async def get_help_assistant_for_turn(
+        self, assistant_id: UUID
+    ) -> HelpAssistantTurn:
+        """:meth:`get_help_assistant` plus the servers a turn may call.
+
+        A help assistant's servers pass the same space rule as a chat turn's
+        (:func:`general_servers_for_space` with :meth:`_space_membership`), so a
+        server a space admin switched off stops at the next helper turn. The
+        loaded assistant holds no capability-purpose server (AssistantFactory
+        keeps general ones only), so no capability a helper had changes.
+        """
+        space = await self._help_assistant_space(assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
+        )
+        return HelpAssistantTurn(
+            assistant=assistant,
+            mcp_servers=general_servers_for_space(
+                assistant.mcp_servers,
+                space.security_classification,
+                in_space=self._space_membership(space, effective_config),
+            ),
+        )
+
+    async def _help_assistant_space(self, assistant_id: UUID) -> "Space":
         is_active_helper = (
             await self.org_space_assistant_role_repo.exists_active_for_assistant(
                 assistant_id
@@ -2197,9 +2235,7 @@ class AssistantService:
             raise NotFoundException(
                 "Assistant is not a help assistant; refusing privileged read."
             )
-
-        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
-        return space.get_assistant(assistant_id=assistant_id)
+        return await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
 
     async def get_assistants(
         self,
