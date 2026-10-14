@@ -1702,7 +1702,7 @@
   "integration_source_show_in_problems": "See why under Problems",
   "integration_source_folder_empty_syncing": "Documents appear here as the sync reads them.",
   "integration_source_stat_searchable": "Searchable documents",
-  "integration_source_stat_unreadable": "Could not be read",
+  "integration_source_stat_skipped": "Skipped",
   "integration_source_stat_watch": "Change notifications",
   "integration_source_watch_on": "On",
   "integration_source_watch_off": "Off",

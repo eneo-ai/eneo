@@ -256,12 +256,8 @@
             <dd class="text-xl font-semibold tabular-nums">{summary.documentCount}</dd>
           </div>
           <div class="border-default flex flex-col gap-1 border-l px-4 py-3">
-            <dt class="text-secondary text-xs">{m.integration_source_stat_unreadable()}</dt>
-            <dd
-              class="text-xl font-semibold tabular-nums {skippedTotal
-                ? 'text-warning-stronger'
-                : ''}"
-            >
+            <dt class="text-secondary text-xs">{m.integration_source_stat_skipped()}</dt>
+            <dd class="text-xl font-semibold tabular-nums">
               {skippedTotal ?? "–"}
             </dd>
           </div>
