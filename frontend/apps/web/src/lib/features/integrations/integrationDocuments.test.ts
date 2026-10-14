@@ -67,12 +67,12 @@ describe("toggleDocumentsSort", () => {
 });
 
 describe("integrationDocumentsHref", () => {
-  it("points at the item's page and optionally its skipped tab", () => {
+  it("points at the item's page and optionally its problems tab", () => {
     expect(integrationDocumentsHref("personal", "ik-1")).toBe(
       "/spaces/personal/knowledge/integrations/ik-1"
     );
-    expect(integrationDocumentsHref("space-1", "ik-1", "skipped")).toBe(
-      "/spaces/space-1/knowledge/integrations/ik-1?tab=skipped"
+    expect(integrationDocumentsHref("space-1", "ik-1", "problems")).toBe(
+      "/spaces/space-1/knowledge/integrations/ik-1?tab=problems"
     );
   });
 });

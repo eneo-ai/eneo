@@ -73,7 +73,7 @@ describe("describeImportOutcome", () => {
     });
   });
 
-  it("links to the skipped tab when files were skipped and nothing was indexed", () => {
+  it("links to the problems tab when files were skipped and nothing was indexed", () => {
     const outcome = describeImportOutcome(
       knowledge({
         last_sync_status: "success",
@@ -84,7 +84,7 @@ describe("describeImportOutcome", () => {
     );
     expect(outcome.indexed).toBe(0);
     expect(outcome.skipped).toBe(3);
-    expect(outcome.href).toBe("/spaces/space-1/knowledge/integrations/ik-1?tab=skipped");
+    expect(outcome.href).toBe("/spaces/space-1/knowledge/integrations/ik-1?tab=problems");
   });
 
   it("falls back to the document count when the summary is missing", () => {

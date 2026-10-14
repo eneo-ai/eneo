@@ -15,9 +15,10 @@ export const load = async (event) => {
     throw error(404);
   }
 
+  const requestedTab = event.url.searchParams.get("tab");
+
   // An item imported with others lives on its wrapper's page, with its folder selected.
   if (knowledge.wrapper_id && knowledge.integration_type === "sharepoint") {
-    const requestedTab = event.url.searchParams.get("tab");
     throw redirect(
       307,
       sourceHref(
@@ -29,6 +30,11 @@ export const load = async (event) => {
         }
       )
     );
+  }
+
+  // Links from before the problems tab still name the skipped-files tab.
+  if (requestedTab === "skipped") {
+    throw redirect(307, `${event.url.pathname}?tab=problems`);
   }
 
   return { knowledgeId: knowledge.id };

@@ -44,6 +44,15 @@ describe("integration item route", () => {
     }
   );
 
+  it("moves an old link to the skipped files onto the problems tab", async () => {
+    expect(await outcome("ik-alone", "?tab=skipped")).toEqual({
+      thrown: expect.objectContaining({
+        status: 307,
+        location: "/spaces/personal/knowledge/integrations/ik-alone?tab=problems"
+      })
+    });
+  });
+
   it("shows an item imported on its own", async () => {
     expect(await outcome("ik-alone")).toEqual({ data: { knowledgeId: "ik-alone" } });
   });

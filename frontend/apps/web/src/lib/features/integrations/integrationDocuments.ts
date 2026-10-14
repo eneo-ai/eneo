@@ -52,15 +52,14 @@ export type IntegrationSkippedDocuments = {
   synced_at: string | null;
 };
 
-export type IntegrationDocumentsTab = "documents" | "skipped";
-
+/** An item's page; an item imported with others redirects to its folder on the wrapper's page. */
 export function integrationDocumentsHref(
   spaceRouteId: string,
   knowledgeId: string,
-  tab?: IntegrationDocumentsTab
+  tab?: "problems"
 ): string {
   const base = `/spaces/${spaceRouteId}/knowledge/integrations/${knowledgeId}`;
-  return tab === "skipped" ? `${base}?tab=skipped` : base;
+  return tab ? `${base}?tab=${tab}` : base;
 }
 
 export type SkippedReasonGroup = { reason: string; files: string[] };
