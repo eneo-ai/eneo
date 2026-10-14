@@ -12,6 +12,7 @@ from eneo.flows.application.flow_transcript_regeneration_service import (
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.step_output import build_text_overflow_metadata
 from eneo.flows.domain.transcript_corrections import (
+    TranscriptCorrectionOccurrence,
     TranscriptSpeakerEdit,
     segments_content_hash,
 )
@@ -192,6 +193,45 @@ async def test_naming_snapshot_preserves_confirmed_unresolved_and_provisional(co
     )
     context.service.corrections_repo.copy_snapshot.assert_awaited_once()
     assert context.service.audit_service.log.await_args.kwargs["required"] is True
+
+
+async def test_a_transcript_without_speakers_regenerates_without_line_times(
+    context,
+):
+    # Its step kept the model's own text, and timing its words added nothing
+    # to it; a regeneration adds no timestamps either.
+    segments = [
+        {
+            "file_index": 0,
+            "start": 0.0,
+            "end": 2.0,
+            "speaker": None,
+            "text": "Vi frågade sugary om planen.",
+        },
+        {
+            "file_index": 0,
+            "start": 2.4,
+            "end": 5.2,
+            "speaker": None,
+            "text": "Hon svarade direkt.",
+        },
+    ]
+    digest = segments_content_hash(segments)
+    context.service.transcript_source_service.get_for_attempt.return_value = (
+        _source_state(segments)
+    )
+    context.request["segments_hash"] = digest
+    context.corrections.segments_hash = digest
+    context.corrections.occurrences = lambda: [
+        TranscriptCorrectionOccurrence(0, 11, 17, "sugary", "Çagri")
+    ]
+    context.corrections.speaker_edits = lambda: []
+    context.steps[1].output_mode = "pass_through"
+
+    await context.service.regenerate(**context.request)
+
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    assert seed.transcript.text == "Vi frågade Çagri om planen.\nHon svarade direkt."
 
 
 @pytest.mark.parametrize(
