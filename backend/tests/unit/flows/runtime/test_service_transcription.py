@@ -185,6 +185,29 @@ async def test_without_labels_the_service_times_the_models_words(
     assert b'name="task"\r\n\r\ntimestamp\r\n' in service.requests[0].read()
 
 
+async def test_a_token_without_letters_the_aligner_drops_still_times_the_words(
+    spool_contract,
+) -> None:
+    # The service's aligner hears words, not a lone dash; its lines leave it out.
+    spool_contract.duration_seconds = 5.2
+    spoken = "Hej – och välkomna."
+    transcriber = ServiceFlowTranscriber(
+        _registry(
+            TranscribedAudio(
+                spoken, 5.2, segments=(TranscriptSegment(spoken, 0.0, 5.2),)
+            )
+        ),
+        make_transcriber(_timing_service()),
+    )  # type: ignore[arg-type]
+
+    result = await transcriber.transcribe(  # type: ignore[arg-type]
+        await spool_contract.spool(FILE), MODEL, file_id=FILE.id, diarize=False
+    )
+
+    assert (result.text, result.word_timing) == (spoken, "done")
+    assert result.transcript_segments == TIMED_LINES
+
+
 def _with_lines(**changes: object) -> dict[str, object]:
     """TIMED_BODY with every line changed; the text still renders the lines."""
     lines = [{**line, **changes} for line in TIMED_BODY["segments"]]  # type: ignore[union-attr]

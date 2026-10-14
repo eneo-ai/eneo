@@ -233,4 +233,10 @@ def _timed_lines(
 
 
 def _tokens(texts: Iterable[str]) -> list[str]:
-    return " ".join(texts).split()
+    """The words of ``texts`` as written. A token without a letter or digit,
+    such as a lone dash, is not one: the service's aligner may leave it out."""
+    return [
+        token
+        for token in " ".join(texts).split()
+        if any(char.isalnum() for char in token)
+    ]
