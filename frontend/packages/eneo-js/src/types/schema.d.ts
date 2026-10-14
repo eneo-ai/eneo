@@ -23840,7 +23840,7 @@ export interface components {
       model_name: string;
       /**
        * Model Type
-       * @description Model type: completion, embedding, transcription, or image
+       * @description Model type: completion, embedding, transcription, image, or rerank
        * @default completion
        */
       model_type?: string;

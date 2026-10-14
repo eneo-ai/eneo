@@ -315,6 +315,9 @@ class Settings(BaseSettings):
     # Tool-call budget for the built-in image generation provider. Image
     # models routinely take longer than a general MCP tool call.
     image_generation_timeout_seconds: int = 240
+    # Upper bound for one rerank call to a provider, starting with the
+    # registration-time connection test.
+    rerank_request_timeout_seconds: int = 10
     mcp_tool_output_max_chars: int = 32768
     # Decoded size cap for a single MCP image content block; larger images
     # are dropped before they can be persisted as generated files.

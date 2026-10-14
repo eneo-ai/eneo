@@ -44,6 +44,7 @@ from eneo.model_providers.domain.provider_api import (
     connection_check_request,
     models_list_request,
 )
+from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     embedding_provider_configuration,
 )
@@ -172,8 +173,8 @@ def _extract_mode_hint(m: dict[str, Any]) -> str | None:
        use ``model_type: "text"`` for everything and rely on the flag.
 
     Returns one of ``"completion"``, ``"embedding"``, ``"transcription"``,
-    ``"image"``, or ``None`` when the response carries neither field and the
-    caller should fall back to name-based inference.
+    ``"image"``, ``"rerank"``, or ``None`` when the response carries neither
+    field and the caller should fall back to name-based inference.
     """
     raw_capabilities: Any = m.get("capabilities")
     embeddings_flag: bool = (
@@ -188,6 +189,8 @@ def _extract_mode_hint(m: dict[str, Any]) -> str | None:
         return "transcription"
     if model_type in ("image", "image_generation"):
         return "image"
+    if model_type == "rerank":
+        return "rerank"
     if model_type == "text":
         # Could still be an embedding flagged via capabilities.
         return "embedding" if embeddings_flag else "completion"
@@ -226,6 +229,7 @@ LITELLM_MODE_TO_OUR_MODE: dict[str, str] = {
     "embedding": "embedding",
     "audio_transcription": "transcription",
     "image_generation": "image",
+    "rerank": "rerank",
 }
 
 # Name fragments that mark an image generation model when the name is not in
@@ -287,6 +291,8 @@ def _infer_mode_from_name(name: str) -> str | None:
         return None
     if any(kw in lower for kw in _IMAGE_NAME_KEYWORDS):
         return "image"
+    if "rerank" in lower:
+        return "rerank"
     if "whisper" in lower:
         return "transcription"
     if "embedding" in lower:
@@ -765,6 +771,7 @@ class ModelProviderService:
         For transcription models: skips validation (requires audio file).
         For image models: skips validation (a real generation is billed and
         slow; a wrong name surfaces on first use through the provider error).
+        For rerank models: sends one short query with two documents.
         """
         if model_type in ("transcription", "image"):
             return {
@@ -805,6 +812,14 @@ class ModelProviderService:
         try:
             if model_type == "embedding":
                 await aembedding(input=["test"], **kwargs)
+            elif model_type == "rerank":
+                await litellm_transport.arerank(
+                    query="test",
+                    documents=["first document", "second document"],
+                    top_n=1,
+                    timeout=get_settings().rerank_request_timeout_seconds,
+                    **kwargs,
+                )
             else:
                 await acompletion(
                     messages=[{"role": "user", "content": "hi"}],

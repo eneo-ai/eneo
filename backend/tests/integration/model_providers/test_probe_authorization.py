@@ -45,6 +45,13 @@ async def tenant_tokens(db_container, patch_auth_service_jwt):
             "validate_model",
             {"success": True},
         ),
+        (
+            "POST",
+            "validate-model",
+            {"model_name": "rerank-v3.5", "model_type": "rerank"},
+            "validate_model",
+            {"success": True},
+        ),
     ],
 )
 async def test_provider_probes_require_admin(
