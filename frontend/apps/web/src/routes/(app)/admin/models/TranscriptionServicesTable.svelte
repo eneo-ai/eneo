@@ -106,14 +106,17 @@
 
   // Applies a saved service as the server returned it, its check included:
   // the server clears a check whose address or key changed, by anyone. A
-  // check still running tested settings this answer may have replaced, so its
-  // result is dropped; a new address or key starts a fresh one.
+  // check still running tested settings this answer may have replaced: a new
+  // address or key from this page, an address moved by someone else, or a
+  // stored check the server cleared for a new key. Then its result is dropped.
+  // Any other change (the name, the default mark, switching it on) leaves it
+  // to answer, so connecting a service as the default still shows its test.
   //
   // The default mark belongs to the organisation, not to the row: only the
   // answer to a save that changed it (`marksDefault`) brings it, and takes it
   // from the service that had it. A slower answer to another edit carries the
   // mark as it was when that edit was sent, so it keeps what the list shows.
-  function replace(next: TranscriptionService, marksDefault = false): boolean {
+  function replace(next: TranscriptionService, marksDefault = false, newSettings = false): boolean {
     const current = services.find((service) => service.id === next.id);
     if (!current) return false;
     services = services.map((service) => {
@@ -124,8 +127,14 @@
         ? { ...service, is_default: false }
         : service;
     });
-    checkRuns.set(next.id, (checkRuns.get(next.id) ?? 0) + 1);
-    checking.delete(next.id);
+    const replaced =
+      newSettings ||
+      next.endpoint_url !== current.endpoint_url ||
+      (current.last_check !== null && next.last_check === null);
+    if (replaced) {
+      checkRuns.set(next.id, (checkRuns.get(next.id) ?? 0) + 1);
+      checking.delete(next.id);
+    }
     return true;
   }
 
@@ -197,7 +206,7 @@
   ): Promise<TranscriptionService> {
     const retest = "endpoint_url" in body || "api_key" in body;
     const updated = await mutate(id, () => eneo.transcriptionServices.update({ id }, body));
-    if (replace(updated, "is_default" in body) && retest) void runCheck(id);
+    if (replace(updated, "is_default" in body, retest) && retest) void runCheck(id);
     return updated;
   }
 
@@ -232,25 +241,16 @@
 
 <section
   aria-labelledby="{uid}-heading"
-  class="mt-6 flex flex-col gap-4 border-t pt-6"
+  class="mt-6 flex flex-col gap-4 border-t pt-6 pb-4"
   data-tour="admin-speaker-identification"
 >
-  <header class="flex flex-wrap items-start justify-between gap-3">
-    <div>
-      <h2 id="{uid}-heading" class="text-primary text-sm font-semibold tracking-tight">
-        {m.speaker_identification()}
-      </h2>
-      <p class="text-secondary mt-1 max-w-3xl text-[0.8125rem] leading-relaxed">
-        {m.speaker_service_intro()}
-      </p>
-    </div>
-    {#if !loadFailed}
-      <!-- Outline, as the models' own "Lägg till leverantör" above: the tab has no one primary action. -->
-      <Button variant="outline" onclick={() => openDialog(null)}>
-        <Plus data-icon="inline-start" />
-        {m.speaker_service_connect()}
-      </Button>
-    {/if}
+  <header>
+    <h2 id="{uid}-heading" class="text-primary text-sm font-semibold tracking-tight">
+      {m.speaker_identification()}
+    </h2>
+    <p class="text-secondary mt-1 max-w-3xl text-[0.8125rem] leading-relaxed">
+      {m.speaker_service_intro()}
+    </p>
   </header>
 
   {#if loadFailed}
@@ -270,6 +270,7 @@
         <Empty.Title>{m.speaker_service_empty_title()}</Empty.Title>
         <Empty.Description>{m.speaker_service_empty_description()}</Empty.Description>
       </Empty.Header>
+      <Empty.Content>{@render connect()}</Empty.Content>
     </Empty.Root>
   {:else}
     <div class="overflow-hidden rounded-lg border">
@@ -393,8 +394,17 @@
         </Table.Body>
       </Table.Root>
     </div>
+    <!-- Under the list, as the models' "Lägg till leverantör" above it on this tab. -->
+    <div class="flex justify-center">{@render connect()}</div>
   {/if}
 </section>
+
+{#snippet connect()}
+  <Button variant="outline" onclick={() => openDialog(null)}>
+    <Plus data-icon="inline-start" />
+    {m.speaker_service_connect()}
+  </Button>
+{/snippet}
 
 {#key dialogKey}
   <TranscriptionServiceDialog

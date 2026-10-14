@@ -170,6 +170,8 @@
         // A service just connected stays open, so the new test is seen too.
         if (!connected) open = false;
         saved = updated;
+        // As stored: without a trailing "/" or "/v1".
+        address = updated.endpoint_url;
         savedClassificationId = classificationId;
         savedDefault = isDefault;
         apiKey = "";
@@ -183,6 +185,7 @@
           security_classification: classification
         });
         connected = true;
+        address = saved.endpoint_url;
         savedClassificationId = classificationId;
         apiKey = "";
         attempted = false;

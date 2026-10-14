@@ -253,6 +253,29 @@ it("connects a service as the default when the box is ticked, taking the mark fr
     .not.toHaveTextContent(m.speaker_service_default_badge());
 });
 
+it("shows the test of a service connected as the default, though the mark is saved while it runs", async () => {
+  const timra = service({ id: "s2", name: "Vemsa Timrå", endpoint_url: "https://vemsa.timra.se" });
+  const running = deferred<TranscriptionServiceCheck>();
+  create.mockImplementation(async () => timra);
+  update.mockImplementation(async () => ({ ...timra, is_default: true }));
+  check.mockReturnValueOnce(running.promise);
+  render(TranscriptionServicesTable, { services: [], classifications: [] });
+
+  await page.getByRole("button", { name: m.speaker_service_connect() }).click();
+  await page.getByLabelText(m.name()).fill(timra.name);
+  await page.getByLabelText(m.speaker_service_address()).fill(timra.endpoint_url);
+  await page.getByLabelText(m.speaker_service_api_key()).fill("key");
+  await page.getByLabelText(m.speaker_service_default_label()).click();
+  await page.getByRole("button", { name: m.speaker_service_connect_submit(), exact: true }).click();
+  await vi.waitFor(() => expect(update).toHaveBeenCalledWith({ id: "s2" }, { is_default: true }));
+
+  // The mark changed neither the address nor the key: the running test still answers.
+  running.resolve(result("ready"));
+  await expect
+    .element(page.getByRole("dialog").getByText(m.speaker_service_check_words_and_speakers()))
+    .toBeVisible();
+});
+
 it("keeps one default when a slower answer to another edit arrives after the mark moved", async () => {
   const timra = service({ id: "s2", name: "Vemsa Timrå", endpoint_url: "https://vemsa.timra.se" });
   const switchingOff = deferred<TranscriptionService>();
