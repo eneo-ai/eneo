@@ -98,7 +98,7 @@
                 {#snippet action()}
                   <div class="flex flex-col gap-2">
                     {#if isSharePoint(integration)}
-                      <div class="flex items-center gap-2">
+                      <div class="flex flex-wrap items-center gap-2">
                         {#if sharePointConfigStatus === "loading"}
                           <Badge variant="secondary">{m.integration_status_loading()}</Badge>
                         {:else if sharePointConfigStatus === "configured"}
@@ -107,6 +107,9 @@
                           >
                             {m.integration_status_configured()}
                           </Badge>
+                          {#if sharePointConfig}
+                            <SharePointAuthHealth config={sharePointConfig} variant="badge" />
+                          {/if}
                         {:else if sharePointConfigStatus === "error"}
                           <Badge variant="destructive">{m.integration_status_error()}</Badge>
                           <Button
@@ -123,12 +126,17 @@
                       </div>
 
                       {#if sharePointConfigStatus === "configured" && sharePointConfig}
-                        <SharePointAuthHealth config={sharePointConfig} />
-                        {#if sharePointConfig.auth_method === "service_account" && sharePointConfig.auth_status === "error"}
+                        <SharePointAuthHealth config={sharePointConfig} variant="details" />
+                      {/if}
+
+                      {@const needsReauth =
+                        sharePointConfigStatus === "configured" &&
+                        sharePointConfig?.auth_method === "service_account" &&
+                        sharePointConfig?.auth_status === "error"}
+                      <div class="flex items-center gap-2">
+                        {#if needsReauth}
                           <Button
-                            variant="outline"
-                            size="sm"
-                            class="w-fit"
+                            class="flex-1"
                             disabled={reauthServiceAccount.isLoading}
                             onclick={reauthServiceAccount}
                           >
@@ -137,9 +145,6 @@
                               : m.sharepoint_reauth_with_microsoft()}
                           </Button>
                         {/if}
-                      {/if}
-
-                      <div class="flex items-center gap-2">
                         <Button
                           variant={sharePointConfigStatus === "configured" ? "outline" : "default"}
                           class="flex-1"

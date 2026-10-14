@@ -11,6 +11,7 @@ describe("classifyMicrosoftAuthError", () => {
     ],
     ["interaction_required: user must sign in", "interaction_required"],
     ["invalid_grant: AADSTS700082: The refresh token has expired", "invalid_grant"],
+    ["AADSTS9002313: Invalid request. Request is malformed or invalid.", "invalid_grant"],
     ["Connection reset by peer", null],
     ["", null],
     [null, null]

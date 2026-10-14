@@ -7,7 +7,9 @@ export type MicrosoftAuthGuidance = "invalid_client" | "interaction_required" | 
 const GUIDANCE_PATTERNS: ReadonlyArray<[MicrosoftAuthGuidance, RegExp]> = [
   ["invalid_client", /AADSTS7000215|invalid_client/i],
   ["interaction_required", /AADSTS50076|interaction_required/i],
-  ["invalid_grant", /invalid_grant/i]
+  // AADSTS9002313 ("Invalid request") is what a refresh with a stale or
+  // garbled refresh token returns; signing in again is the remedy.
+  ["invalid_grant", /invalid_grant|AADSTS9002313/i]
 ];
 
 /** Which short guidance fits a raw Microsoft identity error, if any. */
