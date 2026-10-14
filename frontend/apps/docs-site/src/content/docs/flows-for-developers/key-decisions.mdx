@@ -141,10 +141,10 @@ The call of an MCP tool for a step's input (`input_source` `tool`) is not opened
 by this package: the MCP client opens it, to a server an instance administrator
 registered. Before each call the flow vets that server's registered address with
 the same policy, with private networks allowed unless
-`FLOW_TOOL_ALLOW_PRIVATE_NETWORKS` is off. The call follows no redirect. This is
-not a pinned connection: the MCP client resolves the name again when it connects.
-The MCP client honours `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY`, which the
-flow HTTP transport ignores.
+`FLOW_TOOL_ALLOW_PRIVATE_NETWORKS` is off. The call follows no redirect. The flow
+gives the MCP client this package's HTTP client, so every connection of the call
+is vetted when it is opened and goes to a vetted IP literal, as for flow HTTP,
+and the call ignores `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` too.
 
 ## 14. Write semantics are per operation
 

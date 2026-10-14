@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import ssl
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Protocol, cast
 
 import httpcore
@@ -51,9 +51,11 @@ class VettedNetworkBackend(httpcore.AsyncNetworkBackend):
         *,
         resolver: Resolver | None = None,
         connector: httpcore.AsyncNetworkBackend | None = None,
+        on_refused: Callable[[], None] | None = None,
     ) -> None:
         self._policy = policy
         self._resolver = resolver or flow_name_resolver()
+        self._on_refused = on_refused
         # httpcore.AnyIOBackend is a real network backend; its conditional export
         # hides that from the type checker.
         self._connector = connector or cast(
@@ -77,6 +79,10 @@ class VettedNetworkBackend(httpcore.AsyncNetworkBackend):
                 deadline=deadline,
                 resolver=self._resolver,
             )
+        except DestinationRefused:
+            if self._on_refused is not None:
+                self._on_refused()
+            raise
         except TimeoutError as exc:
             raise httpcore.ConnectTimeout(
                 f"Resolving {host} exceeded the connect timeout"
@@ -127,6 +133,7 @@ class VettedAsyncTransport(httpx.AsyncHTTPTransport):
         ssl_context: ssl.SSLContext,
         resolver: Resolver | None = None,
         connector: httpcore.AsyncNetworkBackend | None = None,
+        on_refused: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(verify=ssl_context, trust_env=False, retries=0)
         if not isinstance(getattr(self, "_pool", None), httpcore.AsyncConnectionPool):
@@ -141,7 +148,7 @@ class VettedAsyncTransport(httpx.AsyncHTTPTransport):
             http2=False,
             retries=0,
             network_backend=VettedNetworkBackend(
-                policy, resolver=resolver, connector=connector
+                policy, resolver=resolver, connector=connector, on_refused=on_refused
             ),
         )
 
@@ -160,6 +167,60 @@ def build_http_client(
     resolver: Resolver | None = None,
     connector: httpcore.AsyncNetworkBackend | None = None,
 ) -> httpx.AsyncClient:
+    return _vetted_client(
+        policy=policy,
+        timeout=httpx.Timeout(timeout_seconds),
+        headers=None,
+        ssl_context=ssl_context,
+        resolver=resolver,
+        connector=connector,
+        on_refused=None,
+    )
+
+
+class VettedClientFactory:
+    """Builds, for a library that sends its requests through a client it is
+    given (the MCP client of a tool step), clients whose every connection is
+    to an address ``policy`` allows for the name as ``resolver`` answers it
+    at that connection, and says whether it refused one."""
+
+    def __init__(self, *, policy: FlowDestinationPolicy, resolver: Resolver) -> None:
+        self._policy = policy
+        self._resolver = resolver
+        self._refused = False
+
+    def __call__(
+        self, *, headers: dict[str, str], timeout: httpx.Timeout
+    ) -> httpx.AsyncClient:
+        return _vetted_client(
+            policy=self._policy,
+            timeout=timeout,
+            headers=headers,
+            ssl_context=None,
+            resolver=self._resolver,
+            connector=None,
+            on_refused=self._note_refused,
+        )
+
+    def refused_a_connection(self) -> bool:
+        """Whether a client of this factory was refused a connection by the
+        policy."""
+        return self._refused
+
+    def _note_refused(self) -> None:
+        self._refused = True
+
+
+def _vetted_client(
+    *,
+    policy: FlowDestinationPolicy,
+    timeout: httpx.Timeout,
+    headers: dict[str, str] | None,
+    ssl_context: ssl.SSLContext | None,
+    resolver: Resolver | None,
+    connector: httpcore.AsyncNetworkBackend | None,
+    on_refused: Callable[[], None] | None,
+) -> httpx.AsyncClient:
     _warn_once_if_proxy_environment_is_set()
     return httpx.AsyncClient(
         transport=VettedAsyncTransport(
@@ -169,8 +230,10 @@ def build_http_client(
             ssl_context=ssl_context or httpx.create_ssl_context(trust_env=True),
             resolver=resolver,
             connector=connector,
+            on_refused=on_refused,
         ),
-        timeout=httpx.Timeout(timeout_seconds),
+        headers=headers,
+        timeout=timeout,
         follow_redirects=False,
         trust_env=False,
     )
@@ -188,7 +251,8 @@ def _warn_once_if_proxy_environment_is_set() -> None:
     if names:
         _proxy_environment_warned = True
         logger.warning(
-            "Flow HTTP ignores proxy environment variables (%s are set): flow "
-            "requests connect directly, under the destination policy.",
+            "Flow HTTP requests and MCP tool calls ignore proxy environment "
+            "variables (%s are set): they connect directly, under the "
+            "destination policy.",
             ", ".join(names),
         )

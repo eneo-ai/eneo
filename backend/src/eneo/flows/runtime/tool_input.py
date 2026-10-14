@@ -63,6 +63,7 @@ from eneo.flows.output_processing import (
     raise_contract_finding,
     refuse_unknown_dialect,
 )
+from eneo.flows.runtime.egress.http import VettedClientFactory
 from eneo.flows.runtime.egress.policy import (
     Deadline,
     DestinationRefused,
@@ -95,7 +96,10 @@ if TYPE_CHECKING:
     from eneo.flows.domain.runtime import RuntimeStep
     from eneo.flows.variable_resolver import FlowVariableContext, FlowVariableResolver
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
-    from eneo.mcp_servers.infrastructure.client.mcp_client import MCPToolAnswer
+    from eneo.mcp_servers.infrastructure.client.mcp_client import (
+        MCPHttpClientFactory,
+        MCPToolAnswer,
+    )
 
 _CALL_PHASE = "the tool call"
 _TOOL_INPUT_TYPE_VALUES = frozenset(item.value for item in TOOL_INPUT_TYPES)
@@ -132,6 +136,7 @@ class ToolCaller(Protocol):
         *,
         max_answer_bytes: int,
         timeout_seconds: int,
+        http_client_factory: MCPHttpClientFactory,
     ) -> MCPToolAnswer: ...
 
 
@@ -419,9 +424,9 @@ async def _refuse_arguments_outside_the_schema(
 async def _vet_server_address(
     step: RuntimeStep, server: MCPServer, deps: ToolInputDeps, seconds: int
 ) -> None:
-    # A check of the addresses the server's name has now, before the call. It
-    # is not a pinned connection: the MCP client resolves the name again when
-    # it connects.
+    # A check of the addresses the server's name has now, so that a server the
+    # policy refuses ends with its own code before anything is sent. Every
+    # connection of the call is vetted again when it is opened (_call).
     try:
         address = parse_effective_http_url(server.http_url)
         await vet_destination(
@@ -488,6 +493,12 @@ async def _call(
             arguments,
             max_answer_bytes=deps.max_answer_bytes,
             timeout_seconds=timeout_seconds,
+            # The name may answer differently when the client connects than
+            # it did to the check before: each connection connects to an
+            # address the policy allows at that moment, or is not opened.
+            http_client_factory=VettedClientFactory(
+                policy=deps.destination_policy, resolver=deps.name_resolver
+            ),
         )
     except MCPToolCallTimedOut:
         raise _refusal(

@@ -32,8 +32,8 @@ the other starts a child process of its own.
 
 A connection that another first-party module opens for flow code is not seen
 either. The call of an MCP tool for a step's input is one: the MCP module's
-client opens it. FIRST_PARTY_CONNECTORS names the flow modules that may import
-that caller, and the flow vets the server's address before each call.
+client opens it, through the HTTP client of this package that the flow gives
+it. FIRST_PARTY_CONNECTORS names the flow modules that may import that caller.
 """
 
 from __future__ import annotations
@@ -71,15 +71,15 @@ FIRST_PARTY_CONNECTORS = {
             "builds the caller for the run's executor. The server is one an "
             "instance administrator registered, never an address a flow author "
             "wrote; flows/runtime/tool_input.py vets that server's address with "
-            "the destination policy before each call. That is a check of the "
-            "addresses the name has then, not a pinned connection: the MCP client "
-            "resolves the name again when it connects"
+            "the destination policy before each call, and gives the call the "
+            "vetted client factory of the egress package, which vets every "
+            "connection the MCP client opens"
         ),
         "flows/runtime/tool_input.py": (
             "the module that vets the address and then calls through the caller "
-            "the executor was given. It imports one number, the grace the caller "
-            "may take to report a spent budget, to keep that much of the step's "
-            "time back"
+            "the executor was given, with the vetted client factory. It imports "
+            "one number, the grace the caller may take to report a spent budget, "
+            "to keep that much of the step's time back"
         ),
     },
 }

@@ -13,6 +13,7 @@ from typing import (
     Callable,
     Literal,
     Optional,
+    Protocol,
     cast,
 )
 
@@ -78,6 +79,33 @@ MCPStreams = tuple[
     MemoryObjectSendStream[SessionMessage],
     GetSessionIdCallback,
 ]
+
+
+class MCPHttpClientFactory(Protocol):
+    """Builds the HTTP client an ``MCPClient`` sends every request through,
+    the diagnosis of a failed connect included. Whoever builds the client
+    decides which addresses its connections may reach."""
+
+    def __call__(
+        self, *, headers: dict[str, str], timeout: httpx.Timeout
+    ) -> httpx.AsyncClient: ...
+
+    def refused_a_connection(self) -> bool:
+        """Whether the factory's own rule refused a connection that one of
+        its clients was to open."""
+        ...
+
+
+class SdkHttpClientFactory:
+    """The MCP SDK's HTTP client, which refuses no connection itself."""
+
+    def __call__(
+        self, *, headers: dict[str, str], timeout: httpx.Timeout
+    ) -> httpx.AsyncClient:
+        return create_mcp_http_client(headers=headers, timeout=timeout)
+
+    def refused_a_connection(self) -> bool:
+        return False
 
 
 def _skip_json_whitespace(data: bytes | bytearray | memoryview, offset: int) -> int:
@@ -565,10 +593,11 @@ async def _open_streamable_http_client(
     tool_catalog_max_bytes: int,
     tool_answer_ceiling: _ToolAnswerCeiling | None = None,
     terminate_on_close: bool = True,
+    http_client_factory: MCPHttpClientFactory,
 ) -> AsyncGenerator[MCPStreams]:
     timeout = httpx.Timeout(timeout_seconds, read=read_timeout_seconds)
     http_headers = {"Accept-Encoding": "identity", **headers}
-    async with create_mcp_http_client(
+    async with http_client_factory(
         headers=http_headers, timeout=timeout
     ) as http_client:
         # The SDK's client follows redirects. No MCP client of Eneo does: a
@@ -705,7 +734,12 @@ def _redirect_target(response: httpx.Response) -> str | None:
     return None if address == _address(response.url) else address
 
 
-async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
+async def _diagnose_http(
+    url: str,
+    headers: dict[str, str],
+    *,
+    http_client_factory: MCPHttpClientFactory,
+) -> str:
     """Quick HTTP request to diagnose the real error when MCP protocol fails.
 
     The MCP library's anyio TaskGroups can swallow the actual HTTP error
@@ -717,15 +751,18 @@ async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
     rejects the probe body itself.
     """
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+        async with http_client_factory(
+            headers=headers, timeout=httpx.Timeout(5.0)
+        ) as client:
             async with client.stream(
                 "POST",
                 url,
                 headers={
-                    **headers,
                     "Content-Type": "application/json",
                     "Accept": "application/json, text/event-stream",
                 },
+                # The redirect is what this request may have to report.
+                follow_redirects=False,
                 json={
                     "jsonrpc": "2.0",
                     "method": "initialize",
@@ -850,6 +887,7 @@ class MCPClient:
         identity_headers: dict[str, str] | None = None,
         tool_call_max_bytes: int | None = None,
         terminate_session_on_close: bool = True,
+        http_client_factory: MCPHttpClientFactory | None = None,
     ):
         """
         Initialize MCP client.
@@ -872,6 +910,10 @@ class MCPClient:
                 answer the close waits for up to the transport's read
                 timeout. False for a caller that has to be done within its
                 time; the server's session then expires on its own.
+            http_client_factory: Builds the HTTP client every request of
+                this client goes through. The SDK's by default; a caller
+                that may reach only addresses it vetted gives one whose
+                connections are vetted.
             on_tools_list_changed: Fired (best-effort) when the server pushes a
                 ``notifications/tools/list_changed``. Progressive-discovery
                 servers emit this after a tool like ``load_tools`` activates new
@@ -893,6 +935,7 @@ class MCPClient:
             else None
         )
         self._terminate_session_on_close = terminate_session_on_close
+        self._http_client_factory = http_client_factory or SdkHttpClientFactory()
         # Set when a tools/list_changed notification arrives on this session.
         # The proxy also re-lists the servers it just called, so this flag is a
         # protocol-correct optimization rather than the sole trigger.
@@ -971,7 +1014,14 @@ class MCPClient:
             raise
         except BaseException as e:
             error_msg = _extract_error_message(e)
-            if not error_msg:
+            if not error_msg and self._http_client_factory.refused_a_connection():
+                # Asking the server why would resolve its name again, and an
+                # answer the rule allows then would not explain this failure.
+                error_msg = (
+                    "The address the server's name answered is not one this "
+                    "client may connect to."
+                )
+            elif not error_msg:
                 # Cancel scope or other unhelpful error — do a direct HTTP
                 # request to surface the real issue (e.g. 401).
                 try:
@@ -980,7 +1030,11 @@ class MCPClient:
                     # Still produce a diagnostic if auth header construction
                     # fails for any unexpected reason.
                     diagnostic_headers = {}
-                error_msg = await _diagnose_http(self.endpoint_url, diagnostic_headers)
+                error_msg = await _diagnose_http(
+                    self.endpoint_url,
+                    diagnostic_headers,
+                    http_client_factory=self._http_client_factory,
+                )
             logger.error(
                 f"Failed to connect to MCP server {self.mcp_server.name}: {error_msg}"
             )
@@ -1030,6 +1084,7 @@ class MCPClient:
             tool_catalog_max_bytes=self.mcp_server.tool_catalog_max_bytes,
             tool_answer_ceiling=self._tool_answer_ceiling,
             terminate_on_close=self._terminate_session_on_close,
+            http_client_factory=self._http_client_factory,
         )
 
         streams = await streams_context.__aenter__()

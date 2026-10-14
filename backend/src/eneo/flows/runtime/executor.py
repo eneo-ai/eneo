@@ -166,7 +166,11 @@ from eneo.flows.runtime.document_rendering.limits import (
 from eneo.flows.runtime.document_rendering.service import (
     default_document_render_service,
 )
-from eneo.flows.runtime.egress.policy import FlowDestinationPolicy, Resolver
+from eneo.flows.runtime.egress.policy import (
+    FlowDestinationPolicy,
+    FlowOutboundTraffic,
+    Resolver,
+)
 from eneo.flows.runtime.egress.resolver import flow_name_resolver
 from eneo.flows.runtime.execution_heartbeat import (
     FlowExecutionOwnershipLost,
@@ -738,7 +742,8 @@ class FlowRunExecutor:
         self.tool_facts_reader = tool_facts_reader
         self.tool_caller = tool_caller
         self.tool_destination_policy = FlowDestinationPolicy(
-            allow_private_networks=resolved_config.tool_allow_private_networks
+            allow_private_networks=resolved_config.tool_allow_private_networks,
+            traffic=FlowOutboundTraffic.MCP_TOOL_CALL,
         )
         self.tool_name_resolver: Resolver = flow_name_resolver()
         self.tool_call_timeout_seconds = resolved_config.tool_call_timeout_seconds

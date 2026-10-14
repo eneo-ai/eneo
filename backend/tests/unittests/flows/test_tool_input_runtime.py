@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import socket
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
@@ -126,6 +127,7 @@ class _Caller:
         *,
         max_answer_bytes: int,
         timeout_seconds: int,
+        http_client_factory: object,
     ) -> MCPToolAnswer:
         self.calls.append(
             {
@@ -1150,6 +1152,7 @@ async def test_the_default_policy_refuses_a_loopback_server_before_any_request(
 async def test_the_servers_address_is_vetted_with_the_tool_setting(
     user,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     allow_private: bool | None,
     http_url: str,
     answered: list[str] | Exception,
@@ -1157,8 +1160,9 @@ async def test_the_servers_address_is_vetted_with_the_tool_setting(
 ) -> None:
     # Kills the mutants that vet with the HTTP setting (private networks off by
     # default), ignore the tool setting, vet another host or port than the
-    # server's, report an unresolved name as a refused address, or leave a
-    # refused server out of the audit.
+    # server's, report an unresolved name as a refused address, leave a
+    # refused server out of the audit, or log a refused address as one of
+    # flow HTTP.
     assert Settings.model_fields["flow_tool_allow_private_networks"].default is True
     if allow_private is not None:
         changed = get_settings().model_copy(
@@ -1187,12 +1191,101 @@ async def test_the_servers_address_is_vetted_with_the_tool_setting(
     else:
         refused = await _refused(executor, _tool_step(facts), _running(user))
         assert refused.code == code
+        assert (
+            "Flow MCP tool call refused destination mcp.internal" in caplog.text
+        ) is (code == "typed_io_tool_destination_blocked" and bool(asked))
         (audit,) = _audits(executor)
         assert audit["outcome"] is Outcome.FAILURE
         assert "secret" not in str(refused) + repr(audit)
         assert caller.calls == []
     assert asked in ([("mcp.internal", 443)], [])
     assert bool(asked) is ("user:secret" not in http_url)
+
+
+async def test_the_call_connects_only_to_an_address_the_policy_allows_then(
+    user, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Kills the mutant that lets the MCP client connect with an HTTP client of
+    # its own, which resolves the server's name again when it connects: this
+    # name answers a public address to the check before the call and loopback
+    # to every later question, and that client reaches the server on loopback.
+    name = "mcp.rebinding.example"
+    lookups: list[str] = []
+
+    def answer() -> str:
+        lookups.append(name)
+        return "93.184.216.34" if len(lookups) == 1 else "127.0.0.1"
+
+    async def resolver(host: str, port: int) -> list[str]:
+        assert host == name
+        return [answer()]
+
+    ask_the_system = socket.getaddrinfo
+
+    def getaddrinfo(host: str | bytes | None, *rest: Any, **named: Any) -> Any:
+        # The same name server, asked the way the operating system asks it.
+        asked = host.decode() if isinstance(host, bytes) else host
+        return ask_the_system(answer() if asked == name else host, *rest, **named)
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    reached: list[str] = []
+
+    async def note(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        reached.append(request.method)
+        return await call_next(request)
+
+    app = one_tool_app(lambda request_id: tool_result(request_id, {"content": []}))
+    app.middleware("http")(note)
+    async with serve_test_app(app) as url:
+        facts = _endpoint_facts(url.replace("127.0.0.1", name))
+        executor = _tool_executor(user, _Facts(facts), _real_caller())
+        executor.tool_destination_policy = FlowDestinationPolicy(
+            allow_private_networks=True
+        )
+        executor.tool_name_resolver = resolver
+
+        refused = await _refused(
+            executor, _tool_step(facts, input_type="text"), _running(user)
+        )
+
+    assert reached == []
+    assert refused.code == "typed_io_tool_connection_error"
+
+
+async def test_a_connection_the_policy_refused_is_not_followed_by_a_question(
+    user,
+) -> None:
+    # Kills the mutant that lets the client ask the server why the connect
+    # failed after the policy refused the connection: the question resolves
+    # the name again, this name then answers an allowed address, and the
+    # question reaches the server with the credential and reports it as
+    # reachable.
+    answers = iter(["127.0.0.1", "169.254.169.254"])
+    lookups: list[str] = []
+
+    async def resolver(host: str, port: int) -> list[str]:
+        lookups.append(host)
+        return [next(answers, "127.0.0.1")]
+
+    reached: list[str] = []
+
+    async def note(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        reached.append(request.method)
+        return await call_next(request)
+
+    app = one_tool_app(lambda request_id: tool_result(request_id, {"content": []}))
+    app.middleware("http")(note)
+    async with serve_test_app(app) as url:
+        facts = _endpoint_facts(url.replace("127.0.0.1", "mcp.probe.example"))
+        executor = _tool_executor(user, _Facts(facts), _real_caller())
+        executor.tool_name_resolver = resolver
+
+        refused = await _refused(
+            executor, _tool_step(facts, input_type="text"), _running(user)
+        )
+
+    assert (reached, len(lookups)) == ([], 2)
+    assert refused.code == "typed_io_tool_connection_error"
 
 
 async def test_the_executor_config_reads_the_tool_settings_of_the_deployment(
