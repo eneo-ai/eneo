@@ -89,6 +89,15 @@ class SharePointSubscriptionService:
             )
         return self.client_state
 
+    def require_webhook_configuration(self) -> None:
+        """Raise ``ValueError`` naming what a Graph subscription cannot be created without."""
+        if not self.notification_url:
+            raise ValueError(
+                "Set PUBLIC_ORIGIN or SHAREPOINT_WEBHOOK_NOTIFICATION_URL "
+                "before creating SharePoint webhook subscriptions."
+            )
+        self._require_client_state()
+
     def notification_url_drifted(self, subscription: SharePointSubscription) -> bool:
         """True when Graph still posts to a URL this deployment no longer serves."""
         return bool(
@@ -264,6 +273,9 @@ class SharePointSubscriptionService:
         Returns:
             True if recreation successful, False otherwise
         """
+        # Graph drops the old subscription before the new payload is built;
+        # with no URL or client state there would be nothing to put back.
+        self.require_webhook_configuration()
         logger.info(
             f"Recreating expired subscription {subscription.subscription_id} "
             f"for {_resource_label(subscription.site_id, subscription.drive_id)}"
