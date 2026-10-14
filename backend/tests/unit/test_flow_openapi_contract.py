@@ -4606,6 +4606,39 @@ def test_openapi_admin_history_purge_defaults_to_preview_and_is_bounded(
         }
 
 
+def test_openapi_last_check_says_why_it_failed_and_whether_words_are_timed(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec["components"]["schemas"]
+    last_check = schemas["TranscriptionServiceLastCheckPublic"]
+    properties = last_check["properties"]
+
+    assert set(properties) == {
+        "outcome",
+        "identifies_speakers",
+        "times_words",
+        "service_version",
+        "reason",
+        "status_code",
+        "checked_at",
+    }
+    assert set(schemas["TranscriptionServiceCheckPublic"]["properties"]) == {
+        *properties,
+        "detail",
+    }
+    [reason, absent] = properties["reason"]["anyOf"]
+    assert absent == {"type": "null"}
+    assert _resolve_component_ref(openapi_spec, reason)["enum"] == [
+        "unreachable",
+        "timeout",
+        "http_status",
+        "malformed",
+        "credentials",
+    ]
+    assert {"type": "integer"} in properties["status_code"]["anyOf"]
+    assert {"type": "boolean"} in properties["times_words"]["anyOf"]
+
+
 def test_openapi_default_speaker_service_is_marked_by_update_and_shown_on_links(
     openapi_spec: dict,
 ) -> None:

@@ -328,13 +328,14 @@ async def test_another_organisations_connection_is_not_found(
 
 
 @pytest.mark.parametrize(
-    "tasks, identifies_speakers",
+    "tasks, identifies_speakers, times_words",
     [
-        ({"supported_tasks": ["diarize", "align"]}, True),
-        ({"supported_tasks": ["align"]}, False),
-        ({}, None),
+        ({"supported_tasks": ["align", "diarize", "timestamp"]}, True, True),
+        ({"supported_tasks": ["diarize", "align"]}, True, False),
+        ({"supported_tasks": ["align"]}, False, False),
+        ({}, None, None),
     ],
-    ids=["reports-diarize", "reports-no-diarize", "reports-no-tasks"],
+    ids=["reports-both", "reports-diarize", "reports-neither", "reports-no-tasks"],
 )
 async def test_a_check_asks_the_service_with_the_stored_key_and_sends_no_audio(
     client,
@@ -344,6 +345,7 @@ async def test_a_check_asks_the_service_with_the_stored_key_and_sends_no_audio(
     monkeypatch,
     tasks,
     identifies_speakers,
+    times_words,
 ):
     connection = await create_connection()
     native_service.answer = httpx.Response(
@@ -363,7 +365,10 @@ async def test_a_check_asks_the_service_with_the_stored_key_and_sends_no_audio(
         "outcome": "ready",
         "detail": "accepting jobs",
         "identifies_speakers": identifies_speakers,
+        "times_words": times_words,
         "service_version": "1.4.0",
+        "reason": None,
+        "status_code": None,
     }
     [request] = native_service.requests
     assert (request.method, str(request.url)) == (
@@ -374,36 +379,73 @@ async def test_a_check_asks_the_service_with_the_stored_key_and_sends_no_audio(
     [entry] = audited
     assert entry["action"].value == "transcription_service_checked"
     assert entry["metadata"]["extra"]["outcome"] == "ready"
+    assert entry["metadata"]["extra"]["times_words"] is times_words
 
 
 @pytest.mark.parametrize(
-    "answer, outcome, detail",
+    "answer, outcome, detail, reason, status_code",
     [
         (
             httpx.Response(401),
             "credentials_rejected",
             "the service rejected the API key",
+            "credentials",
+            None,
         ),
         (
             httpx.Response(200, json={"queue_accepting_jobs": False}),
             "not_accepting_jobs",
             "queue not accepting jobs",
+            None,
+            None,
         ),
-        (httpx.Response(503, json={"status": "not_ready"}), "unavailable", "http 503"),
+        (
+            httpx.Response(503, json={"status": "not_ready"}),
+            "unavailable",
+            "http 503",
+            "http_status",
+            503,
+        ),
+        (
+            httpx.Response(404, text="Not Found"),
+            "unavailable",
+            "http 404",
+            "http_status",
+            404,
+        ),
         (
             httpx.Response(200, json={"status": "ready"}),
             "unavailable",
             "malformed readiness response",
+            "malformed",
+            None,
         ),
         (
             httpx.ConnectError("dummy-transport-secret"),
             "unavailable",
             "unreachable: ConnectError",
+            "unreachable",
+            None,
+        ),
+        (
+            httpx.ReadTimeout("dummy-transport-secret"),
+            "unavailable",
+            "unreachable: ReadTimeout",
+            "timeout",
+            None,
         ),
     ],
 )
 async def test_a_check_reports_what_went_wrong_without_secrets(
-    client, admin_headers, create_connection, native_service, answer, outcome, detail
+    client,
+    admin_headers,
+    create_connection,
+    native_service,
+    answer,
+    outcome,
+    detail,
+    reason,
+    status_code,
 ):
     connection = await create_connection()
     native_service.answer = answer
@@ -411,12 +453,18 @@ async def test_a_check_reports_what_went_wrong_without_secrets(
     response = await client.post(
         f"{BASE}{connection['id']}/check/", headers=admin_headers
     )
+    kept = await client.get(f"{BASE}{connection['id']}/", headers=admin_headers)
 
     assert response.status_code == 200, response.text
     body = response.json()
     assert (body["outcome"], body["detail"]) == (outcome, detail)
+    assert (body["reason"], body["status_code"]) == (reason, status_code)
     assert body["identifies_speakers"] is None
     assert "secret" not in response.text
+    # Every administrator sees why the last check failed, not only the one
+    # who ran it.
+    last_check = kept.json()["last_check"]
+    assert (last_check["reason"], last_check["status_code"]) == (reason, status_code)
 
 
 async def test_a_disabled_connection_can_still_be_checked(
@@ -583,7 +631,10 @@ async def test_a_check_is_kept_for_every_administrator_until_the_endpoint_or_key
     assert kept == {
         "outcome": "ready",
         "identifies_speakers": None,
+        "times_words": None,
         "service_version": None,
+        "reason": None,
+        "status_code": None,
         "checked_at": checked.json()["checked_at"],
     }
     assert same_address.json()["last_check"] == kept

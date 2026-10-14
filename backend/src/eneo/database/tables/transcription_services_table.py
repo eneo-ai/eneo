@@ -56,9 +56,13 @@ class TranscriptionServiceConnections(BasePublic):
     last_check_identifies_speakers: Mapped[Optional[bool]] = mapped_column(
         nullable=True
     )
+    last_check_times_words: Mapped[Optional[bool]] = mapped_column(nullable=True)
     last_check_service_version: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True
     )
+    # Why the check got no usable answer, and the status of an http_status one.
+    last_check_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    last_check_status_code: Mapped[Optional[int]] = mapped_column(nullable=True)
     last_checked_at: Mapped[Optional[datetime]] = mapped_column(
         sa.DateTime(timezone=True), nullable=True
     )

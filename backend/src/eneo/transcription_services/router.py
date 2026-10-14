@@ -41,6 +41,7 @@ from eneo.settings.encryption_service import EncryptionService
 from eneo.transcription_services.models import (
     MAX_CONNECTIONS_PER_ORGANISATION,
     ConnectionCheckOutcome,
+    ConnectionCheckReason,
     LastConnectionCheck,
     ServiceEndpointError,
     TranscriptionServiceConnection,
@@ -145,9 +146,9 @@ class TranscriptionServiceUpdate(BaseModel):
     is_default: bool | NotProvided = Field(
         default=NOT_PROVIDED,
         description=(
-            "True makes this the organisation's only default speaker "
-            "identification service, in place of the previous one. False "
-            "unmarks it and marks no other."
+            "True makes this the organisation's only default transcription "
+            "service, in place of the previous one. False unmarks it and marks "
+            "no other."
         ),
     )
     security_classification: ModelId | None | NotProvided = Field(
@@ -171,8 +172,27 @@ class TranscriptionServiceLastCheckPublic(BaseModel):
             "service does not report which tasks it supports."
         )
     )
+    times_words: bool | None = Field(
+        description=(
+            "Whether the service reports it can time the words of a transcript "
+            "without identifying speakers. Null: the service does not report "
+            "which tasks it supports."
+        )
+    )
     service_version: str | None = Field(
         description="Version the service reports, when it reports one"
+    )
+    reason: ConnectionCheckReason | None = Field(
+        description=(
+            "Why the check got no usable answer: no connection or response "
+            "(unreachable), no answer in time (timeout), a status other than "
+            "200 (http_status), an answer that is no readiness answer "
+            "(malformed), or a rejected key (credentials). Null when the "
+            "service answered."
+        )
+    )
+    status_code: int | None = Field(
+        description="The status the service answered with, when reason is http_status"
     )
     checked_at: datetime
 
@@ -185,7 +205,10 @@ class TranscriptionServiceLastCheckPublic(BaseModel):
         return cls(
             outcome=check.outcome,
             identifies_speakers=check.identifies_speakers,
+            times_words=check.times_words,
             service_version=check.service_version,
+            reason=check.reason,
+            status_code=check.status_code,
             checked_at=check.checked_at,
         )
 
@@ -201,17 +224,18 @@ class TranscriptionServicePublic(BaseModel):
     is_enabled: bool
     is_default: bool = Field(
         description=(
-            "The organisation's default speaker identification service: a "
-            "flow draft that asks for speaker labels without a chosen service "
-            "gets it stored as its choice, in spaces that may use it. At most "
-            "one service is the default, and only an administrator marks it."
+            "The organisation's default transcription service: a flow draft "
+            "that transcribes and has made no choice of service gets it "
+            "stored as its choice, in spaces that may use it. At most one "
+            "service is the default, and only an administrator marks it."
         )
     )
     security_classification: SecurityClassificationPublic | None
     space_count: int = Field(
         description=(
-            "Spaces granted the service. Their flows cannot identify speakers "
-            "while it is switched off or after it is removed."
+            "Spaces granted the service. Their flows get no word timings and "
+            "cannot identify speakers while it is switched off or after it is "
+            "removed."
         )
     )
     last_check: TranscriptionServiceLastCheckPublic | None = Field(
@@ -246,14 +270,14 @@ class TranscriptionServicePublic(BaseModel):
 
 
 class TranscriptionServiceSummary(BaseModel):
-    """A speaker identification service as a space editor sees it."""
+    """A transcription service as a space editor sees it."""
 
     id: UUID
     name: str
     is_enabled: bool
     is_default: bool = Field(
         description="The organisation's default: filled in as the service of "
-        "flows that identify speakers, in spaces that may use it."
+        "flows that transcribe, in spaces that may use it."
     )
     security_classification: SecurityClassificationPublic | None
 
@@ -405,7 +429,10 @@ async def check_transcription_service(
         outcome=check.outcome,
         detail=check.detail,
         identifies_speakers=check.identifies_speakers,
+        times_words=check.times_words,
         service_version=check.service_version,
+        reason=check.reason,
+        status_code=check.status_code,
         checked_at=check.checked_at,
     )
 
@@ -414,7 +441,7 @@ async def check_transcription_service(
     "/",
     response_model=OffsetPaginatedResponse[TranscriptionServiceSummary],
     description=(
-        "List the organisation's speaker identification services by name, "
+        "List the organisation's transcription services by name, "
         "without addresses or keys, for granting them to spaces."
     ),
     responses=responses.get_responses([401]),

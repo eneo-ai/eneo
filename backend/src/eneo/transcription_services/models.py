@@ -66,9 +66,9 @@ class LastConnectionCheck:
 class TranscriptionServiceConnection:
     """An organisation's connection to one native transcription service.
 
-    Eneo uses it to identify speakers; a connection check reports whether the
-    service says it can. The credential is write-only and never part of this
-    view.
+    Eneo uses it to time the words of a flow's transcripts and to identify
+    their speakers; a connection check reports whether the service says it
+    can do each. The credential is write-only and never part of this view.
     """
 
     id: UUID
@@ -77,13 +77,14 @@ class TranscriptionServiceConnection:
     endpoint_url: str
     is_enabled: bool
     # The organisation's default, marked by an administrator and never
-    # inferred: a flow draft that asks for speaker labels without a choice
-    # gets it stored as its own choice.
+    # inferred: a flow draft that transcribes and has made no choice of
+    # service gets it stored as its own choice.
     is_default: bool
     security_classification: SecurityClassification | None
     created_at: datetime
     updated_at: datetime
-    # Spaces granted the connection; flows there lose speaker labels without it.
+    # Spaces granted the connection; flows there lose word timings and speaker
+    # labels without it.
     space_count: int
     last_check: LastConnectionCheck | None
 
