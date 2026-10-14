@@ -51268,6 +51268,13 @@ export interface operations {
           "application/json": components["schemas"]["SubscriptionRenewalResult"];
         };
       };
+      /** @description SharePoint webhooks are not configured */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Authentication required */
       401: {
         headers: {
