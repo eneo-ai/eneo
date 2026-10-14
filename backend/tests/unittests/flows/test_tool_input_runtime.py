@@ -245,7 +245,8 @@ async def test_a_bound_list_reaches_the_tool_and_its_structured_answer_is_the_in
     # Kills the mutants that write a bound value into the argument as text,
     # drop the structured answer, call more than once, leave out the answer
     # edge or store a value in it, or audit without server and tool (or with
-    # the arguments).
+    # the arguments, or with the path and query of the server's address,
+    # where a token can be).
     received: list[dict[str, Any]] = []
     app = one_tool_app(
         lambda request_id: tool_result(
@@ -259,7 +260,7 @@ async def test_a_bound_list_reaches_the_tool_and_its_structured_answer_is_the_in
     run = _running(user, {"case": "A-17"})
     earlier = _result(output_payload={"text": "", "structured": {"days": _DAYS}})
     async with serve_test_app(_recording(app, received)) as url:
-        facts = _endpoint_facts(url)
+        facts = _endpoint_facts(f"{url}?key=server-token")
         executor = _tool_executor(user, _Facts(facts), _real_caller())
         step = _tool_step(
             facts,
@@ -323,8 +324,7 @@ async def test_a_bound_list_reaches_the_tool_and_its_structured_answer_is_the_in
     assert {key: extra[key] for key in extra if key != "duration_ms"} == {
         "call_type": "tool_input",
         "http_method": "POST",
-        "url_host": "http://127.0.0.1",
-        "url_path": "/mcp",
+        "url_host": url.removesuffix("/mcp"),
         "flow_id": str(run.flow_id),
         "step_order": 2,
         "step_id": str(step.step_id),
@@ -332,6 +332,7 @@ async def test_a_bound_list_reaches_the_tool_and_its_structured_answer_is_the_in
         "tool_name": "lookup",
     }
     assert extra["duration_ms"] >= 0
+    assert audit["description"] == f"Flow HTTP tool_input POST to {extra['url_host']}"
     assert _SECRET_ARGUMENT not in repr(audit) and "A-17" not in repr(audit)
 
 

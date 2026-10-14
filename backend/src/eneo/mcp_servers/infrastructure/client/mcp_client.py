@@ -44,7 +44,10 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, is_builtin_provider
-from eneo.mcp_servers.domain.server_address import MCPServerAddress
+from eneo.mcp_servers.domain.server_address import (
+    MCPServerAddress,
+    loggable_server_address,
+)
 
 logger = get_logger(__name__)
 
@@ -749,7 +752,11 @@ async def _diagnose_http(
     Any HTTP status is diagnostic signal here: auth is evaluated before
     method dispatch, so a 401/403 is trustworthy even from a server that
     rejects the probe body itself.
+
+    A message names the server by ``loggable_server_address``: it is logged,
+    and the path or query of the address can carry a token.
     """
+    server = loggable_server_address(url)
     try:
         async with http_client_factory(
             headers=headers, timeout=httpx.Timeout(5.0)
@@ -782,7 +789,7 @@ async def _diagnose_http(
                 if response.has_redirect_location:
                     target = _redirect_target(response)
                     return (
-                        f"Server at {url} answered with a redirect "
+                        f"Server at {server} answered with a redirect "
                         f"(HTTP {response.status_code})"
                         f"{f' to {target}' if target else ''}. Eneo does not "
                         "follow redirects: register the address the server "
@@ -795,13 +802,13 @@ async def _diagnose_http(
                 if response.status_code >= 400:
                     return f"Server returned HTTP {response.status_code}."
                 return (
-                    f"Server at {url} is reachable "
+                    f"Server at {server} is reachable "
                     f"(HTTP {response.status_code}) but the MCP handshake failed."
                 )
     except httpx.ConnectError:
-        return f"Could not connect to {url}. Verify the URL and that the server is running."
+        return f"Could not connect to {server}. Verify the URL and that the server is running."
     except httpx.TimeoutException:
-        return f"Connection to {url} timed out."
+        return f"Connection to {server} timed out."
     except Exception:
         pass
     return "Connection failed for unknown reasons."
@@ -1091,7 +1098,10 @@ class MCPClient:
 
         self._streams_context = streams_context
         read, write, get_session_id = streams
-        logger.debug(f"Streamable HTTP transport connected to {self.endpoint_url}")
+        logger.debug(
+            "Streamable HTTP transport connected to %s",
+            loggable_server_address(self.endpoint_url),
+        )
 
         session_context = ClientSession(
             read, write, message_handler=self._handle_session_message

@@ -50,6 +50,25 @@ from eneo.mcp_servers.presentation.models import (
 )
 from tests.unit.mcp_test_server import one_tool_app, serve_test_app
 
+
+@pytest.mark.parametrize("failure", [httpx.ConnectError, httpx.ReadTimeout])
+async def test_a_failed_diagnosis_names_the_server_without_its_path_or_query(failure):
+    # Kills the full-address message in either connection-failure branch.
+    def fail(request):
+        raise failure("unavailable", request=request)
+
+    def factory(**kwargs):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fail), **kwargs)
+
+    message = await mcp_client_module._diagnose_http(
+        "https://tools.example/private-path?token=address-secret",
+        {},
+        http_client_factory=factory,
+    )
+    assert "https://tools.example" in message
+    assert "private-path" not in message and "address-secret" not in message
+
+
 # =============================================================================
 # P1: list_tools() error propagation
 # =============================================================================
@@ -618,10 +637,11 @@ class TestMCPClientFollowsNoRedirect:
         assert reached == []
         if redirected == "initialize":
             # Kills the mutants that report the redirect as "reachable, but
-            # the handshake failed", or show the target's user info, query
-            # or fragment.
+            # the handshake failed", show the target's user info, query or
+            # fragment, or name the server by more than its scheme, host and
+            # port (the message is logged, and a token can be in the path).
             assert str(failure.value) == (
-                f"Server at {url} answered with a redirect (HTTP 307) to "
+                f"Server at {origin} answered with a redirect (HTTP 307) to "
                 f"{origin}/elsewhere. Eneo does not follow redirects: register "
                 "the address the server redirects to."
             )
@@ -641,7 +661,8 @@ class TestMCPClientFollowsNoRedirect:
                     pass
 
         assert str(failure.value) == (
-            f"Server at {url} is reachable (HTTP 300) but the MCP handshake failed."
+            f"Server at {url.removesuffix('/mcp')} is reachable (HTTP 300) but the "
+            "MCP handshake failed."
         )
 
     @pytest.mark.parametrize(

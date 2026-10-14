@@ -9,6 +9,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.mcp_servers.domain.server_address import loggable_server_address
 
 
 class RuntimeAuditRun(Protocol):
@@ -66,14 +67,9 @@ async def audit_http_outbound(
     if deps.audit_service is None:
         return
     try:
-        parts = urlsplit(url)
-        safe_url_host = f"{parts.scheme}://{parts.hostname}" if parts.hostname else ""
-        safe_url_path = parts.path or "/"
         extra: dict[str, Any] = {
             "call_type": call_type,
             "http_method": method,
-            "url_host": safe_url_host,
-            "url_path": safe_url_path,
             "flow_id": str(run.flow_id),
             "step_order": step.step_order,
             "step_id": str(step.step_id),
@@ -84,9 +80,20 @@ async def audit_http_outbound(
             extra["status_code"] = status_code
         if duration_ms is not None:
             extra["duration_ms"] = round(duration_ms, 2)
-        if tool is not None:
+        if tool is None:
+            parts = urlsplit(url)
+            url_host = f"{parts.scheme}://{parts.hostname}" if parts.hostname else ""
+            url_path = parts.path or "/"
+            extra["url_path"] = url_path
+            target = f"{url_host}{url_path}"
+        else:
+            # The path and query of an MCP server's registered address can
+            # carry a token; the server is named by its id and its address
+            # without them.
+            url_host = target = loggable_server_address(url)
             extra["mcp_server_id"] = str(tool.mcp_server_id)
             extra["tool_name"] = tool.tool_name
+        extra["url_host"] = url_host
         actor_fields = deps.actor.audit_actor_fields()
         await deps.audit_service.log_async(
             tenant_id=run.tenant_id,
@@ -96,7 +103,7 @@ async def audit_http_outbound(
             action=ActionType.FLOW_HTTP_OUTBOUND_CALL,
             entity_type=EntityType.FLOW_RUN,
             entity_id=run.id,
-            description=f"Flow HTTP {call_type} {method} to {safe_url_host}{safe_url_path}",
+            description=f"Flow HTTP {call_type} {method} to {target}",
             metadata=deps.actor.audit_metadata(target=run, extra=extra),
             outcome=outcome,
             error_message=error_message,

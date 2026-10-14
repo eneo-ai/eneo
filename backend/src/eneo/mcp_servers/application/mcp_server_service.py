@@ -32,6 +32,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     is_builtin_provider,
     is_capability_purpose,
 )
+from eneo.mcp_servers.domain.server_address import loggable_server_address
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
@@ -845,7 +846,7 @@ class MCPServerService:
         """
         try:
             logger.info(
-                f"Testing connection to MCP server: {mcp_server.name} at {endpoint_url(mcp_server)}"
+                f"Testing connection to MCP server: {mcp_server.name} at {loggable_server_address(endpoint_url(mcp_server))}"
             )
 
             # Connect with shorter timeout for faster feedback during creation.
@@ -870,9 +871,9 @@ class MCPServerService:
         except MCPClientError as e:
             error_msg = str(e)
             if "Connection refused" in error_msg:
-                error_msg = f"Could not connect to {endpoint_url(mcp_server)}. Please verify the URL and that the server is running."
+                error_msg = f"Could not connect to {loggable_server_address(endpoint_url(mcp_server))}. Please verify the URL and that the server is running."
             elif "timed out" in error_msg.lower():
-                error_msg = f"Connection to {endpoint_url(mcp_server)} timed out. The server may be slow or unreachable."
+                error_msg = f"Connection to {loggable_server_address(endpoint_url(mcp_server))} timed out. The server may be slow or unreachable."
             logger.warning(f"Connection test failed for {mcp_server.name}: {e}")
             return [], ConnectionResult(success=False, error_message=error_msg)
 
@@ -925,9 +926,9 @@ class MCPServerService:
         except MCPClientError as e:
             error_msg = str(e)
             if "Connection refused" in error_msg:
-                error_msg = f"Could not connect to {endpoint_url(mcp_server)}. Please verify the URL and that the server is running."
+                error_msg = f"Could not connect to {loggable_server_address(endpoint_url(mcp_server))}. Please verify the URL and that the server is running."
             elif "timed out" in error_msg.lower():
-                error_msg = f"Connection to {endpoint_url(mcp_server)} timed out. The server may be slow or unreachable."
+                error_msg = f"Connection to {loggable_server_address(endpoint_url(mcp_server))} timed out. The server may be slow or unreachable."
             logger.warning(f"Failed to discover tools for {mcp_server.name}: {e}")
             return ToolSyncResult(
                 connection=ConnectionResult(success=False, error_message=error_msg)
