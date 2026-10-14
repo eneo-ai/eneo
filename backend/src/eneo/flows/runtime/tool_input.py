@@ -56,6 +56,7 @@ from eneo.flows.flow_security_classification import (
 )
 from eneo.flows.http_transport.effective_url import (
     InvalidHttpUrl,
+    parse_credential_http_url,
     parse_effective_http_url,
 )
 from eneo.flows.output_processing import (
@@ -90,6 +91,7 @@ from eneo.main.exceptions import (
 from eneo.mcp_servers.application.unattended_tool_call import (
     EXCHANGE_STOP_GRACE_SECONDS,
 )
+from eneo.mcp_servers.domain.entities.mcp_server import sends_credential
 
 if TYPE_CHECKING:
     from eneo.flows.domain.flow import FlowRun
@@ -429,6 +431,21 @@ async def _vet_server_address(
     # connection of the call is vetted again when it is opened (_call).
     try:
         address = parse_effective_http_url(server.http_url)
+    except InvalidHttpUrl:
+        raise _destination_blocked(step) from None
+    if sends_credential(server.http_auth_type):
+        # As an HTTP step's secret headers, a credential goes only over https.
+        try:
+            parse_credential_http_url(server.http_url)
+        except InvalidHttpUrl:
+            raise _refusal(
+                f"Step {step.step_order}: the address of the tool's MCP server "
+                "must use https, because the step sends the server's credential "
+                "with the call.",
+                FlowApiErrorCode.TYPED_IO_TOOL_DESTINATION_BLOCKED,
+                step_order=step.step_order,
+            ) from None
+    try:
         await vet_destination(
             address.host,
             address.port,
@@ -436,13 +453,8 @@ async def _vet_server_address(
             deadline=Deadline(float(seconds)),
             resolver=deps.name_resolver,
         )
-    except (InvalidHttpUrl, DestinationRefused):
-        raise _refusal(
-            f"Step {step.step_order}: the address of the tool's MCP server is "
-            "not allowed for flows.",
-            FlowApiErrorCode.TYPED_IO_TOOL_DESTINATION_BLOCKED,
-            step_order=step.step_order,
-        ) from None
+    except DestinationRefused:
+        raise _destination_blocked(step) from None
     except (DestinationUnresolvable, TimeoutError):
         raise _refusal(
             f"Step {step.step_order}: the name of the tool's MCP server did "
@@ -450,6 +462,15 @@ async def _vet_server_address(
             FlowApiErrorCode.TYPED_IO_TOOL_CONNECTION_ERROR,
             step_order=step.step_order,
         ) from None
+
+
+def _destination_blocked(step: RuntimeStep) -> TypedIOValidationException:
+    return _refusal(
+        f"Step {step.step_order}: the address of the tool's MCP server is not "
+        "allowed for flows.",
+        FlowApiErrorCode.TYPED_IO_TOOL_DESTINATION_BLOCKED,
+        step_order=step.step_order,
+    )
 
 
 def _budget_seconds(step: RuntimeStep, deps: ToolInputDeps) -> int:

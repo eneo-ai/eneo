@@ -4995,7 +4995,7 @@
   "flow_error_typed_io_tool_classification_changed": "The security classification of the tool's server changed after the run started. Start the run again.",
   "flow_error_typed_io_tool_changed": "The tool has changed since this flow was published. Publish the flow again to use the tool as it is now.",
   "flow_error_typed_io_tool_invalid_arguments": "The values sent to the tool do not fit what the tool accepts. Check the step's tool arguments.",
-  "flow_error_typed_io_tool_destination_blocked": "The tool's server address is not allowed for flows.",
+  "flow_error_typed_io_tool_destination_blocked": "The tool's server address is not allowed for flows, or the server takes a credential and its address does not use https.",
   "flow_error_typed_io_tool_connection_error": "The tool's server could not be reached, or the call failed.",
   "flow_error_typed_io_tool_timeout": "The tool did not answer in time.",
   "flow_error_typed_io_tool_reported_error": "The tool reported an error.",
