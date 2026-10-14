@@ -1,10 +1,11 @@
-"""Speaker labels for flow transcripts from a native speaker service.
+"""Speaker labels and word timings for flow transcripts from a native service.
 
-A flow's transcription model writes the text; the space's speaker service (an
-organisation's connection) labels who says what, through an async job API
+A flow's transcription model writes the text; the transcription service the
+flow chose (an organisation's connection) labels who says what, or places the
+words in time without labelling anyone, through an async job API
 (``eneo.transcription_services.client``): submit the audio and the transcript
-as a diarize job, poll it until it reaches a terminal state, then fetch the
-labelled result.
+as a ``diarize`` or ``timestamp`` job, poll it until it reaches a terminal
+state, then fetch the result.
 
 This module owns what a flow attempt adds around those requests: provider-call
 receipts, admission retries within the step budget, the poll schedule,
@@ -76,6 +77,7 @@ from eneo.transcription_services.client import (
     JOB_CANCELLED,
     JOB_COMPLETED,
     JOB_FAILED,
+    TIMESTAMP_TASK,
     CredentialsRejected,
     JobFailureKind,
     RequestFailed,
@@ -125,7 +127,7 @@ class RemoteTranscriptionCancelledException(TranscriptionProviderError):
 
 class RemoteFlowTranscriber:
     """A native service that labels the speakers of a transcript a flow's
-    transcription model produced."""
+    transcription model produced, or times its words."""
 
     def __init__(
         self, client: TranscriptionServiceClient, *, poll_interval_seconds: float
@@ -150,10 +152,11 @@ class RemoteFlowTranscriber:
         The audio is uploaded again for diarization; the transcript comes back
         rendered with the same speaker-labelled lines a full job produces.
         """
-        result, _ = await self._run_job(
+        return await self._echoed_job(
             file,
             file_id=file_id,
             request=TranscriptionJobRequest(
+                task=DIARIZE_TASK,
                 language=language,
                 words=words,
                 segments=segments,
@@ -162,18 +165,62 @@ class RemoteFlowTranscriber:
             ),
             observer=observer,
         )
-        # A service that predates diarize jobs ignores the unknown fields and
+
+    async def time_words(
+        self,
+        file: SpooledAudio,
+        *,
+        file_id: UUID,
+        segments: Sequence[TranscriptSegment],
+        model_name: str,
+        language: str | None = None,
+        observer: ProviderCallObserver | None = None,
+    ) -> TranscriptionJobResult:
+        """Have the service place the words of a transcript produced elsewhere
+        in time, labelling no speakers.
+
+        The audio is uploaded again for alignment; the transcript comes back
+        as timed lines without speakers, each with its words.
+        """
+        return await self._echoed_job(
+            file,
+            file_id=file_id,
+            request=TranscriptionJobRequest(
+                task=TIMESTAMP_TASK,
+                language=language,
+                segments=segments,
+                model=model_name,
+            ),
+            observer=observer,
+        )
+
+    async def _echoed_job(
+        self,
+        file: SpooledAudio,
+        *,
+        file_id: UUID,
+        request: TranscriptionJobRequest,
+        observer: ProviderCallObserver | None,
+    ) -> TranscriptionJobResult:
+        result, _ = await self._run_job(
+            file, file_id=file_id, request=request, observer=observer
+        )
+        # A service that predates the task ignores the unknown fields and
         # transcribes the audio itself with its own model. The echoed model is
         # the only signal, and that text must not replace the flow's transcript.
-        if result.model != model_name:
+        if result.model != request.model:
             logger.error(
-                "remote_transcription.diarize_unsupported expected_model=%s got=%s",
-                model_name,
+                "remote_transcription.task_unsupported task=%s expected_model=%s got=%s",
+                request.task,
+                request.model,
                 result.model,
             )
             raise TranscriptionProviderError(
                 litellm_transport.PROVIDER_ERROR_MESSAGE,
-                details={"reason": "diarize_task_unsupported", "retryable": False},
+                details={
+                    "reason": f"{request.task}_task_unsupported",
+                    "retryable": False,
+                },
             )
         return result
 
@@ -506,9 +553,9 @@ class RemoteFlowTranscriber:
                 f"{REMOTE_TRANSCRIPTION_PROVIDER}/"
                 f"{self.client.destination_host or 'transcription-service'}"
             )
-            # A diarize job is its own provider call on the same audio; the
-            # suffix keeps it apart from the model call that transcribed it.
-            requested_model = f"{provider_model}#diarize"
+            # A service job is its own provider call on the same audio; the
+            # task suffix keeps it apart from the model call that transcribed it.
+            requested_model = f"{provider_model}#{request.task}"
             call_id = await observer.started(
                 build_transcription_call_request_facts(
                     requested_model=requested_model,
@@ -538,7 +585,7 @@ class RemoteFlowTranscriber:
         )
         idempotency_key = hashlib.sha256(
             json.dumps(
-                [operation_scope, str(file_id), audio_digest, DIARIZE_TASK],
+                [operation_scope, str(file_id), audio_digest, request.task],
                 separators=(",", ":"),
             ).encode()
         ).hexdigest()

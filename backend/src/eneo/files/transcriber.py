@@ -63,10 +63,14 @@ class TranscribedAudio:
     diarization: str | None = None
     # Wall time of the external speaker-labelling call, when one was made.
     diarization_elapsed_ms: int | None = None
-    # The service's word-timestamp source for the labels, when reported.
+    # The service's word-timestamp source, when reported.
     alignment: str | None = None
     speaker_review: dict[str, Any] | None = None
     empty_intervals: tuple[EmptyTranscriptionInterval, ...] = ()
+    # What came of the external service timing the words of a transcript
+    # whose speakers were not labelled: None when it was not asked, "done",
+    # or the closed reason it failed (flows' ``WordTimingOutcome``).
+    word_timing: str | None = None
 
 
 class Transcriber:

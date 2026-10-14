@@ -1314,6 +1314,28 @@ contract's `transcription.speaker_labels.selectable` is `true`. When it is
 `null`, omit it: the new run follows the flow's current default, which may
 differ from what the earlier run used.
 
+### Word times without speaker labels
+
+When the flow has chosen a speaker identification service and a run labels no
+speakers, the service places the transcript's words in time. The step's text
+stays the transcription model's own, so later steps read no timestamps; the
+timed lines and their words are stored as the step's transcript segments and
+word timings, for playback that follows the audio word by word.
+
+The step's transcription evidence, `input_payload_json.transcription`, records
+the outcome as `word_timing`:
+
+- `{"status": "done"}` when every file of the step was timed.
+- `{"status": "failed", "reason": ...}` when the words could not be timed. The
+  run goes on with the model's text, as without a service. `reason` is `unavailable`
+  (the chosen service could not be used or reached), `unsupported` (the
+  service does not offer word timing), `credentials` (it refused the key),
+  `failed` (the job failed or was cancelled on the service) or `no_timings`
+  (it returned no usable word times).
+
+A step whose flow chose no service, or that labels speakers, has no
+`word_timing`.
+
 ### Send a recording in several parts
 
 A recorder that starts a new file during a long meeting, for example every 20 minutes or after a lost microphone, should mark the files as parts of one recording. Speakers are then labelled across all parts together, so a person keeps one label for the whole meeting instead of getting a new one in each part.
@@ -1412,7 +1434,7 @@ The stored text is the authoritative done text. Timed passages are kept only whe
 
 The transcript must belong to the same tenant, user, flow, published version, step, and transcription model. Expiry limits how long an unbound transcript waits for its first run: an expired unbound transcript is refused, while one already bound to this file is accepted whatever its expiry, so a retry over the same file keeps using it. Admission binds it permanently to the uploaded file. The same transcript can be submitted again for that file; another file receives `409 flow_run_live_transcript_already_bound`. An unavailable, foreign, or expired unbound transcript receives `404 flow_run_live_transcript_not_found`. A step without exactly one audio file receives `400 flow_run_live_transcript_requires_one_audio_file`. The ID is part of the request's idempotency fingerprint.
 
-Before using the text, Eneo decodes the file and compares its duration with the live session's received audio. The difference must be at most one second or 0.5% of the decoded duration, whichever is larger. With speaker labels off, the live passages become the transcript segments. With labels on, the existing speaker service labels those passages using the run's `max_speakers`. Reduced-precision alignment is retained and reported just as for batch transcription; a speaker-service failure follows the usual run failure and retry behavior.
+Before using the text, Eneo decodes the file and compares its duration with the live session's received audio. The difference must be at most one second or 0.5% of the decoded duration, whichever is larger. With speaker labels off, the flow's service times the words of the live passages and the timed lines become the transcript segments; without a service, or when the timing fails, the live passages do. With labels on, the existing speaker service labels those passages using the run's `max_speakers`. Reduced-precision alignment is retained and reported just as for batch transcription; a speaker-service failure follows the usual run failure and retry behavior.
 
 The step's transcription evidence records `transcript_origin` as `live` or `batch`. If the requested live transcript cannot be used at execution, Eneo transcribes the file through the normal batch path and adds `live_fallback_reason`: `duration_mismatch`, `no_timing` (in either label mode), or `unavailable`. The existing `source` reference continues to identify the stored transcript for playback, corrections, and regeneration.
 

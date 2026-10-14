@@ -55,7 +55,10 @@ from eneo.flows.runtime.recording_parts import (
     split_recording,
 )
 from eneo.flows.runtime.run_cancellation import FlowStepCancelledError
-from eneo.flows.runtime.speaker_enrichment import SpeakerServiceFailed
+from eneo.flows.runtime.service_enrichment import (
+    SpeakerServiceFailed,
+    WordTimingOutcome,
+)
 from eneo.flows.runtime.step_deadline import current_step_deadline_scope
 from eneo.flows.transcription_config import (
     FlowTranscriptionConfig,
@@ -144,7 +147,8 @@ class FlowStepTranscriber(Protocol):
     """What a flow audio step needs from a transcription engine.
 
     Satisfied by ``RegistryFlowTranscriber`` (the flow's model) and
-    ``DiarizingFlowTranscriber`` (the model, then a speaker service).
+    ``ServiceFlowTranscriber`` (the model, then the flow's transcription
+    service, which labels the speakers or times the words).
     """
 
     async def transcribe(
@@ -167,6 +171,7 @@ class FlowStepTranscriber(Protocol):
         *,
         transcribed: TranscribedAudio,
         file_id: UUID,
+        diarize: bool,
         language: str | None = None,
         observer: "ProviderCallObserver | None" = None,
         max_speakers: int | None = None,
@@ -176,7 +181,7 @@ class FlowStepTranscriber(Protocol):
 @dataclass(frozen=True)
 class FlowTranscribers:
     """The engines a flow audio step may use: its model alone, or its model
-    and the speaker service the step resolved."""
+    and the transcription service the step resolved."""
 
     model: FlowStepTranscriber
     with_speaker_service: Callable[
@@ -568,6 +573,9 @@ class FlowTranscriptionResult:
     empty_intervals: tuple[EmptyTranscriptionInterval, ...] = ()
     transcript_origin: Literal["live", "batch"] = "batch"
     live_fallback_reason: LiveFallbackReason | None = None
+    # What came of timing the words of a transcript whose speakers were not
+    # labelled; None when no service was asked to.
+    word_timing: WordTimingOutcome | None = None
 
     @property
     def source(self) -> TranscriptSource:
@@ -600,6 +608,15 @@ class FlowTranscriptionResult:
             **(
                 {"live_fallback_reason": self.live_fallback_reason}
                 if self.live_fallback_reason is not None
+                else {}
+            ),
+            **(
+                {
+                    "word_timing": {"status": "done"}
+                    if self.word_timing is WordTimingOutcome.DONE
+                    else {"status": "failed", "reason": self.word_timing.value}
+                }
+                if self.word_timing is not None
                 else {}
             ),
         }
@@ -863,6 +880,7 @@ async def transcribe_audio_input(
     measured_seconds: list[float] = []
     every_file_measured = True
     diarization_outcomes: list[str | None] = []
+    word_timings: list[str | None] = []
     diarization_elapsed: list[int] = []
     speakers: list[dict[str, Any]] = []
     alignments: list[str] = []
@@ -968,16 +986,16 @@ async def transcribe_audio_input(
                                     segments=live_segments,
                                     transcript_segments=live_segments,
                                 )
-                                if diarize:
-                                    transcribed = await transcriber.enrich(
-                                        audio_file,
-                                        transcription_model,
-                                        transcribed=transcribed,
-                                        file_id=file.id,
-                                        language=provider_language,
-                                        observer=transcription_call_observer,
-                                        max_speakers=max_speakers,
-                                    )
+                                transcribed = await transcriber.enrich(
+                                    audio_file,
+                                    transcription_model,
+                                    transcribed=transcribed,
+                                    file_id=file.id,
+                                    diarize=diarize,
+                                    language=provider_language,
+                                    observer=transcription_call_observer,
+                                    max_speakers=max_speakers if diarize else None,
+                                )
                                 transcript_origin = "live"
                     if transcribed is None:
                         transcribed = await transcriber.transcribe(
@@ -999,6 +1017,7 @@ async def transcribe_audio_input(
             measured_seconds.append(transcribed.duration_seconds)
 
         diarization_outcomes.append(transcribed.diarization)
+        word_timings.append(transcribed.word_timing)
         empty_intervals.extend(
             replace(interval, file_id=file.id)
             for interval in transcribed.empty_intervals
@@ -1126,6 +1145,7 @@ async def transcribe_audio_input(
         empty_intervals=tuple(empty_intervals),
         transcript_origin=transcript_origin,
         live_fallback_reason=live_fallback_reason,
+        word_timing=_combine_word_timings(word_timings),
     )
 
 
@@ -1157,6 +1177,19 @@ def _coarsest_alignment(alignments: list[str]) -> str | None:
     return next(
         (value for value in alignments if value != "forced"),
         alignments[0],
+    )
+
+
+def _combine_word_timings(outcomes: list[str | None]) -> WordTimingOutcome | None:
+    """One outcome for the step: done only when every file that was timed was
+    timed in full, else the first failure. A reader seeks by segments only
+    when every file has them, so one untimed file leaves the step untimed."""
+    timed = [WordTimingOutcome(outcome) for outcome in outcomes if outcome is not None]
+    if not timed:
+        return None
+    return next(
+        (outcome for outcome in timed if outcome is not WordTimingOutcome.DONE),
+        WordTimingOutcome.DONE,
     )
 
 
@@ -1228,23 +1261,28 @@ async def resolve_and_transcribe_audio_for_step(
         space, config=transcription_config, step_order=step_order
     )
     diarize = transcription_config.diarize(speaker_labels)
-    speaker_service = (
+    # Without labels the chosen service only times the words, and the text
+    # never depends on that: a choice the space can no longer use leaves the
+    # transcript untimed rather than refusing the step.
+    service = (
         select_speaker_service(
             space, config=transcription_config, step_order=step_order
         )
         if diarize
-        else None
+        else resolve_speaker_service(transcription_config, space).connection
     )
     ordered_files = order_files_by_request(files, requested_ids)
 
     try:
-        transcriber = await transcribers.for_step(speaker_service)
+        transcriber = await transcribers.for_step(service)
     except NotFoundException as exc:
         # The chosen service was removed between resolving it and reading its
-        # key: the same refusal.
-        raise _speaker_service_refusal(
-            SpeakerServiceGap.PICKED_UNAVAILABLE, step_order=step_order
-        ) from exc
+        # key: the same refusal, or no word timings.
+        if diarize:
+            raise _speaker_service_refusal(
+                SpeakerServiceGap.PICKED_UNAVAILABLE, step_order=step_order
+            ) from exc
+        service, transcriber = None, transcribers.model
     result = await transcribe_audio_input(
         files=ordered_files,
         transcriber=transcriber,
@@ -1263,11 +1301,13 @@ async def resolve_and_transcribe_audio_for_step(
         single_recording=single_recording,
         decode_limits=decode_limits,
     )
+    if service is None and transcription_config.speaker_service_id is not None:
+        return replace(result, word_timing=WordTimingOutcome.UNAVAILABLE)
     # No labelling call was made for a recording without speech.
-    if speaker_service is None or result.diarization_elapsed_ms is None:
+    if service is None or result.diarization_elapsed_ms is None:
         return result
     return replace(
         result,
-        speaker_service_id=speaker_service.id,
-        speaker_service_name=speaker_service.name,
+        speaker_service_id=service.id,
+        speaker_service_name=service.name,
     )

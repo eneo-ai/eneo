@@ -22,11 +22,11 @@ import asyncio
 import json
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from enum import StrEnum
-from typing import Any, BinaryIO, NoReturn, cast
+from typing import Any, BinaryIO, Literal, NoReturn, cast
 from uuid import uuid4
 
 import httpx
@@ -36,13 +36,17 @@ from eneo.files.transcript import (
     TranscriptWord,
 )
 from eneo.main.logging import get_logger
+from eneo.transcription_services.models import ConnectionCheckReason
 
 logger = get_logger(__name__)
 
-# The one task Eneo asks of a service: label the speakers of a transcript the
-# flow's own model wrote. A service may advertise more (Vemsa also transcribes
-# and realigns corrected transcripts); Eneo sends none of those.
+# The two tasks Eneo asks of a service, both on a transcript the flow's own
+# model wrote: label its speakers, or place its words in time without
+# labelling anyone. A service may advertise more (Vemsa also transcribes and
+# realigns corrected transcripts); Eneo sends none of those.
 DIARIZE_TASK = "diarize"
+TIMESTAMP_TASK = "timestamp"
+JobTask = Literal["diarize", "timestamp"]
 
 JOB_COMPLETED = "completed"
 JOB_FAILED = "failed"
@@ -127,12 +131,17 @@ class JobNotFound(TranscriptionServiceError):
 
 @dataclass(frozen=True, slots=True)
 class TranscriptionJobRequest:
-    """The form fields of one speaker-labelling job, checked when built so
-    that an invalid request fails before anything is recorded or sent."""
+    """The form fields of one job, checked when built so that an invalid
+    request fails before anything is recorded or sent.
 
+    ``diarize`` labels the speakers of the transcript; ``timestamp`` times its
+    words and labels no one, so it takes segments only and no speaker bound.
+    """
+
+    task: JobTask
     language: str | None
-    # The transcript whose speakers the job labels; the service does not
-    # transcribe the audio itself.
+    # The transcript the job works on; the service does not transcribe the
+    # audio itself.
     words: Sequence[TranscriptWord] | None = None
     segments: Sequence[TranscriptSegment] | None = None
     # The model that produced the transcript; the service echoes it in the
@@ -149,7 +158,11 @@ class TranscriptionJobRequest:
                 "Reviewed transcripts require explicit re-diarization and decision invalidation."
             )
         if not self.words and not self.segments:
-            raise ValueError("A diarize job needs a timestamped transcript.")
+            raise ValueError(f"A {self.task} job needs a timestamped transcript.")
+        if self.task == TIMESTAMP_TASK and (
+            self.words or self.max_speakers is not None
+        ):
+            raise ValueError("A timestamp job times segments and labels no speakers.")
         if self.max_speakers is not None:
             _require_positive_speaker_bound(self.max_speakers)
 
@@ -194,17 +207,21 @@ class TranscriptionJobResult:
 class ServiceReadiness:
     """Authenticated ``GET /v1/health/ready`` outcome for this client's token.
 
-    ``identifies_speakers`` is whether the service lists ``diarize`` among
-    its supported tasks; None when it reports no task list (an older
-    deployment). Whether the service is up or has room says nothing about
-    what it supports.
+    ``identifies_speakers`` and ``times_words`` are whether the service lists
+    ``diarize`` and ``timestamp`` among its supported tasks; None when it
+    reports no task list (an older deployment). Whether the service is up or
+    has room says nothing about what it supports. ``reason`` says why there
+    was no usable answer, with the ``status_code`` of an unexpected status.
     """
 
     ready: bool
     accepting_jobs: bool
     detail: str
     identifies_speakers: bool | None = None
+    times_words: bool | None = None
     service_version: str | None = None
+    reason: ConnectionCheckReason | None = None
+    status_code: int | None = None
 
 
 class TranscriptionServiceClient:
@@ -249,10 +266,11 @@ class TranscriptionServiceClient:
         the upload began raises ``SubmissionOutcomeUnknown``.
         """
         data = _form_fields(request, include_speaker_review=self.include_speaker_review)
-        logger.info(
-            "remote_transcription.speaker_prior mode=%s",
-            "maximum" if "max_speakers" in data else "automatic",
-        )
+        if request.task == DIARIZE_TASK:
+            logger.info(
+                "remote_transcription.speaker_prior mode=%s",
+                "maximum" if "max_speakers" in data else "automatic",
+            )
         try:
             async with self._http(timeout=self.submit_timeout_seconds) as http:
                 response = await http.post(
@@ -348,44 +366,53 @@ class TranscriptionServiceClient:
                 ready=False,
                 accepting_jobs=False,
                 detail=f"unreachable: {exc.error_type}",
+                reason=ConnectionCheckReason.TIMEOUT
+                if isinstance(exc.__cause__, httpx.TimeoutException)
+                else ConnectionCheckReason.UNREACHABLE,
             )
         except TimeoutError:
             return ServiceReadiness(
-                ready=False, accepting_jobs=False, detail="unreachable: no answer"
+                ready=False,
+                accepting_jobs=False,
+                detail="unreachable: no answer",
+                reason=ConnectionCheckReason.TIMEOUT,
             )
         if response.status_code == 401:
             raise CredentialsRejected()
         body = _json_object(response)
-        identifies_speakers = _identifies_speakers(body.get("supported_tasks"))
+        tasks = body.get("supported_tasks")
         version = body.get("service_version")
-        service_version = (
-            version[:_SERVICE_VERSION_MAX_CHARS] if isinstance(version, str) else None
+        readiness = ServiceReadiness(
+            ready=False,
+            accepting_jobs=False,
+            detail="",
+            identifies_speakers=_supports(tasks, DIARIZE_TASK),
+            times_words=_supports(tasks, TIMESTAMP_TASK),
+            service_version=version[:_SERVICE_VERSION_MAX_CHARS]
+            if isinstance(version, str)
+            else None,
         )
         if response.status_code != 200:
-            return ServiceReadiness(
-                ready=False,
-                accepting_jobs=False,
+            return replace(
+                readiness,
                 detail=f"http {response.status_code}",
-                identifies_speakers=identifies_speakers,
-                service_version=service_version,
+                reason=ConnectionCheckReason.HTTP_STATUS,
+                status_code=response.status_code,
             )
         accepting_jobs = body.get("queue_accepting_jobs")
         if not isinstance(accepting_jobs, bool):
             # The protocol's readiness answer always carries the admission
             # flag; an answer without it is not a service Eneo can rely on.
-            return ServiceReadiness(
-                ready=False,
-                accepting_jobs=False,
+            return replace(
+                readiness,
                 detail="malformed readiness response",
-                identifies_speakers=identifies_speakers,
-                service_version=service_version,
+                reason=ConnectionCheckReason.MALFORMED,
             )
-        return ServiceReadiness(
+        return replace(
+            readiness,
             ready=True,
             accepting_jobs=accepting_jobs,
             detail="accepting jobs" if accepting_jobs else "queue not accepting jobs",
-            identifies_speakers=identifies_speakers,
-            service_version=service_version,
         )
 
     @property
@@ -458,12 +485,15 @@ def _form_fields(
     request: TranscriptionJobRequest, *, include_speaker_review: bool
 ) -> dict[str, str]:
     data: dict[str, str] = {
+        "task": request.task,
         "language": request.language or "auto",
-        "diarize": "true",
     }
-    if include_speaker_review:
-        data["include_speaker_review"] = "true"
-    data["task"] = DIARIZE_TASK
+    if request.task == DIARIZE_TASK:
+        data["diarize"] = "true"
+        if include_speaker_review:
+            data["include_speaker_review"] = "true"
+        if request.max_speakers is not None:
+            data["max_speakers"] = str(request.max_speakers)
     if request.words:
         data["words"] = json.dumps(
             [
@@ -482,8 +512,6 @@ def _form_fields(
         )
     if request.model:
         data["model"] = request.model
-    if request.max_speakers is not None:
-        data["max_speakers"] = str(request.max_speakers)
     return data
 
 
@@ -544,11 +572,11 @@ def _job_result(body: dict[str, object]) -> TranscriptionJobResult:
     )
 
 
-def _identifies_speakers(raw: object) -> bool | None:
-    """Whether the reported task list includes ``diarize``; None without a list."""
+def _supports(raw: object, task: JobTask) -> bool | None:
+    """Whether the reported task list includes ``task``; None without a list."""
     if not isinstance(raw, list):
         return None
-    return DIARIZE_TASK in cast(list[object], raw)
+    return task in cast(list[object], raw)
 
 
 def _failure_kind(raw: object) -> JobFailureKind | None:

@@ -352,7 +352,10 @@ async def resolve_transcribe_and_attach_audio_input(
         )
 
     reduced_precision_message = None
-    if transcription_result.alignment in REDUCED_PRECISION_ALIGNMENTS:
+    if (
+        transcription_result.diarization == "external"
+        and transcription_result.alignment in REDUCED_PRECISION_ALIGNMENTS
+    ):
         reduced_precision_message = (
             f"Step {request.step.step_order}: speakers were labelled per transcript "
             f"segment ({transcription_result.alignment}) because the service could "

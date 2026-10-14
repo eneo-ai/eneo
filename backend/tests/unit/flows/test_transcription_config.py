@@ -30,23 +30,38 @@ def test_diarization_must_be_a_boolean(raw: object) -> None:
         parse_transcription_config({"wizard": {"transcription_diarization": raw}})
 
 
-def test_a_picked_speaker_service_is_used_only_while_speakers_are_labelled() -> None:
+def test_a_chosen_service_is_in_use_whenever_the_flow_transcribes() -> None:
+    # It times the words of every transcript, and labels speakers when asked.
     service_id = uuid4()
     wizard = {
         "transcription_enabled": True,
         "transcription_speaker_service": {"id": str(service_id)},
     }
 
-    assert parse_transcription_config({"wizard": wizard}).speaker_service_in_use == (
-        service_id
+    for labels in (True, False):
+        config = parse_transcription_config(
+            {"wizard": {**wizard, "transcription_diarization": labels}}
+        )
+        assert config.service_in_use == service_id
+    config = parse_transcription_config(
+        {"wizard": {**wizard, "transcription_enabled": False}}
     )
-    for switched_off in (
-        {**wizard, "transcription_diarization": False},
-        {**wizard, "transcription_enabled": False},
-    ):
-        config = parse_transcription_config({"wizard": switched_off})
-        assert config.speaker_service_id == service_id
-        assert config.speaker_service_in_use is None
+    assert config.speaker_service_id == service_id
+    assert config.service_in_use is None
+
+
+@pytest.mark.parametrize("raw", [None, {"id": None}, {"id": " "}])
+def test_a_choice_of_no_service_names_none(raw: object) -> None:
+    config = parse_transcription_config(
+        {
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": raw,
+            }
+        }
+    )
+
+    assert (config.speaker_service_id, config.service_in_use) == (None, None)
 
 
 @pytest.mark.parametrize("raw", ["service", {"id": "not-a-uuid"}])

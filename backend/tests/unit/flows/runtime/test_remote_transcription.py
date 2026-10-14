@@ -46,6 +46,7 @@ from eneo.transcription_services import client as client_module
 from tests.unit.transcription_services.scripted_service import (
     JOB_ID,
     RESULT_BODY,
+    TIMED_BODY,
     ScriptedService,
     accepted,
     make_client,
@@ -95,11 +96,21 @@ def make_transcriber(
 
 
 async def label(transcriber: RemoteFlowTranscriber, file, **kwargs):
-    """One speaker-labelling job, the only job the client submits."""
+    """One speaker-labelling job."""
     return await transcriber.label_speakers(
         file,
         words=[TranscriptWord("Hej", 0.0, 0.4)],
         model_name=RESULT_BODY["model"],
+        **kwargs,
+    )
+
+
+async def time_words(transcriber: RemoteFlowTranscriber, file, **kwargs):
+    """One word-timing job on the transcript of ``TIMED_BODY``."""
+    return await transcriber.time_words(
+        file,
+        segments=[TranscriptSegment("Hej och välkomna.", 0.0, 5.2)],
+        model_name=TIMED_BODY["model"],
         **kwargs,
     )
 
@@ -445,7 +456,7 @@ async def test_failed_submission_preserves_typed_errors_and_receipts(
     assert observer.accepted_calls == []
 
 
-@pytest.mark.parametrize("change", ["scope", "file_id", "digest"])
+@pytest.mark.parametrize("change", ["scope", "file_id", "digest", "task"])
 async def test_submission_key_is_stable_and_scoped_to_operation(spool_contract, change):
     service = ScriptedService(
         submit_responses=[accepted(), accepted(), accepted()],
@@ -454,7 +465,11 @@ async def test_submission_key_is_stable_and_scoped_to_operation(spool_contract, 
             status("completed"),
             status("completed"),
         ],
-        result_responses=[httpx.Response(200, json=RESULT_BODY) for _ in range(3)],
+        result_responses=[
+            httpx.Response(200, json=RESULT_BODY),
+            httpx.Response(200, json=RESULT_BODY),
+            httpx.Response(200, json=TIMED_BODY if change == "task" else RESULT_BODY),
+        ],
     )
     observer = RecordingObserver()
     transcriber = make_transcriber(service)
@@ -478,7 +493,8 @@ async def test_submission_key_is_stable_and_scoped_to_operation(spool_contract, 
     file = await audio_file(
         spool_contract, b"different audio" if change == "digest" else b"fake-mp3-bytes"
     )
-    await label(transcriber, file, observer=observer, file_id=file_id)
+    job = time_words if change == "task" else label
+    await job(transcriber, file, observer=observer, file_id=file_id)
     keys = [
         request.headers["Idempotency-Key"]
         for request in service.requests
@@ -629,6 +645,71 @@ async def test_label_speakers_rejects_a_service_that_ignored_the_task(
         )
 
     assert excinfo.value.details["reason"] == "diarize_task_unsupported"
+
+
+@pytest.mark.parametrize("base_url,expected_model", PROVIDER_TARGETS)
+async def test_time_words_submits_a_timestamp_job_and_records_its_own_call(
+    spool_contract, base_url: str, expected_model: str
+) -> None:
+    service = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("completed")],
+        result_responses=[httpx.Response(200, json=TIMED_BODY)],
+    )
+    observer = RecordingObserver()
+
+    result = await time_words(
+        make_transcriber(service, base_url=base_url),
+        await audio_file(spool_contract),
+        language="sv",
+        observer=observer,
+        file_id=UUID(int=1),
+    )
+
+    assert result.alignment == "forced"
+    assert result.segments == (
+        TranscriptSegment(
+            "Hej och",
+            0.0,
+            2.0,
+            words=(
+                TranscriptWord("Hej", 0.0, 0.4, 0.98),
+                TranscriptWord("och", 0.5, 0.8, 0.91),
+            ),
+        ),
+        TranscriptSegment(
+            "välkomna.", 2.4, 5.2, words=(TranscriptWord("välkomna.", 2.4, 3.1, 0.0),)
+        ),
+    )
+    # The timing job is its own provider call on the audio, apart from the
+    # model call that transcribed it and from a diarize job.
+    [facts] = observer.started_facts
+    assert isinstance(facts, TranscriptionCallRequestFacts)
+    assert facts.requested_model == f"{expected_model}#timestamp"
+    assert len(observer.completed_calls) == 1
+    body = service.requests[0].read()
+    assert b'name="task"\r\n\r\ntimestamp\r\n' in body
+    assert b'name="diarize"' not in body
+
+
+async def test_time_words_rejects_a_service_that_ignored_the_task(
+    spool_contract,
+) -> None:
+    # A pre-task service transcribes the audio itself and reports its own model.
+    service = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("completed")],
+        result_responses=[httpx.Response(200, json=RESULT_BODY)],
+    )
+
+    with pytest.raises(OpenAIException) as excinfo:
+        await time_words(
+            make_transcriber(service),
+            await audio_file(spool_contract),
+            file_id=UUID(int=1),
+        )
+
+    assert excinfo.value.details["reason"] == "timestamp_task_unsupported"
 
 
 async def test_label_speakers_returns_service_segments_and_settles_the_receipt(

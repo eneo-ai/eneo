@@ -29,23 +29,46 @@ class ConnectionCheckOutcome(StrEnum):
     CREDENTIALS_REJECTED = "credentials_rejected"
 
 
+class ConnectionCheckReason(StrEnum):
+    """Why a check got no usable answer; a closed set that never quotes the
+    endpoint, the key or the transport's own text."""
+
+    # No connection was made, or no response came back.
+    UNREACHABLE = "unreachable"
+    # The answer did not arrive in time.
+    TIMEOUT = "timeout"
+    # The service answered with a status other than 200; the status is kept.
+    HTTP_STATUS = "http_status"
+    # The service answered 200 with something that is no readiness answer.
+    MALFORMED = "malformed"
+    # The service rejected the key.
+    CREDENTIALS = "credentials"
+
+
 @dataclass(frozen=True, slots=True)
 class LastConnectionCheck:
-    """The latest check of a connection's current endpoint and key."""
+    """The latest check of a connection's current endpoint and key.
+
+    ``reason`` is None when the service answered usably; ``status_code`` is
+    the status of an ``http_status`` answer.
+    """
 
     outcome: ConnectionCheckOutcome
     identifies_speakers: bool | None
     service_version: str | None
     checked_at: datetime
+    times_words: bool | None = None
+    reason: ConnectionCheckReason | None = None
+    status_code: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class TranscriptionServiceConnection:
     """An organisation's connection to one native transcription service.
 
-    Eneo uses it to identify speakers; a connection check reports whether the
-    service says it can. The credential is write-only and never part of this
-    view.
+    Eneo uses it to time the words of a flow's transcripts and to identify
+    their speakers; a connection check reports whether the service says it
+    can do each. The credential is write-only and never part of this view.
     """
 
     id: UUID
@@ -54,13 +77,14 @@ class TranscriptionServiceConnection:
     endpoint_url: str
     is_enabled: bool
     # The organisation's default, marked by an administrator and never
-    # inferred: a flow draft that asks for speaker labels without a choice
-    # gets it stored as its own choice.
+    # inferred: a flow draft that transcribes and has made no choice of
+    # service gets it stored as its own choice.
     is_default: bool
     security_classification: SecurityClassification | None
     created_at: datetime
     updated_at: datetime
-    # Spaces granted the connection; flows there lose speaker labels without it.
+    # Spaces granted the connection; flows there lose word timings and speaker
+    # labels without it.
     space_count: int
     last_check: LastConnectionCheck | None
 

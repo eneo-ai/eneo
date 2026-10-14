@@ -10652,7 +10652,7 @@ export interface paths {
     };
     /**
      * List Transcription Service Catalogue
-     * @description List the organisation's speaker identification services by name, without addresses or keys, for granting them to spaces.
+     * @description List the organisation's transcription services by name, without addresses or keys, for granting them to spaces.
      */
     get: operations["list_transcription_service_catalogue_api_v1_transcription_services__get"];
     put?: never;
@@ -15497,6 +15497,13 @@ export interface components {
      * @enum {string}
      */
     ConnectionCheckOutcome: "ready" | "not_accepting_jobs" | "unavailable" | "credentials_rejected";
+    /**
+     * ConnectionCheckReason
+     * @description Why a check got no usable answer; a closed set that never quotes the
+     *     endpoint, the key or the transport's own text.
+     * @enum {string}
+     */
+    ConnectionCheckReason: "unreachable" | "timeout" | "http_status" | "malformed" | "credentials";
     /**
      * ConstrainingSource
      * @enum {string}
@@ -38146,11 +38153,23 @@ export interface components {
        */
       identifies_speakers: boolean | null;
       outcome: components["schemas"]["ConnectionCheckOutcome"];
+      /** @description Why the check got no usable answer: no connection or response (unreachable), no answer in time (timeout), a status other than 200 (http_status), an answer that is no readiness answer (malformed), or a rejected key (credentials). Null when the service answered. */
+      reason: components["schemas"]["ConnectionCheckReason"] | null;
       /**
        * Service Version
        * @description Version the service reports, when it reports one
        */
       service_version: string | null;
+      /**
+       * Status Code
+       * @description The status the service answered with, when reason is http_status
+       */
+      status_code: number | null;
+      /**
+       * Times Words
+       * @description Whether the service reports it can time the words of a transcript without identifying speakers. Null: the service does not report which tasks it supports.
+       */
+      times_words: boolean | null;
     };
     /** TranscriptionServiceCreate */
     TranscriptionServiceCreate: {
@@ -38194,11 +38213,23 @@ export interface components {
        */
       identifies_speakers: boolean | null;
       outcome: components["schemas"]["ConnectionCheckOutcome"];
+      /** @description Why the check got no usable answer: no connection or response (unreachable), no answer in time (timeout), a status other than 200 (http_status), an answer that is no readiness answer (malformed), or a rejected key (credentials). Null when the service answered. */
+      reason: components["schemas"]["ConnectionCheckReason"] | null;
       /**
        * Service Version
        * @description Version the service reports, when it reports one
        */
       service_version: string | null;
+      /**
+       * Status Code
+       * @description The status the service answered with, when reason is http_status
+       */
+      status_code: number | null;
+      /**
+       * Times Words
+       * @description Whether the service reports it can time the words of a transcript without identifying speakers. Null: the service does not report which tasks it supports.
+       */
+      times_words: boolean | null;
     };
     /** TranscriptionServicePublic */
     TranscriptionServicePublic: {
@@ -38216,7 +38247,7 @@ export interface components {
       id: string;
       /**
        * Is Default
-       * @description The organisation's default speaker identification service: a flow draft that asks for speaker labels without a chosen service gets it stored as its choice, in spaces that may use it. At most one service is the default, and only an administrator marks it.
+       * @description The organisation's default transcription service: a flow draft that transcribes and has made no choice of service gets it stored as its choice, in spaces that may use it. At most one service is the default, and only an administrator marks it.
        */
       is_default: boolean;
       /** Is Enabled */
@@ -38228,7 +38259,7 @@ export interface components {
       security_classification: components["schemas"]["SecurityClassificationPublic"] | null;
       /**
        * Space Count
-       * @description Spaces granted the service. Their flows cannot identify speakers while it is switched off or after it is removed.
+       * @description Spaces granted the service. Their flows get no word timings and cannot identify speakers while it is switched off or after it is removed.
        */
       space_count: number;
       /**
@@ -38239,7 +38270,7 @@ export interface components {
     };
     /**
      * TranscriptionServiceSummary
-     * @description A speaker identification service as a space editor sees it.
+     * @description A transcription service as a space editor sees it.
      */
     TranscriptionServiceSummary: {
       /**
@@ -38249,7 +38280,7 @@ export interface components {
       id: string;
       /**
        * Is Default
-       * @description The organisation's default: filled in as the service of flows that identify speakers, in spaces that may use it.
+       * @description The organisation's default: filled in as the service of flows that transcribe, in spaces that may use it.
        */
       is_default: boolean;
       /** Is Enabled */
@@ -38276,7 +38307,7 @@ export interface components {
       endpoint_url?: string;
       /**
        * Is Default
-       * @description True makes this the organisation's only default speaker identification service, in place of the previous one. False unmarks it and marks no other.
+       * @description True makes this the organisation's only default transcription service, in place of the previous one. False unmarks it and marks no other.
        */
       is_default?: boolean;
       /** Is Enabled */

@@ -201,6 +201,25 @@ class TestPickedSpeakerService:
     def _connection() -> SimpleNamespace:
         return SimpleNamespace(id=uuid4())
 
+    @pytest.mark.parametrize("labels", [True, False])
+    def test_a_saved_pick_is_kept_whether_or_not_it_labels_speakers(
+        self, labels: bool
+    ) -> None:
+        service_id = uuid4()
+
+        assert (
+            kept_speaker_service_id(
+                {
+                    "wizard": {
+                        "transcription_enabled": True,
+                        "transcription_diarization": labels,
+                        "transcription_speaker_service": {"id": str(service_id)},
+                    }
+                }
+            )
+            == service_id
+        )
+
     def test_an_unreadable_saved_pick_names_no_service(self) -> None:
         assert (
             kept_speaker_service_id(
@@ -333,19 +352,19 @@ class TestChosenSpeakerService:
 
 
 class TestDefaultSpeakerService:
-    """A draft that asks for speaker labels without a chosen service is written
-    with the organisation's default as its own choice; nothing else is."""
+    """A draft that transcribes and whose author has made no choice of
+    service is written with the organisation's default as its own choice;
+    nothing else is, and a choice of none is a choice."""
 
     _DEFAULT = uuid4()
     _CHOSEN = {"transcription_speaker_service": {"id": str(uuid4())}}
 
     @classmethod
     def _fill(
-        cls, metadata: dict[str, object] | None, steps: list, *, default: bool = True
+        cls, metadata: dict[str, object] | None, *, default: bool = True
     ) -> dict[str, object] | None:
         return fill_default_speaker_service(
             metadata=metadata,
-            steps=steps,
             space=SimpleNamespace(  # pyright: ignore[reportArgumentType]
                 default_transcription_service=SimpleNamespace(id=cls._DEFAULT)
                 if default
@@ -354,12 +373,10 @@ class TestDefaultSpeakerService:
         )
 
     @pytest.mark.parametrize(
-        ("wizard", "steps"),
-        [({}, []), (_LABELS_OFF, _MAPS_SPEAKERS)],
-        ids=["own_setting_on", "a_step_needs_labels_with_the_setting_off"],
+        "wizard", [{}, _LABELS_OFF], ids=["labels_on", "labels_off"]
     )
-    def test_the_default_becomes_the_choice_of_a_flow_that_asks_and_chose_none(
-        self, wizard: dict[str, object], steps: list
+    def test_the_default_becomes_the_choice_of_a_flow_that_transcribes_and_has_none(
+        self, wizard: dict[str, object]
     ) -> None:
         metadata = {
             "form_schema": {"fields": []},
@@ -367,7 +384,7 @@ class TestDefaultSpeakerService:
         }
         written = {"form_schema": {"fields": []}, "wizard": dict(metadata["wizard"])}
 
-        filled = self._fill(metadata, steps)
+        filled = self._fill(metadata)
 
         assert filled == {
             "form_schema": {"fields": []},
@@ -380,20 +397,22 @@ class TestDefaultSpeakerService:
         assert metadata == written
 
     @pytest.mark.parametrize(
-        ("wizard", "steps", "default"),
+        ("wizard", "default"),
         [
-            (_CHOSEN, [], True),
-            ({**_CHOSEN, **_LABELS_OFF}, _MAPS_SPEAKERS, True),
-            (_LABELS_OFF, [], True),
-            ({"transcription_enabled": False}, _MAPS_SPEAKERS, True),
-            ({}, _MAPS_SPEAKERS, False),
-            ({"transcription_diarization": "yes"}, [], True),
-            ({"transcription_speaker_service": {"id": "nope"}}, [], True),
+            (_CHOSEN, True),
+            ({**_CHOSEN, **_LABELS_OFF}, True),
+            ({"transcription_speaker_service": None}, True),
+            ({"transcription_speaker_service": None, **_LABELS_OFF}, True),
+            ({"transcription_enabled": False}, True),
+            ({}, False),
+            ({"transcription_diarization": "yes"}, True),
+            ({"transcription_speaker_service": {"id": "nope"}}, True),
         ],
         ids=[
             "a_choice_is_kept",
-            "a_choice_is_kept_when_a_step_needs_labels",
-            "labels_off_and_no_step_needs_them",
+            "a_choice_is_kept_with_labels_off",
+            "a_choice_of_none_is_kept",
+            "a_choice_of_none_is_kept_with_labels_off",
             "the_flow_transcribes_nothing",
             "the_space_has_no_usable_default",
             "a_malformed_setting_is_left_to_validation",
@@ -401,11 +420,11 @@ class TestDefaultSpeakerService:
         ],
     )
     def test_nothing_else_is_filled(
-        self, wizard: dict[str, object], steps: list, default: bool
+        self, wizard: dict[str, object], default: bool
     ) -> None:
         metadata = {"wizard": {"transcription_enabled": True, **wizard}}
 
-        assert self._fill(metadata, steps, default=default) is metadata
+        assert self._fill(metadata, default=default) is metadata
 
     def test_a_flow_without_metadata_stays_without(self) -> None:
-        assert self._fill(None, _MAPS_SPEAKERS) is None
+        assert self._fill(None) is None

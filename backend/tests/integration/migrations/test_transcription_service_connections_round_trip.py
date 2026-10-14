@@ -17,7 +17,8 @@ from eneo.database.tables.transcription_services_table import (
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-_REVISION = "202610111900"
+_REVISION = "202610141000"
+_DEFAULT_REVISION = "202610111900"
 _LAST_CHECK_REVISION = "202610091000"
 _OPERATIONS_REVISION = "202610082100"
 _PREVIOUS_REVISION = "202610081100"
@@ -103,6 +104,26 @@ def _default_mark(database_url: str) -> tuple[bool, set[str]]:
                 if not index.get("duplicates_constraint")
             },
         )
+    finally:
+        engine.dispose()
+
+
+_CHECK_REASON_COLUMNS = {
+    "last_check_times_words",
+    "last_check_reason",
+    "last_check_status_code",
+}
+
+
+def _check_reason_columns(database_url: str) -> set[str]:
+    engine = create_engine(database_url)
+    try:
+        return _CHECK_REASON_COLUMNS & {
+            column["name"]
+            for column in inspect(engine).get_columns(
+                "transcription_service_connections"
+            )
+        }
     finally:
         engine.dispose()
 
@@ -229,6 +250,14 @@ def test_the_tables_round_trip_and_match_the_models(
             transaction.rollback()
     finally:
         engine.dispose()
+
+    # A kept check's reason and word timing columns come and go on their own.
+    assert _check_reason_columns(database_url) == _CHECK_REASON_COLUMNS
+    command.downgrade(config, _DEFAULT_REVISION)
+    assert _check_reason_columns(database_url) == set()
+    assert _default_mark(database_url) == (True, {default_index["name"]})
+    command.upgrade(config, _REVISION)
+    assert _check_reason_columns(database_url) == _CHECK_REASON_COLUMNS
 
     assert _default_mark(database_url) == (True, {default_index["name"]})
     command.downgrade(config, _LAST_CHECK_REVISION)

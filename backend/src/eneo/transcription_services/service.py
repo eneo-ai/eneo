@@ -23,6 +23,7 @@ from eneo.transcription_services.client import (
 from eneo.transcription_services.models import (
     MAX_CONNECTIONS_PER_ORGANISATION,
     ConnectionCheckOutcome,
+    ConnectionCheckReason,
     LastConnectionCheck,
     TranscriptionServiceConnection,
 )
@@ -45,14 +46,18 @@ _CHECK_TIMEOUT_SECONDS = 10.0
 class ConnectionCheck:
     """What the service answered to an authenticated readiness request.
 
-    No audio is sent. ``identifies_speakers`` is None when the service does
-    not report which tasks it supports.
+    No audio is sent. ``identifies_speakers`` and ``times_words`` are None
+    when the service does not report which tasks it supports; ``reason`` says
+    why there was no usable answer.
     """
 
     outcome: ConnectionCheckOutcome
     detail: str
     identifies_speakers: bool | None
+    times_words: bool | None
     service_version: str | None
+    reason: ConnectionCheckReason | None
+    status_code: int | None
     checked_at: datetime
 
 
@@ -174,7 +179,10 @@ class TranscriptionServiceConnectionService:
             # The kept check described the old endpoint or key.
             row.last_check_outcome = None
             row.last_check_identifies_speakers = None
+            row.last_check_times_words = None
             row.last_check_service_version = None
+            row.last_check_reason = None
+            row.last_check_status_code = None
             row.last_checked_at = None
         if is_provided(is_enabled):
             row.is_enabled = is_enabled
@@ -231,7 +239,10 @@ class TranscriptionServiceConnectionService:
                 outcome=ConnectionCheckOutcome.CREDENTIALS_REJECTED,
                 detail="the service rejected the API key",
                 identifies_speakers=None,
+                times_words=None,
                 service_version=None,
+                reason=ConnectionCheckReason.CREDENTIALS,
+                status_code=None,
                 checked_at=datetime.now(UTC),
             )
         else:
@@ -243,7 +254,10 @@ class TranscriptionServiceConnectionService:
                 else ConnectionCheckOutcome.NOT_ACCEPTING_JOBS,
                 detail=readiness.detail,
                 identifies_speakers=readiness.identifies_speakers,
+                times_words=readiness.times_words,
                 service_version=readiness.service_version,
+                reason=readiness.reason,
+                status_code=readiness.status_code,
                 checked_at=datetime.now(UTC),
             )
         await self.repository.record_check(
@@ -253,6 +267,9 @@ class TranscriptionServiceConnectionService:
                 identifies_speakers=result.identifies_speakers,
                 service_version=result.service_version,
                 checked_at=result.checked_at,
+                times_words=result.times_words,
+                reason=result.reason,
+                status_code=result.status_code,
             ),
             endpoint_url=connection.endpoint_url,
             api_key_encrypted=ciphertext,
@@ -265,6 +282,8 @@ class TranscriptionServiceConnectionService:
                 "outcome": result.outcome.value,
                 "detail": result.detail,
                 "identifies_speakers": result.identifies_speakers,
+                "times_words": result.times_words,
+                "reason": result.reason.value if result.reason is not None else None,
             },
         )
         return result

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from typing import Any, NoReturn, cast
 from uuid import UUID
 
@@ -32,14 +33,17 @@ from eneo.flows.domain.step_output import (
 from eneo.flows.domain.transcript_corrections import (
     SUPPORTED_TRANSCRIPT_CORRECTIONS_SCHEMA_VERSIONS,
     TranscriptCorrectionInvalidOccurrenceError,
+    TranscriptCorrectionOccurrence,
+    TranscriptSpeakerEdit,
     TranscriptSpeakerEditInvalidError,
+    apply_corrections,
     apply_to_rendered_transcript,
     validate_correction_partitions,
     validate_occurrences,
     validate_speaker_edits,
 )
 from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
-from eneo.flows.domain.transcript_words import locate_words
+from eneo.flows.domain.transcript_words import LocatedWord, locate_words
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_run_input_envelope import (
@@ -73,8 +77,11 @@ def _invalid(reason: str, *, conflict: bool = False) -> NoReturn:
     )
 
 
-def render_original_segments(segments: list[dict[str, Any]]) -> str:
-    """Render immutable source evidence, even if an earlier approval changed output text."""
+def render_original_segments(
+    segments: list[dict[str, Any]], *, timed: bool = True
+) -> str:
+    """Render immutable source evidence, even if an earlier approval changed
+    output text; ``timed`` false leaves out each line's times."""
     lines: list[str] = []
     previous_file = None
     multiple = len({segment.get("file_index", 0) for segment in segments}) > 1
@@ -86,11 +93,39 @@ def render_original_segments(segments: list[dict[str, Any]]) -> str:
             lines.extend([f"## Del {file_index + 1}", ""])
         previous_file = file_index
         lines.append(
-            render_line_prefix(segment["start"], segment["end"])
+            (render_line_prefix(segment["start"], segment["end"]) if timed else "")
             + attribution_text(segment)
             + segment["text"]
         )
     return "\n".join(lines)
+
+
+def _render_reviewed_transcript(
+    segments: list[dict[str, Any]],
+    occurrences: list[TranscriptCorrectionOccurrence],
+    edits: list[TranscriptSpeakerEdit],
+    words_by_segment: Mapping[int, Sequence[LocatedWord]] | None,
+) -> str | None:
+    """The corrected transcript a regeneration continues with, or None when a
+    correction no longer fits its line.
+
+    Speaker-labelled lines are the transcript's text as its step wrote it, so
+    they keep their times. Lines without speakers place the model's own text
+    in time (its words were timed, or it was transcribed live), and its step
+    kept that text without times: so does the regeneration."""
+    if edits or any(
+        segment.get("speaker") or segment.get("speaker_attribution")
+        for segment in segments
+    ):
+        return apply_to_rendered_transcript(
+            render_original_segments(segments),
+            segments,
+            occurrences,
+            edits,
+            words_by_segment,
+        )
+    corrected, skipped = apply_corrections(segments, occurrences)
+    return None if skipped else render_original_segments(corrected, timed=False)
 
 
 class FlowTranscriptRegenerationService:
@@ -227,12 +262,8 @@ class FlowTranscriptRegenerationService:
             if words and words.segments_hash == segments_hash
             else None
         )
-        reviewed = apply_to_rendered_transcript(
-            render_original_segments(segments),
-            segments,
-            occurrences,
-            edits,
-            words_by_segment,
+        reviewed = _render_reviewed_transcript(
+            segments, occurrences, edits, words_by_segment
         )
         if reviewed is None:
             _invalid("reviewed_transcript_not_renderable")

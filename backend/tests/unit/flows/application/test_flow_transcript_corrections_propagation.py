@@ -220,6 +220,26 @@ def test_skips_when_the_text_was_hand_edited() -> None:
     assert outcome.skip_reason == "text_not_aligned"
 
 
+def test_a_plain_transcript_is_never_rendered_into_timed_lines() -> None:
+    # A transcript whose words were timed without speakers keeps the model's
+    # text; its timed segments never become the reviewed text's lines.
+    speakerless = [{**segment, "speaker": None} for segment in SEGMENTS]
+    plain = "### 0:00 - 0:08\n\nVi frågade sugary om planen. sugary svarade direkt."
+
+    outcome = build_folded_transcript(
+        transcript_source=_source_state(speakerless),
+        checkpoint=_checkpoint({"text": plain}),
+        step_result=_step_result(),
+        correction_set=_correction_set(
+            occurrences_json=[OCCURRENCE],
+            segments_hash=segments_content_hash(speakerless),
+        ),
+    )
+
+    assert (outcome.folded_payload, outcome.previous_text) == (None, plain)
+    assert outcome.skip_reason == "text_not_aligned"
+
+
 def test_skips_when_the_step_was_retried_after_the_checkpoint() -> None:
     outcome = build_folded_transcript(
         transcript_source=_source_state(SEGMENTS),

@@ -1,15 +1,17 @@
-"""Flow-step transcriber that transcribes in Eneo and labels speakers externally.
+"""Flow-step transcribers: the flow's model alone, or the model and the
+transcription service the flow chose.
 
 The flow's own transcription model (registry, per-tenant provider credentials,
-governance) produces the transcript; the external transcription service is
-asked only to diarize the audio and attach speaker labels to it.
+governance) produces the transcript; the external transcription service never
+writes text. It labels the speakers when the run asks for labels, and
+otherwise places the words in time.
 
 The service receives the transcript as one segment per audio chunk, spanning
 the chunk's measured duration. Those windows are the only timestamps Eneo can
 vouch for: they come from the audio it split and measured itself, not from the
 provider, whose word timings have proven unreliable. The service force-aligns
-the text inside each window and, if it cannot, falls back to labelling whole
-segments, so the text order is never disturbed.
+the text inside each window. A diarize job that cannot falls back to labelling
+whole segments, so the text order is never disturbed.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from eneo.files.transcriber import TranscribedAudio, Transcriber
 from eneo.flows.runtime.audio_spool import SpooledAudio
 from eneo.flows.runtime.recording_parts import RecordingAudio, join_part_windows
 from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
-from eneo.flows.runtime.speaker_enrichment import enrich_transcript
+from eneo.flows.runtime.service_enrichment import enrich_transcript
 
 if TYPE_CHECKING:
     from eneo.model_providers.domain.provider_call_observer import (
@@ -68,6 +70,7 @@ class RegistryFlowTranscriber:
         *,
         transcribed: TranscribedAudio,
         file_id: UUID,
+        diarize: bool,
         language: str | None = None,
         observer: ProviderCallObserver | None = None,
         max_speakers: int | None = None,
@@ -75,8 +78,10 @@ class RegistryFlowTranscriber:
         return transcribed
 
 
-class DiarizingFlowTranscriber(RegistryFlowTranscriber):
-    """``FlowStepTranscriber`` composed of the registry engine and the service."""
+class ServiceFlowTranscriber(RegistryFlowTranscriber):
+    """``FlowStepTranscriber`` composed of the registry engine and the flow's
+    transcription service: the service labels the speakers of a run that asks
+    for labels, and times the words of any other."""
 
     def __init__(self, transcriber: Transcriber, remote: RemoteFlowTranscriber) -> None:
         super().__init__(transcriber)
@@ -104,13 +109,12 @@ class DiarizingFlowTranscriber(RegistryFlowTranscriber):
             persist_cache_to_file=False,
             observer=observer,
         )
-        if not diarize:
-            return transcribed
         return await self.enrich(
             file,
             transcription_model,
             transcribed=transcribed,
             file_id=file_id,
+            diarize=diarize,
             language=language,
             observer=observer,
             max_speakers=max_speakers,
@@ -123,6 +127,7 @@ class DiarizingFlowTranscriber(RegistryFlowTranscriber):
         *,
         transcribed: TranscribedAudio,
         file_id: UUID,
+        diarize: bool,
         language: str | None = None,
         observer: ProviderCallObserver | None = None,
         max_speakers: int | None = None,
@@ -133,6 +138,7 @@ class DiarizingFlowTranscriber(RegistryFlowTranscriber):
             transcription_model,
             transcribed=transcribed,
             file_id=file_id,
+            diarize=diarize,
             language=language,
             observer=observer,
             max_speakers=max_speakers,
@@ -166,6 +172,7 @@ class DiarizingFlowTranscriber(RegistryFlowTranscriber):
             transcription_model,
             transcribed=join_part_windows(parts, recording.bounds),
             file_id=recording.file_ids[0],
+            diarize=True,
             language=language,
             observer=observer,
             max_speakers=max_speakers,

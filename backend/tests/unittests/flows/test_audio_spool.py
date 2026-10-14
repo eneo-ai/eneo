@@ -11,9 +11,9 @@ import pytest
 from eneo.files import audio
 from eneo.files.file_service import FileDownload
 from eneo.files.transcriber import Transcriber
-from eneo.flows.runtime.diarizing_transcription import (
-    DiarizingFlowTranscriber,
+from eneo.flows.runtime.service_transcription import (
     RegistryFlowTranscriber,
+    ServiceFlowTranscriber,
 )
 from eneo.flows.runtime.transcription import FlowTranscribers
 from eneo.main.exceptions import TypedIOValidationException
@@ -49,7 +49,9 @@ recording = test_audio.recording
 ffmpeg = test_audio.ffmpeg
 
 
-@pytest.mark.parametrize("outcome", ["registry", "failure", "cancel", "diarize"])
+@pytest.mark.parametrize(
+    "outcome", ["registry", "failure", "cancel", "diarize", "timestamp"]
+)
 async def test_audio_step_uses_download_and_removes_spool(
     user, recording, ffmpeg, monkeypatch, outcome, spool_contract
 ):
@@ -103,24 +105,43 @@ async def test_audio_step_uses_download_and_removes_spool(
     monkeypatch.setattr(TRANSPORT, provider)
     registry = Transcriber(file_service=file_service)
     monkeypatch.setattr(registry, "_get_adapter", AsyncMock(return_value=_adapter()))
+    timed = {
+        **RESULT_BODY,
+        "text": "[00:00:00 - 00:00:01] hello",
+        "segments": [
+            {
+                "start": 0.0,
+                "end": 1.0,
+                "text": "hello",
+                "words": [{"word": "hello", "start": 0.0, "end": 0.5}],
+            }
+        ],
+        "alignment": "forced",
+    }
     service = ScriptedService(
         submit_responses=[accepted()],
         status_responses=[status("completed")],
         result_responses=[
-            httpx.Response(200, json={**RESULT_BODY, "model": model.model_name})
+            httpx.Response(
+                200,
+                json={
+                    **(timed if outcome == "timestamp" else RESULT_BODY),
+                    "model": model.model_name,
+                },
+            )
         ],
     )
     remote = make_transcriber(service)
     if outcome == "registry":
         executor.transcribers = FlowTranscribers(
             model=RegistryFlowTranscriber(registry),
-            with_speaker_service=AsyncMock(side_effect=AssertionError("labels off")),
+            with_speaker_service=AsyncMock(side_effect=AssertionError("no service")),
         )
-    elif outcome == "diarize":
+    elif outcome in {"diarize", "timestamp"}:
         executor.transcribers = FlowTranscribers(
             model=RegistryFlowTranscriber(registry),
             with_speaker_service=AsyncMock(
-                return_value=DiarizingFlowTranscriber(registry, remote)
+                return_value=ServiceFlowTranscriber(registry, remote)
             ),
         )
     run = _run(user=user, payload={})
@@ -138,21 +159,28 @@ async def test_audio_step_uses_download_and_removes_spool(
             version_metadata={
                 "wizard": {
                     "transcription_enabled": True,
-                    "transcription_speaker_service": _SPEAKER_CHOICE,
                     "transcription_model": {"id": str(model.id)},
-                    "transcription_diarization": outcome != "registry",
+                    "transcription_diarization": outcome
+                    not in {"registry", "timestamp"},
+                    **(
+                        {}
+                        if outcome == "registry"
+                        else {"transcription_speaker_service": _SPEAKER_CHOICE}
+                    ),
                 }
             },
             requested_file_ids=[file.id],
             transcription_call_observer=observer,
         )
 
-    if outcome in {"registry", "diarize"}:
+    if outcome in {"registry", "diarize", "timestamp"}:
         result = await execute()
-        if outcome == "registry":
-            assert "hello" in result.text
-        else:
+        if outcome == "diarize":
             assert result.text == RESULT_BODY["text"]
+        else:
+            assert "hello" in result.text
+        if outcome == "timestamp":
+            assert result.transcription_metadata["word_timing"] == {"status": "done"}
         assert decodes == ["wav"]
         assert provider.await_count == 1
     else:
@@ -168,7 +196,7 @@ async def test_audio_step_uses_download_and_removes_spool(
     assert list(temp_dir.iterdir()) == []
     assert len(download.streams) == 1
     assert duration.await_count == 0
-    if outcome == "diarize":
+    if outcome in {"diarize", "timestamp"}:
         assert observer.started_facts[-1].audio_seconds == 10
         assert len(observer.started_facts) == 2
         assert payload in service.requests[0].read()

@@ -15,11 +15,11 @@ from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.infrastructure.flow_transcript_source_repo import (
     FlowTranscriptSourceRepository,
 )
-from eneo.flows.runtime.diarizing_transcription import RegistryFlowTranscriber
 from eneo.flows.runtime.executor import FlowRunExecutor
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.live_transcription.repository import LiveTranscriptRepository
 from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
+from eneo.flows.runtime.service_transcription import RegistryFlowTranscriber
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.flows.runtime.transcription import FlowTranscribers
 from eneo.main.container.container import Container

@@ -486,7 +486,7 @@ SHARED_CASES = json.loads(
 async def test_rejected_remote_sidecar_preserves_canonical_text_across_files(
     spool_contract, damage
 ):
-    from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
+    from eneo.flows.runtime.service_transcription import ServiceFlowTranscriber
     from tests.unit.flows.runtime.test_remote_transcription import make_transcriber
     from tests.unit.transcription_services.scripted_service import (
         ScriptedService,
@@ -522,7 +522,7 @@ async def test_rejected_remote_sidecar_preserves_canonical_text_across_files(
     result = await _run(
         spool_contract,
         files,
-        DiarizingFlowTranscriber(registry, make_transcriber(service)),
+        ServiceFlowTranscriber(registry, make_transcriber(service)),
     )
 
     assert result.text == (

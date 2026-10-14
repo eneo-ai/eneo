@@ -24,6 +24,7 @@ from eneo.security_classifications.domain.entities.security_classification impor
 )
 from eneo.transcription_services.models import (
     ConnectionCheckOutcome,
+    ConnectionCheckReason,
     LastConnectionCheck,
     TranscriptionServiceConnection,
 )
@@ -237,7 +238,12 @@ class TranscriptionServiceConnectionRepository:
             .values(
                 last_check_outcome=check.outcome.value,
                 last_check_identifies_speakers=check.identifies_speakers,
+                last_check_times_words=check.times_words,
                 last_check_service_version=check.service_version,
+                last_check_reason=check.reason.value
+                if check.reason is not None
+                else None,
+                last_check_status_code=check.status_code,
                 last_checked_at=check.checked_at,
                 updated_at=table.updated_at,
             )
@@ -307,8 +313,9 @@ def _to_domain(row: TranscriptionServiceConnections) -> TranscriptionServiceConn
 
 
 def _last_check(row: TranscriptionServiceConnections) -> LastConnectionCheck | None:
-    # An outcome this build does not know reads as untested.
+    # An outcome this build does not know reads as untested, a reason as none.
     outcomes = {outcome.value: outcome for outcome in ConnectionCheckOutcome}
+    reasons = {reason.value: reason for reason in ConnectionCheckReason}
     outcome = outcomes.get(row.last_check_outcome or "")
     if outcome is None or row.last_checked_at is None:
         return None
@@ -317,4 +324,7 @@ def _last_check(row: TranscriptionServiceConnections) -> LastConnectionCheck | N
         identifies_speakers=row.last_check_identifies_speakers,
         service_version=row.last_check_service_version,
         checked_at=row.last_checked_at,
+        times_words=row.last_check_times_words,
+        reason=reasons.get(row.last_check_reason or ""),
+        status_code=row.last_check_status_code,
     )

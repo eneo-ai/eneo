@@ -24,13 +24,13 @@ from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
 )
-from eneo.flows.runtime.diarizing_transcription import RegistryFlowTranscriber
 from eneo.flows.runtime.executor import (
     FlowRunExecutor,
     RunExecutionState,
     RuntimeStep,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.service_transcription import RegistryFlowTranscriber
 from eneo.flows.runtime.transcription import FlowTranscribers, FlowTranscriptionResult
 from eneo.flows.runtime.transcription_runtime import (
     AudioRuntimeDeps,
@@ -197,7 +197,7 @@ async def test_remote_failure_facts_survive_executor_terminalization(
     from eneo.flows.domain.flow import FlowStepResult
     from eneo.flows.flow_run_error import dump_flow_run_error, parse_flow_run_error
     from eneo.flows.runtime import remote_transcription
-    from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
+    from eneo.flows.runtime.service_transcription import ServiceFlowTranscriber
     from eneo.flows.runtime.transcription import transcribe_audio_input
     from eneo.transcription_services.client import TranscriptionServiceClient
 
@@ -242,7 +242,7 @@ async def test_remote_failure_facts_survive_executor_terminalization(
     with pytest.raises(TypedIOValidationException) as exc_info:
         await transcribe_audio_input(
             files=[FileInfo.model_validate(file, from_attributes=True)],
-            transcriber=DiarizingFlowTranscriber(registry, remote),
+            transcriber=ServiceFlowTranscriber(registry, remote),
             transcription_model=SimpleNamespace(model_name="whisper-1"),
             language="sv",
             step_order=1,
@@ -841,8 +841,17 @@ async def test_a_service_removed_before_its_key_is_read_is_the_same_refusal(
 
 
 @pytest.mark.asyncio
-async def test_labels_off_transcribe_with_the_model_and_connect_no_service(
-    spool_contract, user
+@pytest.mark.parametrize(
+    ("speaker_services", "choice"),
+    [
+        ([], {}),
+        # The author chose none: a service the space has is not asked.
+        ([_SPEAKER_SERVICE], {"transcription_speaker_service": None}),
+    ],
+    ids=["no_choice_no_service", "chose_none"],
+)
+async def test_labels_off_without_a_chosen_service_connect_no_service(
+    spool_contract, user, speaker_services, choice
 ):
     executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
         spool_contract=spool_contract, user=user
@@ -851,10 +860,10 @@ async def test_labels_off_transcribe_with_the_model_and_connect_no_service(
     model = SimpleNamespace(id=uuid4(), name="whisper-1", can_access=True)
     # Labels off need no speaker service, so none in the space is no refusal.
     space_repo.one = AsyncMock(
-        return_value=_SpaceStub([model], model, speaker_services=[])
+        return_value=_SpaceStub([model], model, speaker_services=speaker_services)
     )
 
-    await _resolve_meeting(
+    resolved = await _resolve_meeting(
         executor,
         flow_run_repo,
         file_service,
@@ -862,12 +871,14 @@ async def test_labels_off_transcribe_with_the_model_and_connect_no_service(
         {
             "transcription_model": {"id": str(model.id)},
             "transcription_diarization": False,
+            **choice,
         },
     )
 
     model_engine.transcribe.assert_awaited_once()
     assert model_engine.transcribe.await_args.kwargs["diarize"] is False
     with_speaker_service.assert_not_awaited()
+    assert "word_timing" not in resolved.transcription_metadata
 
 
 @pytest.mark.asyncio
@@ -885,8 +896,8 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
     import httpx
 
     from eneo.files.transcript import TranscriptSegment
-    from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
     from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
+    from eneo.flows.runtime.service_transcription import ServiceFlowTranscriber
     from tests.unit.transcription_services.scripted_service import (
         RESULT_BODY,
         ScriptedService,
@@ -918,7 +929,7 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
         )
     )
     with_speaker_service = AsyncMock(
-        return_value=DiarizingFlowTranscriber(registry, remote)
+        return_value=ServiceFlowTranscriber(registry, remote)
     )
     executor.transcribers = FlowTranscribers(
         model=AsyncMock(), with_speaker_service=with_speaker_service
@@ -959,6 +970,8 @@ async def test_vemsa_receives_the_speaker_bound_the_run_settled(
         resolved.transcription_metadata["speaker_service"],
         resolved.transcription_metadata["speaker_service_id"],
     ) == ("Vemsa", str(_SPEAKER_SERVICE.id))
+    # A diarize job labels the speakers; it is no word-timing job.
+    assert "word_timing" not in resolved.transcription_metadata
     submitted = vemsa.requests[0].read()
     assert b'name="task"\r\n\r\ndiarize' in submitted
     if bound is None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import re
 import subprocess
 import sys
 from dataclasses import replace
@@ -41,7 +42,13 @@ from tests.unit.transcription_services.scripted_service import (
 )
 
 LABEL = TranscriptionJobRequest(
-    language="sv", segments=[TranscriptSegment("hej du", 0.0, 0.7)]
+    task="diarize", language="sv", segments=[TranscriptSegment("hej du", 0.0, 0.7)]
+)
+TIME = TranscriptionJobRequest(
+    task="timestamp",
+    language="sv",
+    segments=[TranscriptSegment("hej du", 0.0, 0.7)],
+    model="whisper-1",
 )
 
 
@@ -64,6 +71,16 @@ def _form(service: ScriptedService, index: int = 0) -> bytes:
     return service.requests[index].read()
 
 
+def _fields(service: ScriptedService) -> dict[str, str]:
+    """The job's text form fields; the audio part is not one."""
+    return {
+        name.decode(): value.decode()
+        for name, value in re.findall(
+            rb'name="(\w+)"\r\n\r\n(.*?)\r\n--', _form(service), re.S
+        )
+    }
+
+
 async def test_submit_sends_the_multipart_job_contract() -> None:
     service = ScriptedService(submit_responses=[accepted()])
 
@@ -74,13 +91,35 @@ async def test_submit_sends_the_multipart_job_contract() -> None:
     assert request.headers["idempotency-key"] == "key-1"
     body = _form(service)
     assert b'name="file"' in body and b"fake" in body
-    assert b'name="language"' in body and b"sv" in body
-    # Every job asks for speaker labels on a transcript it carries.
-    assert b'name="diarize"' in body and b"true" in body
-    assert b'name="task"' in body and b"diarize" in body
-    assert b"false" not in body
-    # No model is named unless the request carries one.
-    assert b'name="model"' not in body
+    # A diarize job asks for speaker labels on a transcript it carries. No
+    # model is named unless the request carries one.
+    assert _fields(service) == {
+        "task": "diarize",
+        "language": "sv",
+        "diarize": "true",
+        "segments": '[{"text":"hej du","start":0.0,"end":0.7}]',
+    }
+
+
+async def test_a_timestamp_job_sends_its_transcript_and_no_speaker_fields() -> None:
+    service = ScriptedService(submit_responses=[accepted()])
+    client = make_client(service)
+    # Speaker review belongs to diarize jobs, whatever the client opted into.
+    client.include_speaker_review = True
+
+    await client.submit_job(
+        TIME,
+        filename="a.wav",
+        mimetype="audio/wav",
+        payload=io.BytesIO(b"audio"),
+    )
+
+    assert _fields(service) == {
+        "task": "timestamp",
+        "language": "sv",
+        "segments": '[{"text":"hej du","start":0.0,"end":0.7}]',
+        "model": "whisper-1",
+    }
 
 
 async def test_diarize_job_sends_the_transcript_and_its_model() -> None:
@@ -89,6 +128,7 @@ async def test_diarize_job_sends_the_transcript_and_its_model() -> None:
     await _submit(
         service,
         TranscriptionJobRequest(
+            task="diarize",
             language="sv",
             words=[TranscriptWord("hej", 0.0, 0.4), TranscriptWord("du", 0.5, 0.7)],
             model="whisper-1",
@@ -110,6 +150,7 @@ async def test_diarize_job_accepts_segments_without_words() -> None:
     await _submit(
         service,
         TranscriptionJobRequest(
+            task="diarize",
             language="sv",
             segments=[TranscriptSegment("hej du", 0.0, 0.7)],
         ),
@@ -149,6 +190,19 @@ async def test_speaker_review_is_requested_only_by_explicit_opt_in(enabled) -> N
     "fields",
     [
         pytest.param({"words": []}, id="diarize-without-transcript"),
+        pytest.param({"task": "timestamp"}, id="timestamp-without-transcript"),
+        pytest.param(
+            {"task": "timestamp", "words": [TranscriptWord("x", 0, 1)]},
+            id="timestamp-with-words",
+        ),
+        pytest.param(
+            {
+                "task": "timestamp",
+                "segments": [TranscriptSegment("x", 0, 1)],
+                "max_speakers": 2,
+            },
+            id="timestamp-with-a-speaker-bound",
+        ),
         pytest.param(
             {
                 "segments": [
@@ -173,7 +227,7 @@ async def test_speaker_review_is_requested_only_by_explicit_opt_in(enabled) -> N
 )
 def test_an_invalid_request_cannot_be_built(fields) -> None:
     with pytest.raises(ValueError):
-        TranscriptionJobRequest(language="sv", **fields)
+        TranscriptionJobRequest(**{"task": "diarize", "language": "sv", **fields})
 
 
 @pytest.mark.parametrize(
@@ -599,6 +653,41 @@ async def test_readiness_reports_service_and_admission_state(
         assert service.requests[0].headers["authorization"] == "Bearer devtoken"
 
 
+@pytest.mark.parametrize(
+    ("answer", "reason", "status_code"),
+    [
+        (httpx.Response(200, json={"queue_accepting_jobs": True}), None, None),
+        (httpx.Response(200, json={"queue_accepting_jobs": False}), None, None),
+        (httpx.Response(404, text="Not Found"), "http_status", 404),
+        (httpx.Response(503, json={"status": "not_ready"}), "http_status", 503),
+        (httpx.Response(200, json={"status": "ready"}), "malformed", None),
+        (httpx.Response(200, text="<html></html>"), "malformed", None),
+        (httpx.ConnectError("dummy-readiness-secret"), "unreachable", None),
+        (httpx.ConnectTimeout("dummy-readiness-secret"), "timeout", None),
+        (httpx.ReadTimeout("dummy-readiness-secret"), "timeout", None),
+    ],
+    ids=[
+        "ready",
+        "admission-refused",
+        "wrong-address",
+        "not-ready",
+        "no-admission-flag",
+        "not-json",
+        "no-connection",
+        "connect-timeout",
+        "read-timeout",
+    ],
+)
+async def test_readiness_names_why_it_got_no_usable_answer(
+    answer, reason, status_code
+) -> None:
+    service = ScriptedService(ready_responses=[answer])
+
+    readiness = await make_client(service).check_readiness()
+
+    assert (readiness.reason, readiness.status_code) == (reason, status_code)
+
+
 async def test_rejected_readiness_credentials_are_a_configuration_error() -> None:
     service = ScriptedService(ready_responses=[httpx.Response(401)])
 
@@ -713,6 +802,29 @@ async def test_readiness_reports_speaker_identification_separately_from_capacity
     )
 
 
+@pytest.mark.parametrize(
+    ("tasks", "times_words"),
+    [
+        (None, None),
+        (["align", "diarize"], False),
+        (["align", "diarize", "timestamp"], True),
+        ("timestamp", None),
+    ],
+    ids=["older-service", "no-timestamp", "reports-timestamp", "not-a-list"],
+)
+async def test_readiness_reports_whether_the_service_times_words(
+    tasks, times_words
+) -> None:
+    body = {"queue_accepting_jobs": True}
+    if tasks is not None:
+        body["supported_tasks"] = tasks
+    service = ScriptedService(ready_responses=[httpx.Response(200, json=body)])
+
+    readiness = await make_client(service).check_readiness()
+
+    assert readiness.times_words is times_words
+
+
 async def test_an_unready_service_still_reports_what_it_supports() -> None:
     service = ScriptedService(
         ready_responses=[
@@ -738,4 +850,8 @@ async def test_a_readiness_answer_that_never_arrives_is_bounded_in_total() -> No
     async with asyncio.timeout(1):
         readiness = await client.check_readiness()
 
-    assert (readiness.ready, readiness.detail) == (False, "unreachable: no answer")
+    assert (readiness.ready, readiness.detail, readiness.reason) == (
+        False,
+        "unreachable: no answer",
+        "timeout",
+    )
