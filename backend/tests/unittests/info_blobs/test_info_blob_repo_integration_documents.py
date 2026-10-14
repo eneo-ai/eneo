@@ -9,9 +9,17 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository, _document_matches
 
 ANCHOR = "https://contoso.sharepoint.com/sites/KS/Shared%20Documents/Protokoll"
+ANCHOR_LIKE = ANCHOR.replace("%", "\\%")
+# The URL part below the anchor, or the whole URL when it does not start there.
+BELOW_ANCHOR = (
+    f"CASE WHEN (info_blobs.url ILIKE '{ANCHOR_LIKE}%' ESCAPE '\\') "
+    f"THEN SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) "
+    "ELSE info_blobs.url END"
+)
 
 
 def _compiled(statement) -> str:
@@ -77,10 +85,7 @@ async def test_page_filters_active_documents_of_the_item_on_title_or_path(sessio
         assert f"info_blobs.integration_knowledge_id = '{knowledge_id}'" in sql
         assert "info_blobs.version_state = 'active'" in sql
         assert "info_blobs.title ILIKE '%50\\%\\_x%' ESCAPE '\\'" in sql
-        assert (
-            f"SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) "
-            "ILIKE '%50\\%\\_x%' ESCAPE '\\'"
-        ) in sql
+        assert f"{BELOW_ANCHOR} ILIKE '%50\\%\\_x%' ESCAPE '\\'" in sql
     assert "count(*)" in totals_sql
     assert "coalesce(sum(info_blobs.size), 0)" in totals_sql
     assert "LIMIT 50 OFFSET 100" in page_sql
@@ -127,28 +132,21 @@ async def test_page_orders_by_the_requested_key_with_a_stable_tiebreak(
             "Årsmöte",
             ANCHOR,
             [
-                f"SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) ILIKE '%Årsmöte%'",
-                f"SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) "
-                "ILIKE '%\\%C3\\%85rsm\\%C3\\%B6te%'",
+                f"{BELOW_ANCHOR} ILIKE '%Årsmöte%'",
+                f"{BELOW_ANCHOR} ILIKE '%\\%C3\\%85rsm\\%C3\\%B6te%'",
             ],
         ),
         (
             "Shared Documents",
             ANCHOR,
             [
-                f"SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) "
-                "ILIKE '%Shared Documents%'",
-                f"SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) "
-                "ILIKE '%Shared\\%20Documents%'",
+                f"{BELOW_ANCHOR} ILIKE '%Shared Documents%'",
+                f"{BELOW_ANCHOR} ILIKE '%Shared\\%20Documents%'",
             ],
         ),
         # Nothing to encode: one URL match, below the anchor only, so the
         # site name KS in /sites/KS cannot match every document of the item.
-        (
-            "KS",
-            ANCHOR,
-            [f"SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) ILIKE '%KS%'"],
-        ),
+        ("KS", ANCHOR, [f"{BELOW_ANCHOR} ILIKE '%KS%'"]),
         ("KS", None, ["info_blobs.url ILIKE '%KS%'"]),
     ],
     ids=[
@@ -166,6 +164,64 @@ def test_search_matches_the_title_and_the_url_below_the_item(
     assert f"info_blobs.title ILIKE '%{q}%'" in sql
     for expected in expected_url_matches:
         assert expected in sql
-    assert sql.count("ILIKE") == 1 + len(expected_url_matches)
+    # Each URL match carries its own prefix test when an anchor is set.
+    per_url_match = 2 if anchor else 1
+    assert sql.count("ILIKE") == 1 + per_url_match * len(expected_url_matches)
     if anchor:
-        assert "info_blobs.url ILIKE" not in sql
+        assert f"info_blobs.url ILIKE '%{q}%'" not in sql
+
+
+RENAMED_ANCHOR = "https://contoso.sharepoint.com/sites/KS/Shared%20Documents/Protokoll%20och%20beslut"
+DOCUMENTS = [
+    (f"{ANCHOR}/Beslut.pdf", "Beslut.pdf"),
+    (f"{ANCHOR}/Arbetsgrupp/KS-1.pdf", "KS-1.pdf"),
+    ("https://contoso.sharepoint.com/sites/KS/Shared%20Documents/Rutin.docx", "Rutin"),
+]
+
+
+@pytest.fixture
+def documents():
+    """``DOCUMENTS`` in a table SQLite evaluates the match against."""
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(sa.text("CREATE TABLE info_blobs (url TEXT, title TEXT)"))
+        connection.execute(
+            sa.text("INSERT INTO info_blobs VALUES (:url, :title)"),
+            [{"url": url, "title": title} for url, title in DOCUMENTS],
+        )
+
+    def matching(q: str, anchor: str | None) -> list[str]:
+        query = sa.select(InfoBlobs.title).where(_document_matches(q, anchor))
+        with engine.connect() as connection:
+            return sorted(connection.scalars(query))
+
+    return matching
+
+
+@pytest.mark.parametrize(
+    "q, anchor, expected",
+    [
+        ("KS", ANCHOR, ["KS-1.pdf", "Rutin"]),
+        ("Protokoll", ANCHOR, []),
+        ("Arbetsgrupp", ANCHOR, ["KS-1.pdf"]),
+        ("Shared Documents", ANCHOR, ["Rutin"]),
+        # The selected folder was renamed to a shorter name: documents carry
+        # the new URL while the item still stores the old one.
+        ("Arbetsgrupp", RENAMED_ANCHOR, ["KS-1.pdf"]),
+        ("KS", RENAMED_ANCHOR, ["Beslut.pdf", "KS-1.pdf", "Rutin"]),
+        ("KS", None, ["Beslut.pdf", "KS-1.pdf", "Rutin"]),
+    ],
+    ids=[
+        "site name only in the title or outside the anchor",
+        "anchor folder is not below the anchor",
+        "nested folder below the anchor",
+        "library of a document outside the anchor",
+        "nested folder after the selected folder was renamed",
+        "whole URL after the selected folder was renamed",
+        "whole URL without an anchor",
+    ],
+)
+def test_search_strips_the_anchor_only_from_urls_that_start_with_it(
+    documents, q, anchor, expected
+):
+    assert documents(q, anchor) == expected

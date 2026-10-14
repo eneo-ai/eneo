@@ -395,6 +395,7 @@ async def test_recreate_all_recreates_every_tenant_subscription_and_reports_fail
         return_value=integration
     )
     subscription_service = AsyncMock()
+    subscription_service.require_webhook_configuration = MagicMock()
     subscription_service.recreate_expired_subscription.side_effect = [True, False]
     container.sharepoint_subscription_service.return_value = subscription_service
 
@@ -411,3 +412,23 @@ async def test_recreate_all_recreates_every_tenant_subscription_and_reports_fail
     ] == [healthy, broken]
     assert (result.total_subscriptions, result.recreated, result.failed) == (2, 1, 1)
     assert str(broken.id) in result.errors[0]
+
+
+@pytest.mark.asyncio
+async def test_recreate_all_is_refused_before_any_subscription_is_touched_when_webhooks_are_not_configured():
+    container, _ = _build_container_with_admin_user()
+    subscription_repo = AsyncMock()
+    container.sharepoint_subscription_repo.return_value = subscription_repo
+    subscription_service = AsyncMock()
+    subscription_service.require_webhook_configuration = MagicMock(
+        side_effect=ValueError("SHAREPOINT_WEBHOOK_CLIENT_STATE must be configured")
+    )
+    container.sharepoint_subscription_service.return_value = subscription_service
+
+    with pytest.raises(HTTPException) as exc_info:
+        await recreate_all_subscriptions(container=container)
+
+    assert exc_info.value.status_code == 400
+    assert "SHAREPOINT_WEBHOOK_CLIENT_STATE" in exc_info.value.detail
+    subscription_repo.list_by_tenant.assert_not_awaited()
+    subscription_service.recreate_expired_subscription.assert_not_awaited()

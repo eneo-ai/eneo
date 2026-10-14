@@ -36,6 +36,11 @@ def xlsx_bytes(rows: list[list[object]]) -> bytes:
     return buffer.getvalue()
 
 
+def header_only_xlsx_bytes() -> bytes:
+    """A workbook whose only text is its first row, which parsers read as the header."""
+    return xlsx_bytes([["Name", "Value"]])
+
+
 def pptx_bytes(*titles: str) -> bytes:
     from pptx import Presentation
 

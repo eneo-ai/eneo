@@ -351,6 +351,62 @@ class TestRecreateExpiredSubscription:
         assert result is False
         mock_subscription_repo.update.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "missing, named_setting",
+        [
+            pytest.param(
+                "sharepoint_webhook_client_state",
+                "SHAREPOINT_WEBHOOK_CLIENT_STATE",
+                id="client-state",
+            ),
+            pytest.param(
+                "sharepoint_webhook_notification_url",
+                "SHAREPOINT_WEBHOOK_NOTIFICATION_URL",
+                id="notification-url",
+            ),
+        ],
+    )
+    async def test_recreate_touches_nothing_when_webhooks_are_not_configured(
+        self,
+        mock_subscription_repo,
+        mock_oauth_token_service,
+        expired_subscription,
+        mock_token,
+        missing,
+        named_setting,
+    ):
+        """A live subscription must not be dropped at Graph with no replacement."""
+        with patch(
+            "eneo.integration.infrastructure.sharepoint_subscription_service.get_settings"
+        ) as mock_settings:
+            settings = MagicMock()
+            settings.sharepoint_webhook_notification_url = (
+                "https://example.com/webhook/"
+            )
+            settings.sharepoint_webhook_client_state = "test-client-state"
+            settings.public_origin = None
+            setattr(settings, missing, None)
+            mock_settings.return_value = settings
+            service = SharePointSubscriptionService(
+                sharepoint_subscription_repo=mock_subscription_repo,
+                oauth_token_service=mock_oauth_token_service,
+            )
+        old_subscription_id = expired_subscription.subscription_id
+
+        with (
+            patch.object(service, "_delete_graph_subscription") as delete_graph,
+            patch.object(service, "_create_graph_subscription") as create_graph,
+            pytest.raises(ValueError, match=named_setting),
+        ):
+            await service.recreate_expired_subscription(
+                subscription=expired_subscription, token=mock_token
+            )
+
+        delete_graph.assert_not_called()
+        create_graph.assert_not_called()
+        mock_subscription_repo.update.assert_not_called()
+        assert expired_subscription.subscription_id == old_subscription_id
+
     async def test_recreate_continues_even_if_delete_fails(
         self, service, mock_subscription_repo, expired_subscription, mock_token
     ):

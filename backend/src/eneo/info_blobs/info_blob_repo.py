@@ -101,13 +101,20 @@ _Column = ColumnElement[Any] | InstrumentedAttribute[Any]
 _LIKE_ESCAPE = "\\"
 
 
-def _contains(column: _Column, needle: str) -> ColumnElement[bool]:
-    escaped = (
+def _like_literal(needle: str) -> str:
+    return (
         needle.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
         .replace("%", _LIKE_ESCAPE + "%")
         .replace("_", _LIKE_ESCAPE + "_")
     )
-    return column.ilike(f"%{escaped}%", escape=_LIKE_ESCAPE)
+
+
+def _contains(column: _Column, needle: str) -> ColumnElement[bool]:
+    return column.ilike(f"%{_like_literal(needle)}%", escape=_LIKE_ESCAPE)
+
+
+def _starts_with(column: _Column, prefix: str) -> ColumnElement[bool]:
+    return column.ilike(f"{_like_literal(prefix)}%", escape=_LIKE_ESCAPE)
 
 
 def _document_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
@@ -116,13 +123,21 @@ def _document_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
     Document URLs are percent-encoded, so the encoded form of ``q`` is tried
     as well. Only the part after ``url_anchor`` (the item's site, library or
     folder URL) is searched, so a site named KS does not match every document
-    under /sites/KS. Items without a stored URL fall back to the whole URL.
+    under /sites/KS. Items without a stored URL fall back to the whole URL, as
+    do documents whose URL no longer starts with the anchor: a sync refreshes
+    document URLs after the selected folder was renamed, but not the item's
+    own URL, and cutting the old anchor's width out of a shorter URL would
+    hide part of a nested folder name.
     """
-    path: _Column = (
-        sa.func.substring(InfoBlobs.url, len(url_anchor) + 1)
-        if url_anchor
-        else InfoBlobs.url
-    )
+    path: _Column = InfoBlobs.url
+    if url_anchor:
+        path = sa.case(
+            (
+                _starts_with(InfoBlobs.url, url_anchor),
+                sa.func.substring(InfoBlobs.url, len(url_anchor) + 1),
+            ),
+            else_=InfoBlobs.url,
+        )
     needles = [q]
     if (encoded := quote(q, safe="/")) != q:
         needles.append(encoded)

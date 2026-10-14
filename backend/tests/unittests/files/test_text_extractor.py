@@ -453,6 +453,25 @@ class TestTextExtractorXLSX:
         assert isinstance(result, str)
         assert "File: empty.xlsx" in result
 
+    def test_extract_from_xlsx_header_only_sheet(self, tmp_path):
+        """A sheet holding only its first row is text; a blank sheet adds nothing."""
+        from openpyxl import Workbook
+
+        xlsx_path = tmp_path / "names.xlsx"
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Members"
+        ws["A1"] = "Name"
+        ws["C1"] = "Role\nin board"
+        wb.create_sheet("Blank")
+        wb.save(xlsx_path)
+
+        result = TextExtractor.extract_from_xlsx(xlsx_path)
+
+        assert result == (
+            "File: names.xlsx\n\nSheet: Members | headers: Name | Role in board"
+        )
+
     def test_extract_from_xlsx_with_special_characters(self, tmp_path):
         """Should handle special characters in cells."""
         from openpyxl import Workbook

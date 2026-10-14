@@ -89,8 +89,11 @@
     untrack(enqueueReport);
   });
 
+  // A report refreshes the space, which publishes a new space object with
+  // the same id; only a change of space may queue another report.
+  const spaceId = $derived($currentSpace.id);
   $effect(() => {
-    void $currentSpace.id;
+    void spaceId;
     untrack(() => {
       if (get(pendingImports).length > 0) enqueueReport();
     });

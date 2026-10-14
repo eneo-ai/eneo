@@ -28,6 +28,11 @@ from eneo.integration.infrastructure.content_service.utils import (
     NO_TEXT_LAYER_REASON,
     NO_TEXT_REASONS,
     ExtractionResult,
+    extract_sharepoint_content,
+)
+from tests.unittests.integration.sharepoint_fixtures import (
+    XLSX_MIME,
+    header_only_xlsx_bytes,
 )
 
 
@@ -1859,6 +1864,63 @@ class TestOneDriveFolderTraversal:
         assert stats["skipped_details"] == [
             {"file": "still-readable.docx", "reason": expected_reason}
         ]
+
+    async def test_full_sync_keeps_a_workbook_whose_only_text_is_its_header_row(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        mock_integration_knowledge,
+    ):
+        """The header row is text, so the indexed copy is replaced, not removed."""
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].one.return_value = mock_integration_knowledge
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[MagicMock(size=40)]
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get_file_extraction_by_id.return_value = extract_sharepoint_content(
+            header_only_xlsx_bytes(), XLSX_MIME, "names.xlsx"
+        )
+        stats = service._initialize_stats()
+
+        with patch.object(
+            service, "_process_info_blob", AsyncMock(return_value="embedded")
+        ) as mock_process:
+            await service._process_folder_results(
+                site_id="site-123",
+                drive_id="drive-123",
+                resource_type="site",
+                client=mock_client,
+                results=[
+                    {
+                        "id": "item-123",
+                        "name": "names.xlsx",
+                        "webUrl": "https://example.com/names.xlsx",
+                        "parentReference": {"driveId": "drive-123"},
+                    }
+                ],
+                integration_knowledge_id=mock_integration_knowledge.id,
+                token=mock_oauth_token,
+                processed_items=set(),
+                stats=stats,
+            )
+
+        mock_process.assert_awaited_once()
+        assert (
+            "Sheet: Budget | headers: Name | Value"
+            in mock_process.await_args.kwargs["text"]
+        )
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
+        assert stats["files_deleted"] == 0
+        assert stats["files_processed"] == 1
+        assert stats["skipped_details"] == []
 
 
 class TestGetFileContent:

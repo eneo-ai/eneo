@@ -867,6 +867,7 @@ async def renew_expired_subscriptions(
     ),
     responses={
         200: {"description": "Recreation completed (check result for details)"},
+        400: {"description": "SharePoint webhooks are not configured"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
     },
@@ -883,6 +884,13 @@ async def recreate_all_subscriptions(
     subscription_repo = container.sharepoint_subscription_repo()
     subscription_service = container.sharepoint_subscription_service()
     user_integration_repo = container.user_integration_repo()
+
+    try:
+        subscription_service.require_webhook_configuration()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
 
     subscriptions = await subscription_repo.list_by_tenant(user.tenant_id)
     logger.info(
