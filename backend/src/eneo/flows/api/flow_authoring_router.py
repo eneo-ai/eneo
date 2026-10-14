@@ -731,7 +731,13 @@ async def delete_flow(
                 "a top-level `$ref` in drafts 3, 4, 6 and 7, which a run does not "
                 "read either); `context` holds "
                 "`step_order`, `field`, `argument` and `problem` "
-                "`missing_required`."
+                "`missing_required`. A step whose fixed (not bound) argument "
+                "value does not fit the subschema the input schema's top-level "
+                "`properties` gives for that argument is refused with "
+                "`typed_io_tool_invalid_config` and `problem` `outside_schema`; "
+                "not beside a top-level `$ref` in drafts 3, 4, 6 and 7, and not "
+                "when the bounded property check times out, cannot evaluate the "
+                "subschema, or cannot run on this host: a run checks those."
             ),
             message="Flow cannot be published in its current state.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,

@@ -5,7 +5,6 @@ exhausted."""
 
 from __future__ import annotations
 
-import multiprocessing
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -256,10 +255,6 @@ async def test_a_retried_runs_dispatch_failure_is_not_retryable_after_its_tool_s
     before_it = await _exhaust_dispatch(db_container, fresh)
 
     assert len(tool_calls.arguments) == 1
-    # Its arguments were checked against the tool's schema in the child process.
-    assert "flow-tool-argument-check" in {
-        child.name for child in multiprocessing.active_children()
-    }
     assert after_the_tool_step.retryable is False
     assert after_the_tool_step.details is not None
     assert after_the_tool_step.details.tool_call_possible is True

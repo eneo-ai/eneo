@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
@@ -23,6 +24,8 @@ from eneo.flows.published_definition import (
     inspect_published_definition_integrity,
     published_definition_checksum,
 )
+from eneo.flows.runtime import tool_argument_check
+from eneo.flows.runtime.tool_argument_check import ToolArgumentChecker
 from eneo.main.exceptions import BadRequestException
 from eneo.mcp_servers.application.unattended_tool_use import (
     UnattendedToolFacts,
@@ -521,3 +524,148 @@ def test_only_a_top_level_list_of_names_is_read_as_required_arguments(
     # string would be read letter by letter, a number as a name): publish
     # judges only the list of strings the schema's own grammar gives.
     assert required_tool_arguments(input_schema) == names
+
+
+def _limit_schema(limit: object, **top: object) -> dict[str, object]:
+    """The step's tool requires case_id (bound to text) and declares it an
+    integer, and gives ``limit`` (fixed to 5) the property ``limit``."""
+    return {
+        "type": "object",
+        "required": ["case_id"],
+        "properties": {"case_id": {"type": "integer"}, "limit": limit},
+        "$defs": {"text": {"type": "string"}},
+        **top,
+    }
+
+
+def _expanding_refs() -> dict[str, object]:
+    definitions: dict[str, object] = {"s0": {"type": "integer"}}
+    for level in range(1, 21):
+        definitions[f"s{level}"] = {"allOf": [{"$ref": f"#/$defs/s{level - 1}"}] * 2}
+    return {"$defs": definitions}
+
+
+_DRAFT_07_REF = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$ref": "#/$defs/text",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("limit", "top", "refused_rule"),
+    [
+        pytest.param({"type": "string"}, {}, "type", id="wrong-type"),
+        pytest.param({"$ref": "#/$defs/text"}, {}, "type", id="by-reference"),
+        pytest.param(False, {}, None, id="false-subschema"),
+        pytest.param({"type": "integer"}, {}, "", id="fits"),
+        pytest.param({"type": "string"}, _DRAFT_07_REF, "", id="draft-07-ref"),
+        pytest.param(
+            {"type": "string", "pattern": "^x"}, {}, "type", id="pattern-checked"
+        ),
+        pytest.param(
+            {"type": "string", "allOf": [{"$ref": "#/$defs/code"}]},
+            {"$defs": {"code": {"pattern": "^[A-Z]+$"}}},
+            "type",
+            id="pattern-by-reference-checked",
+        ),
+        pytest.param({"$ref": "#/$defs/none"}, {}, "", id="unresolvable-left-to-run"),
+        pytest.param(
+            {"$ref": "#/$defs/s20"},
+            _expanding_refs(),
+            "",
+            id="reference-expansion-left-to-run",
+        ),
+        pytest.param(
+            {"$ref": "#/default"},
+            {"default": {"multipleOf": 0}},
+            "",
+            id="numerical-fragment-left-to-run",
+        ),
+    ],
+)
+async def test_publish_refuses_a_fixed_argument_its_property_refuses(
+    user, monkeypatch, limit: object, top: dict[str, object], refused_rule: str | None
+) -> None:
+    # Kills the mutants that publish a fixed value its property refuses (every
+    # run would fail at the argument check), check a bound argument at publish
+    # (case_id holds text until the run), check the fixed arguments as the
+    # whole object (case_id would be missing), resolve the property's
+    # reference outside the tool's schema, read the argument's name from the
+    # error's path (a false subschema's error has none), read properties
+    # beside a draft-07 top-level "$ref", which a run does not read, do
+    # schema work in the API process, or refuse a property it could
+    # not evaluate. "" means the step publishes.
+    facts = _Facts(_facts(input_schema=_limit_schema(limit, **top)))
+    flow = _tool_flow(user, facts.facts)
+    service, _, version_repo = _publisher(user, flow, facts)
+
+    checker = ToolArgumentChecker()
+    monkeypatch.setattr(tool_argument_check, "_CHECKER", checker)
+    monkeypatch.setattr(tool_argument_check, "TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS", 0.2)
+    if refused_rule == "":
+        beats: list[float] = []
+
+        async def heartbeat():
+            while True:
+                beats.append(time.monotonic())
+                await asyncio.sleep(0.01)
+
+        beating = asyncio.create_task(heartbeat())
+        started = time.monotonic()
+        try:
+            await service.publish_flow(flow_id=flow.id)
+            ended = time.monotonic()
+            version_repo.create.assert_awaited_once()
+            assert ended - started < 2.0
+            assert max(b - a for a, b in zip([started, *beats], [*beats, ended])) < 0.3
+            assert (
+                await checker.check_fixed_properties(
+                    {"limit": 5}, _limit_schema({"type": "integer"})
+                )
+                is None
+            )
+        finally:
+            beating.cancel()
+            await asyncio.gather(beating, return_exceptions=True)
+            checker._end_child()
+        return
+    try:
+        with pytest.raises(BadRequestException) as refusal:
+            await service.publish_flow(flow_id=flow.id)
+    finally:
+        checker._end_child()
+
+    assert refusal.value.code == "typed_io_tool_invalid_config"
+    assert refusal.value.context == {
+        "step_order": 2,
+        "field": "input_config.tool.arguments.limit",
+        "argument": "limit",
+        "problem": "outside_schema",
+    }
+    message = str(refusal.value)
+    assert "argument 'limit'" in message
+    assert (
+        ("rule" not in message)
+        if refused_rule is None
+        else (f"rule '{refused_rule}'" in message)
+    )
+    version_repo.create.assert_not_awaited()
+
+
+async def test_publish_leaves_a_checker_host_fault_to_the_run(
+    user, monkeypatch
+) -> None:
+    # Kills a host startup failure escaping publication as a server error.
+    def cannot_start():
+        raise OSError("checker start unavailable")
+
+    checker = ToolArgumentChecker()
+    monkeypatch.setattr(tool_argument_check, "_CHECKER", checker)
+    monkeypatch.setattr(tool_argument_check, "_start_child", cannot_start)
+    facts = _Facts(_facts(input_schema=_limit_schema({"type": "integer"})))
+    flow = _tool_flow(user, facts.facts)
+    service, _, version_repo = _publisher(user, flow, facts)
+    await service.publish_flow(flow_id=flow.id)
+    version_repo.create.assert_awaited_once()
+    assert checker._child is None

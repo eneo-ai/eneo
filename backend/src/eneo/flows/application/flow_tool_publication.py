@@ -38,6 +38,11 @@ from eneo.flows.output_processing import (
     refuse_unevaluable_contract,
     refuse_unknown_dialect,
 )
+from eneo.flows.runtime.tool_argument_check import (
+    FixedPropertyViolation,
+    ToolArgumentCheckFailed,
+    check_fixed_tool_properties,
+)
 from eneo.main.exceptions import TypedIOValidationException
 from eneo.mcp_servers.application.unattended_tool_use import (
     UnattendedToolRefusal,
@@ -165,9 +170,12 @@ async def pin_tool_steps(
     the space (``typed_io_tool_not_allowed``), whose approved input schema
     is not a valid JSON Schema of a draft Eneo supports
     (``typed_io_tool_invalid_schema``), or that
-    gives no value for an argument the schema's top-level ``required`` names
-    (``typed_io_tool_invalid_config``). The steps have passed the graph check,
-    so each tool configuration reads.
+    gives no value for an argument the schema's top-level ``required`` names,
+    or a fixed value that the schema's top-level ``properties`` refuses for
+    its argument where publish judges it
+    (``_refuse_fixed_argument_outside_schema``; both
+    ``typed_io_tool_invalid_config``). The steps have
+    passed the graph check, so each tool configuration reads.
     """
     pins: dict[int, PublishedToolInputConfig] = {}
     # The fingerprints of the schemas this publish has found to be valid.
@@ -195,6 +203,7 @@ async def pin_tool_steps(
             )
             checked.add(fingerprint)
         _refuse_missing_required_argument(step.step_order, config, tool)
+        await _refuse_fixed_argument_outside_schema(step.step_order, config, tool)
         pins[step.step_order] = PublishedToolInputConfig(
             mcp_server_id=config.mcp_server_id,
             tool_id=config.tool_id,
@@ -246,6 +255,44 @@ def _refuse_missing_required_argument(
                     ),
                 },
             )
+
+
+async def _refuse_fixed_argument_outside_schema(
+    step_order: int, config: ToolInputConfig, tool: MCPServerTool
+) -> None:
+    # A fixed value is the same at every run, so a value that its property's
+    # schema refuses fails every run's argument check. A bound value is known
+    # only when the step runs, and is checked then.
+    if tool.input_schema is None:
+        return
+    bound = {argument.name for argument in config.bound_arguments()}
+    fixed = {
+        name: value for name, value in config.arguments.items() if name not in bound
+    }
+    if not fixed:
+        return
+    try:
+        outside = await check_fixed_tool_properties(fixed, tool.input_schema)
+    except ToolArgumentCheckFailed:
+        # The checker logs the host fault. Publishing proves no violation;
+        # the run still checks the full arguments before making a tool call.
+        return
+    if not isinstance(outside, FixedPropertyViolation):
+        return
+    rule = (
+        "" if outside.violation.rule is None else f" (rule '{outside.violation.rule}')"
+    )
+    raise invalid_tool_config(
+        f"Step {step_order}: the fixed value of argument '{outside.argument}' does "
+        f"not fit the input schema of tool '{tool.name}'{rule}.",
+        step_order=step_order,
+        context={
+            "step_order": step_order,
+            **tool_argument_context(
+                outside.argument, ToolArgumentProblem.OUTSIDE_SCHEMA.value
+            ),
+        },
+    )
 
 
 def published_input_config(

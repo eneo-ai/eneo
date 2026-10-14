@@ -5022,6 +5022,7 @@
   "flow_tool_argument_step_not_earlier": "Argumentet ”{argument}” läser från ett steg som inte har körts när det här steget körs. Välj en variabel från ett tidigare steg.",
   "flow_tool_argument_unknown_reference": "Argumentet ”{argument}” läser en variabel som körningen inte har. Välj en annan variabel.",
   "flow_tool_argument_missing_required": "Argumentet ”{argument}” är obligatoriskt men har inget värde. Ge det ett fast värde eller välj en variabel.",
+  "flow_tool_argument_outside_schema": "Det fasta värdet för argumentet ”{argument}” passar inte det verktyget tar emot för det. Ändra värdet eller välj en variabel.",
   "flow_run_error_tool_text_label": "Verktygets egen feltext",
   "flow_tool_missing_tool": "Välj ett verktyg.",
   "flow_tool_config_title": "Verktygsanrop",

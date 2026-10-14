@@ -2,7 +2,7 @@
 
 The scan parses every module under ``eneo/flows`` and ``eneo/flow_packages``
 (imports at any nesting level, under an alias, under ``TYPE_CHECKING``) and,
-outside the egress package and two named exceptions, fails when a module
+outside the egress package and its named exception, fails when a module
 
 * imports a third-party package that is not on ALLOWED_THIRD_PARTY. The list is
   the review checkpoint: a network client (boto3, dnspython, aioftp, pysftp,
@@ -26,9 +26,9 @@ as litellm or redis connects on its own, and weasyprint's URL fetcher is denied 
 the renderer, not here. Reviewing what a new allowlist entry can reach is part of
 adding it.
 
-Two modules are named below with their reasons: one connects to an endpoint
-a flow author cannot choose, and the destination policy does not apply to it;
-the other starts a child process of its own.
+The live-transcription exception connects to an endpoint a flow author cannot
+choose. Two checker modules may import exactly their local process/pipe owners;
+network imports and socket calls remain refused there.
 
 A connection that another first-party module opens for flow code is not seen
 either. The call of an MCP tool for a step's input is one: the MCP module's
@@ -57,9 +57,22 @@ NAMED_EXCEPTIONS = {
         "flow author. It stays outside the destination policy for now because a "
         "local speech service is a legitimate target; a follow-up decides its policy"
     ),
-    "flows/runtime/tool_argument_check.py": (
-        "starts its own child process (multiprocessing, spawn) and speaks to it over "
-        "a local socket pair (multiprocessing.connection); no network"
+}
+
+# The checker starts only its local entry file and exchanges schemas over a
+# inherited Pipe FD. The entry file reconstructs only that local connection.
+LOCAL_PROCESS_IMPORTS = {
+    "flows/runtime/tool_argument_check.py": frozenset(
+        {
+            "subprocess",
+            "multiprocessing.Pipe",
+            "multiprocessing.connection.Connection",
+        }
+    ),
+    "flows/runtime/tool_argument_check_child.py": frozenset(
+        {
+            "multiprocessing.connection.Connection",
+        }
     ),
 }
 
@@ -221,7 +234,9 @@ def _forbidden_stdlib(module: str) -> bool:
     )
 
 
-def scan_source(source: str) -> list[Violation]:
+def scan_source(
+    source: str, local_process_imports: frozenset[str] = frozenset()
+) -> list[Violation]:
     tree = ast.parse(source)
     httpx_aliases: set[str] = set()
     os_aliases: set[str] = set()
@@ -230,7 +245,11 @@ def scan_source(source: str) -> list[Violation]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                found.extend(_check_module(node.lineno, alias.name, alias.name))
+                found.extend(
+                    _check_module(
+                        node.lineno, alias.name, alias.name, local_process_imports
+                    )
+                )
                 top = alias.name.split(".")[0]
                 if alias.name == "httpx":
                     httpx_aliases.add(alias.asname or "httpx")
@@ -244,7 +263,12 @@ def scan_source(source: str) -> list[Violation]:
             for alias in node.names:
                 name = alias.name
                 found.extend(
-                    _check_module(node.lineno, node.module, f"{node.module}.{name}")
+                    _check_module(
+                        node.lineno,
+                        node.module,
+                        f"{node.module}.{name}",
+                        local_process_imports,
+                    )
                 )
                 if name in SINK_NAMES:
                     found.append(
@@ -277,7 +301,11 @@ def scan_source(source: str) -> list[Violation]:
     return sorted(found, key=lambda violation: violation.line)
 
 
-def _check_module(line: int, module: str, described: str) -> list[Violation]:
+def _check_module(
+    line: int, module: str, described: str, local_process_imports: frozenset[str]
+) -> list[Violation]:
+    if described in local_process_imports:
+        return []
     top = module.split(".")[0]
     if top == "eneo" or top == "__future__":
         return []
@@ -318,7 +346,9 @@ def test_no_flow_code_reaches_the_network_outside_the_egress_package():
     for relative, source in _scanned_modules():
         if relative in NAMED_EXCEPTIONS:
             continue
-        violations = scan_source(source)
+        violations = scan_source(
+            source, LOCAL_PROCESS_IMPORTS.get(relative, frozenset())
+        )
         if violations:
             offenders[relative] = [f"{v.line}: {v.what}" for v in violations]
     assert not offenders, (
@@ -461,3 +491,14 @@ def test_the_scanner_finds_each_known_sink(source: str):
 )
 def test_the_scanner_leaves_passive_use_alone(source: str):
     assert scan_source(source) == [], source
+
+
+@pytest.mark.parametrize("relative", sorted(LOCAL_PROCESS_IMPORTS))
+def test_local_checker_process_admission_keeps_network_imports_refused(relative):
+    # Kills a whole-module exception that also admits a new network client.
+    allowed = LOCAL_PROCESS_IMPORTS[relative]
+    source = (SRC / relative).read_text()
+    assert not scan_source(source, allowed)
+    assert scan_source(source)
+    assert scan_source(source + "\nimport socket\n", allowed)
+    assert scan_source(source + "\nimport urllib.request\n", allowed)
