@@ -133,21 +133,21 @@
                         sharePointConfigStatus === "configured" &&
                         sharePointConfig?.auth_method === "service_account" &&
                         sharePointConfig?.auth_status === "error"}
-                      <div class="flex items-center gap-2">
-                        {#if needsReauth}
-                          <Button
-                            class="flex-1"
-                            disabled={reauthServiceAccount.isLoading}
-                            onclick={reauthServiceAccount}
-                          >
-                            {reauthServiceAccount.isLoading
-                              ? m.redirecting()
-                              : m.sharepoint_reauth_with_microsoft()}
-                          </Button>
-                        {/if}
+                      {#if needsReauth}
+                        <Button
+                          class="w-full"
+                          disabled={reauthServiceAccount.isLoading}
+                          onclick={reauthServiceAccount}
+                        >
+                          {reauthServiceAccount.isLoading
+                            ? m.redirecting()
+                            : m.sharepoint_reauth_with_microsoft()}
+                        </Button>
+                      {/if}
+                      <div class="flex min-w-0 items-center gap-2">
                         <Button
                           variant={sharePointConfigStatus === "configured" ? "outline" : "default"}
-                          class="flex-1"
+                          class="min-w-0 flex-1 truncate"
                           disabled={sharePointConfigStatus === "loading"}
                           onclick={() => ($showSharePointConfigDialog = true)}
                         >
