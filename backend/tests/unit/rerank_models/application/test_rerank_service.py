@@ -8,6 +8,7 @@ and the space's security classification allows it; everything else is
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+from eneo.main.exceptions import ProviderInactiveException
 from eneo.rerank_models.application import rerank_service as service_module
 from eneo.rerank_models.application.rerank_service import RerankService
 
@@ -129,3 +130,19 @@ class TestSpecForDefault:
             spec = await service.spec_for_default("q", space_classification)
 
         assert spec is not None
+
+    async def test_a_disabled_provider_means_no_spec_not_an_error(self):
+        service = _service([_model()])
+
+        with (
+            patch.object(
+                service_module,
+                "load_active_litellm_provider",
+                AsyncMock(side_effect=ProviderInactiveException("inactive")),
+            ),
+            patch.object(service_module, "logger") as logger,
+        ):
+            spec = await service.spec_for_default("q", None)
+
+        assert spec is None
+        assert logger.warning.call_count == 1

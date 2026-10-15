@@ -231,6 +231,7 @@ class Datastore:
             )
 
         limit = num_chunks if num_chunks is not None else 30
+        fetch = rerank.candidate_count(limit) if rerank is not None else limit
 
         start = time.time()
         search_string_embedding = (
@@ -239,29 +240,32 @@ class Datastore:
             )
         )
         step_1 = time.time()
-        semantic_results = await self.chunk_repo.semantic_search(
-            search_string_embedding,
-            group_ids=group_ids,
-            website_ids=website_ids,
-            integration_knowledge_ids=integration_knowledge_ids,
-            info_blob_ids=info_blob_ids,
-            limit=rerank.candidate_count(limit) if rerank is not None else limit,
-        )
+
+        async def nearest(count: int) -> list[InfoBlobChunkInDBWithScore]:
+            results = await self.chunk_repo.semantic_search(
+                search_string_embedding,
+                group_ids=group_ids,
+                website_ids=website_ids,
+                integration_knowledge_ids=integration_knowledge_ids,
+                info_blob_ids=info_blob_ids,
+                limit=count,
+            )
+            # Vector search returns nearest neighbors unconditionally; a
+            # relevance floor lets callers drop chunks that merely happen to be
+            # the least distant (e.g. retrieval triggered by an off-topic
+            # message). Score scales are embedding-model-dependent, so there
+            # is no global default.
+            if min_score is not None:
+                results = [res for res in results if res.score >= min_score]
+            return results
+
+        semantic_results = await nearest(fetch)
         end = time.time()
 
         logger.debug(
             f"Time to get results: Embed step: {step_1 - start},"
             f" Search step: {end - step_1}, Total: {end - start}"
         )
-
-        # Vector search returns nearest neighbors unconditionally; a relevance
-        # floor lets callers drop chunks that merely happen to be the least
-        # distant (e.g. retrieval triggered by an off-topic message). Score
-        # scales are embedding-model-dependent, so there is no global default.
-        if min_score is not None:
-            semantic_results = [
-                res for res in semantic_results if res.score >= min_score
-            ]
 
         if rerank is not None:
             reranked = await self._rerank(rerank, semantic_results)
@@ -274,8 +278,13 @@ class Datastore:
                 )
                 return reranked
             # The reranker failed: the result the call would have produced
-            # without the spec, so the user still gets an answer.
-            semantic_results = semantic_results[:limit]
+            # without the spec, so the user still gets an answer. The capped
+            # candidate set may be smaller than the caller asked for; then the
+            # vector search is repeated with the caller's limit.
+            if fetch < limit:
+                semantic_results = await nearest(limit)
+            else:
+                semantic_results = semantic_results[:limit]
 
         scores = [res.score for res in semantic_results]
 

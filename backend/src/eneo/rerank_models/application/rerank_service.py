@@ -10,6 +10,11 @@ from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from eneo.main.config import get_settings
+from eneo.main.exceptions import (
+    APIKeyNotConfiguredException,
+    ProviderInactiveException,
+    ProviderNotFoundException,
+)
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.infrastructure.litellm_provider import (
@@ -73,11 +78,22 @@ class RerankService:
             return None
         if not self._allowed(model, security_classification):
             return None
-        return RerankSpec(
-            reranker=await self._reranker(model),
-            query=query,
-            model_name=model.name,
-        )
+        try:
+            reranker = await self._reranker(model)
+        except (
+            ProviderNotFoundException,
+            ProviderInactiveException,
+            APIKeyNotConfiguredException,
+        ) as exc:
+            # A disabled or misconfigured provider leaves its models in the
+            # catalogue; the search must still answer, in vector order.
+            logger.warning(
+                "Rerank model %s is not usable (%s); searching without it",
+                model.name,
+                exc,
+            )
+            return None
+        return RerankSpec(reranker=reranker, query=query, model_name=model.name)
 
     def _allowed(
         self,

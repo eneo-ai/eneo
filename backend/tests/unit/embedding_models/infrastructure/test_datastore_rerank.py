@@ -230,3 +230,57 @@ class TestFallback:
             ("b", 0.8),
             ("c", 0.7),
         ]
+
+
+class TestFallbackRefetch:
+    async def test_a_capped_candidate_set_is_refetched_with_the_callers_limit(self):
+        """num_chunks above the cap: the reranker saw K rows, the fallback must
+        not hand back fewer than the same search without a spec would."""
+        datastore = _datastore(VECTOR_ORDER[:2])
+        datastore.chunk_repo.semantic_search = AsyncMock(
+            side_effect=[VECTOR_ORDER[:2], VECTOR_ORDER]
+        )
+        reranker = MagicMock()
+        reranker.rerank = AsyncMock(side_effect=RuntimeError("down"))
+        spec = RerankSpec(
+            reranker=reranker,
+            query="q",
+            model_name="m",
+            candidate_factor=1,
+            max_candidates=2,
+        )
+
+        result = await datastore.semantic_search(
+            "q",
+            embedding_model=TEST_COLLECTION.embedding_model,
+            collections=[TEST_COLLECTION],
+            num_chunks=3,
+            rerank=spec,
+        )
+
+        limits = [
+            call.kwargs["limit"]
+            for call in datastore.chunk_repo.semantic_search.await_args_list
+        ]
+        assert limits == [2, 3]
+        assert [c.text for c in result] == ["a", "b", "c"]
+        # The embedding is reused, not recomputed.
+        assert (
+            datastore.create_embeddings_service.get_embedding_for_query.await_count == 1
+        )
+
+    async def test_no_refetch_when_the_candidate_set_covers_the_limit(self):
+        datastore = _datastore(VECTOR_ORDER)
+        reranker = MagicMock()
+        reranker.rerank = AsyncMock(side_effect=RuntimeError("down"))
+
+        result = await datastore.semantic_search(
+            "q",
+            embedding_model=TEST_COLLECTION.embedding_model,
+            collections=[TEST_COLLECTION],
+            num_chunks=1,
+            rerank=_spec(reranker),
+        )
+
+        assert datastore.chunk_repo.semantic_search.await_count == 1
+        assert [c.text for c in result] == ["a"]
