@@ -30,7 +30,10 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowVersion,
 )
-from eneo.flows.domain.flow_step_attempt_input import parse_flow_step_attempt_input
+from eneo.flows.domain.flow_step_attempt_input import (
+    attempt_tool_call_state,
+    parse_flow_step_attempt_input,
+)
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.step_output import (
@@ -41,7 +44,10 @@ from eneo.flows.domain.step_output import (
 )
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
 from eneo.flows.domain.transcript_source import TranscriptSourceExportRow
-from eneo.flows.enums import FlowRunReviewCheckpointState
+from eneo.flows.enums import (
+    OPEN_FLOW_STEP_ATTEMPT_STATUSES,
+    FlowRunReviewCheckpointState,
+)
 from eneo.flows.flow_run_contract_service import build_final_output_contract
 from eneo.flows.flow_run_provenance import (
     FlowAttemptProvenanceParseResult,
@@ -805,6 +811,10 @@ def _dump_attempt_record(
     dumped["provenance_json"] = parse_result.to_export_payload()
     input_parse_result = parse_flow_step_attempt_input(item.input_payload_json)
     dumped["input_payload_json"] = input_parse_result.to_export_payload()
+    dumped["tool_call_state"] = attempt_tool_call_state(
+        input_parse_result.attempt_input,
+        attempt_open=item.status in OPEN_FLOW_STEP_ATTEMPT_STATUSES,
+    )
     dumped["resolved_input_lineage"] = project_resolved_input_lineage(
         resolved_inputs=resolved_inputs,
         scoped_attempt_provenance=scoped_provenance,

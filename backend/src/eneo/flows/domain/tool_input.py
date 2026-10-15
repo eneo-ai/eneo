@@ -15,7 +15,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from eneo.flows.domain.canonical_json_hash import canonical_json_hash
+from eneo.flows.domain.canonical_json_hash import (
+    SHA256_HEX_PATTERN,
+    canonical_json_hash,
+)
 from eneo.flows.domain.schema_engine import ref_ignores_siblings
 from eneo.flows.enums import FlowInputType
 from eneo.flows.flow_validators_template import EXACT_TEMPLATE_EXPRESSION_PATTERN
@@ -99,7 +102,7 @@ class PublishedToolInputConfig(ToolInputConfig):
 
     tool_name: str = Field(min_length=1)
     # tool_input_schema_sha256 of the input schema that was approved then.
-    input_schema_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    input_schema_sha256: str = Field(pattern=SHA256_HEX_PATTERN)
 
 
 _ARGUMENT_NAMES = TypeAdapter[list[str]](list[str])

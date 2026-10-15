@@ -119,6 +119,7 @@ class _Caller:
 
     answer: MCPToolAnswer | Exception
     calls: list[dict[str, Any]] = field(default_factory=list)
+    journal: list[tuple[str, dict[str, Any] | None]] | None = None
 
     async def call(
         self,
@@ -130,6 +131,8 @@ class _Caller:
         timeout_seconds: int,
         http_client_factory: object,
     ) -> MCPToolAnswer:
+        if self.journal is not None:
+            self.journal.append(("call", None))
         self.calls.append(
             {
                 "server": server,
@@ -999,7 +1002,7 @@ def _nested(depth: int) -> object:
         pytest.param(
             {"value": "{{flow_input.value}}"},
             {"value": _nested(600)},
-            None,
+            "typed_io_input_too_large",
             id="bound-600-deep",
         ),
         pytest.param({"value": float("nan")}, None, _ARGUMENTS, id="fixed-nan"),
@@ -1009,24 +1012,23 @@ async def test_arguments_go_to_the_check_as_json_text(
     user,
     arguments: dict[str, object],
     run_input: dict[str, object] | None,
-    refusal_code: str | None,
+    refusal_code: str,
 ) -> None:
     # Kills the mutants that send the check as a pickle (at 600 levels it
     # raises RecursionError, untyped) and that let arguments JSON text cannot
-    # hold raise untyped.
+    # hold raise untyped. Arguments the check passes but the attempt's record
+    # of the call cannot hold whole (nested deeper than its reader reads) are
+    # not sent: kills the mutant that calls without a readable record.
     facts = _facts(input_schema={"type": "object"})
     caller = _answered({"ok": True})
     executor = _tool_executor(user, _Facts(facts), caller)
     step = _tool_step(facts, arguments=arguments)
     run = _running(user, run_input)
 
-    if refusal_code is None:
-        await _read(executor, step, run)
-        assert len(caller.calls) == 1
-    else:
-        refused = await _refused(executor, step, run)
-        assert refused.code == refusal_code
-        assert caller.calls == []
+    refused = await _refused(executor, step, run)
+    assert refused.code == refusal_code
+    assert caller.calls == []
+    executor.flow_run_repo.write_attempt_tool_call_evidence.assert_not_awaited()
 
 
 async def test_a_check_whose_process_does_not_start_fails_the_step_as_the_host(
@@ -1498,6 +1500,174 @@ async def test_a_failed_call_fails_the_attempt_with_its_own_code_and_is_audited(
     assert audit["error_message"] == str(refused)
     assert audit["metadata"]["extra"]["tool_name"] == "lookup_case"
     assert _SECRET_ARGUMENT not in repr(audit) + str(refused)
+
+
+@dataclass
+class _Journal:
+    """What the read did, in order: each stored call record, each commit and
+    the call itself."""
+
+    events: list[tuple[str, dict[str, Any] | None]] = field(default_factory=list)
+
+    def watch(self, executor, caller: _Caller, *, failing_write: int | None) -> None:
+        async def write(**kwargs: Any) -> str:
+            result = kwargs["result"]
+            record = {
+                "start": kwargs["start"].model_dump(mode="json"),
+                "result": None if result is None else result.model_dump(mode="json"),
+            }
+            self.events.append(("write", record))
+            if self.kinds.count("write") == failing_write:
+                raise ConnectionResetError("the database went away")
+            return "written"
+
+        async def commit() -> None:
+            self.events.append(("commit", None))
+
+        executor.flow_run_repo.write_attempt_tool_call_evidence.side_effect = write
+        executor.session.commit.side_effect = commit
+        caller.journal = self.events
+
+    @property
+    def kinds(self) -> list[str]:
+        return [kind for kind, _ in self.events]
+
+    @property
+    def results(self) -> list[dict[str, Any] | None]:
+        return [record["result"] for kind, record in self.events if record]
+
+
+async def _no_address(host: str, port: int) -> list[str]:
+    raise DestinationUnresolvable(host)
+
+
+_STORED_CALL = ["write", "commit", "call", "write", "commit"]
+
+
+@pytest.mark.parametrize(
+    ("ending", "kinds", "code"),
+    [
+        pytest.param("answered", _STORED_CALL, None, id="answered"),
+        pytest.param("timed_out", _STORED_CALL, "typed_io_tool_timeout", id="failed"),
+        pytest.param(
+            "unresolvable", [], "typed_io_tool_connection_error", id="name-unresolved"
+        ),
+        pytest.param("too_large", [], "typed_io_input_too_large", id="args-too-large"),
+        pytest.param("start_not_stored", ["write"], None, id="no-start"),
+        pytest.param(
+            "result_not_stored",
+            ["write", "commit", "call", "write"],
+            None,
+            id="no-result",
+        ),
+    ],
+)
+async def test_the_call_is_recorded_before_it_is_sent_and_ended_before_it_is_read(
+    user, ending: str, kinds: list[str], code: str | None
+) -> None:
+    # Kills the mutants that store the start after the call or do not commit
+    # it before, that call although the start was not stored (its write
+    # failed, it is too large for the inline budget, or the read was refused
+    # before), that leave out the result of a
+    # failed call or give it another code, whose answered result is not the
+    # answer the step reads (size and hash of its tool_answer edge), or that
+    # return the step's input although its result could not be stored, so
+    # that the step would go on to its model.
+    facts = _facts(input_schema={"type": "object"})
+    caller = (
+        _Caller(MCPToolCallTimedOut("late"))
+        if ending == "timed_out"
+        else _answered(structured={"rows": [1, 2]})
+    )
+    executor = _tool_executor(
+        user,
+        _Facts(facts),
+        caller,
+        max_inline_text_bytes=600 if ending == "too_large" else 1024 * 1024,
+    )
+    if ending == "unresolvable":
+        executor.tool_name_resolver = _no_address
+    journal = _Journal()
+    journal.watch(
+        executor,
+        caller,
+        failing_write={"start_not_stored": 1, "result_not_stored": 2}.get(ending),
+    )
+    arguments = {"q": "x" * (1000 if ending == "too_large" else 3), "n": None}
+    step = _tool_step(facts, arguments={**arguments, "case": "{{flow_input.case}}"})
+
+    ended: Exception | None = None
+    try:
+        await _read(executor, step, _running(user, {"case": "A-17"}))
+    except Exception as exc:
+        ended = exc
+
+    assert journal.kinds == kinds
+    assert len(caller.calls) == kinds.count("call")
+    if ending == "answered":
+        assert ended is None
+    elif ending in {"start_not_stored", "result_not_stored"}:
+        assert isinstance(ended, ConnectionResetError)
+    else:
+        assert isinstance(ended, TypedIOValidationException)
+        assert ended.code == code
+    if not kinds:
+        return
+    assert facts.server is not None and facts.tool is not None
+    start = journal.events[0][1]
+    assert start == {
+        "start": {
+            "mcp_server_id": str(facts.server.id),
+            "tool_id": str(facts.tool.id),
+            "tool_name": "lookup_case",
+            "published_input_schema_sha256": canonical_json_hash({"type": "object"}),
+            "current_input_schema_sha256": canonical_json_hash({"type": "object"}),
+            "arguments": {**arguments, "case": "A-17"},
+        },
+        "result": None,
+    }
+    if ending == "start_not_stored":
+        return
+    assert caller.calls[0]["arguments"] == start["start"]["arguments"]
+    (result,) = journal.results[1:]
+    assert result is not None and result["duration_ms"] >= 0
+    if ending == "timed_out":
+        assert {**result, "duration_ms": 0} == {
+            "outcome": "failed",
+            "duration_ms": 0,
+            "error_code": code,
+            "answer_byte_size": None,
+            "answer_sha256": None,
+        }
+        return
+    answer_bytes = canonical_json_bytes({"rows": [1, 2]})
+    assert (result["outcome"], result["answer_byte_size"], result["error_code"]) == (
+        "answered",
+        len(answer_bytes),
+        None,
+    )
+    assert result["answer_sha256"] == hashlib.sha256(answer_bytes).hexdigest()
+
+
+async def test_a_call_whose_attempt_has_closed_is_not_made(user) -> None:
+    # Kills the mutant that sends the call although the start found the
+    # attempt closed (the run ended or was recovered first), and the one
+    # that reports that as a failure of the step instead of the run's own
+    # outcome.
+    from eneo.flows.domain.flow_run_exceptions import FlowStepAttemptClosed
+
+    facts = _facts()
+    caller = _answered(structured={"rows": []})
+    executor = _tool_executor(user, _Facts(facts), caller)
+    executor.flow_run_repo.write_attempt_tool_call_evidence.return_value = (
+        "attempt_closed"
+    )
+
+    with pytest.raises(FlowStepAttemptClosed):
+        await _read(executor, _tool_step(facts), _running(user))
+
+    assert caller.calls == []
+    executor.session.commit.assert_not_awaited()
 
 
 def _slow(release: asyncio.Event) -> Callable[[object], Awaitable[Response]]:

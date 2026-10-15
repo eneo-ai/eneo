@@ -404,3 +404,17 @@ FLOW_RUN_TERMINAL_ERROR_RETRYABILITY: dict[FlowApiErrorCode, bool] = {
     }
     for code in FLOW_RUN_TERMINAL_ERROR_CODES
 }
+
+
+def typed_io_failure_code(raw_code: str | None) -> FlowApiErrorCode:
+    """The typed input/output code a typed step failure ends with: its own
+    code when it is one, else ``typed_io_validation_failed``."""
+    if raw_code is None:
+        return FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED
+    try:
+        code = FlowApiErrorCode(raw_code)
+    except ValueError:
+        return FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED
+    if code in FLOW_TYPED_IO_ERROR_CODES:
+        return code
+    return FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED

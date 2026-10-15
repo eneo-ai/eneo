@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 
+# A lowercase hex SHA-256 digest, as canonical_json_hash and hashlib write it.
+SHA256_HEX_PATTERN = r"^[0-9a-f]{64}$"
+
 
 def canonical_json_bytes(value: object) -> bytes:
     """Serialize JSON-compatible data using the canonical Flows encoding."""

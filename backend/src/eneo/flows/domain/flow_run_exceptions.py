@@ -27,3 +27,14 @@ class FlowRunPersistenceInvariantError(RuntimeError):
 
 class FlowExecutionOwnershipLost(asyncio.CancelledError):
     pass
+
+
+@dataclass(eq=False)
+class FlowStepAttemptClosed(Exception):
+    """A write for the attempt found it already closed, by the run's
+    terminalization or by recovery: the run's stored outcome stands, and the
+    step does no further work."""
+
+    run_id: UUID
+    step_id: UUID
+    attempt_no: int
