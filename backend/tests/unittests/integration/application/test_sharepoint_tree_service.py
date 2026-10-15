@@ -130,6 +130,33 @@ class TestUserFacingFailures:
 
         assert str(exc_info.value) == expected
 
+    async def test_other_failures_are_shown_without_urls_or_hosts(
+        self, service, monkeypatch
+    ):
+        service._connect = AsyncMock(return_value=(MagicMock(), AsyncMock(), None))
+        infra = MagicMock()
+        infra.get_folder_tree = AsyncMock(
+            side_effect=ValueError(
+                "Graph call https://graph.microsoft.com/v1.0/drives/x?token=secret "
+                "failed after Error 111 connecting to redis.internal:6379"
+            )
+        )
+        monkeypatch.setattr(
+            "eneo.integration.infrastructure.preview_service.sharepoint_tree_service."
+            "SharePointTreeService",
+            MagicMock(return_value=infra),
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await service.get_folder_tree(
+                user_integration_id=uuid4(), space_id=uuid4(), site_id="site-1"
+            )
+
+        message = str(exc_info.value)
+        assert message.startswith("Failed to fetch SharePoint folder tree: Graph call")
+        assert "secret" not in message
+        assert "redis.internal" not in message
+
     async def test_organisation_connections_get_a_token_provider(self, service):
         connection = MagicMock()
         connection.integration.integration_type = "sharepoint"

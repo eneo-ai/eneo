@@ -10,6 +10,7 @@ from eneo.assistants.api.assistant_models import AssistantType, DefaultAssistant
 from eneo.files.file_models import FileRestrictions, Limit
 from eneo.main.models import ResourcePermission
 from eneo.questions.question import UseTools
+from eneo.roles.permissions import Permission
 from eneo.spaces.api.space_assembler import SpaceAssembler
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from eneo.spaces.space import Space
@@ -118,6 +119,51 @@ def space():
     space.name = TEST_NAME
 
     return space
+
+
+@pytest.mark.parametrize(
+    "user_permissions, expected_for_organization_item",
+    [
+        ([], [ResourcePermission.READ]),
+        (
+            [Permission.ADMIN],
+            [
+                ResourcePermission.READ,
+                ResourcePermission.EDIT,
+                ResourcePermission.DELETE,
+            ],
+        ),
+    ],
+    ids=["editor", "admin"],
+)
+def test_items_from_the_organization_app_offer_changes_to_admins_only(
+    space: Space,
+    space_assembler: SpaceAssembler,
+    user_permissions: list[Permission],
+    expected_for_organization_item: list[ResourcePermission],
+):
+    """The integration service refuses anyone else a rename, sync or delete."""
+    space_assembler.user.permissions = user_permissions
+    actor = space_assembler.actor_manager.get_space_actor_from_space.return_value
+    actor.get_integrations_permissions.return_value = [
+        ResourcePermission.READ,
+        ResourcePermission.EDIT,
+        ResourcePermission.DELETE,
+    ]
+    organization_item = MagicMock()
+    organization_item.user_integration.auth_type = "tenant_app"
+    personal_item = MagicMock()
+    personal_item.user_integration.auth_type = "user_oauth"
+    space.integration_knowledge_list = [organization_item, personal_item]
+
+    space_assembler._set_permissions_on_resources(space)
+
+    assert organization_item.permissions == expected_for_organization_item
+    assert personal_item.permissions == [
+        ResourcePermission.READ,
+        ResourcePermission.EDIT,
+        ResourcePermission.DELETE,
+    ]
 
 
 def test_from_personal_space_to_model_sets_personal(

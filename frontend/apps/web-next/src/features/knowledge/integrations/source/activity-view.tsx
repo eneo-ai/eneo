@@ -86,13 +86,35 @@ function syncTitle(log: SyncLog, kind: ActivityKind, t: Translate): string {
       return t("integration_activity_unchanged");
     case "changed": {
       const parts: string[] = [];
-      if (log.files_processed > 0) parts.push(t("file_s_synced", { count: log.files_processed }));
-      if (log.pages_processed > 0) parts.push(t("page_s_synced", { count: log.pages_processed }));
-      if (log.files_deleted > 0) parts.push(t("file_s_deleted", { count: log.files_deleted }));
-      if (log.skipped_items > 0) parts.push(t("item_s_skipped", { count: log.skipped_items }));
-      const unchanged = readSyncLogExtras(log).unchangedItems;
-      if (parts.length === 0 && unchanged > 0) {
-        parts.push(t("item_s_unchanged", { count: unchanged }));
+      const add = (count: number, one: () => string, other: (count: number) => string) => {
+        if (count > 0) parts.push(count === 1 ? one() : other(count));
+      };
+      add(
+        log.files_processed,
+        () => t("integration_activity_files_synced_one"),
+        (count) => t("integration_activity_files_synced_other", { count })
+      );
+      add(
+        log.pages_processed,
+        () => t("integration_activity_pages_synced_one"),
+        (count) => t("integration_activity_pages_synced_other", { count })
+      );
+      add(
+        log.files_deleted,
+        () => t("integration_activity_files_deleted_one"),
+        (count) => t("integration_activity_files_deleted_other", { count })
+      );
+      add(
+        log.skipped_items,
+        () => t("integration_activity_items_skipped_one"),
+        (count) => t("integration_activity_items_skipped_other", { count })
+      );
+      if (parts.length === 0) {
+        add(
+          readSyncLogExtras(log).unchangedItems,
+          () => t("integration_activity_items_unchanged_one"),
+          (count) => t("integration_activity_items_unchanged_other", { count })
+        );
       }
       return parts.join(", ");
     }

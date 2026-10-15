@@ -185,6 +185,8 @@ def _document(url: str | None) -> IntegrationDocumentItem:
         "Could not remove out-of-scope: database unavailable",
         "Could not remove out-of-scope-subtree: database unavailable",
         "Could not remove removed: database unavailable",
+        # Releases before 2.2, for deleted items anywhere in the drive.
+        "Could not remove: database unavailable",
     ],
 )
 def test_a_skip_of_an_item_never_placed_in_scope_is_served_without_its_name(reason):
@@ -214,6 +216,28 @@ def test_a_skip_of_an_item_never_placed_in_scope_is_served_without_its_name(reas
     ]
 
     assert served == [{"file": "", "reason": reason}] * 3
+
+
+def test_a_stored_skip_without_a_file_name_still_has_its_reason_cleaned():
+    metadata = IntegrationKnowledgeMetaData(
+        size=0,
+        last_sync_summary={
+            "skipped_details": [
+                {
+                    "file": None,
+                    "reason": f"Could not remove unextractable: {STORED_SQL_ERROR}",
+                },
+                {"file": "Protokoll.docx", "reason": None},
+            ]
+        },
+    )
+
+    served = metadata.model_dump()["last_sync_summary"]["skipped_details"]
+
+    assert served == [
+        {"file": "", "reason": "Could not remove unextractable: Database error"},
+        {"file": "Protokoll.docx", "reason": ""},
+    ]
 
 
 def test_a_skip_of_a_file_in_scope_keeps_its_name():

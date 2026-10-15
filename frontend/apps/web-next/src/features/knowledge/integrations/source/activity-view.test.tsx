@@ -184,7 +184,7 @@ describe("ActivityView", () => {
         .map((h) => h.textContent)
     ).toEqual([14, 13, 12].map((day) => dayHeading(`2026-10-${day}T12:00:00Z`)));
     expect(timelineRows().map((row) => row.querySelector("p")?.textContent)).toEqual([
-      "2 fil(er) synkad, 1 fil(er) borttagen",
+      "2 filer synkade, 1 fil borttagen",
       "Synken misslyckades",
       "Allt aktuellt, inga ändringar"
     ]);
@@ -334,7 +334,7 @@ describe("ActivityView", () => {
     expect(screen.queryByText("Laddar synkhistorik...")).toBeNull();
     await act(async () => release());
 
-    expect(await screen.findByText("7 fil(er) synkad")).toBeTruthy();
+    expect(await screen.findByText("7 filer synkade")).toBeTruthy();
     expect(requests()).toHaveLength(4);
     expect(requests()[3]).toEqual({ item: "busy", skip: 0, limit: 10 });
     // The second page loaded before stays: 20 earlier syncs and the new one.
@@ -360,7 +360,7 @@ describe("ActivityView", () => {
     // Meanwhile a sync lands, and the new revision's first page is in first.
     logs.a = [...hourly("new", 1, "2026-10-15T13:00:00Z", { files_processed: 7 }), ...logs.a];
     rerender(<Activity items={[folder("a", "Avtal", "2026-10-15T13:00:30Z")]} />);
-    expect(await screen.findByText("7 fil(er) synkad")).toBeTruthy();
+    expect(await screen.findByText("7 filer synkade")).toBeTruthy();
     expect(timelineRows()).toHaveLength(11);
 
     await act(async () => release());
@@ -370,7 +370,7 @@ describe("ActivityView", () => {
     // While the next revision loads, the newest history stays, with its newest sync.
     get.mockImplementationOnce(() => new Promise(() => {}));
     rerender(<Activity items={[folder("a", "Avtal", "2026-10-15T14:00:30Z")]} />);
-    expect(screen.getByText("7 fil(er) synkad")).toBeTruthy();
+    expect(screen.getByText("7 filer synkade")).toBeTruthy();
     expect(timelineRows()).toHaveLength(21);
   });
 
@@ -390,7 +390,7 @@ describe("ActivityView", () => {
     logs.a = [...hourly("new", 1, "2026-10-15T13:00:00Z", { files_processed: 7 }), ...logs.a];
     serve(logs);
     fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
-    expect(await screen.findByText("7 fil(er) synkad")).toBeTruthy();
+    expect(await screen.findByText("7 filer synkade")).toBeTruthy();
     expect(screen.queryByText("Kunde inte läsa in synkhistoriken")).toBeNull();
   });
 

@@ -78,6 +78,20 @@ def user_visible_error(error: BaseException | str) -> str:
 
 
 def _describe(error: BaseException) -> str:
+    # A wrapper such as InternalHTTPException says nothing; its cause does.
+    # The chain is walked, not recursed, and a cycle ends it.
+    seen: set[int] = set()
+    current = error
+    while True:
+        seen.add(id(current))
+        text = _describe_one(current)
+        cause = current.__cause__
+        if text or cause is None or id(cause) in seen:
+            return text or type(current).__name__
+        current = cause
+
+
+def _describe_one(error: BaseException) -> str:
     if isinstance(error, aiohttp.ClientResponseError) and error.status:
         return _http_status(error.status, error.message)
     if isinstance(error, httpx.HTTPStatusError):
@@ -93,12 +107,10 @@ def _describe(error: BaseException) -> str:
         return TIMEOUT_ERROR
     if isinstance(error, (aiohttp.ClientConnectionError, httpx.TransportError)):
         return CONNECTION_ERROR
-    text = str(error).strip()
-    if text:
-        return text
-    # A wrapper such as InternalHTTPException says nothing; its cause does.
-    cause = error.__cause__
-    return _describe(cause) if cause is not None else type(error).__name__
+    try:
+        return str(error).strip()
+    except Exception:  # noqa: BLE001 - an error whose text fails still has a kind
+        return ""
 
 
 def _http_status(status: int, reason: str | None) -> str:

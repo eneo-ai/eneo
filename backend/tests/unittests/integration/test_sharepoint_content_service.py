@@ -4244,7 +4244,7 @@ class TestSelectedItemTypePersistence:
 
 
 def _run_clears(redis_client: AsyncMock) -> list[str]:
-    """Keys whose deferred clear removed the run's own entry only."""
+    """Keys whose clear removed the run's own entry only."""
     return [
         call.args[2]
         for call in redis_client.eval.await_args_list
@@ -4341,7 +4341,7 @@ class TestSyncProgress:
             ("b.docx", "unchanged"),
             ("a.docx", "indexed"),
         ]
-        progress_redis.delete.assert_awaited_once_with(sync_progress_key(ik.id))
+        assert _run_clears(progress_redis) == [sync_progress_key(ik.id)]
 
     async def test_delta_sync_counts_changes_without_a_total(
         self, progress_service, progress_redis, mock_dependencies, mock_oauth_token
@@ -4394,7 +4394,7 @@ class TestSyncProgress:
             ("b.docx", "unchanged"),
             ("a.docx", "indexed"),
         ]
-        progress_redis.delete.assert_awaited_once_with(sync_progress_key(ik.id))
+        assert _run_clears(progress_redis) == [sync_progress_key(ik.id)]
 
     @pytest.mark.parametrize("mode", ["full", "delta"])
     async def test_a_failed_sync_removes_its_progress(
@@ -4428,7 +4428,7 @@ class TestSyncProgress:
                     )
 
         assert _progress_phases(progress_redis)[0]["sync_type"] == mode
-        progress_redis.delete.assert_awaited_once_with(sync_progress_key(ik.id))
+        assert _run_clears(progress_redis) == [sync_progress_key(ik.id)]
         assert ik.last_sync_status == "error"
 
     @pytest.fixture
@@ -4516,7 +4516,7 @@ class TestSyncProgress:
                     token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
                 )
 
-        progress_redis.delete.assert_awaited_once_with(sync_progress_key(ik.id))
+        assert _run_clears(progress_redis) == [sync_progress_key(ik.id)]
         progress_redis.expire.assert_not_awaited()
         assert not progress_service._post_transaction_tasks
 

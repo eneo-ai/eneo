@@ -92,10 +92,10 @@ describe("SourcesOverview", () => {
     const { table, container } = await show();
 
     expect(stat("Källor")).toBe("2");
-    expect(stat("Behöver åtgärd")).toBe("1 i 1 utrymme");
+    expect(stat("Behöver åtgärd")).toBe("1 i 1 yta");
     expect(stat("Sökbara dokument")).toBe("30");
     // Personal spaces are counted, never listed.
-    expect(stat("I personliga utrymmen")).toBe("4 1 med fel");
+    expect(stat("I personliga ytor")).toBe("4 1 med fel");
     expect(sourceLinks(table)).toEqual(["Socialförvaltningen", "Intranätet"]);
 
     const [, first, second] = within(table).getAllByRole("row");
@@ -125,7 +125,7 @@ describe("SourcesOverview", () => {
     await waitFor(() => expect(sourceLinks(table)).toEqual(["Intranätet"]));
 
     fireEvent.click(screen.getByRole("radio", { name: "Alla 2" }));
-    const search = screen.getByRole("textbox", { name: "Sök källa, mapp eller utrymme" });
+    const search = screen.getByRole("textbox", { name: "Sök källa, mapp eller yta" });
     fireEvent.change(search, { target: { value: "arkiv" } });
     await waitFor(() => expect(sourceLinks(table)).toEqual(["Socialförvaltningen"]));
 
@@ -166,7 +166,7 @@ describe("SourcesOverview", () => {
     const fakturor = within(table).getByText("Fakturor").closest("tr")!;
     expect(within(fakturor).getByText("Inloggningen till SharePoint har gått ut")).toBeTruthy();
     expect(within(table).queryByText(/credentials are invalid/)).toBeNull();
-    expect(stat("Behöver åtgärd")).toBe("2 i 2 utrymmen");
+    expect(stat("Behöver åtgärd")).toBe("2 i 2 ytor");
   });
 
   it("says how many folders of a source still wait for their first sync", async () => {
@@ -207,9 +207,9 @@ describe("SourcesOverview", () => {
     renderInApp(<SourcesOverview />);
 
     expect(
-      await screen.findByText("Ingen kunskap har importerats till delade utrymmen än.")
+      await screen.findByText("Ingen kunskap har importerats till delade ytor än.")
     ).toBeTruthy();
-    expect(stat("I personliga utrymmen")).toBe("2");
+    expect(stat("I personliga ytor")).toBe("2");
     expect(screen.queryByRole("table")).toBeNull();
   });
 });
