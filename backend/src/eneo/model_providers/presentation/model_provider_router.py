@@ -760,7 +760,7 @@ async def list_provider_models(
     user: CurrentUser,
     service: ServiceDep,
     mode: Annotated[
-        Literal["completion", "embedding", "transcription", "image"] | None,
+        Literal["completion", "embedding", "transcription", "image", "rerank"] | None,
         Query(description="Filter response to a single mode."),
     ] = None,
 ) -> list[dict[str, Any]]:
