@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatService, type ChatPartner } from "./ChatService.svelte";
 import { projectTurnDebugDetails } from "./turnDebugProjection";
-import type { Conversation } from "@eneo/eneo-js";
+import { EneoError, type Conversation } from "@eneo/eneo-js";
+import { m } from "$lib/paraglide/messages";
 
 function assistantPartner(overrides: Partial<ChatPartner> = {}): ChatPartner {
   return {
@@ -390,6 +391,40 @@ describe("ChatService turn diagnostics", () => {
     await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual([]));
     expect(chat.currentConversation.messages.at(-1)?.answer).toBe("Live answer");
     expect(get).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatService failed answers", () => {
+  function failingAsk(code: string, partial: string) {
+    return vi.fn().mockImplementation(async ({ callbacks }) => {
+      callbacks.onFirstChunk({
+        id: "message-1",
+        session_id: "session-1",
+        answer: "",
+        references: []
+      });
+      if (partial) callbacks.onText({ session_id: "session-1", answer: partial, references: [] });
+      throw new EneoError("Backend fallback", "SERVER", 200, 0, { code, message: "x" });
+    });
+  }
+
+  it("says whose side failed when an answer breaks off", async () => {
+    const chat = chatService(vi.fn(), { ask: failingAsk("provider_connection_lost", "Hej") });
+
+    await chat.askQuestion("Hello");
+
+    expect(chat.currentConversation.messages.at(-1)?.answer).toBe(
+      m.provider_failure_connection_lost()
+    );
+  });
+
+  it("hands a failure before the first token to the input with its reason", async () => {
+    const chat = chatService(vi.fn(), { ask: failingAsk("provider_unreachable", "") });
+
+    await expect(chat.askQuestion("Hello")).rejects.toMatchObject({
+      response: { code: "provider_unreachable" }
+    });
+    expect(chat.currentConversation.messages).toHaveLength(0);
   });
 });
 

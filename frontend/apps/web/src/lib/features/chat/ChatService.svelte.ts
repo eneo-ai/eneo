@@ -1,10 +1,11 @@
 import { browser } from "$app/environment";
 import { splitPendingInref } from "./inrefBuffer";
 import { PAGINATION } from "$lib/core/constants";
-import { toastError } from "$lib/core/errors";
+import { getAnswerFailureMessage, toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { waitFor } from "$lib/core/waitFor";
+import { m } from "$lib/paraglide/messages";
 import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
 import {
   type ConversationSparse,
@@ -1038,12 +1039,17 @@ export class ChatService {
           console.error(error);
           throw error;
         } else {
-          // Error during streaming — show inline in the conversation
-          let message = "We encountered an error processing your request.";
-          if (error instanceof EneoError) {
-            message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
-          } else if (error instanceof Object && "message" in error && "name" in error) {
-            message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
+          // Error during streaming — show inline in the conversation. A known
+          // reason says whose side failed; anything else keeps its details
+          // for a support report.
+          let message = getAnswerFailureMessage(error);
+          if (message === undefined) {
+            message = m.chat_answer_failed();
+            if (error instanceof EneoError) {
+              message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
+            } else if (error instanceof Object && "message" in error && "name" in error) {
+              message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
+            }
           }
 
           this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
