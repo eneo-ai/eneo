@@ -1,12 +1,15 @@
 import asyncio
 import hashlib
 import unicodedata
+from collections.abc import Callable, Coroutine
 from datetime import datetime, timezone
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 from urllib.parse import unquote
 from uuid import UUID
 
 from sqlalchemy import event
+from sqlalchemy.orm import Session
 
 from eneo.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate, SourceMetadataEntry
 from eneo.integration.domain.entities.oauth_token import OauthToken
@@ -242,14 +245,17 @@ class SharePointContentService:
         self.service_account_auth_service = service_account_auth_service
         self.sync_log_repo = sync_log_repo
         self.change_key_service = change_key_service
-        # Strong refs to in-flight post-commit ChangeKey flush tasks so the event
-        # loop does not GC them before they run.
-        self._pending_change_key_tasks: set["asyncio.Task[None]"] = set()
+        # Strong refs to in-flight post-transaction tasks (ChangeKey flushes,
+        # progress clears) so the event loop does not GC them before they run.
+        self._post_transaction_tasks: set["asyncio.Task[None]"] = set()
         # Library column definitions per drive, fetched once per service
         # instance (one sync job). Failed reads are cached as None so a drive
         # whose columns cannot be read is asked only once.
         self._column_catalogs: dict[str, Optional[SharePointColumnCatalog]] = {}
-        self._progress = SyncProgressReporter(sync_progress_store)
+        self._progress = SyncProgressReporter(
+            sync_progress_store,
+            after_transaction=partial(self._after_outer_transaction, on_rollback=True),
+        )
 
     async def _refresh_service_account_access_token(
         self, tenant_app: TenantSharePointApp
@@ -311,6 +317,9 @@ class SharePointContentService:
         sync_log = None
         started_at = datetime.now(timezone.utc)
         resolved_integration_knowledge_id: UUID | None = integration_knowledge_id
+        # Outside the try: what a failed sync indexed or deleted before the
+        # error is committed, so its log records it.
+        stats = self._initialize_stats()
 
         try:
             await self._progress.begin(integration_knowledge_id, "full")
@@ -336,8 +345,6 @@ class SharePointContentService:
                 access_token_provider = None
             else:
                 raise ValueError("Either token_id or tenant_app_id must be provided")
-
-            stats = self._initialize_stats()
 
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
@@ -439,7 +446,11 @@ class SharePointContentService:
                 str(e),
                 sync_type="full",
                 started_at=started_at,
-                metadata=_sync_metadata(trigger=sync_trigger, recovery=recovery),
+                metadata=_sync_metadata(
+                    self._build_summary_stats(stats),
+                    trigger=sync_trigger,
+                    recovery=recovery,
+                ),
             )
             logger.error(f"Error in pull_content: {e}", exc_info=True)
             raise
@@ -520,6 +531,9 @@ class SharePointContentService:
         started_at = datetime.now(timezone.utc)
         resolved_integration_knowledge_id: UUID | None = integration_knowledge_id
         delegated_to_full_sync = False
+        # Outside the try, like the full sync's: changes applied before an
+        # error are committed and belong in its log.
+        stats = self._initialize_stats()
 
         try:
             await self._progress.begin(integration_knowledge_id, "delta")
@@ -576,8 +590,6 @@ class SharePointContentService:
                     sync_trigger=sync_trigger,
                     recovery="missing_delta_token",
                 )
-
-            stats = self._initialize_stats()
 
             base_url = _require_sharepoint_token(token).base_url
             async with SharePointContentClient(
@@ -917,7 +929,9 @@ class SharePointContentService:
                 str(e),
                 sync_type="delta",
                 started_at=started_at,
-                metadata=_sync_metadata(trigger=sync_trigger),
+                metadata=_sync_metadata(
+                    self._build_summary_stats(stats), trigger=sync_trigger
+                ),
             )
             raise
         finally:
@@ -1249,6 +1263,7 @@ class SharePointContentService:
                     integration_knowledge=integration_knowledge,
                     sharepoint_item_id=page_id,
                     stats=stats,
+                    item_name=page_name,
                 )
                 self._count_outcome(stats, outcome, page_name, page=True)
             except Exception as e:
@@ -1365,21 +1380,23 @@ class SharePointContentService:
         stats: SyncStats,
         sharepoint_item_id: Optional[str] = None,
         source_metadata: Optional[list[SourceMetadataEntry]] = None,
+        item_name: Optional[str] = None,
     ) -> BlobOutcome:
+        """Index one document; ``item_name`` (default ``title``) names a skip."""
         sanitized_text = sanitize_text_for_db(text)
         if not sanitized_text.strip():
             # Nothing indexable survives sanitising; treat it like a parser that
             # found no text so a previously indexed copy does not linger. The
-            # caller counts the skip from the outcome.
-            if sharepoint_item_id:
-                await self._delete_local_sharepoint_item(
-                    item_id=sharepoint_item_id,
-                    item_name=title,
-                    integration_knowledge=integration_knowledge,
-                    integration_knowledge_id=integration_knowledge.id,
-                    stats=stats,
-                    reason="unextractable",
-                )
+            # skip is counted here, before that copy is removed, so a failed
+            # removal never comes first among the item's skip reasons.
+            await self._skip_or_remove_unextractable(
+                item_id=sharepoint_item_id,
+                item_name=item_name or title,
+                skip_reason=EMPTY_CONTENT_REASON,
+                integration_knowledge=integration_knowledge,
+                integration_knowledge_id=integration_knowledge.id,
+                stats=stats,
+            )
             return "empty"
 
         existing_blob = None
@@ -1481,11 +1498,7 @@ class SharePointContentService:
             _record_change(stats, item_name, outcome)
         elif outcome == "unchanged":
             stats["unchanged_items"] += 1
-        else:
-            stats["skipped_items"] += 1
-            stats["skipped_details"].append(
-                {"file": item_name, "reason": "Empty or unreadable content"}
-            )
+        # "empty" is counted by _process_info_blob, which found it.
 
     async def _delete_local_sharepoint_item(
         self,
@@ -1862,26 +1875,47 @@ class SharePointContentService:
         """
         if not pending or not self.change_key_service:
             return
+        # Skipping is the safe direction: the item re-processes next sync.
+        if not self._after_outer_transaction(
+            partial(self._flush_change_keys, pending), on_rollback=False
+        ):
+            logger.warning("Could not register post-commit ChangeKey flush")
 
+    def _after_outer_transaction(
+        self, callback: Callable[[], Coroutine[Any, Any, None]], *, on_rollback: bool
+    ) -> bool:
+        """Run ``callback`` once the session's outermost transaction commits,
+        or also once it rolls back with ``on_rollback``.
+
+        Savepoints end inside that transaction (info blob publication uses
+        them, also in a pending delta pass after a sync) and do not count.
+        False when the session cannot carry the hook, e.g. a non-ORM session
+        in unit tests.
+        """
         sync_session = getattr(self.session, "sync_session", None)
-        if sync_session is None:
-            return
+        if not isinstance(sync_session, Session):
+            return False
+        fired = False
 
-        def _on_after_commit(_sync_session: object) -> None:
+        def _on_end(session: Session) -> None:
+            nonlocal fired
+            # A savepoint's commit or rollback is dispatched while it is still
+            # the session's nested transaction.
+            if fired or session.in_nested_transaction():
+                return
+            fired = True
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 return
-            task = loop.create_task(self._flush_change_keys(pending))
-            self._pending_change_key_tasks.add(task)
-            task.add_done_callback(self._pending_change_key_tasks.discard)
+            task = loop.create_task(callback())
+            self._post_transaction_tasks.add(task)
+            task.add_done_callback(self._post_transaction_tasks.discard)
 
-        try:
-            event.listen(sync_session, "after_commit", _on_after_commit, once=True)
-        except Exception as exc:
-            # Defensive: a non-ORM session (e.g. in unit tests) cannot register
-            # events. Skipping is the safe direction — the item re-processes next sync.
-            logger.warning("Could not register post-commit ChangeKey flush: %s", exc)
+        event.listen(sync_session, "after_commit", _on_end)
+        if on_rollback:
+            event.listen(sync_session, "after_rollback", _on_end)
+        return True
 
     async def _flush_change_keys(self, pending: list[tuple[UUID, str, str]]) -> None:
         if not self.change_key_service:

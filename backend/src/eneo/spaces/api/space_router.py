@@ -1189,10 +1189,8 @@ async def get_integration_knowledge_sync_progress(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
-    knowledge = await service.list_readable_knowledge(space_id=id)
-    items = await container.sharepoint_sync_progress_store().get_many(
-        [item.id for item in knowledge]
-    )
+    knowledge_ids = await service.list_readable_knowledge_ids(space_id=id)
+    items = await container.sharepoint_sync_progress_store().get_many(knowledge_ids)
     return IntegrationSyncProgressList(items=items)
 
 

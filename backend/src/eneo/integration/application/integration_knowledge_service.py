@@ -93,6 +93,7 @@ class BatchIntegrationKnowledgeCreateResult(TypedDict):
 class PlacedIntegrationKnowledge:
     placement: "IntegrationKnowledgePlacement"
     knowledge: IntegrationKnowledge
+    can_open_space: bool
 
 
 @dataclass(frozen=True)
@@ -208,12 +209,14 @@ class IntegrationKnowledgeService:
             if listed
             else {}
         )
+        openable = await self._openable_spaces(listed)
         return TenantIntegrationKnowledgeOverview(
             # An item removed between the two reads is left out.
             items=[
                 PlacedIntegrationKnowledge(
                     placement=placement,
                     knowledge=knowledge[placement.integration_knowledge_id],
+                    can_open_space=placement.space_id in openable,
                 )
                 for placement in listed
                 if placement.integration_knowledge_id in knowledge
@@ -223,6 +226,28 @@ class IntegrationKnowledgeService:
                 1 for placement in personal if placement.last_sync_status == "error"
             ),
         )
+
+    async def _openable_spaces(
+        self, placements: "list[IntegrationKnowledgePlacement]"
+    ) -> set[UUID]:
+        """Spaces of ``placements`` the caller may open.
+
+        Being an admin grants no access to a shared space, so a shared space
+        opens only through membership, direct or through a group. Opening the
+        organization space makes every tenant admin its admin
+        (``SpaceService.ensure_org_admin_members``), so it always opens.
+        """
+        openable = {
+            placement.space_id for placement in placements if placement.organization
+        }
+        shared = {placement.space_id for placement in placements} - openable
+        access = await self.space_repo.get_spaces_access_facts(list(shared))
+        openable.update(
+            space_id
+            for space_id, facts in access.items()
+            if self.actor_manager.get_space_actor(facts).can_read_space()
+        )
+        return openable
 
     async def get_readable_knowledge(
         self, space_id: UUID, integration_knowledge_id: UUID
@@ -237,12 +262,20 @@ class IntegrationKnowledgeService:
             integration_knowledge_id=integration_knowledge_id
         )
 
-    async def list_readable_knowledge(
-        self, space_id: UUID
-    ) -> list[IntegrationKnowledge]:
-        """The items a space shows, for anyone who may read its integrations."""
-        space = await self._space_with_readable_integrations(space_id)
-        return list(space.integration_knowledge_list)
+    async def list_readable_knowledge_ids(self, space_id: UUID) -> list[UUID]:
+        """Ids of the items a space shows, for anyone who may read its integrations.
+
+        Reads the caller's access facts and the ids only: the progress view
+        polls this every few seconds, and the space aggregate loads every
+        member, assistant and source of the space.
+        """
+        facts = await self.space_repo.get_space_access_facts(space_id)
+        actor = self.actor_manager.get_space_actor(facts)
+        if not (actor.can_read_space() and actor.can_read_integrations()):
+            raise UnauthorizedException()
+        return await self.space_repo.get_visible_integration_knowledge_ids(
+            space_id, facts.tenant_space_id
+        )
 
     async def _space_with_readable_integrations(self, space_id: UUID) -> Space:
         space = await self.space_repo.one(id=space_id)

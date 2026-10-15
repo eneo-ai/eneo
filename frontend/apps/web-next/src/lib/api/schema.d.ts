@@ -10054,6 +10054,11 @@ export interface components {
        * @description True for the tenant's organization space
        */
       organization: boolean;
+      /**
+       * Can Open
+       * @description Whether the caller may open the space: the organization space, or a shared space they belong to directly or through a group. The admin permission alone grants no access to a shared space
+       */
+      can_open: boolean;
     };
     /** AdminPersonalIntegrationKnowledge */
     AdminPersonalIntegrationKnowledge: {

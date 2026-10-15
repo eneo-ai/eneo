@@ -1,16 +1,19 @@
 """Live progress of running SharePoint syncs, kept in Redis.
 
 One JSON entry per integration knowledge item, written by the worker while a
-sync runs and removed when it ends. Progress is advisory: a Redis failure is
-logged and never fails a sync or the page that reads it.
+sync runs and removed once the sync's database transaction has ended. Progress
+is advisory: a Redis failure is logged and never fails a sync or the page that
+reads it.
 """
 
+import asyncio
 import time
 from collections import deque
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Literal
+from functools import partial
+from typing import Any, Literal
 from uuid import UUID
 
 import redis.asyncio as redis
@@ -31,12 +34,20 @@ SyncPhase = Literal["discovering", "processing", "finishing"]
 FileOutcome = Literal["indexed", "unchanged", "skipped"]
 
 # Same window as SHAREPOINT_SYNC_LOCK_TTL_SECONDS: an entry outlives a crashed
-# worker no longer than its lock. Every write renews it.
-# KNOWN GAP: unlike the lock there is no watchdog, so one file that takes longer
-# than the TTL lets the entry lapse until the next file finishes.
+# worker no longer than its lock. Every write renews it, and a running sync
+# writes at least once per heartbeat, however long one file or the finishing
+# phase takes.
 SYNC_PROGRESS_TTL_SECONDS = 300
+HEARTBEAT_INTERVAL_SECONDS = 60.0
+# A finished sync's entry waits for its transaction to end; should that never
+# be seen, it lapses after this instead of the full TTL.
+FINISHED_TTL_SECONDS = 120
 MIN_WRITE_INTERVAL_SECONDS = 1.0
 RECENT_FILES_LIMIT = 8
+
+# Runs the callback once the sync's database transaction has committed or rolled
+# back. Returns False when that cannot be arranged.
+AfterTransaction = Callable[[Callable[[], Coroutine[Any, Any, None]]], bool]
 
 
 def sync_progress_key(integration_knowledge_id: UUID) -> str:
@@ -59,8 +70,32 @@ class SharePointSyncProgressStore:
             ex=SYNC_PROGRESS_TTL_SECONDS,
         )
 
-    async def clear(self, integration_knowledge_id: UUID) -> None:
-        await self.redis_client.delete(sync_progress_key(integration_knowledge_id))
+    async def clear(
+        self, integration_knowledge_id: UUID, *, started_at: datetime | None = None
+    ) -> None:
+        """Remove the entry; with ``started_at``, only the entry of that run.
+
+        The check and the delete are two round trips: a run that starts in
+        between loses its entry until its next write.
+        """
+        key = sync_progress_key(integration_knowledge_id)
+        if started_at is not None:
+            value: bytes | str | None = await self.redis_client.get(key)
+            if value is None:
+                return
+            try:
+                current = IntegrationSyncProgress.model_validate_json(value)
+            except ValidationError:
+                pass
+            else:
+                if current.started_at != started_at:
+                    return
+        await self.redis_client.delete(key)
+
+    async def expire(self, integration_knowledge_id: UUID, seconds: int) -> None:
+        await self.redis_client.expire(
+            sync_progress_key(integration_knowledge_id), seconds
+        )
 
     async def get_many(
         self, integration_knowledge_ids: Sequence[UUID]
@@ -111,10 +146,15 @@ class _Run:
 class SyncProgressReporter:
     """Publishes the progress of one sync at a time from its ``SyncStats``.
 
-    Writes happen when a sync begins, on every phase change, and otherwise at
-    most once per ``min_interval_seconds``; every call still updates the state
-    the next write publishes. Without a store, or for a sync without an item
-    id, every call is a no-op.
+    Writes happen when a sync begins, on every phase change, otherwise at most
+    once per ``min_interval_seconds``, and while a sync runs at least once per
+    ``heartbeat_interval_seconds`` (None disables the heartbeat); every call
+    still updates the state the next write publishes. Without a store, or for
+    a sync without an item id, every call is a no-op.
+
+    With ``after_transaction`` a finished sync's entry stays until the sync's
+    transaction ends, so the page never shows no sync while the item's rows
+    still hold what was there before it.
     """
 
     def __init__(
@@ -122,16 +162,21 @@ class SyncProgressReporter:
         store: SharePointSyncProgressStore | None,
         *,
         min_interval_seconds: float = MIN_WRITE_INTERVAL_SECONDS,
+        heartbeat_interval_seconds: float | None = HEARTBEAT_INTERVAL_SECONDS,
+        after_transaction: AfterTransaction | None = None,
         clock: Callable[[], datetime] = _utcnow,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         super().__init__()
         self._store = store
         self._min_interval_seconds = min_interval_seconds
+        self._heartbeat_interval_seconds = heartbeat_interval_seconds
+        self._after_transaction = after_transaction
         self._clock = clock
         self._monotonic = monotonic
         self._run: _Run | None = None
         self._last_write: float | None = None
+        self._heartbeat: asyncio.Task[None] | None = None
 
     async def begin(
         self, integration_knowledge_id: UUID | None, sync_type: SyncType
@@ -146,6 +191,11 @@ class SyncProgressReporter:
             started_at=self._clock(),
         )
         await self._write()
+        # One heartbeat serves nested runs: it writes whichever run is current.
+        if self._heartbeat is None and self._heartbeat_interval_seconds is not None:
+            self._heartbeat = asyncio.create_task(
+                self._beat(self._heartbeat_interval_seconds)
+            )
 
     def add_total(self, count: int) -> None:
         """Count files or pages a listing returned for processing."""
@@ -174,8 +224,9 @@ class SyncProgressReporter:
         if run is None:
             return
         self._apply(run, stats, current=current)
-        # KNOWN GAP: there is no trailing write, so a slow item that starts
-        # within the interval after a write is published only once it is done.
+        # There is no trailing write: a slow item that starts within the
+        # interval after a write is published by the next heartbeat at the
+        # latest.
         if (
             self._last_write is not None
             and self._monotonic() - self._last_write < self._min_interval_seconds
@@ -184,17 +235,61 @@ class SyncProgressReporter:
         await self._write()
 
     async def end(self) -> None:
+        """Stop reporting and remove the entry: once the sync's transaction has
+        ended when ``after_transaction`` arranges it, otherwise now.
+
+        The heartbeat is stopped first so no write can re-create the entry.
+        """
         run, self._run = self._run, None
+        await self._stop_heartbeat()
         if run is None or self._store is None:
             return
+        store, item_id = self._store, run.integration_knowledge_id
+        # A later sync of the item may already be writing when the deferred
+        # clear runs (the lease is released before the commit), so only this
+        # run's entry is removed.
+        deferred_clear = partial(self._clear, item_id, started_at=run.started_at)
+        if self._after_transaction is not None and self._after_transaction(
+            deferred_clear
+        ):
+            try:
+                await store.expire(item_id, FINISHED_TTL_SECONDS)
+            except Exception as exc:  # noqa: BLE001 - progress must never fail a sync
+                logger.warning(
+                    "Could not shorten sync progress of integration knowledge %s: %s",
+                    item_id,
+                    exc,
+                )
+            return
+        await self._clear(item_id)
+
+    async def _clear(
+        self, integration_knowledge_id: UUID, *, started_at: datetime | None = None
+    ) -> None:
+        if self._store is None:
+            return
         try:
-            await self._store.clear(run.integration_knowledge_id)
+            await self._store.clear(integration_knowledge_id, started_at=started_at)
         except Exception as exc:  # noqa: BLE001 - progress must never fail a sync
             logger.warning(
                 "Could not clear sync progress of integration knowledge %s: %s",
-                run.integration_knowledge_id,
+                integration_knowledge_id,
                 exc,
             )
+
+    async def _beat(self, interval: float) -> None:
+        while True:
+            await asyncio.sleep(interval)
+            await self._write()
+
+    async def _stop_heartbeat(self) -> None:
+        heartbeat, self._heartbeat = self._heartbeat, None
+        if heartbeat is None:
+            return
+        heartbeat.cancel()
+        # wait() rather than awaiting the task: the heartbeat's cancellation
+        # must not be mistaken for a cancellation of the sync itself.
+        await asyncio.wait([heartbeat])
 
     @staticmethod
     def _apply(run: _Run, stats: SyncStats, *, current: str | None) -> None:

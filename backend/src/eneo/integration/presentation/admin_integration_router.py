@@ -44,6 +44,7 @@ async def get_integration_knowledge_overview(
                     id=item.placement.space_id,
                     name=item.placement.space_name,
                     organization=item.placement.organization,
+                    can_open=item.can_open_space,
                 ),
                 knowledge=IntegrationKnowledgeAssembler.to_space_knowledge_model(
                     item.knowledge

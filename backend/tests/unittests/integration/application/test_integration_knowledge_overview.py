@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
+from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
 from eneo.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeTable,
@@ -89,13 +90,30 @@ def _app(container: Container) -> FastAPI:
     return app
 
 
-async def _get_overview(case, repo):
+def _member_facts(space_id: UUID, tenant_id: UUID, members: dict) -> SpaceAccessFacts:
+    return SpaceAccessFacts(
+        id=space_id,
+        tenant_id=tenant_id,
+        user_id=None,
+        tenant_space_id=uuid4(),
+        members={
+            user_id: SpaceRoleFact(id=user_id, role=role)
+            for user_id, role in members.items()
+        },
+        group_members={},
+        default_assistant_id=None,
+        assistant_ids=frozenset(),
+        app_ids=frozenset(),
+    )
+
+
+async def _get_overview(case, repo, space_repo=None):
     container = Container(
         user=providers.Object(case.user),
         user_integration_repo=providers.Object(case.integration_repo),
         tenant_integration_repo=providers.Object(AsyncMock()),
         tenant_sharepoint_app_repo=providers.Object(case.app_repo),
-        space_repo=providers.Object(AsyncMock()),
+        space_repo=providers.Object(space_repo or AsyncMock()),
         oauth_token_repo=providers.Object(AsyncMock()),
         integration_knowledge_repo=providers.Object(repo),
         embedding_model_repo2=providers.Object(AsyncMock()),
@@ -166,6 +184,9 @@ async def test_lists_shared_and_organization_items_and_only_counts_personal_ones
     shared = _insert_space(
         connection, tables, tenant_id=tenant_id, name="Barn", parent=organization
     )
+    closed = _insert_space(
+        connection, tables, tenant_id=tenant_id, name="Ekonomi", parent=organization
+    )
     personal = _insert_space(
         connection, tables, tenant_id=tenant_id, name="Max", user_id=uuid4()
     )
@@ -189,6 +210,9 @@ async def test_lists_shared_and_organization_items_and_only_counts_personal_ones
             day=day,
         )
         for status, day in [("error", 2), ("never", 1)]
+    )
+    closed_item = _insert_knowledge(
+        connection, tables, tenant_id=tenant_id, space_id=closed, status="success"
     )
     for status in ("error", "success", "error"):
         _insert_knowledge(
@@ -243,14 +267,30 @@ async def test_lists_shared_and_organization_items_and_only_counts_personal_ones
             user_integration=case.integration,
             embedding_model=EMBEDDING_MODEL,
         ),
+        closed_item: IntegrationKnowledge(
+            id=closed_item,
+            name="Budget",
+            url="https://contoso.sharepoint.com/sites/EKO/Budget",
+            tenant_id=tenant_id,
+            space_id=closed,
+            user_integration=case.integration,
+            embedding_model=EMBEDDING_MODEL,
+            last_sync_status="success",
+        ),
     }
 
     async def get_by_ids(ids: list[UUID]) -> list[IntegrationKnowledge]:
         return [knowledge[id] for id in ids]
 
     repo.get_by_ids = AsyncMock(side_effect=get_by_ids)
+    # The admin is a viewer of Barn and not a member of Ekonomi.
+    space_repo = AsyncMock()
+    space_repo.get_spaces_access_facts.return_value = {
+        shared: _member_facts(shared, tenant_id, {case.user.id: "viewer"}),
+        closed: _member_facts(closed, tenant_id, {uuid4(): "admin"}),
+    }
 
-    response = await _get_overview(case, repo)
+    response = await _get_overview(case, repo, space_repo)
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -267,7 +307,12 @@ async def test_lists_shared_and_organization_items_and_only_counts_personal_ones
         for item in body["items"]
     ] == [
         (
-            {"id": str(shared), "name": "Barn", "organization": False},
+            {
+                "id": str(shared),
+                "name": "Barn",
+                "organization": False,
+                "can_open": True,
+            },
             str(older_shared_item),
             "sharepoint",
             "never",
@@ -275,7 +320,12 @@ async def test_lists_shared_and_organization_items_and_only_counts_personal_ones
             0,
         ),
         (
-            {"id": str(shared), "name": "Barn", "organization": False},
+            {
+                "id": str(shared),
+                "name": "Barn",
+                "organization": False,
+                "can_open": True,
+            },
             str(newer_shared_item),
             "confluence",
             "error",
@@ -284,9 +334,24 @@ async def test_lists_shared_and_organization_items_and_only_counts_personal_ones
         ),
         (
             {
+                "id": str(closed),
+                "name": "Ekonomi",
+                "organization": False,
+                "can_open": False,
+            },
+            str(closed_item),
+            "sharepoint",
+            "success",
+            None,
+            0,
+        ),
+        (
+            {
                 "id": str(organization),
                 "name": "Sundsvalls kommun",
                 "organization": True,
+                # Opening it makes every tenant admin its admin.
+                "can_open": True,
             },
             str(org_item),
             "sharepoint",
@@ -295,12 +360,16 @@ async def test_lists_shared_and_organization_items_and_only_counts_personal_ones
             12,
         ),
     ]
-    org_knowledge = body["items"][2]["knowledge"]
+    org_knowledge = body["items"][3]["knowledge"]
     assert org_knowledge["folder_path"] == "/Styrdokument"
     assert org_knowledge["wrapper_name"] == "Kommunstyrelsen"
     repo.get_by_ids.assert_awaited_once_with(
-        [older_shared_item, newer_shared_item, org_item]
+        [older_shared_item, newer_shared_item, closed_item, org_item]
     )
+    # The shared spaces' facts are read at once; the organization space needs none.
+    space_repo.get_spaces_access_facts.assert_awaited_once()
+    (asked,) = space_repo.get_spaces_access_facts.await_args.args
+    assert sorted(asked) == sorted([shared, closed])
 
 
 @pytest.mark.parametrize(
@@ -313,10 +382,12 @@ async def test_non_admins_are_refused_before_anything_is_read(
     case.user.roles[0].permissions = permissions
     _, _, repo = placements_database
     repo.get_by_ids = AsyncMock()
+    space_repo = AsyncMock()
 
-    response = await _get_overview(case, repo)
+    response = await _get_overview(case, repo, space_repo)
 
     assert response.status_code == 403
     assert response.json()["eneo_error_code"] == ErrorCodes.UNAUTHORIZED.value
     repo.session.execute.assert_not_awaited()
     repo.get_by_ids.assert_not_awaited()
+    space_repo.get_spaces_access_facts.assert_not_awaited()
