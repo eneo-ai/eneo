@@ -3,6 +3,7 @@
   import { sanitizeLinkHref } from "$lib/components/markdown/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { pickFileIcon } from "$lib/core/formatting/pickFileIcon";
+  import { fileExtension } from "$lib/core/formatting/fileExtension";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
   import { m } from "$lib/paraglide/messages";
 
@@ -24,9 +25,7 @@
   const Icon = $derived(pickFileIcon(file.mimetype));
   // The downloaded file's size; `size` counts the extracted text of a document.
   const bytes = $derived(file.original_size ?? file.size);
-  const extension = $derived(
-    file.name.includes(".") ? (file.name.split(".").pop() ?? "").toUpperCase() : ""
-  );
+  const extension = $derived(fileExtension(file.name));
   const previewable = $derived(preview?.canPreview(file) ?? false);
   const previewing = $derived(preview?.isOpen(file) ?? false);
 </script>

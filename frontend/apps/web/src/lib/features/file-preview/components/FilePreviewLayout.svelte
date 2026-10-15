@@ -38,7 +38,9 @@
   let { preview, versionsOf, exportOf, occupant, contents, children }: Props = $props();
 
   const panelId = $props.id();
-  let overview = $state(false);
+  // The overview is the preview's state, so a file bundle in a message can
+  // open it as the panel's own controls do.
+  const overview = $derived(preview.overview !== null);
   let trigger = $state<HTMLButtonElement | null>(null);
   const hasContents = $derived(
     !!contents && contents.views.length + contents.documents.length + contents.uploads.length > 0
@@ -59,7 +61,7 @@
 
   $effect(() => {
     // A file or view takes over the overview. Closing it then closes the panel.
-    if (preview.shown || occupied || !hasContents) overview = false;
+    if (preview.shown || occupied || !hasContents) preview.closeOverview(false);
   });
 
   // A selected item can replace its own opener. Restore focus to the panel
@@ -76,16 +78,18 @@
   });
 
   async function choose(show: () => void) {
-    overview = false;
+    preview.closeOverview(false);
     show();
     await tick();
     document.getElementById(panelId)?.focus();
   }
 
-  async function showOverview() {
+  // The panel's own way into the overview (its launcher and back buttons);
+  // a bundle in a message opens it through the preview directly and lands
+  // on its section instead of the panel.
+  async function openOverview() {
     occupant?.close();
-    preview.close();
-    overview = true;
+    preview.showOverview(null, trigger);
     await tick();
     document.getElementById(panelId)?.focus();
   }
@@ -93,7 +97,7 @@
   function close() {
     if (occupied) occupant?.close();
     else if (preview.shown) preview.close();
-    else overview = false;
+    else preview.closeOverview();
   }
 
   // Below this width a split leaves neither side usable, so the preview opens
@@ -149,13 +153,14 @@
         {preview}
         {...contents}
         fullHeight
+        focusSection={preview.overview?.section ?? null}
         onfile={(file) => choose(() => preview.open(file, trigger))}
         onview={(view) => choose(view.open)}
       />
     </div>
   {/if}
   {#if occupied && occupant}
-    {@render occupant.panel(hasContents ? showOverview : undefined)}
+    {@render occupant.panel(hasContents ? openOverview : undefined)}
   {/if}
   {#if preview.shown}
     <!-- A covered file stays mounted, so it is as the reader left it (the
@@ -170,7 +175,7 @@
         {versionsOf}
         {exportOf}
         {contents}
-        onoverview={hasContents ? showOverview : undefined}
+        onoverview={hasContents ? openOverview : undefined}
         sheet={!split}
       />
     </div>
@@ -198,7 +203,7 @@
                 bind:ref={trigger}
                 onopen={() => {
                   preview.openedByItself = false;
-                  overview = true;
+                  void openOverview();
                 }}
               />
             </div>

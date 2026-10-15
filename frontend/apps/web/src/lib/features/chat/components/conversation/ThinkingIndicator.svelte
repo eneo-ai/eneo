@@ -6,15 +6,19 @@
 -->
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+
+  /** The badge reads as thinking by default; a sent message that is still
+   * waiting for its attachments shows what it waits for instead. */
+  let { label }: { label?: string } = $props();
 </script>
 
-<div class="thinking-badge" role="status" aria-label={m.assistant_is_thinking()}>
+<div class="thinking-badge" role="status" aria-label={label ?? m.assistant_is_thinking()}>
   <span class="thinking-dots" aria-hidden="true">
     <span class="thinking-dot"></span>
     <span class="thinking-dot"></span>
     <span class="thinking-dot"></span>
   </span>
-  <span class="thinking-text">{m.thinking()}</span>
+  <span class="thinking-text">{label ?? m.thinking()}</span>
 </div>
 
 <style lang="postcss">

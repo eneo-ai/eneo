@@ -2,7 +2,10 @@
   import { conversationUploads } from "../../conversationUploads";
   import { opensFilePanel } from "../../toolFileInputs";
   import { getEneo } from "$lib/core/Eneo";
-  import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import {
+    initAttachmentManager,
+    matchesUpload
+  } from "$lib/features/attachments/AttachmentManager";
   import { getAttachmentRulesStore } from "$lib/features/attachments/getAttachmentRules";
   import { toStore } from "svelte/store";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
@@ -71,7 +74,13 @@
   );
   initAttachmentManager({
     eneo: getEneo(),
-    options: { rules: attachmentRules, inlineErrors: true }
+    options: {
+      rules: attachmentRules,
+      inlineErrors: true,
+      // A file sent earlier in this conversation is attached again as it is,
+      // without another upload.
+      findExisting: (file) => uploads.find((uploaded) => matchesUpload(file, uploaded))
+    }
   });
 
   // Every file in the conversation opens in one preview panel beside the
@@ -265,6 +274,9 @@
       bind:this={scrollContainer}
       ondragenter={(event) => {
         event.preventDefault();
+        // Files dropped while a message is in flight would be lost with the
+        // sent batch, so the drop area stays closed until the reply is in.
+        if (chat.askQuestion.isLoading) return;
         isDragging = true;
       }}
     >
