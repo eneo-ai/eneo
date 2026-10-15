@@ -1,9 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatService, type ChatPartner } from "./ChatService.svelte";
 import { projectTurnDebugDetails } from "./turnDebugProjection";
-import type { Conversation, UploadedFile } from "@eneo/eneo-js";
+import { EneoError, type Conversation, type UploadedFile } from "@eneo/eneo-js";
+import { m } from "$lib/paraglide/messages";
 import { writable } from "svelte/store";
 import { UploadsNotReadyError } from "$lib/features/attachments/AttachmentManager";
+
+// Exercise the browser buffering path in Node when a test supplies an animation clock.
+vi.mock("$app/environment", () => ({ browser: true }));
 
 function assistantPartner(overrides: Partial<ChatPartner> = {}): ChatPartner {
   return {
@@ -392,6 +396,159 @@ describe("ChatService turn diagnostics", () => {
     await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual([]));
     expect(chat.currentConversation.messages.at(-1)?.answer).toBe("Live answer");
     expect(get).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatService failed answers", () => {
+  function failingAsk(code: string, partial: string) {
+    return vi.fn().mockImplementation(async ({ callbacks }) => {
+      await callbacks.onOpen();
+      callbacks.onFirstChunk({
+        id: "message-1",
+        session_id: "session-1",
+        answer: "",
+        references: []
+      });
+      if (partial) callbacks.onText({ session_id: "session-1", answer: partial, references: [] });
+      throw new EneoError("Backend fallback", "SERVER", 200, 0, { code, message: "x" });
+    });
+  }
+
+  it("says whose side failed when an answer breaks off", async () => {
+    const chat = chatService(vi.fn(), { ask: failingAsk("provider_connection_lost", "Hej") });
+
+    await chat.askQuestion("Hello");
+
+    expect(chat.currentConversation.messages.at(-1)?.answer).toBe(
+      m.provider_failure_connection_lost()
+    );
+  });
+
+  it("hands a failure before the first token to the input with its reason", async () => {
+    const chat = chatService(vi.fn(), { ask: failingAsk("provider_unreachable", "") });
+
+    await expect(chat.askQuestion("Hello")).rejects.toMatchObject({
+      response: { code: "provider_unreachable" }
+    });
+    expect(chat.currentConversation.messages).toHaveLength(0);
+  });
+
+  describe("frame-buffered answers", () => {
+    const requestFrame = vi.fn<(callback: FrameRequestCallback) => number>(() => 1);
+
+    beforeEach(() => {
+      requestFrame.mockClear();
+      vi.stubGlobal("requestAnimationFrame", requestFrame);
+      vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    });
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    it.each([
+      { scenario: "before the first frame", displayed: "", pending: "Partial answer" },
+      { scenario: "between frames", displayed: "First part", pending: " tail<inref" },
+      { scenario: "with only a pending citation", displayed: "", pending: "<inref" }
+    ])("shows only the error $scenario", async ({ displayed, pending }) => {
+      const ask = vi.fn().mockImplementation(async ({ callbacks }) => {
+        await callbacks.onOpen();
+        callbacks.onFirstChunk({
+          id: "message-1",
+          session_id: "session-1",
+          answer: "",
+          references: []
+        });
+        if (displayed) {
+          callbacks.onText({ session_id: "session-1", answer: displayed, references: [] });
+          requestFrame.mock.lastCall?.[0](performance.now() + 100);
+        }
+        callbacks.onText({ session_id: "session-1", answer: pending, references: [] });
+        throw new EneoError("Failure", "SERVER", 200, 0, { code: "provider_connection_lost" });
+      });
+      const chat = chatService(vi.fn(), { ask });
+
+      await chat.askQuestion("Hello");
+
+      expect(chat.currentConversation.messages).toHaveLength(1);
+      expect(chat.currentConversation.messages[0].answer).toBe(
+        m.provider_failure_connection_lost()
+      );
+    });
+
+    it.each(["completed", "aborted"])(
+      "keeps pending text when the answer is %s",
+      async (outcome) => {
+        const ask = vi.fn().mockImplementation(async ({ callbacks }) => {
+          await callbacks.onOpen();
+          callbacks.onFirstChunk({
+            id: "message-1",
+            session_id: "session-1",
+            answer: "",
+            references: []
+          });
+          callbacks.onText({ session_id: "session-1", answer: "Text<inref", references: [] });
+          callbacks.onReasoning({ session_id: "session-1", reasoning: "Thinking" });
+          if (outcome === "aborted") throw new DOMException("Send cancelled", "AbortError");
+        });
+        const chat = chatService(vi.fn(), { ask });
+
+        await chat.askQuestion("Hello");
+
+        expect(chat.currentConversation.messages).toHaveLength(1);
+        expect(chat.currentConversation.messages[0]).toMatchObject({
+          answer: "Text<inref",
+          reasoning: "Thinking"
+        });
+      }
+    );
+
+    it("does not flush a newer answer when an older request fails", async () => {
+      let failOld!: (error: Error) => void;
+      let finishNew!: () => void;
+      const ask = vi
+        .fn()
+        .mockImplementationOnce(async ({ callbacks }) => {
+          await callbacks.onOpen();
+          callbacks.onFirstChunk({
+            id: "message-1",
+            session_id: "session-1",
+            answer: "",
+            references: []
+          });
+          callbacks.onText({ session_id: "session-1", answer: "Old", references: [] });
+          await new Promise<void>((_, reject) => {
+            failOld = reject;
+          });
+        })
+        .mockImplementationOnce(async ({ callbacks }) => {
+          await callbacks.onOpen();
+          callbacks.onFirstChunk({
+            id: "message-2",
+            session_id: "session-1",
+            answer: "",
+            references: []
+          });
+          callbacks.onText({ session_id: "session-1", answer: "New<inref", references: [] });
+          await new Promise<void>((resolve) => {
+            finishNew = resolve;
+          });
+        });
+      const chat = chatService(vi.fn(), { ask });
+      const oldRequest = chat.askQuestion("First");
+      await vi.waitFor(() => expect(chat.currentConversation.messages[0]?.id).toBe("message-1"));
+      const newRequest = chat.askQuestion("Second");
+      await vi.waitFor(() => expect(chat.currentConversation.messages[1]?.id).toBe("message-2"));
+
+      failOld(new EneoError("Failure", "SERVER", 200, 0, { code: "provider_connection_lost" }));
+      await oldRequest;
+      expect(chat.currentConversation.messages[1].answer).toBe("");
+      finishNew();
+      await newRequest;
+
+      expect(chat.currentConversation.messages.map(({ answer }) => answer)).toEqual([
+        "Old",
+        "New<inref"
+      ]);
+    });
   });
 });
 
