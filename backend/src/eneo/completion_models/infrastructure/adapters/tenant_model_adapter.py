@@ -705,6 +705,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             "organization",
             "deployment_name",
             "extra_headers",
+            "timeout",
         }
 
         try:
