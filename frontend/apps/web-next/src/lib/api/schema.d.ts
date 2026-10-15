@@ -19950,7 +19950,7 @@ export interface components {
       autocut_cutoff?: number | null;
       /**
        * Rerank
-       * @description Rerank the candidates with the installation's default rerank model, when one is registered and the collection's space may use it. Reranked results carry the reranker's scores and autocut_cutoff is ignored. Without a usable rerank model the search runs as without this flag.
+       * @description Rerank the candidates with the installation's default rerank model. Reranked results carry the reranker's scores and autocut_cutoff is ignored; without a usable rerank model the search runs as without this flag.
        * @default false
        */
       rerank?: boolean;

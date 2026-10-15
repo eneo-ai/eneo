@@ -1,11 +1,3 @@
-"""Resolves the reranker a search may use and hands semantic search a spec.
-
-A spec is built only when a reranker is registered, enabled, chosen as the
-default, and allowed by the space's security classification. Otherwise the
-answer is ``None`` and semantic search runs today's path; that is the opt-in
-contract of #1035.
-"""
-
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
@@ -38,12 +30,13 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Models already reported as refused by a classification, so a busy
-# installation logs the refusal once per process rather than once per search.
+# Refusals already logged, so a busy installation logs once per model.
 _refusals_logged: set[UUID] = set()
 
 
 class RerankService:
+    """Builds the ``RerankSpec`` a search may use; ``None`` keeps today's path."""
+
     def __init__(
         self,
         session: "AsyncSession",
@@ -61,12 +54,8 @@ class RerankService:
         query: str,
         security_classification: Optional["SecurityClassification"],
     ) -> RerankSpec | None:
-        """A spec for the installation's default reranker, or ``None``.
-
-        ``security_classification`` is the space's. A reranker receives the
-        question and the chunk texts, so a space may only use one that meets
-        its classification, like every other model type.
-        """
+        """The installation's default reranker as a spec, or ``None`` when there
+        is none, it is disabled, or the space's classification is above its."""
         model = next(
             (
                 m
@@ -87,9 +76,8 @@ class RerankService:
             APIKeyNotConfiguredException,
             ProviderRejectedRequestException,
         ) as exc:
-            # A disabled or misconfigured provider, or outbound headers that
-            # cannot be decrypted, leaves its models in the catalogue; the
-            # search must still answer, in vector order.
+            # A disabled or misconfigured provider keeps its models in the
+            # catalogue; the search must still answer, in vector order.
             logger.warning(
                 "Rerank model %s is not usable (%s); searching without it",
                 model.name,

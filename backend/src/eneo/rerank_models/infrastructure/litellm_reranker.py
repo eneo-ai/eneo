@@ -8,12 +8,8 @@ from eneo.model_providers.infrastructure.outbound_headers_runtime import (
 
 
 class LiteLLMReranker:
-    """The ``Reranker`` protocol over LiteLLM's rerank API.
-
-    One call per search: the provider scores the query against every text and
-    answers with ``results`` of ``{"index", "relevance_score"}``, which are
-    mapped back to input order. A text the provider leaves out scores 0.
-    """
+    """``Reranker`` over LiteLLM's rerank API; a text the provider leaves out
+    of its results scores 0."""
 
     def __init__(
         self,

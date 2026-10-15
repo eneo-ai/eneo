@@ -208,13 +208,8 @@ class Datastore:
         *,
         rerank: Optional["RerankSpec"] = None,
     ) -> list[InfoBlobChunkInDBWithScore]:
-        """Nearest chunks to ``search_string`` within the given scope.
-
-        With ``rerank`` the reranker scores the spec's query against the K best
-        candidates, K from the spec, and those come back in reranker order with
-        reranker scores; ``autocut`` does not apply. A reranker failure yields
-        the result the call would have produced without the spec.
-        """
+        """Nearest chunks in scope. With ``rerank`` the K best are returned in
+        reranker order with reranker scores and ``autocut`` does not apply."""
         group_ids = [group.id for group in (collections or [])]
         website_ids = [website.id for website in (websites or [])]
         integration_knowledge_ids = [i.id for i in (integration_knowledge_list or [])]
@@ -230,8 +225,8 @@ class Datastore:
             )
 
         limit = num_chunks if num_chunks is not None else 30
-        # With a spec the search also covers the reranker's candidates, so the
-        # fallback on a reranker failure is the same result as without a spec.
+        # The search covers the reranker's candidates too, so a reranker failure
+        # falls back to the same result as without a spec.
         candidates = rerank.candidate_count(limit) if rerank is not None else 0
 
         start = time.time()
@@ -289,9 +284,8 @@ class Datastore:
     async def _rerank(
         spec: "RerankSpec", candidates: list[InfoBlobChunkInDBWithScore]
     ) -> Optional[list[InfoBlobChunkInDBWithScore]]:
-        """All candidates in reranker order with reranker scores, or ``None``
-        when the reranker failed. Scores are never mixed: either every chunk
-        carries a vector score or every chunk carries a reranker score."""
+        """The candidates in reranker order with reranker scores, never mixed
+        with vector scores; ``None`` when the reranker failed."""
         if not candidates:
             return []
         try:
