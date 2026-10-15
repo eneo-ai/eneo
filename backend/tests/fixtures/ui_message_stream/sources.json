@@ -239,6 +239,7 @@
               "output_cost_per_token": null,
               "is_org_enabled": false,
               "is_org_default": false,
+              "is_org_reader": false,
               "tenant_id": null,
               "provider_id": null,
               "provider_type": null,
