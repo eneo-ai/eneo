@@ -491,6 +491,94 @@ def test_attempt_input_parser_exports_explicit_corruption(
     assert export_payload["error_code"] == error_code
 
 
+_TOOL_CALL_START: dict[str, object] = {
+    "mcp_server_id": "00000000-0000-0000-0000-000000000701",
+    "tool_id": "00000000-0000-0000-0000-000000000702",
+    "tool_name": "lookup_case",
+    "published_input_schema_sha256": "a" * 64,
+    "current_input_schema_sha256": "a" * 64,
+    "arguments": {"case_id": "A-17", "days": ["2026-01-03"], "limit": None},
+}
+_ANSWERED = {
+    "outcome": "answered",
+    "duration_ms": 12,
+    "answer_byte_size": 20,
+    "answer_sha256": "b" * 64,
+}
+_FAILED = {"outcome": "failed", "duration_ms": 0, "error_code": "typed_io_tool_timeout"}
+
+
+@pytest.mark.parametrize(
+    ("call", "tracked"),
+    [
+        pytest.param({"tool_call_start": _TOOL_CALL_START}, True, id="start-only"),
+        pytest.param(
+            {"tool_call_start": _TOOL_CALL_START, "tool_call_result": _ANSWERED},
+            True,
+            id="answered",
+        ),
+        pytest.param(
+            {"tool_call_start": _TOOL_CALL_START, "tool_call_result": _FAILED},
+            True,
+            id="failed",
+        ),
+        pytest.param(
+            {"resolved_input": {}, "tool_call_result": _ANSWERED},
+            False,
+            id="result-without-start",
+        ),
+        pytest.param(
+            {
+                "tool_call_start": _TOOL_CALL_START,
+                "tool_call_result": {**_ANSWERED, "answer_sha256": None},
+            },
+            False,
+            id="answered-without-hash",
+        ),
+        pytest.param(
+            {
+                "tool_call_start": _TOOL_CALL_START,
+                "tool_call_result": {**_FAILED, "error_code": None},
+            },
+            False,
+            id="failed-without-code",
+        ),
+        pytest.param(
+            {
+                "tool_call_start": _TOOL_CALL_START,
+                "tool_call_result": {**_FAILED, "answer_byte_size": 3},
+            },
+            False,
+            id="failed-with-an-answer",
+        ),
+        pytest.param(
+            {"tool_call_start": {**_TOOL_CALL_START, "arguments": ["A-17"]}},
+            False,
+            id="arguments-not-an-object",
+        ),
+        pytest.param(
+            {"tool_call_start": {**_TOOL_CALL_START, "answer": "x"}},
+            False,
+            id="unknown-start-key",
+        ),
+    ],
+)
+def test_a_tool_call_record_is_tracked_only_in_its_complete_shape(
+    call: dict[str, object], tracked: bool
+) -> None:
+    # Kills the mutants that leave the call fields out of the envelope or out
+    # of its at-least-one-field rule (a start alone would read as corrupt),
+    # or that accept a result without its start, an answered result without
+    # its hash, a failed one without its code or with an answer.
+    raw = {"schema_version": "flow-step-attempt-input.v1", **call}
+
+    parsed = parse_flow_step_attempt_input(raw)
+
+    assert parsed.status == ("tracked" if tracked else "corrupt")
+    if tracked:
+        assert parsed.to_export_payload() == raw
+
+
 def test_attempt_provenance_omits_empty_llm_section() -> None:
     output = _step_output()
     output.tool_calls_metadata = None

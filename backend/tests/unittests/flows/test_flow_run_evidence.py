@@ -754,6 +754,73 @@ def test_evidence_and_public_attempt_keep_consumed_material_aliases(
     assert text not in json.dumps(evidence)
 
 
+_TOOL_CALL = {
+    "tool_call_start": {
+        "mcp_server_id": "00000000-0000-0000-0000-000000000701",
+        "tool_id": "00000000-0000-0000-0000-000000000702",
+        "tool_name": "lookup_case",
+        "published_input_schema_sha256": "a" * 64,
+        "current_input_schema_sha256": "a" * 64,
+        "arguments": {"case_id": "A-17", "api_key": "sk-tool-secret-4711"},
+    }
+}
+_ANSWERED_CALL = {
+    **_TOOL_CALL,
+    "tool_call_result": {
+        "outcome": "answered",
+        "duration_ms": 12,
+        "answer_byte_size": 20,
+        "answer_sha256": "b" * 64,
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("call", "status", "state"),
+    [
+        pytest.param(_TOOL_CALL, FlowStepAttemptStatus.CANCELLED, "interrupted"),
+        pytest.param(_TOOL_CALL, FlowStepAttemptStatus.FAILED, "interrupted"),
+        pytest.param(_TOOL_CALL, FlowStepAttemptStatus.STARTED, "in_progress"),
+        pytest.param(_ANSWERED_CALL, FlowStepAttemptStatus.FAILED, "answered"),
+        pytest.param(
+            {"resolved_input": {"text": "x"}}, FlowStepAttemptStatus.COMPLETED, None
+        ),
+    ],
+)
+def test_a_tool_call_reads_as_its_stored_result_or_else_as_interrupted(
+    call: dict[str, object], status: FlowStepAttemptStatus, state: str | None
+) -> None:
+    # Kills the mutants that read a start without a result on a closed
+    # attempt as anything but interrupted (a worker that died during the
+    # call, or a run that ended first, must not read as an answer), that
+    # ignore the attempt's status, or that leave the state or the stored
+    # call out of the evidence bundle, raw or redacted.
+    from eneo.flows.api.flow_models import FlowStepAttemptPublic
+
+    run, version = _evidence_run_and_version()
+    raw_input = {"schema_version": "flow-step-attempt-input.v1", **call}
+    attempt = _attempt_with_provenance(run, None).model_copy(
+        update={"status": status, "input_payload_json": raw_input}
+    )
+
+    public = FlowStepAttemptPublic.model_validate(
+        {**attempt.model_dump(), "resolved_input_lineage": {"status": "not_tracked"}}
+    )
+    bundle = build_evidence_bundle(
+        run=run, version=version, step_results=[], step_attempts=[attempt]
+    )
+    raw = bundle.to_dict()["step_attempts"][0]
+    redacted = redact_evidence_bundle(bundle).to_dict()["step_attempts"][0]
+
+    assert public.tool_call_state == state
+    assert raw["tool_call_state"] == redacted["tool_call_state"] == state
+    assert raw["input_payload_json"] == raw_input
+    if state is not None:
+        arguments = redacted["input_payload_json"]["tool_call_start"]["arguments"]
+        assert arguments["case_id"] == "A-17"
+        assert "sk-tool-secret-4711" not in json.dumps(redacted)
+
+
 def test_evidence_redacts_inline_transcript_bytes_without_changing_source_identity():
     from eneo.flows.domain.step_output import inline_transcript
 

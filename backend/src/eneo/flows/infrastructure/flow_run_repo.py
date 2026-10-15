@@ -62,6 +62,9 @@ from eneo.flows.domain.flow_run_recovery_policy import (
 )
 from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptInput,
+    FlowStepAttemptToolCallResult,
+    FlowStepAttemptToolCallStart,
+    FlowStepAttemptToolCallWrite,
     merge_flow_step_attempt_input,
     parse_flow_step_attempt_input,
 )
@@ -3431,6 +3434,62 @@ class FlowRunRepository:
         await self.session.flush()
         await self.session.refresh(row)
         return FlowStepAttempt.model_validate(row)
+
+    async def write_attempt_tool_call_evidence(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        start: FlowStepAttemptToolCallStart,
+        result: FlowStepAttemptToolCallResult | None = None,
+    ) -> FlowStepAttemptToolCallWrite:
+        """Store the start, or the start and the result, of the attempt's tool
+        call. Only those two fields change: never the resolved-input edges or
+        anything activation records.
+
+        The run row and then the attempt row are locked, in the order run
+        terminalization takes them. An attempt that is already closed is left
+        as it is, whoever holds the run now: its stored start stays the
+        evidence of a call that was interrupted. On an open attempt the
+        execution lease is then asserted (FlowExecutionOwnershipLost when it
+        is gone), so a worker that lost the run writes nothing.
+        """
+        locked_run_id = await self.session.scalar(
+            sa.select(FlowRuns.id)
+            .where(FlowRuns.id == run_id, FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        row = await self.session.scalar(
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == attempt_no)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+        if locked_run_id is None or row is None:
+            raise FlowRunPersistenceInvariantError(
+                operation="write_attempt_tool_call_evidence",
+                run_id=run_id,
+                tenant_id=tenant_id,
+            )
+        if row.status not in OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES:
+            return "attempt_closed"
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
+        merged = merge_flow_step_attempt_input(
+            row.input_payload_json,
+            FlowStepAttemptInput(tool_call_start=start, tool_call_result=result),
+            run_id=run_id,
+            step_id=step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
+        )
+        row.input_payload_json = merged.to_payload()
+        await self.session.flush()
+        return "written"
 
     async def get_resolved_input_edges(
         self,

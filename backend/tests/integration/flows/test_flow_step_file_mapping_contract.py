@@ -1520,7 +1520,7 @@ async def _read_committed_transcript(*, case, db_container, admin_user):
             .where(FileContentReferences.file_id == reference.file_id)
         ) == case.text.encode("utf-8")
         deps = replace(
-            case.executor._build_step_input_resolution_deps(),
+            case.executor._build_step_input_resolution_deps(attempt_no=1),
             file_service=container.file_service(user=admin_user),
             flow_run_repo=repo,
         )

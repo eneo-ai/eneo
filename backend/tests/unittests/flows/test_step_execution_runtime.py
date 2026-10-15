@@ -2432,7 +2432,7 @@ async def test_complete_step_execution_times_out_llm_request():
 
 @pytest.mark.asyncio
 async def test_whitespace_abort_is_a_typed_failure_with_sampled_raw_output():
-    from eneo.flows.runtime.executor import _typed_io_failure_code
+    from eneo.flows.flow_api_error_code import typed_io_failure_code
 
     raw = '{"fact":"å"}' + "\n        " * 114
     assistant = MagicMock()
@@ -2467,7 +2467,7 @@ async def test_whitespace_abort_is_a_typed_failure_with_sampled_raw_output():
         )
     error = caught.value
     assert error.code == "flow_llm_output_whitespace_abort"
-    assert _typed_io_failure_code(error.code).value == error.code
+    assert typed_io_failure_code(error.code).value == error.code
     assert not isinstance(error, StepOutputValidationException)
     assert getattr(error, "rejected_completion", None) is None
     evidence = error.rejected_output.evidence

@@ -83,7 +83,9 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionProjection
 from eneo.flows.domain.flow_step_attempt_input import (
+    FlowAttemptToolCallState,
     FlowStepAttemptInput,
+    attempt_tool_call_state,
     parse_flow_step_attempt_input,
 )
 from eneo.flows.domain.one_line_text import ONE_LINE_TEXT_MAX_CHARS
@@ -99,6 +101,7 @@ from eneo.flows.domain.step_output import StepMaterialReference, parse_step_text
 from eneo.flows.domain.text_processing import TextProcessingConfig
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
 from eneo.flows.enums import (
+    OPEN_FLOW_STEP_ATTEMPT_STATUSES,
     FlowInputSource,
     FlowInputType,
     FlowOutputMode,
@@ -2295,6 +2298,24 @@ class FlowStepAttemptPublic(BaseModel):
             self.input_payload_json.resolved_input if self.input_payload_json else None
         )
         return parse_step_text_aliases((resolved or {}).get("material_aliases"))
+
+    @computed_field(
+        description=(
+            "How the attempt's MCP tool call ended, read from "
+            "`input_payload_json.tool_call_start` and `tool_call_result`: "
+            "`answered` or `failed` from the stored result; `in_progress` "
+            "while the attempt is open and the call has no result; "
+            "`interrupted` when the attempt closed before the result was "
+            "stored, so whether the server acted is unknown. Null when the "
+            "attempt recorded no tool call."
+        )
+    )
+    @property
+    def tool_call_state(self) -> FlowAttemptToolCallState | None:
+        return attempt_tool_call_state(
+            self.input_payload_json,
+            attempt_open=self.status in OPEN_FLOW_STEP_ATTEMPT_STATUSES,
+        )
 
 
 class FlowRunReviewCheckpointEditPublic(FlowRunReviewCheckpointEdit):

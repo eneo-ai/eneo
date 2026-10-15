@@ -1488,6 +1488,13 @@ Every admitted item in `step_attempts` has a required
   including zero
 - `corrupt` isolates malformed stored lineage behind a machine-readable marker
 
+An attempt of a step whose input is an MCP tool also has `tool_call_state`:
+`answered` or `failed` from the stored `input_payload_json.tool_call_result`,
+`in_progress` while the attempt is open and has only
+`input_payload_json.tool_call_start`, `interrupted` when the attempt closed
+without a result (whether the server acted is unknown), and `null` when the
+attempt recorded no call.
+
 The interactive evidence view applies the same admitted-attempt count and byte
 budgets to lineage, so a lineage cannot bypass evidence narrowing. Exports
 remain complete-or-refuse under their documented limits.

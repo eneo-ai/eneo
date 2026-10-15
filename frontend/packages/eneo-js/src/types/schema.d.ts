@@ -26247,6 +26247,8 @@ export interface components {
        */
       schema_version?: "flow-step-attempt-input.v1";
       start?: components["schemas"]["FlowStepAttemptStart"] | null;
+      tool_call_result?: components["schemas"]["FlowStepAttemptToolCallResult"] | null;
+      tool_call_start?: components["schemas"]["FlowStepAttemptToolCallStart"] | null;
     };
     /** FlowStepAttemptMappedAdmission */
     FlowStepAttemptMappedAdmission: {
@@ -26468,6 +26470,11 @@ export interface components {
        */
       tenant_id: string;
       /**
+       * Tool Call State
+       * @description How the attempt's MCP tool call ended, read from `input_payload_json.tool_call_start` and `tool_call_result`: `answered` or `failed` from the stored result; `in_progress` while the attempt is open and the call has no result; `interrupted` when the attempt closed before the result was stored, so whether the server acted is unknown. Null when the attempt recorded no tool call.
+       */
+      readonly tool_call_state: ("in_progress" | "interrupted" | "answered" | "failed") | null;
+      /**
        * Updated At
        * Format: date-time
        */
@@ -26492,6 +26499,186 @@ export interface components {
      * @enum {string}
      */
     FlowStepAttemptStatus: "started" | "failed" | "completed" | "cancelled";
+    /**
+     * FlowStepAttemptToolCallResult
+     * @description How the call that ``FlowStepAttemptToolCallStart`` records ended, stored
+     *     before the step does any further work. The answer itself is not kept: an
+     *     answered call has the size and hash of the step input it became.
+     */
+    FlowStepAttemptToolCallResult: {
+      /**
+       * Answer Byte Size
+       * @description Size of the answer the step took, as its tool_answer edge counts it.
+       */
+      answer_byte_size?: number | null;
+      /**
+       * Answer Sha256
+       * @description Hash of the answer the step took, as its tool_answer edge has it.
+       */
+      answer_sha256?: string | null;
+      /**
+       * Duration Ms
+       * @description Milliseconds from the stored start to the call's end.
+       */
+      duration_ms: number;
+      /** @description The typed code a failed call ended the step with. */
+      error_code?:
+        | (
+            | "flow_assistant_snapshot_drift"
+            | "flow_assistant_snapshot_republish_required"
+            | "flow_assistant_snapshot_resource_invalid"
+            | "flow_definition_checksum_mismatch"
+            | "flow_definition_flow_id_invalid"
+            | "flow_definition_invalid"
+            | "flow_definition_no_executable_steps"
+            | "flow_definition_schema_version_missing"
+            | "flow_definition_schema_version_unsupported"
+            | "flow_definition_steps_invalid"
+            | "flow_deleted"
+            | "flow_dispatch_failed"
+            | "flow_input_contract_inapplicable"
+            | "flow_llm_output_truncated"
+            | "flow_llm_output_whitespace_abort"
+            | "flow_llm_request_timeout"
+            | "flow_mapped_provider_call_limit_exceeded"
+            | "flow_missing_principal"
+            | "flow_model_capacity_undeclared"
+            | "flow_provider_call_evidence_persistence_failed"
+            | "flow_provider_rate_limited"
+            | "flow_provider_unavailable"
+            | "flow_review_expired"
+            | "flow_review_open_active_conflict_invariant"
+            | "flow_review_open_multiple_active_checkpoints_invariant"
+            | "flow_review_open_step_result_incomplete_invariant"
+            | "flow_review_policy_invalid"
+            | "flow_review_rejected"
+            | "flow_run_abandoned"
+            | "flow_run_cancelled"
+            | "flow_run_error_payload_invalid"
+            | "flow_run_input_exceeds_limit"
+            | "flow_run_user_cancelled"
+            | "flow_runtime_actor_invalid"
+            | "flow_runtime_input_not_consumed"
+            | "flow_service_principal_disabled"
+            | "flow_step_attempt_start_failed"
+            | "flow_step_execution_failed"
+            | "flow_step_missing"
+            | "flow_step_timeout"
+            | "flow_summarization_non_convergent"
+            | "flow_task_failure"
+            | "flow_task_timeout"
+            | "flow_unsupported_output_mode"
+            | "flow_unsupported_output_type"
+            | "flow_webhook_delivery_failed"
+            | "flow_worker_stalled"
+            | "typed_io_audio_exceeds_limit"
+            | "typed_io_audio_invalid_file_type"
+            | "typed_io_audio_missing_file"
+            | "typed_io_audio_source_unsupported"
+            | "typed_io_audio_too_many_files"
+            | "typed_io_contract_not_checked"
+            | "typed_io_contract_violation"
+            | "typed_io_document_source_unsupported"
+            | "typed_io_empty_extraction"
+            | "typed_io_file_not_found"
+            | "typed_io_file_source_unsupported"
+            | "typed_io_http_connection_error"
+            | "typed_io_http_invalid_config"
+            | "typed_io_http_invalid_url"
+            | "typed_io_http_malformed_response"
+            | "typed_io_http_non_success"
+            | "typed_io_http_response_too_large"
+            | "typed_io_http_ssrf_blocked"
+            | "typed_io_http_timeout"
+            | "typed_io_input_exceeds_model_window"
+            | "typed_io_input_too_large"
+            | "typed_io_invalid_file_type"
+            | "typed_io_invalid_input_source_combination"
+            | "typed_io_invalid_input_source_position"
+            | "typed_io_invalid_json_input"
+            | "typed_io_invalid_output_mode_combination"
+            | "typed_io_invalid_schema"
+            | "typed_io_missing_required_files"
+            | "typed_io_output_parse_failed"
+            | "typed_io_render_failed"
+            | "typed_io_speaker_identification_failed"
+            | "typed_io_speaker_service_unavailable"
+            | "typed_io_structured_output_exceeds_limit"
+            | "typed_io_template_checksum_mismatch"
+            | "typed_io_template_render_failed"
+            | "typed_io_tool_answer_too_large"
+            | "typed_io_tool_changed"
+            | "typed_io_tool_classification_changed"
+            | "typed_io_tool_connection_error"
+            | "typed_io_tool_destination_blocked"
+            | "typed_io_tool_invalid_arguments"
+            | "typed_io_tool_invalid_config"
+            | "typed_io_tool_invalid_schema"
+            | "typed_io_tool_malformed_answer"
+            | "typed_io_tool_not_allowed"
+            | "typed_io_tool_reported_error"
+            | "typed_io_tool_timeout"
+            | "typed_io_transcript_too_large"
+            | "typed_io_transcription_config_invalid"
+            | "typed_io_transcription_empty"
+            | "typed_io_transcription_failed"
+            | "typed_io_transcription_model_missing"
+            | "typed_io_transcription_model_unavailable"
+            | "typed_io_transcription_not_enabled"
+            | "typed_io_unsupported_type"
+            | "typed_io_validation_failed"
+            | "typed_io_variable_resolution_failed"
+          )
+        | null;
+      /**
+       * Outcome
+       * @description `answered` when the step took the answer; `failed` with a typed code.
+       * @enum {string}
+       */
+      outcome: "answered" | "failed";
+    };
+    /**
+     * FlowStepAttemptToolCallStart
+     * @description What the attempt's one tool call sends, stored and committed before the
+     *     request goes out. It proves the prepared arguments, not that the server
+     *     received them.
+     */
+    FlowStepAttemptToolCallStart: {
+      /**
+       * Arguments
+       * @description The complete arguments object the call sends, bound values resolved.
+       */
+      arguments: {
+        [key: string]: components["schemas"]["JsonValue"];
+      };
+      /**
+       * Current Input Schema Sha256
+       * @description Fingerprint of the tool's approved input schema read before the call.
+       */
+      current_input_schema_sha256: string;
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       * @description The registered MCP server called.
+       */
+      mcp_server_id: string;
+      /**
+       * Published Input Schema Sha256
+       * @description Fingerprint of the input schema pinned when the flow was published.
+       */
+      published_input_schema_sha256: string;
+      /**
+       * Tool Id
+       * Format: uuid
+       * @description The server's tool called.
+       */
+      tool_id: string;
+      /**
+       * Tool Name
+       * @description The tool name the call used, pinned at publish.
+       */
+      tool_name: string;
+    };
     /**
      * FlowStepCreateRequest
      * @example {

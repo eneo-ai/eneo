@@ -153,6 +153,7 @@ def _build_executor(
         )
 
     flow_run_repo.activate_step_attempt = AsyncMock(side_effect=_activate_step_attempt)
+    flow_run_repo.write_attempt_tool_call_evidence = AsyncMock(return_value="written")
     flow_version_repo = AsyncMock()
     flow_run_review_checkpoint_repo = AsyncMock()
     space_repo = AsyncMock()

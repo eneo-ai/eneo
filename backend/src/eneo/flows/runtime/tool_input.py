@@ -5,7 +5,8 @@ the arguments, what every level says about the tool now and whether it is
 still the tool the flow pinned, the level of the tool's server against the
 one the run counted, the arguments against the tool's approved input schema
 (in a child process with a time limit: tool_argument_check),
-the step's time, the server's address, the call, the answer.
+the step's time, the server's address, the record of the call's start, the
+call, the answer, the record of its result.
 The levels are asked before the call; the server's name is resolved in
 between, within the time the step has left. The run's preflight asks the
 levels and the pin with the same function, so a run that would be refused
@@ -31,6 +32,12 @@ from eneo.flows.application.flow_tool_publication import (
     AllowedTool,
     read_allowed_tool,
 )
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptToolCallResult,
+    FlowStepAttemptToolCallStart,
+    storable_tool_call_start,
+)
+from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from eneo.flows.domain.tool_facts import UnattendedToolFactsSource
 from eneo.flows.domain.tool_input import (
     TOOL_INPUT_TYPES,
@@ -40,13 +47,14 @@ from eneo.flows.domain.tool_input import (
     tool_input_schema_sha256,
 )
 from eneo.flows.enums import FlowInputType
-from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_error_code import FlowApiErrorCode, typed_io_failure_code
 from eneo.flows.flow_run_error import (
     TOOL_ERROR_TEXT_MAX_LENGTH,
     FlowRunContractViolation,
 )
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdge,
+    FlowResolvedInputHashedSelection,
     FlowResolvedInputJsonPath,
     FlowResolvedInputToolAnswerSource,
     build_resolved_input_edge,
@@ -129,6 +137,19 @@ class AuditToolCallFn(Protocol):
     ) -> Awaitable[None]: ...
 
 
+class RecordToolCallFn(Protocol):
+    """Stores the start, or the start and the result, of the attempt's tool
+    call and commits it. Raises FlowStepAttemptClosed when the attempt is
+    already closed; any other failure to store passes on as it is."""
+
+    def __call__(
+        self,
+        *,
+        start: FlowStepAttemptToolCallStart,
+        result: FlowStepAttemptToolCallResult | None,
+    ) -> Awaitable[None]: ...
+
+
 class ToolCaller(Protocol):
     async def call(
         self,
@@ -151,7 +172,9 @@ class ToolInputDeps:
     name_resolver: Resolver
     # The deployment's ceiling for one call; the step's deadline may leave less.
     call_timeout_seconds: int
-    max_answer_bytes: int
+    # The deployment's inline budget: the most a step's input may hold, and
+    # the most the stored record of a call's arguments may take.
+    max_inline_text_bytes: int
     audit_http_outbound: AuditToolCallFn
 
 
@@ -220,12 +243,17 @@ async def resolve_tool_input(
     space_id: UUID,
     counted_server_levels: Mapping[int, int | None],
     deps: ToolInputDeps,
+    record_call: RecordToolCallFn,
 ) -> FlowOutsideInputResolution:
     """Read the tool of ``step`` and return its answer as the step's input.
 
     ``counted_server_levels`` holds, by step order, the level the run's
     preflight counted the tool's server at; a step it does not hold was
     counted at none, which is the case while classifications are off.
+
+    ``record_call`` stores what is sent before the request goes out, and how
+    the call ended (a typed failure or the accepted answer) before this
+    returns, so nothing reads the answer before its result is stored.
     """
     config = pinned_tool_config(step)
     arguments, argument_edges = _resolve_arguments(step, config, context, deps)
@@ -238,6 +266,7 @@ async def resolve_tool_input(
     )
     counted_level = _counted_server_level(step, usable.server, counted_server_levels)
     await _refuse_arguments_outside_the_schema(step, arguments, usable.tool)
+    call_start = _storable_call_start(step, config, usable.tool, arguments, deps)
     # Asked before anything goes out: a step whose time is spent makes no
     # outbound call, so there is none to audit.
     vet_seconds = _budget_seconds(step, deps)
@@ -262,14 +291,32 @@ async def resolve_tool_input(
     # it is called. Every typed ending is one audited outbound call. A read
     # that is cancelled, or that ends with an exception that is not typed,
     # writes no audit record, as for the HTTP input.
+    sent_at: float | None = None
     try:
         await _vet_server_address(step, usable.server, deps, vet_seconds)
+        # Committed before the request: a call whose start cannot be stored
+        # is not made, and a call the worker does not live through keeps its
+        # start without a result.
+        await record_call(start=call_start, result=None)
+        sent_at = time.monotonic()
         answer = await _call(step, usable.server, config, arguments, deps)
+        duration_ms = _milliseconds_since(sent_at)
         text, structured = _answer_as_step_input(
-            step, config, answer, max_bytes=deps.max_answer_bytes
+            step, config, answer, max_bytes=deps.max_inline_text_bytes
         )
     except TypedIOValidationException as exc:
+        failed = (
+            None
+            if sent_at is None
+            else FlowStepAttemptToolCallResult(
+                outcome="failed",
+                duration_ms=_milliseconds_since(sent_at),
+                error_code=typed_io_failure_code(exc.code),
+            )
+        )
         await audit(Outcome.FAILURE, str(exc))
+        if failed is not None:
+            await record_call(start=call_start, result=failed)
         raise
     # Built before the success is audited, so that hashing the answer cannot
     # fail after it.
@@ -285,12 +332,57 @@ async def resolve_tool_input(
         ),
         selected_value=text if structured is None else structured,
     )
+    selection = answer_edge.selection
+    if not isinstance(selection, FlowResolvedInputHashedSelection):
+        raise FlowRuntimeInvariantError("A tool answer edge must hash the answer.")
     await audit(Outcome.SUCCESS, None)
+    await record_call(
+        start=call_start,
+        result=FlowStepAttemptToolCallResult(
+            outcome="answered",
+            duration_ms=duration_ms,
+            answer_byte_size=selection.byte_size,
+            answer_sha256=selection.sha256,
+        ),
+    )
     return FlowOutsideInputResolution(
         text=text,
         structured=structured,
         resolved_input_edges=(*argument_edges, answer_edge),
     )
+
+
+def _storable_call_start(
+    step: RuntimeStep,
+    config: PublishedToolInputConfig,
+    tool: MCPServerTool,
+    arguments: dict[str, object],
+    deps: ToolInputDeps,
+) -> FlowStepAttemptToolCallStart:
+    """The record of what the call sends: the arguments are stored whole, or
+    the call is not made."""
+    start = storable_tool_call_start(
+        mcp_server_id=config.mcp_server_id,
+        tool_id=config.tool_id,
+        tool_name=config.tool_name,
+        published_input_schema_sha256=config.input_schema_sha256,
+        current_input_schema_sha256=tool_input_schema_sha256(tool.input_schema),
+        arguments=arguments,
+        max_bytes=deps.max_inline_text_bytes,
+    )
+    if start is None:
+        raise _refusal(
+            f"Step {step.step_order}: the tool's arguments cannot be stored whole "
+            f"as the record of the call (more than {deps.max_inline_text_bytes} "
+            "bytes, or nested too deep), so the call is not made.",
+            FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE,
+            step_order=step.step_order,
+        )
+    return start
+
+
+def _milliseconds_since(started: float) -> int:
+    return round((time.monotonic() - started) * 1000)
 
 
 def _refusal(
@@ -512,7 +604,7 @@ async def _call(
             server,
             name,
             arguments,
-            max_answer_bytes=deps.max_answer_bytes,
+            max_answer_bytes=deps.max_inline_text_bytes,
             timeout_seconds=timeout_seconds,
             # The name may answer differently when the client connects than
             # it did to the check before: each connection connects to an
@@ -531,7 +623,7 @@ async def _call(
     except MCPToolAnswerTooLarge:
         raise _refusal(
             f"Step {step.step_order}: the answer of tool '{name}' exceeded "
-            f"{deps.max_answer_bytes} bytes.",
+            f"{deps.max_inline_text_bytes} bytes.",
             FlowApiErrorCode.TYPED_IO_TOOL_ANSWER_TOO_LARGE,
             step_order=step.step_order,
         ) from None

@@ -41,10 +41,13 @@ from eneo.flows.domain.flow import (
     FlowStepAttemptStatus,
     FlowStepResult,
 )
+from eneo.flows.domain.flow_run_exceptions import FlowStepAttemptClosed
 from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptCompletionConfiguration,
     FlowStepAttemptExecutionInput,
     FlowStepAttemptStart,
+    FlowStepAttemptToolCallResult,
+    FlowStepAttemptToolCallStart,
     parse_flow_step_attempt_input,
 )
 from eneo.flows.domain.mapped_execution_policy import (
@@ -96,8 +99,8 @@ from eneo.flows.enums import (
 )
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
-    FLOW_TYPED_IO_ERROR_CODES,
     FlowApiErrorCode,
+    typed_io_failure_code,
 )
 from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
@@ -414,18 +417,6 @@ def _flow_provider_error_code(exc: Exception | None) -> FlowApiErrorCode | None:
     if exc.code == "provider_unavailable":
         return FlowApiErrorCode.PROVIDER_UNAVAILABLE
     return None
-
-
-def _typed_io_failure_code(raw_code: str | None) -> FlowApiErrorCode:
-    if raw_code is None:
-        return FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED
-    try:
-        code = FlowApiErrorCode(raw_code)
-    except ValueError:
-        return FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED
-    if code in FLOW_TYPED_IO_ERROR_CODES:
-        return code
-    return FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED
 
 
 def _flow_api_error_code_or_default(
@@ -806,17 +797,10 @@ class FlowRunExecutor:
                     retry_count=retry_count,
                 )
         except FlowExecutionOwnershipLost:
-            # Ownership is lost either because recovery terminalized the run
-            # (report the honest terminal outcome, as a late write always did)
-            # or because another owner holds a newer revision of a still
-            # running run (only then is "ownership lost" the whole truth).
             await self._rollback()
-            try:
-                return await self._return_after_terminalized_step_write(
-                    run_id=run_id, flow_id=flow_id, tenant_id=tenant_id
-                )
-            except RuntimeError:
-                return {"status": "skipped", "reason": "execution_ownership_lost"}
+            return await self._return_after_losing_the_run(
+                run_id=run_id, flow_id=flow_id, tenant_id=tenant_id
+            )
 
     async def execute_claimed(
         self,
@@ -1175,6 +1159,11 @@ class FlowRunExecutor:
                     step=step,
                     attempt_no=attempt_no,
                     state=state,
+                )
+            except FlowStepAttemptClosed:
+                await self._rollback()
+                return await self._return_after_losing_the_run(
+                    run_id=run_id, flow_id=flow_id, tenant_id=tenant_id
                 )
             except TypedIOValidationException as typed_exc:
                 contract_diag: dict[str, Any] | None = None
@@ -1997,7 +1986,7 @@ class FlowRunExecutor:
                 run=run,
                 requested_ids=list(requested_file_ids),
                 state=state,
-                deps=self._build_step_input_resolution_deps(),
+                deps=self._build_step_input_resolution_deps(attempt_no=attempt_no),
             )
         prepared = await prepare_step_execution(
             step=step,
@@ -2085,6 +2074,20 @@ class FlowRunExecutor:
                 tenant_id=tenant_id,
             )
         return run.status != FlowRunStatus.RUNNING
+
+    async def _return_after_losing_the_run(
+        self, *, run_id: UUID, flow_id: UUID, tenant_id: UUID
+    ) -> dict[str, Any]:
+        # The run was lost either because it was terminalized (report the
+        # honest terminal outcome, as a late write always did) or because
+        # recovery gave it to another owner or back to the queue (only then
+        # is "ownership lost" the whole truth).
+        try:
+            return await self._return_after_terminalized_step_write(
+                run_id=run_id, flow_id=flow_id, tenant_id=tenant_id
+            )
+        except RuntimeError:
+            return {"status": "skipped", "reason": "execution_ownership_lost"}
 
     async def _return_after_terminalized_step_write(
         self,
@@ -2223,7 +2226,7 @@ class FlowRunExecutor:
             if step.may_call_completion_provider
             else ""
         )
-        error_code = _typed_io_failure_code(typed_exc.code)
+        error_code = typed_io_failure_code(typed_exc.code)
         rejected_completion = (
             typed_exc.rejected_completion
             if isinstance(typed_exc, StepOutputValidationException)
@@ -2719,6 +2722,7 @@ class FlowRunExecutor:
         self,
         transcription_call_observer: "ProviderCallObserver | None" = None,
         *,
+        attempt_no: int,
         transcript_source_preparation: TranscriptSourcePreparation | None = None,
     ) -> StepInputResolutionDeps:
         return StepInputResolutionDeps(
@@ -2726,7 +2730,7 @@ class FlowRunExecutor:
             commit=self._commit,
             variable_resolver=self.variable_resolver,
             resolve_http_input_source_text=self._resolve_http_input_source_text,
-            resolve_tool_input=self._resolve_tool_input,
+            resolve_tool_input=partial(self._resolve_tool_input, attempt_no=attempt_no),
             file_service=self.file_service,
             transcribers=self.transcribers,
             flow_repo=self.flow_repo,
@@ -2815,6 +2819,7 @@ class FlowRunExecutor:
         )
         deps = self._build_step_input_resolution_deps(
             transcription_call_observer,
+            attempt_no=attempt_no,
             transcript_source_preparation=pending[1] if pending is not None else None,
         )
         return await resolve_step_input_runtime(
@@ -2860,7 +2865,27 @@ class FlowRunExecutor:
         run: FlowRun,
         context: FlowVariableContext,
         counted_server_levels: Mapping[int, int | None],
+        attempt_no: int,
     ) -> FlowOutsideInputResolution:
+        async def record_call(
+            *,
+            start: FlowStepAttemptToolCallStart,
+            result: FlowStepAttemptToolCallResult | None,
+        ) -> None:
+            written = await self.flow_run_repo.write_attempt_tool_call_evidence(
+                run_id=run.id,
+                step_id=step.step_id,
+                attempt_no=attempt_no,
+                tenant_id=run.tenant_id,
+                start=start,
+                result=result,
+            )
+            if written == "attempt_closed":
+                raise FlowStepAttemptClosed(
+                    run_id=run.id, step_id=step.step_id, attempt_no=attempt_no
+                )
+            await self._commit()
+
         return await resolve_tool_input_runtime(
             step=step,
             run=run,
@@ -2868,6 +2893,7 @@ class FlowRunExecutor:
             deps=self._tool_input_deps(),
             space_id=await self._flow_space_id(run),
             counted_server_levels=counted_server_levels,
+            record_call=record_call,
         )
 
     async def _tool_preflight(
@@ -2933,7 +2959,7 @@ class FlowRunExecutor:
             destination_policy=self.tool_destination_policy,
             name_resolver=self.tool_name_resolver,
             call_timeout_seconds=self.tool_call_timeout_seconds,
-            max_answer_bytes=self.max_inline_text_bytes,
+            max_inline_text_bytes=self.max_inline_text_bytes,
             audit_http_outbound=self._audit_http_outbound,
         )
 

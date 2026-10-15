@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, TypeAlias, cast
 from uuid import UUID
@@ -8,6 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from eneo.flows.domain.step_output import StepMaterialReference
+from eneo.flows.flow_run_error import NullablePublicTerminalErrorCode
 from eneo.json_types import JsonObject
 
 FLOW_STEP_ATTEMPT_INPUT_SCHEMA_VERSION: Literal["flow-step-attempt-input.v1"] = (
@@ -82,6 +84,80 @@ class FlowStepAttemptExecutionInput(_FlowStepAttemptInputModel):
     assistant_context_version: int = Field(ge=1)
 
 
+_SHA256_HEX = r"^[0-9a-f]{64}$"
+
+
+class FlowStepAttemptToolCallStart(_FlowStepAttemptInputModel):
+    """What the attempt's one tool call sends, stored and committed before the
+    request goes out. It proves the prepared arguments, not that the server
+    received them."""
+
+    mcp_server_id: UUID = Field(description="The registered MCP server called.")
+    tool_id: UUID = Field(description="The server's tool called.")
+    tool_name: str = Field(
+        min_length=1, description="The tool name the call used, pinned at publish."
+    )
+    published_input_schema_sha256: str = Field(
+        pattern=_SHA256_HEX,
+        description="Fingerprint of the input schema pinned when the flow was published.",
+    )
+    current_input_schema_sha256: str = Field(
+        pattern=_SHA256_HEX,
+        description="Fingerprint of the tool's approved input schema read before the call.",
+    )
+    arguments: JsonObject = Field(
+        description="The complete arguments object the call sends, bound values resolved."
+    )
+
+
+FlowToolCallOutcome: TypeAlias = Literal["answered", "failed"]
+# What a write of tool-call evidence did: stored it on the open attempt, or
+# found the attempt already closed and changed nothing.
+FlowStepAttemptToolCallWrite: TypeAlias = Literal["written", "attempt_closed"]
+# How a reader names an attempt's tool call: a call with a stored result has
+# its outcome; one without a result is in progress while the attempt is open
+# and interrupted once it is closed (the worker died or the run ended first).
+FlowAttemptToolCallState: TypeAlias = Literal[
+    "in_progress", "interrupted", "answered", "failed"
+]
+
+
+class FlowStepAttemptToolCallResult(_FlowStepAttemptInputModel):
+    """How the call that ``FlowStepAttemptToolCallStart`` records ended, stored
+    before the step does any further work. The answer itself is not kept: an
+    answered call has the size and hash of the step input it became."""
+
+    outcome: FlowToolCallOutcome = Field(
+        description="`answered` when the step took the answer; `failed` with a typed code."
+    )
+    duration_ms: int = Field(
+        ge=0, description="Milliseconds from the stored start to the call's end."
+    )
+    error_code: NullablePublicTerminalErrorCode = Field(
+        default=None, description="The typed code a failed call ended the step with."
+    )
+    answer_byte_size: int | None = Field(
+        default=None,
+        ge=0,
+        description="Size of the answer the step took, as its tool_answer edge counts it.",
+    )
+    answer_sha256: str | None = Field(
+        default=None,
+        pattern=_SHA256_HEX,
+        description="Hash of the answer the step took, as its tool_answer edge has it.",
+    )
+
+    @model_validator(mode="after")
+    def _outcome_has_its_facts(self) -> FlowStepAttemptToolCallResult:
+        answer = (self.answer_byte_size, self.answer_sha256)
+        if self.outcome == "answered":
+            if None in answer or self.error_code is not None:
+                raise ValueError("an answered tool call has its answer's size and hash")
+        elif answer != (None, None) or self.error_code is None:
+            raise ValueError("a failed tool call has an error code and no answer")
+        return self
+
+
 class FlowStepAttemptInput(_FlowStepAttemptInputModel):
     schema_version: Literal["flow-step-attempt-input.v1"] = (
         FLOW_STEP_ATTEMPT_INPUT_SCHEMA_VERSION
@@ -90,6 +166,8 @@ class FlowStepAttemptInput(_FlowStepAttemptInputModel):
     resolved_input: JsonObject | None = None
     completion_configuration: FlowStepAttemptCompletionConfiguration | None = None
     execution_inputs: tuple[FlowStepAttemptExecutionInput, ...] | None = None
+    tool_call_start: FlowStepAttemptToolCallStart | None = None
+    tool_call_result: FlowStepAttemptToolCallResult | None = None
 
     @model_validator(mode="after")
     def _contains_attempt_input_evidence(self) -> FlowStepAttemptInput:
@@ -98,8 +176,11 @@ class FlowStepAttemptInput(_FlowStepAttemptInputModel):
             and self.resolved_input is None
             and self.completion_configuration is None
             and self.execution_inputs is None
+            and self.tool_call_start is None
         ):
             raise ValueError("attempt input must contain at least one tracked field")
+        if self.tool_call_result is not None and self.tool_call_start is None:
+            raise ValueError("a tool call result needs the start of its call")
         if self.execution_inputs is not None and not self.execution_inputs:
             raise ValueError("tracked execution inputs cannot be empty")
         if (self.completion_configuration is None) != (self.execution_inputs is None):
@@ -113,6 +194,19 @@ class FlowStepAttemptInput(_FlowStepAttemptInputModel):
             JsonObject,
             self.model_dump(mode="json", exclude_none=True),
         )
+
+
+def attempt_tool_call_state(
+    attempt_input: FlowStepAttemptInput | None, *, attempt_open: bool
+) -> FlowAttemptToolCallState | None:
+    """The state of the attempt's tool call; None for an attempt with no
+    recorded call (no tool step, a refusal before the call, or an attempt a
+    retried run imported, which made no call)."""
+    if attempt_input is None or attempt_input.tool_call_start is None:
+        return None
+    if attempt_input.tool_call_result is not None:
+        return attempt_input.tool_call_result.outcome
+    return "in_progress" if attempt_open else "interrupted"
 
 
 FlowStepAttemptInputParseStatus: TypeAlias = Literal[
@@ -269,6 +363,40 @@ def parse_flow_step_attempt_input(raw: object) -> FlowStepAttemptInputParseResul
     )
 
 
+def storable_tool_call_start(
+    *,
+    mcp_server_id: UUID,
+    tool_id: UUID,
+    tool_name: str,
+    published_input_schema_sha256: str,
+    current_input_schema_sha256: str,
+    arguments: Mapping[str, object],
+    max_bytes: int,
+) -> FlowStepAttemptToolCallStart | None:
+    """The start of a tool call as the attempt will store it, or None when it
+    cannot be stored whole: the envelope reader would not take it back (a
+    value JSON has no form for, or nesting deeper than the reader reads), or
+    its JSON text is more than ``max_bytes``. The reader decides, so a
+    stored start is always read back as tracked."""
+    record: dict[str, object] = {
+        "schema_version": FLOW_STEP_ATTEMPT_INPUT_SCHEMA_VERSION,
+        "tool_call_start": {
+            "mcp_server_id": str(mcp_server_id),
+            "tool_id": str(tool_id),
+            "tool_name": tool_name,
+            "published_input_schema_sha256": published_input_schema_sha256,
+            "current_input_schema_sha256": current_input_schema_sha256,
+            "arguments": dict(arguments),
+        },
+    }
+    stored = parse_flow_step_attempt_input(record).attempt_input
+    if stored is None or stored.tool_call_start is None:
+        return None
+    if len(json.dumps(record, ensure_ascii=False).encode("utf-8")) > max_bytes:
+        return None
+    return stored.tool_call_start
+
+
 def merge_flow_step_attempt_input(
     raw_existing: object,
     incoming: FlowStepAttemptInput,
@@ -298,6 +426,8 @@ def merge_flow_step_attempt_input(
         "resolved_input",
         "completion_configuration",
         "execution_inputs",
+        "tool_call_start",
+        "tool_call_result",
     ):
         existing_value = getattr(existing, field)
         incoming_value = getattr(incoming, field)
