@@ -44,7 +44,7 @@ export function computeTools(
       .boolean()
       .default(false)
       .describe(
-        "Leave false unless the user asks for a downloadable file or the rows are needed as a source file by create_spreadsheet or create_chart. Then return a tabular value: an array of objects with the same keys, or an array of arrays whose first row holds the column names. The whole table is attached as a CSV file and result keeps only the first rows as a preview.",
+        "Leave false unless the user asks for a downloadable file, create_spreadsheet needs the rows as a file, or a chart needs more than about 50 rows; a smaller table goes to create_chart as labels and series, since an export is shown to the user as a downloadable file. Then return a tabular value: an array of objects with the same keys, or an array of arrays whose first row holds the column names. The whole table is attached as a CSV file and result keeps only the first rows as a preview.",
       ),
     export_filename: z
       .string()
