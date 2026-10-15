@@ -150,7 +150,7 @@ export function AdminIntegrationsPage() {
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       <PageHeader title={t("integrations")} />
       <p className="text-muted-foreground text-sm">{t("admin_integrations_grid_hint")}</p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" data-tour="admin-integrations">
         {integrations.map((integration) => (
           <IntegrationCard key={integration.integration_id} integration={integration} />
         ))}

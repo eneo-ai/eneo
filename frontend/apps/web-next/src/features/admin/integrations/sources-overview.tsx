@@ -293,7 +293,11 @@ export function SourcesOverview() {
   const query = useQuery(knowledgeOverviewQueryOptions(browserApi));
 
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-4">
+    <section
+      aria-labelledby={headingId}
+      className="flex flex-col gap-4"
+      data-tour="admin-integration-sources"
+    >
       <div className="flex flex-col gap-1">
         <h2 id={headingId} className="font-semibold">
           {t("admin_sources_heading")}
