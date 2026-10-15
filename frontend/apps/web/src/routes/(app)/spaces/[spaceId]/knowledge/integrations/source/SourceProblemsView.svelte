@@ -148,24 +148,21 @@
         <!-- The same file name recurs across folders, so the key needs the position. -->
         {#each expanded ? group.files : group.files.slice(0, FILES_SHOWN) as file, index (`${index}:${file.item.id}:${file.file}`)}
           <li
-            class="border-dimmer flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 border-t py-2"
+            class="border-dimmer grid items-baseline gap-x-6 gap-y-0.5 border-t py-2 {showFolders
+              ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_minmax(0,3fr)]'
+              : 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]'}"
           >
-            <span class="min-w-0 break-all">
-              <span class="font-medium">{file.file}</span>
-              {#if showFolders}
-                <span class="text-secondary">
-                  ·
-                  <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
-                  <a
-                    href={folderHref(file.item.id)}
-                    class="focus-visible:ring-stronger rounded hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                    >{folderLabel(file.item)}</a
-                  >
-                  <!-- eslint-enable svelte/no-navigation-without-resolve -->
-                </span>
-              {/if}
-            </span>
-            <span class="text-secondary text-xs">{file.detail}</span>
+            <span class="min-w-0 font-medium break-all">{file.file}</span>
+            {#if showFolders}
+              <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
+              <a
+                href={folderHref(file.item.id)}
+                class="text-secondary focus-visible:ring-stronger min-w-0 justify-self-start rounded break-all hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                >{folderLabel(file.item)}</a
+              >
+              <!-- eslint-enable svelte/no-navigation-without-resolve -->
+            {/if}
+            <span class="text-secondary min-w-0">{file.detail}</span>
           </li>
         {/each}
       </ul>
@@ -188,7 +185,7 @@
   </Collapsible.Root>
 {/snippet}
 
-<div class="flex max-w-4xl flex-col gap-6">
+<div class="flex flex-col gap-6">
   {#if problems === null}
     <div class="text-secondary flex items-center gap-2 text-sm" role="status">
       <IconLoadingSpinner size="sm" class="animate-spin" />
@@ -253,51 +250,58 @@
             </div>
           </div>
         {/if}
-        {#each problems.failures as failure (failure.message)}
-          <div class="border-negative-default flex gap-3 rounded-lg border p-4">
-            <span
-              class="bg-negative-dimmer text-negative-stronger flex size-8 shrink-0 items-center justify-center rounded-md"
-            >
-              <TriangleAlert class="size-4" aria-hidden="true" />
-            </span>
-            <div class="flex min-w-0 flex-1 flex-col gap-1.5">
-              <p class="font-medium">
-                {failure.items.length === 1
-                  ? m.integration_problem_sync_failed_title({
-                      name: folderLabel(failure.items[0])
-                    })
-                  : m.integration_problem_sync_failed_many_title({
-                      count: failure.items.length
-                    })}
-              </p>
-              <p class="text-sm">{m.integration_problem_sync_failed_description()}</p>
-              {#if failure.message}
-                <details class="text-secondary text-xs">
-                  <summary class="cursor-pointer"
-                    >{m.integration_problem_technical_details()}</summary
-                  >
-                  <p class="mt-1 font-mono break-words">{failure.message}</p>
-                </details>
-              {/if}
-              {#if showFolders}
-                <ul class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                  {#each failure.items as item (item.id)}
-                    <li>
-                      <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
-                      <a
-                        href={folderHref(item.id)}
-                        class="text-accent-default focus-visible:ring-stronger rounded font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+        {#if problems.failures.length > 0}
+          <div class="grid gap-3 xl:grid-cols-2">
+            {#each problems.failures as failure (failure.message)}
+              <!-- A card left alone on its row takes the whole row. -->
+              <div
+                class="border-negative-default flex gap-3 rounded-lg border p-4 xl:last:odd:col-span-2"
+              >
+                <span
+                  class="bg-negative-dimmer text-negative-stronger flex size-8 shrink-0 items-center justify-center rounded-md"
+                >
+                  <TriangleAlert class="size-4" aria-hidden="true" />
+                </span>
+                <div class="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <p class="font-medium">
+                    {failure.items.length === 1
+                      ? m.integration_problem_sync_failed_title({
+                          name: folderLabel(failure.items[0])
+                        })
+                      : m.integration_problem_sync_failed_many_title({
+                          count: failure.items.length
+                        })}
+                  </p>
+                  <p class="text-sm">{m.integration_problem_sync_failed_description()}</p>
+                  {#if failure.message}
+                    <details class="text-secondary text-xs">
+                      <summary class="cursor-pointer"
+                        >{m.integration_problem_technical_details()}</summary
                       >
-                        {m.integration_problem_open_named_folder({ name: folderLabel(item) })}
-                      </a>
-                      <!-- eslint-enable svelte/no-navigation-without-resolve -->
-                    </li>
-                  {/each}
-                </ul>
-              {/if}
-            </div>
+                      <p class="mt-1 font-mono break-words">{failure.message}</p>
+                    </details>
+                  {/if}
+                  {#if showFolders}
+                    <ul class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                      {#each failure.items as item (item.id)}
+                        <li>
+                          <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
+                          <a
+                            href={folderHref(item.id)}
+                            class="text-accent-default focus-visible:ring-stronger rounded font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                          >
+                            {m.integration_problem_open_named_folder({ name: folderLabel(item) })}
+                          </a>
+                          <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
+                </div>
+              </div>
+            {/each}
           </div>
-        {/each}
+        {/if}
       </section>
     {/if}
 

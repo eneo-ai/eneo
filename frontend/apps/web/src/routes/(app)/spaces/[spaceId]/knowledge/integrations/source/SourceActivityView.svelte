@@ -142,7 +142,7 @@
 <div class="flex flex-wrap items-start gap-8">
   <section
     aria-label={m.integration_activity_events()}
-    class="flex max-w-3xl min-w-0 flex-[999_1_32rem] flex-col gap-6"
+    class="flex min-w-0 flex-[999_1_32rem] flex-col gap-6"
   >
     {#if error}
       <div
@@ -178,6 +178,12 @@
             {@const failure = failureText(log)}
             {@const took = duration(log)}
             <li class="border-dimmer flex gap-3 border-t py-3">
+              <time
+                class="text-secondary w-11 shrink-0 pt-1.5 text-xs tabular-nums"
+                datetime={log.started_at}
+              >
+                {formatTime(log.started_at)}
+              </time>
               <span
                 class="flex size-7 shrink-0 items-center justify-center rounded-full {iconStyles[
                   kind
@@ -193,12 +199,7 @@
                 {/if}
               </span>
               <div class="flex min-w-0 flex-1 flex-col gap-1">
-                <div class="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <p class="font-medium">{title(log, kind)}</p>
-                  <time class="text-secondary text-xs tabular-nums" datetime={log.started_at}>
-                    {formatTime(log.started_at)}
-                  </time>
-                </div>
+                <p class="font-medium">{title(log, kind)}</p>
                 {#if failure}
                   <p class="text-negative-stronger text-sm break-words">{failure}</p>
                 {/if}
