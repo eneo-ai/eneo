@@ -19,7 +19,6 @@ from typing import (
 )
 from urllib.parse import urlsplit, urlunsplit
 
-import httpx
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from typing_extensions import override
@@ -59,7 +58,6 @@ from eneo.completion_models.infrastructure.static_prompts import (
 )
 from eneo.files.model_file_references import file_handle
 from eneo.logging.logging import LoggingDetails
-from eneo.main.config import get_settings
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
 from eneo.model_providers.infrastructure import litellm_transport
@@ -705,7 +703,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             "organization",
             "deployment_name",
             "extra_headers",
-            "timeout",
         }
 
         try:
@@ -1224,11 +1221,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             dict: LiteLLM kwargs with api_key, api_base, and config fields
         """
         kwargs = build_litellm_provider_kwargs(self.credential_resolver)
-        settings = get_settings()
-        kwargs["timeout"] = httpx.Timeout(
-            settings.ai_provider_read_timeout_seconds,
-            connect=settings.ai_provider_connect_timeout_seconds,
-        )
 
         # Process model kwargs with provider-specific adjustments
         if model_kwargs:

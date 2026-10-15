@@ -318,13 +318,6 @@ class Settings(BaseSettings):
     # Upper bound for one rerank call to a provider, starting with the
     # registration-time connection test.
     rerank_request_timeout_seconds: int = 10
-    # Bounds for one chat completion request to a model provider. The read
-    # timeout is how long the provider may stay silent: before the first
-    # token, between streamed tokens, or for a whole non-streamed answer.
-    # LiteLLM applies the connect timeout to OpenAI, Azure and Bedrock routes
-    # only; other routes use the read timeout for connecting as well.
-    ai_provider_connect_timeout_seconds: float = Field(default=10, gt=0)
-    ai_provider_read_timeout_seconds: float = Field(default=600, gt=0)
     mcp_tool_output_max_chars: int = 32768
     # Decoded size cap for a single MCP image content block; larger images
     # are dropped before they can be persisted as generated files.

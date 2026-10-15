@@ -447,17 +447,6 @@ value and a comment.
     |----------|---------|-------------|
     | `OUTBOUND_HEADERS_ALLOWED_DESTINATIONS` | `[]` | JSON list of endpoint URLs that configured outbound headers may be sent to, e.g. `["https://gateway.internal/v1"]`. Empty allows any explicitly configured provider endpoint. Set it on both the backend and the worker, which sends headers for uploads and crawls (the shipped compose file gives both the same env file). An invalid entry stops either at startup. Recommended for multi-tenant deployments. See [Outbound headers](/guides/ai-providers#outbound-headers). |
 
-    **AI Provider Timeouts:**
-
-    | Variable | Default | Description |
-    |----------|---------|-------------|
-    | `AI_PROVIDER_CONNECT_TIMEOUT_SECONDS` | `10` | How long a chat request may take to open a connection to the model provider. LiteLLM applies it to OpenAI, Azure OpenAI and Bedrock routes; other providers use the read timeout for connecting as well |
-    | `AI_PROVIDER_READ_TIMEOUT_SECONDS` | `600` | How long the provider may stay silent: before the first token, between streamed tokens, or for a whole answer that is not streamed. When it runs out, users are told that the model did not respond in time. See [When a provider fails](/guides/ai-providers#when-a-provider-fails) |
-
-    <Callout type="info">
-      Requests through the OpenAI client (OpenAI, Azure OpenAI and OpenAI-compatible endpoints) are retried twice after a timeout or a server error, so a provider that never answers keeps a user waiting for up to three read timeouts. Keep that below the response timeout of your reverse proxy (nginx `proxy_read_timeout` defaults to 60 seconds); otherwise the proxy ends the request first and users see a general error instead of the provider message.
-    </Callout>
-
     **Integrations:**
 
     <Callout type="info">

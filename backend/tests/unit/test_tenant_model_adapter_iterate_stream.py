@@ -924,31 +924,6 @@ async def test_mid_stream_failure_in_eneo_code_is_not_blamed_on_the_provider():
     span.record_exception.assert_not_called()
 
 
-def test_provider_requests_are_bounded_by_the_configured_timeouts():
-    adapter = object.__new__(TenantModelAdapter)
-    adapter.credential_resolver = Mock()
-    adapter.outbound_headers = None
-
-    with (
-        patch(
-            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter."
-            "build_litellm_provider_kwargs",
-            return_value={},
-        ),
-        patch(
-            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter."
-            "get_settings",
-            return_value=SimpleNamespace(
-                ai_provider_read_timeout_seconds=42,
-                ai_provider_connect_timeout_seconds=3,
-            ),
-        ),
-    ):
-        kwargs = adapter._prepare_kwargs(model_kwargs=None)
-
-    assert kwargs["timeout"] == httpx.Timeout(42, connect=3)
-
-
 def _tool_call_events(completions):
     return [
         c
