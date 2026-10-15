@@ -16,6 +16,7 @@ then.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import re
@@ -81,7 +82,11 @@ from eneo.flows.runtime.egress.policy import (
     Resolver,
     vet_destination,
 )
-from eneo.flows.runtime.http_audit import AuditedToolCall
+from eneo.flows.runtime.http_audit import (
+    AuditedToolCall,
+    await_read_audit,
+    unfinished_call_message,
+)
 from eneo.flows.runtime.http_orchestration import FlowOutsideInputResolution
 from eneo.flows.runtime.step_deadline import current_step_deadline_scope
 from eneo.flows.runtime.tool_argument_check import (
@@ -140,7 +145,8 @@ class AuditToolCallFn(Protocol):
 class RecordToolCallFn(Protocol):
     """Stores the start, or the start and the result, of the attempt's tool
     call and commits it. Raises FlowStepAttemptClosed when the attempt is
-    already closed; any other failure to store passes on as it is."""
+    already closed; any other failure to store passes on as it is. When it
+    raises, it holds no row lock (its transaction is rolled back)."""
 
     def __call__(
         self,
@@ -273,24 +279,28 @@ async def resolve_tool_input(
     started = time.monotonic()
 
     async def audit(outcome: Outcome, error_message: str | None) -> None:
-        await deps.audit_http_outbound(
-            run=run,
-            step=step,
-            url=usable.server.http_url,
-            method="POST",
-            call_type="tool_input",
-            outcome=outcome,
-            error_message=error_message,
-            duration_ms=(time.monotonic() - started) * 1000,
-            tool=AuditedToolCall(
-                mcp_server_id=config.mcp_server_id, tool_name=config.tool_name
-            ),
+        await await_read_audit(
+            deps.audit_http_outbound(
+                run=run,
+                step=step,
+                url=usable.server.http_url,
+                method="POST",
+                call_type="tool_input",
+                outcome=outcome,
+                error_message=error_message,
+                duration_ms=(time.monotonic() - started) * 1000,
+                tool=AuditedToolCall(
+                    mcp_server_id=config.mcp_server_id, tool_name=config.tool_name
+                ),
+            )
         )
 
     # From here the run reaches out for the server: its name is resolved, then
-    # it is called. Every typed ending is one audited outbound call. A read
-    # that is cancelled, or that ends with an exception that is not typed,
-    # writes no audit record, as for the HTTP input.
+    # it is called. Every ending is one audited outbound call: a typed one with
+    # its message, a stopped one or one with an error that has no typed code
+    # with a fixed text that says whether the request was sent. Once the
+    # success is audited, a later failure (storing the result) is not audited
+    # again.
     sent_at: float | None = None
     try:
         await _vet_server_address(step, usable.server, deps, vet_seconds)
@@ -317,6 +327,12 @@ async def resolve_tool_input(
         await audit(Outcome.FAILURE, str(exc))
         if failed is not None:
             await record_call(start=call_start, result=failed)
+        raise
+    except (asyncio.CancelledError, Exception) as exc:
+        await audit(
+            Outcome.FAILURE,
+            unfinished_call_message(exc, request_sent=sent_at is not None),
+        )
         raise
     # Built before the success is audited, so that hashing the answer cannot
     # fail after it.

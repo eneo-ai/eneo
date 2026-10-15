@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
@@ -1625,6 +1626,8 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
 
         scenario.runtime_assistant.get_response = get_response
         executor = FlowRunExecutor(
+            # The worker opens this on a session of its own; here the executor's audit service serves.
+            read_audit_service=lambda: nullcontext(executor.audit_service),
             runtime_actor=FlowRunActor.from_user(user=admin_user),
             session=session,
             flow_repo=worker.flow_repo(),

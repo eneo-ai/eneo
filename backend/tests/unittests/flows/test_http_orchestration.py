@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import traceback
 from dataclasses import dataclass
@@ -319,6 +320,153 @@ async def test_resolve_http_input_source_text_malformed_json_maps_to_typed_code(
     audit_kwargs = deps.audit_http_outbound.await_args.kwargs
     assert audit_kwargs["outcome"].name == "FAILURE"
     assert audit_kwargs["status_code"] == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ending", "message"),
+    [
+        pytest.param(
+            "untyped",
+            "The call ended with an error that has no typed code.",
+            id="untyped",
+        ),
+        pytest.param(
+            "cancelled", "The call was stopped before it ended.", id="cancelled"
+        ),
+        pytest.param(
+            "too_large", "Step 4: the response is too large.", id="typed-late"
+        ),
+        pytest.param(
+            "timeout", "Step 4: HTTP GET input timed out after 5s.", id="typed-early"
+        ),
+    ],
+)
+async def test_an_http_input_read_is_audited_once_however_it_ends(
+    ending: str, message: str
+) -> None:
+    # Kills the mutants that write no audit record for an HTTP input read that
+    # was cancelled, ended by an error without a typed code, or refused as
+    # too large after its response, that audit such a read with the error's
+    # own text, and that audit a typed failure twice.
+    entered = asyncio.Event()
+    request = httpx.Request("GET", "https://example.org/data")
+
+    async def send(**_: Any) -> httpx.Response:
+        if ending == "untyped":
+            raise RuntimeError("upstream said sk-http-secret")
+        if ending == "timeout":
+            raise httpx.TimeoutException("timeout")
+        if ending == "cancelled":
+            entered.set()
+            await asyncio.Event().wait()
+        return httpx.Response(200, request=request, text="ok")
+
+    def too_large(**_: Any) -> str:
+        raise TypedIOValidationException(
+            "Step 4: the response is too large.",
+            code="typed_io_http_response_too_large",
+        )
+
+    deps = _make_deps(send_http_request=send, read_response_text=too_large)
+    read = asyncio.create_task(
+        resolve_http_input_source_text(
+            step=_Step(
+                step_order=4,
+                step_id="s4",
+                input_type="text",
+                input_source="http_get",
+                input_config={
+                    "url": "https://example.org/data",
+                    "auth": {"mode": "none"},
+                },
+            ),
+            run=_Run(id="run-4", flow_id="flow-1", tenant_id="tenant-1"),
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+    )
+    if ending == "cancelled":
+        await entered.wait()
+        read.cancel()
+    with pytest.raises(BaseException):
+        await read
+
+    deps.audit_http_outbound.assert_awaited_once()
+    audit = deps.audit_http_outbound.await_args.kwargs
+    assert (audit["outcome"].name, audit["error_message"]) == ("FAILURE", message)
+    assert "sk-http-secret" not in repr(audit)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ending", "stop_while", "queue_answers", "queued"),
+    [
+        pytest.param("stuck", "sending", False, 0, id="stopped-hung-queue"),
+        pytest.param("timeout", None, False, 0, id="typed-hung-queue"),
+        pytest.param("ok", "queueing", True, 1, id="stopped-while-queued"),
+        pytest.param("ok", "queueing", False, 0, id="stopped-while-hung-queue"),
+    ],
+)
+async def test_an_http_input_read_waits_little_for_its_one_audit(
+    monkeypatch, ending: str, stop_while: str | None, queue_answers: bool, queued: int
+) -> None:
+    # Kills the mutants that wait without a limit for the audit log (after a
+    # stop, after a typed failure, or for a record being queued when the read
+    # is stopped), that drop the record being queued when the read is
+    # stopped, and that queue a second record for that read.
+    from eneo.flows.runtime import http_audit
+
+    monkeypatch.setattr(http_audit, "READ_AUDIT_TIMEOUT_SECONDS", 0.05)
+    reached = {"sending": asyncio.Event(), "queueing": asyncio.Event()}
+    answered = asyncio.Event()
+    records: list[dict[str, Any]] = []
+
+    async def send(**_: Any) -> httpx.Response:
+        reached["sending"].set()
+        if ending == "timeout":
+            raise httpx.TimeoutException("timeout")
+        if ending == "stuck":
+            await asyncio.Event().wait()
+        return httpx.Response(200, request=httpx.Request("GET", "https://e.org"))
+
+    async def enqueue(**record: Any) -> None:
+        reached["queueing"].set()
+        await answered.wait()
+        records.append(record)
+
+    deps = _make_deps(send_http_request=send)
+    deps.audit_http_outbound.side_effect = enqueue
+    read = asyncio.create_task(
+        resolve_http_input_source_text(
+            step=_Step(
+                step_order=5,
+                step_id="s5",
+                input_type="text",
+                input_source="http_get",
+                input_config={
+                    "url": "https://example.org/data",
+                    "auth": {"mode": "none"},
+                },
+            ),
+            run=_Run(id="run-5", flow_id="flow-1", tenant_id="tenant-1"),
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+    )
+    if stop_while is not None:
+        await reached[stop_while].wait()
+        read.cancel()
+    if queue_answers:
+        answered.set()
+
+    done, _ = await asyncio.wait({read}, timeout=5)
+
+    assert done == {read}
+    assert read.cancelled() or isinstance(read.exception(), TypedIOValidationException)
+    assert read.cancelled() == (stop_while is not None)
+    assert len(records) == queued
+    deps.audit_http_outbound.assert_awaited_once()
 
 
 @pytest.mark.asyncio

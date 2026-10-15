@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -199,6 +200,8 @@ def _build_executor(
 
     flow_run_terminalizer.terminalize_run = AsyncMock(side_effect=_terminalize_run)
     executor = FlowRunExecutor(
+        # The worker opens this on a session of its own; here the executor's audit service serves.
+        read_audit_service=lambda: nullcontext(executor.audit_service),
         runtime_actor=FlowRunActor.from_user(user=user),
         session=session,
         flow_repo=flow_repo,

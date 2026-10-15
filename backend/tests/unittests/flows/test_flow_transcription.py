@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
 from hashlib import sha256
 from types import SimpleNamespace
@@ -496,6 +496,8 @@ def _build_executor(
     encryption_service = AsyncMock()
     transcriber = AsyncMock()
     executor = FlowRunExecutor(
+        # The worker opens this on a session of its own; here the executor's audit service serves.
+        read_audit_service=lambda: nullcontext(executor.audit_service),
         runtime_actor=FlowRunActor.from_user(user=user),
         session=session,
         flow_repo=flow_repo,

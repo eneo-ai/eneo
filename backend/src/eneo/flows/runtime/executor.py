@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import AbstractAsyncContextManager
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -666,6 +667,9 @@ class FlowRunExecutor:
         max_inline_text_bytes: int | None = None,
         input_limits: FlowInputLimits | None = None,
         audit_service: AuditService | None = None,
+        read_audit_service: Callable[
+            [], AbstractAsyncContextManager[AuditService | None]
+        ],
         webhook_delivery_repo: FlowRunWebhookDeliveryRepository | None = None,
         references_service: ReferencesService | None = None,
         transcribers: FlowTranscribers | None = None,
@@ -717,6 +721,10 @@ class FlowRunExecutor:
         self.encryption_service = encryption_service
         self.max_inline_text_bytes = resolved_config.max_inline_text_bytes
         self.audit_service = audit_service
+        # Opens the audit service a tool or HTTP input read queues its record
+        # with, on a database session that is not the run's: a write that
+        # outlives its time limit is left to unwind there.
+        self.read_audit_service = read_audit_service
         self.references_service = references_service
         self.transcribers = transcribers
         # Per-run document names, derived from the pinned definition with the steps.
@@ -2875,19 +2883,26 @@ class FlowRunExecutor:
             start: FlowStepAttemptToolCallStart,
             result: FlowStepAttemptToolCallResult | None,
         ) -> None:
-            written = await self.flow_run_repo.write_attempt_tool_call_evidence(
-                run_id=run.id,
-                step_id=step.step_id,
-                attempt_no=attempt_no,
-                tenant_id=run.tenant_id,
-                start=start,
-                result=result,
-            )
-            if written == "attempt_closed":
-                raise FlowStepAttemptClosed(
-                    run_id=run.id, step_id=step.step_id, attempt_no=attempt_no
+            try:
+                written = await self.flow_run_repo.write_attempt_tool_call_evidence(
+                    run_id=run.id,
+                    step_id=step.step_id,
+                    attempt_no=attempt_no,
+                    tenant_id=run.tenant_id,
+                    start=start,
+                    result=result,
                 )
-            await self._commit()
+                if written == "attempt_closed":
+                    raise FlowStepAttemptClosed(
+                        run_id=run.id, step_id=step.step_id, attempt_no=attempt_no
+                    )
+                await self._commit()
+            except (asyncio.CancelledError, Exception):
+                # Releases the run and attempt row locks the write took, so
+                # no other writer waits on them while the read audits how it
+                # ended.
+                await self._rollback()
+                raise
 
         return await resolve_tool_input_runtime(
             step=step,
@@ -3394,24 +3409,35 @@ class FlowRunExecutor:
         duration_ms: float | None = None,
         tool: AuditedToolCall | None = None,
     ) -> None:
-        deps = HttpAuditDeps(
-            audit_service=self.audit_service,
-            actor=self.runtime_actor,
-            logger=logger,
-        )
-        await audit_http_outbound_runtime(
-            run=run,
-            step=step,
-            url=url,
-            method=method,
-            call_type=call_type,
-            outcome=outcome,
-            error_message=error_message,
-            status_code=status_code,
-            duration_ms=duration_ms,
-            tool=tool,
-            deps=deps,
-        )
+        try:
+            async with self.read_audit_service() as audit_service:
+                await audit_http_outbound_runtime(
+                    run=run,
+                    step=step,
+                    url=url,
+                    method=method,
+                    call_type=call_type,
+                    outcome=outcome,
+                    error_message=error_message,
+                    status_code=status_code,
+                    duration_ms=duration_ms,
+                    tool=tool,
+                    deps=HttpAuditDeps(
+                        audit_service=audit_service,
+                        actor=self.runtime_actor,
+                        logger=logger,
+                    ),
+                )
+        except Exception:
+            # As audit_http_outbound does for the audit log itself: a read is
+            # not failed because its audit record could not be queued.
+            logger.warning(
+                "flow_executor.read_audit_service_failed: the read's audit record "
+                "may not have been queued run_id=%s step_order=%d",
+                run.id,
+                step.step_order,
+                exc_info=True,
+            )
 
     async def _process_typed_output(
         self,

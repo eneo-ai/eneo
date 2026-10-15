@@ -190,3 +190,86 @@ async def test_audit_http_outbound_uses_step_label_when_description_missing() ->
     extra = kwargs["metadata"]["extra"]
     assert "step_description" not in extra
     assert "duration_ms" not in extra
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stopped", [False, True], ids=["expired", "stopped"])
+async def test_a_read_audit_whose_write_will_not_unwind_ends_within_its_limit(
+    monkeypatch, stopped: bool
+) -> None:
+    # Kills the mutants that wait, after the limit, for the cancelled write to
+    # unwind (this write's cleanup does not end while the read waits, so that
+    # wait would hold the read, stopped or not), that leave the write running
+    # uncancelled, and that drop or keep holding the write while it unwinds
+    # (the event loop holds a task only weakly).
+    import asyncio
+
+    from eneo.flows.runtime import http_audit
+
+    monkeypatch.setattr(http_audit, "READ_AUDIT_TIMEOUT_SECONDS", 0.05)
+    queueing, unwound = asyncio.Event(), asyncio.Event()
+    cancelled: list[bool] = []
+
+    async def write() -> None:
+        try:
+            queueing.set()
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+        finally:
+            await unwound.wait()
+
+    read = asyncio.create_task(http_audit.await_read_audit(write()))
+    await queueing.wait()
+    if stopped:
+        read.cancel()
+
+    done, _ = await asyncio.wait({read}, timeout=2)
+
+    await asyncio.sleep(0)
+    assert done == {read}
+    assert read.cancelled() == stopped
+    assert cancelled == [True]
+    assert len(http_audit._UNWINDING_WRITES) == 1
+    unwound.set()
+    for _ in range(3):
+        await asyncio.sleep(0)
+    assert not http_audit._UNWINDING_WRITES
+
+
+@pytest.mark.asyncio
+async def test_a_read_audit_service_has_a_database_session_of_its_own(
+    monkeypatch,
+) -> None:
+    # Kills the mutants that give the read audit service no session of its
+    # own (its repositories reach no scoped session), that open no
+    # transaction on it, and that leave it reachable after the scope.
+    from contextlib import asynccontextmanager
+
+    from dependency_injector import providers
+
+    from eneo.database import database
+    from eneo.flows.runtime import tasks
+    from eneo.main.container.container import Container, SessionProxy
+
+    own = MagicMock(name="own")
+
+    @asynccontextmanager
+    async def session():
+        yield own
+
+    monkeypatch.setattr(database, "sessionmanager", SimpleNamespace(session=session))
+    sessionless = Container(session=providers.Object(SessionProxy()))
+
+    async with tasks.audit_service_on_own_session(sessionless) as audit_service:
+        sessions = [
+            audit_service.repository.session,
+            audit_service.audit_config_service.repository.session,
+            audit_service.feature_flag_service.feature_flag_repo.db_session,
+        ]
+        assert all(session.execute is own.execute for session in sessions)
+
+    own.begin.assert_called_once_with()
+    with pytest.raises(RuntimeError):
+        _ = sessions[0].execute

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Generator
-from contextlib import contextmanager
+from collections.abc import AsyncGenerator, Generator
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from typing import TYPE_CHECKING, assert_never
 from uuid import UUID
 
@@ -73,7 +74,7 @@ from eneo.flows.runtime.service_transcription import (
 )
 from eneo.flows.runtime.transcription import FlowTranscribers
 from eneo.main.config import get_settings
-from eneo.main.container.container import Container
+from eneo.main.container.container import Container, SessionProxy
 from eneo.main.logging import get_logger
 from eneo.main.request_context import clear_request_context, set_request_context
 from eneo.mcp_servers.application.unattended_tool_call import UnattendedToolCaller
@@ -89,6 +90,7 @@ from eneo.transcription_services.repository import (
 from eneo.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
+    from eneo.audit.application.audit_service import AuditService
     from eneo.files.transcriber import Transcriber
     from eneo.flows.runtime.transcription import FlowStepTranscriber
     from eneo.settings.encryption_service import EncryptionService
@@ -100,6 +102,21 @@ logger = get_logger(__name__)
 def enable_autobegin_for_flow_task_session(session: AsyncSession) -> None:
     """Flow runtime uses commit-heavy repos; enable autobegin for this task session."""
     session.sync_session.autobegin = True
+
+
+@asynccontextmanager
+async def audit_service_on_own_session(
+    sessionless_container: Container,
+) -> AsyncGenerator[AuditService]:
+    """The audit service of a container built on SessionProxy, inside a short
+    session of its own (Container.session_scope, closed when the scope ends).
+
+    A tool or HTTP input read queues its audit record with it: a write that
+    outlives its time limit is left to unwind and must not do that on the
+    run's session, which the run goes on using. The scope sets the session
+    only in the context of the write that opens it."""
+    async with Container.session_scope():
+        yield sessionless_container.audit_service()
 
 
 @contextmanager
@@ -378,6 +395,10 @@ async def _execute_flow_run_async_traced(
                     template_asset_repo=runtime_container.flow_template_asset_repo(),
                     encryption_service=runtime_container.encryption_service(),
                     audit_service=runtime_container.audit_service(),
+                    read_audit_service=partial(
+                        audit_service_on_own_session,
+                        Container(session=providers.Object(SessionProxy())),
+                    ),
                     references_service=runtime_container.references_service(
                         datastore__create_embeddings_service__user=run_actor.user
                     ),

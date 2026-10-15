@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -366,6 +367,8 @@ async def _create_review_pause_runtime_context(
     )
     file_service = worker_container.file_service(user=admin_user)
     executor = FlowRunExecutor(
+        # The worker opens this on a session of its own; here the executor's audit service serves.
+        read_audit_service=lambda: nullcontext(executor.audit_service),
         runtime_actor=FlowRunActor.from_user(user=admin_user),
         session=session,
         flow_repo=worker_container.flow_repo(),

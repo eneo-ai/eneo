@@ -1,4 +1,5 @@
 import wave
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from types import SimpleNamespace
@@ -171,6 +172,8 @@ async def test_full_run_uses_live_segments_and_persists_evidence(
         )
         admission = await load_container_upload_admission(worker)
         executor = FlowRunExecutor(
+            # The worker opens this on a session of its own; here the executor's audit service serves.
+            read_audit_service=lambda: nullcontext(executor.audit_service),
             runtime_actor=FlowRunActor.from_user(user=case.user),
             session=session,
             flow_repo=worker.flow_repo(),

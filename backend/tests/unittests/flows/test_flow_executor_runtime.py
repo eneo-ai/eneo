@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -604,6 +605,8 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
 
     flow_run_terminalizer.terminalize_run = AsyncMock(side_effect=_terminalize_run)
     executor = FlowRunExecutor(
+        # The worker opens this on a session of its own; here the executor's audit service serves.
+        read_audit_service=lambda: nullcontext(executor.audit_service),
         runtime_actor=runtime_actor or FlowRunActor.from_user(user=user),
         session=session,
         flow_repo=flow_repo,
@@ -720,6 +723,8 @@ def test_executor_accepts_grouped_config(user):
     )
 
     executor = FlowRunExecutor(
+        # The worker opens this on a session of its own; here the executor's audit service serves.
+        read_audit_service=lambda: nullcontext(executor.audit_service),
         runtime_actor=FlowRunActor.from_user(user=user),
         session=session,
         flow_repo=flow_repo,

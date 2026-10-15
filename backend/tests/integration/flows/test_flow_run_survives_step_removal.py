@@ -13,6 +13,7 @@ retained assistant protects.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -152,6 +153,8 @@ async def test_a_run_in_flight_when_its_step_is_removed_completes_with_the_assis
             )
         )
         executor = FlowRunExecutor(
+            # The worker opens this on a session of its own; here the executor's audit service serves.
+            read_audit_service=lambda: nullcontext(executor.audit_service),
             runtime_actor=FlowRunActor.from_user(user=admin_user),
             session=session,
             flow_repo=container.flow_repo(),

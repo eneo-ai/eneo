@@ -1,15 +1,31 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 from urllib.parse import urlsplit
 from uuid import UUID
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.flows.domain.flow_run_exceptions import FlowStepAttemptClosed
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.mcp_servers.domain.server_address import loggable_server_address
+
+logger = logging.getLogger(__name__)
+
+# The longest a tool or HTTP input read waits for its audit record to be
+# queued. The audit log's queue client sets no read timeout, so a half-open
+# queue connection would otherwise hold the read, and its worker, without
+# limit; the ending is logged instead.
+READ_AUDIT_TIMEOUT_SECONDS: Final = 5.0
+
+# Writes cut off at READ_AUDIT_TIMEOUT_SECONDS, held until they have unwound:
+# the event loop keeps only a weak reference to a task.
+_UNWINDING_WRITES: set[asyncio.Future[None]] = set()
 
 
 class RuntimeAuditRun(Protocol):
@@ -48,6 +64,56 @@ class AuditedToolCall:
 
     mcp_server_id: UUID
     tool_name: str
+
+
+def unfinished_call_message(exc: BaseException, *, request_sent: bool) -> str:
+    """The audit text of a read that ended without a typed result (stopped, or
+    an error with no typed code): a fixed text that says whether its request
+    was sent. The error's own text is never used: it can quote the server, its
+    address or the request."""
+    stopped = isinstance(exc, (asyncio.CancelledError, FlowStepAttemptClosed))
+    if not request_sent:
+        if stopped:
+            return "The read was stopped before its request was sent."
+        return "The read ended with an error that has no typed code before its request was sent."
+    if stopped:
+        return "The call was stopped before it ended."
+    return "The call ended with an error that has no typed code."
+
+
+async def await_read_audit(write: Awaitable[None]) -> None:
+    """Wait at most READ_AUDIT_TIMEOUT_SECONDS for ``write``, which queues the
+    audit record of a tool or HTTP input read; on expiry it is cancelled, a
+    warning that the record may not have been queued is logged and this
+    returns without waiting for it to unwind, so ``write`` must not use the
+    read's database session.
+
+    A read that is stopped while its record is being queued goes on waiting
+    for that same write, within the same limit, and stops after it: the
+    record is neither lost nor queued again by the read's own handling of
+    the stop."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + READ_AUDIT_TIMEOUT_SECONDS
+    queued = asyncio.ensure_future(write)
+    stop: asyncio.CancelledError | None = None
+    while not queued.done() and (left := deadline - loop.time()) > 0:
+        try:
+            # Cancelling this wait leaves the write running.
+            await asyncio.wait((queued,), timeout=left)
+        except asyncio.CancelledError as cancelled:
+            stop = cancelled
+    if not queued.done():
+        queued.cancel()
+        _UNWINDING_WRITES.add(queued)
+        queued.add_done_callback(_UNWINDING_WRITES.discard)
+        logger.warning(
+            "flow_executor.read_audit_timed_out: the read's audit record may "
+            "not have been queued"
+        )
+    elif stop is None:
+        queued.result()
+    if stop is not None:
+        raise stop
 
 
 async def audit_http_outbound(

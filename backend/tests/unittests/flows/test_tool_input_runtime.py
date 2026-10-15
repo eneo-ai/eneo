@@ -1542,6 +1542,7 @@ async def _no_address(host: str, port: int) -> list[str]:
 
 
 _STORED_CALL = ["write", "commit", "call", "write", "commit"]
+_ANSWERED_NOTHING = MCPToolAnswer((), 0, {"rows": []}, is_error=False)
 
 
 @pytest.mark.parametrize(
@@ -1668,6 +1669,170 @@ async def test_a_call_whose_attempt_has_closed_is_not_made(user) -> None:
 
     assert caller.calls == []
     executor.session.commit.assert_not_awaited()
+
+
+_STOPPED = "The call was stopped before it ended."
+_UNTYPED = "The call ended with an error that has no typed code."
+_STOPPED_UNSENT = "The read was stopped before its request was sent."
+_UNTYPED_UNSENT = (
+    "The read ended with an error that has no typed code before its request was sent."
+)
+
+
+@dataclass
+class _Hanging(_Caller):
+    """Holds the call open until the read is cancelled."""
+
+    entered: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def call(self, *args: Any, **kwargs: Any) -> MCPToolAnswer:
+        self.calls.append(kwargs)
+        self.entered.set()
+        await asyncio.Event().wait()
+        raise AssertionError("the call was not cancelled")
+
+
+@pytest.mark.parametrize(
+    ("ending", "outcome", "message", "calls"),
+    [
+        pytest.param("untyped", Outcome.FAILURE, _UNTYPED, 1, id="untyped-error"),
+        pytest.param("cancelled", Outcome.FAILURE, _STOPPED, 1, id="cancelled"),
+        pytest.param(
+            "closed", Outcome.FAILURE, _STOPPED_UNSENT, 0, id="attempt-closed"
+        ),
+        pytest.param(
+            "start_not_stored", Outcome.FAILURE, _UNTYPED_UNSENT, 0, id="no-start"
+        ),
+        pytest.param("result_not_stored", Outcome.SUCCESS, None, 1, id="no-result"),
+    ],
+)
+async def test_a_read_that_ends_without_a_typed_result_is_audited_once(
+    user, ending: str, outcome: Outcome, message: str | None, calls: int
+) -> None:
+    # Kills the mutants that write no audit record for a read that was
+    # cancelled, stopped by its closed attempt or ended by an error without a
+    # typed code, that audit such a read with the error's own text (which can
+    # quote the server or the arguments) or as a call when nothing was sent,
+    # and that audit a read twice when storing its result fails after its
+    # success was audited.
+    facts = _facts()
+    caller: _Caller = (
+        _Hanging(_ANSWERED_NOTHING)
+        if ending == "cancelled"
+        else _Caller(RuntimeError(f"server said {_SECRET_ARGUMENT}"))
+        if ending == "untyped"
+        else _answered(structured={"rows": []})
+    )
+    executor = _tool_executor(user, _Facts(facts), caller)
+    write = executor.flow_run_repo.write_attempt_tool_call_evidence
+    if ending == "closed":
+        write.return_value = "attempt_closed"
+    elif ending == "start_not_stored":
+        write.side_effect = ConnectionResetError(_SECRET_ARGUMENT)
+    elif ending == "result_not_stored":
+        write.side_effect = ["written", ConnectionResetError(_SECRET_ARGUMENT)]
+    step = _tool_step(facts, arguments={"q": _SECRET_ARGUMENT})
+
+    read = asyncio.create_task(_read(executor, step, _running(user)))
+    if isinstance(caller, _Hanging):
+        await caller.entered.wait()
+        read.cancel()
+    with pytest.raises(BaseException) as ended:
+        await read
+
+    assert not isinstance(ended.value, TypedIOValidationException)
+    assert len(caller.calls) == calls
+    (audit,) = _audits(executor)
+    assert (audit["outcome"], audit["error_message"]) == (outcome, message)
+    assert _SECRET_ARGUMENT not in repr(audit)
+
+
+@pytest.mark.parametrize(
+    ("ending", "queue_answers", "events"),
+    [
+        pytest.param("closed", False, ["rollback", "audit"], id="stopped-at-start"),
+        pytest.param("typed", False, ["audit"], id="typed-failure"),
+        pytest.param("stopped", True, ["audit", "queued"], id="stopped-while-queued"),
+    ],
+)
+async def test_a_tool_read_releases_the_rows_and_waits_little_for_its_one_audit(
+    user, monkeypatch, ending: str, queue_answers: bool, events: list[str]
+) -> None:
+    # Kills the mutants that audit a read stopped by its closed attempt while
+    # the write still holds the run and attempt row locks (no rollback before
+    # the audit), that wait for the audit log without a limit after a stop or
+    # a typed failure (here its enqueue never returns), and that drop the
+    # success record being queued when the read is stopped.
+    from eneo.flows.domain.flow_run_exceptions import FlowStepAttemptClosed
+    from eneo.flows.runtime import http_audit
+
+    monkeypatch.setattr(http_audit, "READ_AUDIT_TIMEOUT_SECONDS", 0.05)
+    facts = _facts()
+    caller = _answered() if ending == "typed" else _answered(structured={})
+    executor = _tool_executor(user, _Facts(facts), caller)
+    if ending == "closed":
+        executor.flow_run_repo.write_attempt_tool_call_evidence.return_value = (
+            "attempt_closed"
+        )
+    seen: list[str] = []
+    queueing, answered = asyncio.Event(), asyncio.Event()
+
+    async def rollback() -> None:
+        seen.append("rollback")
+
+    async def enqueue(**_: object) -> None:
+        seen.append("audit")
+        queueing.set()
+        await answered.wait()
+        seen.append("queued")
+
+    executor.session.rollback.side_effect = rollback
+    executor.audit_service.log_async.side_effect = enqueue
+    read = asyncio.create_task(_read(executor, _tool_step(facts), _running(user)))
+    if ending == "stopped":
+        await queueing.wait()
+        read.cancel()
+    if queue_answers:
+        answered.set()
+
+    done, _ = await asyncio.wait({read}, timeout=5)
+
+    assert done == {read}
+    if ending == "stopped":
+        assert read.cancelled()
+    else:
+        ended = {"closed": FlowStepAttemptClosed, "typed": TypedIOValidationException}
+        assert isinstance(read.exception(), ended[ending])
+    assert seen == events
+
+
+@pytest.mark.parametrize("opens", [True, False], ids=["opened", "cannot-open"])
+async def test_a_tool_read_queues_its_audit_with_the_read_audit_service(
+    user, opens: bool
+) -> None:
+    # Kills the mutants that queue a read's audit with the run's own audit
+    # service (on the run's database session) instead of the read audit
+    # service the worker opens on a session of its own, and that fail an
+    # answered read because that service could not be opened.
+    from contextlib import asynccontextmanager
+
+    facts = _facts()
+    executor = _tool_executor(user, _Facts(facts), _answered(structured={}))
+    own = AsyncMock()
+
+    @asynccontextmanager
+    async def read_audit_service():
+        if not opens:
+            raise ConnectionRefusedError("no database connection")
+        yield own
+
+    executor.read_audit_service = read_audit_service
+
+    resolution = await _read(executor, _tool_step(facts), _running(user))
+
+    assert resolution.structured == {}
+    executor.audit_service.log_async.assert_not_awaited()
+    assert own.log_async.await_count == (1 if opens else 0)
 
 
 def _slow(release: asyncio.Event) -> Callable[[object], Awaitable[Response]]:

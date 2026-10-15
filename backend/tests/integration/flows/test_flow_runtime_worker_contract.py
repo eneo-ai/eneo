@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from contextlib import nullcontext
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -487,6 +488,8 @@ async def _create_runtime_worker_context(
     )
     file_service = worker_container.file_service(user=admin_user)
     executor = FlowRunExecutor(
+        # The worker opens this on a session of its own; here the executor's audit service serves.
+        read_audit_service=lambda: nullcontext(executor.audit_service),
         runtime_actor=FlowRunActor.from_user(user=admin_user),
         session=session,
         flow_repo=worker_container.flow_repo(),
@@ -959,6 +962,8 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         )
         audit_service = SimpleNamespace(log_async=AsyncMock(return_value=uuid4()))
         executor = FlowRunExecutor(
+            # The worker opens this on a session of its own; here the executor's audit service serves.
+            read_audit_service=lambda: nullcontext(executor.audit_service),
             runtime_actor=FlowRunActor.from_user(user=admin_user),
             session=session,
             flow_repo=container.flow_repo(),
