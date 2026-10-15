@@ -1,12 +1,14 @@
 """Seed SharePoint knowledge at scale so the integration UI can be tried locally.
 
-Creates the shared space "SharePoint – storskaligt" (recreated on every run)
-holding the combinations the knowledge UI must handle: a site imported as a
-35-folder tree with every sync state and every skip reason, a clean source
-with thousands of documents and long names, a whole-site import under a
-second embedding model, and single items that failed, never synced or sit in
-a OneDrive. Change-notification subscriptions are active, expired, failing or
-about to expire, and every folder has weeks of sync history.
+Creates the shared spaces "SharePoint – storskaligt" and "SharePoint – HR och
+nämnd" (recreated on every run) holding the combinations the knowledge UI must
+handle: a site imported as a 35-folder tree with every sync state and every
+skip reason, a clean source with thousands of documents and long names, a
+whole-site import under a second embedding model, and single items that
+failed, never synced or sit in a OneDrive. One failing source goes into the
+user's personal space, so admin views have one to count. Change-notification
+subscriptions are active, expired, failing or about to expire, and every
+folder has weeks of sync history naming the files each sync changed.
 
 ``--simulate-sync`` then writes live progress for a few of those items to
 Redis, the way a running sync does, so the progress UI can be watched without
@@ -54,6 +56,10 @@ from eneo.redis.connection import build_redis_auth_kwargs, build_redis_url
 from eneo.settings.encryption_service import EncryptionService
 
 SPACE_ID = uuid.UUID("5a0e5a0e-0000-4000-8000-000000000001")
+SECOND_SPACE_ID = uuid.UUID("5a0e5a0e-0000-4000-8000-000000000002")
+SECOND_SPACE_NAME = "SharePoint – HR och nämnd"
+# One source goes into the user's personal space, so admin views have one to count.
+PERSONAL_KNOWLEDGE_KEY = "knowledge/personal-notes"
 SPACE_NAME = "SharePoint – storskaligt"
 # Every id the script creates is derived from this namespace, so a rerun
 # replaces the same rows instead of piling up new ones.
@@ -130,6 +136,7 @@ class Source:
     site_id: str
     wrapper: bool
     folders: list[Folder]
+    space: str = "main"  # main | second | personal
 
 
 def site_folder(site: str, library: str, path: str) -> str:
@@ -269,7 +276,8 @@ def build_sources(rng: random.Random) -> list[Source]:
             "HR-handboken",
             "showcase-site-hr",
             False,
-            [
+            space="second",
+            folders=[
                 Folder(
                     key="hr",
                     name="HR-handboken",
@@ -286,13 +294,32 @@ def build_sources(rng: random.Random) -> list[Source]:
             "Nämndhandlingar 2027",
             "showcase-site-namnd",
             False,
-            [
+            space="second",
+            folders=[
                 Folder(
                     key="namnd2027",
                     name="Nämndhandlingar 2027",
                     folder_path="/2027",
                     url=site_folder("namnd", "Delade dokument", "/2027"),
                     state="never",
+                )
+            ],
+        ),
+        Source(
+            "Mina anteckningar",
+            "showcase-onedrive-personal",
+            False,
+            space="personal",
+            folders=[
+                Folder(
+                    key="personal-notes",
+                    name="Mina anteckningar",
+                    folder_path="/Anteckningar",
+                    url="https://contoso-my.sharepoint.com/personal/demo_example_se/Documents/Anteckningar",
+                    state="error",
+                    documents=12,
+                    error="The folder was moved or deleted in OneDrive (itemNotFound)",
+                    resource_type="onedrive",
                 )
             ],
         ),
@@ -311,6 +338,21 @@ def skipped_details(rng: random.Random, count: int) -> list[dict[str, str]]:
     return details
 
 
+def file_changes(
+    rng: random.Random, kinds: list[tuple[str, int]]
+) -> list[dict[str, str]]:
+    """Named changes, e.g. [("added", 3), ("deleted", 1)], as a sync records them."""
+    return [
+        {
+            "file": f"{rng.choice(DOCUMENT_WORDS)} {rng.randint(1, 9999):04d}"
+            f"{rng.choice(DOCUMENT_EXTENSIONS)}",
+            "change": change,
+        }
+        for change, count in kinds
+        for _ in range(count)
+    ]
+
+
 def sync_metadata(
     *,
     trigger: str,
@@ -318,8 +360,10 @@ def sync_metadata(
     deleted: int,
     unchanged: int,
     skipped: list[dict[str, str]],
+    changed: list[dict[str, str]] | None = None,
     reconcile_warning: str | None = None,
 ) -> dict[str, Any]:
+    changed = changed or []
     metadata: dict[str, Any] = {
         "trigger": trigger,
         "files_processed": processed,
@@ -331,6 +375,9 @@ def sync_metadata(
         "skipped_total": len(skipped),
         "skipped_truncated": len(skipped) > MAX_LISTED_SKIPPED,
         "skipped_details": skipped[:MAX_LISTED_SKIPPED],
+        "changed_details": changed[:MAX_LISTED_SKIPPED],
+        "changed_total": len(changed),
+        "changed_truncated": len(changed) > MAX_LISTED_SKIPPED,
     }
     if reconcile_warning:
         metadata["reconcile_warning"] = reconcile_warning
@@ -363,8 +410,11 @@ def one(cur: psycopg2.extensions.cursor, query: str, *params: Any) -> Any:
 
 
 def remove_showcase(cur: psycopg2.extensions.cursor) -> None:
+    spaces = [str(SPACE_ID), str(SECOND_SPACE_ID)]
     cur.execute(
-        "SELECT id FROM integration_knowledge WHERE space_id = %s", (str(SPACE_ID),)
+        """SELECT id FROM integration_knowledge
+           WHERE space_id = ANY(%s::uuid[]) OR id = %s""",
+        (spaces, str(sid(PERSONAL_KNOWLEDGE_KEY))),
     )
     ids = [row[0] for row in cur.fetchall()]
     if ids:
@@ -388,8 +438,8 @@ def remove_showcase(cur: psycopg2.extensions.cursor) -> None:
         "spaces_embedding_models",
         "spaces_completion_models",
     ):
-        cur.execute(f"DELETE FROM {table} WHERE space_id = %s", (str(SPACE_ID),))
-    cur.execute("DELETE FROM spaces WHERE id = %s", (str(SPACE_ID),))
+        cur.execute(f"DELETE FROM {table} WHERE space_id = ANY(%s::uuid[])", (spaces,))
+    cur.execute("DELETE FROM spaces WHERE id = ANY(%s::uuid[])", (spaces,))
 
 
 def resolve_user_integration(
@@ -490,26 +540,41 @@ def seed(settings: Settings, email: str) -> None:
             cur, settings, tenant_id, user_id
         )
 
-        cur.execute(
-            """INSERT INTO spaces (id, name, description, tenant_id, user_id, tenant_space_id)
-               VALUES (%s, %s, %s, %s, NULL, %s)""",
-            (
-                str(SPACE_ID),
-                SPACE_NAME,
-                "SharePoint-kunskap i stor skala för lokal test av gränssnittet",
-                tenant_id,
-                org_space_id,
-            ),
-        )
-        cur.execute(
-            "INSERT INTO spaces_users (space_id, user_id, role) VALUES (%s, %s, 'admin')",
-            (str(SPACE_ID), user_id),
-        )
-        for model in set(embedding.values()):
+        for space_id, space_name in (
+            (SPACE_ID, SPACE_NAME),
+            (SECOND_SPACE_ID, SECOND_SPACE_NAME),
+        ):
             cur.execute(
-                "INSERT INTO spaces_embedding_models (space_id, embedding_model_id) VALUES (%s, %s)",
-                (str(SPACE_ID), model),
+                """INSERT INTO spaces (id, name, description, tenant_id, user_id, tenant_space_id)
+                   VALUES (%s, %s, %s, %s, NULL, %s)""",
+                (
+                    str(space_id),
+                    space_name,
+                    "SharePoint-kunskap för lokal test av gränssnittet",
+                    tenant_id,
+                    org_space_id,
+                ),
             )
+            cur.execute(
+                "INSERT INTO spaces_users (space_id, user_id, role) VALUES (%s, %s, 'admin')",
+                (str(space_id), user_id),
+            )
+            for model in set(embedding.values()):
+                cur.execute(
+                    "INSERT INTO spaces_embedding_models (space_id, embedding_model_id) VALUES (%s, %s)",
+                    (str(space_id), model),
+                )
+        personal_space_id = one(
+            cur,
+            "SELECT id FROM spaces WHERE tenant_id = %s AND user_id = %s LIMIT 1",
+            tenant_id,
+            user_id,
+        )
+        space_ids = {
+            "main": str(SPACE_ID),
+            "second": str(SECOND_SPACE_ID),
+            "personal": str(personal_space_id) if personal_space_id else None,
+        }
 
         subscriptions = {
             "social": dict(expires=now + timedelta(days=2), failures=0),
@@ -552,6 +617,9 @@ def seed(settings: Settings, email: str) -> None:
         document_count = 0
         log_count = 0
         for source in build_sources(rng):
+            space_id = space_ids[source.space]
+            if space_id is None:
+                continue
             wrapper_id = str(sid(f"wrapper/{source.name}")) if source.wrapper else None
             for folder in source.folders:
                 knowledge_id = str(sid(f"knowledge/{folder.key}"))
@@ -598,7 +666,7 @@ def seed(settings: Settings, email: str) -> None:
                         folder.name,
                         folder.name,
                         folder.url,
-                        str(SPACE_ID),
+                        space_id,
                         embedding[folder.embedding],
                         tenant_id,
                         user_integration_id,
@@ -682,7 +750,7 @@ def seed(settings: Settings, email: str) -> None:
                     )
         connection.commit()
     print(
-        f"Seeded {SPACE_NAME!r} ({SPACE_ID}): {knowledge_count} items, "
+        f"Seeded {SPACE_NAME!r} and {SECOND_SPACE_NAME!r}: {knowledge_count} items, "
         f"{document_count} documents, {log_count} sync logs."
     )
     print(f"Open /spaces/{SPACE_ID}/knowledge?tab=integrations")
@@ -749,6 +817,7 @@ def history(
                 deleted=0,
                 unchanged=0,
                 skipped=skipped,
+                changed=file_changes(rng, [("added", folder.documents)]),
             ),
             started_at=started,
             completed_at=started + timedelta(seconds=30 + folder.documents // 2),
@@ -760,6 +829,8 @@ def history(
         if moment > now - timedelta(hours=3):
             break
         processed = rng.choice([0, 0, 1, 1, 2, 3, 7])
+        deleted = rng.choice([0, 0, 0, 1])
+        added = rng.randint(0, processed)
         runs.append(
             dict(
                 sync_type="delta",
@@ -768,9 +839,17 @@ def history(
                 metadata=sync_metadata(
                     trigger="webhook",
                     processed=processed,
-                    deleted=rng.choice([0, 0, 0, 1]),
+                    deleted=deleted,
                     unchanged=rng.randint(0, 3),
                     skipped=[],
+                    changed=file_changes(
+                        rng,
+                        [
+                            ("added", added),
+                            ("updated", processed - added),
+                            ("deleted", deleted),
+                        ],
+                    ),
                 ),
                 started_at=moment,
                 completed_at=moment + timedelta(seconds=rng.randint(4, 50)),
@@ -778,16 +857,18 @@ def history(
         )
     # A manual full sync last, so the problems list reflects every skipped file.
     final_start = now - timedelta(hours=rng.randint(1, 3), minutes=rng.randint(0, 59))
+    final_processed = rng.randint(0, 6)
     final: dict[str, Any] = dict(
         sync_type="full",
         status="success",
         error=None,
         metadata=sync_metadata(
             trigger="manual",
-            processed=rng.randint(0, 6),
+            processed=final_processed,
             deleted=0,
             unchanged=max(0, folder.documents - 6),
             skipped=skipped,
+            changed=file_changes(rng, [("updated", final_processed)]),
             reconcile_warning=(
                 "Reconciliation skipped: would delete 40 of 57 indexed documents "
                 "(above the safety cap)"
@@ -962,7 +1043,7 @@ def main() -> None:
         with connect(settings) as connection, connection.cursor() as cur:
             remove_showcase(cur)
             connection.commit()
-        print(f"Removed {SPACE_NAME!r}.")
+        print(f"Removed {SPACE_NAME!r}, {SECOND_SPACE_NAME!r} and the personal source.")
         return
     email = args.user or getattr(settings, "default_user_email", None)
     if not email:
