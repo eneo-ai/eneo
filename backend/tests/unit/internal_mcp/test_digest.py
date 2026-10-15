@@ -12,7 +12,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp.server.fastmcp import Context, FastMCP
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
@@ -884,14 +884,9 @@ class TestProgressReporter:
 
         app = server.streamable_http_app()
 
-        def client_factory(headers=None, timeout=None, auth=None):
-            return httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="http://localhost:8000",
-                headers=headers,
-                timeout=timeout,
-                auth=auth,
-            )
+        http_client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://localhost:8000"
+        )
 
         received: list[tuple[float, float | None, str | None]] = []
 
@@ -899,8 +894,8 @@ class TestProgressReporter:
             received.append((progress, total, message))
 
         async with server.session_manager.run():
-            async with streamablehttp_client(
-                "http://localhost:8000/mcp", httpx_client_factory=client_factory
+            async with streamable_http_client(
+                "http://localhost:8000/mcp", http_client=http_client
             ) as (read, write, _):
                 async with ClientSession(read, write) as session:
                     await session.initialize()

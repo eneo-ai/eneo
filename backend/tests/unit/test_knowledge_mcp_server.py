@@ -1306,6 +1306,9 @@ class TestOriginalLinks:
 # digest_documents
 # --------------------------------------------------------------------------- #
 from eneo.completion_models.application.map_reduce import DigestBudgets  # noqa: E402
+from eneo.completion_models.domain.model_kwargs_capabilities import (  # noqa: E402
+    SupportedModelKwargs,
+)
 from eneo.files.tabular_index import IndexedSheet, tabular_sample_text  # noqa: E402
 from eneo.internal_mcp.constants import CITE_KEY_META  # noqa: E402
 from eneo.internal_mcp.digest import DigestModel  # noqa: E402
@@ -1371,7 +1374,11 @@ def _patch_digest_context(
         collections=collections,
         websites=[],
         integration_knowledge_list=[],
-        completion_model=SimpleNamespace(id=uuid4(), name="m"),
+        completion_model=SimpleNamespace(
+            id=uuid4(),
+            name="m",
+            get_supported_model_kwargs=lambda: SupportedModelKwargs(),
+        ),
         completion_model_kwargs=SimpleNamespace(),
     )
     calls: dict[str, list] = {"size": [], "list": [], "texts": []}

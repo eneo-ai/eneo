@@ -81,6 +81,7 @@ export const EMPTY_POLICY: GovernancePolicy = {
   prompt_enforcement: { enabled: false, prompt_library_id: null },
   reasoning_policy: { configured: false, default_effort: null, allow_user_override: false },
   file_policy: { configured: false, inline_file_text: null },
+  reader_policy: { inherit: true, completion_model_id: null },
   skills: { bindings: [] },
   updated_at: null,
   updated_by_user_id: null

@@ -408,6 +408,9 @@ class TestToolSteering:
 from contextlib import asynccontextmanager as _acm  # noqa: E402
 
 from eneo.completion_models.application.map_reduce import DigestBudgets  # noqa: E402
+from eneo.completion_models.domain.model_kwargs_capabilities import (  # noqa: E402
+    SupportedModelKwargs,
+)
 from eneo.files.tabular_index import TABULAR_INDEX_MAX_CHARS  # noqa: E402
 from eneo.internal_mcp.digest import DigestModel  # noqa: E402
 from eneo.internal_mcp.files import (  # noqa: E402
@@ -469,7 +472,11 @@ def _patch_digest_files(monkeypatch, files, *, user_tenant_id):
 
     async def prepare(tool_ctx, assistant, claims, *, instruction):
         return DigestModel(
-            model=SimpleNamespace(id=uuid4(), name="m"),
+            model=SimpleNamespace(
+                id=uuid4(),
+                name="m",
+                get_supported_model_kwargs=lambda: SupportedModelKwargs(),
+            ),
             adapter=adapter,
             model_kwargs={},
             count=lambda text: len(text.split()),
