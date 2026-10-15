@@ -8,7 +8,8 @@ import type { IntegrationKnowledge } from "../knowledge";
 
 const api = vi.hoisted(() => ({ PATCH: vi.fn(), POST: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("@/features/jobs/use-jobs", () => ({ useJobs: () => ({ trackJob: vi.fn() }) }));
+const jobs = vi.hoisted(() => ({ trackJob: vi.fn() }));
+vi.mock("@/features/jobs/use-jobs", () => ({ useJobs: () => jobs }));
 vi.mock("@/features/spaces/use-space", async () => {
   const { makeSpace } = await import("@/features/spaces/testing/space-fixture");
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
@@ -22,6 +23,18 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
+
+const policies = {
+  id: "i1",
+  name: "Policydokument",
+  integration_type: "sharepoint",
+  permissions: ["edit", "delete"]
+} as IntegrationKnowledge;
+
+async function openMenu() {
+  fireEvent.click(screen.getByRole("button", { name: /Policydokument/ }));
+  await screen.findByRole("menuitem", { name: "Byt namn" });
+}
 
 it("shows an empty name at the field on rename, which takes focus", async () => {
   api.PATCH.mockReturnValue(new Promise(() => {}));
@@ -59,18 +72,7 @@ it("shows an empty name at the field on rename, which takes focus", async () => 
 
 it("keeps focus on a busy full sync and starts one", async () => {
   api.POST.mockReturnValue(new Promise(() => {}));
-  renderInApp(
-    <IntegrationActions
-      item={
-        {
-          id: "i1",
-          name: "Policydokument",
-          integration_type: "sharepoint",
-          permissions: ["edit", "delete"]
-        } as IntegrationKnowledge
-      }
-    />
-  );
+  renderInApp(<IntegrationActions item={policies} />);
   fireEvent.click(screen.getByRole("button", { name: /Policydokument/ }));
   const syncItem = await screen.findByRole("menuitem", { name: "Fullständig synk" });
   // The menu moves focus into itself on the next frame; let it, as a user would.
@@ -89,4 +91,28 @@ it("keeps focus on a busy full sync and starts one", async () => {
   expect(document.activeElement).toBe(busy);
   fireEvent.click(busy);
   expect(api.POST).toHaveBeenCalledTimes(1);
+});
+
+it("follows the full sync from the job it returned", async () => {
+  const job = { id: "job-1", name: "Policydokument", status: "queued" };
+  api.POST.mockResolvedValue({ data: job, response: new Response("{}", { status: 202 }) });
+  renderInApp(<IntegrationActions item={policies} />);
+  await openMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Fullständig synk" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Fullständig synk" });
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Starta fullständig synk" }));
+
+  // So a sync that is done before the first poll still counts as done.
+  await waitFor(() => expect(jobs.trackJob).toHaveBeenCalledWith(job));
+});
+
+it("offers a rename or full sync only of an item the user may edit", async () => {
+  // The backend reports no edit for the organisation's SharePoint to non-admins.
+  renderInApp(<IntegrationActions item={{ ...policies, permissions: ["read", "delete"] }} />);
+  fireEvent.click(screen.getByRole("button", { name: /Policydokument/ }));
+
+  expect(await screen.findByRole("menuitem", { name: "Ta bort" })).toBeTruthy();
+  expect(screen.queryByRole("menuitem", { name: "Fullständig synk" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Byt namn" })).toBeNull();
 });

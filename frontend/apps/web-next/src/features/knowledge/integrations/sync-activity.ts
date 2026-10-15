@@ -1,5 +1,5 @@
 import type { IntegrationKnowledge } from "../knowledge";
-import type { SyncLog } from "./queries";
+import type { SyncLog, SyncLogWindow } from "./queries";
 
 export type FileChange = { file: string; change: "added" | "updated" | "deleted" };
 
@@ -123,6 +123,26 @@ export function mergeFirstPage(
 export function appendPage(loaded: readonly SyncLog[], page: readonly SyncLog[]): SyncLog[] {
   const ids = new Set(loaded.map((log) => log.id));
   return [...loaded, ...page.filter((log) => !ids.has(log.id))];
+}
+
+/**
+ * An item's window with an older page added, or null when the page does not
+ * continue it. The page was read from where a window ending with the log
+ * `after` stopped; syncs that ran since only shift it toward newer logs, so it
+ * continues a window that still ends there or one whose last log it repeats.
+ * A window that ends elsewhere (a new revision whose first page did not reach
+ * the old end) would get a gap.
+ */
+export function continueWindow(
+  loaded: SyncLogWindow,
+  page: { items: readonly SyncLog[]; total_count: number },
+  after: string | undefined
+): SyncLogWindow | null {
+  const last = loaded.logs.at(-1)?.id;
+  if (last !== after && !page.items.some((log) => log.id === last)) return null;
+  const logs = appendPage(loaded.logs, page.items);
+  // Nothing new means the newest logs moved under the paging; stop rather than loop.
+  return { logs, total: logs.length > loaded.logs.length ? page.total_count : logs.length };
 }
 
 export type ActivityDay = { day: string; entries: ActivityEntry[] };

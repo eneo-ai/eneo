@@ -157,6 +157,7 @@ export function FolderOverview({
                 icon={<ExternalLink className="size-4" aria-hidden="true" />}
                 href={url}
                 target="_blank"
+                rel="noopener noreferrer"
               />
             ) : null}
             <IntegrationActions item={row.item} />

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   activityKind,
   appendPage,
+  continueWindow,
   groupActivityByDay,
   itemsToPage,
   mergeActivity,
@@ -196,6 +197,43 @@ describe("paging an item's logs", () => {
 
   it("appends an older page without the logs a newer sync pushed into it", () => {
     expect(ids(appendPage(logs("l5", "l4"), logs("l4", "l3")))).toEqual(["l5", "l4", "l3"]);
+  });
+});
+
+describe("continueWindow", () => {
+  const logs = (...names: string[]) => names.map((id) => log({ id }));
+  const window = (...names: string[]) => ({ logs: logs(...names), total: 30 });
+  const page = (...names: string[]) => ({ items: logs(...names), total_count: 30 });
+  const ids = (result: ReturnType<typeof continueWindow>) => result?.logs.map((entry) => entry.id);
+
+  it("continues a window that still ends where the page was asked from", () => {
+    // A new revision's first page put a newer sync above the same end.
+    expect(ids(continueWindow(window("l9", "l8", "l7"), page("l6", "l5"), "l7"))).toEqual([
+      "l9",
+      "l8",
+      "l7",
+      "l6",
+      "l5"
+    ]);
+  });
+
+  it("continues a window whose end the page repeats, without the repeats", () => {
+    expect(ids(continueWindow(window("l9", "l8"), page("l8", "l7"), "l9"))).toEqual([
+      "l9",
+      "l8",
+      "l7"
+    ]);
+  });
+
+  it("drops a page that would leave a gap below a new revision's first page", () => {
+    expect(continueWindow(window("l20", "l19"), page("l6", "l5"), "l7")).toBeNull();
+  });
+
+  it("stops paging when a page adds nothing", () => {
+    expect(continueWindow(window("l9", "l8"), page(), "l8")).toEqual({
+      logs: logs("l9", "l8"),
+      total: 2
+    });
   });
 });
 

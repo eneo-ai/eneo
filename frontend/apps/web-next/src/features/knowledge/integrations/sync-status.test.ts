@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { IntegrationKnowledge } from "../knowledge";
-import { latestTime, summarizeIntegrationSync } from "./sync-status";
+import {
+  compareSyncRevisions,
+  latestTime,
+  summarizeIntegrationSync,
+  syncRevision
+} from "./sync-status";
 
 type Metadata = NonNullable<IntegrationKnowledge["metadata"]>;
 
@@ -49,5 +54,31 @@ describe("latestTime", () => {
     ["2026-10-03T10:00:00Z", "2026-10-02T10:00:00Z", "2026-10-03T10:00:00Z"]
   ])("%s, %s → %s", (a, b, expected) => {
     expect(latestTime(a, b)).toBe(expected);
+  });
+});
+
+describe("compareSyncRevisions", () => {
+  const revision = (metadata: Partial<Metadata>) => syncRevision(item(metadata));
+  const never = revision({});
+  const synced = revision({
+    last_sync_attempted_at: "2026-10-01T10:00:00Z",
+    last_synced_at: "2026-10-01T10:05:00Z",
+    document_count: 4
+  });
+  const failedLater = revision({
+    last_sync_attempted_at: "2026-10-02T10:00:00+02:00",
+    last_synced_at: "2026-10-01T10:05:00Z",
+    document_count: 4
+  });
+  const legacy = revision({ last_synced_at: "2026-09-01T10:00:00Z", document_count: 4 });
+
+  it("orders an item's revisions by its latest attempt, then its latest success", () => {
+    expect([failedLater, never, synced, legacy].sort(compareSyncRevisions)).toEqual([
+      never,
+      legacy,
+      synced,
+      failedLater
+    ]);
+    expect(compareSyncRevisions(synced, synced)).toBe(0);
   });
 });

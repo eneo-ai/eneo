@@ -20,7 +20,9 @@ import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { cn } from "@/lib/utils";
 import type { IntegrationKnowledge } from "../../knowledge";
 import {
+  addOlderSyncLogs,
   fetchSyncLogPage,
+  shownSyncLogWindow,
   syncLogWindowQueryOptions,
   type SyncLog,
   type SyncLogWindow
@@ -29,7 +31,6 @@ import { describeSkipReason } from "../skip-reasons";
 import { isCredentialsError } from "../source-problems";
 import {
   activityKind,
-  appendPage,
   groupActivityByDay,
   itemsToPage,
   mergeActivity,
@@ -69,10 +70,11 @@ const DETAILS_CLASS =
 
 type Translate = ReturnType<typeof useTranslations>;
 
-type WindowKey = ReturnType<typeof syncLogWindowQueryOptions>["queryKey"];
+/** A shown folder's loaded history. */
+type LoadedWindow = SyncLogWindow & { item: IntegrationKnowledge };
 
-/** A shown folder's loaded history, and where it is cached. */
-type LoadedWindow = SyncLogWindow & { item: IntegrationKnowledge; queryKey: WindowKey };
+/** "Show older" for the folder selection it was pressed in (null: every folder). */
+type OlderRequest = { selection: string | null; targets: LoadedWindow[] };
 
 function syncTitle(log: SyncLog, kind: ActivityKind, t: Translate): string {
   switch (kind) {
@@ -298,45 +300,46 @@ export function ActivityView({
 
   const multiple = items.length > 1;
   const shown = selectedId ? items.filter((item) => item.id === selectedId) : items;
-  const windows = shown.map((item) => syncLogWindowQueryOptions(browserApi, queryClient, item));
-  const results = useQueries({ queries: windows });
+  const results = useQueries({
+    queries: shown.map((item) => syncLogWindowQueryOptions(browserApi, queryClient, item))
+  });
   const loaded = shown.flatMap((item, index): LoadedWindow[] => {
-    const data = results[index]?.data;
-    const queryKey = windows[index]?.queryKey;
-    return data && queryKey ? [{ ...data, item, queryKey }] : [];
+    const result = results[index];
+    // A new revision whose first page failed keeps the history shown before, beside the error.
+    const data =
+      result?.data ?? (result?.isError ? shownSyncLogWindow(queryClient, item.id) : undefined);
+    return data ? [{ ...data, item }] : [];
   });
 
   // Kept apart from the mutation's own error, which a retry clears at once:
   // the banner (and the focused retry button in it) stays until one succeeds.
-  const [olderError, setOlderError] = useState<unknown>(null);
+  // It and the busy state belong to the folder selection they came from.
+  const [olderError, setOlderError] = useState<{
+    selection: string | null;
+    error: unknown;
+  } | null>(null);
   const older = useMutation({
-    mutationFn: (targets: LoadedWindow[]) =>
+    mutationFn: ({ targets }: OlderRequest) =>
       Promise.all(
         targets.map(async (target) => ({
           target,
           page: await fetchSyncLogPage(browserApi, target.item.id, target.logs.length)
         }))
       ),
-    onSuccess: (pages) => {
+    onSuccess: (pages, { selection }) => {
       for (const { target, page } of pages) {
-        queryClient.setQueryData(target.queryKey, (current) => {
-          if (!current) return current;
-          const logs = appendPage(current.logs, page.items);
-          // Nothing new means the newest logs moved under the paging; stop rather than loop.
-          return {
-            logs,
-            total: logs.length > current.logs.length ? page.total_count : logs.length
-          };
-        });
+        addOlderSyncLogs(queryClient, target.item.id, page, target.logs.at(-1)?.id);
       }
-      setOlderError(null);
+      setOlderError((current) => (current?.selection === selection ? null : current));
       // The button goes once nothing older is left, the banner once a retry worked.
       rescueFocus(eventsRef.current);
     },
-    onError: (error) => setOlderError(error)
+    onError: (error, { selection }) => setOlderError({ selection, error })
   });
+  const olderPending = older.isPending && older.variables.selection === selectedId;
+  const olderFailure = olderError?.selection === selectedId ? olderError : null;
   const showOlder = () => {
-    if (!older.isPending) older.mutate(itemsToPage(loaded));
+    if (!olderPending) older.mutate({ selection: selectedId, targets: itemsToPage(loaded) });
   };
 
   const isLoaded = loaded.length === shown.length;
@@ -367,7 +370,10 @@ export function ActivityView({
                 ...folderOptions
               ]}
               value={selectedId ?? ALL_FOLDERS}
-              onChange={(value) => onSelect(value === ALL_FOLDERS ? null : value)}
+              onChange={(value) => {
+                setOlderError(null);
+                onSelect(value === ALL_FOLDERS ? null : value);
+              }}
               size="sm"
               width="100%"
             />
@@ -383,11 +389,11 @@ export function ActivityView({
               for (const result of failed) void result.refetch();
             }}
           />
-        ) : olderError !== null ? (
+        ) : olderFailure !== null ? (
           <ListError
             title={t("sync_history_load_failed")}
-            error={olderError}
-            isRetrying={older.isPending}
+            error={olderFailure.error}
+            isRetrying={olderPending}
             onRetry={showOlder}
           />
         ) : null}
@@ -407,7 +413,7 @@ export function ActivityView({
         {hasMore ? (
           <Button
             label={t("integration_activity_show_older")}
-            isLoading={older.isPending}
+            isLoading={olderPending}
             isInterruptible
             onClick={showOlder}
             className="w-fit"

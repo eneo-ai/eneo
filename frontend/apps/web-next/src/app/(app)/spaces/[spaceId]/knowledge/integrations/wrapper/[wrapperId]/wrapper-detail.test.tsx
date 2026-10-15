@@ -53,9 +53,8 @@ vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   return { useSpace: () => useSpaceFromQuery(() => state.space as Space) };
 });
-vi.mock("@/features/jobs/use-jobs", () => ({
-  useJobs: () => ({ trackJob: () => {}, queueUploads: () => {} })
-}));
+const jobs = vi.hoisted(() => ({ trackJob: vi.fn(), queueUploads: () => {} }));
+vi.mock("@/features/jobs/use-jobs", () => ({ useJobs: () => jobs }));
 vi.mock("@/lib/api/browser", () => {
   const reply = async (answer: Answer | Promise<Answer>) => {
     const { data, error, status = error === undefined ? 200 : 500 } = await answer;
@@ -109,14 +108,23 @@ vi.mock("@/lib/api/browser", () => {
         state.synced.push(itemId);
         return reply(
           state.refuseSync.includes(itemId)
-            ? { error: { message: "Busy" }, status: 409 }
-            : { data: {} }
+            ? {
+                error: {
+                  message:
+                    "Admin permission is required to sync organization-wide SharePoint integrations.",
+                  eneo_error_code: 9001
+                },
+                status: 403
+              }
+            : { data: { id: `job-${itemId}`, name: itemId, status: "queued" }, status: 202 }
         );
       }
     }
   };
 });
 
+import { WrapperActions } from "@/features/knowledge/integrations/actions";
+import type { IntegrationKnowledge } from "@/features/knowledge/knowledge";
 import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
 import { WrapperDetail } from "./wrapper-detail.client";
 
@@ -132,6 +140,7 @@ afterEach(() => {
   state.synced = [];
   state.refuseSync = [];
   for (const shown of Object.values(toasts)) shown.mockClear();
+  jobs.trackJob.mockClear();
   state.onDelete = () => {};
   links.length = 0;
   vi.restoreAllMocks();
@@ -144,16 +153,17 @@ function liveRegion() {
 
 const folder = { wrapper_id: "w1", wrapper_name: "Byggnad" };
 
-function show(
-  items: Record<string, unknown>[],
-  route = "/spaces/space-1/knowledge/integrations/wrapper/w1"
-) {
+const WRAPPER_PAGE = "/spaces/space-1/knowledge/integrations/wrapper/w1";
+
+function show(items: Record<string, unknown>[], route = WRAPPER_PAGE) {
   state.space = makeSpace({
     integrations: items.map((item) => makeIntegration({ ...folder, ...item }))
   });
   setRoute(route);
   return renderInApp(<WrapperDetail wrapperId="w1" />);
 }
+
+const job = (itemId: string) => ({ id: `job-${itemId}`, name: itemId, status: "queued" });
 
 const mall = {
   id: "i1",
@@ -412,11 +422,14 @@ describe("WrapperDetail", () => {
     show([mall, { ...protokoll, url: "http://kommun.sharepoint.com/sites/protokoll" }]);
 
     const overview = screen.getByRole("table", { name: "Mappar i Byggnad" });
+    const external = (link: HTMLElement) => [
+      link.getAttribute("href"),
+      link.getAttribute("target"),
+      link.getAttribute("rel")
+    ];
     expect(
-      within(overview)
-        .getByRole("link", { name: /Öppna i SharePoint: Mallar/ })
-        .getAttribute("href")
-    ).toBe("https://kommun.sharepoint.com/sites/avtal");
+      external(within(overview).getByRole("link", { name: /Öppna i SharePoint: Mallar/ }))
+    ).toEqual(["https://kommun.sharepoint.com/sites/avtal", "_blank", "noopener noreferrer"]);
     expect(
       within(overview).queryByRole("link", { name: /Öppna i SharePoint: Protokoll/ })
     ).toBeNull();
@@ -424,13 +437,18 @@ describe("WrapperDetail", () => {
 
     fireEvent.click(within(overview).getByRole("link", { name: "Mallar" }));
     const documents = await screen.findByRole("table", { name: "Dokument i Mallar" });
-    expect(within(documents).getByRole("link", { name: /Avtalsmall\.docx/ })).toBeTruthy();
+    expect(external(within(documents).getByRole("link", { name: /Avtalsmall\.docx/ }))).toEqual([
+      "https://kommun.sharepoint.com/sites/avtal/Avtalsmall.docx",
+      "_blank",
+      "noopener noreferrer"
+    ]);
     expect(within(documents).queryByRole("link", { name: /Gammal\.docx/ })).toBeNull();
     const mallar = screen.getByRole("region", { name: "Mallar" });
     // The folder's own link, beside the document's.
-    expect(within(mallar).getAllByRole("link", { name: /^Öppna i SharePoint(?!:)/ })).toHaveLength(
-      1
-    );
+    const folderLinks = within(mallar).getAllByRole("link", { name: /^Öppna i SharePoint(?!:)/ });
+    expect(folderLinks.map(external)).toEqual([
+      ["https://kommun.sharepoint.com/sites/avtal", "_blank", "noopener noreferrer"]
+    ]);
 
     const nav = screen.getByRole("navigation", { name: "Mappar" });
     fireEvent.click(within(nav).getByRole("link", { name: /Protokoll/ }));
@@ -617,28 +635,69 @@ describe("WrapperDetail navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Byggnad" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Synka om alla objekt" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Synka om alla objekt" });
-    expect(within(dialog).getByText(/alla 1 objekt i "Byggnad"/)).toBeTruthy();
+    expect(
+      within(dialog).getByText(/^Detta startar en fullständig omsynkning av objektet i "Byggnad"\./)
+    ).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Starta fullständig synk" }));
 
     await waitFor(() =>
       expect(toasts.success).toHaveBeenCalledWith("Omsynkning köad för 1 objekt")
     );
     expect(state.synced).toEqual(["i1"]);
+    // Followed from the job it returned, so a sync done before the first poll still counts.
+    expect(jobs.trackJob).toHaveBeenCalledWith([job("i1")]);
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 
-  it("says how many folders could not be queued for a resync, and queues the rest once", async () => {
+  it("says how many folders could not be queued for a resync and why, and queues the rest once", async () => {
     state.refuseSync = ["i2"];
     show([mall, protokoll]);
 
     fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Byggnad" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Synka om alla objekt" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Synka om alla objekt" });
+    expect(within(dialog).getByText(/alla 2 objekt i "Byggnad"/)).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Starta fullständig synk" }));
 
-    await waitFor(() => expect(toasts.error).toHaveBeenCalledWith("1 av 2 objekt kunde inte köas"));
+    await waitFor(() =>
+      expect(toasts.error).toHaveBeenCalledWith("1 av 2 objekt kunde inte köas", {
+        description: "Du saknar behörighet att utföra denna åtgärd."
+      })
+    );
     expect(state.synced).toEqual(["i1", "i2"]);
+    expect(jobs.trackJob).toHaveBeenCalledWith([job("i1")]);
     expect(toasts.success).not.toHaveBeenCalled();
+  });
+
+  it("says why a one-folder source could not be resynced", async () => {
+    state.refuseSync = ["i1"];
+    show([mall]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Byggnad" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Synka om alla objekt" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Synka om alla objekt" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Starta fullständig synk" }));
+
+    await waitFor(() =>
+      expect(toasts.error).toHaveBeenCalledWith("Omsynkningen kunde inte köas", {
+        description: "Du saknar behörighet att utföra denna åtgärd."
+      })
+    );
+    expect(jobs.trackJob).not.toHaveBeenCalled();
+  });
+
+  it("offers no rename or resync of folders the user may not edit", async () => {
+    // The backend reports no edit for the organisation's SharePoint to non-admins.
+    const readOnly = { permissions: ["read", "delete"] };
+    show([
+      { ...mall, ...readOnly },
+      { ...protokoll, ...readOnly }
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Byggnad" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Ta bort grupp" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Synka om alla objekt" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Byt namn på grupp" })).toBeNull();
   });
 
   it("still says so when the source went away by other means", async () => {
@@ -650,6 +709,31 @@ describe("WrapperDetail navigation", () => {
 
     expect(await screen.findByText("Inga resultat hittades")).toBeTruthy();
     expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it("says the source is gone when Back leads to its page after a delete from the list", async () => {
+    // The list's row menu deletes it ...
+    const items = [makeIntegration({ ...folder, ...mall })] as IntegrationKnowledge[];
+    state.space = makeSpace({ integrations: items });
+    state.onDelete = () => {
+      state.space = makeSpace();
+    };
+    setRoute("/spaces/space-1/knowledge?tab=integrations");
+    const list = renderInApp(
+      <WrapperActions wrapperId="w1" wrapperName="Byggnad" items={items} canEdit canDelete />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Byggnad" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort grupp" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort grupp" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    list.unmount();
+
+    // ... and Back shows its page again, from the router's cache.
+    setRoute(WRAPPER_PAGE);
+    renderInApp(<WrapperDetail wrapperId="w1" />, { queryClient: list.queryClient });
+
+    expect(screen.getByRole("heading", { level: 1, name: "Inga resultat hittades" })).toBeTruthy();
   });
 
   it("shows the history of the folder chosen on Activity, and keeps that folder on Contents", async () => {

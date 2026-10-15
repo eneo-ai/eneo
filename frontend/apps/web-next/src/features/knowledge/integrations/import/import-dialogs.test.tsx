@@ -8,7 +8,8 @@ const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn() }));
 const space = vi.hoisted(() => ({ current: null as unknown }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("next/navigation", () => import("@/test/navigation"));
-vi.mock("@/features/jobs/use-jobs", () => ({ useJobs: () => ({ trackJob: vi.fn() }) }));
+const jobs = vi.hoisted(() => ({ trackJob: vi.fn() }));
+vi.mock("@/features/jobs/use-jobs", () => ({ useJobs: () => jobs }));
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   return { useSpace: () => useSpaceFromQuery(() => space.current as Space) };
@@ -52,7 +53,8 @@ it("Confluence: shows a missing space at the list on import, and moves focus to 
       ]
     })
   );
-  api.POST.mockImplementation(() => ok({}));
+  const job = { id: "job-1", name: "Personal", status: "queued" };
+  api.POST.mockImplementation(() => ok(job));
   renderInApp(
     <ConfluenceImportDialog
       open
@@ -83,6 +85,8 @@ it("Confluence: shows a missing space at the list on import, and moves focus to 
   expect(api.POST.mock.calls[0]?.[1]).toMatchObject({
     body: { key: "HR", name: "Personal", embedding_model: { id: "embed-1" } }
   });
+  // Its first sync is followed from the job the import returned.
+  await waitFor(() => expect(jobs.trackJob).toHaveBeenCalledWith(job));
 });
 
 it("Confluence: moves focus to the warning when the space has no embedding model", async () => {
@@ -125,7 +129,19 @@ it("SharePoint: shows what is missing where it is chosen, one step at a time", a
           drive_id: "drive-1"
         })
   );
-  api.POST.mockImplementation(() => ok({ created_count: 2, failed_count: 0 }));
+  const created = (index: number, name: string) => ({
+    index,
+    name,
+    status: "created",
+    job: { id: `job-${index}`, name, status: "queued" }
+  });
+  api.POST.mockImplementation(() =>
+    ok({
+      created_count: 2,
+      failed_count: 0,
+      items: [created(0, "Policyer"), created(1, "Rutiner")]
+    })
+  );
   renderInApp(
     <SharePointImportDialog
       open
@@ -176,4 +192,11 @@ it("SharePoint: shows what is missing where it is chosen, one step at a time", a
   fireEvent.click(importButton);
   await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
   expect(api.POST.mock.calls[0]?.[1]).toMatchObject({ body: { wrapper_name: "Styrdokument" } });
+  // Every first sync is followed from the job the import returned.
+  await waitFor(() =>
+    expect(jobs.trackJob).toHaveBeenCalledWith([
+      created(0, "Policyer").job,
+      created(1, "Rutiner").job
+    ])
+  );
 });

@@ -223,8 +223,9 @@ the default name on a backend name collision (9017).
   the feed is open; 2 s while it is down and something runs or was just
   started; paused in hidden tabs) and compares snapshots with
   `job-transitions.ts`. Every job
-  the client starts goes through `trackJob(job)` so its completion counts even
-  when the first poll already says "complete". A finished job toasts and
+  the client starts goes through `trackJob(job)` (`trackJob(jobs)` for calls
+  made together) so its completion counts even when the first poll already
+  says "complete". A finished job toasts and
   announces (`job-feedback.ts`), refreshes the query keys in
   `job-invalidation.ts` (add a prefix there when a new kind of job lands
   somewhere new) and records its info-blob in `recent-results.ts`, which the

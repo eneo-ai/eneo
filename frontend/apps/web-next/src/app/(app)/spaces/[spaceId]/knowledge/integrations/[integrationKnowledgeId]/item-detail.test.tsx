@@ -40,6 +40,8 @@ vi.mock("@/lib/api/browser", async () => {
   };
 });
 
+import { IntegrationActions } from "@/features/knowledge/integrations/actions";
+import type { IntegrationKnowledge } from "@/features/knowledge/knowledge";
 import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
 import { ItemDetail } from "./item-detail.client";
 
@@ -48,21 +50,28 @@ afterEach(() => {
   state.deleted = [];
 });
 
-function show(fields: Record<string, unknown> = {}) {
-  state.space = makeSpace({
-    integrations: [
-      makeIntegration({
-        id: "i1",
-        name: "Avtal",
-        selected_item_type: "file",
-        permissions: ["read", "edit", "delete"],
-        metadata: { size: 0, last_synced_at: "2026-10-14T08:00:00Z", document_count: 1 },
-        ...fields
-      })
-    ]
+function avtal(fields: Record<string, unknown> = {}) {
+  return makeIntegration({
+    id: "i1",
+    name: "Avtal",
+    selected_item_type: "file",
+    permissions: ["read", "edit", "delete"],
+    metadata: { size: 0, last_synced_at: "2026-10-14T08:00:00Z", document_count: 1 },
+    ...fields
   });
+}
+
+function show(fields: Record<string, unknown> = {}) {
+  state.space = makeSpace({ integrations: [avtal(fields)] });
   setRoute("/spaces/space-1/knowledge/integrations/i1");
   return renderInApp(<ItemDetail itemId="i1" />);
+}
+
+async function deleteFromMenu() {
+  fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Avtal" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Ta bort integrationskunskap" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
 }
 
 describe("ItemDetail", () => {
@@ -75,9 +84,11 @@ describe("ItemDetail", () => {
     const vendor = screen.getByText("SharePoint");
     expect(vendor.parentElement?.querySelector("img")).toBeTruthy();
     expect(vendor.parentElement?.textContent).toContain("1 fil");
-    expect(screen.getByRole("link", { name: /Öppna i SharePoint/ }).getAttribute("href")).toBe(
-      "https://kommun.sharepoint.com/sites/avtal"
-    );
+    const atSource = screen.getByRole("link", { name: /Öppna i SharePoint/ });
+    expect(atSource.getAttribute("href")).toBe("https://kommun.sharepoint.com/sites/avtal");
+    // A new tab that cannot reach back into Eneo, and is not told where it came from.
+    expect(atSource.getAttribute("target")).toBe("_blank");
+    expect(atSource.getAttribute("rel")).toBe("noopener noreferrer");
     await expectNoAxeViolations(container);
   });
 
@@ -100,10 +111,7 @@ describe("ItemDetail", () => {
     );
     observer.observe(document.body, { childList: true, subtree: true });
 
-    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Avtal" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
-    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort integrationskunskap" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+    await deleteFromMenu();
 
     // Replaced, so Back does not lead to a page that is gone.
     await waitFor(() =>
@@ -115,5 +123,35 @@ describe("ItemDetail", () => {
     // Nothing on its way out, not the "not found" state.
     expect(notFound).not.toContain(true);
     expect(screen.queryByRole("heading", { level: 1, name: "Avtal" })).toBeNull();
+  });
+
+  it("says the item is gone when Back leads to its page after a delete from the list", async () => {
+    // The list's row menu deletes it ...
+    state.space = makeSpace({ integrations: [avtal()] });
+    setRoute("/spaces/space-1/knowledge?tab=integrations");
+    const list = renderInApp(<IntegrationActions item={avtal() as IntegrationKnowledge} />);
+    await deleteFromMenu();
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(state.deleted).toHaveLength(1);
+    list.unmount();
+
+    // ... and Back shows its page again, from the router's cache.
+    setRoute("/spaces/space-1/knowledge/integrations/i1");
+    renderInApp(<ItemDetail itemId="i1" />, { queryClient: list.queryClient });
+
+    expect(screen.getByRole("heading", { level: 1, name: "Inga resultat hittades" })).toBeTruthy();
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it("says the item is gone on a later visit to the page it was deleted from", async () => {
+    const page = show();
+    await deleteFromMenu();
+    await waitFor(() => expect(router.replace).toHaveBeenCalledTimes(1));
+    page.unmount();
+
+    setRoute("/spaces/space-1/knowledge/integrations/i1");
+    renderInApp(<ItemDetail itemId="i1" />, { queryClient: page.queryClient });
+
+    expect(screen.getByRole("heading", { level: 1, name: "Inga resultat hittades" })).toBeTruthy();
   });
 });

@@ -1,12 +1,12 @@
-import { queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
+import { queryOptions, type Query, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import type { IntegrationKnowledge } from "../knowledge";
 import type { SkippedDocuments } from "./source-problems";
-import { mergeFirstPage } from "./sync-activity";
+import { continueWindow, mergeFirstPage } from "./sync-activity";
 import type { ProgressById } from "./sync-progress";
-import { syncRevision } from "./sync-status";
+import { compareSyncRevisions, syncRevision } from "./sync-status";
 
 export type UserIntegration = Schema<"UserIntegration">;
 export type IntegrationPreview = Schema<"IntegrationPreviewData">;
@@ -87,17 +87,28 @@ export const DOCUMENTS_PAGE_SIZE = 50;
 // on screen loads them again, and the list shown before stays until it has.
 
 /**
- * The data cached last under `queryKey` or a longer key, such as the list of
- * an item's earlier revision. A new key in `useQueries` gets a new observer,
- * which has no previous data for `placeholderData` to keep.
+ * The query of an item's newest revision with data under `itemKey` (the key
+ * before the revision), such as the list of an earlier revision while the
+ * current one loads. A new key in `useQueries` gets a new observer, which has
+ * no previous data for `placeholderData` to keep. By revision, not by when
+ * the data was written: an older page can still land in an earlier revision.
  */
-function latestCached<T>(queryClient: QueryClient, queryKey: QueryKey): T | undefined {
+function latestCachedQuery(queryClient: QueryClient, itemKey: QueryKey): Query | undefined {
+  const revision = (query: Query) => String(query.queryKey[itemKey.length] ?? "");
   const [latest] = queryClient
     .getQueryCache()
-    .findAll({ queryKey })
+    .findAll({ queryKey: itemKey })
     .filter((query) => query.state.data !== undefined)
-    .sort((a, b) => b.state.dataUpdatedAt - a.state.dataUpdatedAt);
-  return latest?.state.data as T | undefined;
+    .sort(
+      (a, b) =>
+        compareSyncRevisions(revision(b), revision(a)) ||
+        b.state.dataUpdatedAt - a.state.dataUpdatedAt
+    );
+  return latest;
+}
+
+function latestCached<T>(queryClient: QueryClient, itemKey: QueryKey): T | undefined {
+  return latestCachedQuery(queryClient, itemKey)?.state.data as T | undefined;
 }
 
 /** One page of a synced item's documents; `q` matches the title, the path or a property value. */
@@ -183,20 +194,51 @@ export function fetchSyncLogPage(
 /** An item's sync logs as loaded so far, newest first, and how many it has in all. */
 export type SyncLogWindow = { logs: SyncLog[]; total: number };
 
+const syncLogItemKey = (itemId: string) => ["integrations", "sync-logs", itemId];
+
+/**
+ * The sync history an item shows: its current revision's window, or while
+ * that loads (or after it failed to) the newest one cached before it.
+ */
+export function shownSyncLogWindow(
+  queryClient: QueryClient,
+  itemId: string
+): SyncLogWindow | undefined {
+  return latestCached<SyncLogWindow>(queryClient, syncLogItemKey(itemId));
+}
+
+/**
+ * Adds an older page to the history the item shows now (`shownSyncLogWindow`),
+ * which a new revision may have replaced since the page was asked for; while
+ * the new one loads, its first page takes the page over from there. A page
+ * that does not continue that history is dropped (`continueWindow`), and
+ * "show older" asks again from where it now ends.
+ */
+export function addOlderSyncLogs(
+  queryClient: QueryClient,
+  itemId: string,
+  page: Pick<SyncLogPage, "items" | "total_count">,
+  after: string | undefined
+): void {
+  const query = latestCachedQuery(queryClient, syncLogItemKey(itemId));
+  const shown = query?.state.data as SyncLogWindow | undefined;
+  const next = shown ? continueWindow(shown, page, after) : null;
+  if (query && next) queryClient.setQueryData<SyncLogWindow>(query.queryKey, next);
+}
+
 /**
  * An item's sync history: its newest page, and the older pages "show older"
- * adds to the window (`setQueryData`). A new revision loads the newest page
- * again and keeps the older pages loaded before when it reaches them.
+ * adds to the window (`addOlderSyncLogs`). A new revision loads the newest
+ * page again and keeps the older pages loaded before when it reaches them.
  */
 export function syncLogWindowQueryOptions(
   api: EneoClient,
   queryClient: QueryClient,
   item: IntegrationKnowledge
 ) {
-  const itemKey = ["integrations", "sync-logs", item.id];
-  const latest = () => latestCached<SyncLogWindow>(queryClient, itemKey);
+  const latest = () => shownSyncLogWindow(queryClient, item.id);
   return queryOptions({
-    queryKey: [...itemKey, syncRevision(item)],
+    queryKey: [...syncLogItemKey(item.id), syncRevision(item)],
     queryFn: async (): Promise<SyncLogWindow> => {
       const page = await fetchSyncLogPage(api, item.id, 0);
       return {

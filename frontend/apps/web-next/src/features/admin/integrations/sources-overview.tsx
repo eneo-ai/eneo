@@ -264,7 +264,15 @@ function OverviewContent({
               columns={columns}
               idKey="id"
               aria-labelledby={labelledBy}
-              emptyState={<EmptyState title={t("no_results_found")} isCompact framed={false} />}
+              emptyState={
+                // Under the section's own h2.
+                <EmptyState
+                  title={t("no_results_found")}
+                  headingLevel={3}
+                  isCompact
+                  framed={false}
+                />
+              }
             />
           </SpaceTableFrame>
         </>

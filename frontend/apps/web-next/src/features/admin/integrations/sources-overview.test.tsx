@@ -133,7 +133,10 @@ describe("SourcesOverview", () => {
     await waitFor(() => expect(sourceLinks(table)).toEqual(["Intranätet"]));
 
     fireEvent.change(search, { target: { value: "ekonomi" } });
-    expect(await within(table).findByText("Inga resultat hittades")).toBeTruthy();
+    // Under the section's heading (h2).
+    expect(
+      await within(table).findByRole("heading", { level: 3, name: "Inga resultat hittades" })
+    ).toBeTruthy();
   });
 
   it("names a source of a space the admin cannot open without linking to it", async () => {

@@ -341,6 +341,117 @@ describe("ActivityView", () => {
     expect(await screen.findByRole("heading", { name: "De senaste 21 synkarna" })).toBeTruthy();
   });
 
+  it("adds older events that arrive after a new revision loaded to that revision's history", async () => {
+    const logs = { a: hourly("a", 30, "2026-10-15T12:00:00Z") };
+    serve(logs);
+    const { rerender } = renderInApp(<Activity items={[avtal]} />);
+    await screen.findByText("av totalt 30 synkar");
+
+    // The older page is read when "Visa äldre händelser" is pressed but answers late.
+    const answer = get.getMockImplementation()!;
+    let release: () => void = () => {};
+    get.mockImplementationOnce((...args: unknown[]) => {
+      const page: unknown = answer(...args);
+      return new Promise((resolve) => (release = () => resolve(page)));
+    });
+    fireEvent.click(showOlder()!);
+    await waitFor(() => expect(requests()).toHaveLength(2));
+
+    // Meanwhile a sync lands, and the new revision's first page is in first.
+    logs.a = [...hourly("new", 1, "2026-10-15T13:00:00Z", { files_processed: 7 }), ...logs.a];
+    rerender(<Activity items={[folder("a", "Avtal", "2026-10-15T13:00:30Z")]} />);
+    expect(await screen.findByText("7 fil(er) synkad")).toBeTruthy();
+    expect(timelineRows()).toHaveLength(11);
+
+    await act(async () => release());
+
+    // The press is not lost: the older events join the history on screen.
+    await waitFor(() => expect(timelineRows()).toHaveLength(21));
+    // While the next revision loads, the newest history stays, with its newest sync.
+    get.mockImplementationOnce(() => new Promise(() => {}));
+    rerender(<Activity items={[folder("a", "Avtal", "2026-10-15T14:00:30Z")]} />);
+    expect(screen.getByText("7 fil(er) synkad")).toBeTruthy();
+    expect(timelineRows()).toHaveLength(21);
+  });
+
+  it("keeps the history on screen beside the error when a new revision fails to load", async () => {
+    const logs = { a: hourly("a", 12, "2026-10-15T12:00:00Z") };
+    serve(logs);
+    const { rerender } = renderInApp(<Activity items={[avtal]} />);
+    await waitFor(() => expect(timelineRows()).toHaveLength(10));
+
+    serve(logs, () => true);
+    rerender(<Activity items={[folder("a", "Avtal", "2026-10-15T13:00:30Z")]} />);
+
+    expect(await screen.findByText("Kunde inte läsa in synkhistoriken")).toBeTruthy();
+    expect(timelineRows()).toHaveLength(10);
+    expect(screen.getByRole("heading", { name: "De senaste 10 synkarna" })).toBeTruthy();
+
+    logs.a = [...hourly("new", 1, "2026-10-15T13:00:00Z", { files_processed: 7 }), ...logs.a];
+    serve(logs);
+    fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+    expect(await screen.findByText("7 fil(er) synkad")).toBeTruthy();
+    expect(screen.queryByText("Kunde inte läsa in synkhistoriken")).toBeNull();
+  });
+
+  it("keeps a folder's failure to show older events with that folder", async () => {
+    const busy = folder("busy", "Protokoll");
+    const quiet = folder("quiet", "Kvartalsrapporter");
+    serve(
+      {
+        busy: hourly("busy", 30, "2026-10-15T12:00:00Z"),
+        quiet: hourly("quiet", 12, "2026-06-01T09:00:00Z")
+      },
+      ({ item, skip }) => item === "busy" && skip > 0
+    );
+    renderInApp(<Activity items={[busy, quiet]} />);
+    await chooseFolder("Protokoll");
+    fireEvent.click(await screen.findByRole("button", { name: "Visa äldre händelser" }));
+    expect(await screen.findByText("Kunde inte läsa in synkhistoriken")).toBeTruthy();
+
+    await chooseFolder("Kvartalsrapporter");
+
+    expect(await screen.findByRole("heading", { name: "De senaste 10 synkarna" })).toBeTruthy();
+    // Protokoll's failure is not this folder's, and its retry would page this one.
+    expect(screen.queryByText("Kunde inte läsa in synkhistoriken")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Försök igen" })).toBeNull();
+    fireEvent.click(showOlder()!);
+    await waitFor(() => expect(timelineRows()).toHaveLength(12));
+    expect(requests().at(-1)).toEqual({ item: "quiet", skip: 10, limit: 10 });
+  });
+
+  it("does not carry older events still loading for one folder over to another", async () => {
+    const busy = folder("busy", "Protokoll");
+    const quiet = folder("quiet", "Kvartalsrapporter");
+    serve({
+      busy: hourly("busy", 30, "2026-10-15T12:00:00Z"),
+      quiet: hourly("quiet", 12, "2026-06-01T09:00:00Z")
+    });
+    renderInApp(<Activity items={[busy, quiet]} />);
+    await chooseFolder("Protokoll");
+    let fail: () => void = () => {};
+    get.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          fail = () =>
+            resolve({ error: { message: "Boom" }, response: new Response("{}", { status: 500 }) });
+        })
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Visa äldre händelser" }));
+    await waitFor(() => expect(showOlder()!.getAttribute("aria-busy")).toBe("true"));
+
+    await chooseFolder("Kvartalsrapporter");
+
+    expect(await screen.findByRole("heading", { name: "De senaste 10 synkarna" })).toBeTruthy();
+    expect(showOlder()!.getAttribute("aria-busy")).toBeNull();
+    fireEvent.click(showOlder()!);
+    await waitFor(() => expect(timelineRows()).toHaveLength(12));
+    expect(requests().at(-1)).toEqual({ item: "quiet", skip: 10, limit: 10 });
+    // Protokoll's request fails after the switch: that is Protokoll's problem.
+    await act(async () => fail());
+    expect(screen.queryByText("Kunde inte läsa in synkhistoriken")).toBeNull();
+  });
+
   it("keeps the shown events when older ones fail to load, until a retry works", async () => {
     const logs = { a: Array.from({ length: 12 }, (_, i) => log(`a${i}`, 14 - i)) };
     serve(logs, ({ skip }) => skip > 0);

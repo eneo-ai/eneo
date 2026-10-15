@@ -2,7 +2,12 @@
 
 import type { DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
-import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useMutationState,
+  useQueryClient,
+  type QueryClient
+} from "@tanstack/react-query";
 import { Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
@@ -29,7 +34,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
@@ -40,17 +45,34 @@ import type { IntegrationSource } from "./sources";
 
 type SourceRef = Pick<IntegrationSource, "kind" | "id">;
 
+/** Marks a removal from the source's own page (the actions given `onDeleted`). */
 function sourceRemovalKey(spaceId: string, source: SourceRef) {
   return ["integrations", "remove", spaceId, source.kind, source.id];
+}
+
+/** Mutation ids grow, so a mutation started later has a higher one. */
+function latestMutationId(queryClient: QueryClient): number {
+  return queryClient
+    .getMutationCache()
+    .getAll()
+    .reduce((latest, mutation) => Math.max(latest, mutation.mutationId), 0);
 }
 
 /**
  * The source is being deleted or was deleted from this page, so a page that
  * showed only it is leaving rather than looking at a source that went away.
+ * Only the page's own actions mark a removal, and one from before the page
+ * opened (on an earlier visit that Back can return to) does not count: the
+ * source is then simply gone.
  */
 export function useIsRemovingSource(spaceId: string, source: SourceRef): boolean {
+  const queryClient = useQueryClient();
+  const [openedAfter] = useState(() => latestMutationId(queryClient));
   const statuses = useMutationState({
-    filters: { mutationKey: sourceRemovalKey(spaceId, source) },
+    filters: {
+      mutationKey: sourceRemovalKey(spaceId, source),
+      predicate: (mutation) => mutation.mutationId > openedAfter
+    },
     select: (mutation) => mutation.state.status
   });
   return statuses.some((status) => status === "pending" || status === "success");
@@ -59,7 +81,7 @@ export function useIsRemovingSource(spaceId: string, source: SourceRef): boolean
 /**
  * Row actions (rename / full sync / delete) for one integration knowledge item.
  * `onDeleted` runs once the deleted item has left the space, e.g. to leave a
- * page that only showed it.
+ * page that only showed it (`useIsRemovingSource`).
  */
 export function IntegrationActions({
   item,
@@ -104,8 +126,8 @@ export function IntegrationActions({
           { params: { path: { id: space.id, integration_knowledge_id: item.id } } }
         )
       ),
-    onSuccess: () => {
-      trackJob();
+    onSuccess: (job) => {
+      trackJob(job);
       invalidate();
       void queryClient.invalidateQueries({
         queryKey: ["integrations", "sync-progress", space.id]
@@ -116,7 +138,7 @@ export function IntegrationActions({
   });
 
   const deleteKnowledge = useRemovalMutation({
-    mutationKey: sourceRemovalKey(space.id, { kind: "item", id: item.id }),
+    mutationKey: onDeleted ? sourceRemovalKey(space.id, { kind: "item", id: item.id }) : undefined,
     mutationFn: () =>
       unwrap(
         browserApi.DELETE(
@@ -267,18 +289,37 @@ export function WrapperActions({
           )
         )
       );
-      const failed = results.filter((result) => result.status === "rejected").length;
-      return { failed, total: results.length };
+      const jobs = results.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : []
+      );
+      const refused = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected"
+      );
+      return { jobs, total: results.length, refusal: refused?.reason as unknown };
     },
-    onSuccess: ({ failed, total }) => {
-      if (failed < total) trackJob();
+    onSuccess: ({ jobs, total, refusal }) => {
+      if (jobs.length > 0) trackJob(jobs);
       invalidate();
       void queryClient.invalidateQueries({
         queryKey: ["integrations", "sync-progress", space.id]
       });
       setShowResync(false);
-      if (failed > 0) toast.error(t("resync_all_wrapper_partial_failure", { failed, total }));
-      else toast.success(t("resync_all_wrapper_queued", { count: total }));
+      const failed = total - jobs.length;
+      if (failed > 0) {
+        toast.error(
+          total === 1
+            ? t("resync_all_wrapper_failed_one")
+            : t("resync_all_wrapper_partial_failure", { failed, total }),
+          // The first refusal's reason, in the catalog's words as toastApiError gives them.
+          { description: getErrorMessage(refusal, t) }
+        );
+      } else {
+        toast.success(
+          total === 1
+            ? t("resync_all_wrapper_queued_one")
+            : t("resync_all_wrapper_queued", { count: total })
+        );
+      }
     }
   });
 
@@ -298,7 +339,9 @@ export function WrapperActions({
   });
 
   const deleteWrapper = useRemovalMutation({
-    mutationKey: sourceRemovalKey(space.id, { kind: "wrapper", id: wrapperId }),
+    mutationKey: onDeleted
+      ? sourceRemovalKey(space.id, { kind: "wrapper", id: wrapperId })
+      : undefined,
     mutationFn: () =>
       unwrap(
         browserApi.DELETE("/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/", {
@@ -368,7 +411,11 @@ export function WrapperActions({
         open={showResync}
         onOpenChange={setShowResync}
         title={t("resync_all_wrapper")}
-        description={t("confirm_resync_all_wrapper", { wrapperName, count: resyncable.length })}
+        description={
+          resyncable.length === 1
+            ? t("confirm_resync_all_wrapper_one", { wrapperName })
+            : t("confirm_resync_all_wrapper", { wrapperName, count: resyncable.length })
+        }
         confirmLabel={resync.isPending ? t("syncing") : t("start_full_sync")}
         variant="default"
         pending={resync.isPending}

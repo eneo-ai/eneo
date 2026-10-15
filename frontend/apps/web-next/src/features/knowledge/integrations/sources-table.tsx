@@ -14,7 +14,7 @@ import {
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import Link from "next/link";
 import { useFormatter, useTranslations } from "next-intl";
-import { useId, useRef, useState, type Ref } from "react";
+import { useEffect, useId, useRef, useState, type Ref } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { Table } from "@/components/astryx/table";
 import { EmptyState } from "@/components/composites/empty-state";
@@ -293,6 +293,7 @@ export function SourcesList({
   const headingIds = useId();
   const bannerRef = useRef<HTMLDivElement>(null);
   const allFilterRef = useRef<HTMLButtonElement>(null);
+  const chosenFilterRef = useRef<HTMLButtonElement>(null);
   const [filter, setFilter] = useState<SourceFilter>("all");
   // Once a filter has been chosen the bar stays, so the pressed segment never vanishes under focus.
   const [filterUsed, setFilterUsed] = useState(false);
@@ -326,6 +327,10 @@ export function SourcesList({
   // The sources changed under the chosen filter (the failing one recovered, say).
   const noMatch = filter !== "all" && counts[filter] === 0;
   useAnnounceChange(noMatch ? t("integration_filter_no_match") : null);
+  // The tables went, and focus with them if it was in one: the filter in use takes it.
+  useEffect(() => {
+    if (noMatch) rescueFocus(chosenFilterRef.current);
+  }, [noMatch]);
 
   function chooseFilter(next: SourceFilter) {
     setFilter(next);
@@ -362,7 +367,9 @@ export function SourcesList({
             ).map((option) => (
               <SegmentedControlItem
                 key={option}
-                ref={option === "all" ? allFilterRef : undefined}
+                ref={
+                  option === "all" ? allFilterRef : option === filter ? chosenFilterRef : undefined
+                }
                 value={option}
                 label={t(`integration_filter_${option}`, { count: counts[option] })}
               />

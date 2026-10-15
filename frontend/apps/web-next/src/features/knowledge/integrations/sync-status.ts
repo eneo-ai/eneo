@@ -56,3 +56,22 @@ export function syncRevision(knowledge: IntegrationKnowledge): string {
     metadata?.document_count ?? 0
   ].join("|");
 }
+
+function revisionTime(value: string | undefined): number {
+  const time = value ? Date.parse(value) : Number.NaN;
+  return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
+}
+
+/**
+ * Orders two of an item's `syncRevision`s: positive when `a` is the newer, by
+ * its latest sync attempt and then its latest successful sync.
+ */
+export function compareSyncRevisions(a: string, b: string): number {
+  const [attemptedA, syncedA] = a.split("|");
+  const [attemptedB, syncedB] = b.split("|");
+  const order = (x: number, y: number) => (x === y ? 0 : x > y ? 1 : -1);
+  return (
+    order(revisionTime(attemptedA), revisionTime(attemptedB)) ||
+    order(revisionTime(syncedA), revisionTime(syncedB))
+  );
+}

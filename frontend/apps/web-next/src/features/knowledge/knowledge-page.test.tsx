@@ -437,7 +437,7 @@ describe("KnowledgePage", () => {
       "integrations"
     );
     fireEvent.click(await screen.findByRole("radio", { name: "Behöver åtgärd 1" }));
-    expect(screen.getByRole("link", { name: "HR-handboken" })).toBeTruthy();
+    screen.getByRole("link", { name: "HR-handboken" }).focus();
 
     // The wrapper is deleted and HR-handboken recovers: one source, none failing.
     state.space = makeSpace({
@@ -452,6 +452,10 @@ describe("KnowledgePage", () => {
     await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
 
     const showAll = await screen.findByRole("button", { name: "Visa alla" });
+    // The focused link went with the table; the filter in use takes focus, not <body>.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Behöver åtgärd 0" }))
+    );
     expect(screen.getByText("Inga källor matchar filtret.", { selector: "p" })).toBeTruthy();
     expect(screen.queryByText("Inga resultat hittades")).toBeNull();
     expect(screen.getByRole("radiogroup", { name: "Filtrera på status" })).toBeTruthy();

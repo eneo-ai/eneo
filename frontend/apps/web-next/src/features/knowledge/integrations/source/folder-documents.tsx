@@ -136,6 +136,7 @@ function FolderHeader({
               size="sm"
               href={url}
               target="_blank"
+              rel="noopener noreferrer"
               icon={<ExternalLink className="size-4" aria-hidden="true" />}
             />
           ) : null}
@@ -384,6 +385,7 @@ export function FolderDocuments({
             icon={<ExternalLink className="size-4" aria-hidden="true" />}
             href={url}
             target="_blank"
+            rel="noopener noreferrer"
           />
         ) : null;
       }

@@ -197,7 +197,7 @@ export function SharePointImportDialog({
       );
     },
     onSuccess: (result) => {
-      trackJob();
+      trackJob(result.items.flatMap((item) => (item.job ? [item.job] : [])));
       void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
       if (result.created_count === 0) {
         toast.error(

@@ -204,6 +204,37 @@ it("catches an upload whose job is already finished on the first poll", async ()
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ["users", "me"] });
 });
 
+it("catches every job of calls made together, and checks the list once for them", async () => {
+  const synced = (id: string, name: string) =>
+    ({ ...job, id, name, task: "upload_info_blob", status: "complete" }) as Job;
+  api.items = [synced("job-1", "Avtal.pdf"), synced("job-2", "Bilaga.pdf")];
+  function Track() {
+    const { trackJob } = useJobs();
+    return (
+      <button
+        type="button"
+        onClick={() => trackJob(api.items.map((item) => ({ ...item, status: "queued" })))}
+      >
+        Track
+      </button>
+    );
+  }
+  const { queryClient } = renderInApp(
+    <JobsProvider>
+      <Track />
+    </JobsProvider>
+  );
+  await waitFor(() => expect(queryClient.getQueryData(["jobs"])).toHaveLength(2));
+  const polls = vi.mocked(browserApi.GET).mock.calls.length;
+
+  fireEvent.click(screen.getByRole("button", { name: "Track" }));
+
+  await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(2));
+  expect(toast.success).toHaveBeenCalledWith("Avtal.pdf är klar och sökbar.");
+  expect(toast.success).toHaveBeenCalledWith("Bilaga.pdf är klar och sökbar.");
+  expect(browserApi.GET).toHaveBeenCalledTimes(polls + 1);
+});
+
 it("toasts a failed job with its reason", async () => {
   api.items = [{ ...job, task: "upload_info_blob", status: "in progress" } as Job];
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });

@@ -239,6 +239,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
                   label={t(VENDOR[singleItem.integration_type].linkLabel)}
                   href={sourceUrl}
                   target="_blank"
+                  rel="noopener noreferrer"
                   icon={<ExternalLink className="size-4" aria-hidden="true" />}
                 />
               ) : null}
