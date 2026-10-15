@@ -29,9 +29,11 @@
 
   interface Props {
     eneo: Eneo;
+    /** The id of the heading that names this overview, such as its settings row's. */
+    labelledby?: string;
   }
 
-  let { eneo }: Props = $props();
+  let { eneo, labelledby }: Props = $props();
 
   type Row = { space: OverviewSpace; source: IntegrationSource; summary: SourceSummary };
 
@@ -112,9 +114,11 @@
   }
 </script>
 
-<section aria-labelledby="admin-sources-heading" class="flex flex-col gap-4">
-  <h3 id="admin-sources-heading" class="sr-only">{m.admin_sources_heading()}</h3>
-
+<section
+  aria-labelledby={labelledby}
+  class="flex flex-col gap-4"
+  data-tour="admin-integration-sources"
+>
   {#if loading && !overview}
     <div class="text-secondary flex items-center gap-2 text-sm" role="status">
       <IconLoadingSpinner size="sm" class="motion-safe:animate-spin" />

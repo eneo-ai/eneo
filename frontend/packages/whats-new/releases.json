@@ -225,7 +225,7 @@
           },
           "showMe": {
             "href": "/admin/integrations",
-            "anchor": "admin-integrations"
+            "anchor": "admin-integration-sources"
           }
         },
         {

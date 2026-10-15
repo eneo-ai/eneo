@@ -208,8 +208,9 @@
           fullWidth
           title={m.admin_sources_heading()}
           description={m.admin_sources_row_description()}
+          let:labelId
         >
-          <AdminSourcesOverview eneo={data.eneo} />
+          <AdminSourcesOverview eneo={data.eneo} labelledby={labelId} />
         </Settings.Row>
 
         <Settings.Row
