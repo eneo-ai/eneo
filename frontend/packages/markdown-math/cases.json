@@ -346,6 +346,12 @@
       ]
     },
     {
+      "name": "backslash line break inside a dollar",
+      "input": "$x\\\n+y$",
+      "math": [],
+      "literal": ["$x +y$"]
+    },
+    {
       "name": "inline code",
       "input": "Kör `$x$` och ``a `$y$` b``",
       "math": [],

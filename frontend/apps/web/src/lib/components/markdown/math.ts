@@ -11,18 +11,6 @@ import type { EneoMathToken } from "./CustomComponents";
 
 type InlineMath = { raw: string; text: string; displayDelimiter: boolean };
 
-/** First place math can start: an unescaped `$`, or `\(` / `\[`. */
-function mathStart(src: string): number | undefined {
-  for (let i = 0; i < src.length; i++) {
-    if (src[i] === "\\") {
-      if (src[i + 1] === "(" || src[i + 1] === "[") return i;
-      i++; // an escaped character, `\$` included, is never a delimiter
-    } else if (src[i] === "$") {
-      return i;
-    }
-  }
-}
-
 /**
  * `\(…\)` or `\[…\]`: up to the first unescaped closer. A second opener of
  * the same kind first means this one is text, so a run of unclosed openers is
@@ -69,6 +57,7 @@ function matchDollar(src: string, prev: string | undefined): InlineMath | undefi
     const char = src[i];
     if (char === "\n") return;
     if (char === "\\") {
+      if (src[i + 1] === "\n") return; // a hard break, not an escape
       i++;
       continue;
     }
@@ -93,7 +82,9 @@ function matchInlineMath(src: string, prev: string | undefined): InlineMath | un
 const inlineMath: TokenizerAndRendererExtension = {
   name: "eneoMath",
   level: "inline",
-  start: mathStart,
+  // Text already ends at every backslash, so only `$` needs a cut. A native
+  // search, as marked asks again after each text token.
+  start: (src: string) => src.indexOf("$"),
   tokenizer(src: string, tokens: Token[]): EneoMathToken | undefined {
     const match = matchInlineMath(src, tokens.at(-1)?.raw.at(-1));
     if (!match) return;
@@ -127,8 +118,14 @@ const mathFence: TokenizerAndRendererExtension = {
   level: "block",
   // Ends a paragraph only where a whole fence starts. marked asks with the
   // text from the second character on, so `src` itself is not a line start.
+  // marked asks again for each paragraph, so the search stops where this
+  // paragraph does, at the first blank line.
+  // Known limit: after each cut, marked's setext-heading rule reads on to the
+  // next blank line, so fences with no blank lines between them cost
+  // fences × lines (200 fences: ~3 ms). Override marked's lheading if needed.
   start(src: string) {
-    for (const line of src.matchAll(/\n {0,3}\${2,}[ \t]*$/gm)) {
+    for (const line of src.matchAll(/\n(?:[ \t]*$| {0,3}\${2,}[ \t]*$)/gm)) {
+      if (!line[0].includes("$")) return;
       if (matchFence(src.slice(line.index + 1))) return line.index + 1;
     }
   },

@@ -78,13 +78,6 @@ describe("Math in answers", () => {
     expect(container.textContent).toContain("efter");
   });
 
-  it("reads a long run of unclosed openers once", () => {
-    const started = performance.now();
-    const { container } = render(Markdown, { source: "\\(a ".repeat(20000) });
-    expect(performance.now() - started).toBeLessThan(2000);
-    expect(container.querySelector(".katex")).toBeNull();
-  });
-
   it("renders untrusted TeX without links, images or unbounded sizes", () => {
     const { container } = render(Markdown, {
       source:

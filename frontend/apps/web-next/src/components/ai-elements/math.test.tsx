@@ -4,9 +4,13 @@ import { useMemo } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import katex from "katex";
 import { cases } from "@eneo/markdown-math/cases.json";
+import remarkMath from "remark-math";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 import { resolveInrefs } from "@/lib/chat/inref";
 import { renderInApp } from "@/test/render";
 import { CitationSourcesProvider, citationComponents, remarkCitations } from "./citation";
+import { mathPlugin } from "./math";
 import { MessageResponse } from "./message";
 
 afterEach(cleanup);
@@ -88,14 +92,6 @@ describe("Math in answers", () => {
     expect(container.textContent).toContain("efter");
   });
 
-  it("reads a long run of unclosed openers once", async () => {
-    const started = performance.now();
-    const { container } = renderAnswer("\\(a ".repeat(20000));
-    await waitFor(() => expect(container.textContent).toContain("(a (a"));
-    expect(performance.now() - started).toBeLessThan(2000);
-    expect(container.querySelector(".katex")).toBeNull();
-  });
-
   // An unfinished fence is a paragraph from the start, so the chat's citation
   // plugin, which runs before math, still turns its markers into sources.
   it("keeps a citation after an unfinished formula a source", async () => {
@@ -146,5 +142,44 @@ describe("Math in answers", () => {
     const { container } = renderAnswer("Före $\\frac{a$ efter");
     await waitFor(() => expect(container.querySelector(".katex-error")).not.toBeNull());
     expect(container.textContent).toContain("efter");
+  });
+});
+
+describe("math parsing time", () => {
+  const remarkMathOnly = unified()
+    .use(remarkParse)
+    .use(remarkMath, { singleDollarTextMath: false });
+  const llmMath = unified().use(remarkParse).use([mathPlugin.remarkPlugin]);
+
+  function fastest(processor: typeof llmMath, source: string) {
+    let best = Infinity;
+    for (let run = 0; run < 3; run++) {
+      const started = performance.now();
+      processor.runSync(processor.parse(source), source);
+      best = Math.min(best, performance.now() - started);
+    }
+    return best;
+  }
+
+  // Measured against remark-math alone, so a slow runner does not fail the
+  // test: a search that starts over at each token is tens to hundreds of
+  // times slower at this size. The same answers as the web app's lexer test.
+  const answers = {
+    "many paragraphs": "Klicka på **Arkiv** och _Alternativ_ <b>nu</b>!\n\n".repeat(4000),
+    "many inline tokens without math": "a_ b! c< ".repeat(4000),
+    "many empty fences": "$$\n$$\n\n".repeat(4000),
+    "many unclosed openers": "\\(a \\[b ".repeat(4000)
+  };
+
+  for (const [name, source] of Object.entries(answers)) {
+    it(`grows with the answer, as remark-math does: ${name}`, () => {
+      expect(fastest(llmMath, source)).toBeLessThan(5 * fastest(remarkMathOnly, source) + 50);
+    });
+  }
+
+  it("reads a long run of unclosed openers as text", () => {
+    const source = "\\(a ".repeat(20000);
+    const tree = llmMath.runSync(llmMath.parse(source), source);
+    expect(JSON.stringify(tree)).not.toContain("inlineMath");
   });
 });
