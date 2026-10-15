@@ -14,11 +14,27 @@ function describeViolations(violations: AxeResults["violations"]): string {
     .join("\n");
 }
 
+// Contrast is measured on the colours drawn now, so an intro transition that fades
+// in (such as the page title's) fails it midway. Endless ones, like spinners, never end.
+async function finishTransitions(): Promise<void> {
+  // A transition can start a frame after the render that caused it.
+  for (let round = 0; round < 10; round++) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const ending = document.getAnimations().filter((animation) => {
+      const end = animation.effect?.getComputedTiming().endTime;
+      return typeof end === "number" && Number.isFinite(end);
+    });
+    if (ending.length === 0) return;
+    await Promise.all(ending.map((animation) => animation.finished.catch(() => undefined)));
+  }
+}
+
 /** Fails the test when axe finds a WCAG violation inside `context`. */
 export async function expectNoAxeViolations(
   context: ElementContext = document,
   options: RunOptions = {}
 ): Promise<void> {
+  await finishTransitions();
   const rules = Object.fromEntries(PAGE_LEVEL_RULES.map((rule) => [rule, { enabled: false }]));
   const results = await axe.run(context, {
     ...options,

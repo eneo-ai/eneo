@@ -27,5 +27,15 @@
     {/if}
   </div>
 {:else}
-  <SourceStateBadge state={summary.state} />
+  <div class="flex flex-col items-start gap-1">
+    <SourceStateBadge state={summary.state} />
+    <!-- A source where only some folders wait reads as up to date by its badge alone. -->
+    {#if summary.waitingItems > 0 && summary.state !== "never"}
+      <span class="text-secondary text-xs">
+        {summary.waitingItems === 1
+          ? m.integration_source_waiting_one()
+          : m.integration_source_waiting_other({ count: summary.waitingItems })}
+      </span>
+    {/if}
+  </div>
 {/if}

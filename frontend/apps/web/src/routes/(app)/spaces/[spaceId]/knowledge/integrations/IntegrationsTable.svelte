@@ -3,6 +3,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived, writable } from "svelte/store";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { formatRelativeTime } from "$lib/core/formatting/dateTime";
   import SourceStatusFilter from "$lib/features/integrations/components/SourceStatusFilter.svelte";
   import {
@@ -11,6 +12,7 @@
     matchesSourceFilter,
     sourceContentsLabel,
     sourceHref,
+    sourceKey,
     summarizeSource,
     type IntegrationSource,
     type SourceFilter,
@@ -24,11 +26,18 @@
   import SourceNameCell from "./SourceNameCell.svelte";
   import SourceStatusCell from "./SourceStatusCell.svelte";
 
+  interface Props {
+    /** Off while another tab of the knowledge page is open: the list stays mounted there. */
+    active?: boolean;
+  }
+
+  let { active = true }: Props = $props();
+
   const {
     state: { currentSpace }
   } = getSpacesManager();
 
-  const tracker = useSyncProgress();
+  const tracker = useSyncProgress({ active: () => active });
   const progress = writable<Record<string, IntegrationSyncProgress>>({});
   $effect(() => {
     progress.set(tracker.byId);
@@ -103,7 +112,10 @@
     return value ? new Date(value).getTime() : 0;
   }
 
-  const table = Table.createWithStore(visibleRows);
+  // Keyed by source: filtering must not slide another source under a row's open dialog.
+  const table = Table.createWithStore(visibleRows, undefined, {
+    getRowId: (row) => sourceKey(row.source)
+  });
 
   const viewModel = table.createViewModel([
     table.column({
@@ -231,23 +243,33 @@
   </div>
 {/if}
 
-{#if $rows.length > 1}
+<!-- A chosen filter keeps its bar, or a filter that hides every source has no way back. -->
+{#if $rows.length > 1 || $statusFilter !== "all"}
   <div class="pt-3 pr-3">
     <SourceStatusFilter counts={filterCounts} bind:value={$statusFilter} />
   </div>
 {/if}
 
-<Table.Root {viewModel} resourceName="integration">
-  {#if $useEmbeddingModelGroups}
-    {#each $embeddingModels as embeddingModel (embeddingModel.id)}
-      <Table.Group
-        title={embeddingModel.inSpace
-          ? embeddingModel.name
-          : embeddingModel.name + ` (${m.disabled()})`}
-        filterFn={createModelFilter(embeddingModel.id)}
-      ></Table.Group>
-    {/each}
-  {:else}
-    <Table.Group></Table.Group>
-  {/if}
-</Table.Root>
+{#if $rows.length > 0 && $visibleRows.length === 0}
+  <div class="flex flex-col items-start gap-3 py-8 pr-3 text-sm">
+    <p class="text-secondary" role="status">{m.integration_filter_no_match()}</p>
+    <Button variant="outline" size="sm" onclick={() => ($statusFilter = "all")}>
+      {m.integration_filter_show_all()}
+    </Button>
+  </div>
+{:else}
+  <Table.Root {viewModel} resourceName="integration">
+    {#if $useEmbeddingModelGroups}
+      {#each $embeddingModels as embeddingModel (embeddingModel.id)}
+        <Table.Group
+          title={embeddingModel.inSpace
+            ? embeddingModel.name
+            : embeddingModel.name + ` (${m.disabled()})`}
+          filterFn={createModelFilter(embeddingModel.id)}
+        ></Table.Group>
+      {/each}
+    {:else}
+      <Table.Group></Table.Group>
+    {/if}
+  </Table.Root>
+{/if}

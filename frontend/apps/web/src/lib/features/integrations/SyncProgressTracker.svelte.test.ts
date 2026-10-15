@@ -74,9 +74,26 @@ describe("SyncProgressTracker", () => {
     tracker.start();
     await vi.advanceTimersByTimeAsync(60_000);
     tracker.refresh();
-    await vi.advanceTimersByTimeAsync(0);
+    tracker.start();
+    await vi.advanceTimersByTimeAsync(60_000);
 
     expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("polls at once when started again after a pause", async () => {
+    const load = vi.fn(async () => ({ items: [] as IntegrationSyncProgress[] }));
+    const tracker = new SyncProgressTracker({ load });
+
+    tracker.start();
+    await vi.advanceTimersByTimeAsync(0);
+    tracker.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(load).toHaveBeenCalledTimes(1);
+
+    tracker.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(load).toHaveBeenCalledTimes(2);
+    tracker.stop();
   });
 
   it("drops a response that arrives after it was stopped", async () => {

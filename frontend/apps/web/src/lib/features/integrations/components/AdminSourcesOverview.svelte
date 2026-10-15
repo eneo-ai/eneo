@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { Eneo, IntegrationKnowledge } from "@eneo/eneo-js";
+  import type { Eneo, components } from "@eneo/eneo-js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -10,6 +10,7 @@
   import IntegrationVendorIcon from "$lib/features/integrations/components/IntegrationVendorIcon.svelte";
   import SourceStateBadge from "$lib/features/integrations/components/SourceStateBadge.svelte";
   import SourceStatusFilter from "$lib/features/integrations/components/SourceStatusFilter.svelte";
+  import { isCredentialsError } from "$lib/features/integrations/sourceProblems";
   import {
     countSourceFilters,
     groupSourcesBySpace,
@@ -23,12 +24,8 @@
   } from "$lib/features/integrations/sources";
   import { m } from "$lib/paraglide/messages";
 
-  // Response shape of GET /api/v1/admin/integrations/knowledge/.
-  type OverviewSpace = { id: string; name: string; organization: boolean };
-  type Overview = {
-    items: { space: OverviewSpace; knowledge: IntegrationKnowledge }[];
-    personal: { items: number; failing: number };
-  };
+  type OverviewSpace = components["schemas"]["AdminIntegrationKnowledgeSpace"];
+  type Overview = components["schemas"]["AdminIntegrationKnowledgeOverview"];
 
   interface Props {
     eneo: Eneo;
@@ -97,6 +94,13 @@
       )
   );
 
+  /** Why the source needs attention: its first failure, in words for the known sign-in one. */
+  function failureText(summary: SourceSummary): string | null {
+    const message = summary.failedItems[0]?.metadata?.last_sync_error?.trim();
+    if (!message) return null;
+    return isCredentialsError(message) ? m.integration_problem_credentials_title() : message;
+  }
+
   function updatedLabel(summary: SourceSummary): string {
     if (summary.lastSyncedAt) return formatRelativeTime(summary.lastSyncedAt);
     if (summary.lastSyncAttemptedAt) {
@@ -113,7 +117,7 @@
 
   {#if loading && !overview}
     <div class="text-secondary flex items-center gap-2 text-sm" role="status">
-      <IconLoadingSpinner size="sm" class="animate-spin" />
+      <IconLoadingSpinner size="sm" class="motion-safe:animate-spin" />
       <span>{m.loading()}</span>
     </div>
   {:else if error}
@@ -140,7 +144,9 @@
           {counts.attention}
           {#if attentionSpaces > 0}
             <span class="text-secondary text-xs font-normal">
-              {m.admin_sources_in_spaces({ count: attentionSpaces })}
+              {attentionSpaces === 1
+                ? m.admin_sources_in_spaces_one()
+                : m.admin_sources_in_spaces_other({ count: attentionSpaces })}
             </span>
           {/if}
         </dd>
@@ -193,14 +199,18 @@
                 <div class="flex min-w-0 items-center gap-3">
                   <IntegrationVendorIcon size="sm" type={row.source.integrationType} />
                   <div class="flex min-w-0 flex-col">
-                    <!-- eslint-disable svelte/no-navigation-without-resolve -- dynamic space route -->
-                    <a
-                      href={sourceHref(row.space.id, row.source)}
-                      class="focus-visible:ring-stronger truncate rounded font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                    >
-                      {row.source.name}
-                    </a>
-                    <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                    {#if row.space.can_open}
+                      <!-- eslint-disable svelte/no-navigation-without-resolve -- dynamic space route -->
+                      <a
+                        href={sourceHref(row.space.id, row.source)}
+                        class="focus-visible:ring-stronger truncate rounded font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                      >
+                        {row.source.name}
+                      </a>
+                      <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                    {:else}
+                      <span class="truncate font-medium">{row.source.name}</span>
+                    {/if}
                     <span class="text-secondary truncate text-xs">
                       {sourceContentsLabel(row.source.items)}
                     </span>
@@ -214,7 +224,15 @@
                 {/if}
               </Table.Cell>
               <Table.Cell class="text-right tabular-nums">{row.summary.documentCount}</Table.Cell>
-              <Table.Cell><SourceStateBadge state={row.summary.state} /></Table.Cell>
+              <Table.Cell>
+                {@const failure = failureText(row.summary)}
+                <div class="flex max-w-xs flex-col items-start gap-1">
+                  <SourceStateBadge state={row.summary.state} />
+                  {#if failure}
+                    <span class="text-secondary text-xs break-words">{failure}</span>
+                  {/if}
+                </div>
+              </Table.Cell>
               <Table.Cell class="text-secondary">{updatedLabel(row.summary)}</Table.Cell>
             </Table.Row>
           {:else}

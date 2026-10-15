@@ -6,6 +6,7 @@ import "../../../../app.css";
 import { m } from "$lib/paraglide/messages";
 import { expectNoAxeViolations } from "$lib/test/axe";
 import SharePointConnectionHealth from "./SharePointConnectionHealth.svelte";
+import { SharePointSubscriptionList } from "./SharePointSubscriptionList.svelte";
 
 type App = components["schemas"]["TenantSharePointAppPublic"];
 type Subscription = components["schemas"]["SharePointSubscriptionPublic"];
@@ -45,9 +46,11 @@ function show(config: App, subscriptions: Subscription[] = []) {
     testStoredConnection: vi.fn().mockResolvedValue({ success: true }),
     restartServiceAccountAuth: vi.fn()
   };
+  const eneo = { integrations: { admin: { sharepoint } } } as unknown as Eneo;
   const props = {
-    eneo: { integrations: { admin: { sharepoint } } } as unknown as Eneo,
+    eneo,
     config,
+    subscriptionList: new SharePointSubscriptionList(eneo),
     subscriptionsOpen: false,
     onEdit: vi.fn(),
     onToggleSubscriptions: vi.fn(),
@@ -62,7 +65,7 @@ describe("SharePointConnectionHealth", () => {
     const { sharepoint, props } = show(app(), [subscription({})]);
 
     await expect.element(page.getByText(m.sharepoint_health_overall_ok())).toBeVisible();
-    await expect.element(page.getByText(m.sharepoint_health_watch_ok({ count: 1 }))).toBeVisible();
+    await expect.element(page.getByText(m.sharepoint_health_watch_ok_one())).toBeVisible();
     await page.getByRole("button", { name: m.sharepoint_health_test_run() }).click();
 
     await expect.element(page.getByText(m.sharepoint_health_test_ok())).toBeVisible();

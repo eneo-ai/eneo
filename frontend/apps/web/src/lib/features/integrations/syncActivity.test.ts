@@ -2,8 +2,10 @@ import type { IntegrationKnowledge } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
 import {
   activityKind,
+  appendPage,
   groupActivityByDay,
   mergeActivity,
+  mergeFirstPage,
   readSyncLogExtras,
   skippedNotListed,
   summarizeActivity,
@@ -163,5 +165,31 @@ describe("the activity timeline", () => {
       unchanged: 0,
       deleted: 1
     });
+  });
+});
+
+describe("paging an item's logs", () => {
+  const ids = (logs: SyncLog[]) => logs.map((entry) => entry.id);
+  const logs = (...names: string[]) => names.map((id) => log({ id }));
+
+  it("puts a reloaded first page above the older pages it reaches", () => {
+    expect(ids(mergeFirstPage(logs("l3", "l2", "l1"), logs("l4", "l3"), 20))).toEqual([
+      "l4",
+      "l3",
+      "l2",
+      "l1"
+    ]);
+  });
+
+  it("starts over when more syncs ran than the first page holds", () => {
+    expect(ids(mergeFirstPage(logs("l2", "l1"), logs("l9", "l8"), 20))).toEqual(["l9", "l8"]);
+  });
+
+  it("takes a first page that holds every log as it is", () => {
+    expect(ids(mergeFirstPage(logs("l2", "gone"), logs("l3", "l2"), 2))).toEqual(["l3", "l2"]);
+  });
+
+  it("appends an older page without the logs a newer sync pushed into it", () => {
+    expect(ids(appendPage(logs("l5", "l4"), logs("l4", "l3")))).toEqual(["l5", "l4", "l3"]);
   });
 });

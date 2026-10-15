@@ -34,7 +34,16 @@ describe("integration item route", () => {
     [
       "?tab=problems",
       "/spaces/personal/knowledge/integrations/wrapper/w1?folder=ik-wrapped&tab=problems"
-    ]
+    ],
+    [
+      "?tab=activity",
+      "/spaces/personal/knowledge/integrations/wrapper/w1?folder=ik-wrapped&tab=activity"
+    ],
+    [
+      "?tab=content",
+      "/spaces/personal/knowledge/integrations/wrapper/w1?folder=ik-wrapped&tab=content"
+    ],
+    ["?tab=unknown", "/spaces/personal/knowledge/integrations/wrapper/w1?folder=ik-wrapped"]
   ])(
     "sends a wrapped item %s to its wrapper with the folder selected",
     async (search, location) => {

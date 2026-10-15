@@ -1,5 +1,5 @@
-import { onMount } from "svelte";
-import { get } from "svelte/store";
+import { onMount, untrack } from "svelte";
+import { fromStore, get } from "svelte/store";
 import { getEneo } from "$lib/core/Eneo";
 import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
 import type { IntegrationSyncProgress } from "./syncProgress";
@@ -7,13 +7,25 @@ import { SyncProgressTracker } from "./SyncProgressTracker.svelte";
 
 const SETTLE_REFRESH_DELAY_MS = 3_000;
 
-/** Live sync progress for the current space while the calling component is mounted. */
-export function useSyncProgress(): SyncProgressTracker {
+type Options = {
+  /** Poll only while this holds, e.g. while the tab showing the progress is open. */
+  active?: () => boolean;
+};
+
+/**
+ * Live sync progress for the current space while the calling component is mounted.
+ * It polls only while the space has integration knowledge, `active` holds and the
+ * browser tab is visible; coming back to the tab polls at once.
+ */
+export function useSyncProgress({ active = () => true }: Options = {}): SyncProgressTracker {
   const eneo = getEneo();
   const {
     state: { currentSpace },
     refreshCurrentSpace
   } = getSpacesManager();
+  const space = fromStore(currentSpace);
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- timer handles, never rendered
+  const settleTimers = new Set<ReturnType<typeof setTimeout>>();
 
   const tracker = new SyncProgressTracker({
     load: () =>
@@ -24,12 +36,20 @@ export function useSyncProgress(): SyncProgressTracker {
     // a second refresh shortly after picks up what the first one can miss.
     onSettled: () => {
       void refreshCurrentSpace("knowledge");
-      setTimeout(() => void refreshCurrentSpace("knowledge"), SETTLE_REFRESH_DELAY_MS);
+      const timer = setTimeout(() => {
+        settleTimers.delete(timer);
+        void refreshCurrentSpace("knowledge");
+      }, SETTLE_REFRESH_DELAY_MS);
+      settleTimers.add(timer);
     }
   });
 
+  let visible = $state(true);
+
   onMount(() => {
-    tracker.start();
+    visible = !document.hidden;
+    const onVisibilityChange = () => (visible = !document.hidden);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     // Starting a sync from a menu refreshes the space; look for its progress right away.
     let first = true;
     const unsubscribe = currentSpace.subscribe(() => {
@@ -37,9 +57,21 @@ export function useSyncProgress(): SyncProgressTracker {
       else tracker.refresh();
     });
     return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       unsubscribe();
       tracker.stop();
+      for (const timer of settleTimers) clearTimeout(timer);
+      settleTimers.clear();
     };
+  });
+
+  const hasKnowledge = $derived(
+    space.current.knowledge.integrationKnowledge.some((item) => item.space_id === space.current.id)
+  );
+
+  $effect(() => {
+    const poll = visible && active() && hasKnowledge;
+    untrack(() => (poll ? tracker.start() : tracker.stop()));
   });
 
   return tracker;

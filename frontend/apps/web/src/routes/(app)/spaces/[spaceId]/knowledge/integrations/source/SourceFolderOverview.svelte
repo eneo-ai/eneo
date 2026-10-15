@@ -10,7 +10,7 @@
     buildIntegrationTree,
     flattenIntegrationTree
   } from "$lib/features/integrations/integrationTree";
-  import { itemState } from "$lib/features/integrations/sources";
+  import { itemState, itemWatchState, watchStateLabel } from "$lib/features/integrations/sources";
   import type { IntegrationSyncProgress } from "$lib/features/integrations/syncProgress";
   import { m } from "$lib/paraglide/messages";
   import IntegrationActions from "../IntegrationActions.svelte";
@@ -25,6 +25,7 @@
   let { items, progress, sourceName, hrefFor }: Props = $props();
 
   let rows = $derived(flattenIntegrationTree(buildIntegrationTree(items), () => true));
+  let showWatch = $derived(items.some((item) => item.integration_type === "sharepoint"));
 </script>
 
 <Table.Root aria-label={m.integration_source_folders_table_label({ name: sourceName })}>
@@ -34,6 +35,9 @@
       <Table.Head>{m.status()}</Table.Head>
       <Table.Head class="text-right">{m.documents()}</Table.Head>
       <Table.Head>{m.integration_source_last_up_to_date()}</Table.Head>
+      {#if showWatch}
+        <Table.Head>{m.integration_source_stat_watch()}</Table.Head>
+      {/if}
       <Table.Head class="w-[1%]"><span class="sr-only">{m.actions()}</span></Table.Head>
     </Table.Row>
   </Table.Header>
@@ -78,6 +82,12 @@
             –
           {/if}
         </Table.Cell>
+        {#if showWatch}
+          {@const watch = itemWatchState(item)}
+          <Table.Cell class={watch === "expired" ? "text-warning-stronger" : "text-secondary"}>
+            {item.integration_type === "sharepoint" ? watchStateLabel(watch) : "–"}
+          </Table.Cell>
+        {/if}
         <Table.Cell>
           <div class="flex items-center justify-end gap-1">
             {#if item.url}

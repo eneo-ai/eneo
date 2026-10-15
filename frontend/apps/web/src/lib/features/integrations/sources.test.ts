@@ -4,8 +4,10 @@ import {
   countSourceFilters,
   groupIntegrationSources,
   groupSourcesBySpace,
+  itemWatchState,
   matchesSourceFilter,
   sourceHref,
+  sourceKey,
   summarizeSource
 } from "./sources";
 import type { IntegrationSyncProgress } from "./syncProgress";
@@ -140,6 +142,16 @@ describe("summarizeSource", () => {
     expect(summary.failedItems.map((i) => i.id)).toEqual(["b"]);
   });
 
+  it("counts the folders still waiting for a first sync, but not one that syncs now", () => {
+    const never = { last_sync_status: "never", document_count: 0 } as const;
+    const summary = summarizeSource([item("a"), item("b", {}, never), item("c", {}, never)], {
+      c: progress("c")
+    });
+
+    expect(summary.state).toBe("syncing");
+    expect(summary.waitingItems).toBe(1);
+  });
+
   it("does not blame the sign-in when another failure is mixed in", () => {
     const summary = summarizeSource(
       [
@@ -166,6 +178,41 @@ describe("source status filters", () => {
 
     expect(counts).toEqual({ all: 3, attention: 1, syncing: 1, never: 0, empty: 1, ok: 1 });
     expect(matchesSourceFilter(failingWhileSyncing, "attention")).toBe(true);
+  });
+
+  it("finds a source under Waiting when only some of its folders wait for a first sync", () => {
+    const partlyWaiting = summarizeSource(
+      [item("a"), item("b", {}, { last_sync_status: "never", document_count: 0 })],
+      {}
+    );
+
+    expect(partlyWaiting.state).toBe("ok");
+    expect(matchesSourceFilter(partlyWaiting, "never")).toBe(true);
+    expect(matchesSourceFilter(partlyWaiting, "ok")).toBe(true);
+    expect(matchesSourceFilter(summarizeSource([item("c")], {}), "never")).toBe(false);
+  });
+});
+
+describe("itemWatchState", () => {
+  const now = new Date("2026-10-15T12:00:00Z").getTime();
+  const expiresIn = (hours: number) => new Date(now + hours * 60 * 60 * 1000).toISOString();
+
+  it.each([
+    [expiresIn(72), "active"],
+    [expiresIn(47), "expiring"],
+    [expiresIn(-1), "expired"],
+    [null, "none"],
+    ["not a date", "none"]
+  ] as const)("reads an expiry of %s as %s", (expires, state) => {
+    expect(
+      itemWatchState(item("a", {}, { sharepoint_subscription_expires_at: expires }), now)
+    ).toBe(state);
+  });
+});
+
+describe("sourceKey", () => {
+  it("tells a wrapper from an item with the same id", () => {
+    expect(sourceKey({ kind: "wrapper", id: "x" })).not.toBe(sourceKey({ kind: "item", id: "x" }));
   });
 });
 

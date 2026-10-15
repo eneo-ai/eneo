@@ -24,9 +24,11 @@
     progress.total ? Math.min(100 - readableWidth, (progress.skipped / progress.total) * 100) : 0
   );
   let valueText = $derived(
-    progress.total === null
-      ? m.integration_progress_done_so_far({ count: progress.done })
-      : m.integration_progress_done_of_total({ done: progress.done, total: progress.total })
+    progress.total !== null
+      ? m.integration_progress_done_of_total({ done: progress.done, total: progress.total })
+      : progress.done === 1
+        ? m.integration_progress_done_so_far_one()
+        : m.integration_progress_done_so_far_other({ count: progress.done })
   );
 </script>
 
@@ -44,8 +46,14 @@
   {#if fraction === null}
     <span class="indeterminate bg-accent-default absolute inset-y-0 w-1/3 rounded-full"></span>
   {:else}
-    <span class="bg-accent-default h-full transition-[width]" style:width="{readableWidth}%"></span>
-    <span class="bg-warning-default h-full transition-[width]" style:width="{skippedWidth}%"></span>
+    <span
+      class="bg-accent-default h-full motion-safe:transition-[width]"
+      style:width="{readableWidth}%"
+    ></span>
+    <span
+      class="bg-warning-default h-full motion-safe:transition-[width]"
+      style:width="{skippedWidth}%"
+    ></span>
   {/if}
 </div>
 

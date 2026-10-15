@@ -87,12 +87,24 @@ function knowledge(
   } as IntegrationKnowledge;
 }
 
-const protokoll = knowledge("ik-a", "Protokoll");
+const inDays = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+
+const protokoll = knowledge(
+  "ik-a",
+  "Protokoll",
+  {},
+  { sharepoint_subscription_expires_at: inDays(2.5) }
+);
 const skannade = knowledge(
   "ik-b",
   "Skannade",
   {},
-  { last_sync_status: "error", last_sync_error: CREDENTIALS, document_count: 2 }
+  {
+    last_sync_status: "error",
+    last_sync_error: CREDENTIALS,
+    document_count: 2,
+    sharepoint_subscription_expires_at: inDays(-1)
+  }
 );
 
 const space = {
@@ -189,12 +201,26 @@ describe("source page", () => {
     await expect
       .element(page.getByText(m.integration_source_stopped_sign_in_title()))
       .toBeVisible();
+    // Each folder's change notifications, in words.
+    const overview = page.getByRole("table", {
+      name: m.integration_source_folders_table_label({ name: "Kommunstyrelsen" })
+    });
+    await expect
+      .element(overview.getByRole("row").filter({ hasText: "Protokoll" }))
+      .toHaveTextContent(m.sharepoint_webhook_active());
+    await expect
+      .element(overview.getByRole("row").filter({ hasText: "Skannade" }))
+      .toHaveTextContent(m.sharepoint_webhook_expired());
+    await expect.element(page.getByText(m.integration_source_watch_expired_one())).toBeVisible();
+    // A state is told by its shape as well as its colour.
+    const link = (name: RegExp) => folders.getByRole("link", { name }).element();
+    expect(link(/Protokoll/).querySelector("svg.lucide-check")).not.toBeNull();
+    expect(link(/Skannade/).querySelector("svg.lucide-x")).not.toBeNull();
     // One blocking sign-in problem plus one scanned file; the image is skipped on purpose.
     await expect
       .element(page.getByRole("tab", { name: `${m.integration_source_tab_problems()} 2` }))
       .toBeVisible();
-    // The truncating page title belongs to the shared header; check what this page renders.
-    await expectNoAxeViolations({ exclude: [["h1"]] });
+    await expectNoAxeViolations();
   });
 
   it("shows the documents of the folder the URL selects", async () => {
@@ -205,6 +231,7 @@ describe("source page", () => {
       .element(folders.getByRole("link", { name: /Protokoll/ }))
       .toHaveAttribute("aria-current", "page");
     await expect.element(page.getByRole("heading", { name: "Protokoll", level: 2 })).toBeVisible();
+    await expect.element(page.getByText(m.sharepoint_webhook_active())).toBeVisible();
     await expect.poll(() => api.listDocuments.mock.calls.at(-1)?.[0].knowledge.id).toBe("ik-a");
     await expect
       .element(
@@ -246,8 +273,7 @@ describe("source page", () => {
     await expect
       .element(page.getByText(m.integration_problems_intentional_heading({ count: 1 })))
       .toBeVisible();
-    // The truncating page title belongs to the shared header; check what this page renders.
-    await expectNoAxeViolations({ exclude: [["h1"]] });
+    await expectNoAxeViolations();
   });
 
   it("groups failures by message and shortens long file lists", async () => {
@@ -325,6 +351,34 @@ describe("source page", () => {
     expect(folders.getByRole("link", { name: /2018/ }).elements()).toHaveLength(0);
 
     expect(api.getSyncLogs).not.toHaveBeenCalled();
+  });
+
+  it("reloads only the folder whose sync finished, also its activity", async () => {
+    api.route.state = { tab: "activity" };
+    const { rerender } = showWrapper("?tab=activity");
+    await expect.poll(() => api.listSkippedDocuments.mock.calls.length).toBe(2);
+    await expect.poll(() => api.getSyncLogs.mock.calls.length).toBe(2);
+
+    const synced = knowledge(
+      "ik-a",
+      "Protokoll",
+      {},
+      { last_synced_at: "2026-10-15T09:00:00Z", sharepoint_subscription_expires_at: inDays(2.5) }
+    );
+    await rerender({ source: groupIntegrationSources([synced, skannade])[0] });
+
+    await expect.poll(() => api.listSkippedDocuments.mock.calls.length).toBe(3);
+    await expect.poll(() => api.getSyncLogs.mock.calls.length).toBe(3);
+    expect(api.listSkippedDocuments.mock.calls[2][0].knowledge.id).toBe("ik-a");
+    expect(api.getSyncLogs.mock.calls[2][0].knowledge.id).toBe("ik-a");
+  });
+
+  it("shows the link and actions of a wrapper of one folder once, in the page header", async () => {
+    render(SourcePage, { source: groupIntegrationSources([protokoll])[0] });
+
+    await expect.element(page.getByRole("heading", { name: "Protokoll", level: 2 })).toBeVisible();
+    expect(page.getByRole("link", { name: m.open_in_sharepoint() }).elements()).toHaveLength(1);
+    expect(page.getByRole("button", { name: m.actions() }).elements()).toHaveLength(1);
   });
 
   it("shows a source of one folder without a folder list", async () => {

@@ -658,7 +658,7 @@
                   class="text-muted-foreground flex items-center justify-center gap-2 px-4 py-10"
                   role="status"
                 >
-                  <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+                  <LoaderCircle class="size-4 motion-safe:animate-spin" aria-hidden="true" />
                   {m.loading_available_sites()}
                 </div>
               {:else if previewLoadFailed}
@@ -946,7 +946,7 @@
             onclick={isFixtureSession ? simulateImport : importKnowledge}
           >
             {#if importKnowledge.isLoading}
-              <LoaderCircle class="animate-spin" aria-hidden="true" />
+              <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
               {m.importing()}
             {:else if isFixtureSession}
               <FlaskConical aria-hidden="true" />

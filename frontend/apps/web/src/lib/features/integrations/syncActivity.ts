@@ -87,6 +87,28 @@ export function mergeActivity(
     .sort((a, b) => startedAt(b.log) - startedAt(a.log));
 }
 
+/**
+ * An item's newest logs after reloading its first page. The older pages already
+ * loaded are kept when the new page reaches them; otherwise more syncs ran than
+ * a page holds, and keeping them would leave a gap.
+ */
+export function mergeFirstPage(
+  loaded: readonly SyncLog[] | undefined,
+  firstPage: readonly SyncLog[],
+  total: number
+): SyncLog[] {
+  if (!loaded || loaded.length === 0 || firstPage.length >= total) return [...firstPage];
+  const ids = new Set(firstPage.map((log) => log.id));
+  if (!loaded.some((log) => ids.has(log.id))) return [...firstPage];
+  return [...firstPage, ...loaded.filter((log) => !ids.has(log.id))];
+}
+
+/** An older page after the loaded logs; syncs that ran in between shift it, so drop repeats. */
+export function appendPage(loaded: readonly SyncLog[], page: readonly SyncLog[]): SyncLog[] {
+  const ids = new Set(loaded.map((log) => log.id));
+  return [...loaded, ...page.filter((log) => !ids.has(log.id))];
+}
+
 export type ActivityDay = { day: string; entries: ActivityEntry[] };
 
 function localDayKey(value: string): string {

@@ -7,11 +7,15 @@ import { m } from "$lib/paraglide/messages";
 import { expectNoAxeViolations } from "$lib/test/axe";
 import AdminSourcesOverview from "./AdminSourcesOverview.svelte";
 
+const CREDENTIALS =
+  "SharePoint credentials are invalid or expired; an administrator must reconnect the integration";
+
 function knowledge(
   id: string,
   name: string,
   fields: Partial<IntegrationKnowledge> = {},
-  status = "success"
+  status = "success",
+  error = "Graph timeout"
 ): IntegrationKnowledge {
   return {
     id,
@@ -26,18 +30,23 @@ function knowledge(
       size: 0,
       document_count: 10,
       last_sync_status: status,
-      last_sync_error: status === "error" ? "Graph timeout" : null,
+      last_sync_error: status === "error" ? error : null,
       last_synced_at: "2026-10-14T08:00:00Z"
     }
   } as IntegrationKnowledge;
 }
 
-const social = { id: "s1", name: "Socialtjänsten", organization: false };
-const org = { id: "s2", name: "Organisationen", organization: true };
+const social = { id: "s1", name: "Socialtjänsten", organization: false, can_open: true };
+const org = { id: "s2", name: "Organisationen", organization: true, can_open: true };
+// A shared space the admin is not a member of: its pages would refuse them.
+const closed = { id: "s3", name: "Ekonomi", organization: false, can_open: false };
 
-function show() {
+type OverviewItem = { space: typeof social; knowledge: IntegrationKnowledge };
+
+function show(extra: OverviewItem[] = []) {
   const knowledgeOverview = vi.fn(async () => ({
     items: [
+      ...extra,
       { space: org, knowledge: knowledge("a", "Intranätet") },
       {
         space: social,
@@ -76,7 +85,7 @@ describe("AdminSourcesOverview", () => {
   it("sums up the organisation's sources and lists those that need attention first", async () => {
     show();
 
-    await expect.element(page.getByText(m.admin_sources_in_spaces({ count: 1 }))).toBeVisible();
+    await expect.element(page.getByText(m.admin_sources_in_spaces_one())).toBeVisible();
     await expect
       .element(page.getByText(m.admin_sources_personal_failing({ count: 1 })))
       .toBeVisible();
@@ -85,6 +94,27 @@ describe("AdminSourcesOverview", () => {
       .element(page.getByRole("link", { name: "Socialförvaltningen" }))
       .toHaveAttribute("href", "/spaces/s1/knowledge/integrations/wrapper/w1");
     await expectNoAxeViolations();
+  });
+
+  it("names a source of a space the admin cannot open without linking to it", async () => {
+    show([{ space: closed, knowledge: knowledge("d", "Fakturor", {}, "error", CREDENTIALS) }]);
+
+    await expect.element(page.getByText("Fakturor")).toBeVisible();
+    expect(page.getByRole("link", { name: "Fakturor" }).elements()).toHaveLength(0);
+    expect(sourceLinks()).toEqual(["Socialförvaltningen", "Intranätet"]);
+    await expect
+      .element(page.getByText(m.admin_sources_in_spaces_other({ count: 2 })))
+      .toBeVisible();
+    await expectNoAxeViolations();
+  });
+
+  it("says why a source needs attention, in words for a refused sign-in", async () => {
+    show([{ space: closed, knowledge: knowledge("d", "Fakturor", {}, "error", CREDENTIALS) }]);
+
+    const table = page.getByRole("table", { name: m.admin_sources_heading() });
+    await expect.element(table.getByText("Graph timeout")).toBeVisible();
+    await expect.element(table.getByText(m.integration_problem_credentials_title())).toBeVisible();
+    expect(table.getByText(/credentials are invalid/).elements()).toHaveLength(0);
   });
 
   it("narrows the list by status and by a search on source, folder or space", async () => {

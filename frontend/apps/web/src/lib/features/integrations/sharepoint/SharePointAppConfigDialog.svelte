@@ -439,7 +439,7 @@
           class="text-muted-foreground flex items-center justify-center gap-2 py-10"
           role="status"
         >
-          <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+          <LoaderCircle class="size-4 motion-safe:animate-spin" aria-hidden="true" />
           {m.loading_configuration()}
         </div>
       {:else if configLoadFailed}
@@ -503,7 +503,7 @@
                 onclick={testStoredConnection}
               >
                 {#if testStoredConnection.isLoading}
-                  <LoaderCircle class="animate-spin" aria-hidden="true" />
+                  <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
                 {/if}
                 {testStoredConnection.isLoading ? m.testing() : m.test_connection()}
               </Button>
@@ -663,7 +663,7 @@
           onclick={updateSecret}
         >
           {#if updateSecret.isLoading}
-            <LoaderCircle class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
           {/if}
           {updateSecret.isLoading ? m.saving() : m.save()}
         </Button>
@@ -676,7 +676,7 @@
             onclick={reauthServiceAccount}
           >
             {#if reauthServiceAccount.isLoading}
-              <LoaderCircle class="animate-spin" aria-hidden="true" />
+              <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
             {/if}
             {reauthServiceAccount.isLoading
               ? m.redirecting()
@@ -703,7 +703,7 @@
           onclick={testCredentials}
         >
           {#if testCredentials.isLoading}
-            <LoaderCircle class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
           {/if}
           {testCredentials.isLoading ? m.testing() : m.test_connection()}
         </Button>
@@ -713,7 +713,7 @@
           onclick={saveConfig}
         >
           {#if saveConfig.isLoading}
-            <LoaderCircle class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
           {:else if isFixtureSession}
             <FlaskConical aria-hidden="true" />
           {/if}
@@ -732,7 +732,7 @@
           onclick={startServiceAccountOAuth}
         >
           {#if startServiceAccountOAuth.isLoading}
-            <LoaderCircle class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
           {:else if isFixtureSession}
             <FlaskConical aria-hidden="true" />
           {/if}

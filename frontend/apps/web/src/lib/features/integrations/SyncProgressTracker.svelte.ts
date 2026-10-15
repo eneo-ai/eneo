@@ -20,6 +20,7 @@ export class SyncProgressTracker {
   #onSettled: Options["onSettled"];
   #timer: ReturnType<typeof setTimeout> | undefined;
   #running = false;
+  #unavailable = false;
   #generation = 0;
 
   constructor({ load, onSettled }: Options) {
@@ -32,7 +33,7 @@ export class SyncProgressTracker {
   }
 
   start() {
-    if (this.#running) return;
+    if (this.#running || this.#unavailable) return;
     this.#running = true;
     void this.#tick();
   }
@@ -64,6 +65,7 @@ export class SyncProgressTracker {
     } catch (error) {
       if (generation !== this.#generation) return;
       if ((error as { status?: number })?.status === 404) {
+        this.#unavailable = true;
         this.stop();
         return;
       }

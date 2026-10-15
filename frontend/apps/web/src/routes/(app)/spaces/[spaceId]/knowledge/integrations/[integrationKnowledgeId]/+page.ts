@@ -1,6 +1,13 @@
 import { error, redirect } from "@sveltejs/kit";
 import type { IntegrationKnowledge } from "@eneo/eneo-js";
-import { sourceHref } from "$lib/features/integrations/sources";
+import { sourceHref, type SourceTab } from "$lib/features/integrations/sources";
+
+/** The wrapper page's tab for a tab of the item page; the skipped files moved to Problems. */
+function wrapperTab(tab: string | null): SourceTab | undefined {
+  if (tab === "skipped" || tab === "problems") return "problems";
+  if (tab === "activity" || tab === "content") return tab;
+  return undefined;
+}
 
 export const load = async (event) => {
   const { currentSpace } = await event.parent();
@@ -24,10 +31,7 @@ export const load = async (event) => {
       sourceHref(
         event.params.spaceId,
         { kind: "wrapper", id: knowledge.wrapper_id },
-        {
-          folder: knowledge.id,
-          tab: requestedTab === "skipped" || requestedTab === "problems" ? "problems" : undefined
-        }
+        { folder: knowledge.id, tab: wrapperTab(requestedTab) }
       )
     );
   }
