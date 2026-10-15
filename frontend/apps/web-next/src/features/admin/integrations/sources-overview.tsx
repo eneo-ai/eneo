@@ -14,6 +14,7 @@ import {
   knowledgeOverviewQueryOptions,
   type KnowledgeOverview
 } from "@/features/knowledge/integrations/queries";
+import { isCredentialsError } from "@/features/knowledge/integrations/source-problems";
 import { SourceStateLabel, SourceUpdated } from "@/features/knowledge/integrations/source-status";
 import {
   countSourceFilters,
@@ -23,6 +24,7 @@ import {
   sourceContentsLabel,
   sourceHref,
   summarizeSource,
+  waitingLabel,
   type IntegrationSource,
   type SourceFilter,
   type SourceSummary
@@ -72,16 +74,38 @@ function SourceCell({ row }: { row: OverviewRow }) {
         <VendorIcon type={row.source.integrationType} />
       </span>
       <span className="flex min-w-0 flex-col">
-        <Link
-          href={sourceHref(routeId, row.source)}
-          className="text-ax-text focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 w-fit items-center font-semibold break-words hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
-        >
-          {row.name}
-        </Link>
+        {/* The admin permission alone opens no shared space: link only where its page would. */}
+        {row.space.can_open ? (
+          <Link
+            href={sourceHref(routeId, row.source)}
+            className="text-ax-text focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 w-fit items-center font-semibold break-words hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+          >
+            {row.name}
+          </Link>
+        ) : (
+          <span className="font-semibold break-words">{row.name}</span>
+        )}
         <span className="text-ax-text-secondary text-xs">
           {sourceContentsLabel(row.source.items, t)}
         </span>
       </span>
+    </span>
+  );
+}
+
+/** Why the source needs attention, or which of its folders still wait for a first sync. */
+function StatusCell({ summary }: { summary: SourceSummary }) {
+  const t = useTranslations();
+  const failure = summary.failedItems[0]?.metadata?.last_sync_error?.trim();
+  const note = failure
+    ? isCredentialsError(failure)
+      ? t("integration_problem_credentials_title")
+      : failure
+    : waitingLabel(summary, t);
+  return (
+    <span className="flex min-w-0 flex-col items-start gap-1">
+      <SourceStateLabel state={summary.state} />
+      {note ? <span className="text-ax-text-secondary text-xs break-words">{note}</span> : null}
     </span>
   );
 }
@@ -163,7 +187,7 @@ function OverviewContent({
       key: "status",
       header: t("status"),
       width: proportional(2),
-      renderCell: (row) => <SourceStateLabel state={row.summary.state} />
+      renderCell: (row) => <StatusCell summary={row.summary} />
     },
     {
       key: "updated",
@@ -183,7 +207,9 @@ function OverviewContent({
           note={
             attentionSpaces > 0 ? (
               <span className="text-ax-text-secondary text-xs font-normal">
-                {t("admin_sources_in_spaces", { count: attentionSpaces })}
+                {attentionSpaces === 1
+                  ? t("admin_sources_in_spaces_one")
+                  : t("admin_sources_in_spaces_other", { count: attentionSpaces })}
               </span>
             ) : null
           }

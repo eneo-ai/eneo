@@ -85,6 +85,46 @@ export function mergeActivity(
     .sort((a, b) => startedAt(b.log) - startedAt(a.log));
 }
 
+/**
+ * The items whose next page can extend the merged timeline: those that hold the
+ * cutoff (`mergeActivity`) and those with nothing loaded yet. Another partly
+ * loaded item's older syncs already sit below the cutoff, so paging it would
+ * show nothing until the cutoff moves past it.
+ */
+export function itemsToPage<Source extends { logs: readonly SyncLog[]; total: number }>(
+  sources: readonly Source[]
+): Source[] {
+  const partial = sources.filter((source) => source.total > source.logs.length);
+  const oldest = (source: Source) => Math.min(...source.logs.map(startedAt));
+  const cutoff = Math.max(
+    ...partial.filter((source) => source.logs.length > 0).map(oldest),
+    -Infinity
+  );
+  return partial.filter((source) => source.logs.length === 0 || oldest(source) >= cutoff);
+}
+
+/**
+ * An item's newest logs after reloading its first page. The older pages already
+ * loaded are kept when the new page reaches them; otherwise more syncs ran than
+ * a page holds, and keeping them would leave a gap.
+ */
+export function mergeFirstPage(
+  loaded: readonly SyncLog[] | undefined,
+  firstPage: readonly SyncLog[],
+  total: number
+): SyncLog[] {
+  if (!loaded || loaded.length === 0 || firstPage.length >= total) return [...firstPage];
+  const ids = new Set(firstPage.map((log) => log.id));
+  if (!loaded.some((log) => ids.has(log.id))) return [...firstPage];
+  return [...firstPage, ...loaded.filter((log) => !ids.has(log.id))];
+}
+
+/** An older page after the loaded logs; syncs that ran in between shift it, so drop repeats. */
+export function appendPage(loaded: readonly SyncLog[], page: readonly SyncLog[]): SyncLog[] {
+  const ids = new Set(loaded.map((log) => log.id));
+  return [...loaded, ...page.filter((log) => !ids.has(log.id))];
+}
+
 export type ActivityDay = { day: string; entries: ActivityEntry[] };
 
 function localDayKey(value: string): string {

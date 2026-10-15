@@ -105,7 +105,7 @@ describe("SharePointConnectionHealth", () => {
 
     expect(
       await within(health).findByText(
-        "1 bevakningar aktiva. Nya och ändrade filer hämtas inom några minuter."
+        "1 bevakning aktiv. Nya och ändrade filer hämtas inom några minuter."
       )
     ).toBeTruthy();
     expect(within(health).getByText("Allt fungerar")).toBeTruthy();
@@ -261,5 +261,45 @@ describe("SharePointConnectionHealth", () => {
         ),
       { timeout: 1500 }
     );
+  });
+
+  it("updates the checklist when a watch is renewed in the watch table", async () => {
+    subscriptions = [subscription(), subscription({ is_expired: true, expires_in_hours: -5 })];
+    const { health } = show(app());
+    fireEvent.click(await within(health).findByRole("button", { name: "Visa bevakningar" }));
+    const table = await screen.findByRole("table", { name: "SharePoint Webhook-prenumerationer" });
+    expect(within(health).getByRole("button", { name: "Förnya utgångna" })).toBeTruthy();
+
+    // The refetch after the renewal finds nothing expired.
+    subscriptions = [subscription(), subscription()];
+    const expiredRow = within(table).getByText("Webhook Utgången").closest("tr")!;
+    fireEvent.click(within(expiredRow).getByRole("button", { name: "Förnya" }));
+
+    expect(
+      await within(health).findByText(
+        "2 bevakningar aktiva. Nya och ändrade filer hämtas inom några minuter."
+      )
+    ).toBeTruthy();
+    expect(within(health).queryByRole("button", { name: "Förnya utgångna" })).toBeNull();
+    expect(within(health).getByText("Allt fungerar")).toBeTruthy();
+  });
+
+  it("updates the watch table when the checklist renews the expired watches", async () => {
+    subscriptions = [subscription(), subscription({ is_expired: true, expires_in_hours: -5 })];
+    respond({
+      "/api/v1/admin/sharepoint/subscriptions/renew-expired": { recreated: 1, failed: 0 }
+    });
+    const { health } = show(app());
+    fireEvent.click(await within(health).findByRole("button", { name: "Visa bevakningar" }));
+    const table = await screen.findByRole("table", { name: "SharePoint Webhook-prenumerationer" });
+    expect(within(table).getByText("Webhook Utgången")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Förnya alla utgångna (1)" })).toBeTruthy();
+
+    subscriptions = [subscription(), subscription()];
+    fireEvent.click(within(health).getByRole("button", { name: "Förnya utgångna" }));
+
+    await waitFor(() => expect(within(table).queryByText("Webhook Utgången")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Förnya alla utgångna (1)" })).toBeNull();
+    expect(screen.getByText("2 totalt, 2 aktiva, 0 utgångna")).toBeTruthy();
   });
 });

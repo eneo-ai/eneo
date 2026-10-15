@@ -67,12 +67,16 @@ export function LiveSyncFeed({ progress }: { progress: IntegrationSyncProgress }
               className="border-ax-border flex items-center gap-3 border-t px-4 py-2"
             >
               <OutcomeIcon outcome={file.outcome} />
-              <span className="min-w-0 flex-1 truncate">{file.name}</span>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate">{file.name}</span>
+                {reason ? (
+                  <span className="text-ax-text-secondary text-xs break-words">{reason}</span>
+                ) : null}
+              </span>
               <span
                 className={`shrink-0 text-xs ${file.outcome === "skipped" ? "text-ax-warning" : "text-ax-text-secondary"}`}
               >
                 {t(OUTCOME_LABEL[file.outcome])}
-                {reason ? <span className="sr-only">: {reason}</span> : null}
               </span>
             </li>
           );

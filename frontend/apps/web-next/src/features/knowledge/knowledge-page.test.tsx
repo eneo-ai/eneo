@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   deleted: [] as string[],
   bulkResult: { total: 0, queued: 0, failed: 0, crawl_runs: [], errors: [] } as unknown,
   progress: [] as unknown[],
+  progressPolls: 0,
   toasts: [] as { kind: string; message: string; description?: string }[]
 }));
 
@@ -31,8 +32,11 @@ vi.mock("@/features/spaces/use-space", async () => {
 });
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: (path: string) =>
-      Promise.resolve({
+    GET: (path: string) => {
+      if (path === "/api/v1/spaces/{id}/knowledge/integrations/sync-progress/") {
+        state.progressPolls += 1;
+      }
+      return Promise.resolve({
         data:
           path === "/api/v1/spaces/{id}/"
             ? state.space
@@ -40,7 +44,8 @@ vi.mock("@/lib/api/browser", () => ({
               ? { items: state.progress }
               : { items: [] },
         response: new Response("{}")
-      }),
+      });
+    },
     POST: (path: string, { body }: { body: unknown }) => {
       state.posted.push({ path, body });
       return Promise.resolve({ data: state.bulkResult, response: new Response("{}") });
@@ -67,7 +72,10 @@ import { KnowledgePage } from "./knowledge-page";
 
 afterEach(() => {
   cleanup();
+  // Astryx keeps one live region on <body>: no announcement may carry over.
+  document.querySelectorAll("[data-astryx-live-region]").forEach((region) => region.remove());
   state.progress = [];
+  state.progressPolls = 0;
   state.posted = [];
   state.deleted = [];
   state.toasts = [];
@@ -413,6 +421,217 @@ describe("KnowledgePage", () => {
     expect(screen.queryByRole("table", { name: "multilingual-e5-large" })).toBeNull();
     expect(names(screen.getByRole("table", { name: "text-embedding-3" }))).toEqual(["Bygglov"]);
     await expectNoAxeViolations(document.body);
+  });
+
+  it("keeps the status filter and a way back when the chosen filter no longer matches", async () => {
+    const failing = { size: 0, last_sync_status: "error", last_sync_error: "Graph timeout" };
+    const wrapped = { wrapper_id: "w1", wrapper_name: "Byggnad" };
+    const { container, queryClient } = show(
+      makeSpace({
+        integrations: [
+          makeIntegration({ id: "i1", name: "Mall 1", ...wrapped }),
+          makeIntegration({ id: "i2", name: "Mall 2", ...wrapped }),
+          makeIntegration({ id: "i3", name: "HR-handboken", metadata: failing })
+        ]
+      }),
+      "integrations"
+    );
+    fireEvent.click(await screen.findByRole("radio", { name: "Behöver åtgärd 1" }));
+    expect(screen.getByRole("link", { name: "HR-handboken" })).toBeTruthy();
+
+    // The wrapper is deleted and HR-handboken recovers: one source, none failing.
+    state.space = makeSpace({
+      integrations: [
+        makeIntegration({
+          id: "i3",
+          name: "HR-handboken",
+          metadata: { size: 0, last_synced_at: "2026-10-14T08:00:00Z", document_count: 4 }
+        })
+      ]
+    });
+    await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
+
+    const showAll = await screen.findByRole("button", { name: "Visa alla" });
+    expect(screen.getByText("Inga källor matchar filtret.", { selector: "p" })).toBeTruthy();
+    expect(screen.queryByText("Inga resultat hittades")).toBeNull();
+    expect(screen.getByRole("radiogroup", { name: "Filtrera på status" })).toBeTruthy();
+    await waitFor(() => expect(liveRegion()?.textContent).toBe("Inga källor matchar filtret."));
+    await expectNoAxeViolations(container);
+
+    showAll.focus();
+    fireEvent.click(showAll);
+    expect(screen.getByRole("link", { name: "HR-handboken" })).toBeTruthy();
+    // The pressed button is gone; focus is on the filter now in use, which stays.
+    const all = screen.getByRole("radio", { name: "Alla 1" });
+    expect(document.activeElement).toBe(all);
+    expect(all.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radiogroup", { name: "Filtrera på status" })).toBeTruthy();
+  });
+
+  it("says when some folders of a source still wait for their first sync", () => {
+    const wrapped = { wrapper_id: "w1", wrapper_name: "Byggnad" };
+    show(
+      makeSpace({
+        integrations: [
+          makeIntegration({
+            id: "i1",
+            name: "Mall 1",
+            ...wrapped,
+            metadata: { size: 0, last_synced_at: "2026-10-14T08:00:00Z", document_count: 4 }
+          }),
+          makeIntegration({
+            id: "i2",
+            name: "Mall 2",
+            ...wrapped,
+            metadata: { size: 0, last_synced_at: null }
+          }),
+          makeIntegration({
+            id: "i3",
+            name: "Avtal",
+            metadata: { size: 0, last_synced_at: "2026-10-14T08:00:00Z", document_count: 2 }
+          })
+        ]
+      }),
+      "integrations"
+    );
+
+    const row = screen.getByRole("link", { name: "Byggnad" }).closest("tr")!;
+    expect(within(row).getByText("Aktuell")).toBeTruthy();
+    expect(within(row).getByText("1 mapp väntar på sin första synk")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Väntar 1" }));
+    const table = screen.getByRole("table", { name: "Integrationer" });
+    expect(
+      within(table)
+        .getAllByRole("row")
+        .slice(1)
+        .map((tr) => within(tr).getAllByRole("link")[0]!.textContent)
+    ).toEqual(["Byggnad"]);
+  });
+
+  it("sorts a source that syncs right now as the most recently updated", async () => {
+    state.progress = [
+      {
+        integration_knowledge_id: "i1",
+        sync_type: "delta",
+        phase: "processing",
+        started_at: "2026-10-15T10:00:00Z",
+        updated_at: "2026-10-15T10:01:00Z",
+        total: null,
+        done: 1,
+        indexed: 1,
+        unchanged: 0,
+        skipped: 0,
+        deleted: 0
+      }
+    ];
+    show(
+      makeSpace({
+        integrations: [
+          makeIntegration({
+            id: "i1",
+            name: "Avtal",
+            metadata: { size: 0, last_synced_at: "2026-10-01T08:00:00Z", document_count: 1 }
+          }),
+          makeIntegration({
+            id: "i2",
+            name: "Bygglov",
+            metadata: { size: 0, last_synced_at: "2026-10-10T08:00:00Z", document_count: 1 }
+          }),
+          makeIntegration({
+            id: "i3",
+            name: "Cirkulär",
+            metadata: { size: 0, last_synced_at: "2026-10-05T08:00:00Z", document_count: 1 }
+          })
+        ]
+      }),
+      "integrations"
+    );
+    const table = screen.getByRole("table", { name: "Integrationer" });
+    await within(table).findByText("Uppdateras nu");
+
+    fireEvent.click(within(table).getByRole("button", { name: "Sortera efter Uppdaterad" }));
+    const sources = within(table)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("link")[0]!.textContent);
+    // Oldest first: Avtal synced last on 1 October, but it is updating now.
+    expect(sources).toEqual(["Cirkulär", "Bygglov", "Avtal"]);
+  });
+
+  it("heads the empty result under the model groups' headings when the search empties them all", () => {
+    const other = { id: "embed-2", name: "text-embedding-3" };
+    show(
+      makeSpace({
+        integrations: [
+          makeIntegration({ id: "i1", name: "Avtal" }),
+          makeIntegration({ id: "i2", name: "Bygglov", embedding_model: other })
+        ],
+        overrides: {
+          embedding_models: [
+            { id: "embed-1", name: "multilingual-e5-large", nickname: null, is_deprecated: false },
+            { ...other, nickname: null, is_deprecated: false }
+          ]
+        }
+      }),
+      "integrations"
+    );
+    expect(screen.getByRole("heading", { level: 3, name: "text-embedding-3" })).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Filtrera integrationer" }), {
+      target: { value: "ekonomi" }
+    });
+
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("heading", { level: 3, name: "Inga resultat hittades" })).toBeTruthy();
+  });
+
+  it("announces a refused sign-in politely when it happens, not on every visit", async () => {
+    const signInRefused = {
+      size: 0,
+      last_sync_status: "error",
+      last_sync_error:
+        "SharePoint credentials are invalid or expired; an administrator must reconnect the integration"
+    };
+    const avtal = makeIntegration({ id: "i1", name: "Avtal", metadata: signInRefused });
+    const { queryClient } = show(
+      makeSpace({ integrations: [avtal, makeIntegration({ id: "i2", name: "Bygglov" })] }),
+      "integrations"
+    );
+    // Already there when the tab opened: the banner shows it, nothing is read out.
+    expect(screen.getByText("1 källa uppdateras inte")).toBeTruthy();
+    expect(liveRegion()?.textContent ?? "").toBe("");
+
+    state.space = makeSpace({
+      integrations: [avtal, makeIntegration({ id: "i2", name: "Bygglov", metadata: signInRefused })]
+    });
+    await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
+
+    await waitFor(() => expect(liveRegion()?.textContent).toBe("2 källor uppdateras inte"));
+  });
+
+  it("polls the sync progress only on the integrations tab of a space with its own", async () => {
+    const own = makeSpace({ integrations: [makeIntegration({ id: "i1", name: "Avtal" })] });
+    show(own);
+    expect(screen.getByRole("tab", { name: "Samlingar" }).getAttribute("aria-selected")).toBe(
+      "true"
+    );
+    await act(async () => {});
+    expect(state.progressPolls).toBe(0);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Integrationer" }));
+    await waitFor(() => expect(state.progressPolls).toBe(1));
+    cleanup();
+
+    // Only a source shared in from another space: it syncs there.
+    state.progressPolls = 0;
+    show(
+      makeSpace({ integrations: [makeIntegration({ id: "i9", space_id: "space-0" })] }),
+      "integrations"
+    );
+    expect(screen.getByRole("heading", { name: "Inga integrationer ännu" })).toBeTruthy();
+    await act(async () => {});
+    expect(state.progressPolls).toBe(0);
   });
 
   it("offers the next step for integrations in the empty state", () => {

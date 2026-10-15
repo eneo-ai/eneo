@@ -9,11 +9,13 @@ import Link from "next/link";
 import { useFormatter, useTranslations } from "next-intl";
 import { Table } from "@/components/astryx/table";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
+import { cn } from "@/lib/utils";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { IntegrationActions } from "../actions";
+import { safeExternalUrl } from "../external-url";
 import { buildIntegrationTree, flattenIntegrationTree } from "../integration-tree";
-import { SourceStateLabel } from "../source-status";
-import { itemState } from "../sources";
+import { SourceStateLabel, useWatchStates } from "../source-status";
+import { itemState, watchStateLabel } from "../sources";
 import type { ProgressById } from "../sync-progress";
 import { VENDOR } from "../vendor";
 import type { InPlaceLink } from "./in-place-link";
@@ -33,6 +35,22 @@ function LastUpToDate({ item }: { item: IntegrationKnowledge }) {
   return (
     <span className="text-ax-text-secondary text-sm">
       {attempted ? t("integration_source_last_attempt_at", { time: attempted }) : "–"}
+    </span>
+  );
+}
+
+/** Whether SharePoint tells Eneo about changes to the folder; "–" for other vendors. */
+function WatchCell({ item }: { item: IntegrationKnowledge }) {
+  const t = useTranslations();
+  const [watch] = useWatchStates([item]) ?? [];
+  if (item.integration_type !== "sharepoint" || !watch) {
+    return <span className="text-ax-text-secondary text-sm">–</span>;
+  }
+  return (
+    <span
+      className={cn("text-sm", watch === "expired" ? "text-ax-warning" : "text-ax-text-secondary")}
+    >
+      {watchStateLabel(watch, t)}
     </span>
   );
 }
@@ -108,30 +126,43 @@ export function FolderOverview({
       width: proportional(1),
       renderCell: (row) => <LastUpToDate item={row.item} />
     },
+    ...(items.some((item) => item.integration_type === "sharepoint")
+      ? [
+          {
+            key: "watch",
+            header: t("integration_source_stat_watch"),
+            width: proportional(1),
+            renderCell: (row: FolderRow) => <WatchCell item={row.item} />
+          }
+        ]
+      : []),
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
       width: pixel(112),
       align: "end",
-      renderCell: (row) => (
-        <span className="flex items-center justify-end gap-1">
-          {row.item.url ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              label={t("integration_source_open_item_link", {
-                label: t(VENDOR[row.item.integration_type].linkLabel),
-                name: row.item.name
-              })}
-              isIconOnly
-              icon={<ExternalLink className="size-4" aria-hidden="true" />}
-              href={row.item.url}
-              target="_blank"
-            />
-          ) : null}
-          <IntegrationActions item={row.item} />
-        </span>
-      )
+      renderCell: (row) => {
+        const url = safeExternalUrl(row.item.url);
+        return (
+          <span className="flex items-center justify-end gap-1">
+            {url ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                label={t("integration_source_open_item_link", {
+                  label: t(VENDOR[row.item.integration_type].linkLabel),
+                  name: row.item.name
+                })}
+                isIconOnly
+                icon={<ExternalLink className="size-4" aria-hidden="true" />}
+                href={url}
+                target="_blank"
+              />
+            ) : null}
+            <IntegrationActions item={row.item} />
+          </span>
+        );
+      }
     }
   ];
 

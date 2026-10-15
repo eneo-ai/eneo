@@ -1,9 +1,12 @@
-import { queryOptions, type QueryKey } from "@tanstack/react-query";
+import { queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import type { IntegrationKnowledge } from "../knowledge";
 import type { SkippedDocuments } from "./source-problems";
+import { mergeFirstPage } from "./sync-activity";
 import type { ProgressById } from "./sync-progress";
+import { syncRevision } from "./sync-status";
 
 export type UserIntegration = Schema<"UserIntegration">;
 export type IntegrationPreview = Schema<"IntegrationPreviewData">;
@@ -79,16 +82,22 @@ export type IntegrationDocumentsSort = "name" | "path" | "size" | "updated_at";
 
 export const DOCUMENTS_PAGE_SIZE = 50;
 
+// The lists a sync rewrites (documents, skipped files, sync logs) carry the
+// item's sync revision in their key: a sync that finished while they were not
+// on screen loads them again, and the list shown before stays until it has.
+
 /**
- * The lists a sync of the item rewrites, every page and window of them:
- * `useSyncProgress` refetches them when the item's sync revision changes.
+ * The data cached last under `queryKey` or a longer key, such as the list of
+ * an item's earlier revision. A new key in `useQueries` gets a new observer,
+ * which has no previous data for `placeholderData` to keep.
  */
-export function syncedListKeys(spaceId: string, knowledgeId: string): QueryKey[] {
-  return [
-    ["integrations", "documents", spaceId, knowledgeId],
-    ["integrations", "skipped", spaceId, knowledgeId],
-    ["integrations", "sync-logs", knowledgeId]
-  ];
+function latestCached<T>(queryClient: QueryClient, queryKey: QueryKey): T | undefined {
+  const [latest] = queryClient
+    .getQueryCache()
+    .findAll({ queryKey })
+    .filter((query) => query.state.data !== undefined)
+    .sort((a, b) => b.state.dataUpdatedAt - a.state.dataUpdatedAt);
+  return latest?.state.data as T | undefined;
 }
 
 /** One page of a synced item's documents; `q` matches the title, the path or a property value. */
@@ -96,16 +105,17 @@ export function integrationDocumentsQueryOptions(
   api: EneoClient,
   args: {
     spaceId: string;
-    knowledgeId: string;
+    item: IntegrationKnowledge;
     q: string;
     sort: IntegrationDocumentsSort;
     order: "asc" | "desc";
     page: number;
   }
 ) {
-  const { spaceId, knowledgeId, ...view } = args;
+  const { spaceId, item, ...view } = args;
+  const knowledgeId = item.id;
   return queryOptions({
-    queryKey: ["integrations", "documents", spaceId, knowledgeId, view],
+    queryKey: ["integrations", "documents", spaceId, knowledgeId, syncRevision(item), view],
     queryFn: (): Promise<IntegrationDocumentsPage> =>
       unwrap(
         api.GET(
@@ -131,34 +141,70 @@ export function integrationDocumentsQueryOptions(
 /** The files the latest sync of an item could not read, capped by the backend. */
 export function skippedDocumentsQueryOptions(
   api: EneoClient,
+  queryClient: QueryClient,
   spaceId: string,
-  knowledgeId: string
+  item: IntegrationKnowledge
 ) {
+  const itemKey = ["integrations", "skipped", spaceId, item.id];
   return queryOptions({
-    queryKey: ["integrations", "skipped", spaceId, knowledgeId],
-    // Only a sync rewrites the list, and a finished one refetches it (syncedListKeys).
+    queryKey: [...itemKey, syncRevision(item)],
+    // Only a sync rewrites the list, and its revision is in the key.
     staleTime: 5 * 60_000,
     queryFn: (): Promise<SkippedDocuments> =>
       unwrap(
         api.GET(
           "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/skipped/",
-          { params: { path: { id: spaceId, integration_knowledge_id: knowledgeId } } }
+          { params: { path: { id: spaceId, integration_knowledge_id: item.id } } }
         )
-      )
+      ),
+    placeholderData: () => latestCached<SkippedDocuments>(queryClient, itemKey)
   });
 }
 
-/** An item's newest sync logs, `limit` of them; the activity view grows the window. */
-export function recentSyncLogsQueryOptions(api: EneoClient, knowledgeId: string, limit: number) {
+/** Per request; the sync-log endpoint caps `limit` at 100, so a long history is read page by page. */
+export const SYNC_LOG_PAGE_SIZE = 10;
+
+/** One page of an item's sync logs, newest first, from the `skip`th. */
+export function fetchSyncLogPage(
+  api: EneoClient,
+  knowledgeId: string,
+  skip: number
+): Promise<SyncLogPage> {
+  return unwrap(
+    api.GET("/api/v1/integrations/sync-logs/{integration_knowledge_id}/", {
+      params: {
+        path: { integration_knowledge_id: knowledgeId },
+        query: { skip, limit: SYNC_LOG_PAGE_SIZE }
+      }
+    })
+  );
+}
+
+/** An item's sync logs as loaded so far, newest first, and how many it has in all. */
+export type SyncLogWindow = { logs: SyncLog[]; total: number };
+
+/**
+ * An item's sync history: its newest page, and the older pages "show older"
+ * adds to the window (`setQueryData`). A new revision loads the newest page
+ * again and keeps the older pages loaded before when it reaches them.
+ */
+export function syncLogWindowQueryOptions(
+  api: EneoClient,
+  queryClient: QueryClient,
+  item: IntegrationKnowledge
+) {
+  const itemKey = ["integrations", "sync-logs", item.id];
+  const latest = () => latestCached<SyncLogWindow>(queryClient, itemKey);
   return queryOptions({
-    queryKey: ["integrations", "sync-logs", knowledgeId, "recent", limit],
-    queryFn: (): Promise<SyncLogPage> =>
-      unwrap(
-        api.GET("/api/v1/integrations/sync-logs/{integration_knowledge_id}/", {
-          params: { path: { integration_knowledge_id: knowledgeId }, query: { skip: 0, limit } }
-        })
-      ),
-    placeholderData: (previous) => previous
+    queryKey: [...itemKey, syncRevision(item)],
+    queryFn: async (): Promise<SyncLogWindow> => {
+      const page = await fetchSyncLogPage(api, item.id, 0);
+      return {
+        logs: mergeFirstPage(latest()?.logs, page.items, page.total_count),
+        total: page.total_count
+      };
+    },
+    placeholderData: latest
   });
 }
 
@@ -171,8 +217,9 @@ function isNotFound(error: unknown): boolean {
 
 /**
  * The running syncs of a space, keyed by item. Polls every 2 s while one runs
- * and every 15 s otherwise; stops for good on a 404 (a backend without the
- * endpoint). Structural sharing keeps the data stable between identical polls.
+ * and every 15 s otherwise, but not while the browser tab is hidden; stops for
+ * good on a 404 (a backend without the endpoint). Structural sharing keeps the
+ * data stable between identical polls.
  */
 export function syncProgressQueryOptions(api: EneoClient, spaceId: string) {
   return queryOptions({
@@ -189,7 +236,8 @@ export function syncProgressQueryOptions(api: EneoClient, spaceId: string) {
     refetchInterval: (query) => {
       if (isNotFound(query.state.error)) return false;
       return Object.keys(query.state.data ?? {}).length > 0 ? PROGRESS_ACTIVE_MS : PROGRESS_IDLE_MS;
-    }
+    },
+    refetchIntervalInBackground: false
   });
 }
 

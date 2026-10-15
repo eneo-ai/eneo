@@ -29,6 +29,7 @@ import { useSpace } from "@/features/spaces/use-space";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { BlobPreviewDialog } from "../../blobs";
 import { IntegrationActions } from "../actions";
+import { safeExternalUrl } from "../external-url";
 import {
   DOCUMENTS_PAGE_SIZE,
   integrationDocumentsQueryOptions,
@@ -37,8 +38,8 @@ import {
 } from "../queries";
 import { describeSkipReason } from "../skip-reasons";
 import type { SkippedDocuments } from "../source-problems";
-import { SourceStateLabel } from "../source-status";
-import { itemState } from "../sources";
+import { SourceStateLabel, useWatchStates } from "../source-status";
+import { itemState, watchStateLabel } from "../sources";
 import type { ProgressById } from "../sync-progress";
 import { VENDOR } from "../vendor";
 import type { InPlaceLink } from "./in-place-link";
@@ -88,14 +89,16 @@ function DocumentNameCell({ document }: { document: IntegrationDocument }) {
 function FolderHeader({
   item,
   progress,
-  onDeleted
+  showControls
 }: {
   item: IntegrationKnowledge;
   progress: ProgressById;
-  onDeleted?: () => void;
+  showControls: boolean;
 }) {
   const t = useTranslations();
   const attempted = useClientTimeText(item.metadata?.last_sync_attempted_at, "date_time");
+  const [watch] = useWatchStates([item]) ?? [];
+  const url = safeExternalUrl(item.url);
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex min-w-0 flex-col gap-1">
@@ -117,21 +120,28 @@ function FolderHeader({
           ) : attempted ? (
             <span>{t("integration_source_last_attempt_at", { time: attempted })}</span>
           ) : null}
+          {item.integration_type === "sharepoint" && watch ? (
+            <span className={watch === "expired" ? "text-ax-warning" : undefined}>
+              {t("integration_source_watch_state_line", { state: watchStateLabel(watch, t) })}
+            </span>
+          ) : null}
           {item.folder_path ? <span className="break-all">{item.folder_path}</span> : null}
         </div>
       </div>
-      <div className="flex items-center gap-1">
-        {item.url ? (
-          <Button
-            label={t(VENDOR[item.integration_type].linkLabel)}
-            size="sm"
-            href={item.url}
-            target="_blank"
-            icon={<ExternalLink className="size-4" aria-hidden="true" />}
-          />
-        ) : null}
-        <IntegrationActions item={item} onDeleted={onDeleted} />
-      </div>
+      {showControls ? (
+        <div className="flex items-center gap-1">
+          {url ? (
+            <Button
+              label={t(VENDOR[item.integration_type].linkLabel)}
+              size="sm"
+              href={url}
+              target="_blank"
+              icon={<ExternalLink className="size-4" aria-hidden="true" />}
+            />
+          ) : null}
+          <IntegrationActions item={item} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -206,17 +216,17 @@ export function FolderDocuments({
   skipped,
   problemsLink,
   showHeader = true,
-  onDeleted
+  showControls = true
 }: {
   item: IntegrationKnowledge;
   progress: ProgressById;
   /** The files the latest sync skipped; null while unknown or not loadable. */
   skipped: SkippedDocuments | null;
   problemsLink: InPlaceLink;
-  /** The folder's own heading and actions; off when the source is this one item. */
+  /** The folder's own heading; off when the source is this one item. */
   showHeader?: boolean;
-  /** After the folder was deleted from its own menu. */
-  onDeleted?: () => void;
+  /** The folder's link and actions in its heading; off when the page header has them. */
+  showControls?: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -247,7 +257,7 @@ export function FolderDocuments({
   const documents = useQuery(
     integrationDocumentsQueryOptions(browserApi, {
       spaceId: space.id,
-      knowledgeId: item.id,
+      item,
       q,
       sort: active?.sortKey ?? "path",
       order: active?.direction === "descending" ? "desc" : "asc",
@@ -299,15 +309,16 @@ export function FolderDocuments({
           total: data.total_count
         })
       : null;
-  // What a search or a page turn led to, once it is in (not on the first load).
+  // What a search led to, once it is in. Astryx's Pagination announces a page
+  // turn itself, and the first load is not a result.
   const resultText = rangeText ?? (q !== "" ? emptyText : null);
   const settled = data !== undefined && !documents.isFetching && !pastTheEnd;
-  const announced = useRef<string | null | undefined>(undefined);
+  const announcedSearch = useRef(q);
   useEffect(() => {
-    if (!settled || announced.current === resultText) return;
-    if (announced.current !== undefined && resultText !== null) announce(resultText);
-    announced.current = resultText;
-  }, [announce, resultText, settled]);
+    if (!settled || announcedSearch.current === q) return;
+    announcedSearch.current = q;
+    if (resultText !== null) announce(resultText);
+  }, [announce, q, resultText, settled]);
 
   const columns: TableColumn<DocumentRow>[] = [
     {
@@ -359,8 +370,9 @@ export function FolderDocuments({
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
       width: pixel(64),
       align: "end",
-      renderCell: (row) =>
-        row.url ? (
+      renderCell: (row) => {
+        const url = safeExternalUrl(row.url);
+        return url ? (
           <Button
             variant="ghost"
             size="sm"
@@ -370,10 +382,11 @@ export function FolderDocuments({
               name: row.title
             })}
             icon={<ExternalLink className="size-4" aria-hidden="true" />}
-            href={row.url}
+            href={url}
             target="_blank"
           />
-        ) : null
+        ) : null;
+      }
     }
   ];
 
@@ -386,7 +399,7 @@ export function FolderDocuments({
       aria-labelledby={`folder-documents-${item.id}`}
     >
       {showHeader ? (
-        <FolderHeader item={item} progress={progress} onDeleted={onDeleted} />
+        <FolderHeader item={item} progress={progress} showControls={showControls} />
       ) : (
         <h2 id={`folder-documents-${item.id}`} className="sr-only">
           {t("documents")}

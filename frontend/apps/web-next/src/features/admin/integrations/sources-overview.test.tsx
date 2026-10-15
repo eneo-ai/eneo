@@ -11,11 +11,15 @@ vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
 import { SourcesOverview } from "./sources-overview";
 
+const CREDENTIALS =
+  "SharePoint credentials are invalid or expired; an administrator must reconnect the integration";
+
 function knowledge(
   id: string,
   name: string,
   fields: Partial<IntegrationKnowledge> = {},
-  status = "success"
+  status = "success",
+  error = "Graph timeout"
 ): IntegrationKnowledge {
   return {
     id,
@@ -30,14 +34,17 @@ function knowledge(
       size: 0,
       document_count: 10,
       last_sync_status: status,
-      last_sync_error: status === "error" ? "Graph timeout" : null,
-      last_synced_at: "2026-10-14T08:00:00Z"
+      last_sync_error: status === "error" ? error : null,
+      last_synced_at: status === "never" ? null : "2026-10-14T08:00:00Z",
+      ...(status === "never" ? { document_count: 0 } : {})
     }
   } as IntegrationKnowledge;
 }
 
-const social = { id: "s1", name: "Socialtjänsten", organization: false };
-const org = { id: "s2", name: "Organisationen", organization: true };
+const social = { id: "s1", name: "Socialtjänsten", organization: false, can_open: true };
+const org = { id: "s2", name: "Organisationen", organization: true, can_open: true };
+// A shared space the admin is not a member of: its pages would refuse them.
+const closed = { id: "s3", name: "Ekonomi", organization: false, can_open: false };
 const wrapper = { wrapper_id: "w1", wrapper_name: "Socialförvaltningen" };
 
 const overview: KnowledgeOverview = {
@@ -85,7 +92,7 @@ describe("SourcesOverview", () => {
     const { table, container } = await show();
 
     expect(stat("Källor")).toBe("2");
-    expect(stat("Behöver åtgärd")).toBe("1 i 1 utrymmen");
+    expect(stat("Behöver åtgärd")).toBe("1 i 1 utrymme");
     expect(stat("Sökbara dokument")).toBe("30");
     // Personal spaces are counted, never listed.
     expect(stat("I personliga utrymmen")).toBe("4 1 med fel");
@@ -93,6 +100,8 @@ describe("SourcesOverview", () => {
 
     const [, first, second] = within(table).getAllByRole("row");
     expect(within(first!).getByText("Behöver åtgärd")).toBeTruthy();
+    // Why: the folder's first failure.
+    expect(within(first!).getByText("Graph timeout")).toBeTruthy();
     expect(within(first!).getByText("2 mappar")).toBeTruthy();
     expect(within(second!).getByText("(Organisation)")).toBeTruthy();
     await expectNoAxeViolations(container);
@@ -127,8 +136,55 @@ describe("SourcesOverview", () => {
     expect(await within(table).findByText("Inga resultat hittades")).toBeTruthy();
   });
 
+  it("names a source of a space the admin cannot open without linking to it", async () => {
+    respond({
+      ...overview,
+      items: [...overview.items, { space: closed, knowledge: knowledge("d", "Fakturor") }]
+    });
+    const { table, container } = await show();
+
+    expect(within(table).getByText("Fakturor")).toBeTruthy();
+    expect(within(table).queryByRole("link", { name: "Fakturor" })).toBeNull();
+    expect(sourceLinks(table)).toEqual(["Socialförvaltningen", "Intranätet"]);
+    await expectNoAxeViolations(container);
+  });
+
+  it("says why a source needs attention, in words for a refused sign-in", async () => {
+    respond({
+      ...overview,
+      items: [
+        ...overview.items,
+        { space: closed, knowledge: knowledge("d", "Fakturor", {}, "error", CREDENTIALS) }
+      ]
+    });
+    const { table } = await show();
+
+    expect(within(table).getByText("Graph timeout")).toBeTruthy();
+    const fakturor = within(table).getByText("Fakturor").closest("tr")!;
+    expect(within(fakturor).getByText("Inloggningen till SharePoint har gått ut")).toBeTruthy();
+    expect(within(table).queryByText(/credentials are invalid/)).toBeNull();
+    expect(stat("Behöver åtgärd")).toBe("2 i 2 utrymmen");
+  });
+
+  it("says how many folders of a source still wait for their first sync", async () => {
+    const nämnden = { wrapper_id: "w2", wrapper_name: "Nämnden" };
+    respond({
+      ...overview,
+      items: [
+        ...overview.items,
+        { space: social, knowledge: knowledge("d", "Protokoll", nämnden) },
+        { space: social, knowledge: knowledge("e", "Bilagor", nämnden, "never") }
+      ]
+    });
+    const { table } = await show();
+
+    const row = within(table).getByRole("link", { name: "Nämnden" }).closest("tr")!;
+    expect(within(row).getByText("Aktuell")).toBeTruthy();
+    expect(within(row).getByText("1 mapp väntar på sin första synk")).toBeTruthy();
+  });
+
   it("orders spaces and sources by the Swedish alphabet, Å, Ä and Ö after Z", async () => {
-    const space = (id: string, name: string) => ({ id, name, organization: false });
+    const space = (id: string, name: string) => ({ id, name, organization: false, can_open: true });
     respond({
       items: [
         { space: space("s1", "Äldreförvaltningen"), knowledge: knowledge("a", "Rutiner") },

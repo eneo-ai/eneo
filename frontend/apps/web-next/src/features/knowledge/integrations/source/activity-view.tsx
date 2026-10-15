@@ -2,6 +2,8 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { useCollator } from "@astryxdesign/core/i18n";
+import { Selector } from "@astryxdesign/core/Selector";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { Check, History, LoaderCircle, X } from "lucide-react";
@@ -17,12 +19,19 @@ import { rescueFocus } from "@/lib/focus-rescue";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { cn } from "@/lib/utils";
 import type { IntegrationKnowledge } from "../../knowledge";
-import { recentSyncLogsQueryOptions, type SyncLog } from "../queries";
+import {
+  fetchSyncLogPage,
+  syncLogWindowQueryOptions,
+  type SyncLog,
+  type SyncLogWindow
+} from "../queries";
 import { describeSkipReason } from "../skip-reasons";
 import { isCredentialsError } from "../source-problems";
 import {
   activityKind,
+  appendPage,
   groupActivityByDay,
+  itemsToPage,
   mergeActivity,
   readSyncLogExtras,
   skippedNotListed,
@@ -33,7 +42,8 @@ import {
   type FileChange
 } from "../sync-activity";
 
-const PAGE_SIZE = 10;
+/** "Every folder" in the folder selector; item ids are UUIDs. */
+const ALL_FOLDERS = "all";
 
 const ICON_STYLE: Record<ActivityKind, string> = {
   failed: "bg-ax-error-muted text-ax-error",
@@ -58,6 +68,11 @@ const DETAILS_CLASS =
   "[&_.astryx-collapsible-trigger]:text-ax-text-secondary [&_.astryx-collapsible-trigger]:min-h-6 [&_.astryx-collapsible-trigger]:text-xs [&_.astryx-collapsible-trigger]:font-medium pointer-coarse:[&_.astryx-collapsible-trigger]:min-h-11";
 
 type Translate = ReturnType<typeof useTranslations>;
+
+type WindowKey = ReturnType<typeof syncLogWindowQueryOptions>["queryKey"];
+
+/** A shown folder's loaded history, and where it is cached. */
+type LoadedWindow = SyncLogWindow & { item: IntegrationKnowledge; queryKey: WindowKey };
 
 function syncTitle(log: SyncLog, kind: ActivityKind, t: Translate): string {
   switch (kind) {
@@ -89,6 +104,12 @@ function syncDuration(log: SyncLog): string | null {
   const end = Date.parse(log.completed_at);
   if (Number.isNaN(start) || Number.isNaN(end)) return null;
   return formatDuration(log.started_at, new Date(Math.max(end, start + 1000)).toISOString());
+}
+
+/** The folder's name, or its path where another folder of the source has the same name. */
+function folderLabel(item: IntegrationKnowledge, items: readonly IntegrationKnowledge[]): string {
+  const sameName = items.filter((other) => other.name === item.name).length > 1;
+  return sameName && item.folder_path ? item.folder_path : item.name;
 }
 
 // ClientTime has no time-of-day format; this renders the same Timestamp the
@@ -128,11 +149,14 @@ function SyncFiles({ log }: { log: SyncLog }) {
   if (extras.changedFiles.length === 0 && skipped.length === 0) return null;
   const notListed =
     skippedNotListed(log) + Math.max(0, extras.changedTotal - extras.changedFiles.length);
+  const count = extras.changedTotal + log.skipped_items;
   return (
     <Collapsible
-      trigger={t("integration_activity_show_files", {
-        count: extras.changedTotal + log.skipped_items
-      })}
+      trigger={
+        count === 1
+          ? t("integration_activity_show_files_one")
+          : t("integration_activity_show_files_other", { count })
+      }
       defaultIsOpen={false}
       chevronPosition="start"
       className={DETAILS_CLASS}
@@ -251,63 +275,80 @@ function Total({
 
 /**
  * A source's sync history as one timeline, newest first and grouped by day,
- * with totals beside it. Loads each item's newest syncs; "show older" grows
- * the window for every item, and only once all of them loaded.
+ * with totals beside it. Each folder's history loads a page at a time; "show
+ * older" pages the folders the timeline waits for. Every folder at once stops
+ * where the busiest one's loaded history runs out, so a quiet folder's older
+ * syncs are reached by choosing it in the folder selector.
  */
 export function ActivityView({
   items,
-  showFolders
+  selectedId,
+  onSelect
 }: {
   items: IntegrationKnowledge[];
-  /** The source has more than one item, so each entry names its folder. */
-  showFolders: boolean;
+  /** The one folder whose history to show; null shows every folder's. */
+  selectedId: string | null;
+  onSelect: (itemId: string | null) => void;
 }) {
   const t = useTranslations();
+  const collator = useCollator();
   const queryClient = useQueryClient();
   const totalsId = useId();
   const eventsRef = useRef<HTMLElement>(null);
-  const [limit, setLimit] = useState(PAGE_SIZE);
 
-  const results = useQueries({
-    queries: items.map((item) => recentSyncLogsQueryOptions(browserApi, item.id, limit))
+  const multiple = items.length > 1;
+  const shown = selectedId ? items.filter((item) => item.id === selectedId) : items;
+  const windows = shown.map((item) => syncLogWindowQueryOptions(browserApi, queryClient, item));
+  const results = useQueries({ queries: windows });
+  const loaded = shown.flatMap((item, index): LoadedWindow[] => {
+    const data = results[index]?.data;
+    const queryKey = windows[index]?.queryKey;
+    return data && queryKey ? [{ ...data, item, queryKey }] : [];
   });
+
   // Kept apart from the mutation's own error, which a retry clears at once:
   // the banner (and the focused retry button in it) stays until one succeeds.
   const [olderError, setOlderError] = useState<unknown>(null);
-  // The window only grows once every item's bigger page loaded, so a failure
-  // keeps the timeline that is already shown.
   const older = useMutation({
-    mutationFn: (next: number) =>
+    mutationFn: (targets: LoadedWindow[]) =>
       Promise.all(
-        items.map((item) =>
-          queryClient.query(recentSyncLogsQueryOptions(browserApi, item.id, next))
-        )
+        targets.map(async (target) => ({
+          target,
+          page: await fetchSyncLogPage(browserApi, target.item.id, target.logs.length)
+        }))
       ),
-    onSuccess: (_pages, next) => {
-      setLimit(next);
+    onSuccess: (pages) => {
+      for (const { target, page } of pages) {
+        queryClient.setQueryData(target.queryKey, (current) => {
+          if (!current) return current;
+          const logs = appendPage(current.logs, page.items);
+          // Nothing new means the newest logs moved under the paging; stop rather than loop.
+          return {
+            logs,
+            total: logs.length > current.logs.length ? page.total_count : logs.length
+          };
+        });
+      }
       setOlderError(null);
       // The button goes once nothing older is left, the banner once a retry worked.
       rescueFocus(eventsRef.current);
     },
     onError: (error) => setOlderError(error)
   });
+  const showOlder = () => {
+    if (!older.isPending) older.mutate(itemsToPage(loaded));
+  };
 
-  const pages = results.map((result) => result.data);
-  const isLoaded = pages.every((page) => page !== undefined);
+  const isLoaded = loaded.length === shown.length;
   const failed = results.filter((result) => result.isError);
-  const entries = isLoaded
-    ? mergeActivity(
-        items.map((item, index) => ({
-          item,
-          logs: pages[index]?.items ?? [],
-          total: pages[index]?.total_count
-        }))
-      )
-    : [];
+  const entries = isLoaded ? mergeActivity(loaded) : [];
   const days = groupActivityByDay(entries);
   const totals = summarizeActivity(entries);
-  const hasMore = isLoaded && pages.some((page) => page && page.total_count > page.items.length);
-  const syncCount = pages.reduce((sum, page) => sum + (page?.total_count ?? 0), 0);
+  const hasMore = isLoaded && loaded.some((window) => window.total > window.logs.length);
+  const syncCount = loaded.reduce((sum, window) => sum + window.total, 0);
+  const folderOptions = items
+    .map((item) => ({ value: item.id, label: folderLabel(item, items) }))
+    .sort((a, b) => collator.compare(a.label, b.label));
 
   return (
     <div className="flex flex-wrap items-start gap-8">
@@ -317,6 +358,22 @@ export function ActivityView({
         aria-label={t("integration_activity_events")}
         className="flex min-w-0 flex-[999_1_32rem] flex-col gap-6"
       >
+        {multiple ? (
+          <div className="w-full max-w-xs">
+            <Selector
+              label={t("integration_source_folder")}
+              options={[
+                { value: ALL_FOLDERS, label: t("integration_source_all_folders") },
+                ...folderOptions
+              ]}
+              value={selectedId ?? ALL_FOLDERS}
+              onChange={(value) => onSelect(value === ALL_FOLDERS ? null : value)}
+              size="sm"
+              width="100%"
+            />
+          </div>
+        ) : null}
+
         {failed.length > 0 ? (
           <ListError
             title={t("sync_history_load_failed")}
@@ -331,7 +388,7 @@ export function ActivityView({
             title={t("sync_history_load_failed")}
             error={olderError}
             isRetrying={older.isPending}
-            onRetry={() => older.mutate(limit + PAGE_SIZE)}
+            onRetry={showOlder}
           />
         ) : null}
 
@@ -343,7 +400,7 @@ export function ActivityView({
           <EmptyState icon={<History />} title={t("integration_sync_summary_none")} isCompact />
         ) : (
           days.map((day) => (
-            <ActivityDaySection key={day.day} day={day} showFolders={showFolders} />
+            <ActivityDaySection key={day.day} day={day} showFolders={multiple && !selectedId} />
           ))
         )}
 
@@ -352,9 +409,7 @@ export function ActivityView({
             label={t("integration_activity_show_older")}
             isLoading={older.isPending}
             isInterruptible
-            onClick={() => {
-              if (!older.isPending) older.mutate(limit + PAGE_SIZE);
-            }}
+            onClick={showOlder}
             className="w-fit"
           />
         ) : null}
@@ -367,7 +422,9 @@ export function ActivityView({
         >
           <div className="flex flex-col gap-0.5">
             <h2 id={totalsId} className="text-sm font-semibold">
-              {t("integration_activity_totals_heading", { count: totals.syncs })}
+              {totals.syncs === 1
+                ? t("integration_activity_totals_heading_one")
+                : t("integration_activity_totals_heading_other", { count: totals.syncs })}
             </h2>
             {syncCount > totals.syncs ? (
               <p className="text-ax-text-secondary text-xs">

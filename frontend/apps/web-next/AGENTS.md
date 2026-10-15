@@ -121,6 +121,10 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
     from its own description and status only): use `TextInput` from
     `@/components/astryx/text-input`, which adds the caller's ids after
     Astryx's own (as the password policy checklist needs).
+  - An error or warning `Banner` is `role="alert"`, read out assertively each
+    time it mounts. A notice about a state that lasts, shown on every visit to
+    its page or tab, is `QuietBanner` from `@/components/astryx/banner` (no
+    live region), and what is new is announced politely with `useAnnounce`.
   - CommandPalette marks only a picked value as selected: patched (the
     highlighted option is exposed as selected, as the APG combobox pattern
     says). DateInput's `nativePicker` is deprecated since 0.6.4: use

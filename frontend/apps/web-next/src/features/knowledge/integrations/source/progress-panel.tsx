@@ -14,7 +14,8 @@ const PHASE_LABEL: Record<SyncProgressPhase, string> = {
   finishing: "integration_progress_phase_finishing"
 };
 
-export type NowReading = { folder: string | null; file: string };
+/** The file a syncing folder reads right now, for a source of several folders. */
+export type NowReading = { folder: string; file: string };
 
 /**
  * A source's running sync: how far it is, the three steps of a sync and, on a
@@ -127,9 +128,7 @@ export function SyncProgressPanel({
           {nowReading.slice(0, 3).map((reading, index) => (
             <li key={index} className="flex min-w-0 items-center gap-2">
               <span className="text-ax-text-secondary shrink-0">
-                {reading.folder
-                  ? t("integration_progress_reading_in", { folder: reading.folder })
-                  : t("integration_live_reading")}
+                {t("integration_progress_reading_in", { folder: reading.folder })}
               </span>
               <span className="min-w-0 truncate font-medium">{reading.file}</span>
             </li>

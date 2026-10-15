@@ -1,6 +1,5 @@
 "use client";
 
-import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import {
@@ -16,6 +15,7 @@ import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import Link from "next/link";
 import { useFormatter, useTranslations } from "next-intl";
 import { useId, useRef, useState, type Ref } from "react";
+import { QuietBanner } from "@/components/astryx/banner";
 import { Table } from "@/components/astryx/table";
 import { EmptyState } from "@/components/composites/empty-state";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
@@ -32,6 +32,7 @@ import {
   sourceContentsLabel,
   sourceHref,
   summarizeSource,
+  waitingLabel,
   type IntegrationSource,
   type SourceFilter,
   type SourceState,
@@ -67,12 +68,19 @@ function time(value: string | null): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+/** A source that syncs shows "Updating now", the most recent there is. */
+function updatedAt(summary: SourceSummary): number {
+  if (summary.progress) return Number.POSITIVE_INFINITY;
+  return time(summary.lastSyncedAt ?? summary.lastSyncAttemptedAt);
+}
+
 const COMPARATORS: Partial<Record<SourceSortKey, TableSortComparator<SourceRow>>> = {
   documents: (a, b) => a.summary.documentCount - b.summary.documentCount,
   status: (a, b) => STATE_ORDER[a.summary.state] - STATE_ORDER[b.summary.state],
-  updated: (a, b) =>
-    time(a.summary.lastSyncedAt ?? a.summary.lastSyncAttemptedAt) -
-    time(b.summary.lastSyncedAt ?? b.summary.lastSyncAttemptedAt)
+  updated: (a, b) => {
+    const [left, right] = [updatedAt(a.summary), updatedAt(b.summary)];
+    return left === right ? 0 : left < right ? -1 : 1;
+  }
 };
 
 function wrapperPermissions(items: IntegrationKnowledge[]) {
@@ -110,10 +118,22 @@ function SourceNameCell({ source }: { source: IntegrationSource }) {
   );
 }
 
-/** Progress while it syncs (and a warning if some folders failed); otherwise the state alone. */
+/**
+ * Progress while it syncs (and a warning if some folders failed); otherwise the
+ * state, and the folders still waiting for their first sync.
+ */
 function SourceStatusCell({ row }: { row: SourceRow }) {
+  const t = useTranslations();
   const { progress, failedItems } = row.summary;
-  if (!progress) return <SourceStateLabel state={row.summary.state} />;
+  if (!progress) {
+    const waiting = waitingLabel(row.summary, t);
+    return (
+      <span className="flex flex-col items-start gap-1">
+        <SourceStateLabel state={row.summary.state} />
+        {waiting ? <span className="text-ax-text-secondary text-xs">{waiting}</span> : null}
+      </span>
+    );
+  }
   return (
     <div className="flex w-44 max-w-full flex-col gap-1.5">
       <SyncProgress progress={progress} name={row.name} />
@@ -155,13 +175,10 @@ function SignInStoppedBanner({
       <Button label={t("integration_sources_attention_show_them")} size="sm" onClick={onShowThem} />
     ) : null;
   return (
-    <Banner
+    <QuietBanner
       ref={ref}
       // The focus target once "Show them" is gone (it hides itself).
       tabIndex={-1}
-      // Not Astryx's assertive alert, read out on every mount: the notice is
-      // announced politely once, when it appears or its count changes.
-      role={undefined}
       status="error"
       title={title}
       description={t("integration_sources_attention_sign_in")}
@@ -226,7 +243,7 @@ function SourcesTable({ rows, labelledBy }: { rows: SourceRow[]; labelledBy: str
           <WrapperActions
             wrapperId={row.source.id}
             wrapperName={row.name}
-            itemCount={row.source.items.length}
+            items={row.source.items}
             {...wrapperPermissions(row.source.items)}
           />
         ) : single ? (
@@ -244,7 +261,9 @@ function SourcesTable({ rows, labelledBy }: { rows: SourceRow[]; labelledBy: str
         idKey="id"
         aria-labelledby={labelledBy}
         plugins={{ sort: sortPlugin }}
-        emptyState={<EmptyState title={t("no_results_found")} isCompact framed={false} />}
+        emptyState={
+          <EmptyState title={t("no_results_found")} headingLevel={3} isCompact framed={false} />
+        }
       />
     </SpaceTableFrame>
   );
@@ -258,7 +277,8 @@ export type SourceGroup = { key: string; heading: string | null; sources: Integr
  * state or live progress, documents and last update, in one table or one per
  * group. The sign-in notice, the status filter and the search on a source's
  * or its folders' names sit once above every group; a group the filter
- * empties is left out. `labelledBy` names an ungrouped table.
+ * empties is left out, and a filter that matches nothing any more says so,
+ * with a way back to every source. `labelledBy` names an ungrouped table.
  */
 export function SourcesList({
   groups,
@@ -272,7 +292,10 @@ export function SourcesList({
   const t = useTranslations();
   const headingIds = useId();
   const bannerRef = useRef<HTMLDivElement>(null);
+  const allFilterRef = useRef<HTMLButtonElement>(null);
   const [filter, setFilter] = useState<SourceFilter>("all");
+  // Once a filter has been chosen the bar stays, so the pressed segment never vanishes under focus.
+  const [filterUsed, setFilterUsed] = useState(false);
   const [query, setQuery] = useState("");
 
   const grouped = groups.map((group) => ({
@@ -300,6 +323,20 @@ export function SourcesList({
   const signInStopped = rows.filter(
     (row) => row.summary.failedItems.length > 0 && row.summary.credentialsFailed
   );
+  // The sources changed under the chosen filter (the failing one recovered, say).
+  const noMatch = filter !== "all" && counts[filter] === 0;
+  useAnnounceChange(noMatch ? t("integration_filter_no_match") : null);
+
+  function chooseFilter(next: SourceFilter) {
+    setFilter(next);
+    if (next !== "all") setFilterUsed(true);
+  }
+
+  function showAll() {
+    setFilter("all");
+    // The pressed button goes; the filter now in use takes focus.
+    allFilterRef.current?.focus();
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -308,16 +345,16 @@ export function SourcesList({
         rows={signInStopped}
         filter={filter}
         onShowThem={() => {
-          setFilter("attention");
+          chooseFilter("attention");
           rescueFocus(bannerRef.current);
         }}
       />
-      {rows.length > 1 ? (
+      {rows.length > 1 || filterUsed ? (
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <SegmentedControl
             label={t("integration_filter_label")}
             value={filter}
-            onChange={(value) => setFilter(value as SourceFilter)}
+            onChange={(value) => chooseFilter(value as SourceFilter)}
             size="sm"
           >
             {SOURCE_FILTERS.filter(
@@ -325,6 +362,7 @@ export function SourcesList({
             ).map((option) => (
               <SegmentedControlItem
                 key={option}
+                ref={option === "all" ? allFilterRef : undefined}
                 value={option}
                 label={t(`integration_filter_${option}`, { count: counts[option] })}
               />
@@ -339,8 +377,14 @@ export function SourcesList({
           />
         </div>
       ) : null}
-      {shown.length === 0 ? (
-        <EmptyState title={t("no_results_found")} isCompact />
+      {noMatch ? (
+        <div className="flex flex-col items-start gap-3 py-6">
+          <p className="text-ax-text-secondary text-sm">{t("integration_filter_no_match")}</p>
+          <Button label={t("integration_filter_show_all")} size="sm" onClick={showAll} />
+        </div>
+      ) : shown.length === 0 ? (
+        // Under the group headings (h3) and the page's "Kunskap" (h2).
+        <EmptyState title={t("no_results_found")} headingLevel={3} isCompact />
       ) : (
         shown.map((group) => {
           const headingId = group.heading === null ? null : `${headingIds}-${group.key}`;

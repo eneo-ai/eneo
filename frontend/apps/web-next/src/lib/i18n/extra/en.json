@@ -787,6 +787,8 @@
   "integration_sync_summary_folders": "{count} folders scanned",
   "integration_sync_summary_pages": "{count} pages",
   "integration_sync_summary_skipped": "{count} items skipped",
+  "integration_vendor_confluence": "Confluence",
+  "integration_vendor_sharepoint": "SharePoint",
   "invalid_email": "Please enter a valid email address",
   "invalid_format": "Invalid format",
   "invalid_json_custom_headers": "Invalid JSON for custom headers",

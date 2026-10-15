@@ -32,7 +32,7 @@ import type {
   SourceProblems,
   SyncFailure
 } from "../source-problems";
-import type { InPlaceLink } from "./in-place-link";
+import { SamePageLink, type InPlaceLink } from "./in-place-link";
 
 const FILES_SHOWN = 10;
 
@@ -212,7 +212,7 @@ function FailureCard({
           <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
             {failure.items.map((item) => (
               <li key={item.id}>
-                <Link {...folderLink(item.id)} className="font-medium">
+                <Link {...folderLink(item.id)} as={SamePageLink} className="font-medium">
                   {t("integration_problem_open_named_folder", { name: folderLabel(item) })}
                 </Link>
               </li>
@@ -280,6 +280,7 @@ function FileGroupRow({
               {showFolders ? (
                 <Link
                   {...folderLink(file.item.id)}
+                  as={SamePageLink}
                   color="secondary"
                   className="min-w-0 justify-self-start break-all"
                 >

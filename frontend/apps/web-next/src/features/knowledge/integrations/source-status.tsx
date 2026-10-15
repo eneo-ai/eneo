@@ -4,8 +4,26 @@ import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { useTranslations } from "next-intl";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { StatusLabel } from "@/components/composites/status-label";
-import { sourceStateStatus, type ItemState, type SourceState, type SourceSummary } from "./sources";
+import { useHydrated } from "@/lib/hooks/use-hydrated";
+import type { IntegrationKnowledge } from "../knowledge";
+import {
+  itemWatchState,
+  sourceStateStatus,
+  type ItemState,
+  type SourceState,
+  type SourceSummary,
+  type WatchState
+} from "./sources";
 import type { SyncProgressSummary } from "./sync-progress";
+
+/**
+ * The items' change notifications, null until hydrated: they are relative to
+ * now, which the server and the browser see differently.
+ */
+export function useWatchStates(items: readonly IntegrationKnowledge[]): WatchState[] | null {
+  const hydrated = useHydrated();
+  return hydrated ? items.map((item) => itemWatchState(item)) : null;
+}
 
 /** A source's or item's state as a coloured dot and its label. */
 export function SourceStateLabel({

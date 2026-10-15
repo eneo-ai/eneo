@@ -4,6 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { useTranslations } from "next-intl";
 import { EmptyState } from "@/components/composites/empty-state";
+import { useIsRemovingSource } from "@/features/knowledge/integrations/actions";
 import { SourcePage } from "@/features/knowledge/integrations/source/source-page";
 import { groupIntegrationSources } from "@/features/knowledge/integrations/sources";
 import { useSpace } from "@/features/spaces/use-space";
@@ -17,8 +18,11 @@ export function ItemDetail({ itemId }: { itemId: string }) {
     (entry) => entry.id === itemId && entry.space_id === space.id
   );
   const [source] = item ? groupIntegrationSources([item], collator.compare) : [];
+  const removing = useIsRemovingSource(space.id, { kind: "item", id: itemId });
 
   if (!source) {
+    // Deleted from its own page, which is on its way back to the list.
+    if (removing) return null;
     return (
       <EmptyState
         title={t("no_results_found")}

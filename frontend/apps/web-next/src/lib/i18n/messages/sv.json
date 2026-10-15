@@ -5854,6 +5854,8 @@
   "integration_sync_summary_folders": "{count} mappar genomsökta",
   "integration_sync_summary_pages": "{count} sidor",
   "integration_sync_summary_skipped": "{count} objekt förbigicks",
+  "integration_vendor_confluence": "Confluence",
+  "integration_vendor_sharepoint": "SharePoint",
   "invalid_email": "Ange en giltig e-postadress",
   "invalid_format": "Ogiltigt format",
   "invalid_json_custom_headers": "Ogiltig JSON för anpassade headers",

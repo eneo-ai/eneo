@@ -104,7 +104,7 @@ function RowActions({ row }: { row: KnowledgeRow }) {
         <WrapperActions
           wrapperId={source.wrapperId}
           wrapperName={source.wrapperName}
-          itemCount={source.items.length}
+          items={source.items}
           canEdit={permissions.includes("edit")}
           canDelete={permissions.includes("delete")}
         />

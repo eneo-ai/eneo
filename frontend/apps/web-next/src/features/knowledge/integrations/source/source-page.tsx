@@ -1,14 +1,14 @@
 "use client";
 
 import { Badge } from "@astryxdesign/core/Badge";
-import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import { useId, useRef, useState, type ReactNode } from "react";
+import { QuietBanner } from "@/components/astryx/banner";
 import { ClientTime } from "@/components/composites/client-time";
 import { PageHeader } from "@/components/composites/page-header";
 import { useAppContext } from "@/components/providers/app-context";
@@ -16,12 +16,13 @@ import { RemovalFocusScope } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
 import { rescueFocus } from "@/lib/focus-rescue";
-import { hoursUntil } from "@/lib/format";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { IntegrationActions, WrapperActions } from "../actions";
+import { safeExternalUrl } from "../external-url";
 import { skippedDocumentsQueryOptions } from "../queries";
 import { buildSourceProblems, type SkippedDocuments } from "../source-problems";
+import { useWatchStates } from "../source-status";
 import {
   sourceContentsLabel,
   sourceHref,
@@ -37,11 +38,9 @@ import { ActivityView } from "./activity-view";
 import { FolderDocuments } from "./folder-documents";
 import { FolderNav } from "./folder-nav";
 import { FolderOverview } from "./folder-overview";
-import { inPlaceLink } from "./in-place-link";
+import { inPlaceLink, SamePageLink } from "./in-place-link";
 import { ProblemsView } from "./problems-view";
 import { SyncProgressPanel } from "./progress-panel";
-
-const EXPIRING_SOON_HOURS = 48;
 
 /** What the page shows: a tab and, on a source of many folders, the folder (null: all of them). */
 type SourceView = { tab: SourceTab; folder: string | null };
@@ -58,18 +57,11 @@ function Stat({ label, children }: { label: string; children: ReactNode }) {
 /** Whether SharePoint tells Eneo about changes: how many items are watched, and what lapsed. */
 function WatchStat({ items }: { items: IntegrationKnowledge[] }) {
   const t = useTranslations();
-  const hydrated = useHydrated();
-  // Expiry is relative to now, which the server and the browser see differently.
-  if (!hydrated) return <>–</>;
-  const hours = items.map((item) => {
-    const expires = item.metadata?.sharepoint_subscription_expires_at;
-    return expires ? hoursUntil(expires) : null;
-  });
-  const watched = hours.filter((left) => left !== null && left > 0).length;
-  const expired = hours.filter((left) => left !== null && left <= 0).length;
-  const expiring = hours.filter(
-    (left) => left !== null && left > 0 && left <= EXPIRING_SOON_HOURS
-  ).length;
+  const states = useWatchStates(items);
+  if (!states) return <>–</>;
+  const expired = states.filter((state) => state === "expired").length;
+  const expiring = states.filter((state) => state === "expiring").length;
+  const watched = states.filter((state) => state === "active" || state === "expiring").length;
   const label =
     watched === items.length
       ? t("integration_source_watch_on")
@@ -81,11 +73,15 @@ function WatchStat({ items }: { items: IntegrationKnowledge[] }) {
       {label}
       {expired > 0 ? (
         <span className="text-ax-warning text-xs font-normal">
-          {t("integration_source_watch_expired", { count: expired })}
+          {expired === 1
+            ? t("integration_source_watch_expired_one")
+            : t("integration_source_watch_expired_other", { count: expired })}
         </span>
       ) : expiring > 0 ? (
         <span className="text-ax-text-secondary text-xs font-normal">
-          {t("integration_source_watch_expiring", { count: expiring })}
+          {expiring === 1
+            ? t("integration_source_watch_expiring_one")
+            : t("integration_source_watch_expiring_other", { count: expiring })}
         </span>
       ) : watched === 0 ? (
         <span className="text-ax-text-secondary text-xs font-normal">
@@ -107,6 +103,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const t = useTranslations();
   const format = useFormatter();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const { space, routeId } = useSpace();
   const { can } = useAppContext();
@@ -131,10 +128,12 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
     ? (source.items.find((item) => item.id === view.folder) ?? null)
     : singleItem;
 
-  // Keyed by the item alone: a finished sync refetches the list (useSyncProgress)
-  // while the one shown stays, so Problems keeps its place.
+  // Keyed by each item's sync revision; the list shown before stays while a
+  // new one loads, so Problems keeps its place.
   const skippedQueries = useQueries({
-    queries: source.items.map((item) => skippedDocumentsQueryOptions(browserApi, space.id, item.id))
+    queries: source.items.map((item) =>
+      skippedDocumentsQueryOptions(browserApi, queryClient, space.id, item)
+    )
   });
   // undefined while an item's list loads, null when it could not be loaded.
   const skippedByItem: Record<string, SkippedDocuments | null | undefined> = Object.fromEntries(
@@ -147,8 +146,9 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const problems = skippedLoaded ? buildSourceProblems(source.items, skippedByItem, t) : null;
   // Before the skipped lists arrive, the failures alone already give the blocking causes.
   const problemCount = (problems ?? buildSourceProblems(source.items, {}, t)).causeCount;
+  // Over the current items: a removed folder's list stays in the cache a while.
   const skippedTotal = skippedLoaded
-    ? Object.values(skippedByItem).reduce((sum, skipped) => sum + (skipped?.total ?? 0), 0)
+    ? source.items.reduce((sum, item) => sum + (skippedByItem[item.id]?.total ?? 0), 0)
     : null;
 
   const listHref = `/spaces/${routeId}/knowledge?tab=integrations`;
@@ -192,9 +192,9 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const folderLink = (itemId: string | null) => linkTo({ tab: "content", folder: itemId });
   const problemsLink = linkTo({ tab: "problems", folder: view.folder });
 
-  const toList = () => router.push(listHref);
-  // Deleting the source's last item from its own page leaves nothing to show here.
-  const onLastItemDeleted = source.items.length === 1 ? toList : undefined;
+  // Replaces the page, so Back does not lead to the source that is gone.
+  const toList = () => router.replace(listHref);
+  const sourceUrl = safeExternalUrl(singleItem?.url);
 
   const actions =
     source.kind === "wrapper" ? (
@@ -202,14 +202,14 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
         <WrapperActions
           wrapperId={source.id}
           wrapperName={source.name}
-          itemCount={source.items.length}
+          items={source.items}
           canEdit={permissions.includes("edit")}
           canDelete={permissions.includes("delete")}
           onDeleted={toList}
         />
       ) : null
     ) : singleItem ? (
-      <IntegrationActions item={singleItem} onDeleted={onLastItemDeleted} />
+      <IntegrationActions item={singleItem} onDeleted={toList} />
     ) : null;
 
   const failureTitle =
@@ -234,10 +234,10 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
           ]}
           actions={
             <div className="flex items-center gap-2">
-              {singleItem?.url ? (
+              {singleItem && sourceUrl ? (
                 <Button
                   label={t(VENDOR[singleItem.integration_type].linkLabel)}
-                  href={singleItem.url}
+                  href={sourceUrl}
                   target="_blank"
                   icon={<ExternalLink className="size-4" aria-hidden="true" />}
                 />
@@ -249,6 +249,8 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
 
         <div className="text-ax-text-secondary flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <VendorIcon type={source.integrationType} />
+          <span>{t(VENDOR[source.integrationType].name)}</span>
+          <span aria-hidden="true">·</span>
           <span>{sourceContentsLabel(source.items, t)}</span>
           {singleItem?.folder_path ? (
             <>
@@ -267,10 +269,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
         </div>
 
         {failureTitle !== null && tab !== "problems" ? (
-          <Banner
-            // Not Astryx's assertive alert, read out again whenever the user
-            // leaves Problems: a new failure is announced politely once.
-            role={undefined}
+          <QuietBanner
             status="error"
             title={failureTitle}
             description={
@@ -280,7 +279,12 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
             }
             collapsible={false}
             endContent={
-              <Button label={t("integration_source_show_problems")} size="sm" {...problemsLink} />
+              <Button
+                label={t("integration_source_show_problems")}
+                size="sm"
+                {...problemsLink}
+                as={SamePageLink}
+              />
             }
           />
         ) : null}
@@ -394,7 +398,8 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
                   skipped={skippedByItem[singleItem.id] ?? null}
                   problemsLink={problemsLink}
                   showHeader={source.kind === "wrapper"}
-                  onDeleted={onLastItemDeleted}
+                  // The page header has the item's link and actions.
+                  showControls={false}
                 />
               ) : null
             ) : tab === "problems" ? (
@@ -412,7 +417,11 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
               />
             ) : (
               // Each folder's history is a request of its own; only fetch it when it is looked at.
-              <ActivityView items={source.items} showFolders={multiple} />
+              <ActivityView
+                items={source.items}
+                selectedId={multiple ? (selectedItem?.id ?? null) : null}
+                onSelect={(folder) => show({ tab: "activity", folder })}
+              />
             )}
           </div>
         </div>

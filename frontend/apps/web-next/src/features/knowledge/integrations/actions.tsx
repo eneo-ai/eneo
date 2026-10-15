@@ -2,7 +2,7 @@
 
 import type { DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
@@ -31,10 +31,30 @@ import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import type { IntegrationKnowledge } from "../knowledge";
+import type { IntegrationSource } from "./sources";
+
+type SourceRef = Pick<IntegrationSource, "kind" | "id">;
+
+function sourceRemovalKey(spaceId: string, source: SourceRef) {
+  return ["integrations", "remove", spaceId, source.kind, source.id];
+}
+
+/**
+ * The source is being deleted or was deleted from this page, so a page that
+ * showed only it is leaving rather than looking at a source that went away.
+ */
+export function useIsRemovingSource(spaceId: string, source: SourceRef): boolean {
+  const statuses = useMutationState({
+    filters: { mutationKey: sourceRemovalKey(spaceId, source) },
+    select: (mutation) => mutation.state.status
+  });
+  return statuses.some((status) => status === "pending" || status === "success");
+}
 
 /**
  * Row actions (rename / full sync / delete) for one integration knowledge item.
@@ -96,6 +116,7 @@ export function IntegrationActions({
   });
 
   const deleteKnowledge = useRemovalMutation({
+    mutationKey: sourceRemovalKey(space.id, { kind: "item", id: item.id }),
     mutationFn: () =>
       unwrap(
         browserApi.DELETE(
@@ -197,28 +218,69 @@ export function IntegrationActions({
   );
 }
 
-/** Wrapper actions (rename / delete all items) shown on folder rows and the wrapper page. */
+/**
+ * Wrapper actions (rename / resync every item / delete all items) shown on
+ * source rows and the wrapper page. `items` are the wrapper's items.
+ */
 export function WrapperActions({
   wrapperId,
   wrapperName,
-  itemCount,
+  items: wrapperItems,
   canEdit,
   canDelete,
   onDeleted
 }: {
   wrapperId: string;
   wrapperName: string;
-  itemCount: number;
+  items: IntegrationKnowledge[];
   canEdit: boolean;
   canDelete: boolean;
   onDeleted?: () => void;
 }) {
   const t = useTranslations();
   const { space } = useSpace();
+  const { trackJob } = useJobs();
+  const queryClient = useQueryClient();
   const invalidate = useSpaceInvalidation();
   const [showRename, setShowRename] = useState(false);
+  const [showResync, setShowResync] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [newName, setNewName] = useState(wrapperName);
+
+  const resyncable = wrapperItems.filter(
+    (item) =>
+      item.integration_type === "sharepoint" && (item.permissions?.includes("edit") ?? false)
+  );
+  const canResync = canEdit && resyncable.length > 0;
+
+  // Never rejects: confirming again after a failure would queue the items
+  // that were queued already once more.
+  const resync = useMutation({
+    mutationFn: async () => {
+      const results = await Promise.allSettled(
+        resyncable.map((item) =>
+          unwrap(
+            browserApi.POST(
+              "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/sync/",
+              { params: { path: { id: space.id, integration_knowledge_id: item.id } } }
+            )
+          )
+        )
+      );
+      const failed = results.filter((result) => result.status === "rejected").length;
+      return { failed, total: results.length };
+    },
+    onSuccess: ({ failed, total }) => {
+      if (failed < total) trackJob();
+      invalidate();
+      void queryClient.invalidateQueries({
+        queryKey: ["integrations", "sync-progress", space.id]
+      });
+      setShowResync(false);
+      if (failed > 0) toast.error(t("resync_all_wrapper_partial_failure", { failed, total }));
+      else toast.success(t("resync_all_wrapper_queued", { count: total }));
+    }
+  });
 
   const rename = useMutation({
     mutationFn: () =>
@@ -236,6 +298,7 @@ export function WrapperActions({
   });
 
   const deleteWrapper = useRemovalMutation({
+    mutationKey: sourceRemovalKey(space.id, { kind: "wrapper", id: wrapperId }),
     mutationFn: () =>
       unwrap(
         browserApi.DELETE("/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/", {
@@ -261,6 +324,15 @@ export function WrapperActions({
               setNewName(wrapperName);
               setShowRename(true);
             }
+          }
+        ]
+      : []),
+    ...(canResync
+      ? [
+          {
+            label: t("resync_all_wrapper"),
+            icon: <RefreshCw aria-hidden="true" />,
+            onClick: () => setShowResync(true)
           }
         ]
       : []),
@@ -293,12 +365,22 @@ export function WrapperActions({
         onSave={() => rename.mutate()}
       />
       <ConfirmDialogControlled
+        open={showResync}
+        onOpenChange={setShowResync}
+        title={t("resync_all_wrapper")}
+        description={t("confirm_resync_all_wrapper", { wrapperName, count: resyncable.length })}
+        confirmLabel={resync.isPending ? t("syncing") : t("start_full_sync")}
+        variant="default"
+        pending={resync.isPending}
+        onConfirm={() => resync.mutate()}
+      />
+      <ConfirmDialogControlled
         open={showDelete}
         onOpenChange={setShowDelete}
         title={t("delete_wrapper")}
         description={t("confirm_delete_sharepoint_wrapper", {
           wrapperName,
-          count: String(itemCount)
+          count: String(wrapperItems.length)
         })}
         confirmLabel={deleteWrapper.isPending ? t("deleting") : t("delete")}
         pending={deleteWrapper.isPending}

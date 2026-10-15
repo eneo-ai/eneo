@@ -30,6 +30,8 @@ export type SourceSummary = {
   lastSyncedAt: string | null;
   lastSyncAttemptedAt: string | null;
   failedItems: IntegrationKnowledge[];
+  /** Items that have not finished a first sync and are not syncing now. */
+  waitingItems: number;
   /** Every failure is the organisation's SharePoint sign-in, which only an admin can fix. */
   credentialsFailed: boolean;
   progress: SyncProgressSummary | null;
@@ -129,6 +131,33 @@ export function sourceHref(
   return search ? `${base}?${search}` : base;
 }
 
+/** Whether SharePoint tells Eneo about changes to the item, from when its subscription expires. */
+export type WatchState = "active" | "expiring" | "expired" | "none";
+
+/** Subscriptions are renewed automatically from this long before they expire. */
+const WATCH_EXPIRING_MS = 48 * 60 * 60 * 1000;
+
+/** Relative to `now`, which the server and the browser see differently: read it once hydrated. */
+export function itemWatchState(item: IntegrationKnowledge, now = Date.now()): WatchState {
+  const expires = item.metadata?.sharepoint_subscription_expires_at;
+  const left = expires ? new Date(expires).getTime() - now : Number.NaN;
+  if (Number.isNaN(left)) return "none";
+  if (left <= 0) return "expired";
+  return left <= WATCH_EXPIRING_MS ? "expiring" : "active";
+}
+
+const WATCH_STATE_LABEL: Record<WatchState, string> = {
+  active: "integration_source_watch_on",
+  expiring: "integration_source_watch_state_expiring",
+  expired: "integration_source_watch_state_expired",
+  none: "integration_source_watch_off"
+};
+
+/** In the words of the source's "Change notifications" figure (On/Off). */
+export function watchStateLabel(state: WatchState, t: Translate): string {
+  return t(WATCH_STATE_LABEL[state]);
+}
+
 export function itemState(item: IntegrationKnowledge, progress: ProgressById): ItemState {
   if (progress[item.id]) return "syncing";
   const state = summarizeIntegrationSync(item).state;
@@ -170,11 +199,20 @@ export function summarizeSource(
     lastSyncedAt,
     lastSyncAttemptedAt,
     failedItems,
+    waitingItems: states.filter((s) => s === "never").length,
     credentialsFailed:
       failedItems.length > 0 &&
       failedItems.every((item) => isCredentialsError(item.metadata?.last_sync_error)),
     progress: combineSyncProgress(syncing)
   };
+}
+
+/** The folders waiting for a first sync, where the source's state alone reads as more settled. */
+export function waitingLabel(summary: SourceSummary, t: Translate): string | null {
+  if (summary.waitingItems === 0 || summary.state === "never") return null;
+  return summary.waitingItems === 1
+    ? t("integration_source_waiting_one")
+    : t("integration_source_waiting_other", { count: summary.waitingItems });
 }
 
 /** "3 folders, 1 file" style description of what a source holds. */
@@ -201,7 +239,10 @@ export function sourceContentsLabel(items: readonly IntegrationKnowledge[], t: T
   return parts.join(", ");
 }
 
-/** The status filters above a list of sources. */
+/**
+ * The status filters above a list of sources. A source can match several: "attention"
+ * also covers one that syncs, and "never" one where only some items wait for a first sync.
+ */
 export type SourceFilter = "all" | "attention" | "syncing" | "never" | "empty" | "ok";
 
 export const SOURCE_FILTERS: readonly SourceFilter[] = [
@@ -213,7 +254,6 @@ export const SOURCE_FILTERS: readonly SourceFilter[] = [
   "ok"
 ];
 
-/** "attention" also covers a failed source that is syncing again. */
 export function matchesSourceFilter(summary: SourceSummary, filter: SourceFilter): boolean {
   switch (filter) {
     case "all":
@@ -222,6 +262,8 @@ export function matchesSourceFilter(summary: SourceSummary, filter: SourceFilter
       return summary.failedItems.length > 0;
     case "syncing":
       return summary.progress !== null;
+    case "never":
+      return summary.waitingItems > 0;
     default:
       return summary.state === filter;
   }

@@ -3,6 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { useTranslations } from "next-intl";
 import { EmptyState } from "@/components/composites/empty-state";
+import { useIsRemovingSource } from "@/features/knowledge/integrations/actions";
 import { SourcePage } from "@/features/knowledge/integrations/source/source-page";
 import { findWrapperSource } from "@/features/knowledge/integrations/sources";
 import { useSpace } from "@/features/spaces/use-space";
@@ -18,8 +19,11 @@ export function WrapperDetail({ wrapperId }: { wrapperId: string }) {
     space.knowledge.integration_knowledge_list.items.filter((item) => item.space_id === space.id),
     wrapperId
   );
+  const removing = useIsRemovingSource(space.id, { kind: "wrapper", id: wrapperId });
 
   if (!source) {
+    // Deleted from its own page, which is on its way back to the list.
+    if (removing) return null;
     return (
       <EmptyState
         title={t("no_results_found")}

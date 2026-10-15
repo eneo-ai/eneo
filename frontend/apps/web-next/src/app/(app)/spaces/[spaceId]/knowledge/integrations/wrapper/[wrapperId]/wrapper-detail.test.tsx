@@ -7,21 +7,48 @@ import { renderInApp, renderToHtml } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
 
 type Answer = { data?: unknown; error?: unknown; status?: number };
-type Query = { offset?: number; limit?: number };
+type Query = { offset?: number; limit?: number; skip?: number };
 
 const state = vi.hoisted(() => ({
   space: null as unknown,
   progress: [] as unknown[],
   /** An item's skipped list; "error" fails the request, a promise answers when it settles. */
   skipped: {} as Record<string, unknown>,
-  /** An item's documents, or a function of the requested page. */
+  /** An item's documents, or a function of the requested page (a promise answers when it settles). */
   documents: {} as Record<string, unknown>,
+  /** An item's sync logs, newest first. */
+  logs: {} as Record<string, unknown[]>,
   requests: [] as string[],
+  /** The items a full sync was started for; listed here, they are refused. */
+  synced: [] as string[],
+  refuseSync: [] as string[],
   /** Runs on a delete, e.g. to take the item out of the space. */
   onDelete: () => {}
 }));
+const toasts = vi.hoisted(() => ({
+  success: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn()
+}));
+vi.mock("@/lib/toast", () => ({ toast: toasts }));
 
 vi.mock("next/navigation", () => import("@/test/navigation"));
+/** The props each next/link gets: Astryx's links too, through the app's LinkProvider. */
+const links = vi.hoisted(() => [] as Record<string, unknown>[]);
+vi.mock("next/link", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/link")>();
+  const { createElement } = await import("react");
+  return {
+    default: (props: Record<string, unknown>) => {
+      links.push(props);
+      return createElement(
+        actual.default,
+        props as unknown as Parameters<typeof actual.default>[0]
+      );
+    }
+  };
+});
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   return { useSpace: () => useSpaceFromQuery(() => state.space as Space) };
@@ -52,12 +79,17 @@ vi.mock("@/lib/api/browser", () => {
     if (path.endsWith("/documents/")) {
       state.requests.push(`documents ${itemId} ${options?.params?.query?.offset ?? 0}`);
       const documents = state.documents[itemId];
-      return {
-        data:
-          typeof documents === "function"
-            ? (documents as (query: Query) => unknown)(options?.params?.query ?? {})
-            : (documents ?? { items: [], total_count: 0, limit: 50, offset: 0, total_size: 0 })
-      };
+      const data =
+        typeof documents === "function"
+          ? (documents as (query: Query) => unknown)(options?.params?.query ?? {})
+          : (documents ?? { items: [], total_count: 0, limit: 50, offset: 0, total_size: 0 });
+      return data instanceof Promise ? data.then((value: unknown) => ({ data: value })) : { data };
+    }
+    if (path === "/api/v1/integrations/sync-logs/{integration_knowledge_id}/") {
+      state.requests.push(`logs ${itemId}`);
+      const { skip = 0, limit = 10 } = options?.params?.query ?? {};
+      const logs = state.logs[itemId] ?? [];
+      return { data: { items: logs.slice(skip, skip + limit), total_count: logs.length } };
     }
     return { data: { items: [], count: 0 } };
   };
@@ -67,6 +99,19 @@ vi.mock("@/lib/api/browser", () => {
       DELETE: () => {
         state.onDelete();
         return reply({ status: 204 });
+      },
+      POST: (
+        path: string,
+        options?: { params?: { path?: { integration_knowledge_id?: string } } }
+      ) => {
+        const itemId = options?.params?.path?.integration_knowledge_id ?? "";
+        if (!path.endsWith("/sync/")) return reply({ error: { message: `unexpected ${path}` } });
+        state.synced.push(itemId);
+        return reply(
+          state.refuseSync.includes(itemId)
+            ? { error: { message: "Busy" }, status: 409 }
+            : { data: {} }
+        );
       }
     }
   };
@@ -82,8 +127,13 @@ afterEach(() => {
   state.progress = [];
   state.skipped = {};
   state.documents = {};
+  state.logs = {};
   state.requests = [];
+  state.synced = [];
+  state.refuseSync = [];
+  for (const shown of Object.values(toasts)) shown.mockClear();
   state.onDelete = () => {};
+  links.length = 0;
   vi.restoreAllMocks();
   window.history.replaceState(null, "", "/");
 });
@@ -223,6 +273,16 @@ describe("WrapperDetail", () => {
     expect(screen.getByRole("link", { name: "Visa problem" }).getAttribute("href")).toBe(
       "/spaces/space-1/knowledge/integrations/wrapper/w1?tab=problems"
     );
+    // A link that switches this page's view is never prefetched; one that leaves it may be.
+    const prefetch = (href: string) =>
+      new Set(links.filter((props) => props.href === href).map((props) => props.prefetch));
+    expect(prefetch("/spaces/space-1/knowledge/integrations/wrapper/w1?tab=problems")).toEqual(
+      new Set([false])
+    );
+    expect(prefetch("/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i2")).toEqual(
+      new Set([false])
+    );
+    expect(prefetch("/spaces/space-1/knowledge?tab=integrations")).toEqual(new Set([undefined]));
 
     // In the folder list each state has a shape of its own, not just a colour.
     const nav = screen.getByRole("navigation", { name: "Mappar" });
@@ -252,7 +312,14 @@ describe("WrapperDetail", () => {
         skipped: 1,
         deleted: 0,
         current: "Budget 2026.xlsx",
-        recent: [{ name: "Plan.docx", outcome: "indexed" }]
+        recent: [
+          { name: "Plan.docx", outcome: "indexed" },
+          {
+            name: "Ritning.pdf",
+            outcome: "skipped",
+            reason: "No text layer (scanned document; OCR is not supported)"
+          }
+        ]
       }
     ];
     show([mall, protokoll], "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i1");
@@ -262,6 +329,115 @@ describe("WrapperDetail", () => {
     const live = screen.getByRole("region", { name: "Läses just nu" });
     expect(within(live).getByText("Budget 2026.xlsx")).toBeTruthy();
     expect(within(live).getByText("Plan.docx")).toBeTruthy();
+    // Why a file was skipped is there for everyone to read, not only screen readers.
+    const reason = within(live).getByText("Inget textlager (skannat dokument; OCR stöds inte)");
+    expect(reason.closest(".sr-only")).toBeNull();
+  });
+
+  it("shows a one-folder source's link and actions once, in the page header", () => {
+    show([mall]);
+
+    expect(screen.getAllByRole("link", { name: /Öppna i SharePoint/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /^Fler åtgärder för/ })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Fler åtgärder för Byggnad" })).toBeTruthy();
+    // The folder's own heading stays, with its state.
+    expect(screen.getByRole("heading", { level: 2, name: "Mallar" })).toBeTruthy();
+  });
+
+  it("says per folder whether SharePoint reports its changes", async () => {
+    const hours = (count: number) => new Date(Date.now() + count * 3_600_000).toISOString();
+    const watched = (item: typeof mall, expires: string | null) => ({
+      ...item,
+      metadata: { ...item.metadata, sharepoint_subscription_expires_at: expires }
+    });
+    show([watched(mall, hours(72)), watched(protokoll, hours(-2))]);
+
+    const overview = screen.getByRole("table", { name: "Mappar i Byggnad" });
+    expect(within(overview).getByRole("columnheader", { name: "Ändringsbevakning" })).toBeTruthy();
+    const row = (name: string) => within(overview).getByRole("link", { name }).closest("tr")!;
+    expect(within(row("Mallar")).getByText("På")).toBeTruthy();
+    expect(within(row("Protokoll")).getByText("Har gått ut")).toBeTruthy();
+    const stat = screen.getByText("Ändringsbevakning", { selector: "dt" }).nextElementSibling!;
+    expect(within(stat as HTMLElement).getByText("1 bevakning har gått ut")).toBeTruthy();
+
+    fireEvent.click(within(overview).getByRole("link", { name: "Protokoll" }));
+    expect(await screen.findByText("Ändringsbevakning: Har gått ut")).toBeTruthy();
+  });
+
+  it("says when folders' change notifications are about to be renewed", () => {
+    const inHours = new Date(Date.now() + 24 * 3_600_000).toISOString();
+    const expiring = (item: typeof mall) => ({
+      ...item,
+      metadata: { ...item.metadata, sharepoint_subscription_expires_at: inHours }
+    });
+    show([expiring(mall), expiring(protokoll)]);
+
+    const stat = screen.getByText("Ändringsbevakning", { selector: "dt" }).nextElementSibling!;
+    expect(stat.textContent).toContain("På");
+    expect(
+      within(stat as HTMLElement).getByText("2 går ut inom 48 timmar och förnyas automatiskt")
+    ).toBeTruthy();
+    const overview = screen.getByRole("table", { name: "Mappar i Byggnad" });
+    expect(within(overview).getAllByText("På, förnyas inom 48 timmar")).toHaveLength(2);
+  });
+
+  it("links to an item or document at its source only over https", async () => {
+    state.documents.i1 = {
+      items: [
+        {
+          id: "d1",
+          title: "Avtalsmall.docx",
+          relative_path: "/Mallar/Avtalsmall.docx",
+          size: 2048,
+          updated_at: null,
+          url: "https://kommun.sharepoint.com/sites/avtal/Avtalsmall.docx",
+          source_metadata: []
+        },
+        {
+          id: "d2",
+          title: "Gammal.docx",
+          relative_path: "/Mallar/Gammal.docx",
+          size: 2048,
+          updated_at: null,
+          url: "http://kommun.sharepoint.com/sites/avtal/Gammal.docx",
+          source_metadata: []
+        }
+      ],
+      total_count: 2,
+      limit: 50,
+      offset: 0,
+      total_size: 4096
+    };
+    // Plain http, which Astryx's own link check lets through.
+    show([mall, { ...protokoll, url: "http://kommun.sharepoint.com/sites/protokoll" }]);
+
+    const overview = screen.getByRole("table", { name: "Mappar i Byggnad" });
+    expect(
+      within(overview)
+        .getByRole("link", { name: /Öppna i SharePoint: Mallar/ })
+        .getAttribute("href")
+    ).toBe("https://kommun.sharepoint.com/sites/avtal");
+    expect(
+      within(overview).queryByRole("link", { name: /Öppna i SharePoint: Protokoll/ })
+    ).toBeNull();
+    expect(overview.querySelector('a[href^="http:"]')).toBeNull();
+
+    fireEvent.click(within(overview).getByRole("link", { name: "Mallar" }));
+    const documents = await screen.findByRole("table", { name: "Dokument i Mallar" });
+    expect(within(documents).getByRole("link", { name: /Avtalsmall\.docx/ })).toBeTruthy();
+    expect(within(documents).queryByRole("link", { name: /Gammal\.docx/ })).toBeNull();
+    const mallar = screen.getByRole("region", { name: "Mallar" });
+    // The folder's own link, beside the document's.
+    expect(within(mallar).getAllByRole("link", { name: /^Öppna i SharePoint(?!:)/ })).toHaveLength(
+      1
+    );
+
+    const nav = screen.getByRole("navigation", { name: "Mappar" });
+    fireEvent.click(within(nav).getByRole("link", { name: /Protokoll/ }));
+    const protokollSection = await screen.findByRole("region", { name: "Protokoll" });
+    expect(
+      within(protokollSection).queryByRole("link", { name: /^Öppna i SharePoint/ })
+    ).toBeNull();
   });
 });
 
@@ -395,7 +571,8 @@ describe("WrapperDetail navigation", () => {
     expect(link.getAttribute("href")).toBe(
       "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i2"
     );
-    fireEvent.click(link);
+    // The page handles the click itself: no browser navigation.
+    expect(fireEvent.click(link)).toBe(false);
 
     expect(await screen.findByRole("heading", { level: 2, name: "Protokoll" })).toBeTruthy();
     expect(link.getAttribute("aria-current")).toBe("page");
@@ -405,29 +582,177 @@ describe("WrapperDetail navigation", () => {
     expect(router.replace).not.toHaveBeenCalled();
   });
 
-  it("goes back to the list after the last folder was deleted from its own menu", async () => {
-    const only = { ...mall, permissions: ["read", "edit", "delete"] };
-    show([only]);
+  it("replaces the page with the list once the source was deleted from its own menu", async () => {
+    show([mall]);
     state.onDelete = () => {
       state.space = makeSpace();
     };
+    // Whatever the page shows on its way out.
+    const notFound: boolean[] = [];
+    const observer = new MutationObserver(() =>
+      notFound.push(screen.queryByText("Inga resultat hittades") !== null)
+    );
+    observer.observe(document.body, { childList: true, subtree: true });
 
-    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Mallar" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
-    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort integrationskunskap" });
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Byggnad" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort grupp" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort grupp" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
 
+    // Replaced, so Back does not lead to a page that is gone.
     await waitFor(() =>
-      expect(router.push).toHaveBeenCalledWith("/spaces/space-1/knowledge?tab=integrations")
+      expect(router.replace).toHaveBeenCalledWith("/spaces/space-1/knowledge?tab=integrations")
     );
+    observer.disconnect();
+    expect(router.push).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { level: 1, name: "Byggnad" })).toBeNull();
+    // Not the "not found" state while the list loads.
+    expect(notFound).not.toContain(true);
+    expect(screen.queryByText("Inga resultat hittades")).toBeNull();
+  });
+
+  it("resyncs a one-folder source from the page header, which holds its one menu", async () => {
+    show([mall]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Byggnad" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Synka om alla objekt" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Synka om alla objekt" });
+    expect(within(dialog).getByText(/alla 1 objekt i "Byggnad"/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Starta fullständig synk" }));
+
+    await waitFor(() =>
+      expect(toasts.success).toHaveBeenCalledWith("Omsynkning köad för 1 objekt")
+    );
+    expect(state.synced).toEqual(["i1"]);
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("says how many folders could not be queued for a resync, and queues the rest once", async () => {
+    state.refuseSync = ["i2"];
+    show([mall, protokoll]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Byggnad" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Synka om alla objekt" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Synka om alla objekt" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Starta fullständig synk" }));
+
+    await waitFor(() => expect(toasts.error).toHaveBeenCalledWith("1 av 2 objekt kunde inte köas"));
+    expect(state.synced).toEqual(["i1", "i2"]);
+    expect(toasts.success).not.toHaveBeenCalled();
+  });
+
+  it("still says so when the source went away by other means", async () => {
+    const { queryClient } = show([mall]);
+
+    // Deleted in another tab, say: the page did not remove it, so it says it is gone.
+    state.space = makeSpace();
+    await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
+
+    expect(await screen.findByText("Inga resultat hittades")).toBeTruthy();
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it("shows the history of the folder chosen on Activity, and keeps that folder on Contents", async () => {
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    const search = () => new URL(String(replaceState.mock.lastCall?.[2])).search;
+    const sync = (id: string, startedAt: string, error: string | null = null) => ({
+      id,
+      integration_knowledge_id: "i2",
+      sync_type: "delta",
+      status: error ? "error" : "success",
+      error_message: error,
+      started_at: startedAt,
+      completed_at: null,
+      files_processed: 1,
+      files_deleted: 0,
+      pages_processed: 0,
+      folders_processed: 0,
+      skipped_items: 0,
+      skipped_details: []
+    });
+    state.logs.i1 = Array.from({ length: 12 }, (_, index) =>
+      sync(`m${index}`, `2026-10-${String(14 - index).padStart(2, "0")}T12:00:00Z`)
+    );
+    state.logs.i2 = [sync("p1", "2026-06-01T12:00:00Z", "Protokollet kunde inte läsas")];
+    const { container } = show(
+      [mall, protokoll],
+      "/spaces/space-1/knowledge/integrations/wrapper/w1?tab=activity"
+    );
+
+    const folderPicker = await screen.findByRole("combobox", { name: "Mapp" });
+    expect(await screen.findByRole("heading", { name: "De senaste 10 synkarna" })).toBeTruthy();
+    expect(screen.queryByText("Protokollet kunde inte läsas")).toBeNull();
+    await expectNoAxeViolations(container);
+
+    fireEvent.keyDown(folderPicker, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Protokoll" }));
+
+    expect(await screen.findByText("Protokollet kunde inte läsas")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Den senaste synken" })).toBeTruthy();
+    expect(search()).toBe("?tab=activity&folder=i2");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Innehåll" }));
+    expect(await screen.findByRole("heading", { level: 2, name: "Protokoll" })).toBeTruthy();
+    expect(search()).toBe("?folder=i2");
+  });
+
+  it("does not intercept a click that opens the folder somewhere else", () => {
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    show([mall, protokoll]);
+    const nav = screen.getByRole("navigation", { name: "Mappar" });
+    const link = within(nav).getByRole("link", { name: /Protokoll/ });
+
+    for (const modifier of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }]) {
+      // Records the click as it leaves the page, and stops jsdom's navigation after that.
+      let prevented: boolean | undefined;
+      const record = (event: Event) => {
+        prevented = event.defaultPrevented;
+        event.preventDefault();
+      };
+      document.addEventListener("click", record);
+      fireEvent.click(link, modifier);
+      document.removeEventListener("click", record);
+      expect(prevented).toBe(false);
+    }
+
+    expect(replaceState).not.toHaveBeenCalled();
+    expect(link.getAttribute("aria-current")).toBeNull();
+    expect(
+      within(nav)
+        .getByRole("link", { name: /Alla mappar/ })
+        .getAttribute("aria-current")
+    ).toBe("page");
+    expect(screen.queryByRole("heading", { level: 2, name: "Protokoll" })).toBeNull();
+  });
+
+  it("moves focus to the tab panel when the pressed Visa problem goes with the banner", async () => {
+    show([
+      mall,
+      {
+        ...protokoll,
+        metadata: { ...protokoll.metadata, last_sync_status: "error", last_sync_error: "Boom" }
+      }
+    ]);
+    const showProblems = screen.getByRole("link", { name: "Visa problem" });
+    showProblems.focus();
+
+    // In place: the click is the page's own, not a navigation.
+    expect(fireEvent.click(showProblems)).toBe(false);
+
+    expect(screen.getByRole("tab", { name: /Problem/ }).getAttribute("aria-selected")).toBe("true");
+    expect(showProblems.isConnected).toBe(false);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
+      timeout: 1500
+    });
   });
 });
 
 describe("WrapperDetail documents", () => {
-  it("keeps focus in the folder when paging to the last page, and says what it shows", async () => {
+  it("keeps focus in the folder when paging to the last page, which the pager announces", async () => {
     state.documents.i1 = documentPages(() => 60);
     show([mall, protokoll], "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i1");
     await screen.findByRole("button", { name: /Dokument 1\.docx/ });
+    const announcements = recordAnnouncements();
 
     const next = screen.getByRole("button", { name: "Gå till nästa sida" });
     next.focus();
@@ -440,7 +765,25 @@ describe("WrapperDetail documents", () => {
       () => expect(document.activeElement).toBe(screen.getByRole("region", { name: "Mallar" })),
       { timeout: 1500 }
     );
-    await waitFor(() => expect(liveRegion()).toBe("Visar 51–60 av 60"));
+    expect(screen.getByText(/^Visar 51–60 av 60/)).toBeTruthy();
+    announcements.stop();
+    // Astryx's Pagination says which page; the range is not read out after it.
+    expect(announcements.said).toEqual(["Sida 2 av 2"]);
+  });
+
+  it("announces what a search finds once it is in", async () => {
+    state.documents.i1 = documentPages(() => 60);
+    show([mall, protokoll], "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i1");
+    await screen.findByRole("button", { name: /Dokument 1\.docx/ });
+    // The first load is no result to announce.
+    expect(liveRegion()).toBe("");
+
+    fireEvent.change(screen.getByLabelText("Sök dokument på namn eller sökväg"), {
+      target: { value: "dokument" }
+    });
+
+    await waitFor(() => expect(liveRegion()).toBe("Visar 1–50 av 60"));
+    expect(state.requests.filter((request) => request.startsWith("documents i1"))).toHaveLength(2);
   });
 
   it("moves to the last page when a sync shrinks the folder under the current one", async () => {
@@ -453,20 +796,58 @@ describe("WrapperDetail documents", () => {
     await screen.findByRole("button", { name: /Dokument 1\.docx/ });
     fireEvent.click(screen.getByRole("button", { name: "Gå till nästa sida" }));
     await screen.findByRole("button", { name: /Dokument 51\.docx/ });
-    await waitFor(() => expect(liveRegion()).toBe("Visar 51–60 av 60"));
 
     const announcements = recordAnnouncements();
     total = 40;
     await act(() => queryClient.invalidateQueries({ queryKey: ["integrations", "documents"] }));
 
     expect(await screen.findByRole("button", { name: /Dokument 40\.docx/ })).toBeTruthy();
-    await waitFor(() => expect(liveRegion()).toBe("Visar 1–40 av 40"));
     announcements.stop();
     // Never an empty folder, never a range past the end.
     expect(screen.queryByText("Inga dokument kunde indexeras")).toBeNull();
-    expect(announcements.said).toEqual(["Visar 1–40 av 40"]);
+    expect(screen.getByText(/^Visar 1–40 av 40/)).toBeTruthy();
+    // The user turned no page and searched nothing: nothing to announce.
+    expect(announcements.said).toEqual([]);
     // One page left: no pager.
     expect(screen.queryByRole("button", { name: "Gå till nästa sida" })).toBeNull();
+  });
+
+  it("shows the documents loading, not an empty folder, while it moves back from past the end", async () => {
+    let total = 60;
+    let release: () => void = () => {};
+    const pages = documentPages(() => total);
+    state.documents.i1 = (query: Query) =>
+      total === 60 || (query.offset ?? 0) > 0
+        ? pages(query)
+        : new Promise((resolve) => (release = () => resolve(pages(query))));
+    const { queryClient } = show(
+      [mall, protokoll],
+      "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i1"
+    );
+    await screen.findByRole("button", { name: /Dokument 1\.docx/ });
+    fireEvent.click(screen.getByRole("button", { name: "Gå till nästa sida" }));
+    await screen.findByRole("button", { name: /Dokument 51\.docx/ });
+
+    // A sync leaves 40: under its revision page 2 comes back empty, and page 1 is on its way.
+    total = 40;
+    state.space = makeSpace({
+      integrations: [
+        makeIntegration({
+          ...folder,
+          ...mall,
+          metadata: { ...mall.metadata, last_synced_at: "2026-10-15T09:00:00Z", document_count: 40 }
+        }),
+        makeIntegration({ ...folder, ...protokoll })
+      ]
+    });
+    await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
+
+    expect(await screen.findByText("Läser in dokument...")).toBeTruthy();
+    expect(screen.queryByText("Inga dokument kunde indexeras")).toBeNull();
+    expect(screen.queryByRole("table", { name: "Dokument i Mallar" })).toBeNull();
+
+    await act(async () => release());
+    expect(await screen.findByRole("button", { name: /Dokument 40\.docx/ })).toBeTruthy();
   });
 });
 
@@ -498,13 +879,77 @@ describe("WrapperDetail problems", () => {
 
     await waitFor(() => expect(fetches()).toBe(2));
     expect(screen.getByText("scan.pdf")).toBeTruthy();
-    const skippedStat = screen.getByText("Hoppades över").closest("div")!;
+    const skippedStat = screen.getByText("Överhoppade").closest("div")!;
     expect(within(skippedStat).getByText("1")).toBeTruthy();
 
     await act(async () => release(skippedList("ny.pdf", "annan.pdf")));
     expect(await screen.findByText("ny.pdf")).toBeTruthy();
     expect(within(skippedStat).getByText("2")).toBeTruthy();
     expect(fetches()).toBe(2);
+  });
+
+  it("shows what a sync wrote while the page was closed as soon as it opens again", async () => {
+    state.skipped.i1 = skippedList("scan.pdf");
+    state.documents.i1 = documentPages(() => 2);
+    const route = "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i1";
+    const first = show([mall, protokoll], route);
+    expect(await screen.findByRole("button", { name: /Dokument 2\.docx/ })).toBeTruthy();
+    const problemsTab = screen.getByRole("tab", { name: /Problem/ });
+    expect(await within(problemsTab).findByText("1")).toBeTruthy();
+    first.unmount();
+
+    // Elsewhere in the space meanwhile: a sync of Mallar finished, and the
+    // space (refetched by whatever showed it) has its new revision.
+    state.skipped.i1 = {
+      ...skippedList("scan.pdf", "karta.pdf"),
+      items: [
+        ...skippedList("scan.pdf", "karta.pdf").items,
+        { file: "stor.pdf", reason: "File too large (exceeds 50 MB limit)" }
+      ],
+      total: 3
+    };
+    state.documents.i1 = documentPages(() => 3);
+    state.space = makeSpace({
+      integrations: [
+        makeIntegration({
+          ...folder,
+          ...mall,
+          metadata: { ...mall.metadata, last_synced_at: "2026-10-15T09:00:00Z", document_count: 3 }
+        }),
+        makeIntegration({ ...folder, ...protokoll })
+      ]
+    });
+    first.queryClient.setQueryData(["spaces", "space-1"], state.space);
+    setRoute(route);
+    renderInApp(<WrapperDetail wrapperId="w1" />, { queryClient: first.queryClient });
+
+    // The cached lists were read before the sync; they are not shown as current.
+    expect(await screen.findByRole("button", { name: /Dokument 3\.docx/ })).toBeTruthy();
+    const tab = screen.getByRole("tab", { name: /Problem/ });
+    // Two causes now: a scanned document and one too large.
+    expect(await within(tab).findByText("2")).toBeTruthy();
+    const skippedStat = screen.getByText("Överhoppade").closest("div")!;
+    expect(within(skippedStat).getByText("3")).toBeTruthy();
+  });
+
+  it("counts the skipped files of the source's current folders only", async () => {
+    state.skipped.i1 = skippedList("scan.pdf");
+    state.skipped.i2 = skippedList("ritning.pdf", "karta.pdf");
+    const { queryClient } = show([mall, protokoll]);
+    const skippedStat = screen.getByText("Överhoppade").closest("div")!;
+    expect(await within(skippedStat).findByText("3")).toBeTruthy();
+
+    // Protokoll is deleted; its list stays in the cache for a while.
+    state.space = makeSpace({ integrations: [makeIntegration({ ...folder, ...mall })] });
+    await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Överhoppade").closest("div")!.textContent).toContain("1")
+    );
+    expect(screen.getByText("Överhoppade").closest("div")!.textContent).not.toContain("3");
+    expect(
+      queryClient.getQueriesData({ queryKey: ["integrations", "skipped", "space-1", "i2"] })
+    ).not.toHaveLength(0);
   });
 
   it("moves focus to the panel once a retried list loaded and the retry button went", async () => {
