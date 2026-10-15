@@ -23,6 +23,7 @@
   } from "$lib/features/integrations/integrationDocuments";
   import { previewLinkLabel } from "$lib/features/integrations/IntegrationData";
   import SourceStateBadge from "$lib/features/integrations/components/SourceStateBadge.svelte";
+  import { safeExternalUrl } from "$lib/features/integrations/externalUrl";
   import { itemState, itemWatchState, watchStateLabel } from "$lib/features/integrations/sources";
   import type { IntegrationSyncProgress } from "$lib/features/integrations/syncProgress";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
@@ -68,6 +69,7 @@
 
   let folderState = $derived(itemState(knowledge, progress));
   let watchState = $derived(itemWatchState(knowledge));
+  let knowledgeUrl = $derived(safeExternalUrl(knowledge.url));
   let view = $state<"searchable" | "skipped">("searchable");
   let skippedTotal = $derived(skipped?.total ?? 0);
   let skippedNotListed = $derived(skipped ? Math.max(0, skipped.total - skipped.items.length) : 0);
@@ -188,11 +190,11 @@
       </div>
       {#if showControls}
         <div class="flex items-center gap-1">
-          {#if knowledge.url}
+          {#if knowledgeUrl}
             <Button
               variant="outline"
               size="sm"
-              href={knowledge.url}
+              href={knowledgeUrl}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -350,9 +352,9 @@
                   </span>
                 </Table.Cell>
                 <Table.Cell>
-                  {#if document.url}
+                  {#if safeExternalUrl(document.url)}
                     <Button
-                      href={document.url}
+                      href={safeExternalUrl(document.url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       variant="ghost"

@@ -10,6 +10,7 @@
     buildIntegrationTree,
     flattenIntegrationTree
   } from "$lib/features/integrations/integrationTree";
+  import { safeExternalUrl } from "$lib/features/integrations/externalUrl";
   import { itemState, itemWatchState, watchStateLabel } from "$lib/features/integrations/sources";
   import type { IntegrationSyncProgress } from "$lib/features/integrations/syncProgress";
   import { m } from "$lib/paraglide/messages";
@@ -90,9 +91,9 @@
         {/if}
         <Table.Cell>
           <div class="flex items-center justify-end gap-1">
-            {#if item.url}
+            {#if safeExternalUrl(item.url)}
               <Button
-                href={item.url}
+                href={safeExternalUrl(item.url)}
                 target="_blank"
                 rel="noopener noreferrer"
                 variant="ghost"
