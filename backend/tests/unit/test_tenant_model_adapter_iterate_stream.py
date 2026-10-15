@@ -15,8 +15,6 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     MCP_IMAGE_PLACEHOLDER_TEMPLATE,
-    PROVIDER_UNAVAILABLE_CODE,
-    PROVIDER_UNAVAILABLE_MESSAGE,
     TOOL_RESULT_BUDGET_NOTICE,
     PreparedModelStream,
     TenantModelAdapter,
@@ -30,6 +28,9 @@ from eneo.mcp_apps.domain.mcp_app_view import McpAppViewInfo
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     ToolApprovalWaitResult,
+)
+from eneo.model_providers.infrastructure.litellm_transport import (
+    PROVIDER_UNREACHABLE,
 )
 
 
@@ -490,7 +491,7 @@ async def _collect(adapter: TenantModelAdapter, stream, **kwargs):
         ("prepare_streaming", "stream_preparation"),
     ],
 )
-async def test_provider_connectivity_failure_returns_clear_unavailable_error(
+async def test_provider_connectivity_failure_returns_unreachable_error(
     method_name: str,
     phase: str,
 ):
@@ -519,23 +520,23 @@ async def test_provider_connectivity_failure_returns_clear_unavailable_error(
                 )
 
     exc = exc_info.value
-    assert str(exc) == PROVIDER_UNAVAILABLE_MESSAGE
-    assert exc.code == PROVIDER_UNAVAILABLE_CODE
-    assert exc.details == {"reason": PROVIDER_UNAVAILABLE_CODE, "retryable": True}
+    assert str(exc) == PROVIDER_UNREACHABLE.message
+    assert exc.code == "provider_unreachable"
+    assert exc.details == {"reason": "provider_unreachable", "retryable": True}
     span.set_attribute.assert_any_call("gen_ai.operation.name", "chat")
     span.set_attribute.assert_any_call("gen_ai.provider.name", "openai")
     span.set_attribute.assert_any_call("gen_ai.request.model", "test-model")
     span.set_attribute.assert_any_call(
         "gen_ai.request.stream", method_name == "prepare_streaming"
     )
-    span.set_attribute.assert_any_call("error.type", PROVIDER_UNAVAILABLE_CODE)
+    span.set_attribute.assert_any_call("error.type", "provider_unreachable")
     span.set_attribute.assert_any_call("eneo.ai.provider_unavailable", True)
     span.set_attribute.assert_any_call("eneo.ai.operation", phase)
     span.record_exception.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_wrapped_provider_failure_returns_clear_unavailable_error():
+async def test_wrapped_provider_failure_returns_unreachable_error():
     adapter = _make_completion_adapter()
     outer_error = RuntimeError("upstream call failed")
     outer_error.__cause__ = httpx.ConnectError("Temporary failure in name resolution")
@@ -548,13 +549,13 @@ async def test_wrapped_provider_failure_returns_clear_unavailable_error():
             await adapter.get_response(context=SimpleNamespace(), model_kwargs={})
 
     exc = exc_info.value
-    assert str(exc) == PROVIDER_UNAVAILABLE_MESSAGE
-    assert exc.code == PROVIDER_UNAVAILABLE_CODE
-    assert exc.details == {"reason": PROVIDER_UNAVAILABLE_CODE, "retryable": True}
+    assert str(exc) == PROVIDER_UNREACHABLE.message
+    assert exc.code == "provider_unreachable"
+    assert exc.details == {"reason": "provider_unreachable", "retryable": True}
 
 
 @pytest.mark.asyncio
-async def test_text_only_provider_failure_returns_clear_unavailable_error():
+async def test_text_only_provider_failure_returns_unreachable_error():
     adapter = _make_completion_adapter()
 
     with patch(
@@ -565,9 +566,9 @@ async def test_text_only_provider_failure_returns_clear_unavailable_error():
             await adapter.get_response(context=SimpleNamespace(), model_kwargs={})
 
     exc = exc_info.value
-    assert str(exc) == PROVIDER_UNAVAILABLE_MESSAGE
-    assert exc.code == PROVIDER_UNAVAILABLE_CODE
-    assert exc.details == {"reason": PROVIDER_UNAVAILABLE_CODE, "retryable": True}
+    assert str(exc) == PROVIDER_UNREACHABLE.message
+    assert exc.code == "provider_unreachable"
+    assert exc.details == {"reason": "provider_unreachable", "retryable": True}
 
 
 @pytest.mark.asyncio
@@ -838,7 +839,7 @@ def test_models_without_tool_capability_receive_no_tools():
 
 
 @pytest.mark.asyncio
-async def test_mid_stream_provider_failure_yields_unavailable_event():
+async def test_mid_stream_provider_failure_yields_unreachable_event():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
     span = Mock()
@@ -875,10 +876,77 @@ async def test_mid_stream_provider_failure_yields_unavailable_event():
 
     errors = [c for c in completions if c.response_type == ResponseType.ERROR]
     assert len(errors) == 1
-    assert errors[0].error == PROVIDER_UNAVAILABLE_MESSAGE
+    assert errors[0].error == PROVIDER_UNREACHABLE.message
     assert errors[0].error_code == 503
+    assert errors[0].error_reason == "provider_unreachable"
     span.set_attribute.assert_any_call("gen_ai.request.stream", True)
-    span.set_attribute.assert_any_call("error.type", PROVIDER_UNAVAILABLE_CODE)
+    span.set_attribute.assert_any_call("error.type", "provider_unreachable")
+
+
+@pytest.mark.asyncio
+async def test_mid_stream_failure_in_eneo_code_is_not_blamed_on_the_provider():
+    adapter = _make_adapter()
+    span = Mock()
+    span.is_recording.return_value = True
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk()],
+        eneo_context={
+            "mcp_proxy": _FakeMCPProxy(),
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(side_effect=ValueError("message list was malformed")),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.trace.get_current_span",
+            return_value=span,
+        ),
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    errors = [c for c in completions if c.response_type == ResponseType.ERROR]
+    assert len(errors) == 1
+    assert errors[0].error_code == 500
+    assert errors[0].error_reason == "stream_error"
+    span.record_exception.assert_not_called()
+
+
+def test_provider_requests_are_bounded_by_the_configured_timeouts():
+    adapter = object.__new__(TenantModelAdapter)
+    adapter.credential_resolver = Mock()
+    adapter.outbound_headers = None
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter."
+            "build_litellm_provider_kwargs",
+            return_value={},
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter."
+            "get_settings",
+            return_value=SimpleNamespace(
+                ai_provider_read_timeout_seconds=42,
+                ai_provider_connect_timeout_seconds=3,
+            ),
+        ),
+    ):
+        kwargs = adapter._prepare_kwargs(model_kwargs=None)
+
+    assert kwargs["timeout"] == httpx.Timeout(42, connect=3)
 
 
 def _tool_call_events(completions):

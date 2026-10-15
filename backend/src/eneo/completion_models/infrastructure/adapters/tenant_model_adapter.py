@@ -19,6 +19,7 @@ from typing import (
 )
 from urllib.parse import urlsplit, urlunsplit
 
+import httpx
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from typing_extensions import override
@@ -58,6 +59,7 @@ from eneo.completion_models.infrastructure.static_prompts import (
 )
 from eneo.files.model_file_references import file_handle
 from eneo.logging.logging import LoggingDetails
+from eneo.main.config import get_settings
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
 from eneo.model_providers.infrastructure import litellm_transport
@@ -75,9 +77,6 @@ from eneo.model_providers.infrastructure.tenant_model_credential_resolver import
 from eneo.tokens.token_utils import count_tokens, measure_provider_input_tokens
 
 logger = get_logger(__name__)
-
-PROVIDER_UNAVAILABLE_MESSAGE = litellm_transport.PROVIDER_UNAVAILABLE_MESSAGE
-PROVIDER_UNAVAILABLE_CODE = litellm_transport.PROVIDER_UNAVAILABLE_CODE
 
 
 # Regex to match Qwen3 thinking blocks: <think>...</think>
@@ -646,7 +645,13 @@ class TenantModelAdapter(CompletionModelAdapter):
         self.provider_type = provider_type
         self.outbound_headers = outbound_headers
 
-    def _record_provider_unavailable(self, *, phase: str, exc: BaseException) -> None:
+    def _record_provider_unavailable(
+        self,
+        *,
+        phase: str,
+        exc: BaseException,
+        failure: litellm_transport.ProviderFailure,
+    ) -> None:
         span = trace.get_current_span()
         if span.is_recording():
             is_streaming = phase in {"stream_preparation", "stream_iteration"}
@@ -654,14 +659,14 @@ class TenantModelAdapter(CompletionModelAdapter):
             span.set_attribute("gen_ai.provider.name", self.provider_type)
             span.set_attribute("gen_ai.request.model", self.model.name)
             span.set_attribute("gen_ai.request.stream", is_streaming)
-            span.set_attribute("error.type", PROVIDER_UNAVAILABLE_CODE)
+            span.set_attribute("error.type", failure.code)
             span.set_attribute("eneo.ai.provider_unavailable", True)
             span.set_attribute("eneo.ai.provider_type", self.provider_type)
             span.set_attribute("eneo.ai.model", self.litellm_model)
             span.set_attribute("eneo.ai.operation", phase)
             span.set_attribute("eneo.ai.error_type", exc.__class__.__name__)
             span.record_exception(exc)
-            span.set_status(Status(StatusCode.ERROR, PROVIDER_UNAVAILABLE_MESSAGE))
+            span.set_status(Status(StatusCode.ERROR, failure.message))
 
         logger.exception(
             f"[TenantModelAdapter] Provider unavailable for {self.litellm_model} during {phase}",
@@ -670,19 +675,16 @@ class TenantModelAdapter(CompletionModelAdapter):
                 "model": self.litellm_model,
                 "operation": phase,
                 "error_type": exc.__class__.__name__,
-                "error_code": PROVIDER_UNAVAILABLE_CODE,
+                "error_code": failure.code,
             },
         )
 
     def _raise_provider_unavailable(
         self, *, phase: str, exc: BaseException
     ) -> NoReturn:
-        self._record_provider_unavailable(phase=phase, exc=exc)
-        raise OpenAIException(
-            PROVIDER_UNAVAILABLE_MESSAGE,
-            code=PROVIDER_UNAVAILABLE_CODE,
-            details={"reason": PROVIDER_UNAVAILABLE_CODE, "retryable": True},
-        ) from exc
+        failure = litellm_transport.classify_provider_failure(exc)
+        self._record_provider_unavailable(phase=phase, exc=exc, failure=failure)
+        raise failure.to_exception() from exc
 
     def _mask_sensitive_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """Return copy of params with masked API key and header values for safe logging."""
@@ -1221,6 +1223,11 @@ class TenantModelAdapter(CompletionModelAdapter):
             dict: LiteLLM kwargs with api_key, api_base, and config fields
         """
         kwargs = build_litellm_provider_kwargs(self.credential_resolver)
+        settings = get_settings()
+        kwargs["timeout"] = httpx.Timeout(
+            settings.ai_provider_read_timeout_seconds,
+            connect=settings.ai_provider_connect_timeout_seconds,
+        )
 
         # Process model kwargs with provider-specific adjustments
         if model_kwargs:
@@ -2840,23 +2847,30 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         except Exception as exc:
             # Mid-stream errors: yield error event instead of raising
-            if _is_provider_unavailable_error(exc):
-                self._record_provider_unavailable(phase="stream_iteration", exc=exc)
-                # Streaming Completion events expose numeric error_code, not JSON details.
-                error = PROVIDER_UNAVAILABLE_MESSAGE
-                error_code = 503
+            failure = litellm_transport.classify_stream_failure(exc)
+            if failure is not None and failure.unavailable:
+                self._record_provider_unavailable(
+                    phase="stream_iteration", exc=exc, failure=failure
+                )
             else:
                 logger.error(
                     f"[TenantModelAdapter] {self.litellm_model}: Error during stream iteration: {exc}",
                     exc_info=True,
                 )
-                error = litellm_transport.STREAM_ERROR_MESSAGE
-                error_code = 500
 
             yield Completion(
                 text="",
-                error=error,
-                error_code=error_code,
+                error=(
+                    failure.message
+                    if failure is not None
+                    else litellm_transport.STREAM_ERROR_MESSAGE
+                ),
+                error_code=failure.status if failure is not None else 500,
+                error_reason=(
+                    failure.code
+                    if failure is not None
+                    else litellm_transport.STREAM_ERROR_CODE
+                ),
                 response_type=ResponseType.ERROR,
                 stop=True,
             )

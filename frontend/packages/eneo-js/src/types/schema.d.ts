@@ -24622,6 +24622,11 @@ export interface components {
        * @default null
        */
       error_code?: number | null;
+      /**
+       * Code
+       * @default null
+       */
+      code?: string | null;
     };
   };
   responses: never;
@@ -31415,6 +31420,8 @@ export interface operations {
                 error: string;
                 /** Error Code */
                 error_code?: number | null;
+                /** Code */
+                code?: string | null;
               };
         };
       };

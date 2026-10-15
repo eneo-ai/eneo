@@ -263,6 +263,9 @@ class SSEFirstChunk(AskChatResponse):
 class SSEError(SSEBase):
     error: str
     error_code: Optional[int] = None
+    # Why the answer failed, e.g. ``provider_unreachable``; the same reason
+    # codes an HTTP error carries in ``code``.
+    code: Optional[str] = None
 
 
 class ToolApprovalResponse(BaseModel):

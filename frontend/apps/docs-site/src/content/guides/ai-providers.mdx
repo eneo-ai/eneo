@@ -358,6 +358,25 @@ Check your usage regularly:
 
 ## Troubleshooting
 
+### When a provider fails
+
+When a call to a model provider fails, chat users see a message that names the cause instead of a general error. The message says whether the provider or Eneo is at fault and whether trying again can help. API clients get the same reason as `code` in the error body or in the stream's `error` event.
+
+| Reason code | When | Where the fault is | Does retrying help |
+|-------------|------|--------------------|--------------------|
+| `provider_unavailable` | The provider answered with a server error or an overload status (500, 502, 503, 529) | Provider | Usually, after a while |
+| `provider_timeout` | The provider stayed silent longer than `AI_PROVIDER_READ_TIMEOUT_SECONDS`, or its gateway timed out (408, 504) | Provider, overloaded or hanging | Usually |
+| `provider_unreachable` | Eneo could not open a connection: DNS failure, refused connection, TLS failure or connect timeout | The provider is down, or the network path from Eneo is blocked | When the provider recovers; check the endpoint and outbound network if it persists |
+| `provider_connection_lost` | The connection broke before the answer was complete | Provider or network path | Yes |
+| `provider_rate_limited` | The provider refused the request with 429 | Provider quota or your usage tier | After a short wait |
+| `provider_model_not_found` | The provider answered 404 for the configured model | Model configuration: the model was removed or renamed, or the deployment name is wrong | No; correct the model under **Admin → Models** |
+| `provider_rejected_request` | The provider refused the request as invalid (400) | The request or the model configuration | No |
+| `stream_error` | Eneo failed while handling the answer | Eneo | Report it with the time it happened |
+
+Anything else keeps the general `provider_error` message. `provider_unreachable` alone does not prove that the provider is down: if every provider fails this way at the same time, check the network between Eneo and the provider first.
+
+The four outage reasons (`provider_unavailable`, `provider_timeout`, `provider_unreachable`, `provider_connection_lost`) are logged by the backend with the reason as `error_code` and recorded as `error.type` on the request's trace. Timeouts are configured with [`AI_PROVIDER_CONNECT_TIMEOUT_SECONDS` and `AI_PROVIDER_READ_TIMEOUT_SECONDS`](/guides/deployment#environment-configuration).
+
 ### Invalid API Key (401 Errors)
 
 **Symptoms**: Authentication errors, 401 responses
