@@ -165,6 +165,7 @@ describe("computeStepConfigValidationIssues", () => {
       {
         ...tool,
         mcp_server_name: "Ärenden",
+        mcp_server_security_level: null,
         tool_name: "build",
         tool_description: null,
         refusal: null,

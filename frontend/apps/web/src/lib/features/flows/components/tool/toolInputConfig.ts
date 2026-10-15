@@ -8,11 +8,17 @@ export type FlowToolOption = components["schemas"]["FlowToolOptionPublic"];
 /**
  * The tools a step of the flow can name, as far as the editor has them. While
  * a loaded list is asked for again it stays, marked `refreshing`.
+ * `classificationsEnabled` is the organization's switch, as the list gives it.
  */
 export type ToolOptionsLoad =
   | { status: "loading" }
   | { status: "failed"; message: string }
-  | { status: "loaded"; options: FlowToolOption[]; refreshing: boolean };
+  | {
+      status: "loaded";
+      options: FlowToolOption[];
+      classificationsEnabled: boolean;
+      refreshing: boolean;
+    };
 
 const TOOL_INPUT_CONFIG_KEY = "tool";
 const TOOL_CONFIG_KEYS = ["mcp_server_id", "tool_id", "arguments"];

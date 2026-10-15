@@ -427,10 +427,17 @@ function createFlowEditor(data: FlowEditorInitData) {
       load.status === "loaded" ? { ...load, refreshing: true } : { status: "loading" }
     );
     try {
-      const { items } = await data.eneo.flows.toolOptions({ id: data.flow.id });
+      const { items, security_classifications_enabled } = await data.eneo.flows.toolOptions({
+        id: data.flow.id
+      });
       // The answer of an earlier request must not replace a later one's.
       if (request !== toolOptionsRequests) return;
-      toolOptions.set({ status: "loaded", options: items, refreshing: false });
+      toolOptions.set({
+        status: "loaded",
+        options: items,
+        classificationsEnabled: security_classifications_enabled,
+        refreshing: false
+      });
     } catch (error) {
       if (request !== toolOptionsRequests) return;
       toolOptions.set({

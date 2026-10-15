@@ -7,6 +7,7 @@ from uuid import UUID
 
 from eneo.flows.domain.tool_facts import SpaceToolFactsSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_security_classification import tool_server_classification_level
 from eneo.main.exceptions import FileTooLargeException
 from eneo.mcp_servers.application.unattended_tool_use import (
     ListedToolFacts,
@@ -34,6 +35,7 @@ TOOL_OPTIONS_TOO_LARGE_MESSAGE = (
 class FlowToolOption:
     mcp_server_id: UUID
     mcp_server_name: str
+    mcp_server_security_level: int | None
     tool_id: UUID
     tool_name: str
     tool_description: str | None
@@ -41,11 +43,24 @@ class FlowToolOption:
     refusal: UnattendedToolRefusal | None
 
 
-def flow_tool_option(facts: ListedToolFacts) -> FlowToolOption:
+@dataclass(frozen=True, slots=True)
+class FlowToolOptions:
+    options: list[FlowToolOption]
+    # The organization's switch the classification rule reads: while it is
+    # off no level applies, so no option carries one.
+    security_classifications_enabled: bool
+
+
+def flow_tool_option(
+    facts: ListedToolFacts, *, security_enabled: bool
+) -> FlowToolOption:
     server, tool = facts.server, facts.tool
     return FlowToolOption(
         mcp_server_id=server.id,
         mcp_server_name=server.name,
+        mcp_server_security_level=(
+            tool_server_classification_level(server) if security_enabled else None
+        ),
         tool_id=tool.id,
         tool_name=tool.name,
         tool_description=tool.description,
@@ -55,8 +70,12 @@ def flow_tool_option(facts: ListedToolFacts) -> FlowToolOption:
 
 
 async def read_flow_tool_options(
-    reader: SpaceToolFactsSource, *, tenant_id: UUID, space_id: UUID
-) -> list[FlowToolOption]:
+    reader: SpaceToolFactsSource,
+    *,
+    tenant_id: UUID,
+    space_id: UUID,
+    security_enabled: bool,
+) -> FlowToolOptions:
     """The options for every tool of the general servers ``space_id`` has
     activated, in the reader's order, or a refusal when they exceed a bound.
 
@@ -82,4 +101,10 @@ async def read_flow_tool_options(
                 "max_text_bytes": FLOW_TOOL_OPTIONS_MAX_TEXT_BYTES,
             },
         )
-    return [flow_tool_option(fact) for fact in listed.facts]
+    return FlowToolOptions(
+        options=[
+            flow_tool_option(fact, security_enabled=security_enabled)
+            for fact in listed.facts
+        ],
+        security_classifications_enabled=security_enabled,
+    )

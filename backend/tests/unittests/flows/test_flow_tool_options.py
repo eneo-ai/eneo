@@ -20,7 +20,7 @@ from eneo.flows.api.flow_tool_options_router import list_flow_tool_options
 from eneo.flows.application.flow_tool_options import (
     FLOW_TOOL_OPTIONS_MAX_COUNT,
     FLOW_TOOL_OPTIONS_MAX_TEXT_BYTES,
-    FlowToolOption,
+    FlowToolOptions,
     flow_tool_option,
 )
 from eneo.flows.domain.flow import Flow
@@ -36,6 +36,9 @@ from eneo.mcp_servers.infrastructure.repo_impl.unattended_tool_facts_reader impo
     LISTED_TEXT_FIELDS,
 )
 from eneo.roles.permissions import Permission
+from eneo.security_classifications.domain.entities.security_classification import (
+    SecurityClassification,
+)
 from tests.unittests.flows.test_flow_router import _enable_space_access, _request
 from tests.unittests.flows.test_flow_service import _service, _step
 
@@ -133,7 +136,7 @@ async def _options(user, listed: ToolsOfSpace):
 @pytest.mark.asyncio
 async def test_refused_tools_are_listed_in_the_order_the_reader_gave(user) -> None:
     # Kills "refused tools are left out of the list" and "the service sorts".
-    _, _, options = await _options(
+    _, _, listed = await _options(
         user,
         ToolsOfSpace(
             facts=[
@@ -144,10 +147,53 @@ async def test_refused_tools_are_listed_in_the_order_the_reader_gave(user) -> No
         ),
     )
 
-    assert [(o.tool_name, o.refusal) for o in options] == [
+    assert [(o.tool_name, o.refusal) for o in listed.options] == [
         ("zeta", None),
         ("alpha", UnattendedToolRefusal.TOOL_SWITCHED_OFF_IN_SPACE),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("server_level", "security_enabled", "shown"),
+    [(None, True, None), (30, True, 30), (30, False, None)],
+    ids=["server-without-class", "server-class", "classes-switched-off"],
+)
+async def test_the_list_says_whether_classes_apply_and_each_server_level(
+    user,
+    monkeypatch: pytest.MonkeyPatch,
+    server_level: int | None,
+    security_enabled: bool,
+    shown: int | None,
+) -> None:
+    # Kills "the list does not say whether classes are on", "an option leaves
+    # its server's level out", "it shows the space's level" and "it shows a
+    # level while the organization has classes off" (the organization's
+    # switch the rule reads, not one carried on a classification row).
+    monkeypatch.setattr(user.tenant, "security_enabled", security_enabled)
+
+    def level(security_level: int) -> SecurityClassification:
+        return SecurityClassification(
+            tenant_id=user.tenant_id,
+            name="Class",
+            security_level=security_level,
+            security_enabled=True,
+        )
+
+    facts = _listed(space_security_classification=level(10))
+    server = replace(
+        facts.server,
+        effective_security_classification=(
+            None if server_level is None else level(server_level)
+        ),
+    )
+    _, _, listed = await _options(
+        user, ToolsOfSpace(facts=[replace(facts, server=server)], text_bytes=0)
+    )
+
+    public = FlowToolOptionsPublic.from_options(listed)
+    assert public.security_classifications_enabled is security_enabled
+    assert [item.mcp_server_security_level for item in public.items] == [shown]
 
 
 _COUNT, _BYTES = FLOW_TOOL_OPTIONS_MAX_COUNT, FLOW_TOOL_OPTIONS_MAX_TEXT_BYTES
@@ -177,7 +223,7 @@ async def test_a_list_the_read_ended_past_a_bound_is_refused(
 
     flow, tools, options = await _options(user, listed)
 
-    assert len(options) == read_tools
+    assert len(options.options) == read_tools
     assert tools.asked == [
         {
             "tenant_id": user.tenant_id,
@@ -231,9 +277,12 @@ async def test_the_route_answers_the_options_of_the_path_flow(user) -> None:
     # service's list unconverted".
     flow, asked = _flow(user), []
 
-    async def _list(*, flow_id: UUID) -> list[FlowToolOption]:
+    async def _list(*, flow_id: UUID) -> FlowToolOptions:
         asked.append(flow_id)
-        return [flow_tool_option(_listed())]
+        return FlowToolOptions(
+            options=[flow_tool_option(_listed(), security_enabled=False)],
+            security_classifications_enabled=False,
+        )
 
     container, flow_service = _route_container(
         user, flow, can_edit=True, permissions=[Permission.FLOWS]

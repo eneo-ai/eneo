@@ -14,7 +14,7 @@ from eneo.assistants.assistant_update import (
 )
 from eneo.files.file_models import File
 from eneo.flows.application.flow_tool_options import (
-    FlowToolOption,
+    FlowToolOptions,
     read_flow_tool_options,
 )
 from eneo.flows.application.flow_tool_publication import (
@@ -944,7 +944,7 @@ class FlowService:
             space_id=flow.space_id,
         )
 
-    async def list_tool_options(self, *, flow_id: UUID) -> list[FlowToolOption]:
+    async def list_tool_options(self, *, flow_id: UUID) -> FlowToolOptions:
         """The tools of the general servers the flow's space has activated, in
         the reader's order, each with what the decision says about it now;
         writes nothing. Refused when they exceed the list's bounds
@@ -954,6 +954,7 @@ class FlowService:
             self._require_tool_facts_reader(),
             tenant_id=self.user.tenant_id,
             space_id=flow.space_id,
+            security_enabled=self.user.tenant.security_enabled,
         )
 
     async def _load_step_assistants(

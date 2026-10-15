@@ -27061,6 +27061,11 @@ export interface components {
        * @description The server's name.
        */
       mcp_server_name: string;
+      /**
+       * Mcp Server Security Level
+       * @description The level of the server's security classification, the one the classification rule compares: the server must have at least the space's level (`refusal` is `server_below_space_classification` otherwise), and a step may send it values from earlier steps only at or below this level (saving refuses the step otherwise with `flow_step_tool_arguments_classification_write_down`). Null when the server has no classification, and always null while `security_classifications_enabled` is false.
+       */
+      mcp_server_security_level: number | null;
       /** @description Null when no level of the MCP decision refuses the tool now; publish also checks the approved schema and the step's security classification, and a run asks the decision again. Otherwise the level that refuses it, the same value a run's `tool_refusal` carries. */
       refusal: components["schemas"]["UnattendedToolRefusal"] | null;
       /**
@@ -27095,6 +27100,7 @@ export interface components {
      *           },
      *           "mcp_server_id": "00000000-0000-0000-0000-000000000201",
      *           "mcp_server_name": "Case register",
+     *           "mcp_server_security_level": 20,
      *           "refusal": null,
      *           "tool_description": "Fetch one case by its number.",
      *           "tool_id": "00000000-0000-0000-0000-000000000301",
@@ -27104,12 +27110,14 @@ export interface components {
      *           "input_schema": null,
      *           "mcp_server_id": "00000000-0000-0000-0000-000000000201",
      *           "mcp_server_name": "Case register",
+     *           "mcp_server_security_level": 20,
      *           "refusal": "tool_waiting_for_review",
      *           "tool_description": null,
      *           "tool_id": "00000000-0000-0000-0000-000000000302",
      *           "tool_name": "close_case"
      *         }
-     *       ]
+     *       ],
+     *       "security_classifications_enabled": true
      *     }
      */
     FlowToolOptionsPublic: {
@@ -27118,6 +27126,11 @@ export interface components {
        * @description The tools of the MCP servers the flow's space has activated, in the order the reader returns them: server name, then tool name. A personal space has no MCP servers, so its list is empty. The tools of a server that is not a general one (a capability provider or one of Eneo's own servers) are left out.
        */
       items: components["schemas"]["FlowToolOptionPublic"][];
+      /**
+       * Security Classifications Enabled
+       * @description Whether the organization has security classifications turned on, the switch the classification rule reads. While it is on, a null `mcp_server_security_level` means the server has no classification: such a server is refused in a space that has one and cannot receive values from steps whose result has one.
+       */
+      security_classifications_enabled: boolean;
     };
     /** FlowTranscriptCorrectionRevisionBaselinePublic */
     FlowTranscriptCorrectionRevisionBaselinePublic: {
@@ -62784,6 +62797,7 @@ export interface operations {
            *           },
            *           "mcp_server_id": "00000000-0000-0000-0000-000000000201",
            *           "mcp_server_name": "Case register",
+           *           "mcp_server_security_level": 20,
            *           "refusal": null,
            *           "tool_description": "Fetch one case by its number.",
            *           "tool_id": "00000000-0000-0000-0000-000000000301",
@@ -62793,12 +62807,14 @@ export interface operations {
            *           "input_schema": null,
            *           "mcp_server_id": "00000000-0000-0000-0000-000000000201",
            *           "mcp_server_name": "Case register",
+           *           "mcp_server_security_level": 20,
            *           "refusal": "tool_waiting_for_review",
            *           "tool_description": null,
            *           "tool_id": "00000000-0000-0000-0000-000000000302",
            *           "tool_name": "close_case"
            *         }
-           *       ]
+           *       ],
+           *       "security_classifications_enabled": true
            *     }
            */
           "application/json": components["schemas"]["FlowToolOptionsPublic"];

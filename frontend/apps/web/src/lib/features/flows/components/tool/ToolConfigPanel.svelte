@@ -8,6 +8,10 @@
   import { Spinner } from "$lib/components/ui/spinner/index.js";
   import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import type { VariablePickerContext } from "$lib/features/flows/components/VariablePicker.svelte";
+  import {
+    securityClassName,
+    type NamedSecurityLevel
+  } from "$lib/features/flows/flowClassificationNames";
   import { toolRefusalSentence } from "$lib/features/flows/flowToolRefusal";
   import type { JsonObject } from "$lib/features/flows/jsonObject";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -34,6 +38,7 @@
     stepKey,
     isPublished,
     variableContext,
+    classifications = [],
     onConfigChange,
     onReloadOptions
   }: {
@@ -45,6 +50,8 @@
     stepKey: string;
     isPublished: boolean;
     variableContext?: VariablePickerContext;
+    /** The organization's security classes, which name the level of the chosen tool's server. */
+    classifications?: readonly NamedSecurityLevel[];
     onConfigChange?: (detail: { config: ToolInputConfig }) => void;
     onReloadOptions?: () => void;
   } = $props();
@@ -60,6 +67,10 @@
   const options = $derived(toolOptions.status === "loaded" ? toolOptions.options : []);
   const refreshing = $derived(toolOptions.status === "loaded" && toolOptions.refreshing);
   const selected = $derived(findToolOption(options, config));
+  const classificationsEnabled = $derived(
+    toolOptions.status === "loaded" && toolOptions.classificationsEnabled
+  );
+  const serverLevel = $derived(selected?.mcp_server_security_level ?? null);
   const storedArguments = $derived(Object.entries(config?.arguments ?? {}));
   const form = $derived(readToolArgumentForm(selected?.input_schema));
   const namedArguments = $derived(
@@ -220,6 +231,20 @@
               {toolRefusalSentence(selected.refusal)}
             </Alert.Description>
           </Alert.Root>
+        {/if}
+        {#if selected && classificationsEnabled}
+          {#if serverLevel !== null}
+            <div class="flex flex-col gap-1">
+              <p class="text-secondary text-xs font-medium">
+                {m.flow_tool_server_class({
+                  name: securityClassName(classifications, serverLevel)
+                })}
+              </p>
+              <p class="text-muted text-xs leading-relaxed">{m.flow_tool_server_class_rule()}</p>
+            </div>
+          {:else}
+            <p class="text-muted text-xs leading-relaxed">{m.flow_tool_server_no_class()}</p>
+          {/if}
         {/if}
       {/if}
     </div>
