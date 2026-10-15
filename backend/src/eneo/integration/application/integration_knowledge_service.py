@@ -27,6 +27,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.spaces.space_repo import INTEGRATION_KNOWLEDGE_SOURCE
 
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
         TenantSharePointApp,
     )
     from eneo.integration.domain.repositories.integration_knowledge_repo import (
+        IntegrationKnowledgeLocation,
         IntegrationKnowledgePlacement,
         IntegrationKnowledgeRepository,
     )
@@ -251,23 +253,34 @@ class IntegrationKnowledgeService:
 
     async def get_readable_knowledge(
         self, space_id: UUID, integration_knowledge_id: UUID
-    ) -> IntegrationKnowledge:
-        """An item as seen from a space, for anyone who may read its integrations.
+    ) -> IntegrationKnowledgeLocation:
+        """Where an item seen from a space keeps its documents, for anyone who
+        may read the space's integrations."""
+        await self.require_readable_knowledge(space_id, integration_knowledge_id)
+        return await self.integration_knowledge_repo.get_location(
+            integration_knowledge_id
+        )
+
+    async def require_readable_knowledge(
+        self, space_id: UUID, integration_knowledge_id: UUID
+    ) -> None:
+        """Raise unless the caller may read the space's integrations (403) and
+        the space shows the item (404, as for an unknown space).
 
         Membership is checked before the item is looked up so a non-member
         cannot probe which items a space holds.
         """
-        space = await self._space_with_readable_integrations(space_id)
-        return space.get_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id
-        )
+        if integration_knowledge_id not in await self.list_readable_knowledge_ids(
+            space_id
+        ):
+            raise NotFoundException()
 
     async def list_readable_knowledge_ids(self, space_id: UUID) -> list[UUID]:
         """Ids of the items a space shows, for anyone who may read its integrations.
 
-        Reads the caller's access facts and the ids only: the progress view
-        polls this every few seconds, and the space aggregate loads every
-        member, assistant and source of the space.
+        Reads the caller's access facts and the ids only: the source pages
+        poll this and ask once per folder, and the space aggregate loads
+        every member, assistant and source of the space.
         """
         facts = await self.space_repo.get_space_access_facts(space_id)
         actor = self.actor_manager.get_space_actor(facts)
@@ -276,13 +289,6 @@ class IntegrationKnowledgeService:
         return await self.space_repo.get_visible_integration_knowledge_ids(
             space_id, facts.tenant_space_id
         )
-
-    async def _space_with_readable_integrations(self, space_id: UUID) -> Space:
-        space = await self.space_repo.one(id=space_id)
-        actor = self.actor_manager.get_space_actor_from_space(space)
-        if not (actor.can_read_space() and actor.can_read_integrations()):
-            raise UnauthorizedException()
-        return space
 
     async def _get_tenant_app_access_token(
         self, tenant_app: "TenantSharePointApp"
@@ -522,7 +528,7 @@ class IntegrationKnowledgeService:
                         knowledge=None,
                         integration_knowledge_id=None,
                         job=None,
-                        error=str(exc),
+                        error=user_visible_error(exc),
                     )
                 )
 

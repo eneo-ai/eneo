@@ -6,6 +6,9 @@ from sqlalchemy.orm import selectinload
 from typing_extensions import override
 
 from eneo.database.tables.integration_table import (
+    Integration as IntegrationDBModel,
+)
+from eneo.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeDBModel,
 )
 from eneo.database.tables.integration_table import (
@@ -19,6 +22,7 @@ from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.integration.domain.repositories.integration_knowledge_repo import (
+    IntegrationKnowledgeLocation,
     IntegrationKnowledgePlacement,
     IntegrationKnowledgeRepository,
 )
@@ -100,6 +104,45 @@ class IntegrationKnowledgeRepoImpl(
             .options(*self._options)
         )
         return await self._entities_for((await self.session.scalars(query)).all())
+
+    @override
+    async def get_location(self, id: "UUID") -> IntegrationKnowledgeLocation:
+        knowledge = self._db_model
+        row = (
+            await self.session.execute(
+                sa.select(
+                    knowledge.id,
+                    IntegrationDBModel.integration_type,
+                    knowledge.url,
+                    knowledge.folder_path,
+                    knowledge.resource_type,
+                )
+                .join(
+                    UserIntegrationDBModel,
+                    UserIntegrationDBModel.id == knowledge.user_integration_id,
+                )
+                .join(
+                    TenantIntegrationDBModel,
+                    TenantIntegrationDBModel.id
+                    == UserIntegrationDBModel.tenant_integration_id,
+                )
+                .join(
+                    IntegrationDBModel,
+                    IntegrationDBModel.id == TenantIntegrationDBModel.integration_id,
+                )
+                .where(knowledge.id == id)
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundException(f"{knowledge.__name__} not found")
+        knowledge_id, integration_type, url, folder_path, resource_type = row
+        return IntegrationKnowledgeLocation(
+            id=knowledge_id,
+            integration_type=integration_type,
+            url=url,
+            folder_path=folder_path,
+            resource_type=resource_type,
+        )
 
     @override
     async def list_placements(

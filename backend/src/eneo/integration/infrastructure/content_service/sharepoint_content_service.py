@@ -39,6 +39,7 @@ from eneo.integration.infrastructure.content_service.types import (
     ChangeKind,
     SharePointItem,
     SharePointTokenProtocol,
+    SkippedDetail,
     SyncMetadata,
     SyncStats,
 )
@@ -59,6 +60,7 @@ from eneo.integration.infrastructure.sharepoint_sync_progress import (
 )
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
@@ -443,7 +445,7 @@ class SharePointContentService:
         except Exception as e:
             await self._record_sync_failure(
                 resolved_integration_knowledge_id,
-                str(e),
+                e,
                 sync_type="full",
                 started_at=started_at,
                 metadata=_sync_metadata(
@@ -460,7 +462,7 @@ class SharePointContentService:
     async def _record_sync_failure(
         self,
         integration_knowledge_id: UUID | None,
-        error: str,
+        failure: Exception,
         *,
         sync_type: str,
         started_at: datetime,
@@ -477,6 +479,7 @@ class SharePointContentService:
         """
         if integration_knowledge_id is None:
             return
+        error = user_visible_error(failure)
         failed_at = datetime.now(timezone.utc)
         try:
             integration_knowledge = await self.integration_knowledge_repo.one(
@@ -740,28 +743,27 @@ class SharePointContentService:
                         folder_scope_path_unresolved = False
 
                 await self._progress.set_phase("processing", stats)
+                # The delta covers the whole drive. Until an item is placed in
+                # scope its name is never recorded: what is cleaned up or
+                # skipped is named by its item id, and only a file in scope
+                # becomes the progress's current file.
                 for item in changes:
                     item_name = item.get("name", "")
                     item_id = item.get("id")
                     is_deleted = has_graph_facet(item, "deleted")
                     is_folder = has_graph_facet(item, "folder")
-                    await self._progress.update(
-                        stats,
-                        current=None if is_deleted or is_folder else item_name,
-                    )
+                    await self._progress.update(stats)
 
                     logger.debug(
-                        f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder})"
+                        "  - Item %s (deleted=%s, folder=%s)",
+                        item_id,
+                        is_deleted,
+                        is_folder,
                     )
 
                     if not item_id:
+                        # Cannot be placed in or out of scope; counted only.
                         stats["skipped_items"] += 1
-                        stats["skipped_details"].append(
-                            {
-                                "file": item_name or "unknown",
-                                "reason": "Missing item id",
-                            }
-                        )
                         continue
 
                     # Skip scope check for deleted items — they may lack
@@ -781,28 +783,27 @@ class SharePointContentService:
                             and not scope_folder_path
                         ):
                             logger.warning(
-                                "Skipping destructive out-of-scope cleanup for %s "
-                                "(item_id=%s) because folder_path could not be resolved "
+                                "Skipping destructive out-of-scope cleanup for item %s "
+                                "because folder_path could not be resolved "
                                 "for integration_knowledge %s",
-                                item_name,
                                 item_id,
                                 resolved_integration_knowledge_id,
                             )
                             stats["skipped_items"] += 1
                             stats["skipped_details"].append(
                                 {
-                                    "file": item_name or item_id,
+                                    "file": item_id,
                                     "reason": "Folder scope path unavailable",
                                 }
                             )
                             continue
 
                         logger.debug(
-                            f"  - Skipping item {item_name}: not in folder scope"
+                            "  - Skipping item %s: not in folder scope", item_id
                         )
                         await self._delete_local_sharepoint_item(
                             item_id=item_id,
-                            item_name=item_name,
+                            item_name=item_id,
                             integration_knowledge=integration_knowledge,
                             integration_knowledge_id=resolved_integration_knowledge_id,
                             stats=stats,
@@ -820,7 +821,7 @@ class SharePointContentService:
                                 site_id=resolved_site_id,
                                 drive_id=actual_drive_id,
                                 folder_id=item_id,
-                                folder_name=item_name,
+                                folder_name=item_id,
                                 integration_knowledge=integration_knowledge,
                                 integration_knowledge_id=resolved_integration_knowledge_id,
                                 stats=stats,
@@ -834,10 +835,11 @@ class SharePointContentService:
                         known_subfolder_ids.add(item_id)
 
                     if is_deleted:
-                        # Delete the corresponding info_blob if it exists
+                        # Never placed in scope (see above), so named by its
+                        # id; a removed document keeps its own title.
                         await self._delete_local_sharepoint_item(
                             item_id=item_id,
-                            item_name=item_name,
+                            item_name=item_id,
                             integration_knowledge=integration_knowledge,
                             integration_knowledge_id=resolved_integration_knowledge_id,
                             stats=stats,
@@ -867,6 +869,7 @@ class SharePointContentService:
                             )
                         continue
 
+                    await self._progress.update(stats, current=item_name)
                     await self._sync_changed_file(
                         content_client=content_client,
                         drive_id=actual_drive_id,
@@ -926,7 +929,7 @@ class SharePointContentService:
                 raise
             await self._record_sync_failure(
                 resolved_integration_knowledge_id,
-                str(e),
+                e,
                 sync_type="delta",
                 started_at=started_at,
                 metadata=_sync_metadata(
@@ -1272,7 +1275,7 @@ class SharePointContentService:
                 )
                 stats["skipped_items"] += 1
                 stats["skipped_details"].append(
-                    {"file": page_name, "reason": f"Error: {e}"}
+                    {"file": page_name, "reason": error_reason(e)}
                 )
 
     async def _column_catalog(
@@ -1571,7 +1574,10 @@ class SharePointContentService:
             )
             stats["skipped_items"] += 1
             stats["skipped_details"].append(
-                {"file": item_name, "reason": f"Could not remove {reason}: {e}"}
+                {
+                    "file": item_name,
+                    "reason": f"Could not remove {reason}: {user_visible_error(e)}",
+                }
             )
             return 0
 
@@ -1774,7 +1780,7 @@ class SharePointContentService:
             )
             stats["skipped_items"] += 1
             stats["skipped_details"].append(
-                {"file": item_name, "reason": error_reason(str(e))}
+                {"file": item_name, "reason": error_reason(e)}
             )
 
     async def _index_folder_subtree_entering_scope(
@@ -1824,7 +1830,8 @@ class SharePointContentService:
             stats["skipped_details"].append(
                 {
                     "file": folder_name,
-                    "reason": f"Could not list folder contents: {exc}",
+                    "reason": "Could not list folder contents: "
+                    + user_visible_error(exc),
                 }
             )
             return
@@ -1890,10 +1897,14 @@ class SharePointContentService:
         Savepoints end inside that transaction (info blob publication uses
         them, also in a pending delta pass after a sync) and do not count.
         False when the session cannot carry the hook, e.g. a non-ORM session
-        in unit tests.
+        in unit tests, and when no transaction is active: a failed top-level
+        flush has already rolled it back and sent its only rollback event.
         """
         sync_session = getattr(self.session, "sync_session", None)
         if not isinstance(sync_session, Session):
+            return False
+        transaction = sync_session.get_transaction()
+        if transaction is None or not transaction.is_active:
             return False
         fired = False
 
@@ -2061,7 +2072,8 @@ class SharePointContentService:
                 exc_info=True,
             )
             stats["reconcile_warning"] = (
-                f"Orphan cleanup skipped: could not list SharePoint items ({exc})"
+                "Orphan cleanup skipped: could not list SharePoint items "
+                f"({user_visible_error(exc)})"
             )
             return
 
@@ -2257,6 +2269,7 @@ class SharePointContentService:
         }
 
     def _build_summary_stats(self, stats: SyncStats) -> SyncStats:
+        """What the sync status and the sync log keep; its text is user-visible."""
         skipped_details = stats.get("skipped_details", [])
         all_changed_details = stats.get("changed_details", [])
         changed_details = all_changed_details[:_MAX_CHANGED_DETAILS]
@@ -2271,14 +2284,19 @@ class SharePointContentService:
             "skipped_items": stats.get("skipped_items", 0),
             "skipped_total": stats.get("skipped_items", 0),
             "skipped_truncated": len(skipped_details) > _MAX_SKIPPED_DETAILS,
-            "skipped_details": skipped_details[:_MAX_SKIPPED_DETAILS],
+            "skipped_details": [
+                SkippedDetail(
+                    file=detail["file"], reason=user_visible_error(detail["reason"])
+                )
+                for detail in skipped_details[:_MAX_SKIPPED_DETAILS]
+            ],
             "changed_total": changed_total,
             "changed_truncated": changed_total > len(changed_details),
             "changed_details": changed_details,
         }
         reconcile_warning = stats.get("reconcile_warning")
         if reconcile_warning:
-            summary["reconcile_warning"] = reconcile_warning
+            summary["reconcile_warning"] = user_visible_error(reconcile_warning)
         return summary
 
     def _format_summary_for_job(self, summary: SyncStats) -> str:
@@ -2482,12 +2500,12 @@ class SharePointContentService:
             logger.error(
                 f"Error getting file content for {item_name}: {e}", exc_info=True
             )
-            return None, error_reason(str(e))
+            return None, error_reason(e)
         except Exception as e:
             logger.error(
                 f"Error getting file content for {item_name}: {e}", exc_info=True
             )
-            return None, error_reason(str(e))
+            return None, error_reason(e)
 
         if result.text is not None:
             return result.text, None

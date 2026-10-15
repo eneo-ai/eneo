@@ -15,6 +15,7 @@
   import { previewLinkLabel } from "$lib/features/integrations/IntegrationData";
   import IntegrationVendorIcon from "$lib/features/integrations/components/IntegrationVendorIcon.svelte";
   import type { IntegrationSkippedDocuments } from "$lib/features/integrations/integrationDocuments";
+  import { safeExternalUrl } from "$lib/features/integrations/externalUrl";
   import { buildSourceProblems } from "$lib/features/integrations/sourceProblems";
   import {
     itemWatchState,
@@ -67,6 +68,7 @@
   let summary = $derived(summarizeSource(source.items, progress));
   let multiple = $derived(source.items.length > 1);
   let singleItem = $derived(multiple ? null : source.items[0]);
+  let singleItemUrl = $derived(safeExternalUrl(singleItem?.url));
 
   let selectedId = $derived.by(() => {
     if (!multiple) return source.items[0]?.id ?? null;
@@ -225,8 +227,8 @@
     </Page.Tabbar>
     <div class="flex-grow"></div>
     <Page.Flex>
-      {#if singleItem?.url}
-        <Button variant="outline" href={singleItem.url} target="_blank" rel="noopener noreferrer">
+      {#if singleItem && singleItemUrl}
+        <Button variant="outline" href={singleItemUrl} target="_blank" rel="noopener noreferrer">
           {previewLinkLabel(singleItem.integration_type)}
           <IconLinkExternal size="sm" data-icon="inline-end" />
         </Button>

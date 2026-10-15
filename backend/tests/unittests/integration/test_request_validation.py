@@ -75,3 +75,59 @@ def test_batch_items_share_the_same_constraints():
     with pytest.raises(ValidationError):
         CreateSpaceIntegrationKnowledgeBatchItem(folder_path="/a/../b", **_BASE)
     assert CreateSpaceIntegrationKnowledgeBatchItem(folder_id="01ABC", **_BASE)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://contoso.sharepoint.com/sites/x/Shared%20Documents/Policies",
+        "https://contoso-my.sharepoint.com/personal/anna_contoso_se/Documents",
+        "https://contoso.atlassian.net/wiki/spaces/DOCS",
+        # The import dialog sends "" for an item Graph gave no web URL.
+        "",
+    ],
+)
+def test_https_links_are_accepted(url):
+    created = CreateSpaceIntegrationKnowledge(
+        name="Policies",
+        url=url,
+        embedding_model={"id": "00000000-0000-0000-0000-000000000001"},
+    )
+    assert created.url == url
+    assert CreateSpaceIntegrationKnowledgeBatchItem(name="Policies", url=url).url == url
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("javascript:alert(document.cookie)", id="javascript"),
+        pytest.param("data:text/html,<script>alert(1)</script>", id="data"),
+        pytest.param("http://contoso.sharepoint.com/sites/x", id="http"),
+        pytest.param("//evil.example/sites/x", id="scheme-relative"),
+        pytest.param("/sites/x", id="relative"),
+        pytest.param("https:///sites/x", id="no-host"),
+        pytest.param("https://user:pass@evil.example/x", id="user-info"),
+        pytest.param(" https://contoso.sharepoint.com/sites/x", id="leading-space"),
+        pytest.param("https://contoso.sharepoint.com/a\nb", id="control-character"),
+    ],
+)
+def test_links_that_are_not_https_are_rejected(url):
+    with pytest.raises(ValidationError):
+        CreateSpaceIntegrationKnowledge(
+            name="Policies",
+            url=url,
+            embedding_model={"id": "00000000-0000-0000-0000-000000000001"},
+        )
+    with pytest.raises(ValidationError):
+        CreateSpaceIntegrationKnowledgeBatchItem(name="Policies", url=url)
+
+
+def test_the_link_stays_a_plain_string_in_the_api_schema():
+    for model in (
+        CreateSpaceIntegrationKnowledge,
+        CreateSpaceIntegrationKnowledgeBatchItem,
+    ):
+        assert model.model_json_schema()["properties"]["url"] == {
+            "title": "Url",
+            "type": "string",
+        }

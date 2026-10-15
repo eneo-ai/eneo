@@ -25,6 +25,7 @@ from eneo.files.text import (
     TextSanitizer,
 )
 from eneo.integration.infrastructure.content_service.types import SharePointItem
+from eneo.observability.error_text import user_visible_error
 
 logger = getLogger(__name__)
 
@@ -57,8 +58,9 @@ def extraction_limit_reason(limit: str) -> str:
     return f"Exceeds extraction limit ({limit})"
 
 
-def error_reason(detail: str) -> str:
-    return f"Error: {detail}"
+def error_reason(detail: str | BaseException) -> str:
+    """``Error: <detail>``; an exception is described by ``user_visible_error``."""
+    return user_visible_error(f"Error: {user_visible_error(detail)}")
 
 
 @dataclass(frozen=True)

@@ -31,6 +31,7 @@ from eneo.integration.presentation.validation import (
     SELECTED_ITEM_TYPE_MAX_LENGTH,
     SELECTED_ITEM_TYPE_PATTERN,
     validate_folder_path,
+    validate_https_url,
 )
 from eneo.jobs.job_models import JobPublic
 from eneo.main.models import (
@@ -390,10 +391,20 @@ class CreateSpaceIntegrationKnowledge(_IntegrationKnowledgeSelection):
     embedding_model: ModelId
     url: str
 
+    @field_validator("url")
+    @classmethod
+    def _https_url(cls, value: str) -> str:
+        return validate_https_url(value)
+
 
 class CreateSpaceIntegrationKnowledgeBatchItem(_IntegrationKnowledgeSelection):
     name: str
     url: str
+
+    @field_validator("url")
+    @classmethod
+    def _https_url(cls, value: str) -> str:
+        return validate_https_url(value)
 
 
 class CreateSpaceIntegrationKnowledgeBatchRequest(BaseModel):

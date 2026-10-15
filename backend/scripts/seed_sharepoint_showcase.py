@@ -448,10 +448,24 @@ def remove_connection(cur: psycopg2.extensions.cursor) -> list[str]:
 
     Only rows with the seed's own ids go, and only while nothing else uses
     them: knowledge someone imported through the fake connection keeps it, a
-    tenant app since given real credentials stays, and a tenant integration
-    that other connections hang off stays. Returns what was kept.
+    tenant app since given real credentials stays together with its
+    connection and tenant integration, so SharePoint stays enabled, and a
+    tenant integration that other connections hang off stays. Returns what
+    was kept.
     """
     kept: list[str] = []
+    app_id = str(sid("tenant-app"))
+    if one(
+        cur,
+        "SELECT 1 FROM tenant_sharepoint_apps WHERE id = %s AND client_id <> %s",
+        app_id,
+        SHOWCASE_CLIENT_ID,
+    ):
+        kept.append(
+            "the tenant SharePoint app, its connection and integration: the app "
+            "now has real credentials"
+        )
+        return kept
     user_integration_id = str(sid("user-integration"))
     cur.execute(
         """DELETE FROM user_integrations
@@ -466,7 +480,6 @@ def remove_connection(cur: psycopg2.extensions.cursor) -> list[str]:
         cur, "SELECT 1 FROM user_integrations WHERE id = %s", user_integration_id
     ):
         kept.append("the SharePoint connection, still used by imported knowledge")
-    app_id = str(sid("tenant-app"))
     cur.execute(
         """DELETE FROM tenant_sharepoint_apps
            WHERE id = %(id)s AND client_id = %(client_id)s

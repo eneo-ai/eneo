@@ -22,6 +22,17 @@ class IntegrationKnowledgePlacement:
     last_sync_status: str
 
 
+@dataclass(frozen=True)
+class IntegrationKnowledgeLocation:
+    """Where an item's documents are in its source, read from columns only."""
+
+    id: "UUID"
+    integration_type: str
+    url: str | None
+    folder_path: str | None
+    resource_type: str | None
+
+
 class IntegrationKnowledgeRepository(ABC):
     @abstractmethod
     async def one_or_none(
@@ -44,6 +55,11 @@ class IntegrationKnowledgeRepository(ABC):
         self, tenant_id: "UUID"
     ) -> list[IntegrationKnowledgePlacement]:
         """Every item of the tenant, ordered by space name and then creation."""
+        ...
+
+    @abstractmethod
+    async def get_location(self, id: "UUID") -> IntegrationKnowledgeLocation:
+        """The item's location; raises NotFoundException when it is gone."""
         ...
 
     @abstractmethod

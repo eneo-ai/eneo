@@ -1814,7 +1814,14 @@ class SpaceRepository:
         }
 
     async def get_space_access_facts(self, space_id: UUID) -> SpaceAccessFacts:
-        """This caller's facts for a space of their tenant, not the space aggregate."""
+        """This caller's facts for a space of their tenant, not the space aggregate.
+
+        Only the caller's own membership, their groups' memberships and the
+        assistant or app their key is scoped to are filled in. Other members,
+        other assistants and apps, and the default assistant are left out, so
+        the facts serve this caller's checks only: never member management or
+        checks on the default assistant, which need the space itself.
+        """
         space = (
             (
                 await self.session.execute(
@@ -1833,7 +1840,11 @@ class SpaceRepository:
     async def get_spaces_access_facts(
         self, space_ids: Sequence[UUID]
     ) -> dict[UUID, SpaceAccessFacts]:
-        """This caller's facts for each space; other tenants' spaces are left out."""
+        """This caller's facts for each space; other tenants' spaces are left out.
+
+        As ``get_space_access_facts``: only the caller's own membership and key
+        scope, never other members or the default assistant.
+        """
         if not space_ids:
             return {}
         spaces = (

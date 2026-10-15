@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 
 from eneo.integration.application.integration_knowledge_service import (
     IntegrationKnowledgeService,
@@ -1778,6 +1779,38 @@ class TestCreateSpaceIntegrationKnowledgeBatch:
         assert results[1]["integration_knowledge_id"] is None
         assert results[1]["job"] is None
         assert "Invalid SharePoint selection" in (results[1]["error"] or "")
+
+    async def test_batch_create_reports_a_failure_without_sql(
+        self,
+        service: IntegrationKnowledgeService,
+    ):
+        service.create_space_integration_knowledge = AsyncMock(
+            side_effect=sa.exc.IntegrityError(
+                "INSERT INTO integration_knowledge (name, url) VALUES (%(name)s, %(url)s)",
+                {"name": "Lönelista", "url": "https://contoso.sharepoint.com/x"},
+                Exception("duplicate key value violates unique constraint"),
+            )
+        )
+
+        results = await service.create_space_integration_knowledge_batch(
+            user_integration_id=uuid4(),
+            embedding_model_id=uuid4(),
+            space_id=uuid4(),
+            items=[
+                {
+                    "name": "Item",
+                    "key": "site-1",
+                    "url": "https://sharepoint.example.com/item",
+                    "folder_id": None,
+                    "folder_path": None,
+                    "selected_item_type": "site_root",
+                    "resource_type": "site",
+                }
+            ],
+        )
+
+        assert results[0]["status"] == "failed"
+        assert results[0]["error"] == "Database error"
 
     async def test_batch_create_single_item_does_not_set_wrapper(
         self,

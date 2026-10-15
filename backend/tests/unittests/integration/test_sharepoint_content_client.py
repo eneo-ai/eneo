@@ -1,8 +1,12 @@
 import gzip
+import traceback
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
+from aiohttp.client_reqrep import RequestInfo
+from multidict import CIMultiDict, CIMultiDictProxy
+from yarl import URL
 
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     SharePointContentClient,
@@ -239,3 +243,106 @@ class TestFileDownloadExtraction:
 
         with pytest.raises(ValueError, match="exceeds max download size"):
             await client.get_file_extraction_by_id("drive", "item")
+
+
+_SIGNED_DOWNLOAD_URL = (
+    "https://contoso.sharepoint.com/sites/KS/_layouts/15/download.aspx"
+    "?UniqueId=abc&Translate=false&tempauth=v1.eyJzaWduZWQiOiJ0b2tlbiJ9.c2lnbmF0dXJl"
+    "&ApiVersion=2.0"
+)
+
+
+class _RefusedResponse(_FakeResponse):
+    """A download answered with an error status, as aiohttp reports it."""
+
+    def __init__(self, status: int, reason: str, headers: dict[str, str]):
+        super().__init__([], headers)
+        self.status = status
+        self.reason = reason
+
+    def raise_for_status(self) -> None:
+        url = URL(_SIGNED_DOWNLOAD_URL)
+        raise aiohttp.ClientResponseError(
+            RequestInfo(
+                url,
+                "GET",
+                CIMultiDictProxy(CIMultiDict({"Authorization": "Bearer mock-token"})),
+                url,
+            ),
+            (),
+            status=self.status,
+            message=self.reason,
+            headers=CIMultiDictProxy(CIMultiDict(self.headers)),
+        )
+
+
+class TestRefusedDownloads:
+    """A download URL carries a bearer token in its query; errors must not."""
+
+    @pytest.fixture
+    def signed_client(self, client: SharePointContentClient):
+        client.get_file_metadata = AsyncMock(
+            return_value={
+                "name": "report.docx",
+                "@microsoft.graph.downloadUrl": _SIGNED_DOWNLOAD_URL,
+            }
+        )
+        return client
+
+    async def test_the_error_names_the_status_without_the_url_query_or_token(
+        self, signed_client: SharePointContentClient
+    ):
+        signed_client.client.client.get = MagicMock(
+            return_value=_RefusedResponse(403, "Forbidden", {})
+        )
+
+        with pytest.raises(aiohttp.ClientResponseError) as caught:
+            await signed_client.get_file_extraction_by_id("drive", "item")
+
+        error = caught.value
+        assert error.status == 403
+        logged = "".join(traceback.format_exception(error))
+        for text in (str(error), repr(error), logged):
+            assert "tempauth" not in text
+            assert "eyJ" not in text
+            assert "mock-token" not in text
+        assert str(error.request_info.real_url) == _SIGNED_DOWNLOAD_URL.split("?")[0]
+
+    async def test_throttled_downloads_are_still_retried(
+        self, signed_client: SharePointContentClient
+    ):
+        payload = docx_bytes("Second attempt")
+        signed_client.client.client.get = MagicMock(
+            side_effect=[
+                _RefusedResponse(429, "Too Many Requests", {"Retry-After": "0"}),
+                _FakeResponse(
+                    [payload],
+                    {"Content-Type": OCTET, "Content-Length": str(len(payload))},
+                ),
+            ]
+        )
+
+        result = await signed_client.get_file_extraction_by_id("drive", "item")
+
+        assert result.text is not None and "Second attempt" in result.text
+        assert signed_client.client.client.get.call_count == 2
+
+    async def test_an_expired_token_is_still_refreshed(
+        self, signed_client: SharePointContentClient
+    ):
+        payload = docx_bytes("After refresh")
+        signed_client.access_token_provider = AsyncMock(return_value="fresh")
+        signed_client.client.client.get = MagicMock(
+            side_effect=[
+                _RefusedResponse(401, "Unauthorized", {}),
+                _FakeResponse(
+                    [payload],
+                    {"Content-Type": OCTET, "Content-Length": str(len(payload))},
+                ),
+            ]
+        )
+
+        result = await signed_client.get_file_extraction_by_id("drive", "item")
+
+        assert result.text is not None and "After refresh" in result.text
+        assert signed_client.headers["Authorization"] == "Bearer fresh"

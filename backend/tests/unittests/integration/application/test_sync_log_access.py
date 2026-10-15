@@ -312,3 +312,81 @@ async def test_service_key_reads_sync_history_within_its_tenant(
     else:
         sync_log_repo.count_by_integration_knowledge.assert_not_awaited()
         sync_log_repo.get_by_integration_knowledge.assert_not_awaited()
+
+
+async def test_sync_history_written_before_the_cleanup_is_served_clean(
+    integration_access, sync_log_database, authenticated_integration_app
+):
+    case = integration_access
+    connection, tables, space_repo = sync_log_database
+    knowledge_id, space_id = uuid4(), uuid4()
+    connection.execute(
+        tables[IntegrationKnowledge]
+        .insert()
+        .values(id=knowledge_id, space_id=space_id, tenant_id=case.user.tenant_id)
+    )
+    connection.execute(
+        tables[Spaces]
+        .insert()
+        .values(
+            id=space_id,
+            tenant_id=case.user.tenant_id,
+            user_id=case.user.id,
+            tenant_space_id=None,
+        )
+    )
+    signed = (
+        "403, message='Forbidden', url='https://contoso.sharepoint.com/sites/KS/"
+        "_layouts/15/download.aspx?UniqueId=abc&tempauth=v1.eyJhdWQiOiJ4In0.c2ln'"
+    )
+    sql = (
+        "(sqlalchemy.dialects.postgresql.asyncpg.OperationalError) connection to "
+        'server at "db.internal" failed\n[SQL: DELETE FROM info_blobs WHERE id = $1]'
+        "\n[parameters: ('Lönelista.xlsx',)]"
+    )
+    log = SyncLog(
+        id=uuid4(),
+        integration_knowledge_id=knowledge_id,
+        sync_type="delta",
+        status="error",
+        started_at=datetime(2026, 9, 2, tzinfo=timezone.utc),
+        error_message=sql,
+        metadata={
+            "skipped_items": 1,
+            "skipped_details": [{"file": "a.docx", "reason": f"Error: {signed}"}],
+            "reconcile_warning": f"Orphan cleanup skipped ({signed})",
+        },
+    )
+    sync_log_repo = AsyncMock(spec=SyncLogRepository)
+    sync_log_repo.count_by_integration_knowledge.return_value = 1
+    sync_log_repo.get_by_integration_knowledge.return_value = [log]
+    container = Container(
+        user=providers.Object(case.user),
+        user_integration_repo=providers.Object(case.integration_repo),
+        tenant_integration_repo=providers.Object(AsyncMock()),
+        tenant_sharepoint_app_repo=providers.Object(case.app_repo),
+        space_repo=providers.Object(space_repo),
+        oauth_token_repo=providers.Object(AsyncMock()),
+        integration_knowledge_repo=providers.Object(AsyncMock()),
+        embedding_model_repo2=providers.Object(AsyncMock()),
+        job_service=providers.Object(AsyncMock()),
+        sharepoint_subscription_service=providers.Object(AsyncMock()),
+        sync_log_repo=providers.Object(sync_log_repo),
+    )
+    app = authenticated_integration_app(container)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get(f"/integrations/sync-logs/{knowledge_id}/")
+
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["error_message"] == "Database error"
+    assert item["skipped_details"] == [
+        {"file": "a.docx", "reason": "Error: HTTP 403 Forbidden"}
+    ]
+    assert item["metadata"]["reconcile_warning"] == (
+        "Orphan cleanup skipped (HTTP 403 Forbidden)"
+    )
+    for secret in ("tempauth", "eyJ", "db.internal", "DELETE FROM", "Lönelista"):
+        assert secret not in response.text
