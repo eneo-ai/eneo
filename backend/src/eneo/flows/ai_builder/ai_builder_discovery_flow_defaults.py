@@ -3,11 +3,22 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import cast
+from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     BASIC_RUNTIME_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
     RuntimeMetadataState,
+)
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import NO_RUN_INPUT
+from eneo.flows.ai_builder.ai_builder_step_reads import no_step_reads_run_input
+from eneo.flows.application.flow_authoring_snapshot import (
+    flow_step_to_authoring_spec,
+    unsupported_saved_steps,
+)
+from eneo.flows.assistant_authoring_snapshot import (
+    AssistantAuthoringSnapshot,
+    AssistantAuthoringSnapshots,
 )
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from eneo.flows.enums import (
@@ -22,6 +33,26 @@ from eneo.flows.flow_capability_manifest import (
     is_citation_capable_step,
     resolve_document_generation_mode,
 )
+from eneo.flows.step_lineage import existing_step_ref_for_order
+
+
+class FlowWithStepPrompts(Flow):
+    """A saved flow read together with its steps' prompts (by assistant id),
+    so a fact that depends on what a prompt reads can be decided."""
+
+    step_prompts: dict[UUID, str]
+
+    @classmethod
+    def of(
+        cls, flow: Flow, assistant_snapshots: AssistantAuthoringSnapshots
+    ) -> FlowWithStepPrompts:
+        return cls.model_construct(
+            **{name: getattr(flow, name) for name in Flow.model_fields},
+            step_prompts={
+                assistant_id: snapshot.instructions
+                for assistant_id, snapshot in assistant_snapshots.items()
+            },
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +91,8 @@ class FlowCapabilityProfile:
             defaults["primary_runtime_input"].add("text")
         elif self.runtime_input_mode == "text_and_documents":
             defaults["primary_runtime_input"].add("text_and_documents")
+        elif self.runtime_input_mode == NO_RUN_INPUT:
+            defaults["primary_runtime_input"].add(NO_RUN_INPUT)
 
         if self.upload_pattern is not None:
             defaults["upload_pattern"].add(self.upload_pattern)
@@ -110,8 +143,11 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
         if step.input_source is FlowInputSource.FLOW_INPUT
     )
 
-    runtime_input_mode, runtime_input_settled = _derive_runtime_input_mode(
-        flow_input_steps
+    runtime_input_mode, runtime_input_settled = (
+        # Not settled: a request that names a material asks to add a run input.
+        (NO_RUN_INPUT, False)
+        if not flow_input_steps and _reads_no_run_input(flow, steps)
+        else _derive_runtime_input_mode(flow_input_steps)
     )
     document_material_scope, upload_pattern = _derive_document_scope(flow_input_steps)
     final_output_mode = FINAL_OUTPUT_ARTIFACT_BY_TYPE[last_step.output_type]
@@ -153,6 +189,37 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
         citation_step_orders=citation_step_orders,
         contract_step_orders=contract_step_orders,
         variable_binding_step_orders=variable_binding_step_orders,
+    )
+
+
+def _reads_no_run_input(flow: Flow, steps: list[FlowStep]) -> bool:
+    """Whether the flow's facts settle that a run is started with nothing.
+
+    Decided only for a flow read with every step's prompt (a prompt can read
+    the run input too), whose run form declares no fields and whose every step
+    the authoring vocabulary carries; any other flow is left to the question.
+    """
+
+    if (
+        not isinstance(flow, FlowWithStepPrompts)
+        or any(step.assistant_id not in flow.step_prompts for step in steps)
+        or _has_form_fields(flow)
+        or unsupported_saved_steps(steps)
+    ):
+        return False
+    prompts = {
+        assistant_id: AssistantAuthoringSnapshot(instructions=prompt)
+        for assistant_id, prompt in flow.step_prompts.items()
+    }
+    return no_step_reads_run_input(
+        [
+            flow_step_to_authoring_spec(
+                step,
+                existing_step_ref_for_order(step.step_order),
+                assistant_snapshots=prompts,
+            )
+            for step in steps
+        ]
     )
 
 

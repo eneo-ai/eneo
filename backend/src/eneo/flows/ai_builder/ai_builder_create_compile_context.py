@@ -398,7 +398,11 @@ def _runtime_input_fields_from_planning_state(
 def _runtime_input_type_from_architecture(
     architecture: ArchitectureCommit | None,
 ) -> InputType | None:
-    if architecture is None or not architecture.tuples_chain:
+    if (
+        architecture is None
+        or not architecture.reads_run_input
+        or not architecture.tuples_chain
+    ):
         return None
     try:
         runtime_input_type = InputType(architecture.tuples_chain[0].input_type)

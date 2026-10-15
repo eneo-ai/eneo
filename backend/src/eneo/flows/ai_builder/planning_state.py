@@ -398,6 +398,9 @@ class ArchitectureCommitDraft(_PlanningModel):
     """
 
     tuples_chain: list[StepTriple]
+    # False when no step reads what a run is started with: the chain's first
+    # input is then what a step reads from earlier steps, not a run input.
+    reads_run_input: bool = True
     chosen_patterns: list[str]
     required_capabilities: list[str] = Field(default_factory=list[str])
     aggregation_intent: AggregationIntent = "linear"

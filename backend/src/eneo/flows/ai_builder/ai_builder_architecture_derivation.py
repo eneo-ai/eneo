@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import derive_output_mode
 from eneo.flows.ai_builder.ai_builder_result_contract import derive_result_contract
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import NO_RUN_INPUT
 from eneo.flows.ai_builder.pattern_registry import (
     EXTRACT_TEMPLATE_VARIABLES_STEP,
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
@@ -95,14 +96,15 @@ def derive_architecture_commit_draft(
     value is outside the deterministic mapping. The caller can then fall
     back to the normal evaluator/repair path.
     """
-    input_type = _input_type_from_state(state)
+    envelope_input = _envelope_input_from_state(state)
     output_type = _output_type_from_state(state)
-    if input_type is None or output_type is None:
+    if envelope_input is None or output_type is None:
         return None
+    input_source, input_type = envelope_input
 
     output_mode = _output_mode_from_state(state, input_type, output_type)
     capabilities = resolve_capability_for_tuple(
-        input_source=FlowInputSource.FLOW_INPUT,
+        input_source=input_source,
         input_type=input_type,
         output_type=output_type,
         output_mode=output_mode,
@@ -131,6 +133,7 @@ def derive_architecture_commit_draft(
                 output_mode=step_output_mode,
             )
         ],
+        reads_run_input=input_source is FlowInputSource.FLOW_INPUT,
         chosen_patterns=chosen_patterns,
         required_capabilities=[capability.id for capability in capabilities],
         aggregation_intent=derive_aggregation_intent_from_slots(
@@ -238,6 +241,19 @@ def architecture_hints_are_supported(
             and set(chain_steps) <= _DOCX_TEMPLATE_PATTERN_CHAIN_STEPS
         )
     return False
+
+
+def _envelope_input_from_state(
+    state: PlanningState,
+) -> tuple[FlowInputSource, FlowInputType] | None:
+    """Where the architecture envelope starts: the run input, or, when no step
+    reads one, the earlier steps' text a later step reads (the input every
+    Builder step after the first gets)."""
+
+    if state.commit_grade_slot_value("primary_runtime_input") == NO_RUN_INPUT:
+        return FlowInputSource.PREVIOUS_STEP, FlowInputType.TEXT
+    input_type = _input_type_from_state(state)
+    return None if input_type is None else (FlowInputSource.FLOW_INPUT, input_type)
 
 
 def _input_type_from_state(state: PlanningState) -> FlowInputType | None:

@@ -482,7 +482,8 @@ async def test_an_edit_beside_tool_steps_is_proposed_and_applied_keeping_them(
     completion_model_factory,
     db_container,
 ) -> None:
-    # Kills: the whole-flow refusal for tool steps; an apply that rewrites them.
+    # Kills: the whole-flow refusal for tool steps; an apply that rewrites them;
+    # a run-input question on a flow no step of which reads run input.
     space_id = await _create_space_with_planner_model(
         client=client,
         bearer_token=bearer_token,
@@ -539,7 +540,6 @@ async def test_an_edit_beside_tool_steps_is_proposed_and_applied_keeping_them(
             bearer_token=bearer_token,
             session_id=session_id,
             initial_message="Döp om analyssteget till Läs detaljer.",
-            structured_answers={"primary_runtime_input": "text"},
         )
     assert "plan" in [e["event"] for e in events], _builder_event_outline(events)
     plan_id = await _get_latest_plan_id(

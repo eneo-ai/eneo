@@ -8,11 +8,10 @@ not.
 
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import cast
 
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.enums import FlowInputSource, FlowOutputMode
@@ -122,8 +121,9 @@ def step_template_sites(step: StepSpec) -> list[tuple[ReadSite, str]]:
     """Every template carrier of a step, as text, with the site it is read at."""
 
     sites = [(ReadSite.INSTRUCTIONS, step.assistant_spec.instructions)]
-    if step.input_bindings is not None:
-        sites.append((ReadSite.QUESTION, _template_text(step.input_bindings)))
+    sites.extend(
+        (ReadSite.QUESTION, text) for text in _binding_strings(step.input_bindings)
+    )
     for site, column in _CONFIG_SITES:
         channel = step_config_channel(step, column)
         if channel is not None and channel.sites is not None:
@@ -242,6 +242,40 @@ def step_reads(
     return tuple(reads)
 
 
+# What a run is started with, on a flow that declares no form fields: its
+# text or payload, an alias of it, a step's own upload.
+_RUN_INPUT_CHANNELS = frozenset(
+    {ReadChannel.RUN_INPUT, ReadChannel.RUN_INPUT_ALIAS, ReadChannel.STEP_INPUT}
+)
+
+
+def no_step_reads_run_input(steps: Sequence[StepSpec]) -> bool:
+    """Whether, on a flow that declares no form fields, every step's reads are
+    known and none is of what a run is started with, at any site `step_reads`
+    enumerates (a tool argument bound to {{flow_input.text}} too). A
+    configuration that cannot be read is unknown, never "reads nothing"."""
+
+    if any(_has_unreadable_config(step) for step in steps):
+        return False
+    step_refs = spec_step_refs(steps)
+    return not any(
+        read.channel in _RUN_INPUT_CHANNELS
+        for order, step in enumerate(steps, 1)
+        for read in step_reads(
+            step, order=order, step_refs=step_refs, form_field_names=set()
+        )
+    )
+
+
+def _has_unreadable_config(step: StepSpec) -> bool:
+    return any(
+        channel is not None and channel.sites is None
+        for channel in (
+            step_config_channel(step, column) for _, column in _CONFIG_SITES
+        )
+    )
+
+
 def form_fields_read(
     step: StepSpec,
     *,
@@ -354,9 +388,16 @@ def _segments(tail: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in tail.split(".")) if tail else ()
 
 
-def _template_text(payload: Any) -> str:
-    if isinstance(payload, str):
-        return payload
-    if isinstance(payload, (dict, list)):
-        return json.dumps(payload, ensure_ascii=False)
-    return str(payload)
+def _binding_strings(value: object) -> Iterator[str]:
+    """Every string in the bindings as stored: the runtime interpolates the
+    strings themselves, so an encoding (an escaped newline) must not change
+    what a reference reads."""
+
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, Mapping):
+        for item in cast(Mapping[str, object], value).values():
+            yield from _binding_strings(item)
+    elif isinstance(value, list):
+        for item in cast(list[object], value):
+            yield from _binding_strings(item)

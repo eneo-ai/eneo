@@ -68,6 +68,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     requirements_summary_to_metadata,
     slot_classification_from_metadata,
 )
+from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import FlowWithStepPrompts
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
@@ -137,6 +138,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     complete_planning_state,
 )
+from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -1131,7 +1133,8 @@ class TestPlannerContextPreparation:
         flow = MagicMock()
         flow.id = session.flow_id
         flow.space_id = session.space_id
-        snapshots = {uuid4(): {"name": "Assistant"}}
+        assistant_id = uuid4()
+        snapshots = {assistant_id: AssistantAuthoringSnapshot(instructions="Gör det.")}
         flow_service.get_flow.return_value = flow
         flow_service.get_flow_assistant_snapshots.return_value = snapshots
         completion_service.resolve_model_route.return_value = _route(
@@ -1184,7 +1187,9 @@ class TestPlannerContextPreparation:
             result.completion_model_route.requested_model_kwargs.reasoning_effort
             == "high"
         )
-        assert result.flow is flow
+        assert isinstance(result.flow, FlowWithStepPrompts)
+        assert result.flow.id == flow.id
+        assert result.flow.step_prompts == {assistant_id: "Gör det."}
         assert result.assistant_snapshots == snapshots
         assert result.planner_context.available_models == [
             {

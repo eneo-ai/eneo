@@ -44,6 +44,9 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     latest_user_edit_context,
     latest_user_review_context,
 )
+from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
+    FlowWithStepPrompts,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
@@ -586,6 +589,8 @@ class AIBuilderService:
             assistant_snapshots = await self.flow_service.get_flow_assistant_snapshots(
                 flow
             )
+            # Every planning read of this turn sees what the steps' prompts read.
+            flow = FlowWithStepPrompts.of(flow, assistant_snapshots)
 
         validated_files: list[File] = []
         if message_file_ids:

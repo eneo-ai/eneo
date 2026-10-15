@@ -62,6 +62,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     derive_result_contract,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import project_schema_fields
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import NO_RUN_INPUT
 from eneo.flows.ai_builder.planning_state import (
     AttachmentCoverage,
     CheckpointIntent,
@@ -1585,6 +1586,9 @@ def _slot_value(value: str) -> str:
 
 
 def _slot_value_for_slot(slot_name: str, value: str, locale: Locale) -> str:
+    if slot_name == "primary_runtime_input" and value == NO_RUN_INPUT:
+        # Derived from the flow, so no question option carries its label.
+        return "Ingen indata" if locale == "sv" else "No input"
     try:
         rendered = render_question(slot_name, locale)
     except KeyError:

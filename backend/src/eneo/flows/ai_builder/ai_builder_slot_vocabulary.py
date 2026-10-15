@@ -10,7 +10,7 @@ forbids non-stdlib imports into this module.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Final, Literal
 
 DiscoveryFamily = Literal[
     "case_scope",
@@ -53,3 +53,8 @@ NON_LLM_RESOLVABLE_SLOT_NAMES: frozenset[str] = frozenset(
 LLM_RESOLVABLE_SLOT_NAMES: frozenset[str] = (
     KNOWN_REQUIREMENT_SLOT_NAMES - NON_LLM_RESOLVABLE_SLOT_NAMES
 )
+
+# The primary_runtime_input value of a saved flow no step of which reads what a
+# run is started with. Derived from the flow, never offered as an answer: the
+# question lists materials a run can receive.
+NO_RUN_INPUT: Final = "no_run_input"

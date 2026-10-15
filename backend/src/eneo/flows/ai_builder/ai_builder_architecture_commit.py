@@ -30,6 +30,7 @@ def canonical_architecture_commit_payload(
         "tuples_chain": [
             triple.model_dump(mode="json") for triple in commit.tuples_chain
         ],
+        "reads_run_input": commit.reads_run_input,
         "chosen_patterns": sorted(commit.chosen_patterns),
         "required_capabilities": sorted(commit.required_capabilities),
         "aggregation_intent": commit.aggregation_intent,

@@ -306,7 +306,7 @@ def test_template_sites_are_the_carriers_validation_iterates():
 
     assert step_template_sites(step) == [
         (INSTRUCTIONS, "Instruktion"),
-        (QUESTION, '{"question": "Å {{ audience }}"}'),
+        (QUESTION, "Å {{ audience }}"),
     ]
     assert iter_step_templates(step) == [
         template for _, template in step_template_sites(step)
