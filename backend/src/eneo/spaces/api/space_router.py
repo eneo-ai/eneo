@@ -62,6 +62,7 @@ from eneo.spaces.api.space_models import (
 from eneo.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 
 if TYPE_CHECKING:
+    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.spaces.space import Space
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,35 @@ ApiKeyRevokingContainer = Annotated[
     Container,
     Depends(get_container(with_user=True, transaction_scope="function")),
 ]
+
+
+def _mcp_tool_switches(
+    old_servers: "list[MCPServer]", new_servers: "list[MCPServer]"
+) -> dict[str, list[dict[str, object]]] | None:
+    """The tools switched on or off for the space, each before and after;
+    None when none was. Only the tools of a server the space keeps count:
+    the tools of a server switched on or off come and go with it, and that
+    is the server's change."""
+    # The space's projection carries the tool's switch for the space in
+    # is_enabled_by_default (SpaceRepository._project_space_mcp_server_tools).
+    old_switches = {
+        tool.id: tool.is_enabled_by_default
+        for server in old_servers
+        for tool in server.tools
+    }
+    old_entries: list[dict[str, object]] = []
+    new_entries: list[dict[str, object]] = []
+    for server in new_servers:
+        for tool in server.tools:
+            was_enabled = old_switches.get(tool.id)
+            if was_enabled is None or was_enabled == tool.is_enabled_by_default:
+                continue
+            entry = {"id": str(tool.id), "name": tool.name}
+            old_entries.append({**entry, "is_enabled": was_enabled})
+            new_entries.append({**entry, "is_enabled": tool.is_enabled_by_default})
+    if not new_entries:
+        return None
+    return {"old": old_entries, "new": new_entries}
 
 
 async def _space_response(container: Container, space: "Space") -> SpacePublic:
@@ -300,6 +330,7 @@ async def update_space(
             old_space.linked_transcription_services,
             space.linked_transcription_services,
         ),
+        ("mcp_servers", old_space.mcp_servers, space.mcp_servers),
     ):
         old_entries = [{"id": str(m.id), "name": m.name} for m in old_links]
         new_entries = [{"id": str(m.id), "name": m.name} for m in new_links]
@@ -307,6 +338,10 @@ async def update_space(
             tuple(e.values()) for e in new_entries
         }:
             changes[field] = {"old": old_entries, "new": new_entries}
+
+    tool_switches = _mcp_tool_switches(old_space.mcp_servers, space.mcp_servers)
+    if tool_switches is not None:
+        changes["mcp_tools"] = tool_switches
 
     if old_space.enabled_capabilities != space.enabled_capabilities:
         changes["enabled_capabilities"] = {
