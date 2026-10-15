@@ -43,6 +43,7 @@
   import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
   import ToolConfigPanel from "./tool/ToolConfigPanel.svelte";
+  import type { NamedSecurityLevel } from "$lib/features/flows/flowClassificationNames";
   import {
     readToolInputConfig,
     type ToolInputConfig,
@@ -68,6 +69,7 @@
     stepStateKey = "",
     toolOptions = { status: "loading" },
     httpVariableContext = undefined,
+    securityClassifications = [],
     onInputSourceChange,
     onInputTypeChange,
     onRuntimeInputChange,
@@ -106,6 +108,8 @@
     stepStateKey?: string;
     toolOptions?: ToolOptionsLoad;
     httpVariableContext?: import("$lib/features/flows/components/VariablePicker.svelte").VariablePickerContext;
+    /** The organization's security classes, for the tool panel. */
+    securityClassifications?: readonly NamedSecurityLevel[];
     onInputSourceChange?: (detail: { value: string }) => void;
     onInputTypeChange?: (detail: { value: string }) => void;
     onRuntimeInputChange?: (detail: { patch: Partial<FlowRuntimeInputConfigValue> }) => void;
@@ -622,6 +626,7 @@
     stepKey={stepStateKey}
     {isPublished}
     variableContext={httpVariableContext}
+    classifications={securityClassifications}
     onConfigChange={(detail) => onToolConfigChange?.({ config: detail.config })}
     onReloadOptions={onReloadToolOptions}
   />

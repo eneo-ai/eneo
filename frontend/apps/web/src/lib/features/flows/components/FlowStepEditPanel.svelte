@@ -1138,6 +1138,7 @@
             {isPublished}
             {isAdvancedMode}
             {httpVariableContext}
+            {securityClassifications}
             {selectableInputSourceOptions}
             {displayedInputTypeOptions}
             {runtimeInputConfig}

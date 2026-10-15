@@ -39,6 +39,7 @@ function option(overrides: Partial<FlowToolOption>): FlowToolOption {
   return {
     mcp_server_id: "server-1",
     mcp_server_name: "Ärendesystemet",
+    mcp_server_security_level: null,
     tool_id: "tool-search",
     tool_name: "search_cases",
     tool_description: "Söker ärenden.",
@@ -86,7 +87,7 @@ async function renderPanel(
   const onConfigChange = vi.fn<(detail: { config: ToolInputConfig }) => void>();
   const view = render(ToolConfigPanel, {
     config,
-    toolOptions: { status: "loaded", options, refreshing: false },
+    toolOptions: { status: "loaded", options, classificationsEnabled: false, refreshing: false },
     stepKey: "step-2",
     isPublished: false,
     variableContext: {
@@ -259,7 +260,14 @@ describe("ToolConfigPanel", () => {
     const refreshed = withSchema({
       properties: { query: { type: "string" }, limit: { type: "string" } }
     });
-    await rerender({ toolOptions: { status: "loaded", options: [refreshed], refreshing: false } });
+    await rerender({
+      toolOptions: {
+        status: "loaded",
+        options: [refreshed],
+        classificationsEnabled: false,
+        refreshing: false
+      }
+    });
     expect(row("limit").getByRole("textbox")).toHaveProperty("value", "");
     expect(row("limit").getByText(m.flow_tool_argument_misfit(), { exact: false })).toBeTruthy();
     expect(row("query").getByText(m.flow_tool_argument_mode_unset())).toBeTruthy();
@@ -428,7 +436,14 @@ describe("ToolConfigPanel", () => {
     await fireEvent.click(screen.getByRole("button", { name: m.retry() }));
     expect(onReloadOptions).toHaveBeenCalledOnce();
 
-    await rerender({ toolOptions: { status: "loaded", options: [SEARCH], refreshing: true } });
+    await rerender({
+      toolOptions: {
+        status: "loaded",
+        options: [SEARCH],
+        classificationsEnabled: false,
+        refreshing: true
+      }
+    });
     expect(row("query").getByRole("textbox")).toHaveProperty("value", "x");
     expect(screen.getByRole("button", { name: m.flow_tool_options_refresh() })).toHaveProperty(
       "disabled",
@@ -440,6 +455,44 @@ describe("ToolConfigPanel", () => {
     expect(row("query").getByRole("textbox")).toHaveProperty("disabled", true);
     expect(screen.queryByRole("button", { name: m.flow_tool_options_refresh() })).toBeNull();
   });
+
+  // Kills: the chosen tool's server class is not shown or is named from
+  // another level; a server without a class gets no sentence while classes
+  // are on; a class or sentence shows while the organization has classes off.
+  it.each([
+    {
+      enabled: true,
+      level: 30,
+      shown: () => [m.flow_tool_server_class({ name: "Känslig" }), m.flow_tool_server_class_rule()]
+    },
+    { enabled: true, level: null, shown: () => [m.flow_tool_server_no_class()] },
+    { enabled: false, level: 30, shown: () => [] }
+  ])(
+    "says what the chosen tool's server may receive (classes on $enabled, level $level)",
+    async ({ enabled, level, shown }) => {
+      const classes = [
+        { name: "Öppen", security_level: 10 },
+        { name: "Känslig", security_level: 30 }
+      ];
+      const options = [option({ mcp_server_security_level: level })];
+      await renderPanel(options, chosen(), {
+        classifications: classes,
+        toolOptions: {
+          status: "loaded",
+          options,
+          classificationsEnabled: enabled,
+          refreshing: false
+        }
+      });
+
+      const sentences = [
+        m.flow_tool_server_class({ name: "Känslig" }),
+        m.flow_tool_server_class_rule(),
+        m.flow_tool_server_no_class()
+      ];
+      expect(sentences.filter((text) => screen.queryByText(text) !== null)).toStrictEqual(shown());
+    }
+  );
 
   // Kills: a personal space shows the "administrator switches servers on"
   // sentence or a settings link; somebody who may not edit the space gets the link.

@@ -323,9 +323,10 @@ async def test_the_tool_list_reads_the_stored_chain_for_the_flows_space(
             )
         )
         await session.flush()
-        options = await container.flow_service().list_tool_options(
+        listed = await container.flow_service().list_tool_options(
             flow_id=tool_flow.flow_id
         )
+    options = listed.options
 
     assert [(o.tool_name, o.refusal, o.input_schema) for o in options] == [
         ("lookup_case", None, _SCHEMA),

@@ -23,7 +23,7 @@ from eneo.flows.step_lineage import (
 )
 
 if TYPE_CHECKING:
-    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.mcp_servers.application.capability_resolver import ClassifiedServer
 
 
 class ClassificationCause(StrEnum):
@@ -176,7 +176,7 @@ def _steps_at_level(
     )
 
 
-def tool_server_classification_level(server: MCPServer) -> int | None:
+def tool_server_classification_level(server: ClassifiedServer) -> int | None:
     """The level of a tool's MCP server; None when it has no classification."""
     classification = server.effective_security_classification
     return None if classification is None else classification.security_level

@@ -24,6 +24,7 @@ const TOOL = { mcp_server_id: "server-1", tool_id: "tool-search" };
 const OPTION = {
   ...TOOL,
   mcp_server_name: "Ärenden",
+  mcp_server_security_level: null,
   tool_name: "search_cases",
   tool_description: null,
   refusal: null,
@@ -49,7 +50,8 @@ function toolStep(args: Record<string, unknown> | null): FlowStep {
 /** An editor on a two-step flow, through a real client whose requests are answered here. */
 function editorFor(
   second: FlowStep,
-  toolOptions: () => Response | Promise<Response> = () => Response.json({ items: [OPTION] })
+  toolOptions: () => Response | Promise<Response> = () =>
+    Response.json({ items: [OPTION], security_classifications_enabled: true })
 ) {
   const flow = flowFixture({ steps: [flowStepFixture({ user_description: "Hämta" }), second] });
   const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
@@ -132,7 +134,12 @@ describe("FlowEditor with a tool step", () => {
     const answers: Array<(items: unknown[]) => void> = [];
     const { editor } = editorFor(
       toolStep({ query: "x" }),
-      () => new Promise((resolve) => answers.push((items) => resolve(Response.json({ items }))))
+      () =>
+        new Promise((resolve) =>
+          answers.push((items) =>
+            resolve(Response.json({ items, security_classifications_enabled: true }))
+          )
+        )
     );
     const list = () => get(editor.state.toolOptions);
     await vi.waitFor(() => expect(answers).toHaveLength(1));
@@ -141,11 +148,21 @@ describe("FlowEditor with a tool step", () => {
 
     void editor.loadToolOptions();
     void editor.loadToolOptions();
-    expect(list()).toEqual({ status: "loaded", options: [OPTION], refreshing: true });
+    expect(list()).toEqual({
+      status: "loaded",
+      options: [OPTION],
+      classificationsEnabled: true,
+      refreshing: true
+    });
     await vi.waitFor(() => expect(answers).toHaveLength(3));
     answers[2]([]);
     answers[1]([OPTION, OPTION]);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(list()).toEqual({ status: "loaded", options: [], refreshing: false });
+    expect(list()).toEqual({
+      status: "loaded",
+      options: [],
+      classificationsEnabled: true,
+      refreshing: false
+    });
   });
 });

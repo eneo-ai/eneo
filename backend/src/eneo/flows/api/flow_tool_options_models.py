@@ -6,17 +6,19 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.config import JsonDict
 
-from eneo.flows.application.flow_tool_options import FlowToolOption
+from eneo.flows.application.flow_tool_options import FlowToolOptions
 from eneo.mcp_servers.domain.unattended_tool_refusal import UnattendedToolRefusal
 
 _SERVER_ID = "00000000-0000-0000-0000-000000000201"
 _TOOL_ID = "00000000-0000-0000-0000-000000000301"
 
 FLOW_TOOL_OPTIONS_EXAMPLE: JsonDict = {
+    "security_classifications_enabled": True,
     "items": [
         {
             "mcp_server_id": _SERVER_ID,
             "mcp_server_name": "Case register",
+            "mcp_server_security_level": 20,
             "tool_id": _TOOL_ID,
             "tool_name": "lookup_case",
             "tool_description": "Fetch one case by its number.",
@@ -29,13 +31,14 @@ FLOW_TOOL_OPTIONS_EXAMPLE: JsonDict = {
         {
             "mcp_server_id": _SERVER_ID,
             "mcp_server_name": "Case register",
+            "mcp_server_security_level": 20,
             "tool_id": "00000000-0000-0000-0000-000000000302",
             "tool_name": "close_case",
             "tool_description": None,
             "input_schema": None,
             "refusal": UnattendedToolRefusal.TOOL_WAITING_FOR_REVIEW.value,
         },
-    ]
+    ],
 }
 
 
@@ -44,6 +47,18 @@ class FlowToolOptionPublic(BaseModel):
 
     mcp_server_id: UUID = Field(description="The MCP server that offers the tool.")
     mcp_server_name: str = Field(description="The server's name.")
+    mcp_server_security_level: int | None = Field(
+        description=(
+            "The level of the server's security classification, the one the "
+            "classification rule compares: the server must have at least the "
+            "space's level (`refusal` is `server_below_space_classification` "
+            "otherwise), and a step may send it values from earlier steps only "
+            "at or below this level (saving refuses the step otherwise with "
+            "`flow_step_tool_arguments_classification_write_down`). Null when the "
+            "server has no classification, and always null while "
+            "`security_classifications_enabled` is false."
+        )
+    )
     tool_id: UUID = Field(
         description="The tool, to put in a step's tool configuration."
     )
@@ -76,6 +91,15 @@ class FlowToolOptionPublic(BaseModel):
 class FlowToolOptionsPublic(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": FLOW_TOOL_OPTIONS_EXAMPLE})
 
+    security_classifications_enabled: bool = Field(
+        description=(
+            "Whether the organization has security classifications turned on, "
+            "the switch the classification rule reads. While it is on, a null "
+            "`mcp_server_security_level` means the server has no classification: "
+            "such a server is refused in a space that has one and cannot receive "
+            "values from steps whose result has one."
+        )
+    )
     items: list[FlowToolOptionPublic] = Field(
         description=(
             "The tools of the MCP servers the flow's space has activated, in the "
@@ -87,7 +111,10 @@ class FlowToolOptionsPublic(BaseModel):
     )
 
     @classmethod
-    def from_options(cls, options: list[FlowToolOption]) -> Self:
+    def from_options(cls, listed: FlowToolOptions) -> Self:
         return cls(
-            items=[FlowToolOptionPublic.model_validate(option) for option in options]
+            security_classifications_enabled=listed.security_classifications_enabled,
+            items=[
+                FlowToolOptionPublic.model_validate(option) for option in listed.options
+            ],
         )
