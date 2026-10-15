@@ -1,5 +1,6 @@
 import asyncio
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
@@ -74,6 +75,45 @@ def autocut(y_values: list[float], cutoff: int = 2) -> int:
                 return i
 
     return len(y_values)
+
+
+@dataclass(frozen=True)
+class _SearchScope:
+    """The sources a search covers, as the chunk repository filters on them."""
+
+    group_ids: list[UUID]
+    website_ids: list[UUID]
+    integration_knowledge_ids: list[UUID]
+    info_blob_ids: Optional[list[UUID]]
+
+    @classmethod
+    def build(
+        cls,
+        collections: Optional[list["Collection"]],
+        websites: Optional[list["Website"]],
+        integration_knowledge_list: Optional[list[IntegrationKnowledge]],
+        info_blob_ids: Optional[list[UUID]],
+    ) -> "_SearchScope":
+        scope = cls(
+            group_ids=[group.id for group in (collections or [])],
+            website_ids=[website.id for website in (websites or [])],
+            integration_knowledge_ids=[
+                i.id for i in (integration_knowledge_list or [])
+            ],
+            info_blob_ids=info_blob_ids,
+        )
+        # The scope buckets are OR-ed in SQL, so combining a document with its
+        # own sources would widen the search back out to those sources instead
+        # of narrowing it to the document. On an authorization-adjacent
+        # predicate that footgun is worth making unconstructible.
+        if scope.info_blob_ids and (
+            scope.group_ids or scope.website_ids or scope.integration_knowledge_ids
+        ):
+            raise ValueError(
+                "info_blob_ids narrows a search to single documents and cannot be "
+                "combined with collection, website or integration scopes."
+            )
+        return scope
 
 
 class Datastore:
@@ -216,50 +256,18 @@ class Datastore:
         reranker scores; ``autocut`` does not apply. A reranker failure yields
         the result the call would have produced without the spec.
         """
-        group_ids = [group.id for group in (collections or [])]
-        website_ids = [website.id for website in (websites or [])]
-        integration_knowledge_ids = [i.id for i in (integration_knowledge_list or [])]
-
-        # The scope buckets are OR-ed in SQL, so combining a document with its
-        # own sources would widen the search back out to those sources instead
-        # of narrowing it to the document. On an authorization-adjacent
-        # predicate that footgun is worth making unconstructible.
-        if info_blob_ids and (group_ids or website_ids or integration_knowledge_ids):
-            raise ValueError(
-                "info_blob_ids narrows a search to single documents and cannot be "
-                "combined with collection, website or integration scopes."
-            )
-
+        scope = _SearchScope.build(
+            collections, websites, integration_knowledge_list, info_blob_ids
+        )
         limit = num_chunks if num_chunks is not None else 30
         fetch = rerank.candidate_count(limit) if rerank is not None else limit
 
         start = time.time()
-        search_string_embedding = (
-            await self.create_embeddings_service.get_embedding_for_query(
-                model=embedding_model, query=search_string
-            )
+        embedding = await self.create_embeddings_service.get_embedding_for_query(
+            model=embedding_model, query=search_string
         )
         step_1 = time.time()
-
-        async def nearest(count: int) -> list[InfoBlobChunkInDBWithScore]:
-            results = await self.chunk_repo.semantic_search(
-                search_string_embedding,
-                group_ids=group_ids,
-                website_ids=website_ids,
-                integration_knowledge_ids=integration_knowledge_ids,
-                info_blob_ids=info_blob_ids,
-                limit=count,
-            )
-            # Vector search returns nearest neighbors unconditionally; a
-            # relevance floor lets callers drop chunks that merely happen to be
-            # the least distant (e.g. retrieval triggered by an off-topic
-            # message). Score scales are embedding-model-dependent, so there
-            # is no global default.
-            if min_score is not None:
-                results = [res for res in results if res.score >= min_score]
-            return results
-
-        semantic_results = await nearest(fetch)
+        semantic_results = await self._nearest(embedding, scope, fetch, min_score)
         end = time.time()
 
         logger.debug(
@@ -282,7 +290,9 @@ class Datastore:
             # candidate set may be smaller than the caller asked for; then the
             # vector search is repeated with the caller's limit.
             if fetch < limit:
-                semantic_results = await nearest(limit)
+                semantic_results = await self._nearest(
+                    embedding, scope, limit, min_score
+                )
             else:
                 semantic_results = semantic_results[:limit]
 
@@ -293,6 +303,30 @@ class Datastore:
             return semantic_results[:cut_point]
 
         return semantic_results
+
+    async def _nearest(
+        self,
+        embedding: list[float],
+        scope: _SearchScope,
+        limit: int,
+        min_score: Optional[float],
+    ) -> list[InfoBlobChunkInDBWithScore]:
+        """The ``limit`` nearest chunks in scope, above the relevance floor."""
+        results = await self.chunk_repo.semantic_search(
+            embedding,
+            group_ids=scope.group_ids,
+            website_ids=scope.website_ids,
+            integration_knowledge_ids=scope.integration_knowledge_ids,
+            info_blob_ids=scope.info_blob_ids,
+            limit=limit,
+        )
+        # Vector search returns nearest neighbors unconditionally; a relevance
+        # floor lets callers drop chunks that merely happen to be the least
+        # distant (e.g. retrieval triggered by an off-topic message). Score
+        # scales are embedding-model-dependent, so there is no global default.
+        if min_score is not None:
+            results = [res for res in results if res.score >= min_score]
+        return results
 
     @staticmethod
     async def _rerank(
