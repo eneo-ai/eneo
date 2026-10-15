@@ -315,6 +315,7 @@ from eneo.prompts.prompt_service import PromptService
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.redis.connection import build_redis_pool_kwargs
 from eneo.rerank_models.application import RerankModelCRUDService
+from eneo.rerank_models.application.rerank_service import RerankService
 from eneo.rerank_models.domain import RerankModelRepository
 from eneo.roles.roles_repo import RolesRepository
 from eneo.roles.roles_service import RolesService
@@ -960,6 +961,13 @@ class Container(containers.DeclarativeContainer):
         user=user,
         rerank_model_repo=rerank_model_repo,
         security_classification_repo=security_classification_repo,
+    )
+    rerank_service = providers.Factory(
+        RerankService,
+        session=session,
+        user=user,
+        rerank_model_repo=rerank_model_repo,
+        encryption_service=encryption_service,
     )
     embedding_model_crud_service = providers.Factory(
         EmbeddingModelCRUDService,

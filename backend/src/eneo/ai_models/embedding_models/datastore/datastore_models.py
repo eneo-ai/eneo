@@ -14,6 +14,14 @@ class SemanticSearchRequest(BaseModel):
         "Set to null (or omit completely) to not use this feature",
         default=None,
     )
+    rerank: bool = Field(
+        default=False,
+        description="Rerank the candidates with the installation's default rerank "
+        "model, when one is registered and the collection's space may use it. "
+        "Reranked results carry the reranker's scores and autocut_cutoff is "
+        "ignored. Without a usable rerank model the search runs as without this "
+        "flag.",
+    )
 
 
 class SemanticSearchResponse(BaseModel):
