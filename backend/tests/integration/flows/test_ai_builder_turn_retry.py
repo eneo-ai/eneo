@@ -615,10 +615,6 @@ def _child_environment(*, test_settings: Settings) -> dict[str, str]:
         queue_name=test_settings.task_execution_queue,
     )
     environment["TESTING"] = "true" if test_settings.testing else "false"
-    # The provider is scripted, so the child must not fetch LiteLLM's model
-    # catalogue from the internet while it imports; an unreachable host turned
-    # that fetch's retries into the child's startup time.
-    environment["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
     environment["AI_BUILDER_SEND_LOCK_LEASE_SECONDS"] = str(_LEASE_SECONDS)
     return environment
 

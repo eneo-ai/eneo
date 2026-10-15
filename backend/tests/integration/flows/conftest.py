@@ -621,6 +621,10 @@ def _flow_worker_environment(*, settings: Settings, queue_name: str) -> dict[str
             "TENANT_CREDENTIALS_ENABLED": "false",
             "TESTING": "true",
             "DEV": "true",
+            # LiteLLM fetches its model cost map from the internet at import
+            # unless told to use the bundled one; the test process sets this in
+            # pytest.ini, and the worker must not wait on a network.
+            "LITELLM_LOCAL_MODEL_COST_MAP": "True",
         }
     )
     return environment
