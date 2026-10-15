@@ -1,4 +1,6 @@
 import logging
+from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
@@ -63,6 +65,7 @@ from eneo.websites.presentation.website_models import WebsiteCreate, WebsitePubl
 
 if TYPE_CHECKING:
     from eneo.spaces.space import Space
+    from eneo.spaces.space_repo import StoredSpaceToolSetting
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +78,36 @@ ApiKeyRevokingContainer = Annotated[
     Container,
     Depends(get_container(with_user=True, transaction_scope="function")),
 ]
+
+
+def _mcp_tool_setting_changes(
+    old_settings: "Mapping[UUID, StoredSpaceToolSetting]",
+    new_settings: "Mapping[UUID, StoredSpaceToolSetting]",
+    kept_server_ids: AbstractSet[UUID],
+) -> dict[str, list[dict[str, object]]] | None:
+    """The space's stored tool switches that changed, each before and after
+    (null: no switch of its own); None when none did. Only the tools of a
+    server the space keeps count: the tools of a server switched on or off
+    come and go with it, and that is the server's change."""
+    old_entries: list[dict[str, object]] = []
+    new_entries: list[dict[str, object]] = []
+    settings = {**old_settings, **new_settings}
+    for tool_id, setting in sorted(
+        settings.items(), key=lambda item: (item[1].tool_name, str(item[0]))
+    ):
+        before, after = old_settings.get(tool_id), new_settings.get(tool_id)
+        if setting.mcp_server_id not in kept_server_ids:
+            continue
+        was_enabled = None if before is None else before.is_enabled
+        is_enabled = None if after is None else after.is_enabled
+        if was_enabled == is_enabled:
+            continue
+        entry = {"id": str(tool_id), "name": setting.tool_name}
+        old_entries.append({**entry, "is_enabled": was_enabled})
+        new_entries.append({**entry, "is_enabled": is_enabled})
+    if not new_entries:
+        return None
+    return {"old": old_entries, "new": new_entries}
 
 
 async def _space_response(container: Container, space: "Space") -> SpacePublic:
@@ -209,6 +242,8 @@ async def update_space(
     current_user = container.user()
 
     old_space = await service.get_space(id)
+    space_repo = container.space_repo()
+    old_tool_settings = await space_repo.get_stored_tool_settings(id)
 
     def _get_model_ids_or_none(models: list[ModelId] | None):
         if models is None:
@@ -300,6 +335,7 @@ async def update_space(
             old_space.linked_transcription_services,
             space.linked_transcription_services,
         ),
+        ("mcp_servers", old_space.mcp_servers, space.mcp_servers),
     ):
         old_entries = [{"id": str(m.id), "name": m.name} for m in old_links]
         new_entries = [{"id": str(m.id), "name": m.name} for m in new_links]
@@ -307,6 +343,15 @@ async def update_space(
             tuple(e.values()) for e in new_entries
         }:
             changes[field] = {"old": old_entries, "new": new_entries}
+
+    tool_settings = _mcp_tool_setting_changes(
+        old_tool_settings,
+        await space_repo.get_stored_tool_settings(id),
+        {server.id for server in old_space.mcp_servers}
+        & {server.id for server in space.mcp_servers},
+    )
+    if tool_settings is not None:
+        changes["mcp_tools"] = tool_settings
 
     if old_space.enabled_capabilities != space.enabled_capabilities:
         changes["enabled_capabilities"] = {

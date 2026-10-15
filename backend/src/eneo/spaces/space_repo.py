@@ -177,6 +177,16 @@ class SpaceRepositoryUserRequiredError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class StoredSpaceToolSetting:
+    """A space's own stored switch for one tool, whatever the instance
+    admin's switch is."""
+
+    tool_name: str
+    mcp_server_id: UUID
+    is_enabled: bool
+
+
+@dataclass(frozen=True)
 class KnowledgeSource:
     """One kind of knowledge a space can hold: the table that owns it and the
     association table that distributes it to other spaces.
@@ -596,6 +606,32 @@ class SpaceRepository:
                 ]
             )
             await self.session.execute(stmt)
+
+    async def get_stored_tool_settings(
+        self, space_id: UUID
+    ) -> dict[UUID, StoredSpaceToolSetting]:
+        """The tool switches the space has stored, by tool id, as
+        ``_set_mcp_tools`` wrote them: also those of a tool the instance admin
+        switched off for all, which the space's tool list does not show."""
+        rows = await self.session.execute(
+            sa.select(
+                SpacesMCPServerTools.mcp_server_tool_id,
+                MCPServerToolsTable.name,
+                MCPServerToolsTable.mcp_server_id,
+                SpacesMCPServerTools.is_enabled,
+            )
+            .join(
+                MCPServerToolsTable,
+                MCPServerToolsTable.id == SpacesMCPServerTools.mcp_server_tool_id,
+            )
+            .where(SpacesMCPServerTools.space_id == space_id)
+        )
+        return {
+            tool_id: StoredSpaceToolSetting(
+                tool_name=name, mcp_server_id=server_id, is_enabled=is_enabled
+            )
+            for tool_id, name, server_id, is_enabled in rows.tuples()
+        }
 
     async def _set_mcp_tools(
         self,
