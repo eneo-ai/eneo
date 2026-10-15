@@ -11,10 +11,11 @@ import { useSpace } from "@/features/spaces/use-space";
 import { embeddingModelsInUse } from "../knowledge";
 import { NoCreatePermissionInfo } from "../no-create-permission-info";
 import { IntegrationsBetaNotice } from "../notices";
-import { groupIntegrationRows } from "./grouping";
 import { ImportKnowledgeDialog, useImportableIntegrations } from "./import/import-dialog";
 import { integrationSetupAction } from "./setup-action";
-import { IntegrationItemsTable } from "./table";
+import { SourcesTable } from "./sources-table";
+import { groupIntegrationSources } from "./sources";
+import { useSyncProgress } from "./use-sync-progress";
 
 /** Import from a connected integration, or where to connect one first. */
 function ImportAction() {
@@ -65,7 +66,8 @@ export function IntegrationsTab({
   const items = space.knowledge.integration_knowledge_list.items.filter(
     (item) => item.space_id === space.id
   );
-  const rows = groupIntegrationRows(items);
+  const sources = groupIntegrationSources(items);
+  const progress = useSyncProgress();
   const models = embeddingModelsInUse(items, space.embedding_models);
   const grouped =
     models.length > 1 ||
@@ -95,10 +97,10 @@ export function IntegrationsTab({
         <>
           <div className="flex flex-wrap justify-end gap-2">{action}</div>
           {(grouped ? models : [null]).map((model) => {
-            const modelRows = model
-              ? rows.filter((row) => row.embeddingModelId === model.id)
-              : rows;
-            if (modelRows.length === 0) return null;
+            const modelSources = model
+              ? sources.filter((source) => source.embeddingModelId === model.id)
+              : sources;
+            if (modelSources.length === 0) return null;
             const headingId = model ? `${groupId}-${model.id}` : undefined;
             return (
               <div key={model?.id ?? "all"} className="flex flex-col gap-2">
@@ -108,7 +110,11 @@ export function IntegrationsTab({
                     {model.inSpace ? "" : ` (${t("disabled")})`}
                   </h3>
                 )}
-                <IntegrationItemsTable rows={modelRows} labelledBy={headingId ?? labelledBy} />
+                <SourcesTable
+                  sources={modelSources}
+                  progress={progress}
+                  labelledBy={headingId ?? labelledBy}
+                />
               </div>
             );
           })}

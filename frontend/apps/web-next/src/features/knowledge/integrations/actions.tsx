@@ -41,6 +41,7 @@ export function IntegrationActions({ item }: { item: IntegrationKnowledge }) {
   const t = useTranslations();
   const { space } = useSpace();
   const { trackJob } = useJobs();
+  const queryClient = useQueryClient();
   const invalidate = useSpaceInvalidation();
   const [showRename, setShowRename] = useState(false);
   const [showSync, setShowSync] = useState(false);
@@ -76,6 +77,9 @@ export function IntegrationActions({ item }: { item: IntegrationKnowledge }) {
     onSuccess: () => {
       trackJob();
       invalidate();
+      void queryClient.invalidateQueries({
+        queryKey: ["integrations", "sync-progress", space.id]
+      });
       setShowSync(false);
     },
     onError: (error) => toastApiError(error, t)

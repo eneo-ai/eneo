@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
-import { wrapperDisplayName } from "@/features/knowledge/integrations/grouping";
+import { groupIntegrationSources } from "@/features/knowledge/integrations/sources";
 import { spacePageTitle } from "@/features/spaces/page-title";
 import { spaceQueryOptions } from "@/features/spaces/space";
 import { WrapperDetail } from "./wrapper-detail.client";
@@ -14,11 +14,11 @@ export async function generateMetadata({
   const { spaceId, wrapperId } = await params;
   return spacePageTitle(async () => {
     const space = await getQueryClient().query(spaceQueryOptions(eneoApi(), spaceId));
-    const item = space.knowledge.integration_knowledge_list.items.find(
-      (entry) => entry.wrapper_id === wrapperId
+    const source = groupIntegrationSources(space.knowledge.integration_knowledge_list.items).find(
+      (entry) => entry.kind === "wrapper" && entry.id === wrapperId
     );
-    if (!item) throw new Error(`No integration items in wrapper ${wrapperId}`);
-    return wrapperDisplayName(item);
+    if (!source) throw new Error(`No integration items in wrapper ${wrapperId}`);
+    return source.name;
   }, "integrations");
 }
 

@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   posted: [] as { path: string; body: unknown }[],
   deleted: [] as string[],
   bulkResult: { total: 0, queued: 0, failed: 0, crawl_runs: [], errors: [] } as unknown,
+  progress: [] as unknown[],
   toasts: [] as { kind: string; message: string; description?: string }[]
 }));
 
@@ -32,7 +33,12 @@ vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: (path: string) =>
       Promise.resolve({
-        data: path === "/api/v1/spaces/{id}/" ? state.space : { items: [] },
+        data:
+          path === "/api/v1/spaces/{id}/"
+            ? state.space
+            : path === "/api/v1/spaces/{id}/knowledge/integrations/sync-progress/"
+              ? { items: state.progress }
+              : { items: [] },
         response: new Response("{}")
       }),
     POST: (path: string, { body }: { body: unknown }) => {
@@ -61,6 +67,7 @@ import { KnowledgePage } from "./knowledge-page";
 
 afterEach(() => {
   cleanup();
+  state.progress = [];
   state.posted = [];
   state.deleted = [];
   state.toasts = [];
@@ -213,49 +220,93 @@ describe("KnowledgePage", () => {
     expect(screen.queryByRole("button", { name: "Synkronisera valda (2)" })).toBeNull();
   });
 
-  it("lists integrations in a bordered table sorted by name, with folders and status dots", async () => {
+  it("lists one row per source with its state, and leads to each source's page", async () => {
+    const credentials =
+      "SharePoint credentials are invalid or expired; an administrator must reconnect the integration";
     const { container } = show(
       makeSpace({
         integrations: [
-          makeIntegration({ id: "i1", name: "Ärendehandbok", integration_type: "confluence" }),
+          makeIntegration({
+            id: "i1",
+            name: "Ärendehandbok",
+            integration_type: "confluence",
+            metadata: { size: 0, last_synced_at: "2026-09-20T08:00:00Z", document_count: 5 }
+          }),
           makeIntegration({
             id: "i2",
             name: "Avtalsmallar",
             metadata: { size: 0, last_synced_at: null, sharepoint_subscription_expires_at: null }
           }),
           makeIntegration({ id: "i3", name: "Mall 1", wrapper_id: "w1", wrapper_name: "Byggnad" }),
-          makeIntegration({ id: "i4", name: "Mall 2", wrapper_id: "w1", wrapper_name: "Byggnad" })
+          makeIntegration({
+            id: "i4",
+            name: "Mall 2",
+            wrapper_id: "w1",
+            wrapper_name: "Byggnad",
+            metadata: { size: 0, last_sync_status: "error", last_sync_error: credentials }
+          })
         ]
       }),
       "integrations"
     );
 
     const table = await screen.findByRole("table", { name: "Integrationer" });
-    const names = () =>
-      within(table)
-        .getAllByRole("row")
-        .slice(1)
-        .map((row) => within(row).getAllByRole("cell")[0]!.textContent);
-    // Name, ascending, in Swedish order (Ä after Z); the folder links to its page.
-    expect(names()).toEqual(["Avtalsmallar", "Byggnad2 mappar", "Ärendehandbok"]);
+    const rows = () => within(table).getAllByRole("row").slice(1);
+    const sources = () => rows().map((row) => within(row).getAllByRole("link")[0]!.textContent);
+    // Name, ascending, in Swedish order (Ä after Z); a wrapper is one source.
+    expect(sources()).toEqual(["Avtalsmallar", "Byggnad", "Ärendehandbok"]);
     expect(within(table).getByRole("link", { name: "Byggnad" }).getAttribute("href")).toBe(
       "/spaces/space-1/knowledge/integrations/wrapper/w1"
     );
-    const avtal = within(table).getByText("Avtalsmallar").closest("tr")!;
-    expect(within(avtal).getByText("Ingen Webhook")).toBeTruthy();
-    expect(
-      within(avtal).getByRole("button", { name: /^Ingen synk registrerad ?, Synkhistorik$/ })
-    ).toBeTruthy();
-    // What the missing webhook means is text, not a hover-only tooltip.
-    expect(within(avtal).getByText(/ändringar synkas inte automatiskt/)).toBeTruthy();
-    expect(within(avtal).getByRole("link", { name: /Öppna i SharePoint/ })).toBeTruthy();
-    expect(
-      within(avtal).getByRole("button", { name: "Fler åtgärder för Avtalsmallar" })
-    ).toBeTruthy();
+    expect(within(table).getByRole("link", { name: "Avtalsmallar" }).getAttribute("href")).toBe(
+      "/spaces/space-1/knowledge/integrations/i2"
+    );
+    const row = (name: string) => within(table).getByRole("link", { name }).closest("tr")!;
+    expect(within(row("Avtalsmallar")).getByText("Väntar på första synken")).toBeTruthy();
+    expect(within(row("Byggnad")).getByText("Behöver åtgärd")).toBeTruthy();
+    expect(within(row("Byggnad")).getByText("2 mappar")).toBeTruthy();
+    expect(within(row("Ärendehandbok")).getByText("Aktuell")).toBeTruthy();
+
+    // Only the refused sign-in gets a banner: no space member can fix it.
+    expect(screen.getByText("1 källa uppdateras inte")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Öppna källan" }).getAttribute("href")).toBe(
+      "/spaces/space-1/knowledge/integrations/wrapper/w1?tab=problems"
+    );
     await expectNoAxeViolations(container);
 
+    fireEvent.click(screen.getByRole("radio", { name: "Behöver åtgärd 1" }));
+    expect(sources()).toEqual(["Byggnad"]);
+    fireEvent.click(screen.getByRole("radio", { name: "Alla 3" }));
+
     fireEvent.click(screen.getByRole("button", { name: "Sortera efter Status" }));
-    expect(names()[0]).toBe("Avtalsmallar");
+    expect(sources()[0]).toBe("Byggnad");
+  });
+
+  it("shows a running sync as progress on its source", async () => {
+    state.progress = [
+      {
+        integration_knowledge_id: "i1",
+        sync_type: "full",
+        phase: "processing",
+        started_at: "2026-10-15T10:00:00Z",
+        updated_at: "2026-10-15T10:01:00Z",
+        total: null,
+        done: 3,
+        indexed: 3,
+        unchanged: 0,
+        skipped: 0,
+        deleted: 0
+      }
+    ];
+    show(
+      makeSpace({ integrations: [makeIntegration({ id: "i1", name: "Avtalsmallar" })] }),
+      "integrations"
+    );
+
+    expect(
+      await screen.findByRole("progressbar", { name: "Synkförlopp för Avtalsmallar" })
+    ).toBeTruthy();
+    expect(screen.getByText("Synkar · 3 klara")).toBeTruthy();
   });
 
   it("offers the next step for integrations in the empty state", () => {

@@ -1,0 +1,142 @@
+"use client";
+
+import { Button } from "@astryxdesign/core/Button";
+import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
+import { ExternalLink } from "lucide-react";
+import Link from "next/link";
+import { useTranslations } from "next-intl";
+import { Table } from "@/components/astryx/table";
+import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
+import type { IntegrationKnowledge } from "../../knowledge";
+import { IntegrationActions } from "../actions";
+import { buildIntegrationTree, flattenIntegrationTree } from "../integration-tree";
+import { SourceStateLabel } from "../source-status";
+import { itemState } from "../sources";
+import type { ProgressById } from "../sync-progress";
+import { VENDOR } from "../vendor";
+
+type FolderRow = { id: string; item: IntegrationKnowledge; depth: number };
+
+function LastUpToDate({ item }: { item: IntegrationKnowledge }) {
+  const t = useTranslations();
+  const attempted = useClientTimeText(item.metadata?.last_sync_attempted_at, "date_time");
+  if (item.metadata?.last_synced_at) {
+    return (
+      <span className="text-ax-text-secondary text-sm">
+        <ClientTime value={item.metadata.last_synced_at} format="auto" />
+      </span>
+    );
+  }
+  return (
+    <span className="text-ax-text-secondary text-sm">
+      {attempted ? t("integration_source_last_attempt_at", { time: attempted }) : "–"}
+    </span>
+  );
+}
+
+/** Every folder of a source in tree order, with its state, documents and actions. */
+export function FolderOverview({
+  items,
+  progress,
+  sourceName,
+  hrefFor
+}: {
+  items: IntegrationKnowledge[];
+  progress: ProgressById;
+  sourceName: string;
+  hrefFor: (itemId: string) => string;
+}) {
+  const t = useTranslations();
+  const rows: FolderRow[] = flattenIntegrationTree(buildIntegrationTree(items), () => true).map(
+    (row) => ({ id: row.item.id, item: row.item, depth: row.depth })
+  );
+
+  const columns: TableColumn<FolderRow>[] = [
+    {
+      key: "folder",
+      header: t("integration_source_folder"),
+      width: proportional(3),
+      renderCell: (row) => (
+        <span
+          className="flex min-w-0 flex-col"
+          style={{ paddingInlineStart: `${row.depth * 1.25}rem` }}
+        >
+          <Link
+            href={hrefFor(row.item.id)}
+            scroll={false}
+            replace
+            className="text-ax-text focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 w-fit items-center font-semibold break-words hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+          >
+            {row.item.name}
+            {row.item.original_name && row.item.original_name !== row.item.name ? (
+              <span className="text-ax-text-secondary ms-1 font-normal">
+                ({row.item.original_name})
+              </span>
+            ) : null}
+          </Link>
+          {row.item.folder_path ? (
+            <span className="text-ax-text-secondary truncate text-xs">{row.item.folder_path}</span>
+          ) : null}
+        </span>
+      )
+    },
+    {
+      key: "status",
+      header: t("status"),
+      width: proportional(1),
+      renderCell: (row) => <SourceStateLabel state={itemState(row.item, progress)} />
+    },
+    {
+      key: "documents",
+      header: t("documents"),
+      width: pixel(110),
+      align: "end",
+      renderCell: (row) => (
+        <span className="tabular-nums">
+          {progress[row.item.id] ? "–" : (row.item.metadata?.document_count ?? 0)}
+        </span>
+      )
+    },
+    {
+      key: "updated",
+      header: t("integration_source_last_up_to_date"),
+      width: proportional(1),
+      renderCell: (row) => <LastUpToDate item={row.item} />
+    },
+    {
+      key: "actions",
+      header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
+      width: pixel(112),
+      align: "end",
+      renderCell: (row) => (
+        <span className="flex items-center justify-end gap-1">
+          {row.item.url ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              label={t("integration_source_open_item_link", {
+                label: t(VENDOR[row.item.integration_type].linkLabel),
+                name: row.item.name
+              })}
+              isIconOnly
+              icon={<ExternalLink className="size-4" aria-hidden="true" />}
+              href={row.item.url}
+              target="_blank"
+            />
+          ) : null}
+          <IntegrationActions item={row.item} />
+        </span>
+      )
+    }
+  ];
+
+  return (
+    <Table
+      data={rows}
+      columns={columns}
+      idKey="id"
+      aria-label={t("integration_source_folders_table_label", { name: sourceName })}
+    />
+  );
+}
