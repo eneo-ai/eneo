@@ -343,6 +343,20 @@ export function initMCPServers(client) {
     },
 
     /**
+     * The published flows that call a tool of an MCP server (admin only): a
+     * total count and the first part of the list.
+     * @param {Object} params
+     * @param {string} params.mcp_server_id The MCP server ID
+     * @throws {EneoError}
+     * */
+    flowUsage: async ({ mcp_server_id }) => {
+      return client.fetch("/api/v1/mcp-servers/{mcp_server_id}/flow-usage", {
+        method: "get",
+        params: { path: { mcp_server_id } }
+      });
+    },
+
+    /**
      * Manually refresh/sync tools for an MCP server (admin only).
      * @param {Object} params
      * @param {string} params.mcp_server_id The MCP server ID

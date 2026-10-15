@@ -60,6 +60,7 @@ from eneo.flows.api.flow_live_transcription_socket_router import (
 )
 from eneo.flows.api.flow_router import router as flows_router
 from eneo.flows.api.flow_runtime_paths import FLOW_ROOT_PATH
+from eneo.flows.api.flow_tool_usage_router import router as flow_tool_usage_router
 from eneo.governance_policy.presentation.governance_policy_router import (
     router as governance_policy_router,
 )
@@ -614,6 +615,14 @@ router.include_router(
 )
 router.include_router(
     mcp_server_router,
+    prefix="/mcp-servers",
+    tags=["mcp-servers"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+# Flows owns this read of its published definitions; it sits under the
+# server's path so the MCP module never imports flows.
+router.include_router(
+    flow_tool_usage_router,
     prefix="/mcp-servers",
     tags=["mcp-servers"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,

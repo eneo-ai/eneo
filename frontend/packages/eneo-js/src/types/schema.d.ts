@@ -7300,6 +7300,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/mcp-servers/{mcp_server_id}/flow-usage": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the published flows that use an MCP server
+     * @description The flows whose published version has a step that calls a tool of the server, with the tools each one calls, so an administrator sees which flows a change to the server or a tool affects. A draft that is not published, an unpublished flow and a deleted flow are not listed. `total_count` counts every such flow; `items` lists the first 100. The read does not look the server up: a flow published with a server keeps it in its published version when the server's purpose changes or the server is deleted, so its id still lists those flows. It needs the admin permission, as managing MCP servers does.
+     */
+    get: operations["list_mcp_server_flow_usage"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/module-auth/tickets/": {
     parameters: {
       query?: never;
@@ -33321,6 +33341,41 @@ export interface components {
      * @enum {string}
      */
     PublishedDefinitionIntegrityStatus: "verified" | "invalid";
+    /** PublishedFlowToolUsePublic */
+    PublishedFlowToolUsePublic: {
+      /**
+       * Flow Id
+       * Format: uuid
+       * @description The flow.
+       */
+      flow_id: string;
+      /**
+       * Flow Name
+       * @description The flow's name.
+       */
+      flow_name: string;
+      /**
+       * Published Version
+       * @description The flow's published version, the one its runs use.
+       */
+      published_version: number;
+      /**
+       * Space Id
+       * Format: uuid
+       * @description The space the flow belongs to.
+       */
+      space_id: string;
+      /**
+       * Space Name
+       * @description The space's name.
+       */
+      space_name: string;
+      /**
+       * Tool Ids
+       * @description Each tool of the server that a step of the published version calls, once, in id order.
+       */
+      tool_ids: string[];
+    };
     /** PublishedSkillPublic */
     PublishedSkillPublic: {
       /** Content Digest */
@@ -33426,6 +33481,19 @@ export interface components {
       revision_number: number;
       /** Slug */
       slug: string;
+    };
+    /** PublishedToolUsagePublic */
+    PublishedToolUsagePublic: {
+      /**
+       * Items
+       * @description The first 100 of those flows, by space name, then flow name.
+       */
+      items: components["schemas"]["PublishedFlowToolUsePublic"][];
+      /**
+       * Total Count
+       * @description How many published flows call a tool of the server.
+       */
+      total_count: number;
     };
     /** QuestionMetadata */
     QuestionMetadata: {
@@ -66973,6 +67041,47 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_mcp_server_flow_usage: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The MCP server. */
+        mcp_server_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PublishedToolUsagePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

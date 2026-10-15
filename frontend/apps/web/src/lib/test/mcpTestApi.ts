@@ -12,7 +12,7 @@ const toolRest = { description: null, input_schema: null, is_enabled_by_default:
 export const mcpServer = (overrides: Partial<Server> = {}): Server => ({ ...server, ...overrides });
 export const mcpTool = (overrides: Partial<Tool>): Tool => ({ ...tool, ...toolRest, ...overrides });
 export const testEneo = () => createEneo({ baseUrl: "https://eneo.example", token: "t" });
-export const stubFetch = (answer: () => Promise<Response>) => {
+export const stubFetch = (answer: (...request: Parameters<typeof fetch>) => Promise<Response>) => {
   const stub = vi.fn(answer);
   vi.stubGlobal("fetch", stub);
   return stub;

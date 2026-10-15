@@ -234,6 +234,12 @@ A `refusal` of `null` is not a promise that the step publishes. Publishing also 
 
 The permission is checked on the space as it is read for access decisions, without the tools of any MCP server. The list is not paged: one database statement reads it in its order. When the tools number more than 1,000, or the text the list returns for them (each tool's server name, tool name, approved description and approved input schema as its JSON text) takes more than 8 MiB, that statement returns them only up to the first tool past the bound, and the list is refused with 413 `flow_tool_options_too_large`; it is never cut short. The error context gives both limits, as `max_tool_count` and `max_text_bytes`. A space administrator can switch off the MCP servers the flows in the space do not need.
 
+## List the published flows that use an MCP server
+
+`GET /api/v1/mcp-servers/{mcp_server_id}/flow-usage` lists the flows whose published version has a step that calls a tool of the server, so an administrator sees which flows a change to the server or a tool affects. It needs the admin permission, as managing MCP servers does. Drafts that are not published, unpublished flows and deleted flows are not listed.
+
+`total_count` counts every such flow, and `items` lists the first 100 by space name, then flow name. Each item has `flow_id`, `flow_name`, `space_id`, `space_name`, `published_version` and `tool_ids`, the server's tools the published steps call, each once. The read does not look the server up: a flow published with a server keeps it in its published version when the server's purpose changes or the server is deleted, so the server's id still lists those flows.
+
 ## Common application patterns
 
 For endpoint-and-capability-first design walkthroughs, start with [Designing Flows](/guides/flows/designing-flows). This reference section keeps the deeper API field context.

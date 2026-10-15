@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.authentication.principal_types import PrincipalType
-from eneo.database.tables.flow_tables import FlowRuns, FlowVersions
+from eneo.database.tables.flow_tables import FlowRuns, Flows, FlowVersions
 from eneo.database.tables.mcp_server_table import (
     MCPServers,
     MCPServerTools,
@@ -21,13 +21,18 @@ from eneo.database.tables.mcp_server_table import (
 from eneo.database.tables.security_classifications_table import (
     SecurityClassification as SecurityClassifications,
 )
+from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.runtime import tasks as flow_runtime_tasks
 from eneo.main.exceptions import BadRequestException
+from eneo.main.models import ModelId
 from eneo.mcp_servers.domain.unattended_tool_refusal import UnattendedToolRefusal
 from eneo.prompts.api.prompt_models import PromptCreate
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleCreate
+from eneo.users.user import UserUpdate
 from tests.integration.flows.test_flow_assistant_update_siblings import (
     _admin_token_and_space,
 )
@@ -333,3 +338,170 @@ async def test_the_tool_list_reads_the_stored_chain_for_the_flows_space(
         ("open_case", UnattendedToolRefusal.TOOL_WAITING_FOR_REVIEW, None),
     ]
     assert {o.mcp_server_id for o in options} == {tool_flow.server_id}
+
+
+async def _grant(db_container, user_id: UUID, permissions: list[Permission]) -> str:
+    """The user's roles replaced by one with ``permissions``; its session token."""
+    async with db_container() as container:
+        role = await container.role_repo().create_role(
+            RoleCreate(
+                name=f"tool-usage-{uuid4().hex[:8]}",
+                permissions=permissions,
+                tenant_id=container.user().tenant_id,
+            )
+        )
+    async with db_container() as container:
+        user = await container.user_repo().update(
+            UserUpdate(id=user_id, roles=[ModelId(id=role.id)])
+        )
+        assert user is not None
+        return container.auth_service().create_access_token_for_user(user)
+
+
+async def _flow_usage(client, token: str, server_id: UUID):
+    return await client.get(
+        f"/api/v1/mcp-servers/{server_id}/flow-usage",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+_AUTHOR = [Permission.ASSISTANTS, Permission.SHARED_SPACES, Permission.FLOWS_MANAGE]
+
+
+async def test_flow_usage_lists_a_flow_only_while_its_published_version_uses_the_server(
+    client, db_container, admin_user, tool_flow: ToolFlow
+) -> None:
+    # Kills the mutants where the route lets a user without the admin
+    # permission read it, the read takes the draft steps or any stored version
+    # instead of the published one (listed before publish or after unpublish),
+    # ignores a deleted flow, or returns more of the flow than its identities
+    # (step contents, arguments), and where it consults the server catalog, so
+    # a flow published with the server drops out when the server's purpose
+    # changes or the server is deleted.
+    token = await _grant(db_container, admin_user.id, _AUTHOR)
+    assert (await _flow_usage(client, token, tool_flow.server_id)).status_code == 403
+
+    await _grant(db_container, admin_user.id, [*_AUTHOR, Permission.ADMIN])
+    nothing = {"total_count": 0, "items": []}
+    draft_only = await _flow_usage(client, token, tool_flow.server_id)
+    assert draft_only.status_code == 200, draft_only.text
+    assert draft_only.json() == nothing
+
+    async with db_container() as container:
+        container.session().add(
+            SpacesMCPServers(
+                space_id=tool_flow.space_id, mcp_server_id=tool_flow.server_id
+            )
+        )
+        await container.session().flush()
+        await container.flow_service().publish_flow(flow_id=tool_flow.flow_id)
+        space_name = await container.session().scalar(
+            sa.select(Spaces.name).where(Spaces.id == tool_flow.space_id)
+        )
+    published = await _flow_usage(client, token, tool_flow.server_id)
+    assert published.json() == {
+        "total_count": 1,
+        "items": [
+            {
+                "flow_id": str(tool_flow.flow_id),
+                "flow_name": "Verktygssteg",
+                "space_id": str(tool_flow.space_id),
+                "space_name": space_name,
+                "published_version": 1,
+                "tool_ids": [str(tool_flow.tool_id)],
+            }
+        ],
+    }
+
+    async with db_container() as container:
+        await container.flow_service().unpublish_flow(flow_id=tool_flow.flow_id)
+    assert (await _flow_usage(client, token, tool_flow.server_id)).json() == nothing
+
+    async with db_container() as container:
+        await container.flow_service().publish_flow(flow_id=tool_flow.flow_id)
+    republished = (await _flow_usage(client, token, tool_flow.server_id)).json()
+    assert republished["items"][0]["published_version"] == 2
+    for server_change in (
+        sa.update(MCPServers)
+        .where(MCPServers.id == tool_flow.server_id)
+        .values(purpose="web_search"),
+        sa.delete(MCPServers).where(MCPServers.id == tool_flow.server_id),
+    ):
+        async with db_container() as container:
+            await container.session().execute(server_change)
+        still_listed = (await _flow_usage(client, token, tool_flow.server_id)).json()
+        assert still_listed == republished
+    async with db_container() as container:
+        await container.flow_service().delete_flow(tool_flow.flow_id)
+    assert (await _flow_usage(client, token, tool_flow.server_id)).json() == nothing
+
+
+def _stored_tool_step(order: int, server_id: UUID, tool_id: UUID) -> dict[str, object]:
+    # Only what the usage read looks at: a published step's input source and
+    # its pinned tool configuration.
+    return {
+        "step_order": order,
+        "input_source": "tool",
+        "input_config": {
+            "tool": {"mcp_server_id": str(server_id), "tool_id": str(tool_id)}
+        },
+    }
+
+
+async def test_flow_usage_counts_every_using_flow_once_and_lists_a_bounded_first_part(
+    client, db_container, admin_user, tool_flow: ToolFlow, monkeypatch
+) -> None:
+    # Kills the mutants where the read lists every flow (no bound), counts
+    # only the listed part or one row per step, keeps the flows of another
+    # server or a tool configuration on a step that is not a tool step,
+    # repeats a tool a flow uses in several steps, or lists the flows of one
+    # space in another order than by name.
+    monkeypatch.setattr(
+        "eneo.flows.infrastructure.published_tool_usage."
+        "PUBLISHED_TOOL_USAGE_MAX_LISTED",
+        2,
+    )
+    server, other_server = tool_flow.server_id, uuid4()
+    first_tool, second_tool = sorted((tool_flow.tool_id, uuid4()), key=str)
+    published_steps = {
+        "Usage C": [_stored_tool_step(1, server, first_tool)],
+        "Usage A": [
+            _stored_tool_step(1, server, second_tool),
+            _stored_tool_step(2, server, first_tool),
+            _stored_tool_step(3, server, second_tool),
+        ],
+        "Usage B": [_stored_tool_step(1, server, second_tool)],
+        "Another server": [_stored_tool_step(1, other_server, first_tool)],
+        # A run reads a tool configuration only on a tool step.
+        "Not a tool step": [
+            {**_stored_tool_step(1, server, first_tool), "input_source": "flow_input"}
+        ],
+    }
+    async with db_container() as container:
+        session = container.session()
+        tenant_id = container.user().tenant_id
+        for name, steps in published_steps.items():
+            flow = Flows(name=name, tenant_id=tenant_id, space_id=tool_flow.space_id)
+            session.add(flow)
+            await session.flush()
+            session.add(
+                FlowVersions(
+                    flow_id=flow.id,
+                    version=1,
+                    tenant_id=tenant_id,
+                    definition_checksum="0" * 64,
+                    definition_json={"steps": steps},
+                )
+            )
+            await session.flush()
+            flow.published_version = 1
+        await session.flush()
+    token = await _grant(db_container, admin_user.id, [Permission.ADMIN])
+
+    usage = (await _flow_usage(client, token, server)).json()
+
+    assert usage["total_count"] == 3
+    assert [(item["flow_name"], item["tool_ids"]) for item in usage["items"]] == [
+        ("Usage A", [str(first_tool), str(second_tool)]),
+        ("Usage B", [str(second_tool)]),
+    ]

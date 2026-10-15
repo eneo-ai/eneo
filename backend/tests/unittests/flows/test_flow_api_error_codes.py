@@ -55,7 +55,9 @@ FLOW_ERROR_REFERENCE_ROW_CODE_PATTERN = re.compile(
 )
 FLOW_GUIDE_NON_ERROR_CODE_TOKENS = {
     "flow_evidence": "resource permission name, not an error code",
+    "flow_id": "MCP server flow usage item field, not an error code",
     "flow_input": "step input source value, not an error code",
+    "flow_name": "MCP server flow usage item field, not an error code",
     "flow_runtime_upload_abandonment_days": (
         "runtime upload retention field, not an error code"
     ),

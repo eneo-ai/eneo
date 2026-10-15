@@ -261,6 +261,14 @@ configured and what it records.
   longer offers, is refused until an administrator has dealt with it. When the
   tool's name or its approved input schema has changed since the flow was
   published, the flow must be published again.
+- In **Admin → Tools**, the tool list of an MCP server shows how many
+  published flows call a tool of the server, and lists them with their space,
+  published version and the tools they call. A flow in a space you are a member
+  of links to the flow when you may manage flows. Drafts, unpublished flows and
+  deleted flows are not counted. A flow keeps the server in its published
+  version when the server's function changes, so it stays listed. Check the
+  list before you switch the server or a tool off: those flows' tool steps
+  then fail.
 
 Everything else of MCP stays outside Flows. A step's assistant does not use
 MCP servers or tools in a Flow, AI Builder does not propose tool steps, and a

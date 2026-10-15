@@ -169,6 +169,7 @@ from eneo.flows.infrastructure.flow_transcript_source_repo import (
 from eneo.flows.infrastructure.flow_transcript_words_repo import (
     FlowTranscriptWordsRepository,
 )
+from eneo.flows.infrastructure.published_tool_usage import PublishedToolUsageReader
 from eneo.flows.runtime.flow_webhook_delivery import FlowRunWebhookDeliveryService
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.live_transcription.service import (
@@ -900,6 +901,10 @@ class Container(containers.DeclarativeContainer):
     )
     flow_version_repo = providers.Factory(
         FlowVersionRepository,
+        session=session,
+    )
+    published_tool_usage_reader = providers.Factory(
+        PublishedToolUsageReader,
         session=session,
     )
     flow_template_asset_repo = providers.Factory(
