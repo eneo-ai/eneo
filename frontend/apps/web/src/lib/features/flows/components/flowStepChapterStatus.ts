@@ -4,6 +4,7 @@ import { getTextProcessingMode } from "$lib/features/flows/flowTextProcessingCon
 import { m } from "$lib/paraglide/messages";
 import { describeAnswerFields } from "$lib/features/flows/flowStepRequestPreview";
 import { getStepSourceLine } from "$lib/features/flows/flowStepMaterial";
+import type { FlowToolOption } from "./tool/toolInputConfig";
 import type { VariableClassificationContext } from "$lib/features/flows/flowVariableTokens";
 import { OUTPUT_MODES } from "$lib/features/flows/flowStepTypes";
 import {
@@ -92,6 +93,7 @@ export function getChapterInputStatus({
   step,
   previousStep,
   context,
+  tools = [],
   hasKnowledge,
   hasAttachments
 }: {
@@ -100,12 +102,14 @@ export function getChapterInputStatus({
   previousStep?: Pick<FlowStep, "step_order" | "user_description"> | null;
   /** The step's variable context, so form fields read as the form. */
   context: VariableClassificationContext;
+  /** The editor's list of the flow's tools, which names a chosen tool. */
+  tools?: readonly FlowToolOption[];
   hasKnowledge: boolean;
   hasAttachments: boolean;
 }): string {
   // The step list's line (flowStepMaterial owns it), so both say the same.
   const source =
-    getStepSourceLine(step, previousStep, context)?.text ?? m.flow_input_source_flow_input();
+    getStepSourceLine(step, previousStep, context, tools)?.text ?? m.flow_input_source_flow_input();
   const extra =
     hasKnowledge || hasAttachments
       ? m.flow_chapter_input_extra_active()

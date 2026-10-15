@@ -76,27 +76,58 @@ than everything, and it documents the flow's data path for the next author.
 
 A step can take its material from one MCP tool instead of from the flow. In the
 step editor, switch to **Advanced**, open the step's **Source** and choose
-**Fetch from a tool**, then choose the tool and give its arguments.
+**Fetch from a tool**. **Simple** lists the source too, but it can be chosen
+only in **Advanced**. The tool and its arguments follow right under the
+source; choose the tool and give its arguments.
 
-- The flow calls the tool once each time the step runs. A tool that changes
-  something changes it again when a run is started again.
+- The flow calls the tool once each time the step runs. When the step runs
+  again, the tool is called again, and a tool that changes something changes
+  it again.
 - Each argument is a fixed value or exactly one variable from the flow, such as
   an earlier step's result. One argument cannot combine text with a variable.
-- Each argument the tool's schema names has a row of its own. A text, number,
-  yes/no or choice argument has a field of its own; any other argument, also
+- Each argument the tool's schema names has a row of its own, which shows the
+  argument's type when the schema names one type. Required arguments come
+  first, in the order the schema lists them. A text, number, yes/no or choice
+  argument has a field of its own; any other argument, also
   one that may be null, is entered as JSON. When the schema also takes
   arguments of other names, **Other arguments the tool takes** opens one JSON
   field for those. A tool whose arguments the editor cannot show as rows, or
   whose schema names none and takes arguments of any name, gets one JSON field
-  for all of them. A whole number beyond 9,007,199,254,740,991 cannot be stored
-  exactly and is refused; enter it as text if the tool accepts text.
+  for all of them, with **Show the tool's input schema** above it, which shows
+  the approved schema as JSON. **Insert variable** under a JSON field puts the
+  chosen variable in as one JSON string where the cursor is, when the field
+  then still holds a JSON object, such as after `"name": `; otherwise the text
+  stays as it was and the field says where to put the cursor. A whole number
+  beyond 9,007,199,254,740,991 cannot be stored exactly and is refused; enter
+  it as text if the tool accepts text.
+- While an argument's field or a JSON field holds text the step cannot store,
+  such as invalid JSON, a decimal for a whole number or a variable inside a
+  text, the step keeps the values it had and the text stays in the field,
+  also after you open another step and come back. The validation banner lists
+  it as an issue of the step with **Go to step**, and the flow cannot be
+  published until the text is corrected. The text is kept only while the flow
+  is open in the editor. Once another tool or other values for those
+  arguments are stored, the text is dropped. An emptied number or JSON field
+  leaves the argument without a value.
+- The tool search reads the tool's name, its server's name and its approved
+  description.
+- **Show what the AI gets** on a tool step whose tool is in the editor's tool
+  list starts with the tool call: the server, the tool, where each argument's
+  value comes from (a fixed value or a variable) and whether the answer is
+  received as text or JSON.
 - The tool's answer must be text or JSON. An answer with anything else in it,
-  such as an image, is refused and the step fails.
-- The tool must be allowed for flows in the flow's space. A space administrator
-  switches MCP servers on in the space settings; an instance administrator
-  switches servers and tools on and reviews new or changed tools. A tool the
-  editor lists as refused shows the reason and cannot be chosen. A flow in a
-  personal space cannot use tools.
+  such as an image, is refused and the step fails. The step's **Material type**
+  says how the step takes the answer: **Text** takes the answer's text, or its
+  structured content as JSON text when it has no text; **JSON** needs a JSON
+  object or array as the answer. Structured content must be a JSON object or
+  array with either type; otherwise the step fails.
+- The tool must be allowed for flows in the flow's space. An instance
+  administrator adds the MCP server under **Admin → Tools**, switches servers
+  and tools on and reviews new or changed tools; a space administrator
+  switches the server on in the space settings. While the space has no tool
+  to choose, the step editor lists these steps where the tool is chosen. A
+  tool the editor lists as refused shows the reason and cannot be chosen. A
+  flow in a personal space cannot use tools.
 - The tool's MCP server must have at least the security class of the space,
   so the run's own input (a form field, the run's text) and fixed values can be
   sent to it. An earlier step's result can be sent only when that step's class

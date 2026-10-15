@@ -121,6 +121,8 @@ export type SelectableInputTypeOption = {
 export type SelectableInputSourceOption = {
   value: InputSource;
   legacyInvalid: boolean;
+  /** Shown in Enkel, but chosen only in Avancerad. */
+  advancedOnly: boolean;
 };
 
 const INPUT_TYPE_ORDER: InputType[] = ["text", "json", "document", "file", "image", "audio", "any"];
@@ -210,19 +212,19 @@ export function getSelectableInputSourceOptions(params: {
   const { steps, stepOrder, currentInputSource, isAdvancedMode } = params;
   const visible = getValidInputSources({ steps, stepOrder });
   // A source that reaches outside the flow is configured in Avancerad, so only
-  // that mode offers it; a step that already has one shows it in every mode.
-  let options = INPUT_SOURCE_ORDER.filter((value) => visible.includes(value))
-    .filter(
-      (value) =>
-        isAdvancedMode || !ADVANCED_ONLY_INPUT_SOURCES.has(value) || value === currentInputSource
-    )
-    .map((value) => ({
-      value,
-      legacyInvalid: false
-    }));
+  // that mode lets the author choose it; Enkel lists it as being there. A step
+  // that already has one keeps it choosable in every mode.
+  let options: SelectableInputSourceOption[] = INPUT_SOURCE_ORDER.filter((value) =>
+    visible.includes(value)
+  ).map((value) => ({
+    value,
+    legacyInvalid: false,
+    advancedOnly:
+      !isAdvancedMode && ADVANCED_ONLY_INPUT_SOURCES.has(value) && value !== currentInputSource
+  }));
 
   if (currentInputSource && !options.some((option) => option.value === currentInputSource)) {
-    options = [{ value: currentInputSource, legacyInvalid: true }, ...options];
+    options = [{ value: currentInputSource, legacyInvalid: true, advancedOnly: false }, ...options];
   }
 
   return options;

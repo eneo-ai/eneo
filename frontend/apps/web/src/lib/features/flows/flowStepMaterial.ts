@@ -5,6 +5,11 @@ import { parseFlowInputBindings } from "./flowInputBindings";
 import { buildContext } from "./components/flowPromptVariables";
 import { getRuntimeInputConfig } from "./flowRuntimeInputConfig";
 import {
+  findToolOption,
+  readToolInputConfig,
+  type FlowToolOption
+} from "./components/tool/toolInputConfig";
+import {
   classifyVariable,
   extractTemplateTokens,
   isValidStepInputPath,
@@ -153,10 +158,12 @@ function stepParts(orders: number[], alone: boolean): string[] {
   return orders.map((order) => m.flow_step_reads_step({ step: order }));
 }
 
+/** `tools` is the editor's list of the flow's tools, which names a step's chosen tool. */
 export function getStepSourceLine(
   step: MaterialStep,
   previousStep: PreviousStep,
-  context: VariableClassificationContext
+  context: VariableClassificationContext,
+  tools: readonly FlowToolOption[] = []
 ): StepSourceLine | null {
   const material = getStepMaterial(step, previousStep);
   if (!material) return null;
@@ -200,8 +207,14 @@ export function getStepSourceLine(
       return sourceLine([m.flow_step_reads_all_previous()]);
     case "web_address":
       return sourceLine([m.flow_step_reads_web()]);
-    case "tool":
-      return sourceLine([m.flow_step_reads_tool()]);
+    case "tool": {
+      const tool = findToolOption(tools, readToolInputConfig(step.input_config));
+      return sourceLine([
+        tool
+          ? m.flow_step_reads_tool_named({ tool: tool.tool_name, server: tool.mcp_server_name })
+          : m.flow_step_reads_tool()
+      ]);
+    }
   }
 }
 
@@ -213,7 +226,8 @@ export function getStepSourceLine(
 export function stepSourceLines(
   steps: FlowStep[],
   formSchema: Parameters<typeof buildContext>[1],
-  transcriptionEnabled: boolean
+  transcriptionEnabled: boolean,
+  tools: readonly FlowToolOption[] = []
 ): (StepSourceLine | null)[] {
   return steps.map((step) =>
     step.output_mode === "template_fill"
@@ -221,7 +235,8 @@ export function stepSourceLines(
       : getStepSourceLine(
           step,
           steps.find((candidate) => candidate.step_order === step.step_order - 1),
-          buildContext(steps, formSchema, transcriptionEnabled, step.step_order)
+          buildContext(steps, formSchema, transcriptionEnabled, step.step_order),
+          tools
         )
   );
 }

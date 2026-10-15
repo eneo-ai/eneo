@@ -79,7 +79,8 @@
     {/snippet}
   </Popover.Trigger>
   <Popover.Content class="w-(--bits-popover-anchor-width) min-w-[280px] p-0" align="start">
-    <!-- An item's value is its ids, which keeps it unique; the search reads the names only. -->
+    <!-- An item's value is its ids, which keeps it unique; the search reads the
+         names and the approved description. -->
     <Command.Root
       label={m.flow_tool_picker_search()}
       filter={(_value, search, keywords) => computeCommandScore(keywords?.join(" ") ?? "", search)}
@@ -92,7 +93,7 @@
             {#each group.options as option (option.tool_id)}
               <Command.Item
                 value={`${option.mcp_server_id}:${option.tool_id}`}
-                keywords={[option.tool_name, group.serverName]}
+                keywords={[option.tool_name, group.serverName, option.tool_description ?? ""]}
                 data-checked={option === selected}
                 aria-describedby={option.refusal ? `${uid}-${option.tool_id}-refusal` : undefined}
                 onSelect={() => choose(option)}
@@ -106,7 +107,7 @@
                       : 'text-primary'}">{option.tool_name}</span
                   >
                   {#if option.tool_description}
-                    <span class="text-secondary text-xs leading-relaxed"
+                    <span class="text-secondary line-clamp-2 text-xs leading-relaxed"
                       >{option.tool_description}</span
                     >
                   {/if}

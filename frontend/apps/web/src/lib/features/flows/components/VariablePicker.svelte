@@ -19,6 +19,11 @@
   import Braces from "@lucide/svelte/icons/braces";
   import { m } from "$lib/paraglide/messages";
   import {
+    jsonSchemaTypeLabel,
+    readJsonSchemaType,
+    type JsonSchemaType
+  } from "$lib/features/flows/jsonSchemaType";
+  import {
     getFlowFormFieldVariableExpression,
     isFlowFormFieldNameUsableAsVariable
   } from "$lib/features/flows/flowFormSchema";
@@ -93,17 +98,14 @@
       : m.flow_variable_full_output_desc();
   }
 
-  function schemaFields(step: FlowStep): Array<{ name: string; type: string }> {
+  function schemaFields(step: FlowStep): Array<{ name: string; type: JsonSchemaType | null }> {
     const properties = (step.output_contract as { properties?: Record<string, { type?: unknown }> })
       ?.properties;
     if (!properties || typeof properties !== "object") return [];
     // A name no variable path reaches would insert a token that reads another field.
     return Object.entries(properties)
       .filter(([name]) => isVariablePathSegment(name))
-      .map(([name, schema]) => ({
-        name,
-        type: typeof schema?.type === "string" ? schema.type : ""
-      }));
+      .map(([name, schema]) => ({ name, type: readJsonSchemaType(schema?.type) }));
   }
 
   // The same variables the editor's autocomplete accepts, grouped the way an
@@ -205,20 +207,18 @@
           });
         }
         if (step.output_type === "json") {
-          const fieldsOfStep = schemaFields(step);
-          if (fieldsOfStep.length > 0) {
-            for (const field of fieldsOfStep) {
-              entries.push({
-                token: `step_${step.step_order}.output.structured.${field.name}`,
-                label: field.name,
-                description: field.type || undefined
-              });
-            }
-          } else if (allowFor !== "tool_argument" || isJsonObject(step.output_contract)) {
+          if (allowFor !== "tool_argument" || isJsonObject(step.output_contract)) {
             entries.push({
               token: `step_${step.step_order}.output.structured`,
               label: m.flow_variable_structured_label(),
               description: m.flow_variable_structured_desc()
+            });
+          }
+          for (const field of schemaFields(step)) {
+            entries.push({
+              token: `step_${step.step_order}.output.structured.${field.name}`,
+              label: field.name,
+              description: field.type ? jsonSchemaTypeLabel(field.type) : undefined
             });
           }
         }

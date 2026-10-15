@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { createEneo, type FlowStep } from "@eneo/eneo-js";
 import { get, readable } from "svelte/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -126,6 +126,64 @@ describe("FlowEditor with a tool step", () => {
       isExpanded: true
     });
     expect(screen.getByText(m.flow_tool_argument_missing({ name: "query" }))).toBeTruthy();
+  });
+
+  // Kills: an arguments text the step cannot hold is no issue of the step, so
+  // publish stays open with the old arguments; the issue is lost when a save
+  // hands the arguments back with their keys in another order; "Go to step"
+  // does not land on the arguments; the issue stays once the step holds other
+  // arguments, comes back when the step holds the old arguments again, or
+  // outlives its step.
+  it("counts an arguments text the step cannot hold as its issue while the step holds what it was typed against", async () => {
+    const { editor } = editorFor(toolStep({ query: "x", limit: 5 }));
+    await vi.waitFor(() => expect(get(editor.state.toolOptions).status).toBe("loaded"));
+    const typedAgainst = { ...TOOL, arguments: { limit: 5, query: "x" } };
+
+    editor.keepToolArgumentsDraft(get(editor.state.update).steps?.[1] as FlowStep, "arguments", {
+      text: '{"query": ',
+      scope: { except: [] },
+      typedAgainst
+    });
+    const onNavigateToStep = vi.fn();
+    render(FlowValidationBanner, {
+      errors: get(editor.state.validationErrors),
+      steps: get(editor.state.update).steps ?? [],
+      onNavigateToStep,
+      isExpanded: true
+    });
+    expect(screen.getByText(m.flow_tool_arguments_unsaved())).toBeTruthy();
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_validation_go_to_step() }));
+    expect(onNavigateToStep).toHaveBeenCalledWith("step-2", { kind: "tool_arguments" });
+
+    editor.replaceStepAtIndex(1, toolStep({ query: "y" }));
+    expect(get(editor.state.validationErrors).size).toBe(0);
+    // The replaced text does not return with the values it was typed against.
+    editor.replaceStepAtIndex(1, toolStep({ query: "x", limit: 5 }));
+    expect(get(editor.state.validationErrors).size).toBe(0);
+    expect(get(editor.state.toolArgumentsDrafts).size).toBe(0);
+    // Nor is a removed step's text kept.
+    editor.keepToolArgumentsDraft(get(editor.state.update).steps?.[1] as FlowStep, "arguments", {
+      text: "{",
+      scope: { except: [] },
+      typedAgainst
+    });
+    await editor.removeStepAtIndex(1);
+    expect(get(editor.state.toolArgumentsDrafts).size).toBe(0);
+  });
+
+  // Kills: "Go to step" asks for no place, or for one in a step that is not
+  // shown; a request outlives a move to another step (the graph, the Builder,
+  // the step list), so the step editor lands there on a later visit.
+  it("asks the step editor for a place in the step it shows, until another step is shown", () => {
+    const { editor } = editorFor(toolStep({ query: "x" }));
+    const request = () => get(editor.state.stepFocusRequest);
+
+    editor.goToStep("step-2", { kind: "tool" });
+    expect([get(editor.state.activeStepId), request()]).toStrictEqual(["step-2", { kind: "tool" }]);
+    editor.selectStep("step-1");
+    expect(request()).toBeNull();
+    editor.goToStep("step-9", { kind: "tool" });
+    expect([get(editor.state.activeStepId), request()]).toStrictEqual(["step-1", null]);
   });
 
   // Kills: asking for the list again drops the list that is shown; the answer

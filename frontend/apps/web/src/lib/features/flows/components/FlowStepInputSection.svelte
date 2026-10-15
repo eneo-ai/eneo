@@ -46,6 +46,7 @@
   import type { NamedSecurityLevel } from "$lib/features/flows/flowClassificationNames";
   import {
     readToolInputConfig,
+    type ToolArgumentsDraft,
     type ToolInputConfig,
     type ToolOptionsLoad
   } from "./tool/toolInputConfig";
@@ -68,6 +69,7 @@
     flowId = "",
     stepStateKey = "",
     toolOptions = { status: "loading" },
+    toolArgumentsDrafts = new Map(),
     httpVariableContext = undefined,
     securityClassifications = [],
     onInputSourceChange,
@@ -77,6 +79,7 @@
     hasKnowledge = false,
     onHttpConfigChange,
     onToolConfigChange,
+    onToolArgumentsDraftChange,
     onReloadToolOptions,
     onOpenTranscriptionSettings,
     speakerMappingStepOffered = false,
@@ -88,6 +91,7 @@
     selectableInputSourceOptions: Array<{
       value: string;
       legacyInvalid: boolean;
+      advancedOnly: boolean;
     }>;
     displayedInputTypeOptions: Array<{
       value: string;
@@ -107,6 +111,8 @@
     /** The identity of the step being edited, as the chapters know it. */
     stepStateKey?: string;
     toolOptions?: ToolOptionsLoad;
+    /** The arguments texts the editor keeps for this step, by field, because the step cannot hold them. */
+    toolArgumentsDrafts?: ReadonlyMap<string, ToolArgumentsDraft>;
     httpVariableContext?: import("$lib/features/flows/components/VariablePicker.svelte").VariablePickerContext;
     /** The organization's security classes, for the tool panel. */
     securityClassifications?: readonly NamedSecurityLevel[];
@@ -117,6 +123,7 @@
     hasKnowledge?: boolean;
     onHttpConfigChange?: (detail: { config: HttpAuthoredConfig }) => void;
     onToolConfigChange?: (detail: { config: ToolInputConfig }) => void;
+    onToolArgumentsDraftChange?: (place: string, draft: ToolArgumentsDraft | null) => void;
     onReloadToolOptions?: () => void;
     onOpenTranscriptionSettings?: () => void;
     speakerMappingStepOffered?: boolean;
@@ -246,8 +253,14 @@
               <Select.Item
                 value={source.value}
                 label={getInputSourceOptionLabel(source.value, source.legacyInvalid)}
+                disabled={source.advancedOnly}
               >
                 {getInputSourceOptionLabel(source.value, source.legacyInvalid)}
+                {#if source.advancedOnly}
+                  <span class="text-muted ml-auto pl-3 text-xs">
+                    {m.flow_step_option_in_advanced()}
+                  </span>
+                {/if}
               </Select.Item>
             {/each}
           </Select.Group>
@@ -264,10 +277,27 @@
     </div>
   </Settings.Row>
 
+  {#if isToolSource}
+    <ToolConfigPanel
+      config={toolConfig}
+      {toolOptions}
+      stepKey={stepStateKey}
+      {isPublished}
+      variableContext={httpVariableContext}
+      classifications={securityClassifications}
+      argumentsDrafts={toolArgumentsDrafts}
+      onConfigChange={(detail) => onToolConfigChange?.({ config: detail.config })}
+      onArgumentsDraftChange={onToolArgumentsDraftChange}
+      onReloadOptions={onReloadToolOptions}
+    />
+  {/if}
+
   {#if isAdvancedMode || inputTypeValidationMessage || inputTypeFeedback}
     <Settings.Row
       title={m.flow_step_input_type()}
-      description={m.flow_step_input_format_desc()}
+      description={isToolSource
+        ? m.flow_step_input_type_tool_desc()
+        : m.flow_step_input_format_desc()}
       help={m.flow_step_input_type_help()}
       density="compact"
     >
@@ -616,19 +646,6 @@
     {flowId}
     variableContext={httpVariableContext}
     onConfigChange={(detail) => onHttpConfigChange?.({ config: detail.config })}
-  />
-{/if}
-
-{#if isToolSource}
-  <ToolConfigPanel
-    config={toolConfig}
-    {toolOptions}
-    stepKey={stepStateKey}
-    {isPublished}
-    variableContext={httpVariableContext}
-    classifications={securityClassifications}
-    onConfigChange={(detail) => onToolConfigChange?.({ config: detail.config })}
-    onReloadOptions={onReloadToolOptions}
   />
 {/if}
 

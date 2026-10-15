@@ -156,6 +156,13 @@ export function getInputFormatHintText(
   if (sourceHintKind === "all_previous_steps") {
     return m.flow_step_input_format_help_all_previous_steps();
   }
+  // A tool step takes only these two; another type has its own refusal.
+  if (sourceHintKind === "tool_source" && inputType === "json") {
+    return m.flow_step_input_format_help_tool_json();
+  }
+  if (sourceHintKind === "tool_source" && inputType === "text") {
+    return m.flow_step_input_format_help_tool_text();
+  }
   return null;
 }
 

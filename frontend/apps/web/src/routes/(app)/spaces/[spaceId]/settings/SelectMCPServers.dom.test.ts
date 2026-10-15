@@ -10,6 +10,7 @@ vi.mock("$lib/features/spaces/SpacesManager", () => ({
 
 import { activateDuringSave } from "$lib/test/mcpTestApi";
 import { m } from "$lib/paraglide/messages";
+import { getLocale, setLocale } from "$lib/paraglide/runtime";
 import SelectMCPServers from "./SelectMCPServers.svelte";
 
 const server = { id: "s1", name: "Server one", tools: [] };
@@ -64,4 +65,24 @@ it.each([
   expect(screen.queryByText(sentence)).not.toBeNull();
   expect(screen.queryByText(m.mcp_no_org_servers_to_enable())).not.toBeNull();
   expect(screen.queryByText(m.mcp_enable_server_hint())).toBeNull();
+});
+
+it.each([
+  [1, "(1 tool)"],
+  [2, "(2 tools)"]
+])("counts a server's tools in words that fit the sentence (%i)", (count, words) => {
+  // Kills: the count is followed by the capitalised section title, or one
+  // tool is counted in the plural (Swedish has one form, so English shows it)
+  const previous = getLocale();
+  setLocale("en", { reload: false });
+  try {
+    const tools = [1, 2]
+      .slice(0, count)
+      .map((n) => ({ id: `t${n}`, name: `T${n}`, is_enabled: true }));
+    holder.space = space([{ ...server, tools }]);
+    render(SelectMCPServers, { selectableServers: [server] });
+    expect(screen.getByText(words)).toBeTruthy();
+  } finally {
+    setLocale(previous, { reload: false });
+  }
 });

@@ -88,23 +88,35 @@ describe("getValidInputSources", () => {
 });
 
 describe("getSelectableInputSourceOptions", () => {
-  // Kills: the tool source is offered in Enkel, is missing in Avancerad, or a
-  // step saved with it shows it as an invalid option.
-  it.each([{ stepOrder: 1 }, { stepOrder: 2 }])(
-    "offers the tool source in Avancerad only, and always on a step that has it (%o)",
-    ({ stepOrder }) => {
-      const values = (isAdvancedMode: boolean, currentInputSource: "previous_step" | "tool") =>
+  // Kills: a source that reaches outside the flow (a tool, a web address) can
+  // be chosen in Enkel or is hidden there, is missing in Avancerad, or a step
+  // saved with it shows it as an invalid option.
+  it.each([
+    { stepOrder: 1, source: "tool", types: ["text", "json"] },
+    { stepOrder: 2, source: "tool", types: ["text", "json"] },
+    { stepOrder: 1, source: "http_get", types: ["text", "json", "any"] },
+    { stepOrder: 2, source: "http_get", types: ["text", "json", "any"] }
+  ] as const)(
+    "offers the $source source in Avancerad only, and always on a step that has it (step $stepOrder)",
+    ({ stepOrder, source, types }) => {
+      const values = (
+        isAdvancedMode: boolean,
+        currentInputSource: "previous_step" | typeof source
+      ) =>
         getSelectableInputSourceOptions({
           steps: [],
           stepOrder,
           isAdvancedMode,
           currentInputSource
-        }).filter((option) => option.value === "tool");
+        }).filter((option) => option.value === source);
 
-      expect(values(false, "previous_step")).toEqual([]);
-      expect(values(true, "previous_step")).toEqual([{ value: "tool", legacyInvalid: false }]);
-      expect(values(false, "tool")).toEqual([{ value: "tool", legacyInvalid: false }]);
-      expect(getValidInputTypes("tool")).toEqual(["text", "json"]);
+      const option = (advancedOnly: boolean) => [
+        { value: source, legacyInvalid: false, advancedOnly }
+      ];
+      expect(values(false, "previous_step")).toEqual(option(true));
+      expect(values(true, "previous_step")).toEqual(option(false));
+      expect(values(false, source)).toEqual(option(false));
+      expect(getValidInputTypes(source)).toEqual(types);
     }
   );
 });

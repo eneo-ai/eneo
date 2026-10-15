@@ -108,7 +108,14 @@ import { replaceBindingReference, type DanglingBindingReference } from "./flowIn
 import type { FlowInputMaterialOption } from "./flowInputBindings";
 import { rewriteStepBindings } from "./flowVariableReferenceRewriter";
 import { computeStepOrderRemap } from "./flowStepOrderRemap";
-import { lacksChosenTool, type ToolOptionsLoad } from "./components/tool/toolInputConfig";
+import type { StepFocusTarget } from "./flowStepFocus";
+import {
+  keptDraftText,
+  lacksChosenTool,
+  readToolInputConfig,
+  type ToolArgumentsDraft,
+  type ToolOptionsLoad
+} from "./components/tool/toolInputConfig";
 
 type FlowEditorInitData = {
   flow: Flow;
@@ -245,6 +252,13 @@ function createFlowEditor(data: FlowEditorInitData) {
   // step reads from a tool: that step's issues depend on what its tool requires.
   const toolOptions = writable<ToolOptionsLoad>({ status: "loading" });
   let toolOptionsRequests = 0;
+  // Arguments text a tool step cannot hold, by the step's identity and the
+  // field it was typed in, so it outlives leaving the step and the step's
+  // first save. The step keeps its stored arguments meanwhile, so the text is
+  // an issue of the step.
+  const toolArgumentsDrafts = writable<
+    ReadonlyMap<string, ReadonlyMap<string, ToolArgumentsDraft>>
+  >(new Map());
   const serverValidationIssue = writable<ReturnType<typeof parseServerValidationIdentity>>(null);
   // The step the user just created: the editor opens its task chapter and hands
   // it over once (name focused and selected). `stepId` follows the temp→real id
@@ -275,8 +289,13 @@ function createFlowEditor(data: FlowEditorInitData) {
   // reconciliation after a save, so views that react to "the user moved to a
   // step" (scroll resets) stay quiet while a step merely gets its real id.
   const stepNavigationRevision = writable(0);
+  // A place in the shown step that the step editor lands on once, as the
+  // banner's "Go to step" asks for it. Every move to a step drops it, so it
+  // always belongs to the step shown, also after the step got its real id.
+  const stepFocusRequest = writable<StepFocusTarget | null>(null);
   function navigateToStep(stepId: string | null): void {
     pendingActiveStepId = null;
+    stepFocusRequest.set(null);
     activeStepId.set(stepId);
     stepNavigationRevision.update((revision) => revision + 1);
   }
@@ -408,14 +427,54 @@ function createFlowEditor(data: FlowEditorInitData) {
       void loadToolOptions();
     }
     const load = get(toolOptions);
+    const drafts = pruneToolArgumentsDrafts(steps);
     replaceFlowValidationErrors(
       stepConfigValidationPrefix,
       computeStepConfigValidationIssues(
         steps,
         stepConfigValidationPrefix,
-        load.status === "loaded" ? load.options : null
+        load.status === "loaded" ? load.options : null,
+        (step) => [...(drafts.get(stepIdentity(step))?.values() ?? [])].map(({ scope }) => scope)
       )
     );
+  }
+
+  /**
+   * The drafts the steps still hold, after dropping those of a removed step
+   * and those whose step no longer holds what they were typed against: such a
+   * text is replaced, and must not return when the old values do.
+   */
+  function pruneToolArgumentsDrafts(
+    steps: FlowStep[]
+  ): ReadonlyMap<string, ReadonlyMap<string, ToolArgumentsDraft>> {
+    const current = get(toolArgumentsDrafts);
+    if (current.size === 0) return current;
+    const kept = new Map<string, ReadonlyMap<string, ToolArgumentsDraft>>();
+    for (const step of steps) {
+      const config = readToolInputConfig(step.input_config);
+      const live = [...(current.get(stepIdentity(step)) ?? [])].filter(
+        ([, draft]) => keptDraftText(draft, config) !== null
+      );
+      if (live.length > 0) kept.set(stepIdentity(step), new Map(live));
+    }
+    toolArgumentsDrafts.set(kept);
+    return kept;
+  }
+
+  /** Keeps, or with null drops, the arguments text `step` cannot hold in the field at `place`. */
+  function keepToolArgumentsDraft(
+    step: FlowStep,
+    place: string,
+    draft: ToolArgumentsDraft | null
+  ): void {
+    toolArgumentsDrafts.update((current) => {
+      const identity = stepIdentity(step);
+      const ofStep = new Map(current.get(identity));
+      if (draft) ofStep.set(place, draft);
+      else ofStep.delete(place);
+      return new Map(current).set(identity, ofStep);
+    });
+    syncStepConfigValidation(get(editor.state.update).steps ?? []);
   }
 
   /** Asks the server again which tools a step of this flow can name. */
@@ -661,6 +720,17 @@ function createFlowEditor(data: FlowEditorInitData) {
     if (currentSteps.some((step) => step.id === stepId)) {
       navigateToStep(stepId);
     }
+  }
+
+  /** Shows the step and, with a target, asks the step editor to land on that place in it. */
+  function goToStep(stepId: string, target: StepFocusTarget | null): void {
+    selectStep(stepId);
+    if (get(activeStepId) === stepId) stepFocusRequest.set(target);
+  }
+
+  /** The step editor has landed on the requested place. */
+  function takeStepFocusRequest(): void {
+    stepFocusRequest.set(null);
   }
 
   function selectFirstStepIfUnselected(): void {
@@ -1224,14 +1294,17 @@ function createFlowEditor(data: FlowEditorInitData) {
       activeStepId: readonly(activeStepId),
       newStepOpenIntent: readonly(newStepOpenIntent),
       stepNavigationRevision: readonly(stepNavigationRevision),
+      stepFocusRequest: readonly(stepFocusRequest),
       validationErrors,
       toolOptions: readonly(toolOptions),
+      toolArgumentsDrafts: readonly(toolArgumentsDrafts),
       serverValidationIssue: readonly(serverValidationIssue),
       saveStatus: unifiedSaveStatus,
       isPublished
     },
     setResource,
     stepIdentity,
+    keepToolArgumentsDraft,
     takeNewStepFocus,
     clearNewStepOpenIntent,
     addStep,
@@ -1246,6 +1319,8 @@ function createFlowEditor(data: FlowEditorInitData) {
     updateAssistantImmediately,
     listAssistantPrompts,
     selectStep,
+    goToStep,
+    takeStepFocusRequest,
     selectFirstStepIfUnselected,
     setName,
     setDescription,

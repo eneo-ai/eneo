@@ -122,6 +122,38 @@ describe("task and material chapter summaries", () => {
     ).toBe("Läser föregående steg · Kunskap eller filer tillagda");
   });
 
+  // Kills: the Underlag summary leaves the editor's tool list out, so a step
+  // that reads a chosen tool still says only "a tool".
+  it("names the tool a step reads", () => {
+    const current = step({
+      input_source: "tool",
+      input_config: { tool: { mcp_server_id: "server-1", tool_id: "tool-search", arguments: {} } }
+    });
+    expect(
+      getChapterInputStatus({
+        step: current,
+        previousStep: step({ step_order: 1 }),
+        context: buildContext([current], undefined, false, current.step_order),
+        tools: [
+          {
+            mcp_server_id: "server-1",
+            mcp_server_name: "Ärenden",
+            mcp_server_security_level: null,
+            tool_id: "tool-search",
+            tool_name: "search_cases",
+            tool_description: null,
+            input_schema: null,
+            refusal: null
+          }
+        ],
+        hasKnowledge: false,
+        hasAttachments: false
+      })
+    ).toBe(
+      `${m.flow_step_reads({ what: m.flow_step_reads_tool_named({ tool: "search_cases", server: "Ärenden" }) })} · ${m.flow_chapter_input_extra_none()}`
+    );
+  });
+
   it("names the underlag instead of an inactive all-previous source", () => {
     expect(
       getChapterInputStatus({

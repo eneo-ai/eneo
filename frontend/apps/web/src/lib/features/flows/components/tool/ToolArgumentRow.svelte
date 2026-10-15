@@ -10,6 +10,7 @@
     type VariablePickerContext
   } from "$lib/features/flows/components/VariablePicker.svelte";
   import { DELETED_STEP_TOKEN } from "$lib/features/flows/flowStepConfigValidation";
+  import { jsonSchemaTypeLabel } from "$lib/features/flows/jsonSchemaType";
   import { m } from "$lib/paraglide/messages";
   import {
     boundVariableToken,
@@ -32,7 +33,9 @@
     value,
     disabled,
     variableContext,
-    onChange
+    onChange,
+    keptText = null,
+    onUnsavedText
   }: {
     field: ToolArgumentField;
     /** The stored value; undefined while the argument is absent. */
@@ -41,6 +44,10 @@
     variableContext?: VariablePickerContext;
     /** Called with the value to store, or undefined to leave the argument out. */
     onChange: (value: unknown) => void;
+    /** A fixed value typed here earlier that the step could not hold; shown in place of `value`. */
+    keptText?: string | null;
+    /** Called with a typed text the step cannot hold, or null once none is left. */
+    onUnsavedText?: (text: string | null) => void;
   } = $props();
 
   const uid = $props.id();
@@ -65,7 +72,9 @@
   // An argument without a value is a fixed value still to enter, a variable
   // still to choose, or not set. The step holds nothing that tells them apart,
   // so the row remembers which the author chose.
-  let emptyMode = $state<Mode>(untrack(() => (field.required ? "fixed" : "unset")));
+  let emptyMode = $state<Mode>(
+    untrack(() => (keptText !== null || field.required ? "fixed" : "unset"))
+  );
   const mode = $derived.by((): Mode => {
     if (value !== undefined) return token !== null ? "variable" : "fixed";
     return field.required && emptyMode === "unset" ? "fixed" : emptyMode;
@@ -75,10 +84,19 @@
 
   // The text the author typed in this row, with the value the row stored for
   // it. While the step still holds that value the row shows the text as typed;
-  // any other stored value came from outside the row and is shown instead.
-  let typed = $state<{ text: string; stored: unknown } | null>(null);
+  // once another value is stored the text is dropped for good, so it does not
+  // come back with the old value. A text the step cannot hold is the editor's
+  // draft (`keptText`), never kept here.
+  let lastTyped: { text: string; stored: unknown } | null = null;
+  let typed = $derived.by(() => {
+    // Read first: the stored value is what this re-runs on, also while nothing is typed.
+    const stored = value;
+    if (lastTyped !== null && !sameJson(lastTyped.stored, stored)) lastTyped = null;
+    return lastTyped;
+  });
   const draft = $derived.by((): string => {
-    if (typed !== null && sameJson(typed.stored, value)) return typed.text;
+    if (keptText !== null) return keptText;
+    if (typed !== null) return typed.text;
     if (value === undefined || token !== null || misfit) return "";
     if (control.kind === "json") return JSON.stringify(value, null, 2);
     return control.kind === "text" || control.kind === "number" ? String(value) : "";
@@ -141,15 +159,24 @@
     if (next !== "fixed" && next !== "variable" && next !== "unset") return;
     if (next === mode) return;
     emptyMode = next;
-    typed = null;
+    typed = lastTyped = null;
+    onUnsavedText?.(null);
     onChange(undefined);
   }
 
   function typeFixed(text: string) {
     const read = readFixed(text);
-    typed = { text, stored: read.ok ? read.value : undefined };
     emptyMode = "fixed";
-    onChange(typed.stored);
+    // A text refused for a reason leaves the stored value in place and stays
+    // as typed, unsaved; an empty field stores no value.
+    if (!read.ok && read.error !== null) {
+      onUnsavedText?.(text);
+      return;
+    }
+    const stored = read.ok ? read.value : undefined;
+    typed = lastTyped = { text, stored };
+    onUnsavedText?.(null);
+    onChange(stored);
   }
 
   // A switch always shows yes or no, so a yes/no argument that is fixed and
@@ -172,12 +199,34 @@
       .filter((id) => id !== null)
       .join(" ") || undefined
   );
+  // A list of choices is entered by picking one, whatever type its values have.
+  const typeLabel = $derived(
+    control.kind === "choice"
+      ? m.flow_tool_argument_type_choice()
+      : field.type
+        ? jsonSchemaTypeLabel(field.type)
+        : null
+  );
   const valueLabel = $derived(m.flow_tool_argument_value_label({ argument: field.name }));
+  // An example of the shape a list or an object is written in.
+  const jsonExample = $derived(
+    field.type === "array"
+      ? JSON.stringify([
+          m.flow_tool_argument_json_example_value(),
+          m.flow_tool_argument_json_example_value()
+        ])
+      : field.type === "object"
+        ? JSON.stringify({
+            [m.flow_tool_argument_json_example_key()]: m.flow_tool_argument_json_example_value()
+          })
+        : undefined
+  );
 </script>
 
 <div
   role="group"
   aria-labelledby="{uid}-name"
+  data-tool-argument={field.name}
   class="border-default flex flex-col gap-2 rounded-lg border px-3 py-3"
 >
   <div class="flex flex-wrap items-center gap-2">
@@ -186,6 +235,9 @@
       translate="no"
       class="text-primary min-w-0 font-mono text-sm font-medium break-all">{field.name}</code
     >
+    {#if typeLabel}
+      <Badge variant="secondary">{typeLabel}</Badge>
+    {/if}
     {#if field.required}
       <Badge variant="outline">{m.flow_tool_argument_required()}</Badge>
     {/if}
@@ -308,6 +360,7 @@
     {:else}
       <Textarea
         class="min-h-[88px] font-mono text-xs"
+        placeholder={jsonExample}
         value={draft}
         {disabled}
         aria-label={valueLabel}

@@ -12,6 +12,11 @@
   } from "../flowStepRequestPreview";
   import { getChipClasses } from "../flowVariableTokens";
   import { buildContext } from "./flowPromptVariables";
+  import {
+    boundVariableToken,
+    readToolInputConfig,
+    type FlowToolOption
+  } from "./tool/toolInputConfig";
 
   let {
     open = $bindable(false),
@@ -24,7 +29,8 @@
     hasAttachments,
     hasKnowledge,
     isAdvancedMode,
-    transcriptionEnabled
+    transcriptionEnabled,
+    tool = null
   }: {
     open?: boolean;
     step: FlowStep;
@@ -38,7 +44,11 @@
     hasKnowledge: boolean;
     isAdvancedMode: boolean;
     transcriptionEnabled: boolean;
+    /** The listed tool a tool step reads its material from; null for any other step. */
+    tool?: Pick<FlowToolOption, "mcp_server_name" | "tool_name"> | null;
   } = $props();
+
+  const uid = $props.id();
 
   // Only the instruction is rendered per section, so only it may use section variables.
   const instruction = $derived(
@@ -58,6 +68,23 @@
       : null
   );
   const answer = $derived(describeAnswerFields(step));
+  // Where each argument of the tool call gets its value: one whole variable,
+  // named as the instruction names it, or a fixed value as written.
+  const toolArguments = $derived(
+    Object.entries(readToolInputConfig(step.input_config)?.arguments ?? {}).map(([name, value]) =>
+      typeof value === "string" && boundVariableToken(value) !== null
+        ? {
+            name,
+            kind: "variable" as const,
+            segments: describeTemplateSegments(
+              value,
+              buildContext(steps, formSchema, transcriptionEnabled, step.step_order),
+              formSchema
+            )
+          }
+        : { name, kind: "fixed" as const, value: JSON.stringify(value) }
+    )
+  );
   // A long instruction would push the material and the answer out of view;
   // it opens in full on request.
   const LONG_INSTRUCTION = 900;
@@ -66,6 +93,18 @@
 </script>
 
 <!-- The author's own words sit in a quiet inset, apart from the sentences that explain them. -->
+{#snippet chips(segments: TemplateSegment[])}
+  {#each segments as segment, index (index)}
+    {#if segment.kind === "text"}
+      {segment.value}
+    {:else}
+      <span class={cn(getChipClasses(segment.category), "box-decoration-clone font-sans")}
+        >{segment.label}</span
+      >
+    {/if}
+  {/each}
+{/snippet}
+
 {#snippet template(segments: TemplateSegment[], clamped = false)}
   <!-- The clamp sits on the paragraph, not the padded box, or the padding shows part of the next line. -->
   <div class="bg-secondary rounded-lg px-4 py-3">
@@ -75,15 +114,7 @@
         clamped && "line-clamp-10"
       )}
     >
-      {#each segments as segment, index (index)}
-        {#if segment.kind === "text"}
-          {segment.value}
-        {:else}
-          <span class={cn(getChipClasses(segment.category), "box-decoration-clone font-sans")}
-            >{segment.label}</span
-          >
-        {/if}
-      {/each}
+      {@render chips(segments)}
     </p>
   </div>
 {/snippet}
@@ -100,6 +131,42 @@
     </Dialog.Header>
 
     <div class="-mx-4 flex flex-col gap-6 overflow-y-auto px-4 sm:-mx-6 sm:px-6">
+      {#if tool}
+        <section class="flex flex-col gap-2" aria-labelledby="{uid}-tool">
+          <h3 id="{uid}-tool" class="text-primary text-sm font-semibold">
+            {m.flow_request_preview_tool_call()}
+          </h3>
+          <p class="text-primary text-sm">
+            {m.flow_tool_picker_server({ name: tool.mcp_server_name })}
+          </p>
+          <code translate="no" class="text-primary self-start font-mono text-sm break-all"
+            >{tool.tool_name}</code
+          >
+          {#if toolArguments.length > 0}
+            <ul class="flex flex-col gap-1.5">
+              {#each toolArguments as argument (argument.name)}
+                <li class="text-primary text-sm leading-relaxed">
+                  <code translate="no" class="font-mono text-xs">{argument.name}</code>
+                  {#if argument.kind === "variable"}
+                    <span class="text-secondary">{m.flow_request_preview_tool_variable()}</span>
+                    {@render chips(argument.segments)}
+                  {:else}
+                    <span class="text-secondary">{m.flow_request_preview_tool_fixed()}</span>
+                    <code translate="no" class="font-mono text-xs break-all">{argument.value}</code>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {:else}
+            <p class="text-secondary text-sm">{m.flow_request_preview_tool_no_arguments()}</p>
+          {/if}
+          {#if step.input_type === "json"}
+            <p class="text-primary text-sm">{m.flow_request_preview_tool_format_json()}</p>
+          {:else if step.input_type === "text"}
+            <p class="text-primary text-sm">{m.flow_request_preview_tool_format_text()}</p>
+          {/if}
+        </section>
+      {/if}
       <section class="flex flex-col gap-2">
         <h3 class="text-primary text-sm font-semibold">{m.flow_request_preview_instruction()}</h3>
         {#if instructionText.trim()}

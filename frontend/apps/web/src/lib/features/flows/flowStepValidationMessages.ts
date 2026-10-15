@@ -1,13 +1,15 @@
 import { FLOW_API_ERROR_CODE } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
+import { getLocale } from "$lib/paraglide/runtime";
 import {
   isUnattendedToolRefusal,
   toolRefusalSentence,
   type UnattendedToolRefusal
 } from "./flowToolRefusal";
+import type { StepFocusTarget } from "./flowStepFocus";
 
-// `subject` is what an issue of the editor's own names, when it names one.
-const CODE_TO_MESSAGE: Record<string, (subject?: string) => string> = {
+// `subjects` are what an issue of the editor's own names, when it names any.
+const CODE_TO_MESSAGE: Record<string, (subjects: readonly string[]) => string> = {
   typed_io_duplicate_step_order: () => m.flow_validation_msg_duplicate_step_order(),
   typed_io_non_contiguous_step_order: () => m.flow_validation_msg_non_contiguous_step_order(),
   typed_io_multiple_flow_input_steps: () => m.flow_validation_msg_multiple_flow_input_steps(),
@@ -33,7 +35,13 @@ const CODE_TO_MESSAGE: Record<string, (subject?: string) => string> = {
   assistant_save_failed: () => m.flow_validation_msg_assistant_save_failed(),
   http_missing_url: () => m.flow_validation_msg_http_missing_url(),
   tool_missing_tool: () => m.flow_tool_missing_tool(),
-  tool_argument_missing: (name = "") => m.flow_tool_argument_missing({ name }),
+  tool_arguments_unsaved: () => m.flow_tool_arguments_unsaved(),
+  tool_argument_missing: (names) =>
+    names.length > 1
+      ? m.flow_tool_arguments_missing({
+          names: new Intl.ListFormat(getLocale(), { type: "conjunction" }).format(names)
+        })
+      : m.flow_tool_argument_missing({ name: names[0] ?? "" }),
   // Server-side step-graph issue codes (FlowGraphIssueCode) that authoring
   // can trigger; the raw technical sentence stays available as detail.
   flow_http_post_output_must_be_terminal: () => m.flow_validation_msg_http_post_not_terminal(),
@@ -94,12 +102,12 @@ const CODE_TO_MESSAGE: Record<string, (subject?: string) => string> = {
   typed_io_tool_invalid_schema: () => m.flow_error_typed_io_tool_invalid_schema()
 };
 
-export function getValidationIssueMessage(code: string, subject?: string): string {
-  return CODE_TO_MESSAGE[code]?.(subject) ?? code;
+export function getValidationIssueMessage(code: string, subjects: readonly string[] = []): string {
+  return CODE_TO_MESSAGE[code]?.(subjects) ?? code;
 }
 
 export type ParsedValidationError =
-  | { kind: "step"; code: string; stepOrder: number; detail?: string; subject?: string }
+  | { kind: "step"; code: string; stepOrder: number; detail?: string; subjects: string[] }
   | { kind: "assistant"; assistantId: string; message: string }
   | { kind: "flow"; code: string; message: string; detail?: string };
 
@@ -302,6 +310,22 @@ export function describeToolStepRefusal(refusal: ToolStepRefusal): string {
 }
 
 /**
+ * Where the author fixes a tool step's refusal: the argument it names, or the
+ * picker for a tool the step may not call or cannot read. Null for a refusal
+ * about another setting of the step.
+ */
+export function toolStepRefusalFocusTarget(refusal: ToolStepRefusal): StepFocusTarget | null {
+  switch (refusal.kind) {
+    case "argument":
+      return { kind: "tool_argument", name: refusal.argument };
+    case "not_allowed":
+      return { kind: "tool" };
+    case "config":
+      return refusal.field === TOOL_CONFIG_FIELD ? { kind: "tool" } : null;
+  }
+}
+
+/**
  * Structured identity of a server-side validation failure, read from the
  * error payload the backend emits: context.issue_code + step_order, or one of
  * the tool step refusal codes.
@@ -388,7 +412,7 @@ export function parseValidationError(key: string, values: string[]): ParsedValid
         code: rest.slice(0, lastColon),
         stepOrder,
         detail: values[0],
-        subject: values[1]
+        subjects: values.slice(1)
       };
     }
   }

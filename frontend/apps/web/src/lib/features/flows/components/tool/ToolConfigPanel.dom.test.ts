@@ -6,8 +6,16 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import { flowStepFixture } from "$lib/features/flows/flowStepTestFixture";
 
+import { focusStepTarget } from "$lib/features/flows/flowStepFocus";
+
 import ToolConfigPanel from "./ToolConfigPanel.svelte";
-import type { FlowToolOption, StoredToolInputConfig, ToolInputConfig } from "./toolInputConfig";
+import {
+  keptDraftText,
+  type FlowToolOption,
+  type StoredToolInputConfig,
+  type ToolArgumentsDraft,
+  type ToolInputConfig
+} from "./toolInputConfig";
 
 const space = vi.hoisted(() => ({ personal: false, mayEdit: false }));
 
@@ -78,13 +86,24 @@ function chosen(args: Record<string, unknown> = {}, toolId = "tool-search"): Sto
 
 type PanelProps = ComponentProps<typeof ToolConfigPanel>;
 
-/** The panel beside an editor that stores what the panel writes and hands it back. */
+/**
+ * The panel beside an editor that stores what the panel writes and hands it
+ * back: the arguments, and the texts the step cannot hold, which the editor
+ * drops once other values are stored for them.
+ */
 async function renderPanel(
   options: FlowToolOption[],
   config: StoredToolInputConfig | null,
   props: Partial<PanelProps> = {}
 ) {
   const onConfigChange = vi.fn<(detail: { config: ToolInputConfig }) => void>();
+  const drafts = new Map(props.argumentsDrafts ?? []);
+  const keepDraft = (place: string, draft: ToolArgumentsDraft | null) => {
+    if (draft) drafts.set(place, draft);
+    else drafts.delete(place);
+    props.onArgumentsDraftChange?.(place, draft);
+    void view.rerender({ argumentsDrafts: new Map(drafts) });
+  };
   const view = render(ToolConfigPanel, {
     config,
     toolOptions: { status: "loaded", options, classificationsEnabled: false, refreshing: false },
@@ -98,17 +117,25 @@ async function renderPanel(
       transcriptionEnabled: false
     },
     onConfigChange,
-    ...props
+    ...props,
+    onArgumentsDraftChange: keepDraft
   });
-  const store = (next: ToolInputConfig) =>
-    view.rerender({ config: { ...next, hasOtherKeys: false } });
+  const store = (next: ToolInputConfig) => {
+    for (const [place, draft] of drafts) {
+      if (keptDraftText(draft, next) === null) drafts.delete(place);
+    }
+    return view.rerender({
+      config: { ...next, hasOtherKeys: false },
+      argumentsDrafts: new Map(drafts)
+    });
+  };
   const atMount = onConfigChange.mock.lastCall?.[0].config;
   if (atMount) await store(atMount);
   // After the write, as a store does: a row may write while its effects run.
   onConfigChange.mockImplementation(({ config: next }) => queueMicrotask(() => void store(next)));
   /** The arguments of the configuration the panel wrote last. */
   const written = () => onConfigChange.mock.lastCall?.[0].config.arguments;
-  return { ...view, onConfigChange, written };
+  return { ...view, onConfigChange, written, store };
 }
 
 const row = (name: string) => within(screen.getByRole("group", { name }));
@@ -118,10 +145,19 @@ describe("ToolConfigPanel", () => {
   // Kills: a refused tool can be chosen, is listed without its reason, or is
   // skipped by the arrow keys; the search matches an id; a chosen tool is
   // written with other ids or keeps another tool's arguments; choosing the
-  // tool the step already has drops its arguments.
+  // tool the step already has drops its arguments; the search does not read
+  // a tool's approved description.
   it("lists a refused tool with its reason and writes only a tool that can be chosen", async () => {
     const { onConfigChange } = await renderPanel(
-      [SEARCH, REFUSED, option({ tool_id: "tool-list", tool_name: "list_cases" })],
+      [
+        SEARCH,
+        REFUSED,
+        option({
+          tool_id: "tool-list",
+          tool_name: "list_cases",
+          tool_description: "Listar öppna ärenden."
+        })
+      ],
       chosen({ query: "bygglov" })
     );
     const open = () => fireEvent.click(screen.getByRole("combobox", { name: /search_cases/ }));
@@ -139,6 +175,10 @@ describe("ToolConfigPanel", () => {
     await open();
     await type(screen.getByPlaceholderText(m.flow_tool_picker_search()), "tool-close");
     expect(screen.queryByRole("option", { name: /close_case/ })).toBeNull();
+    await type(screen.getByPlaceholderText(m.flow_tool_picker_search()), "listar öppna");
+    expect(screen.getAllByRole("option").map((item) => item.textContent)).toEqual([
+      expect.stringContaining("list_cases")
+    ]);
     await type(screen.getByPlaceholderText(m.flow_tool_picker_search()), "list_cases");
     await fireEvent.click(await screen.findByRole("option", { name: /list_cases/ }));
     expect(onConfigChange).toHaveBeenCalledExactlyOnceWith({
@@ -171,7 +211,7 @@ describe("ToolConfigPanel", () => {
     await type(row("query").getByRole("textbox"), refusedText);
     expect(row("query").getByText(m.flow_tool_argument_fixed_has_variable())).toBeTruthy();
     expect(row("query").getByRole("textbox")).toHaveProperty("value", refusedText);
-    expect(written()).toEqual({});
+    expect(written()).toBeUndefined();
     await type(row("query").getByRole("textbox"), "bygglov");
     expect(written()).toEqual({ query: "bygglov" });
 
@@ -188,7 +228,7 @@ describe("ToolConfigPanel", () => {
   });
 
   // Kills: a number is stored as its text; a decimal or an integer too large
-  // to be exact is stored, or refused without a word; a boolean is stored as
+  // to be exact is stored, refused without a word, or clears the stored value; a boolean is stored as
   // text or left out; "Not set" keeps the argument.
   it("stores a number as a number and a boolean as a boolean, and Not set removes the argument", async () => {
     const { written } = await renderPanel([SEARCH], chosen({ query: "x", limit: 3 }));
@@ -200,7 +240,8 @@ describe("ToolConfigPanel", () => {
     ]) {
       await type(limit(), text);
       expect(row("limit").getByText(sentence)).toBeTruthy();
-      expect(written()).toStrictEqual({ query: "x" });
+      // The step keeps the stored 3 while the text is refused.
+      expect(written()).toBeUndefined();
     }
     await type(limit(), "25");
     expect(written()).toEqual({ query: "x", limit: 25 });
@@ -352,6 +393,117 @@ describe("ToolConfigPanel", () => {
     expect(written()).toEqual({ query: "{{Hämta}}", limit: 5 });
   });
 
+  // Kills: the JSON field of a schema the editor cannot show as rows hides the
+  // approved schema or offers no variable; a chosen variable goes in other
+  // than as one JSON string at the cursor, or goes in where it breaks the
+  // JSON object (the field's first "{}") without saying where it can go.
+  it("shows the approved schema beside the JSON field and puts a chosen variable in at the cursor", async () => {
+    const schema = { $ref: "#/$defs/S", $defs: { S: { properties: { query: {} } } } };
+    const { written } = await renderPanel([withSchema(schema)], chosen());
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_tool_arguments_schema_show() })
+    );
+    expect(document.querySelector("pre")?.textContent).toBe(JSON.stringify(schema, null, 2));
+
+    const field = screen.getByRole("textbox", { name: m.flow_tool_arguments_title() });
+    const insert = async () => {
+      await fireEvent.click(
+        screen.getByRole("button", { name: m.flow_tool_arguments_insert_variable() })
+      );
+      await fireEvent.click(await screen.findByRole("option", { name: /step_1\.output\.text/ }));
+    };
+    await insert();
+    expect(field).toHaveProperty("value", "{}");
+    expect(screen.getByText(m.flow_tool_arguments_insert_where())).toBeTruthy();
+    expect(written()).toBeUndefined();
+    await type(field, '{"query": }');
+    (field as HTMLTextAreaElement).setSelectionRange(10, 10);
+    await insert();
+    expect(written()).toEqual({ query: "{{step_1.output.text}}" });
+    expect(screen.queryByText(m.flow_tool_arguments_insert_where())).toBeNull();
+  });
+
+  // Kills: a text the step cannot hold, in the JSON field or in a row, never
+  // reaches the editor, clears the row's stored value, or is dropped when the
+  // step is left (the field shows the stored arguments again); a text typed
+  // against other values is shown over the step's own; the folded field of
+  // other arguments or an optional row left "Not set" hides a kept text;
+  // "Go to step" lands elsewhere than the field that holds it; a fixed text
+  // stays kept.
+  it("keeps an arguments text the step cannot hold for the step and shows it again", async () => {
+    const ref = withSchema({ $ref: "#/$defs/S" });
+    const onArgumentsDraftChange = vi.fn();
+    const first = await renderPanel([ref], chosen({ query: "x" }), { onArgumentsDraftChange });
+    const field = (name = m.flow_tool_arguments_title()) => screen.getByRole("textbox", { name });
+    await type(field(), '{"query": ');
+    const draft = {
+      text: '{"query": ',
+      scope: { except: [] },
+      typedAgainst: { mcp_server_id: "server-1", tool_id: "tool-search", arguments: { query: "x" } }
+    };
+    expect(onArgumentsDraftChange).toHaveBeenLastCalledWith("arguments", draft);
+    await type(field(), '{"query": "y"}');
+    expect(onArgumentsDraftChange).toHaveBeenLastCalledWith("arguments", null);
+    first.unmount();
+
+    const rows = await renderPanel([SEARCH], chosen({ query: "x" }), { onArgumentsDraftChange });
+    await fireEvent.click(row("tags").getByText(m.flow_tool_argument_mode_fixed()));
+    await type(row("tags").getByRole("textbox"), '["b"');
+    const rowDraft = onArgumentsDraftChange.mock.lastCall;
+    expect(rowDraft?.[0]).toBe("argument:tags");
+    expect(rows.written()).toEqual({ query: "x" });
+    rows.unmount();
+    const kept = (drafts: [string, unknown][]) => ({
+      argumentsDrafts: new Map(drafts) as PanelProps["argumentsDrafts"]
+    });
+    await renderPanel([SEARCH], chosen({ query: "x" }), kept([rowDraft as [string, unknown]]));
+    expect(row("tags").getByRole("textbox")).toHaveProperty("value", '["b"');
+    cleanup();
+
+    const other = await renderPanel([ref], chosen({ query: "z" }), kept([["arguments", draft]]));
+    expect(field()).toHaveProperty("value", JSON.stringify({ query: "z" }, null, 2));
+    other.unmount();
+    const typedOnNone = { ...draft, typedAgainst: { ...draft.typedAgainst, arguments: {} } };
+    const open = await renderPanel([SEARCH], chosen({}), kept([["arguments", typedOnNone]]));
+    expect(field(m.flow_tool_arguments_other_label())).toHaveProperty("value", draft.text);
+    // Folding it hides nothing, and "Go to step" lands on it, not on the
+    // missing required query.
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_tool_arguments_other_title() })
+    );
+    expect(focusStepTarget(document.body, { kind: "tool_arguments" })).toBe(true);
+    expect(document.activeElement).toBe(field(m.flow_tool_arguments_other_label()));
+    open.unmount();
+    await renderPanel([ref], chosen({ query: "x" }), kept([["arguments", draft]]));
+    expect(focusStepTarget(document.body, { kind: "tool_arguments" })).toBe(true);
+    expect(document.activeElement).toBe(field());
+    expect(field()).toHaveProperty("value", draft.text);
+  });
+
+  // Kills: a field keeps a text of its own beside the editor's draft, so once
+  // other values were stored and the editor dropped the draft, the text and
+  // its error come back with the old value while the banner and Publish no
+  // longer follow the field; in a row and in the JSON field.
+  it("shows a text the step cannot hold only while the editor keeps it", async () => {
+    const view = await renderPanel([SEARCH], chosen({ query: "x", limit: 5 }));
+    const limit = () => row("limit").getByRole("spinbutton");
+    const tool = { mcp_server_id: "server-1", tool_id: "tool-search" };
+    await type(limit(), "1.5");
+    expect(limit()).toHaveProperty("value", "1.5");
+    await view.store({ ...tool, arguments: { query: "x", limit: 6 } });
+    await view.store({ ...tool, arguments: { query: "x", limit: 5 } });
+    expect(limit()).toHaveProperty("value", "5");
+    expect(row("limit").queryByText(m.flow_tool_argument_not_integer())).toBeNull();
+    view.unmount();
+
+    const json = await renderPanel([withSchema({ $ref: "#/$defs/S" })], chosen({ query: "x" }));
+    const field = () => screen.getByRole("textbox", { name: m.flow_tool_arguments_title() });
+    await type(field(), '{"query": ');
+    await json.store({ ...tool, arguments: { query: "y" } });
+    await json.store({ ...tool, arguments: { query: "x" } });
+    expect(field()).toHaveProperty("value", JSON.stringify({ query: "x" }, null, 2));
+  });
+
   // Kills: an open schema with named arguments offers no way to add or bind an
   // argument of another name; the other-arguments field drops or overwrites
   // the named ones; a named argument is taken there a second time.
@@ -456,6 +608,40 @@ describe("ToolConfigPanel", () => {
     expect(screen.queryByRole("button", { name: m.flow_tool_options_refresh() })).toBeNull();
   });
 
+  // Kills: an argument row does not say its type or names another, a row is
+  // given a type the schema does not name, a list of choices is called text,
+  // or the JSON field of a list or an object gives no example of how one is
+  // written.
+  it("says each argument's type and how a list or an object is written", async () => {
+    await renderPanel([SEARCH], chosen({ query: "x", tags: ["a"] }));
+
+    expect(row("query").getByText(m.flow_json_type_string())).toBeTruthy();
+    expect(row("limit").getByText(m.flow_json_type_integer())).toBeTruthy();
+    expect(row("note").queryByText(m.flow_json_type_string())).toBeNull();
+    const value = m.flow_tool_argument_json_example_value();
+    expect(row("tags").getByRole("textbox").getAttribute("placeholder")).toBe(
+      JSON.stringify([value, value])
+    );
+    cleanup();
+
+    const properties = { status: { type: "string", enum: ["open"] }, filter: { type: "object" } };
+    await renderPanel([withSchema({ properties })], chosen({ status: "open", filter: {} }));
+    expect(row("status").queryByText(m.flow_json_type_string())).toBeNull();
+    expect(row("status").getByText(m.flow_tool_argument_type_choice())).toBeTruthy();
+    expect(row("filter").getByRole("textbox").getAttribute("placeholder")).toBe(
+      JSON.stringify({ [m.flow_tool_argument_json_example_key()]: value })
+    );
+  });
+
+  // Kills: the picker does not say which server the chosen tool is on or what
+  // the tool does.
+  it("shows the chosen tool's server and description under the picker", async () => {
+    await renderPanel([SEARCH], chosen({ query: "bygglov" }));
+
+    expect(screen.getByText(m.flow_tool_picker_server({ name: "Ärendesystemet" }))).toBeTruthy();
+    expect(screen.getByText("Söker ärenden.")).toBeTruthy();
+  });
+
   // Kills: the chosen tool's server class is not shown or is named from
   // another level; a server without a class gets no sentence while classes
   // are on; a class or sentence shows while the organization has classes off.
@@ -494,23 +680,79 @@ describe("ToolConfigPanel", () => {
     }
   );
 
-  // Kills: a personal space shows the "administrator switches servers on"
-  // sentence or a settings link; somebody who may not edit the space gets the link.
+  // Kills: a personal space shows the steps that give a space tools or a
+  // settings link; a shared space leaves out who adds the server, who switches
+  // it on, or where its tools then show; the step for the space names somebody
+  // else than the reader; somebody who may not edit the space gets the link.
   it.each([
-    { personal: true, mayEdit: true, sentence: () => m.flow_tool_refusal_space_is_personal() },
-    { personal: false, mayEdit: true, sentence: () => m.flow_tool_options_empty_editor() },
-    { personal: false, mayEdit: false, sentence: () => m.flow_tool_options_empty_admin() }
+    {
+      personal: true,
+      mayEdit: true,
+      said: () => m.flow_tool_refusal_space_is_personal(),
+      steps: () => []
+    },
+    {
+      personal: false,
+      mayEdit: true,
+      said: () => m.flow_tool_options_empty_lead(),
+      steps: () => [
+        m.flow_tool_options_empty_step_server(),
+        m.flow_tool_options_empty_editor(),
+        m.flow_tool_options_empty_step_listed()
+      ]
+    },
+    {
+      personal: false,
+      mayEdit: false,
+      said: () => m.flow_tool_options_empty_lead(),
+      steps: () => [
+        m.flow_tool_options_empty_step_server(),
+        m.flow_tool_options_empty_admin(),
+        m.flow_tool_options_empty_step_listed()
+      ]
+    }
   ])(
     "says who can give a space without tools any (personal $personal, may edit $mayEdit)",
-    async ({ personal, mayEdit, sentence }) => {
+    async ({ personal, mayEdit, said, steps }) => {
       Object.assign(space, { personal, mayEdit });
       await renderPanel([], null);
 
-      expect(screen.getByText(sentence())).toBeTruthy();
+      expect(screen.getByText(said())).toBeTruthy();
+      expect(
+        screen.queryAllByRole("listitem").map((item) => item.textContent?.trim())
+      ).toStrictEqual(steps());
       const link = screen.queryByRole("link", { name: m.flow_tool_options_open_settings() });
       expect(link?.getAttribute("href") ?? null).toBe(
         !personal && mayEdit ? "/spaces/space-1/settings" : null
       );
+      // Kills: the link leaves the editor, which saves first and cannot save
+      // a tool step without a tool, so it never gets there; the new tab gets
+      // a handle on the editor or its address.
+      expect(link?.getAttribute("target") ?? null).toBe(!personal && mayEdit ? "_blank" : null);
+      expect(link?.getAttribute("rel") ?? null).toBe(
+        !personal && mayEdit ? "noopener noreferrer" : null
+      );
     }
   );
+
+  // Kills: "Go to step" for a tool issue finds no place to land in the tool
+  // section, lands on the argument's kind instead of its missing value, or
+  // lands on another argument than the one it names.
+  it("lets the step editor land on the picker and on a named argument's value", async () => {
+    await renderPanel([SEARCH], chosen({ limit: 5 }));
+
+    expect(focusStepTarget(document.body, { kind: "tool" })).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole("combobox", { name: /search_cases/ }));
+    expect(focusStepTarget(document.body, { kind: "tool_argument", name: "query" })).toBe(true);
+    expect(document.activeElement).toBe(
+      row("query").getByRole("textbox", {
+        name: m.flow_tool_argument_value_label({ argument: "query" })
+      })
+    );
+    // An argument with a valid value is landed on too, not the first invalid one.
+    focusStepTarget(document.body, { kind: "tool_argument", name: "limit" });
+    expect(screen.getByRole("group", { name: "limit" }).contains(document.activeElement)).toBe(
+      true
+    );
+  });
 });

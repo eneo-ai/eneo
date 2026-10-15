@@ -232,7 +232,9 @@
                     <span class="font-medium">{server.name}</span>
                     {#if hasTools}
                       <span class="text-muted text-xs font-normal"
-                        >({serverTools.length} {m.tools()})</span
+                        >({serverTools.length === 1
+                          ? m.mcp_server_tool_count_one({ count: 1 })
+                          : m.mcp_server_tool_count_many({ count: serverTools.length })})</span
                       >
                     {/if}
                   </Field.Label>

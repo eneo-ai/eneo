@@ -56,7 +56,12 @@
     type FlowRuntimeInputConfigValue
   } from "$lib/features/flows/flowRuntimeInputConfig";
   import { updateTextProcessingMode } from "$lib/features/flows/flowTextProcessingConfig";
-  import { withToolInputConfig } from "./tool/toolInputConfig";
+  import {
+    findToolOption,
+    listedToolOptions,
+    readToolInputConfig,
+    withToolInputConfig
+  } from "./tool/toolInputConfig";
   import FlowStepAIMenu from "./FlowStepAIMenu.svelte";
   import type { AIBuilderStepIntent } from "$lib/features/flows/ai-builder/protocol";
   import FlowStepRequestPreview from "./FlowStepRequestPreview.svelte";
@@ -236,6 +241,8 @@
   // saved under: see getStepChapterStateKey.
   const newStepOpenIntent = flowEditor.state.newStepOpenIntent;
   const toolOptions = flowEditor.state.toolOptions;
+  const toolArgumentsDrafts = flowEditor.state.toolArgumentsDrafts;
+  const stepFocusRequest = flowEditor.state.stepFocusRequest;
   const activeStepStateKey = $derived(
     getStepChapterStateKey({ activeStep, newStepOpenIntent: $newStepOpenIntent })
   );
@@ -737,6 +744,15 @@
         })
       : null;
   });
+  // The listed tool a tool step reads its material from, for the preview.
+  const previewTool = $derived(
+    activeStep?.input_source === "tool"
+      ? findToolOption(
+          listedToolOptions($toolOptions),
+          readToolInputConfig(activeStep.input_config)
+        )
+      : null
+  );
   const instructionText = $derived(
     assistantState.assistant &&
       typeof assistantState.assistant === "object" &&
@@ -783,6 +799,11 @@
     el.focus();
     el.select();
   });
+  // A place the banner asks for is in the Underlag chapter, which lands on it
+  // and hands the request back, so neither a later mount of this panel nor a
+  // later visit to the step lands there again. The tool section is drawn once
+  // the tool list is no longer loading, so the request waits until then.
+  const inputFocusTarget = $derived($toolOptions.status === "loading" ? null : $stepFocusRequest);
   // Leaving the step editor ends the creation episode: coming back should open
   // the chapter the step's own state calls for, not the one it was created on.
   onDestroy(() => flowEditor.clearNewStepOpenIntent());
@@ -801,6 +822,7 @@
           step: activeStep,
           previousStep,
           context: buildContext(steps, formSchema, transcriptionEnabled, activeStep.step_order),
+          tools: listedToolOptions($toolOptions),
           hasKnowledge: hasKnowledgeSelections,
           hasAttachments: hasAttachmentSelections
         })
@@ -1053,6 +1075,7 @@
             hasKnowledge={hasKnowledgeSelections}
             {isAdvancedMode}
             transcriptionEnabled={transcriptionEnabled && hasAudioInputSteps}
+            tool={previewTool}
           />
         {/if}
 
@@ -1132,6 +1155,8 @@
           status={chapterInputStatus}
           initialOpen={defaultOpenChapter === "input"}
           resetKey={activeStepStateKey}
+          focusTarget={inputFocusTarget}
+          onFocusTaken={() => flowEditor.takeStepFocusRequest()}
         >
           <FlowStepInputSection
             step={activeStep}
@@ -1153,6 +1178,9 @@
             flowId={currentFlowId}
             stepStateKey={activeStepStateKey}
             toolOptions={$toolOptions}
+            toolArgumentsDrafts={$toolArgumentsDrafts.get(flowEditor.stepIdentity(activeStep))}
+            onToolArgumentsDraftChange={(place, draft) =>
+              activeStep && flowEditor.keepToolArgumentsDraft(activeStep, place, draft)}
             onReloadToolOptions={() => void flowEditor.loadToolOptions()}
             onInputSourceChange={(detail) =>
               handleInputSourceChange(detail.value as FlowStep["input_source"])}

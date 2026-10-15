@@ -51,6 +51,7 @@
   import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import { getLocale } from "$lib/paraglide/runtime";
   import { stepSourceLines } from "$lib/features/flows/flowStepMaterial";
+  import { listedToolOptions } from "$lib/features/flows/components/tool/toolInputConfig";
   import {
     answerLabel,
     contractFieldCount,
@@ -232,7 +233,8 @@
       isPublished,
       saveStatus,
       validationErrors,
-      serverValidationIssue
+      serverValidationIssue,
+      toolOptions
     }
   } = flowEditor;
   const careDataPolicy = $derived(resolveFlowCareDataPolicy($resource.metadata_json));
@@ -448,9 +450,12 @@
   );
   // What each step reads, in the step list's words, for the Builder's rows.
   const stepReads = $derived(
-    stepSourceLines($update.steps, formSchemaMetadata, transcriptionEnabled).map(
-      (line) => line?.text ?? null
-    )
+    stepSourceLines(
+      $update.steps,
+      formSchemaMetadata,
+      transcriptionEnabled,
+      listedToolOptions($toolOptions)
+    ).map((line) => line?.text ?? null)
   );
   const stepChoices = $derived(
     $update.steps
@@ -737,9 +742,9 @@
         errors={$validationErrors}
         steps={$update.steps}
         classifications={data.securityClassifications}
-        onNavigateToStep={(stepId) => {
+        onNavigateToStep={(stepId, focus) => {
           builderStage = 4;
-          flowEditor.selectStep(stepId);
+          flowEditor.goToStep(stepId, focus);
         }}
         bind:isExpanded={validationBannerExpanded}
       />

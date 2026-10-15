@@ -27,9 +27,12 @@
     describeToolStepRefusal,
     getValidationIssueMessage,
     parseValidationError,
+    toolStepRefusalFocusTarget,
     type parseServerValidationIdentity,
     type ParsedValidationError
   } from "$lib/features/flows/flowStepValidationMessages";
+  import { configIssueFocusTarget } from "$lib/features/flows/flowStepConfigValidation";
+  import type { StepFocusTarget } from "$lib/features/flows/flowStepFocus";
 
   const reducedMotion = prefersReducedMotion();
   const {
@@ -49,7 +52,8 @@
     steps?: FlowStep[];
     /** The organisation's security classes, which name the levels a refusal carries. */
     classifications?: NamedSecurityLevel[];
-    onNavigateToStep?: (stepId: string) => void;
+    /** Opens the step, at the place where the issue is fixed when the issue has one. */
+    onNavigateToStep?: (stepId: string, focus: StepFocusTarget | null) => void;
     /** The latest server rejection's identity and, for a classification refusal, its facts. */
     repairIssue?: ReturnType<typeof parseServerValidationIdentity>;
     onRepairReference?: (detail: {
@@ -76,6 +80,7 @@
     stepName: string;
     stepId: string | undefined;
     message: string;
+    focus: StepFocusTarget | null;
     /** Raw technical sentence, kept for debugging when it adds anything. */
     detail?: string;
     repairs?: ReferenceRepair[];
@@ -95,7 +100,7 @@
     switch (parsed.kind) {
       case "step": {
         const step = steps.find((s) => s.step_order === parsed.stepOrder);
-        const translated = getValidationIssueMessage(parsed.code, parsed.subject);
+        const translated = getValidationIssueMessage(parsed.code, parsed.subjects);
         const raw = parsed.detail;
         const refusal = serverIssueFor(key, parsed);
         const message = refusal?.classification
@@ -120,6 +125,9 @@
           // An untranslated code falls back to the raw server sentence
           // rather than showing the bare code.
           message,
+          focus: refusal?.toolRefusal
+            ? toolStepRefusalFocusTarget(refusal.toolRefusal)
+            : configIssueFocusTarget(parsed.code, parsed.subjects),
           // The editor's own checks carry only their code, which explains nothing.
           detail:
             raw && translated !== parsed.code && raw !== message && raw !== parsed.code
@@ -137,7 +145,8 @@
             step?.user_description ||
             (step ? m.flow_step_fallback_label({ order: String(step.step_order) }) : ""),
           stepId: step?.id ?? undefined,
-          message: translated !== parsed.message ? translated : parsed.message
+          message: translated !== parsed.message ? translated : parsed.message,
+          focus: null
         };
       }
       case "flow": {
@@ -153,6 +162,7 @@
           stepName: "",
           stepId: undefined,
           message: translated !== parsed.code ? translated : (raw ?? parsed.message),
+          focus: null,
           detail:
             raw && translated !== parsed.code && raw !== translated && raw !== parsed.code
               ? raw
@@ -235,9 +245,9 @@
       : m.flow_validation_replace_reference_option(detail);
   }
 
-  function handleNavigate(stepId: string | undefined) {
-    if (stepId && onNavigateToStep) {
-      onNavigateToStep(stepId);
+  function handleNavigate(issue: DisplayIssue) {
+    if (issue.stepId && onNavigateToStep) {
+      onNavigateToStep(issue.stepId, issue.focus);
     }
   }
 
@@ -372,7 +382,7 @@
                     class="shrink-0"
                     onclick={(e) => {
                       e.stopPropagation();
-                      handleNavigate(issue.stepId);
+                      handleNavigate(issue);
                     }}
                   >
                     {m.flow_validation_go_to_step()}

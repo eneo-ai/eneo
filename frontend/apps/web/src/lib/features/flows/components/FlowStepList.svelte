@@ -14,6 +14,7 @@
   import FileInput from "@lucide/svelte/icons/file-input";
   import { cn } from "$lib/utils.js";
   import type { FlowFormSchemaMetadata } from "$lib/features/flows/flowFormSchema";
+  import { listedToolOptions } from "$lib/features/flows/components/tool/toolInputConfig";
 
   let {
     steps,
@@ -40,12 +41,15 @@
 
   const mode = getFlowUserMode();
   const uid = $props.id();
+  const flowEditor = getFlowEditor();
+  const toolOptions = flowEditor.state.toolOptions;
   // Where each step's material comes from, in the words the step panel uses.
-  const sourceLines = $derived(stepSourceLines(steps, formSchema, transcriptionEnabled));
+  const sourceLines = $derived(
+    stepSourceLines(steps, formSchema, transcriptionEnabled, listedToolOptions($toolOptions))
+  );
   // Per step, the index of the step whose caption says what it reads.
   const captionOf = $derived(groupStepSources(sourceLines));
   const captionId = (index: number) => `${uid}-reads-${index}`;
-  const flowEditor = getFlowEditor();
 
   let showAddStep = $state(false);
   const previousOutputType = $derived(
@@ -135,7 +139,7 @@
                 <FileInput class="size-3.5" aria-hidden="true" />
               {/if}
             </span>
-            <span class="min-w-0">{caption.text}</span>
+            <span class="min-w-0 break-words">{caption.text}</span>
           </div>
         {/if}
         <FlowStepCard

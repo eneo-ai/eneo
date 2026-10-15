@@ -4,6 +4,7 @@ import { readable } from "svelte/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
+import { getLocale } from "$lib/paraglide/runtime";
 import { flowStepFixture } from "$lib/features/flows/flowStepTestFixture";
 
 import {
@@ -75,7 +76,7 @@ describe("FlowValidationBanner server issues", () => {
 
     // The action targets the offending step.
     await fireEvent.click(screen.getByRole("button", { name: m.flow_validation_go_to_step() }));
-    expect(onNavigateToStep).toHaveBeenCalledWith("step-3");
+    expect(onNavigateToStep).toHaveBeenCalledWith("step-3", null);
   });
 
   it("says a step needs a model when publish refuses a model step without one", async () => {
@@ -134,6 +135,7 @@ describe("FlowValidationBanner tool refusals", () => {
   const RAW_TOOL_SENTENCE = "Step 3: the server's own English sentence.";
 
   function renderRefusal(code: string, context: Record<string, unknown>) {
+    const onNavigateToStep = vi.fn();
     const identity = parseServerValidationIdentity(
       new EneoError(RAW_TOOL_SENTENCE, "RESPONSE", 400, 0, {
         message: RAW_TOOL_SENTENCE,
@@ -148,9 +150,10 @@ describe("FlowValidationBanner tool refusals", () => {
       ]),
       steps: [flowStepFixture({ id: "step-3", step_order: 3 })],
       repairIssue: identity,
-      onNavigateToStep: () => undefined,
+      onNavigateToStep,
       isExpanded: true
     });
+    return onNavigateToStep;
   }
 
   // Kills: the banner shows the code's generic sentence whatever `context.refusal`
@@ -179,8 +182,8 @@ describe("FlowValidationBanner tool refusals", () => {
 
   // Kills: an argument problem shows the code's generic sentence, or a sentence
   // chosen without the problem or without the argument's name.
-  it("names the argument a refused tool configuration is about", () => {
-    renderRefusal("typed_io_tool_invalid_config", {
+  it("names the argument a refused tool configuration is about", async () => {
+    const onNavigateToStep = renderRefusal("typed_io_tool_invalid_config", {
       issue_code: "flow_step_invalid",
       field: "input_config.tool.arguments.query",
       argument: "query",
@@ -190,6 +193,83 @@ describe("FlowValidationBanner tool refusals", () => {
     expect(
       screen.getByText(m.flow_tool_argument_composed_text({ argument: "query" }))
     ).toBeTruthy();
+    // Kills: "Go to step" leaves the author at the top of the step, not at the argument.
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_validation_go_to_step() }));
+    expect(onNavigateToStep).toHaveBeenCalledWith("step-3", {
+      kind: "tool_argument",
+      name: "query"
+    });
+  });
+
+  // Kills: "Go to step" for a refused tool or an unreadable tool choice leaves
+  // the author at the top of the step; a refusal about another setting of
+  // the step lands on the picker.
+  it.each([
+    {
+      code: "typed_io_tool_not_allowed",
+      context: { refusal: "server_disabled" },
+      focus: { kind: "tool" }
+    },
+    {
+      code: "typed_io_tool_invalid_config",
+      context: { field: "input_config.tool" },
+      focus: { kind: "tool" }
+    },
+    { code: "typed_io_tool_invalid_config", context: { field: "input_type" }, focus: null }
+  ])("asks to land where $code about $context is fixed", async ({ code, context, focus }) => {
+    const onNavigateToStep = renderRefusal(code, context);
+
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_validation_go_to_step() }));
+    expect(onNavigateToStep).toHaveBeenCalledWith("step-3", focus);
+  });
+
+  // Kills: the banner names only one of the missing arguments.
+  it("names every argument a tool step is missing", () => {
+    render(FlowValidationBanner, {
+      errors: new Map([
+        [
+          "flow:step-config:tool_argument_missing:3",
+          ["tool_argument_missing", "to_date", "from_date"]
+        ]
+      ]),
+      steps: [flowStepFixture({ id: "step-3", step_order: 3 })],
+      isExpanded: true
+    });
+
+    const names = new Intl.ListFormat(getLocale(), { type: "conjunction" }).format([
+      "to_date",
+      "from_date"
+    ]);
+    expect(screen.getByText(m.flow_tool_arguments_missing({ names }))).toBeTruthy();
+  });
+
+  // Kills: "Go to step" for a tool step's own issue leaves the author at the
+  // top of the step instead of at the picker or at the argument the issue
+  // names; an issue outside the tool section asks for a place in it.
+  it.each([
+    { code: "tool_missing_tool", subject: [], focus: { kind: "tool" } },
+    {
+      code: "tool_argument_missing",
+      subject: ["query"],
+      focus: { kind: "tool_argument", name: "query" }
+    },
+    {
+      code: "tool_argument_missing",
+      subject: ["to_date", "from_date"],
+      focus: { kind: "tool_argument", name: "to_date" }
+    },
+    { code: "http_missing_url", subject: [], focus: null }
+  ])("asks to land where the editor's issue $code is fixed", async ({ code, subject, focus }) => {
+    const onNavigateToStep = vi.fn();
+    render(FlowValidationBanner, {
+      errors: new Map([[`flow:step-config:${code}:3`, [code, ...subject]]]),
+      steps: [flowStepFixture({ id: "step-3", step_order: 3 })],
+      onNavigateToStep,
+      isExpanded: true
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_validation_go_to_step() }));
+    expect(onNavigateToStep).toHaveBeenCalledWith("step-3", focus);
   });
 });
 
@@ -418,7 +498,7 @@ describe("FlowValidationBanner security classification refusals", () => {
     );
     expect(screen.getAllByText(RAW)).toHaveLength(1);
     await fireEvent.click(screen.getByRole("button", { name: m.flow_validation_go_to_step() }));
-    expect(onNavigateToStep).toHaveBeenCalledWith("step-3");
+    expect(onNavigateToStep).toHaveBeenCalledWith("step-3", null);
   });
 
   it("falls back to the translated sentence for a refusal without facts", () => {

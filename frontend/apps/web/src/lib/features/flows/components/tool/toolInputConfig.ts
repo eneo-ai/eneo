@@ -27,6 +27,11 @@ export type ToolOptionsLoad =
       refreshing: boolean;
     };
 
+/** The tools of a loaded list; none while the list is loading or failed. */
+export function listedToolOptions(load: ToolOptionsLoad): FlowToolOption[] {
+  return load.status === "loaded" ? load.options : [];
+}
+
 const TOOL_INPUT_CONFIG_KEY = "tool";
 const TOOL_CONFIG_KEYS = ["mcp_server_id", "tool_id", "arguments"];
 
@@ -62,7 +67,7 @@ export function lacksChosenTool(step: Pick<FlowStep, "input_source" | "input_con
 
 /** The listed tool a stored choice names, or null when the list does not have it. */
 export function findToolOption(
-  options: FlowToolOption[],
+  options: readonly FlowToolOption[],
   config: Pick<ToolInputConfig, "mcp_server_id" | "tool_id"> | null
 ): FlowToolOption | null {
   return (
@@ -213,9 +218,89 @@ export function readJson(text: string): JsonRead {
   }
 }
 
-/** True when two values are stored as the same JSON. */
+/** JSON text with each object's keys in one order: the server's jsonb keeps no key order. */
+function orderedJson(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) =>
+    isJsonObject(inner)
+      ? Object.fromEntries(
+          Object.entries(inner).sort(([left], [right]) =>
+            left < right ? -1 : left > right ? 1 : 0
+          )
+        )
+      : inner
+  );
+}
+
+/** True when two values are stored as the same JSON, whatever order an object's keys come in. */
 export function sameJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return orderedJson(left) === orderedJson(right);
+}
+
+/**
+ * The stored arguments a field of the step editor writes: one argument's row
+ * (`only`), or the JSON field that takes every argument without a row of its
+ * own (`except` the arguments that have one).
+ */
+export type ArgumentsScope = { only: string } | { except: readonly string[] };
+
+/** The part of `stored` a field with `scope` writes. */
+function scopedArguments(stored: JsonObject, scope: ArgumentsScope): JsonObject {
+  return Object.fromEntries(
+    Object.entries(stored).filter(([name]) =>
+      "only" in scope ? name === scope.only : !scope.except.includes(name)
+    )
+  );
+}
+
+/**
+ * Text typed in a field for a step's tool arguments that the step cannot
+ * hold, with the tool and the field's stored arguments when it was typed. The
+ * step keeps those arguments, so the text stays unsaved until it is fixed.
+ */
+export type ToolArgumentsDraft = {
+  text: string;
+  scope: ArgumentsScope;
+  typedAgainst: ToolInputConfig;
+};
+
+/** The key a step's drafts are kept under: one per row, one for the JSON field. */
+export function draftPlace(scope: ArgumentsScope): string {
+  return "only" in scope ? `argument:${scope.only}` : "arguments";
+}
+
+/** The draft of a text typed in the field with `scope` while the step holds `config`. */
+export function typedDraft(
+  text: string,
+  scope: ArgumentsScope,
+  config: ToolInputConfig
+): ToolArgumentsDraft {
+  return {
+    text,
+    scope,
+    typedAgainst: {
+      mcp_server_id: config.mcp_server_id,
+      tool_id: config.tool_id,
+      arguments: scopedArguments(config.arguments, scope)
+    }
+  };
+}
+
+/**
+ * The draft's text while the step still holds the tool and the field's
+ * arguments it was typed against; null once another tool or other values for
+ * those arguments are stored, which replace the text.
+ */
+export function keptDraftText(
+  draft: ToolArgumentsDraft | null | undefined,
+  config: ToolInputConfig | null
+): string | null {
+  if (!draft || !config) return null;
+  const { typedAgainst, scope } = draft;
+  return typedAgainst.mcp_server_id === config.mcp_server_id &&
+    typedAgainst.tool_id === config.tool_id &&
+    sameJson(typedAgainst.arguments, scopedArguments(config.arguments, scope))
+    ? draft.text
+    : null;
 }
 
 /**

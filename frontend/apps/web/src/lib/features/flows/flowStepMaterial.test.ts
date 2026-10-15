@@ -173,6 +173,32 @@ describe("getStepSourceLine", () => {
     });
   });
 
+  // Kills: a step whose chosen tool the list has still says only "a tool", or
+  // a step is named after a tool it did not choose.
+  it("names the tool a step reads once the editor's list has it", () => {
+    const toolStep = step({
+      input_source: "tool",
+      input_config: { tool: { mcp_server_id: "server-1", tool_id: "tool-search", arguments: {} } }
+    });
+    const option = {
+      mcp_server_id: "server-1",
+      mcp_server_name: "Ärenden",
+      mcp_server_security_level: null,
+      tool_id: "tool-search",
+      tool_name: "search_cases",
+      tool_description: null,
+      input_schema: null,
+      refusal: null
+    };
+    const lineWith = (tools: (typeof option)[]) =>
+      getStepSourceLine(toolStep, flow[0], buildContext(flow, formSchema, false, 2), tools)?.text;
+
+    expect(lineWith([{ ...option, tool_id: "tool-other", tool_name: "other" }, option])).toBe(
+      reads(m.flow_step_reads_tool_named({ tool: "search_cases", server: "Ärenden" }))
+    );
+    expect(lineWith([{ ...option, tool_id: "tool-other" }])).toBe(reads(m.flow_step_reads_tool()));
+  });
+
   it("counts the flow's input aliases as its input, and fixed text as the step's own", () => {
     expect(lineFor(ownText(2, "Text: {{indata_text}}"))).toEqual({
       text: reads(m.flow_step_reads_flow_input()),

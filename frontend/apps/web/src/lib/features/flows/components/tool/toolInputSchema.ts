@@ -1,4 +1,5 @@
 import { isJsonObject, type JsonObject } from "$lib/features/flows/jsonObject";
+import { readJsonSchemaType, type JsonSchemaType } from "$lib/features/flows/jsonSchemaType";
 import { readArgument } from "./toolInputConfig";
 
 type ToolChoiceValue = string | number | boolean;
@@ -15,6 +16,8 @@ export type ToolArgumentField = {
   name: string;
   description: string | null;
   required: boolean;
+  /** The one type the schema names for the argument, when it names one. */
+  type: JsonSchemaType | null;
   control: ToolArgumentControl;
 };
 
@@ -92,17 +95,27 @@ export function readToolArgumentForm(inputSchema: unknown): ToolArgumentForm {
   ) {
     return { kind: "json" };
   }
-  const fields = Object.entries(properties).map(([name, property]) => ({
-    name,
-    description:
-      isJsonObject(property) &&
-      typeof property.description === "string" &&
-      property.description.trim()
-        ? property.description
-        : null,
-    required: required.includes(name),
-    control: controlFor(property)
-  }));
+  // Required arguments first, in the order the schema lists them: a stored
+  // schema keeps that list's order, not the order of its properties.
+  const names = new Set([
+    ...required.filter((name): name is string => typeof name === "string"),
+    ...Object.keys(properties)
+  ]);
+  const fields = Array.from(names, (name) => {
+    const property = properties[name];
+    return {
+      name,
+      description:
+        isJsonObject(property) &&
+        typeof property.description === "string" &&
+        property.description.trim()
+          ? property.description
+          : null,
+      required: required.includes(name),
+      type: isJsonObject(property) ? readJsonSchemaType(property.type) : null,
+      control: controlFor(property)
+    };
+  });
   // JSON Schema allows arguments beyond the named ones unless
   // `additionalProperties` is false.
   const closed = inputSchema.additionalProperties === false;
@@ -118,17 +131,14 @@ export function isRequiredArgumentMissing(field: ToolArgumentField, value: unkno
 }
 
 /**
- * The first required argument of a tool's input schema that `stored` has no
- * value for; null also when the schema is not one the editor shows as rows.
+ * The required arguments of a tool's input schema that `stored` has no value
+ * for, in the order the editor shows them; none also when the schema is not
+ * one the editor shows as rows.
  */
-export function firstMissingRequiredArgument(
-  inputSchema: unknown,
-  stored: JsonObject
-): string | null {
+export function missingRequiredArguments(inputSchema: unknown, stored: JsonObject): string[] {
   const form = readToolArgumentForm(inputSchema);
-  if (form.kind !== "fields") return null;
-  const missing = form.fields.find((field) =>
-    isRequiredArgumentMissing(field, readArgument(stored, field.name))
-  );
-  return missing?.name ?? null;
+  if (form.kind !== "fields") return [];
+  return form.fields
+    .filter((field) => isRequiredArgumentMissing(field, readArgument(stored, field.name)))
+    .map((field) => field.name);
 }

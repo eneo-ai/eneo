@@ -4,6 +4,7 @@ import { flowStepFixture } from "$lib/features/flows/flowStepTestFixture";
 import { removeOrphanedTemplateBindings } from "./templateFillConfig";
 import {
   computeStepConfigValidationIssues,
+  configIssueFocusTarget,
   hasDeletedStepReferences
 } from "./flowStepConfigValidation";
 
@@ -182,6 +183,55 @@ describe("computeStepConfigValidationIssues", () => {
 
     expect(keys({})).toEqual([`${PREFIX}tool_argument_missing:1`]);
     expect(keys({ constructor: "a" })).toEqual([]);
+  });
+
+  // Kills: the issue names only the first missing argument, so the banner
+  // hides the others; required arguments come in the order of the schema's
+  // properties instead of its `required` list.
+  it("names every missing required argument, in the order the schema requires them", () => {
+    const tool = { mcp_server_id: "server-1", tool_id: "tool-1" };
+    const options = [
+      {
+        ...tool,
+        mcp_server_name: "Ärenden",
+        mcp_server_security_level: null,
+        tool_name: "query_detail_view",
+        tool_description: null,
+        refusal: null,
+        input_schema: {
+          required: ["to_date", "from_date"],
+          properties: { limit: {}, from_date: {}, to_date: {} }
+        }
+      }
+    ];
+    const step = flowStepFixture({
+      input_source: "tool",
+      input_config: { tool: { ...tool, arguments: { limit: 5 } } }
+    });
+
+    expect([...computeStepConfigValidationIssues([step], PREFIX, options).values()]).toEqual([
+      ["tool_argument_missing", "to_date", "from_date"]
+    ]);
+  });
+
+  // Kills: an unsaved text is reported without the field it is in, so "Go to
+  // step" lands on the first invalid control of the arguments (a missing
+  // required one) instead of the row that holds the text; a text in the JSON
+  // field is sent to a row.
+  it.each([
+    {
+      unsaved: [{ only: "limit" }, { except: [] }],
+      target: { kind: "tool_argument", name: "limit" }
+    },
+    { unsaved: [{ except: ["query"] }], target: { kind: "tool_arguments" } }
+  ] as const)("lands on the field of an unsaved text ($target.kind)", ({ unsaved, target }) => {
+    const step = flowStepFixture({
+      input_source: "tool",
+      input_config: { tool: { mcp_server_id: "s", tool_id: "t", arguments: {} } }
+    });
+    const issues = computeStepConfigValidationIssues([step], PREFIX, null, () => unsaved);
+    const [code, ...subjects] = issues.get(`${PREFIX}tool_arguments_unsaved:1`) ?? [];
+    expect(configIssueFocusTarget(code ?? "", subjects)).toStrictEqual(target);
   });
 
   it("blocks publishing an incompatible output mode without rewriting the step", () => {

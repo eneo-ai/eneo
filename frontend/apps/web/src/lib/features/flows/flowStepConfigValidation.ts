@@ -8,9 +8,11 @@ import {
   findToolOption,
   lacksChosenTool,
   readToolInputConfig,
+  type ArgumentsScope,
   type FlowToolOption
 } from "./components/tool/toolInputConfig";
-import { firstMissingRequiredArgument } from "./components/tool/toolInputSchema";
+import { missingRequiredArguments } from "./components/tool/toolInputSchema";
+import type { StepFocusTarget } from "./flowStepFocus";
 import { getOutputModeCompatibilityIssue } from "./flowStepTypes";
 import {
   getSpeakerMappingInferNames,
@@ -20,17 +22,44 @@ import {
 /** Matches the synthetic token for a reference to a since-deleted step. */
 export const DELETED_STEP_TOKEN = /\{\{step_\d+_deleted/;
 
+const TOOL_MISSING_TOOL = "tool_missing_tool";
+const TOOL_ARGUMENT_MISSING = "tool_argument_missing";
+const TOOL_ARGUMENTS_UNSAVED = "tool_arguments_unsaved";
+
+/**
+ * Where the author fixes an issue of a tool step this module reports: the
+ * picker, or the first argument the issue names. A text that is not saved
+ * names the argument of its row, and none when it is in the JSON field.
+ * Null for every other issue.
+ */
+export function configIssueFocusTarget(
+  code: string,
+  subjects: readonly string[]
+): StepFocusTarget | null {
+  if (code === TOOL_MISSING_TOOL) return { kind: "tool" };
+  const [first] = subjects;
+  if (code === TOOL_ARGUMENTS_UNSAVED) {
+    return first === undefined
+      ? { kind: "tool_arguments" }
+      : { kind: "tool_argument", name: first };
+  }
+  if (code === TOOL_ARGUMENT_MISSING && first) return { kind: "tool_argument", name: first };
+  return null;
+}
+
 /**
  * Per-step configuration validation: a template_fill step needs a template
  * asset, an HTTP input/output step needs a URL, and a tool input step needs a
- * chosen tool and a value for each argument the tool requires. What a tool
+ * chosen tool, a value for each argument the tool requires, and no arguments
+ * text the step cannot hold in the fields `unsavedArguments` reports. What a tool
  * requires is known only once `toolOptions` are. Returned keys are namespaced
  * with `prefix` so the caller can replace exactly its own error slice.
  */
 export function computeStepConfigValidationIssues(
   steps: FlowStep[],
   prefix: string,
-  toolOptions: FlowToolOption[] | null = null
+  toolOptions: FlowToolOption[] | null = null,
+  unsavedArguments: (step: FlowStep) => readonly ArgumentsScope[] = () => []
 ): Map<string, string[]> {
   const entries = new Map<string, string[]>();
   for (const step of steps) {
@@ -104,18 +133,27 @@ export function computeStepConfigValidationIssues(
         entries.set(`${prefix}http_missing_url:${step.step_order}`, ["http_missing_url"]);
       }
     }
+    const unsaved = step.input_source === "tool" ? unsavedArguments(step) : [];
+    if (unsaved.length > 0) {
+      // The rows' arguments first, so "Go to step" lands on one; the JSON
+      // field has none.
+      entries.set(`${prefix}${TOOL_ARGUMENTS_UNSAVED}:${step.step_order}`, [
+        TOOL_ARGUMENTS_UNSAVED,
+        ...unsaved.flatMap((scope) => ("only" in scope ? [scope.only] : []))
+      ]);
+    }
     if (lacksChosenTool(step)) {
-      entries.set(`${prefix}tool_missing_tool:${step.step_order}`, ["tool_missing_tool"]);
+      entries.set(`${prefix}${TOOL_MISSING_TOOL}:${step.step_order}`, [TOOL_MISSING_TOOL]);
     } else if (step.input_source === "tool" && toolOptions) {
       const tool = readToolInputConfig(step.input_config);
       const option = findToolOption(toolOptions, tool);
-      const argument =
-        tool && option ? firstMissingRequiredArgument(option.input_schema, tool.arguments) : null;
-      if (argument !== null) {
-        // The second value is what the issue is about: the banner names it.
-        entries.set(`${prefix}tool_argument_missing:${step.step_order}`, [
-          "tool_argument_missing",
-          argument
+      const missing =
+        tool && option ? missingRequiredArguments(option.input_schema, tool.arguments) : [];
+      if (missing.length > 0) {
+        // The values after the code are what the issue is about: the banner names them.
+        entries.set(`${prefix}${TOOL_ARGUMENT_MISSING}:${step.step_order}`, [
+          TOOL_ARGUMENT_MISSING,
+          ...missing
         ]);
       }
     }

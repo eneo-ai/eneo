@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { m } from "$lib/paraglide/messages";
 import VariablePicker from "./VariablePicker.svelte";
 import { flowStepFixture } from "$lib/features/flows/flowStepTestFixture";
 import { VARIABLE_CATEGORY_CLASSES } from "$lib/features/flows/flowVariableTokens";
@@ -145,7 +146,8 @@ describe("VariablePicker", () => {
 
   // Kills: a tool argument is offered a step's whole output, or a structured
   // result no contract declares, which publish refuses; a reference publish
-  // accepts is hidden from it; another use of the picker loses the whole output.
+  // accepts is hidden from it; another use of the picker loses the whole output;
+  // a whole result with named fields is offered only field by field.
   it.each([
     {
       allowFor: undefined,
@@ -178,6 +180,10 @@ describe("VariablePicker", () => {
     const offered = (await screen.findAllByRole("option")).map((option) =>
       option.querySelector("code")?.textContent?.slice(2, -2)
     );
+    // Kills: a result field's type is shown as the schema's English keyword.
+    expect(
+      screen.getByRole("option", { name: /step_2\.output\.structured\.id/ }).textContent
+    ).toContain(m.flow_json_type_string());
     expect(offered.toSorted()).toEqual(
       [
         "flow_input.kundnamn",
@@ -187,6 +193,7 @@ describe("VariablePicker", () => {
         "step_1.output.text",
         "step_2.output.text",
         "step_2.output.structured.id",
+        "step_2.output.structured",
         "step_3.output.text",
         "step_4.output.text",
         "step_4.output.structured",
