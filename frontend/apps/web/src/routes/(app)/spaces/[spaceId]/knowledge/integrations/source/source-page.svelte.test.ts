@@ -207,7 +207,9 @@ describe("source page", () => {
     await expect.element(page.getByRole("heading", { name: "Protokoll", level: 2 })).toBeVisible();
     await expect.poll(() => api.listDocuments.mock.calls.at(-1)?.[0].knowledge.id).toBe("ik-a");
     await expect
-      .element(page.getByText(m.integration_source_folder_skipped_other({ count: 2 })))
+      .element(
+        page.getByRole("button", { name: m.integration_source_view_unreadable({ count: 2 }) })
+      )
       .toBeVisible();
   });
 

@@ -2,6 +2,12 @@
 // mirrors the backend's IntegrationSyncProgress model.
 export type SyncProgressPhase = "discovering" | "processing" | "finishing";
 
+export type SyncProgressFile = {
+  name: string;
+  outcome: "indexed" | "unchanged" | "skipped";
+  reason?: string | null;
+};
+
 export type IntegrationSyncProgress = {
   integration_knowledge_id: string;
   sync_type: "full" | "delta";
@@ -15,6 +21,10 @@ export type IntegrationSyncProgress = {
   unchanged: number;
   skipped: number;
   deleted: number;
+  /** The file or page being read now; absent from backends without the live feed. */
+  current?: string | null;
+  /** The latest finished files, newest first. */
+  recent?: SyncProgressFile[];
 };
 
 export type SyncProgressSummary = {

@@ -83,7 +83,7 @@ function show(props: Partial<Parameters<typeof render<typeof FolderDocuments>>[1
     knowledge: knowledge(),
     space: { id: "space-1" },
     progress: {},
-    skippedCount: 0,
+    skipped: { items: [], total: 0, truncated: false, synced_at: null },
     problemsHref: "/spaces/space-1/knowledge/integrations/wrapper/w1?tab=problems",
     ...props
   });
@@ -130,12 +130,17 @@ describe("FolderDocuments", () => {
       limit: 50,
       offset: 0
     });
-    await expect.element(page.getByText("Dokumenttyp").first()).toBeVisible();
+    // Properties differ per library, so they live on the document's card, not in a column.
+    expect(page.getByText("Dokumenttyp").elements()).toHaveLength(0);
+    await expect
+      .element(table.getByText(m.integration_source_doc_searchable()).first())
+      .toBeVisible();
     await expectNoAxeViolations();
 
     await page.getByRole("button", { name: "Protokoll KS 2026-02.pdf" }).click();
     await expect.element(page.getByRole("dialog")).toBeVisible();
     await expect.element(page.getByText("Extracted text")).toBeVisible();
+    await expect.element(page.getByRole("dialog").getByText("Dokumenttyp")).toBeVisible();
   });
 
   it("searches on the server after the input settles", async () => {
@@ -200,16 +205,64 @@ describe("FolderDocuments", () => {
     expect(api.listDocuments.mock.calls.map(([call]) => call.offset)).toEqual([0, 50, 0]);
   });
 
-  it("points at the problems tab when the latest sync skipped files", async () => {
+  it("lists the files the latest sync could not read, with the reason", async () => {
     api.listDocuments.mockResolvedValue(pageOf([doc(1)]));
-    show({ skippedCount: 3 });
+    show({
+      skipped: {
+        items: [
+          { file: "scan.pdf", reason: "No text layer (scanned document; OCR is not supported)" }
+        ],
+        total: 3,
+        truncated: true,
+        synced_at: null
+      }
+    });
 
-    await expect
-      .element(page.getByText(m.integration_source_folder_skipped_other({ count: 3 })))
-      .toBeVisible();
+    await page
+      .getByRole("button", { name: m.integration_source_view_unreadable({ count: 3 }) })
+      .click();
+
+    const table = page.getByRole("table", {
+      name: m.integration_source_skipped_table_label({ name: "Protokoll" })
+    });
+    await expect.element(table.getByText("scan.pdf")).toBeVisible();
+    await expect.element(table.getByText(m.skip_reason_no_text_layer())).toBeVisible();
+    await expect.element(page.getByText(m.skipped_and_n_more({ count: 2 }))).toBeVisible();
     await expect
       .element(page.getByRole("link", { name: m.integration_source_show_in_problems() }))
       .toHaveAttribute("href", "/spaces/space-1/knowledge/integrations/wrapper/w1?tab=problems");
+  });
+
+  it("shows the file being read and the latest outcomes while the folder syncs", async () => {
+    api.listDocuments.mockResolvedValue(pageOf([doc(1)]));
+    show({
+      progress: {
+        "ik-1": {
+          integration_knowledge_id: "ik-1",
+          sync_type: "full",
+          phase: "processing",
+          started_at: "2026-10-15T08:00:00Z",
+          updated_at: "2026-10-15T08:01:00Z",
+          total: 20,
+          done: 3,
+          indexed: 2,
+          unchanged: 0,
+          skipped: 1,
+          deleted: 0,
+          current: "Protokoll KS 2026-04.pdf",
+          recent: [
+            { name: "Bild.png", outcome: "skipped", reason: "Unsupported file type (image)" },
+            { name: "Protokoll KS 2026-03.pdf", outcome: "indexed" }
+          ]
+        }
+      }
+    });
+
+    const feed = page.getByRole("region", { name: m.integration_live_heading() });
+    await expect.element(feed.getByText("Protokoll KS 2026-04.pdf")).toBeVisible();
+    await expect.element(feed.getByText(m.integration_live_reading())).toBeVisible();
+    await expect.element(feed.getByText(m.integration_live_skipped())).toBeVisible();
+    await expect.element(feed.getByText(m.integration_live_indexed())).toBeVisible();
   });
 
   it("explains a folder that never synced", async () => {

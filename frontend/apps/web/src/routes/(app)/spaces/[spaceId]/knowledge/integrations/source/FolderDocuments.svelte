@@ -18,15 +18,17 @@
     toggleDocumentsSort,
     type IntegrationDocumentSort,
     type IntegrationDocumentsPage,
-    type IntegrationDocumentsQuery
+    type IntegrationDocumentsQuery,
+    type IntegrationSkippedDocuments
   } from "$lib/features/integrations/integrationDocuments";
   import { previewLinkLabel } from "$lib/features/integrations/IntegrationData";
   import SourceStateBadge from "$lib/features/integrations/components/SourceStateBadge.svelte";
   import { itemState } from "$lib/features/integrations/sources";
   import type { IntegrationSyncProgress } from "$lib/features/integrations/syncProgress";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
-  import SourceMetadataList from "$lib/features/knowledge/components/SourceMetadataList.svelte";
-  import { hasSourceMetadata } from "$lib/features/knowledge/sourceMetadata";
+  import { describeSkipReason } from "$lib/features/integrations/skipReasons";
+  import Check from "@lucide/svelte/icons/check";
+  import LiveSyncFeed from "./LiveSyncFeed.svelte";
   import { m } from "$lib/paraglide/messages";
   import IntegrationActions from "../IntegrationActions.svelte";
 
@@ -34,21 +36,14 @@
     knowledge: IntegrationKnowledge;
     space: { id: string };
     progress: Record<string, IntegrationSyncProgress>;
-    /** Files of this item the latest sync skipped; null while unknown. */
-    skippedCount: number | null;
+    /** The files this item's latest sync skipped; null while unknown or not loadable. */
+    skipped: IntegrationSkippedDocuments | null;
     problemsHref: string;
     /** Show the folder's own heading and actions; off when the source is this one item. */
     showHeader?: boolean;
   }
 
-  let {
-    knowledge,
-    space,
-    progress,
-    skippedCount,
-    problemsHref,
-    showHeader = true
-  }: Props = $props();
+  let { knowledge, space, progress, skipped, problemsHref, showHeader = true }: Props = $props();
 
   const eneo = getEneo();
   const SEARCH_DEBOUNCE_MS = 300;
@@ -62,6 +57,9 @@
   let loadGeneration = 0;
 
   let folderState = $derived(itemState(knowledge, progress));
+  let view = $state<"searchable" | "skipped">("searchable");
+  let skippedTotal = $derived(skipped?.total ?? 0);
+  let skippedNotListed = $derived(skipped ? Math.max(0, skipped.total - skipped.items.length) : 0);
   let range = $derived(documents ? documentsPageRange(documents) : null);
   let hasPrevious = $derived((documents?.offset ?? 0) > 0);
   let hasNext = $derived(
@@ -192,155 +190,205 @@
     <h2 id="folder-documents-{knowledge.id}" class="sr-only">{m.documents()}</h2>
   {/if}
 
-  {#if skippedCount !== null && skippedCount > 0}
-    <p class="text-secondary text-sm">
-      {skippedCount === 1
-        ? m.integration_source_folder_skipped_one()
-        : m.integration_source_folder_skipped_other({ count: skippedCount })}
-      <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
-      <a
-        href={problemsHref}
-        class="text-accent-default focus-visible:ring-stronger rounded font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
-      >
-        {m.integration_source_show_in_problems()}
-      </a>
-      <!-- eslint-enable svelte/no-navigation-without-resolve -->
-    </p>
+  {#if progress[knowledge.id]}
+    <LiveSyncFeed progress={progress[knowledge.id]} />
   {/if}
 
-  <Input
-    type="search"
-    bind:value={searchText}
-    oninput={onSearchInput}
-    aria-label={m.integration_documents_search_label()}
-    placeholder={m.integration_documents_search_placeholder()}
-    class="max-w-md"
-  />
-
-  {#if error}
-    <div
-      class="text-negative-stronger bg-negative-dimmer flex flex-wrap items-center gap-3 rounded p-4 text-sm"
-      role="alert"
+  <div
+    role="group"
+    aria-label={m.integration_source_document_views()}
+    class="flex flex-wrap items-center gap-2"
+  >
+    <Button
+      size="sm"
+      variant={view === "searchable" ? "default" : "outline"}
+      aria-pressed={view === "searchable"}
+      onclick={() => (view = "searchable")}
     >
-      <span>{m.integration_documents_load_failed()}: {error}</span>
-      <Button variant="outline" size="sm" onclick={() => loadDocuments(query)}>
-        {m.retry()}
-      </Button>
-    </div>
-  {/if}
+      {m.integration_source_view_searchable({ count: knowledge.metadata?.document_count ?? 0 })}
+    </Button>
+    <Button
+      size="sm"
+      variant={view === "skipped" ? "default" : "outline"}
+      aria-pressed={view === "skipped"}
+      disabled={skipped === null}
+      onclick={() => (view = "skipped")}
+    >
+      {m.integration_source_view_unreadable({ count: skippedTotal })}
+    </Button>
+  </div>
 
-  {#if loading}
-    <div class="text-secondary flex items-center gap-2 text-sm" role="status">
-      <IconLoadingSpinner size="sm" class="animate-spin" />
-      <span>{m.integration_documents_loading()}</span>
-    </div>
-  {/if}
-
-  {#if documents && documents.items.length > 0 && range}
-    <div aria-busy={loading}>
-      <Table.Root aria-label={m.integration_documents_table_label({ name: knowledge.name })}>
+  {#if view === "skipped" && skipped}
+    {#if skipped.items.length === 0}
+      <p class="text-secondary py-8 text-sm">{m.integration_source_nothing_skipped()}</p>
+    {:else}
+      <Table.Root aria-label={m.integration_source_skipped_table_label({ name: knowledge.name })}>
         <Table.Header>
           <Table.Row>
-            {#each sortColumns as column (column.id)}
-              {@const active = query.sort === column.id}
-              <Table.Head aria-sort={active ? ariaSort[query.order] : "none"}>
-                <SortButton
-                  order={active ? query.order : undefined}
-                  sortable
-                  onToggle={() => sortBy(column.id)}
-                >
-                  {column.label()}
-                </SortButton>
-              </Table.Head>
-            {/each}
-            <Table.Head>{m.integration_documents_properties()}</Table.Head>
-            <Table.Head class="w-[1%]"><span class="sr-only">{m.actions()}</span></Table.Head>
+            <Table.Head>{m.name()}</Table.Head>
+            <Table.Head>{m.integration_source_skip_reason()}</Table.Head>
           </Table.Row>
         </Table.Header>
         <Table.Body>
-          {#each documents.items as document (document.id)}
+          <!-- The same file name recurs across folders, so the key needs the position. -->
+          {#each skipped.items as file, index (`${index}:${file.file}`)}
             <Table.Row>
-              <Table.Cell class="max-w-[28rem]">
-                <BlobPreview
-                  blob={{
-                    id: document.id,
-                    metadata: { title: document.title },
-                    source_metadata: document.source_metadata
-                  }}
-                  isTableView
-                />
-              </Table.Cell>
-              <Table.Cell class="text-secondary max-w-[20rem] truncate">
-                {document.relative_path}
-              </Table.Cell>
-              <Table.Cell class="tabular-nums">{formatBytes(document.size)}</Table.Cell>
-              <Table.Cell class="tabular-nums">{formatDateTime(document.updated_at)}</Table.Cell>
-              <Table.Cell class="whitespace-normal">
-                {#if hasSourceMetadata(document)}
-                  <SourceMetadataList
-                    entries={document.source_metadata}
-                    variant="inline"
-                    class="text-muted-foreground text-xs"
-                  />
-                {/if}
-              </Table.Cell>
-              <Table.Cell>
-                {#if document.url}
-                  <Button
-                    href={document.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={sourceLinkLabel}
-                  >
-                    <IconLinkExternal size="sm" />
-                  </Button>
-                {/if}
+              <Table.Cell class="max-w-[28rem] font-medium break-all whitespace-normal"
+                >{file.file}</Table.Cell
+              >
+              <Table.Cell class="text-warning-stronger whitespace-normal">
+                {describeSkipReason(file.reason)}
               </Table.Cell>
             </Table.Row>
           {/each}
         </Table.Body>
       </Table.Root>
-    </div>
-
-    <div class="flex flex-wrap items-center justify-between gap-3 text-sm">
-      <p class="text-secondary" aria-live="polite">
-        {m.integration_documents_showing_range(range)}
-        <span class="text-muted">
-          · {m.integration_documents_total_size({ size: formatBytes(documents.total_size) })}
-        </span>
+      <p class="text-secondary flex flex-wrap gap-x-3 text-sm">
+        {#if skippedNotListed > 0}
+          <span class="italic">{m.skipped_and_n_more({ count: skippedNotListed })}</span>
+        {/if}
+        <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
+        <a
+          href={problemsHref}
+          class="text-accent-default focus-visible:ring-stronger rounded font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+        >
+          {m.integration_source_show_in_problems()}
+        </a>
+        <!-- eslint-enable svelte/no-navigation-without-resolve -->
       </p>
-      <div class="flex gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!hasPrevious || loading}
-          onclick={() => goToPage(-1)}
-        >
-          {m.previous()}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!hasNext || loading}
-          onclick={() => goToPage(1)}
-        >
-          {m.next()}
+    {/if}
+  {:else}
+    <Input
+      type="search"
+      bind:value={searchText}
+      oninput={onSearchInput}
+      aria-label={m.integration_documents_search_label()}
+      placeholder={m.integration_documents_search_placeholder()}
+      class="max-w-md"
+    />
+
+    {#if error}
+      <div
+        class="text-negative-stronger bg-negative-dimmer flex flex-wrap items-center gap-3 rounded p-4 text-sm"
+        role="alert"
+      >
+        <span>{m.integration_documents_load_failed()}: {error}</span>
+        <Button variant="outline" size="sm" onclick={() => loadDocuments(query)}>
+          {m.retry()}
         </Button>
       </div>
-    </div>
-  {:else if documents && !loading && !error}
-    <div class="text-secondary py-8 text-sm">
-      {#if query.q !== ""}
-        <p>{m.no_results_found()}</p>
-      {:else if folderState === "syncing"}
-        <p>{m.integration_source_folder_empty_syncing()}</p>
-      {:else if folderState === "never"}
-        <p>{m.integration_documents_empty_never_synced()}</p>
-      {:else}
-        <p>{m.integration_documents_empty_synced()}</p>
-      {/if}
-    </div>
+    {/if}
+
+    {#if loading}
+      <div class="text-secondary flex items-center gap-2 text-sm" role="status">
+        <IconLoadingSpinner size="sm" class="animate-spin" />
+        <span>{m.integration_documents_loading()}</span>
+      </div>
+    {/if}
+
+    {#if documents && documents.items.length > 0 && range}
+      <div aria-busy={loading}>
+        <Table.Root aria-label={m.integration_documents_table_label({ name: knowledge.name })}>
+          <Table.Header>
+            <Table.Row>
+              {#each sortColumns as column (column.id)}
+                {@const active = query.sort === column.id}
+                <Table.Head aria-sort={active ? ariaSort[query.order] : "none"}>
+                  <SortButton
+                    order={active ? query.order : undefined}
+                    sortable
+                    onToggle={() => sortBy(column.id)}
+                  >
+                    {column.label()}
+                  </SortButton>
+                </Table.Head>
+              {/each}
+              <Table.Head>{m.status()}</Table.Head>
+              <Table.Head class="w-[1%]"><span class="sr-only">{m.actions()}</span></Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {#each documents.items as document (document.id)}
+              <Table.Row>
+                <Table.Cell class="max-w-[28rem]">
+                  <BlobPreview
+                    blob={{
+                      id: document.id,
+                      metadata: { title: document.title },
+                      source_metadata: document.source_metadata
+                    }}
+                    isTableView
+                  />
+                </Table.Cell>
+                <Table.Cell class="text-secondary max-w-[20rem] truncate">
+                  {document.relative_path}
+                </Table.Cell>
+                <Table.Cell class="tabular-nums">{formatBytes(document.size)}</Table.Cell>
+                <Table.Cell class="tabular-nums">{formatDateTime(document.updated_at)}</Table.Cell>
+                <Table.Cell>
+                  <span class="text-positive-stronger inline-flex items-center gap-1.5 text-sm">
+                    <Check class="size-4" aria-hidden="true" />
+                    {m.integration_source_doc_searchable()}
+                  </span>
+                </Table.Cell>
+                <Table.Cell>
+                  {#if document.url}
+                    <Button
+                      href={document.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={sourceLinkLabel}
+                    >
+                      <IconLinkExternal size="sm" />
+                    </Button>
+                  {/if}
+                </Table.Cell>
+              </Table.Row>
+            {/each}
+          </Table.Body>
+        </Table.Root>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-3 text-sm">
+        <p class="text-secondary" aria-live="polite">
+          {m.integration_documents_showing_range(range)}
+          <span class="text-muted">
+            · {m.integration_documents_total_size({ size: formatBytes(documents.total_size) })}
+          </span>
+        </p>
+        <div class="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!hasPrevious || loading}
+            onclick={() => goToPage(-1)}
+          >
+            {m.previous()}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!hasNext || loading}
+            onclick={() => goToPage(1)}
+          >
+            {m.next()}
+          </Button>
+        </div>
+      </div>
+    {:else if documents && !loading && !error}
+      <div class="text-secondary py-8 text-sm">
+        {#if query.q !== ""}
+          <p>{m.no_results_found()}</p>
+        {:else if folderState === "syncing"}
+          <p>{m.integration_source_folder_empty_syncing()}</p>
+        {:else if folderState === "never"}
+          <p>{m.integration_documents_empty_never_synced()}</p>
+        {:else}
+          <p>{m.integration_documents_empty_synced()}</p>
+        {/if}
+      </div>
+    {/if}
   {/if}
 </section>

@@ -365,14 +365,16 @@ The page is titled with the source's name, with a breadcrumb back to **Integrati
 
 For a source with several items, the folders are listed on the left. An item imported from a folder inside another imported folder is nested under it, whole-site imports come first and siblings are sorted by name. A source with more than eight folders gets a **Filter folders** box, and a folder with folders under it can be collapsed. Each folder shows its state (also read out to screen readers) and its number of documents, or the files done while it syncs. **All folders** shows a table of the folders with their status, number of documents, when each was last up to date, **Open in SharePoint** and the folder's actions menu. Selecting a folder shows its documents; the selected folder is part of the page address, so it can be linked to. A source imported as a single item shows its documents directly.
 
-The documents of a folder are listed 50 per page:
+Two buttons above a folder's documents switch between **Searchable (N)**, the documents the assistants can search, and **Could not be read (N)**, the files the folder's latest sync skipped with the reason for each and a link to the **Problems** tab. The searchable documents are listed 50 per page:
 
-- **Name** opens a preview of the extracted text. From the preview you can copy the text, **Download extracted text** or **Download original**. The link icon at the end of the row opens the file in SharePoint.
+- **Name** opens the document's card with a preview of the extracted text and the file's [document properties](#document-properties-library-columns) when the library has any. From the card you can copy the text, **Download extracted text** or **Download original**. The link icon at the end of the row opens the file in SharePoint.
 - **Path** is the folder below the imported folder; a file that sits directly in the imported folder has an empty path. The list is sorted by path by default, so files are grouped the way they are in SharePoint.
 - **Size** is the file's size and **Updated** is when Eneo last indexed the document.
-- **Properties** shows the file's [document properties](#document-properties-library-columns) when the library has any.
+- **Status** marks the document as **Searchable**.
 
-The search box matches the name or the path. Each of the four column headings sorts the list, ascending on the first click and reversed on the next. Below the table, _Showing 1–50 of N_ gives the position in the list beside the **Total size** of every indexed document, with **Previous** and **Next** to page. When the latest sync skipped files in the folder, a line above the list says how many, with a link to the **Problems** tab. When a synchronization of the folder finishes while the page is open, the list refreshes itself.
+Properties are not a column, because every library has its own. The search box matches the name, the path or the value of any property, so a case number or a document type finds its files. Each of the four column headings sorts the list, ascending on the first click and reversed on the next. Below the table, _Showing 1–50 of N_ gives the position in the list beside the **Total size** of every indexed document, with **Previous** and **Next** to page. When a synchronization of the folder finishes while the page is open, the list refreshes itself.
+
+While the folder syncs, **Being read now** above the list shows the file the sync is reading, with a spinner, and the latest finished files marked **Searchable**, **Unchanged** or **Could not be read**. The source's progress panel names the file each syncing folder is reading.
 
 #### The Problems tab
 

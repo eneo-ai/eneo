@@ -171,6 +171,15 @@
   });
 
   let firstSync = $derived(source.items.every((item) => !item.metadata?.last_synced_at));
+  // A folder's own feed already names its file, so only the overview lists them here.
+  let nowReading = $derived(
+    !multiple || selectedItem
+      ? []
+      : source.items.flatMap((item) => {
+          const current = progress[item.id]?.current;
+          return current ? [{ folder: item.name, file: current }] : [];
+        })
+  );
 </script>
 
 <svelte:head>
@@ -264,7 +273,12 @@
       {/if}
 
       {#if summary.progress}
-        <SourceProgressPanel progress={summary.progress} sourceName={source.name} {firstSync} />
+        <SourceProgressPanel
+          progress={summary.progress}
+          sourceName={source.name}
+          {firstSync}
+          {nowReading}
+        />
       {:else}
         <dl class="border-default grid grid-cols-2 rounded-lg border lg:grid-cols-4">
           <div class="flex flex-col gap-1 px-4 py-3">
@@ -320,9 +334,7 @@
                     knowledge={selectedItem}
                     space={$currentSpace}
                     {progress}
-                    skippedCount={skippedLoaded
-                      ? (skippedByItem[selectedItem.id]?.total ?? 0)
-                      : null}
+                    skipped={skippedLoaded ? (skippedByItem[selectedItem.id] ?? null) : null}
                     problemsHref={problemsHref()}
                   />
                 {/key}
@@ -342,7 +354,7 @@
               knowledge={singleItem}
               space={$currentSpace}
               {progress}
-              skippedCount={skippedLoaded ? (skippedByItem[singleItem.id]?.total ?? 0) : null}
+              skipped={skippedLoaded ? (skippedByItem[singleItem.id] ?? null) : null}
               problemsHref={problemsHref()}
               showHeader={source.kind === "wrapper"}
             />

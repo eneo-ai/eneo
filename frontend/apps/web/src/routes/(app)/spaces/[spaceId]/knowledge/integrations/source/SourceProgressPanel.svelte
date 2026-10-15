@@ -14,9 +14,11 @@
     sourceName: string;
     /** No item of the source has finished a sync before. */
     firstSync: boolean;
+    /** The file each syncing folder reads right now; the folder is null for a one-folder source. */
+    nowReading?: { folder: string | null; file: string }[];
   }
 
-  let { progress, sourceName, firstSync }: Props = $props();
+  let { progress, sourceName, firstSync, nowReading = [] }: Props = $props();
 
   const phases: { id: SyncProgressPhase; label: () => string }[] = [
     { id: "discovering", label: () => m.integration_progress_phase_discovering() },
@@ -103,6 +105,25 @@
       </li>
     {/each}
   </ol>
+
+  {#if nowReading.length > 0}
+    <ul class="flex flex-col gap-1 text-sm">
+      {#each nowReading.slice(0, 3) as reading, index (index)}
+        <li class="flex min-w-0 items-center gap-2">
+          <IconLoadingSpinner
+            size="sm"
+            class="text-accent-default shrink-0 motion-safe:animate-spin"
+          />
+          <span class="text-secondary shrink-0">
+            {reading.folder
+              ? m.integration_progress_reading_in({ folder: reading.folder })
+              : m.integration_live_reading()}
+          </span>
+          <span class="min-w-0 truncate font-medium">{reading.file}</span>
+        </li>
+      {/each}
+    </ul>
+  {/if}
 
   <p class="text-secondary text-sm">{m.integration_progress_leave_page_hint()}</p>
 </section>
