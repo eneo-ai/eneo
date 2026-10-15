@@ -139,3 +139,25 @@ async def test_object_store_original_needs_a_connected_store():
 
     assert disconnected.original_available is False
     assert connected.original_available is True
+
+
+async def test_hydrated_file_carries_the_original_size():
+    """A download delivers the original; a picked file is recognised by its bytes."""
+    metadata = _metadata(FileType.TEXT)
+    original = b"the exact uploaded bytes"
+    loaded = await _load(
+        metadata,
+        _reference(metadata, FileContentVariant.ORIGINAL, original),
+        _reference(metadata, FileContentVariant.EXTRACTED_TEXT, b"the extracted text"),
+    )
+    assert loaded.size == len(b"the extracted text")
+    assert loaded.original_size == len(original)
+
+
+async def test_hydrated_file_without_an_original_has_no_original_size():
+    metadata = _metadata(FileType.TEXT)
+    loaded = await _load(
+        metadata,
+        _reference(metadata, FileContentVariant.EXTRACTED_TEXT, b"text only"),
+    )
+    assert loaded.original_size is None
