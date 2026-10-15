@@ -109,7 +109,7 @@ export function overviewKnowledgeRows(
   }
 
   const integrations = space.knowledge.integration_knowledge_list.items.filter(own);
-  for (const source of groupIntegrationSources(integrations)) {
+  for (const source of groupIntegrationSources(integrations, compare)) {
     // The overview does not poll sync progress; a running sync shows on the source itself.
     const summary = summarizeSource(source.items, {});
     const { tone, labelKey } = sourceStateStatus(summary.state);

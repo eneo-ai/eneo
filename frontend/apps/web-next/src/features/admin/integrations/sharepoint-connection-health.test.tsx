@@ -237,4 +237,29 @@ describe("SharePointConnectionHealth", () => {
       await screen.findByRole("table", { name: "SharePoint Webhook-prenumerationer" })
     ).toBeTruthy();
   });
+
+  it("moves focus to the watches button once the renewed ones are no longer expired", async () => {
+    subscriptions = [subscription(), subscription({ is_expired: true })];
+    respond({
+      "/api/v1/admin/sharepoint/subscriptions/renew-expired": { recreated: 1, failed: 0 }
+    });
+    const { health } = show(app());
+    const renew = await within(health).findByRole("button", { name: "Förnya utgångna" });
+
+    // The refetch after the renewal finds nothing expired, so the button goes.
+    subscriptions = [subscription(), subscription()];
+    renew.focus();
+    fireEvent.click(renew);
+
+    await waitFor(() =>
+      expect(within(health).queryByRole("button", { name: "Förnya utgångna" })).toBeNull()
+    );
+    await waitFor(
+      () =>
+        expect(document.activeElement).toBe(
+          within(health).getByRole("button", { name: "Visa bevakningar" })
+        ),
+      { timeout: 1500 }
+    );
+  });
 });

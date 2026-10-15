@@ -1,9 +1,19 @@
 "use client";
 
-import { ChevronRight, Search } from "lucide-react";
+import { useCollator } from "@astryxdesign/core/i18n";
+import {
+  ChevronRight,
+  CircleCheck,
+  CircleDashed,
+  CircleMinus,
+  CircleX,
+  LoaderCircle,
+  Search,
+  type LucideIcon
+} from "lucide-react";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
+import { useId, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { cn } from "@/lib/utils";
 import type { IntegrationKnowledge } from "../../knowledge";
@@ -14,26 +24,26 @@ import {
 } from "../integration-tree";
 import { itemState, sourceStateStatus, type ItemState } from "../sources";
 import type { ProgressById } from "../sync-progress";
+import type { InPlaceLink } from "./in-place-link";
 
 /** Below this many folders the whole tree fits and a filter only adds noise. */
 const FILTER_FROM = 8;
 
-const DOT: Record<ItemState, string> = {
-  ok: "bg-ax-success",
-  error: "bg-ax-error",
-  syncing: "bg-ax-accent motion-safe:animate-pulse",
-  empty: "bg-ax-warning",
-  never: "border-ax-border-strong border"
+// A shape per state, so the state never rests on colour alone; the label is for screen readers.
+const STATE_ICON: Record<ItemState, { icon: LucideIcon; className: string }> = {
+  ok: { icon: CircleCheck, className: "text-ax-success" },
+  error: { icon: CircleX, className: "text-ax-error" },
+  syncing: { icon: LoaderCircle, className: "text-ax-text-accent motion-safe:animate-spin" },
+  empty: { icon: CircleMinus, className: "text-ax-warning" },
+  never: { icon: CircleDashed, className: "text-ax-text-secondary" }
 };
 
 const LINK =
-  "focus-visible:outline-ring rounded-ax-inner flex min-h-9 min-w-0 flex-1 items-center gap-2.5 pe-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2";
+  "focus-visible:outline-ring rounded-ax-inner flex min-h-9 min-w-0 flex-1 items-center gap-2.5 pe-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11";
 
-function countLabel(item: IntegrationKnowledge, state: ItemState, progress: ProgressById): string {
-  const entry = progress[item.id];
-  if (entry) return entry.total === null ? `${entry.done}` : `${entry.done}/${entry.total}`;
-  if (state === "never") return "–";
-  return `${item.metadata?.document_count ?? 0}`;
+function StateIcon({ state }: { state: ItemState }) {
+  const { icon: Icon, className } = STATE_ICON[state];
+  return <Icon className={cn("size-3.5 shrink-0", className)} aria-hidden="true" />;
 }
 
 /**
@@ -45,24 +55,38 @@ export function FolderNav({
   items,
   progress,
   selectedId,
-  hrefFor
+  linkFor
 }: {
   items: IntegrationKnowledge[];
   progress: ProgressById;
   /** Null selects the overview of every folder. */
   selectedId: string | null;
-  hrefFor: (itemId: string | null) => string;
+  linkFor: (itemId: string | null) => InPlaceLink;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
+  const collator = useCollator();
+  const headingId = useId();
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   const filtering = query.trim() !== "";
   const rows = flattenIntegrationTree(
-    filterIntegrationTree(buildIntegrationTree(items), query),
+    filterIntegrationTree(buildIntegrationTree(items, collator.compare), query),
     (item) => filtering || !collapsed.has(item.id)
   );
   const totalDocuments = items.reduce((sum, item) => sum + (item.metadata?.document_count ?? 0), 0);
+
+  function countLabel(item: IntegrationKnowledge, state: ItemState): string {
+    const entry = progress[item.id];
+    if (entry) {
+      return entry.total === null
+        ? format.number(entry.done)
+        : `${format.number(entry.done)}/${format.number(entry.total)}`;
+    }
+    if (state === "never") return "–";
+    return format.number(item.metadata?.document_count ?? 0);
+  }
 
   function toggle(itemId: string) {
     setCollapsed((current) => {
@@ -74,9 +98,9 @@ export function FolderNav({
   }
 
   return (
-    <nav aria-labelledby="source-folders-heading" className="flex flex-col gap-1">
+    <nav aria-labelledby={headingId} className="flex flex-col gap-1">
       <h2
-        id="source-folders-heading"
+        id={headingId}
         className="text-ax-text-secondary px-2 pb-1 text-xs font-medium tracking-wide uppercase"
       >
         {t("integration_source_folders")}
@@ -100,9 +124,8 @@ export function FolderNav({
         {!filtering ? (
           <li>
             <Link
-              href={hrefFor(null)}
-              scroll={false}
-              replace
+              {...linkFor(null)}
+              prefetch={false}
               aria-current={selectedId === null ? "page" : undefined}
               className={cn(
                 LINK,
@@ -111,7 +134,9 @@ export function FolderNav({
               )}
             >
               <span className="flex-1 truncate">{t("integration_source_all_folders")}</span>
-              <span className="text-ax-text-secondary text-xs tabular-nums">{totalDocuments}</span>
+              <span className="text-ax-text-secondary text-xs tabular-nums">
+                {format.number(totalDocuments)}
+              </span>
             </Link>
           </li>
         ) : null}
@@ -146,9 +171,8 @@ export function FolderNav({
                 <span className="w-7 shrink-0 pointer-coarse:w-11" aria-hidden="true" />
               )}
               <Link
-                href={hrefFor(row.item.id)}
-                scroll={false}
-                replace
+                {...linkFor(row.item.id)}
+                prefetch={false}
                 aria-current={selected ? "page" : undefined}
                 title={row.item.folder_path ?? row.item.name}
                 className={cn(
@@ -157,10 +181,7 @@ export function FolderNav({
                   selected ? "bg-ax-selected font-medium" : "hover:bg-ax-hover"
                 )}
               >
-                <span
-                  className={cn("size-2 shrink-0 rounded-full", DOT[state])}
-                  aria-hidden="true"
-                />
+                <StateIcon state={state} />
                 <span className="flex-1 truncate">{row.item.name}</span>
                 <span className="sr-only">, {t(sourceStateStatus(state).labelKey)}</span>
                 <span
@@ -169,7 +190,7 @@ export function FolderNav({
                     state === "syncing" ? "text-ax-text-accent" : "text-ax-text-secondary"
                   )}
                 >
-                  {countLabel(row.item, state, progress)}
+                  {countLabel(row.item, state)}
                 </span>
               </Link>
             </li>

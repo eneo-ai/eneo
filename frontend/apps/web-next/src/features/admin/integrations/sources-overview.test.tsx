@@ -127,6 +127,22 @@ describe("SourcesOverview", () => {
     expect(await within(table).findByText("Inga resultat hittades")).toBeTruthy();
   });
 
+  it("orders spaces and sources by the Swedish alphabet, Å, Ä and Ö after Z", async () => {
+    const space = (id: string, name: string) => ({ id, name, organization: false });
+    respond({
+      items: [
+        { space: space("s1", "Äldreförvaltningen"), knowledge: knowledge("a", "Rutiner") },
+        { space: space("s2", "Vård"), knowledge: knowledge("b", "Översikt") },
+        { space: space("s2", "Vård"), knowledge: knowledge("c", "Arkiv") },
+        { space: space("s3", "Barn"), knowledge: knowledge("d", "Protokoll") }
+      ],
+      personal: { items: 0, failing: 0 }
+    });
+    const { table } = await show();
+
+    expect(sourceLinks(table)).toEqual(["Protokoll", "Arkiv", "Översikt", "Rutiner"]);
+  });
+
   it("says so when no shared space has imported anything", async () => {
     respond({ items: [], personal: { items: 2, failing: 0 } });
     renderInApp(<SourcesOverview />);

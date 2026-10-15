@@ -1,7 +1,8 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { useAnnounce } from "@astryxdesign/core/hooks";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
+import { Pagination } from "@astryxdesign/core/Pagination";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import {
   pixel,
@@ -23,6 +24,7 @@ import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
+import { rescueFocus } from "@/lib/focus-rescue";
 import { useSpace } from "@/features/spaces/use-space";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { BlobPreviewDialog } from "../../blobs";
@@ -39,9 +41,12 @@ import { SourceStateLabel } from "../source-status";
 import { itemState } from "../sources";
 import type { ProgressById } from "../sync-progress";
 import { VENDOR } from "../vendor";
+import type { InPlaceLink } from "./in-place-link";
 import { LiveSyncFeed } from "./live-sync-feed";
 
 const SEARCH_DEBOUNCE_MS = 300;
+/** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
+const NARROW_QUERY = "(width < 40rem)";
 
 type DocumentsView = "searchable" | "skipped";
 type DocumentRow = IntegrationDocument;
@@ -80,7 +85,15 @@ function DocumentNameCell({ document }: { document: IntegrationDocument }) {
   );
 }
 
-function FolderHeader({ item, progress }: { item: IntegrationKnowledge; progress: ProgressById }) {
+function FolderHeader({
+  item,
+  progress,
+  onDeleted
+}: {
+  item: IntegrationKnowledge;
+  progress: ProgressById;
+  onDeleted?: () => void;
+}) {
   const t = useTranslations();
   const attempted = useClientTimeText(item.metadata?.last_sync_attempted_at, "date_time");
   return (
@@ -117,7 +130,7 @@ function FolderHeader({ item, progress }: { item: IntegrationKnowledge; progress
             icon={<ExternalLink className="size-4" aria-hidden="true" />}
           />
         ) : null}
-        <IntegrationActions item={item} />
+        <IntegrationActions item={item} onDeleted={onDeleted} />
       </div>
     </div>
   );
@@ -126,11 +139,11 @@ function FolderHeader({ item, progress }: { item: IntegrationKnowledge; progress
 function SkippedFiles({
   item,
   skipped,
-  problemsHref
+  problemsLink
 }: {
   item: IntegrationKnowledge;
   skipped: SkippedDocuments;
-  problemsHref: string;
+  problemsLink: InPlaceLink;
 }) {
   const t = useTranslations();
   if (skipped.items.length === 0) {
@@ -171,7 +184,8 @@ function SkippedFiles({
           <span className="italic">{t("skipped_and_n_more", { count: notListed })}</span>
         ) : null}
         <Link
-          href={problemsHref}
+          {...problemsLink}
+          prefetch={false}
           className="text-ax-text-accent focus-visible:outline-ring rounded-ax-inner font-medium hover:underline focus-visible:outline-2 focus-visible:outline-offset-2"
         >
           {t("integration_source_show_in_problems")}
@@ -190,21 +204,26 @@ export function FolderDocuments({
   item,
   progress,
   skipped,
-  problemsHref,
-  showHeader = true
+  problemsLink,
+  showHeader = true,
+  onDeleted
 }: {
   item: IntegrationKnowledge;
   progress: ProgressById;
   /** The files the latest sync skipped; null while unknown or not loadable. */
   skipped: SkippedDocuments | null;
-  problemsHref: string;
+  problemsLink: InPlaceLink;
   /** The folder's own heading and actions; off when the source is this one item. */
   showHeader?: boolean;
+  /** After the folder was deleted from its own menu. */
+  onDeleted?: () => void;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const announce = useAnnounce();
+  const isNarrow = useMediaQuery(NARROW_QUERY);
   const { space } = useSpace();
+  const sectionRef = useRef<HTMLElement>(null);
   const [view, setView] = useState<DocumentsView>("searchable");
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
@@ -215,11 +234,14 @@ export function FolderDocuments({
   useEffect(() => {
     clearTimeout(debounce.current);
     debounce.current = setTimeout(() => {
-      setQ(searchInput.trim());
+      const next = searchInput.trim();
+      // Only a new search starts over at page 1, not the first run after mount.
+      if (next === q) return;
+      setQ(next);
       setPage(1);
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(debounce.current);
-  }, [searchInput]);
+  }, [q, searchInput]);
 
   const [active] = sort;
   const documents = useQuery(
@@ -229,9 +251,7 @@ export function FolderDocuments({
       q,
       sort: active?.sortKey ?? "path",
       order: active?.direction === "descending" ? "desc" : "asc",
-      page,
-      // A finished sync moves these; the documents it wrote are then fetched.
-      revision: `${item.metadata?.last_synced_at ?? ""}|${item.metadata?.document_count ?? 0}`
+      page
     })
   );
   const sortPlugin = useTableSortable<DocumentRow, IntegrationDocumentsSort>({
@@ -246,24 +266,48 @@ export function FolderDocuments({
   const data = documents.data;
   const state = itemState(item, progress);
   const live = progress[item.id];
-  const from = data && data.items.length > 0 ? data.offset + 1 : 0;
-  const to = data ? data.offset + data.items.length : 0;
   const lastPage = data ? Math.max(1, Math.ceil(data.total_count / DOCUMENTS_PAGE_SIZE)) : 1;
+  // A sync that shrank the folder under the current page: show its last page.
+  if (data && !documents.isPlaceholderData && page > lastPage) setPage(lastPage);
+  // An empty page of a folder that has documents: one past the end, on its way to the last page.
+  const pastTheEnd =
+    data !== undefined &&
+    data.items.length === 0 &&
+    data.total_count > 0 &&
+    (documents.isPlaceholderData || page > lastPage);
 
-  // A press while the page loads is ignored; the button keeps focus.
-  function turnPage(step: -1 | 1) {
-    if (!documents.isFetching) setPage((current) => current + step);
+  function changePage(next: number) {
+    setPage(next);
+    // The pressed button stays focused, except "next"/"previous" at the last
+    // or first page, which becomes disabled: then focus moves to the folder.
+    rescueFocus(sectionRef.current);
   }
 
-  const rangeText = data
-    ? t("integration_documents_showing_range", { from, to, total: data.total_count })
-    : null;
-  const announced = useRef<string | null>(null);
+  const emptyText =
+    q !== ""
+      ? t("no_results_found")
+      : state === "syncing"
+        ? t("integration_source_folder_empty_syncing")
+        : state === "never"
+          ? t("integration_documents_empty_never_synced")
+          : t("integration_documents_empty_synced");
+  const rangeText =
+    data && data.items.length > 0
+      ? t("integration_documents_showing_range", {
+          from: data.offset + 1,
+          to: data.offset + data.items.length,
+          total: data.total_count
+        })
+      : null;
+  // What a search or a page turn led to, once it is in (not on the first load).
+  const resultText = rangeText ?? (q !== "" ? emptyText : null);
+  const settled = data !== undefined && !documents.isFetching && !pastTheEnd;
+  const announced = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    if (!rangeText || documents.isFetching || announced.current === rangeText) return;
-    if (announced.current !== null) announce(rangeText);
-    announced.current = rangeText;
-  }, [announce, documents.isFetching, rangeText]);
+    if (!settled || announced.current === resultText) return;
+    if (announced.current !== undefined && resultText !== null) announce(resultText);
+    announced.current = resultText;
+  }, [announce, resultText, settled]);
 
   const columns: TableColumn<DocumentRow>[] = [
     {
@@ -335,11 +379,14 @@ export function FolderDocuments({
 
   return (
     <section
-      className="flex min-w-0 flex-col gap-3"
+      ref={sectionRef}
+      // Takes focus when the pressed page button disables at the first or last page.
+      tabIndex={-1}
+      className="focus-visible:outline-ring rounded-ax-element flex min-w-0 flex-col gap-3 focus-visible:outline-2 focus-visible:outline-offset-4"
       aria-labelledby={`folder-documents-${item.id}`}
     >
       {showHeader ? (
-        <FolderHeader item={item} progress={progress} />
+        <FolderHeader item={item} progress={progress} onDeleted={onDeleted} />
       ) : (
         <h2 id={`folder-documents-${item.id}`} className="sr-only">
           {t("documents")}
@@ -368,7 +415,7 @@ export function FolderDocuments({
       </SegmentedControl>
 
       {view === "skipped" && skipped ? (
-        <SkippedFiles item={item} skipped={skipped} problemsHref={problemsHref} />
+        <SkippedFiles item={item} skipped={skipped} problemsLink={problemsLink} />
       ) : (
         <>
           <div className="max-w-md">
@@ -384,7 +431,7 @@ export function FolderDocuments({
             />
           </div>
 
-          {documents.isPending ? (
+          {documents.isPending || pastTheEnd ? (
             <LoadingState label={t("integration_documents_loading")} rows={5} />
           ) : documents.isError ? (
             <ListError
@@ -411,32 +458,22 @@ export function FolderDocuments({
                     size: formatBytes(data.total_size, locale)
                   })}
                 </p>
-                <div className="flex gap-2">
-                  <Button
-                    label={t("previous")}
+                {/* Never disabled while a page loads: that would take focus from the
+                    pressed button. The previous page stays visible (aria-busy). */}
+                {lastPage > 1 ? (
+                  <Pagination
+                    page={Math.min(page, lastPage)}
+                    totalPages={lastPage}
+                    onChange={changePage}
+                    variant={isNarrow ? "compact" : "pages"}
                     size="sm"
-                    isDisabled={page <= 1}
-                    onClick={() => turnPage(-1)}
+                    label={t("integration_documents_pagination_label", { name: item.name })}
                   />
-                  <Button
-                    label={t("next")}
-                    size="sm"
-                    isDisabled={page >= lastPage}
-                    onClick={() => turnPage(1)}
-                  />
-                </div>
+                ) : null}
               </div>
             </>
           ) : (
-            <p className="text-ax-text-secondary py-8 text-sm">
-              {q !== ""
-                ? t("no_results_found")
-                : state === "syncing"
-                  ? t("integration_source_folder_empty_syncing")
-                  : state === "never"
-                    ? t("integration_documents_empty_never_synced")
-                    : t("integration_documents_empty_synced")}
-            </p>
+            <p className="text-ax-text-secondary py-8 text-sm">{emptyText}</p>
           )}
         </>
       )}

@@ -14,12 +14,13 @@ import {
 } from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
+import { useId, useRef, useState, type Ref } from "react";
 import { Table } from "@/components/astryx/table";
 import { EmptyState } from "@/components/composites/empty-state";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
+import { rescueFocus } from "@/lib/focus-rescue";
 import type { IntegrationKnowledge } from "../knowledge";
 import { KnowledgeTableControls } from "../table-controls-ui";
 import { IntegrationActions, WrapperActions } from "./actions";
@@ -37,6 +38,7 @@ import {
   type SourceSummary
 } from "./sources";
 import type { ProgressById } from "./sync-progress";
+import { useAnnounceChange } from "./use-announce-change";
 import { VendorIcon } from "./vendor";
 
 type SourceRow = {
@@ -68,7 +70,9 @@ function time(value: string | null): number {
 const COMPARATORS: Partial<Record<SourceSortKey, TableSortComparator<SourceRow>>> = {
   documents: (a, b) => a.summary.documentCount - b.summary.documentCount,
   status: (a, b) => STATE_ORDER[a.summary.state] - STATE_ORDER[b.summary.state],
-  updated: (a, b) => time(a.summary.lastSyncedAt) - time(b.summary.lastSyncedAt)
+  updated: (a, b) =>
+    time(a.summary.lastSyncedAt ?? a.summary.lastSyncAttemptedAt) -
+    time(b.summary.lastSyncedAt ?? b.summary.lastSyncAttemptedAt)
 };
 
 function wrapperPermissions(items: IntegrationKnowledge[]) {
@@ -122,16 +126,24 @@ function SourceStatusCell({ row }: { row: SourceRow }) {
 function SignInStoppedBanner({
   rows,
   filter,
-  onShowThem
+  onShowThem,
+  ref
 }: {
   rows: SourceRow[];
   filter: SourceFilter;
   onShowThem: () => void;
+  ref: Ref<HTMLDivElement>;
 }) {
   const t = useTranslations();
   const { routeId } = useSpace();
   const [first] = rows;
-  if (!first) return null;
+  const title = !first
+    ? null
+    : rows.length === 1
+      ? t("integration_sources_attention_one")
+      : t("integration_sources_attention_other", { count: rows.length });
+  useAnnounceChange(title);
+  if (!first || title === null) return null;
   const action =
     rows.length === 1 ? (
       <Button
@@ -144,59 +156,28 @@ function SignInStoppedBanner({
     ) : null;
   return (
     <Banner
+      ref={ref}
+      // The focus target once "Show them" is gone (it hides itself).
+      tabIndex={-1}
+      // Not Astryx's assertive alert, read out on every mount: the notice is
+      // announced politely once, when it appears or its count changes.
+      role={undefined}
       status="error"
-      title={
-        rows.length === 1
-          ? t("integration_sources_attention_one")
-          : t("integration_sources_attention_other", { count: rows.length })
-      }
+      title={title}
       description={t("integration_sources_attention_sign_in")}
       collapsible={false}
       endContent={action}
+      className="focus-visible:outline-ring focus-visible:outline-2 focus-visible:outline-offset-2"
     />
   );
 }
 
-/**
- * One row per source (a wrapper of folders or a single item): its state or
- * live progress, documents and last update. Filters by state and by a search
- * on the source's or its folders' names; sorts by every column but actions.
- */
-export function SourcesTable({
-  sources,
-  progress,
-  labelledBy
-}: {
-  sources: IntegrationSource[];
-  progress: ProgressById;
-  labelledBy: string;
-}) {
+/** One table of sources, sortable by every column but the actions. */
+function SourcesTable({ rows, labelledBy }: { rows: SourceRow[]; labelledBy: string }) {
   const t = useTranslations();
-  const [filter, setFilter] = useState<SourceFilter>("all");
-  const [query, setQuery] = useState("");
-
-  const rows: SourceRow[] = sources.map((source) => ({
-    id: `${source.kind}-${source.id}`,
-    name: source.name,
-    source,
-    summary: summarizeSource(source.items, progress)
-  }));
-  const counts = countSourceFilters(rows.map((row) => row.summary));
-  const needle = query.trim().toLocaleLowerCase();
-  const visible = rows.filter(
-    (row) =>
-      matchesSourceFilter(row.summary, filter) &&
-      (needle === "" ||
-        [row.name, ...row.source.items.map((item) => item.name)].some((text) =>
-          text.toLocaleLowerCase().includes(needle)
-        ))
-  );
-  const signInStopped = rows.filter(
-    (row) => row.summary.failedItems.length > 0 && row.summary.credentialsFailed
-  );
-
+  const format = useFormatter();
   const { sortedData, sortConfig } = useTableSortableState<SourceRow, SourceSortKey>({
-    data: visible,
+    data: rows,
     defaultSort: DEFAULT_SORT,
     comparators: COMPARATORS
   });
@@ -217,7 +198,7 @@ export function SourcesTable({
       align: "end",
       sortable: true,
       renderCell: (row) => (
-        <span className="tabular-nums">{row.summary.documentCount.toLocaleString()}</span>
+        <span className="tabular-nums">{format.number(row.summary.documentCount)}</span>
       )
     },
     {
@@ -256,11 +237,80 @@ export function SourcesTable({
   ];
 
   return (
-    <div className="flex flex-col gap-3">
+    <SpaceTableFrame>
+      <Table
+        data={sortedData}
+        columns={columns}
+        idKey="id"
+        aria-labelledby={labelledBy}
+        plugins={{ sort: sortPlugin }}
+        emptyState={<EmptyState title={t("no_results_found")} isCompact framed={false} />}
+      />
+    </SpaceTableFrame>
+  );
+}
+
+/** Sources shown under one heading (an embedding model); `heading` null for an ungrouped list. */
+export type SourceGroup = { key: string; heading: string | null; sources: IntegrationSource[] };
+
+/**
+ * The sources of a space (a wrapper of folders or a single item each): its
+ * state or live progress, documents and last update, in one table or one per
+ * group. The sign-in notice, the status filter and the search on a source's
+ * or its folders' names sit once above every group; a group the filter
+ * empties is left out. `labelledBy` names an ungrouped table.
+ */
+export function SourcesList({
+  groups,
+  progress,
+  labelledBy
+}: {
+  groups: SourceGroup[];
+  progress: ProgressById;
+  labelledBy: string;
+}) {
+  const t = useTranslations();
+  const headingIds = useId();
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const [filter, setFilter] = useState<SourceFilter>("all");
+  const [query, setQuery] = useState("");
+
+  const grouped = groups.map((group) => ({
+    ...group,
+    rows: group.sources.map((source): SourceRow => ({
+      id: `${source.kind}-${source.id}`,
+      name: source.name,
+      source,
+      summary: summarizeSource(source.items, progress)
+    }))
+  }));
+  const rows = grouped.flatMap((group) => group.rows);
+  const counts = countSourceFilters(rows.map((row) => row.summary));
+  const needle = query.trim().toLocaleLowerCase();
+  const isVisible = (row: SourceRow) =>
+    matchesSourceFilter(row.summary, filter) &&
+    (needle === "" ||
+      [row.name, ...row.source.items.map((item) => item.name)].some((text) =>
+        text.toLocaleLowerCase().includes(needle)
+      ));
+  const shown = grouped
+    .map((group) => ({ ...group, rows: group.rows.filter(isVisible) }))
+    .filter((group) => group.heading === null || group.rows.length > 0);
+  const visibleCount = shown.reduce((sum, group) => sum + group.rows.length, 0);
+  const signInStopped = rows.filter(
+    (row) => row.summary.failedItems.length > 0 && row.summary.credentialsFailed
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
       <SignInStoppedBanner
+        ref={bannerRef}
         rows={signInStopped}
         filter={filter}
-        onShowThem={() => setFilter("attention")}
+        onShowThem={() => {
+          setFilter("attention");
+          rescueFocus(bannerRef.current);
+        }}
       />
       {rows.length > 1 ? (
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -285,20 +335,27 @@ export function SourcesTable({
             onFilterChange={setQuery}
             filterLabel={t("space_filter_integrations_label")}
             filterPlaceholder={t("ui_filter_items", { resourceName: t("resource_integrations") })}
-            resultCount={visible.length}
+            resultCount={visibleCount}
           />
         </div>
       ) : null}
-      <SpaceTableFrame>
-        <Table
-          data={sortedData}
-          columns={columns}
-          idKey="id"
-          aria-labelledby={labelledBy}
-          plugins={{ sort: sortPlugin }}
-          emptyState={<EmptyState title={t("no_results_found")} isCompact framed={false} />}
-        />
-      </SpaceTableFrame>
+      {shown.length === 0 ? (
+        <EmptyState title={t("no_results_found")} isCompact />
+      ) : (
+        shown.map((group) => {
+          const headingId = group.heading === null ? null : `${headingIds}-${group.key}`;
+          return (
+            <div key={group.key} className="flex flex-col gap-2">
+              {headingId ? (
+                <h3 id={headingId} className="text-ax-text-secondary text-sm font-semibold">
+                  {group.heading}
+                </h3>
+              ) : null}
+              <SourcesTable rows={group.rows} labelledBy={headingId ?? labelledBy} />
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }

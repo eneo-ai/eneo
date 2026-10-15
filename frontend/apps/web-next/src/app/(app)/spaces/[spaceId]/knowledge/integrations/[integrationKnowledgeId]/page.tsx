@@ -11,10 +11,13 @@ import { ItemDetail } from "./item-detail.client";
 type Params = Promise<{ spaceId: string; integrationKnowledgeId: string }>;
 type SearchParams = Promise<{ tab?: string | string[] }>;
 
+/** The space's own item; one shared in from another space is not opened here (as on the client). */
 async function findItem(spaceId: string, itemId: string) {
   try {
     const space = await getQueryClient().query(spaceQueryOptions(eneoApi(), spaceId));
-    return space.knowledge.integration_knowledge_list.items.find((item) => item.id === itemId);
+    return space.knowledge.integration_knowledge_list.items.find(
+      (item) => item.id === itemId && item.space_id === space.id
+    );
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();
     throw error;

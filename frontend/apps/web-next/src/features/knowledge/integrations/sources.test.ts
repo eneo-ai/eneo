@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import sv from "@/lib/i18n/messages/sv.json";
 import {
   countSourceFilters,
+  findWrapperSource,
   groupIntegrationSources,
   groupSourcesBySpace,
   matchesSourceFilter,
@@ -15,6 +16,7 @@ import {
 import type { IntegrationSyncProgress } from "./sync-progress";
 
 const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
+const swedish = new Intl.Collator("sv").compare;
 
 type Metadata = NonNullable<IntegrationKnowledge["metadata"]>;
 
@@ -56,13 +58,16 @@ const CREDENTIALS =
 
 describe("groupIntegrationSources", () => {
   it("groups SharePoint items by wrapper, whatever its size, and keeps other items alone", () => {
-    const sources = groupIntegrationSources([
-      item("b", { wrapper_id: "w1", wrapper_name: "Kommunstyrelsen" }),
-      item("c", { wrapper_id: "w1", wrapper_name: "Kommunstyrelsen" }),
-      item("d", { wrapper_id: "w2", wrapper_name: "Arkiv" }),
-      item("a"),
-      item("e", { integration_type: "confluence", wrapper_id: "w3" })
-    ]);
+    const sources = groupIntegrationSources(
+      [
+        item("b", { wrapper_id: "w1", wrapper_name: "Kommunstyrelsen" }),
+        item("c", { wrapper_id: "w1", wrapper_name: "Kommunstyrelsen" }),
+        item("d", { wrapper_id: "w2", wrapper_name: "Arkiv" }),
+        item("a"),
+        item("e", { integration_type: "confluence", wrapper_id: "w3" })
+      ],
+      swedish
+    );
 
     expect(sources.map((s) => [s.kind, s.id, s.name, s.items.map((i) => i.id)])).toEqual([
       ["item", "a", "a", ["a"]],
@@ -73,8 +78,39 @@ describe("groupIntegrationSources", () => {
   });
 
   it("names a wrapper after its first item when no wrapper name was stored", () => {
-    const [source] = groupIntegrationSources([item("Protokoll", { wrapper_id: "w1" })]);
+    const [source] = groupIntegrationSources([item("Protokoll", { wrapper_id: "w1" })], swedish);
     expect(source?.name).toBe("Protokoll");
+  });
+
+  it("sorts by name with the locale's collator, not the runtime's default", () => {
+    const items = [item("Äldreomsorg"), item("Vuxen"), item("Arkiv")];
+    expect(groupIntegrationSources(items, swedish).map((s) => s.name)).toEqual([
+      "Arkiv",
+      "Vuxen",
+      "Äldreomsorg"
+    ]);
+    expect(
+      groupIntegrationSources(items, new Intl.Collator("en").compare).map((s) => s.name)
+    ).toEqual(["Äldreomsorg", "Arkiv", "Vuxen"]);
+  });
+});
+
+describe("findWrapperSource", () => {
+  it("is the wrapper's SharePoint items as one source, or nothing for an unknown wrapper", () => {
+    const items = [
+      item("b", { wrapper_id: "w1", wrapper_name: "Kommunstyrelsen" }),
+      item("c", { wrapper_id: "w1", wrapper_name: "Kommunstyrelsen" }),
+      item("d", { integration_type: "confluence", wrapper_id: "w2" })
+    ];
+    const source = findWrapperSource(items, "w1");
+    expect([source?.kind, source?.name, source?.items.map((i) => i.id)]).toEqual([
+      "wrapper",
+      "Kommunstyrelsen",
+      ["b", "c"]
+    ]);
+    // Only SharePoint imports group by wrapper.
+    expect(findWrapperSource(items, "w2")).toBeUndefined();
+    expect(findWrapperSource(items, "w9")).toBeUndefined();
   });
 });
 
@@ -179,11 +215,14 @@ describe("groupSourcesBySpace", () => {
   it("groups each space's items into its own sources", () => {
     const spaceA = { id: "s1", name: "Socialtjänsten" };
     const spaceB = { id: "s2", name: "Stadsbyggnad" };
-    const grouped = groupSourcesBySpace([
-      { space: spaceA, knowledge: item("a", { wrapper_id: "w1", wrapper_name: "KS" }) },
-      { space: spaceB, knowledge: item("b") },
-      { space: spaceA, knowledge: item("c", { wrapper_id: "w1", wrapper_name: "KS" }) }
-    ]);
+    const grouped = groupSourcesBySpace(
+      [
+        { space: spaceA, knowledge: item("a", { wrapper_id: "w1", wrapper_name: "KS" }) },
+        { space: spaceB, knowledge: item("b") },
+        { space: spaceA, knowledge: item("c", { wrapper_id: "w1", wrapper_name: "KS" }) }
+      ],
+      swedish
+    );
 
     expect(grouped.map(({ space, source }) => [space.id, source.id, source.items.length])).toEqual([
       ["s1", "w1", 2],

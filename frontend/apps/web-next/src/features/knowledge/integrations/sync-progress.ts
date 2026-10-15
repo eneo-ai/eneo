@@ -59,12 +59,6 @@ export function combineSyncProgress(
   };
 }
 
-/** Share of the files done, 0–1; null when the total is unknown. */
-export function progressFraction(summary: Pick<SyncProgressSummary, "done" | "total">) {
-  if (summary.total === null || summary.total <= 0) return null;
-  return Math.min(1, Math.max(0, summary.done / summary.total));
-}
-
 /** Ids whose sync was running before and is gone now: their results are in the database. */
 export function finishedSyncs(before: ProgressById, after: ProgressById): string[] {
   return Object.keys(before).filter((id) => !(id in after));

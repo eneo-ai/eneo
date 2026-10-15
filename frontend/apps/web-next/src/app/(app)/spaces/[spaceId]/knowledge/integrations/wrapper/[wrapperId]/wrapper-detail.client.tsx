@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useTranslations } from "next-intl";
 import { EmptyState } from "@/components/composites/empty-state";
 import { SourcePage } from "@/features/knowledge/integrations/source/source-page";
-import { groupIntegrationSources } from "@/features/knowledge/integrations/sources";
+import { findWrapperSource } from "@/features/knowledge/integrations/sources";
 import { useSpace } from "@/features/spaces/use-space";
 
 /**
@@ -14,9 +14,10 @@ import { useSpace } from "@/features/spaces/use-space";
 export function WrapperDetail({ wrapperId }: { wrapperId: string }) {
   const t = useTranslations();
   const { space, routeId } = useSpace();
-  const source = groupIntegrationSources(
-    space.knowledge.integration_knowledge_list.items.filter((item) => item.space_id === space.id)
-  ).find((entry) => entry.kind === "wrapper" && entry.id === wrapperId);
+  const source = findWrapperSource(
+    space.knowledge.integration_knowledge_list.items.filter((item) => item.space_id === space.id),
+    wrapperId
+  );
 
   if (!source) {
     return (

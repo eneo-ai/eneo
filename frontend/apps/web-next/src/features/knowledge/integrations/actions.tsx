@@ -36,8 +36,18 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import type { IntegrationKnowledge } from "../knowledge";
 
-/** Row actions (rename / full sync / delete) for one integration knowledge item. */
-export function IntegrationActions({ item }: { item: IntegrationKnowledge }) {
+/**
+ * Row actions (rename / full sync / delete) for one integration knowledge item.
+ * `onDeleted` runs once the deleted item has left the space, e.g. to leave a
+ * page that only showed it.
+ */
+export function IntegrationActions({
+  item,
+  onDeleted
+}: {
+  item: IntegrationKnowledge;
+  onDeleted?: () => void;
+}) {
   const t = useTranslations();
   const { space } = useSpace();
   const { trackJob } = useJobs();
@@ -94,7 +104,10 @@ export function IntegrationActions({ item }: { item: IntegrationKnowledge }) {
         )
       ),
     refresh: invalidate,
-    onRemoved: () => setShowDelete(false)
+    onRemoved: () => {
+      setShowDelete(false);
+      onDeleted?.();
+    }
   });
 
   if (!canEdit && !canDelete) return null;

@@ -3,6 +3,7 @@
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { Check, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useId } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
 import { useProgressText } from "../source-status";
 import { SYNC_PHASES, type SyncProgressPhase, type SyncProgressSummary } from "../sync-progress";
@@ -32,6 +33,7 @@ export function SyncProgressPanel({
   nowReading?: NowReading[];
 }) {
   const t = useTranslations();
+  const headingId = useId();
   const progressText = useProgressText();
   const started = useClientTimeText(progress.startedAt, "date_time");
   const currentPhase = SYNC_PHASES.indexOf(progress.phase);
@@ -41,7 +43,7 @@ export function SyncProgressPanel({
 
   return (
     <section
-      aria-labelledby="sync-progress-heading"
+      aria-labelledby={headingId}
       className="border-ax-border-strong bg-ax-card rounded-ax-container flex flex-col gap-4 border p-4"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -50,7 +52,7 @@ export function SyncProgressPanel({
             className="text-ax-text-accent size-4 shrink-0 motion-safe:animate-spin"
             aria-hidden="true"
           />
-          <h2 id="sync-progress-heading" className="text-base font-semibold">
+          <h2 id={headingId} className="text-base font-semibold">
             {firstSync
               ? t("integration_progress_first_sync")
               : t("integration_progress_sync_running")}

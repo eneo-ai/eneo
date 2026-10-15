@@ -58,13 +58,18 @@ export function SyncProgress({ progress, name }: { progress: SyncProgressSummary
   );
 }
 
-/** When a source was last up to date, or when a sync was last tried if none ever finished. */
+/**
+ * "Updating now" while the source syncs; otherwise when it was last up to
+ * date, or when a sync was last tried if none ever finished.
+ */
 export function SourceUpdated({ summary }: { summary: SourceSummary }) {
   const t = useTranslations();
   const attempted = useClientTimeText(summary.lastSyncAttemptedAt, "date_time");
   return (
     <span className="text-ax-text-secondary text-sm">
-      {summary.lastSyncedAt ? (
+      {summary.progress ? (
+        t("integration_source_updating_now")
+      ) : summary.lastSyncedAt ? (
         <ClientTime value={summary.lastSyncedAt} format="auto" />
       ) : attempted ? (
         t("integration_source_last_attempt_at", { time: attempted })

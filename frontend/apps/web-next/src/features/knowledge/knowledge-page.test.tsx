@@ -267,8 +267,10 @@ describe("KnowledgePage", () => {
     expect(within(row("Byggnad")).getByText("2 mappar")).toBeTruthy();
     expect(within(row("Ärendehandbok")).getByText("Aktuell")).toBeTruthy();
 
-    // Only the refused sign-in gets a banner: no space member can fix it.
+    // Only the refused sign-in gets a banner: no space member can fix it. It is
+    // not an assertive alert, read out again on every visit to the tab.
     expect(screen.getByText("1 källa uppdateras inte")).toBeTruthy();
+    expect(document.querySelector("[role='alert']")).toBeNull();
     expect(screen.getByRole("link", { name: "Öppna källan" }).getAttribute("href")).toBe(
       "/spaces/space-1/knowledge/integrations/wrapper/w1?tab=problems"
     );
@@ -307,6 +309,110 @@ describe("KnowledgePage", () => {
       await screen.findByRole("progressbar", { name: "Synkförlopp för Avtalsmallar" })
     ).toBeTruthy();
     expect(screen.getByText("Synkar · 3 klara")).toBeTruthy();
+    const row = screen.getByRole("link", { name: "Avtalsmallar" }).closest("tr")!;
+    expect(within(row).getByText("Uppdateras nu")).toBeTruthy();
+  });
+
+  it("sorts by the last update, or the last attempt for a source that never finished a sync", () => {
+    show(
+      makeSpace({
+        integrations: [
+          makeIntegration({
+            id: "i1",
+            name: "Avtal",
+            metadata: { size: 0, last_synced_at: "2026-10-01T08:00:00Z", document_count: 1 }
+          }),
+          makeIntegration({
+            id: "i2",
+            name: "Bygglov",
+            metadata: {
+              size: 0,
+              last_sync_status: "error",
+              last_sync_error: "Graph timeout",
+              last_sync_attempted_at: "2026-10-10T08:00:00Z"
+            }
+          }),
+          makeIntegration({
+            id: "i3",
+            name: "Cirkulär",
+            metadata: { size: 0, last_synced_at: "2026-10-05T08:00:00Z", document_count: 1 }
+          })
+        ]
+      }),
+      "integrations"
+    );
+    const table = screen.getByRole("table", { name: "Integrationer" });
+    fireEvent.click(within(table).getByRole("button", { name: "Sortera efter Uppdaterad" }));
+    const sources = within(table)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("link")[0]!.textContent);
+    expect(sources).toEqual(["Avtal", "Cirkulär", "Bygglov"]);
+  });
+
+  it("has one sign-in notice, status filter and search above every embedding model's table", async () => {
+    const other = { id: "embed-2", name: "text-embedding-3" };
+    const signInRefused = {
+      size: 0,
+      last_sync_status: "error",
+      last_sync_error:
+        "SharePoint credentials are invalid or expired; an administrator must reconnect the integration"
+    };
+    show(
+      makeSpace({
+        integrations: [
+          makeIntegration({ id: "i1", name: "Avtal", metadata: signInRefused }),
+          makeIntegration({
+            id: "i2",
+            name: "Bygglov",
+            embedding_model: other,
+            metadata: signInRefused
+          }),
+          makeIntegration({
+            id: "i3",
+            name: "Cirkulär",
+            embedding_model: other,
+            metadata: { size: 0, last_synced_at: "2026-10-01T08:00:00Z", document_count: 2600 }
+          })
+        ],
+        overrides: {
+          embedding_models: [
+            { id: "embed-1", name: "multilingual-e5-large", nickname: null, is_deprecated: false },
+            { ...other, nickname: null, is_deprecated: false }
+          ]
+        }
+      }),
+      "integrations"
+    );
+    const names = (table: HTMLElement) =>
+      within(table)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("link")[0]!.textContent);
+
+    expect(screen.getAllByText("2 källor uppdateras inte")).toHaveLength(1);
+    expect(screen.getAllByRole("radio", { name: /^Alla/ })).toHaveLength(1);
+    expect(screen.getAllByRole("textbox", { name: "Filtrera integrationer" })).toHaveLength(1);
+    const second = screen.getByRole("table", { name: "text-embedding-3" });
+    expect(within(second).getByText("2 600")).toBeTruthy();
+
+    // "Show them" filters every group and goes away; focus stays on the notice.
+    const notice = screen.getByText("2 källor uppdateras inte").closest<HTMLElement>("[tabindex]")!;
+    const showThem = screen.getByRole("button", { name: "Visa dem" });
+    showThem.focus();
+    fireEvent.click(showThem);
+    expect(screen.queryByRole("button", { name: "Visa dem" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(notice));
+    expect(names(screen.getByRole("table", { name: "multilingual-e5-large" }))).toEqual(["Avtal"]);
+    expect(names(screen.getByRole("table", { name: "text-embedding-3" }))).toEqual(["Bygglov"]);
+
+    // The search spans the groups; a group it empties is left out.
+    fireEvent.change(screen.getByRole("textbox", { name: "Filtrera integrationer" }), {
+      target: { value: "bygg" }
+    });
+    expect(screen.queryByRole("table", { name: "multilingual-e5-large" })).toBeNull();
+    expect(names(screen.getByRole("table", { name: "text-embedding-3" }))).toEqual(["Bygglov"]);
+    await expectNoAxeViolations(document.body);
   });
 
   it("offers the next step for integrations in the empty state", () => {

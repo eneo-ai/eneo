@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  combineSyncProgress,
-  finishedSyncs,
-  progressFraction,
-  type IntegrationSyncProgress
-} from "./sync-progress";
+import { combineSyncProgress, finishedSyncs, type IntegrationSyncProgress } from "./sync-progress";
 
 function entry(fields: Partial<IntegrationSyncProgress>): IntegrationSyncProgress {
   return {
@@ -48,17 +43,6 @@ describe("combineSyncProgress", () => {
 
   it("does not know the total while one item does not", () => {
     expect(combineSyncProgress([entry({}), entry({ total: null })])?.total).toBeNull();
-  });
-});
-
-describe("progressFraction", () => {
-  it.each([
-    [{ done: 5, total: 20 }, 0.25],
-    [{ done: 25, total: 20 }, 1],
-    [{ done: 5, total: null }, null],
-    [{ done: 0, total: 0 }, null]
-  ])("%o → %s", (summary, expected) => {
-    expect(progressFraction(summary)).toBe(expected);
   });
 });
 

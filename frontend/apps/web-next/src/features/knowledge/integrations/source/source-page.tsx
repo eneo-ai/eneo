@@ -6,15 +6,16 @@ import { Button } from "@astryxdesign/core/Button";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQueries } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { useId, useRef, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useFormatter, useTranslations } from "next-intl";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { PageHeader } from "@/components/composites/page-header";
 import { useAppContext } from "@/components/providers/app-context";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
+import { rescueFocus } from "@/lib/focus-rescue";
 import { hoursUntil } from "@/lib/format";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import type { IntegrationKnowledge } from "../../knowledge";
@@ -24,30 +25,26 @@ import { buildSourceProblems, type SkippedDocuments } from "../source-problems";
 import {
   sourceContentsLabel,
   sourceHref,
+  sourceTabParam,
   summarizeSource,
   type IntegrationSource,
   type SourceTab
 } from "../sources";
+import { useAnnounceChange } from "../use-announce-change";
 import { useSyncProgress } from "../use-sync-progress";
 import { VENDOR, VendorIcon } from "../vendor";
 import { ActivityView } from "./activity-view";
 import { FolderDocuments } from "./folder-documents";
 import { FolderNav } from "./folder-nav";
 import { FolderOverview } from "./folder-overview";
+import { inPlaceLink } from "./in-place-link";
 import { ProblemsView } from "./problems-view";
 import { SyncProgressPanel } from "./progress-panel";
 
-const TABS: readonly SourceTab[] = ["content", "problems", "activity"];
 const EXPIRING_SOON_HOURS = 48;
 
-function asTab(value: string | null): SourceTab {
-  return TABS.find((tab) => tab === value) ?? "content";
-}
-
-/** A finished sync rewrites an item's skipped list; its timestamps say when. */
-function syncRevision(item: IntegrationKnowledge): string {
-  return `${item.metadata?.last_sync_attempted_at ?? ""}|${item.metadata?.last_synced_at ?? ""}`;
-}
+/** What the page shows: a tab and, on a source of many folders, the folder (null: all of them). */
+type SourceView = { tab: SourceTab; folder: string | null };
 
 function Stat({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -103,12 +100,13 @@ function WatchStat({ items }: { items: IntegrationKnowledge[] }) {
  * One source (a wrapper of folders, or a single item): what it holds and how
  * its syncs go. Contents lists folders and documents, Problems says what went
  * wrong and who fixes it, Activity is the sync history. The tab and the folder
- * live in the address (?tab=, ?folder=), so links and reloads keep them.
+ * live in the address (?tab=, ?folder=), so links and reloads keep them; a
+ * change only rewrites the address, it does not load the page again.
  */
 export function SourcePage({ source }: { source: IntegrationSource }) {
   const t = useTranslations();
+  const format = useFormatter();
   const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { space, routeId } = useSpace();
   const { can } = useAppContext();
@@ -117,21 +115,26 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const baseId = useId();
   const panelId = `${baseId}-panel`;
   const tabId = (tab: SourceTab) => `${baseId}-tab-${tab}`;
+  // By id, not a ref: the in-place links that call it are built during render (react-hooks/refs).
+  const focusPanelIfLost = () => rescueFocus(document.getElementById(panelId));
+  const [view, setView] = useState<SourceView>(() => ({
+    tab: sourceTabParam(searchParams.get("tab") ?? undefined) ?? "content",
+    folder: searchParams.get("folder")
+  }));
+  const { tab } = view;
 
   const progress = useSyncProgress();
   const summary = summarizeSource(source.items, progress);
   const multiple = source.items.length > 1;
   const singleItem = multiple ? null : (source.items[0] ?? null);
-  const tab = asTab(searchParams.get("tab"));
-  const requested = searchParams.get("folder");
   const selectedItem = multiple
-    ? (source.items.find((item) => item.id === requested) ?? null)
+    ? (source.items.find((item) => item.id === view.folder) ?? null)
     : singleItem;
 
+  // Keyed by the item alone: a finished sync refetches the list (useSyncProgress)
+  // while the one shown stays, so Problems keeps its place.
   const skippedQueries = useQueries({
-    queries: source.items.map((item) =>
-      skippedDocumentsQueryOptions(browserApi, space.id, item.id, syncRevision(item))
-    )
+    queries: source.items.map((item) => skippedDocumentsQueryOptions(browserApi, space.id, item.id))
   });
   // undefined while an item's list loads, null when it could not be loaded.
   const skippedByItem: Record<string, SkippedDocuments | null | undefined> = Object.fromEntries(
@@ -149,7 +152,6 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
     : null;
 
   const listHref = `/spaces/${routeId}/knowledge?tab=integrations`;
-  const problemsHref = sourceHref(routeId, source, { tab: "problems" });
   const adminIntegrationsUrl = hydrated
     ? new URL("/admin/integrations", window.location.origin).href
     : "/admin/integrations";
@@ -166,16 +168,33 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
           return current ? [{ folder: item.name, file: current }] : [];
         });
 
-  function selectTab(next: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("tab", asTab(next));
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  // Like the knowledge page's tabs: the address follows, without a server round trip.
+  function show(next: SourceView) {
+    setView(next);
+    const url = new URL(window.location.href);
+    if (next.tab === "content") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", next.tab);
+    if (next.folder) url.searchParams.set("folder", next.folder);
+    else url.searchParams.delete("folder");
+    window.history.replaceState(null, "", url);
+    // The link that was pressed may have gone with the old view.
+    focusPanelIfLost();
   }
 
-  const folderHref = (itemId: string | null) => sourceHref(routeId, source, { folder: itemId });
-  // From another tab the link must name the content tab, or the tab stays put.
-  const folderContentHref = (itemId: string) =>
-    sourceHref(routeId, source, { folder: itemId, tab: "content" });
+  const linkTo = (next: SourceView) =>
+    inPlaceLink(
+      sourceHref(routeId, source, {
+        folder: next.folder,
+        tab: next.tab === "content" ? undefined : next.tab
+      }),
+      () => show(next)
+    );
+  const folderLink = (itemId: string | null) => linkTo({ tab: "content", folder: itemId });
+  const problemsLink = linkTo({ tab: "problems", folder: view.folder });
+
+  const toList = () => router.push(listHref);
+  // Deleting the source's last item from its own page leaves nothing to show here.
+  const onLastItemDeleted = source.items.length === 1 ? toList : undefined;
 
   const actions =
     source.kind === "wrapper" ? (
@@ -186,12 +205,22 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
           itemCount={source.items.length}
           canEdit={permissions.includes("edit")}
           canDelete={permissions.includes("delete")}
-          onDeleted={() => router.push(listHref)}
+          onDeleted={toList}
         />
       ) : null
     ) : singleItem ? (
-      <IntegrationActions item={singleItem} />
+      <IntegrationActions item={singleItem} onDeleted={onLastItemDeleted} />
     ) : null;
+
+  const failureTitle =
+    summary.failedItems.length === 0
+      ? null
+      : summary.credentialsFailed
+        ? t("integration_source_stopped_sign_in_title")
+        : summary.failedItems.length === 1
+          ? t("integration_source_failed_one")
+          : t("integration_source_failed_other", { count: summary.failedItems.length });
+  useAnnounceChange(failureTitle);
 
   return (
     <RemovalFocusScope target={headingRef}>
@@ -237,16 +266,13 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
           ) : null}
         </div>
 
-        {summary.failedItems.length > 0 && tab !== "problems" ? (
+        {failureTitle !== null && tab !== "problems" ? (
           <Banner
+            // Not Astryx's assertive alert, read out again whenever the user
+            // leaves Problems: a new failure is announced politely once.
+            role={undefined}
             status="error"
-            title={
-              summary.credentialsFailed
-                ? t("integration_source_stopped_sign_in_title")
-                : summary.failedItems.length === 1
-                  ? t("integration_source_failed_one")
-                  : t("integration_source_failed_other", { count: summary.failedItems.length })
-            }
+            title={failureTitle}
             description={
               summary.credentialsFailed
                 ? t("integration_source_stopped_sign_in_description")
@@ -254,7 +280,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
             }
             collapsible={false}
             endContent={
-              <Button label={t("integration_source_show_problems")} size="sm" href={problemsHref} />
+              <Button label={t("integration_source_show_problems")} size="sm" {...problemsLink} />
             }
           />
         ) : null}
@@ -269,10 +295,12 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
         ) : (
           <dl className="border-ax-border rounded-ax-container grid grid-cols-2 border lg:grid-cols-4">
             <Stat label={t("integration_source_stat_searchable")}>
-              <span className="text-xl tabular-nums">{summary.documentCount.toLocaleString()}</span>
+              <span className="text-xl tabular-nums">{format.number(summary.documentCount)}</span>
             </Stat>
             <Stat label={t("integration_source_stat_skipped")}>
-              <span className="text-xl tabular-nums">{skippedTotal ?? "–"}</span>
+              <span className="text-xl tabular-nums">
+                {skippedTotal === null ? "–" : format.number(skippedTotal)}
+              </span>
             </Stat>
             <Stat label={t("integration_source_last_up_to_date")}>
               {summary.lastSyncedAt ? (
@@ -292,7 +320,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
             role="tablist"
             aria-label={source.name}
             value={tab}
-            onChange={selectTab}
+            onChange={(next) => show({ ...view, tab: sourceTabParam(next) ?? "content" })}
             hasDivider
           >
             <Tab
@@ -319,8 +347,15 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
               panelId={panelId}
             />
           </TabList>
-          {/* One panel whose content follows the tab, so every tab's aria-controls exists. */}
-          <div role="tabpanel" id={panelId} aria-labelledby={tabId(tab)} className="min-w-0">
+          {/* One panel whose content follows the tab, so every tab's aria-controls exists.
+              It takes focus when the control that changed the view went with it. */}
+          <div
+            role="tabpanel"
+            id={panelId}
+            aria-labelledby={tabId(tab)}
+            tabIndex={-1}
+            className="focus-visible:outline-ring rounded-ax-element min-w-0 focus-visible:outline-2 focus-visible:outline-offset-4"
+          >
             {tab === "content" ? (
               multiple ? (
                 <div className="flex flex-wrap items-start gap-6">
@@ -329,7 +364,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
                       items={source.items}
                       progress={progress}
                       selectedId={selectedItem?.id ?? null}
-                      hrefFor={folderHref}
+                      linkFor={folderLink}
                     />
                   </div>
                   <div className="min-w-0 flex-[999_1_32rem]">
@@ -339,14 +374,14 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
                         item={selectedItem}
                         progress={progress}
                         skipped={skippedByItem[selectedItem.id] ?? null}
-                        problemsHref={problemsHref}
+                        problemsLink={problemsLink}
                       />
                     ) : (
                       <FolderOverview
                         items={source.items}
                         progress={progress}
                         sourceName={source.name}
-                        hrefFor={folderHref}
+                        linkFor={folderLink}
                       />
                     )}
                   </div>
@@ -357,8 +392,9 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
                   item={singleItem}
                   progress={progress}
                   skipped={skippedByItem[singleItem.id] ?? null}
-                  problemsHref={problemsHref}
+                  problemsLink={problemsLink}
                   showHeader={source.kind === "wrapper"}
+                  onDeleted={onLastItemDeleted}
                 />
               ) : null
             ) : tab === "problems" ? (
@@ -366,10 +402,12 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
                 problems={problems}
                 isAdmin={can("admin")}
                 adminIntegrationsUrl={adminIntegrationsUrl}
-                folderHref={folderContentHref}
+                folderLink={folderLink}
                 showFolders={multiple}
                 onRetry={() => {
-                  for (const query of skippedQueries) if (query.isError) void query.refetch();
+                  const failed = skippedQueries.filter((query) => query.isError);
+                  // Once every list loaded, the retry button is gone.
+                  void Promise.all(failed.map((query) => query.refetch())).then(focusPanelIfLost);
                 }}
               />
             ) : (

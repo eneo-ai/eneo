@@ -20,16 +20,19 @@ export function folderPathKey(path: string | null | undefined): string | null {
   return withRoot.toLowerCase();
 }
 
-function byName(a: IntegrationTreeNode, b: IntegrationTreeNode): number {
-  return a.item.name.localeCompare(b.item.name);
-}
-
 /**
  * Items nested by their SharePoint folder path: an item sits under the item
  * whose path is its longest strict prefix. Whole-site imports (no path) come
- * first; an identical path twice makes siblings, never a parent.
+ * first; an identical path twice makes siblings, never a parent. Siblings are
+ * in `compare`'s order: the locale's collator (Astryx `useCollator().compare`),
+ * so the server's HTML and the browser's render agree.
  */
-export function buildIntegrationTree(items: IntegrationKnowledge[]): IntegrationTreeNode[] {
+export function buildIntegrationTree(
+  items: IntegrationKnowledge[],
+  compare: Intl.Collator["compare"]
+): IntegrationTreeNode[] {
+  const byName = (a: IntegrationTreeNode, b: IntegrationTreeNode) =>
+    compare(a.item.name, b.item.name);
   const siteRoots: IntegrationTreeNode[] = [];
   const keyed: { key: string; node: IntegrationTreeNode }[] = [];
 
@@ -41,9 +44,7 @@ export function buildIntegrationTree(items: IntegrationKnowledge[]): Integration
   }
   // Parents are shorter than their children, so placing short keys first
   // guarantees every parent exists before its children look for it.
-  keyed.sort(
-    (a, b) => a.key.length - b.key.length || a.node.item.name.localeCompare(b.node.item.name)
-  );
+  keyed.sort((a, b) => a.key.length - b.key.length || byName(a.node, b.node));
 
   const pathRoots: IntegrationTreeNode[] = [];
   const placed: { key: string; node: IntegrationTreeNode }[] = [];

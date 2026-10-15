@@ -1,5 +1,6 @@
 "use client";
 
+import { useCollator } from "@astryxdesign/core/i18n";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { proportional, pixel, type TableColumn } from "@astryxdesign/core/Table";
 import { useQuery } from "@tanstack/react-query";
@@ -46,13 +47,12 @@ function needsAttention(row: OverviewRow): boolean {
   return row.summary.failedItems.length > 0;
 }
 
-/** Whatever needs someone comes first; the rest by space, then source. */
-function compareRows(a: OverviewRow, b: OverviewRow): number {
-  return (
+/** Whatever needs someone comes first; the rest by space, then source, in `compare`'s order. */
+function rowOrder(compare: Intl.Collator["compare"]) {
+  return (a: OverviewRow, b: OverviewRow): number =>
     Number(needsAttention(b)) - Number(needsAttention(a)) ||
-    a.space.name.localeCompare(b.space.name) ||
-    a.name.localeCompare(b.name)
-  );
+    compare(a.space.name, b.space.name) ||
+    compare(a.name, b.name);
 }
 
 function matchesQuery(row: OverviewRow, needle: string): boolean {
@@ -109,23 +109,26 @@ function OverviewContent({
 }) {
   const t = useTranslations();
   const format = useFormatter();
+  const collator = useCollator();
   const [filter, setFilter] = useState<SourceFilter>("all");
   const [query, setQuery] = useState("");
 
-  const rows: OverviewRow[] = groupSourcesBySpace(overview.items).map(({ space, source }) => ({
-    id: `${space.id}:${source.kind}:${source.id}`,
-    name: source.name,
-    space,
-    source,
-    summary: summarizeSource(source.items, {})
-  }));
+  const rows: OverviewRow[] = groupSourcesBySpace(overview.items, collator.compare).map(
+    ({ space, source }) => ({
+      id: `${space.id}:${source.kind}:${source.id}`,
+      name: source.name,
+      space,
+      source,
+      summary: summarizeSource(source.items, {})
+    })
+  );
   const counts = countSourceFilters(rows.map((row) => row.summary));
   const attentionSpaces = new Set(rows.filter(needsAttention).map((row) => row.space.id)).size;
   const documentTotal = rows.reduce((sum, row) => sum + row.summary.documentCount, 0);
   const needle = query.trim().toLocaleLowerCase();
   const visible = rows
     .filter((row) => matchesSourceFilter(row.summary, filter) && matchesQuery(row, needle))
-    .sort(compareRows);
+    .sort(rowOrder(collator.compare));
 
   const columns: TableColumn<OverviewRow>[] = [
     {

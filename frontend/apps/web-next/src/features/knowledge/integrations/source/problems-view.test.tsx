@@ -7,6 +7,7 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { buildSourceProblems, type SkippedDocuments } from "../source-problems";
+import { inPlaceLink } from "./in-place-link";
 import { ProblemsView } from "./problems-view";
 
 vi.mock("next/navigation", () => import("@/test/navigation"));
@@ -53,7 +54,7 @@ function renderView(
       problems={buildSourceProblems(items, skippedByItem, t)}
       isAdmin={false}
       adminIntegrationsUrl={ADMIN_URL}
-      folderHref={(id) => `/source?folder=${id}`}
+      folderLink={(id) => inPlaceLink(`/source?folder=${id}`, () => {})}
       showFolders={false}
       onRetry={() => {}}
       {...props}
@@ -78,7 +79,7 @@ describe("ProblemsView", () => {
         problems={null}
         isAdmin={false}
         adminIntegrationsUrl={ADMIN_URL}
-        folderHref={() => "/"}
+        folderLink={() => inPlaceLink("/", () => {})}
         showFolders={false}
         onRetry={() => {}}
       />

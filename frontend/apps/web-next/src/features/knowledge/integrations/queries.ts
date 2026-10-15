@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, type QueryKey } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -11,8 +11,6 @@ export type SharePointTreeItem = Schema<"SharePointTreeItem">;
 export type SharePointTree = Schema<"SharePointTreeResponse">;
 export type SyncLog = Schema<"SyncLog">;
 export type SyncLogPage = Schema<"PaginatedSyncLogList">;
-
-export const SYNC_LOG_PAGE_SIZE = 10;
 
 /** Integrations the backend offers for this space (filtered by space/auth type). */
 export function availableIntegrationsQueryOptions(api: EneoClient, spaceId: string) {
@@ -75,26 +73,23 @@ export function sharepointTreeQueryOptions(
   });
 }
 
-export function syncLogsQueryOptions(api: EneoClient, knowledgeId: string, page: number) {
-  return queryOptions({
-    queryKey: ["integrations", "sync-logs", knowledgeId, page],
-    queryFn: (): Promise<SyncLogPage> =>
-      unwrap(
-        api.GET("/api/v1/integrations/sync-logs/{integration_knowledge_id}/", {
-          params: {
-            path: { integration_knowledge_id: knowledgeId },
-            query: { skip: (page - 1) * SYNC_LOG_PAGE_SIZE, limit: SYNC_LOG_PAGE_SIZE }
-          }
-        })
-      )
-  });
-}
-
 export type IntegrationDocumentsPage = Schema<"IntegrationDocumentsPage">;
 export type IntegrationDocument = Schema<"IntegrationDocumentItem">;
 export type IntegrationDocumentsSort = "name" | "path" | "size" | "updated_at";
 
 export const DOCUMENTS_PAGE_SIZE = 50;
+
+/**
+ * The lists a sync of the item rewrites, every page and window of them:
+ * `useSyncProgress` refetches them when the item's sync revision changes.
+ */
+export function syncedListKeys(spaceId: string, knowledgeId: string): QueryKey[] {
+  return [
+    ["integrations", "documents", spaceId, knowledgeId],
+    ["integrations", "skipped", spaceId, knowledgeId],
+    ["integrations", "sync-logs", knowledgeId]
+  ];
+}
 
 /** One page of a synced item's documents; `q` matches the title, the path or a property value. */
 export function integrationDocumentsQueryOptions(
@@ -106,25 +101,24 @@ export function integrationDocumentsQueryOptions(
     sort: IntegrationDocumentsSort;
     order: "asc" | "desc";
     page: number;
-    /** Changes when the item's last sync does, so a finished sync refetches. */
-    revision: string;
   }
 ) {
+  const { spaceId, knowledgeId, ...view } = args;
   return queryOptions({
-    queryKey: ["integrations", "documents", args],
+    queryKey: ["integrations", "documents", spaceId, knowledgeId, view],
     queryFn: (): Promise<IntegrationDocumentsPage> =>
       unwrap(
         api.GET(
           "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/",
           {
             params: {
-              path: { id: args.spaceId, integration_knowledge_id: args.knowledgeId },
+              path: { id: spaceId, integration_knowledge_id: knowledgeId },
               query: {
-                q: args.q.trim() || undefined,
-                sort: args.sort,
-                order: args.order,
+                q: view.q.trim() || undefined,
+                sort: view.sort,
+                order: view.order,
                 limit: DOCUMENTS_PAGE_SIZE,
-                offset: (args.page - 1) * DOCUMENTS_PAGE_SIZE
+                offset: (view.page - 1) * DOCUMENTS_PAGE_SIZE
               }
             }
           }
@@ -134,19 +128,15 @@ export function integrationDocumentsQueryOptions(
   });
 }
 
-/**
- * The files the latest sync of an item could not read, capped by the backend.
- * `revision` changes with the item's last sync, which rewrites the list.
- */
+/** The files the latest sync of an item could not read, capped by the backend. */
 export function skippedDocumentsQueryOptions(
   api: EneoClient,
   spaceId: string,
-  knowledgeId: string,
-  revision: string
+  knowledgeId: string
 ) {
   return queryOptions({
-    queryKey: ["integrations", "skipped", spaceId, knowledgeId, revision],
-    // The key changes when a sync rewrites the list, so a cached one stays right.
+    queryKey: ["integrations", "skipped", spaceId, knowledgeId],
+    // Only a sync rewrites the list, and a finished one refetches it (syncedListKeys).
     staleTime: 5 * 60_000,
     queryFn: (): Promise<SkippedDocuments> =>
       unwrap(

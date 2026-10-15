@@ -4,8 +4,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
-import { syncProgressQueryOptions } from "./queries";
+import type { IntegrationKnowledge } from "../knowledge";
+import { syncedListKeys, syncProgressQueryOptions } from "./queries";
 import { finishedSyncs, type ProgressById } from "./sync-progress";
+import { syncRevision } from "./sync-status";
 
 const NOTHING_RUNS: ProgressById = {};
 
@@ -14,8 +16,32 @@ const NOTHING_RUNS: ProgressById = {};
 const SETTLE_RECHECK_MS = 3_000;
 
 /**
+ * Refetches an item's lists once the space shows a sync of it that the lists
+ * predate. Cached lists keep showing until the new ones arrive.
+ */
+function useRefreshSyncedLists(spaceId: string, items: readonly IntegrationKnowledge[]) {
+  const queryClient = useQueryClient();
+  const seen = useRef<ReadonlyMap<string, string> | null>(null);
+
+  useEffect(() => {
+    const revisions = new Map(items.map((item) => [item.id, syncRevision(item)]));
+    const before = seen.current;
+    seen.current = revisions;
+    if (!before) return;
+    for (const [id, revision] of revisions) {
+      const known = before.get(id);
+      if (known === undefined || known === revision) continue;
+      for (const queryKey of syncedListKeys(spaceId, id)) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
+    }
+  }, [items, queryClient, spaceId]);
+}
+
+/**
  * The running syncs of the current space. When one finishes, the space (its
- * items' counts and statuses) and the finished items' lists are refreshed.
+ * items' counts and statuses) is refreshed, and again a moment later; the
+ * finished items' lists follow once the space shows their new sync.
  */
 export function useSyncProgress(): ProgressById {
   const { space, routeId } = useSpace();
@@ -34,18 +60,12 @@ export function useSyncProgress(): ProgressById {
     const finished = finishedSyncs(previous.current, progress);
     previous.current = progress;
     if (finished.length === 0) return;
-    const refresh = () => {
-      void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
-      // Document, skipped-file and sync-log queries carry the item id in their key.
-      void queryClient.invalidateQueries({
-        predicate: ({ queryKey }) =>
-          queryKey[0] === "integrations" &&
-          finished.some((id) => JSON.stringify(queryKey).includes(id))
-      });
-    };
+    const refresh = () => void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
     refresh();
     rechecks.current.push(window.setTimeout(refresh, SETTLE_RECHECK_MS));
   }, [progress, queryClient, routeId]);
+
+  useRefreshSyncedLists(space.id, space.knowledge.integration_knowledge_list.items);
 
   return progress;
 }

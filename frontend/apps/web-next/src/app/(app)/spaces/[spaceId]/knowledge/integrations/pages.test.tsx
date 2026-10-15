@@ -1,0 +1,113 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { EneoApiError } from "@/lib/api/errors";
+import type { Space } from "@/features/spaces/space";
+import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
+
+const state = vi.hoisted(() => ({
+  space: null as unknown,
+  error: null as unknown,
+  requested: [] as unknown[]
+}));
+
+vi.mock("@/lib/api/server", () => ({ eneoApi: () => ({}) }));
+vi.mock("@/lib/api/query", () => ({
+  getQueryClient: () => ({
+    query: async ({ queryKey }: { queryKey: unknown[] }) => {
+      state.requested.push(queryKey);
+      if (state.error) throw state.error;
+      return state.space;
+    }
+  })
+}));
+// Next's control flow throws; these stand-ins throw something a test can read.
+vi.mock("next/navigation", () => ({
+  notFound: () => {
+    throw new Error("not found");
+  },
+  redirect: (url: string) => {
+    throw new Error(`redirect ${url}`);
+  }
+}));
+
+import IntegrationsPage from "./page";
+import IntegrationItemPage from "./[integrationKnowledgeId]/page";
+import WrapperPage from "./wrapper/[wrapperId]/page";
+
+afterEach(() => {
+  state.space = null;
+  state.error = null;
+  state.requested = [];
+});
+
+function spaceWith(integrations: unknown[]): Space {
+  return makeSpace({ integrations });
+}
+
+const itemPage = (integrationKnowledgeId: string, tab?: string) =>
+  IntegrationItemPage({
+    params: Promise.resolve({ spaceId: "space-1", integrationKnowledgeId }),
+    searchParams: Promise.resolve(tab ? { tab } : {})
+  });
+
+const wrapperPage = (wrapperId: string) =>
+  WrapperPage({ params: Promise.resolve({ spaceId: "space-1", wrapperId }) });
+
+describe("the integrations route", () => {
+  it("leads to the knowledge page's integrations tab", async () => {
+    await expect(
+      IntegrationsPage({ params: Promise.resolve({ spaceId: "personal" }) })
+    ).rejects.toThrow("redirect /spaces/personal/knowledge?tab=integrations");
+  });
+});
+
+describe("the item route", () => {
+  it("shows an item imported on its own", async () => {
+    state.space = spaceWith([makeIntegration({ id: "i1", name: "Avtal" })]);
+    const page = await itemPage("i1");
+    expect(page.props).toEqual({ itemId: "i1" });
+    expect(state.requested).toEqual([["spaces", "space-1"]]);
+  });
+
+  it("opens a wrapped SharePoint item as a folder of its source, on the tab asked for", async () => {
+    state.space = spaceWith([
+      makeIntegration({ id: "i1", wrapper_id: "w1", wrapper_name: "Byggnad" })
+    ]);
+    await expect(itemPage("i1", "skipped")).rejects.toThrow(
+      "redirect /spaces/space-1/knowledge/integrations/wrapper/w1?folder=i1&tab=problems"
+    );
+  });
+
+  it("is not found for an unknown item, or one that belongs to another space", async () => {
+    state.space = spaceWith([
+      makeIntegration({ id: "i1" }),
+      makeIntegration({ id: "shared", space_id: "space-2" })
+    ]);
+    await expect(itemPage("missing")).rejects.toThrow("not found");
+    await expect(itemPage("shared")).rejects.toThrow("not found");
+  });
+
+  it("is not found when the space is", async () => {
+    state.error = new EneoApiError("Space not found", { status: 404 });
+    await expect(itemPage("i1")).rejects.toThrow("not found");
+  });
+});
+
+describe("the wrapper route", () => {
+  it("shows a wrapper of the space's own items", async () => {
+    state.space = spaceWith([
+      makeIntegration({ id: "i1", wrapper_id: "w1", wrapper_name: "Byggnad" })
+    ]);
+    const page = await wrapperPage("w1");
+    expect(page.props).toEqual({ wrapperId: "w1" });
+  });
+
+  it("is not found for an unknown wrapper, or one only another space's items are in", async () => {
+    state.space = spaceWith([
+      makeIntegration({ id: "i1", wrapper_id: "w1" }),
+      makeIntegration({ id: "i2", wrapper_id: "w2", space_id: "space-2" })
+    ]);
+    await expect(wrapperPage("w9")).rejects.toThrow("not found");
+    await expect(wrapperPage("w2")).rejects.toThrow("not found");
+  });
+});

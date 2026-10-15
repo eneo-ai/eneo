@@ -46,3 +46,13 @@ export function latestTime(a: string | null, b: string | null | undefined): stri
   if (!a) return b;
   return new Date(a).getTime() >= new Date(b).getTime() ? a : b;
 }
+
+/** Changes with every finished sync of the item: its document, skipped-file and log lists are then stale. */
+export function syncRevision(knowledge: IntegrationKnowledge): string {
+  const metadata = knowledge.metadata;
+  return [
+    metadata?.last_sync_attempted_at ?? "",
+    metadata?.last_synced_at ?? "",
+    metadata?.document_count ?? 0
+  ].join("|");
+}

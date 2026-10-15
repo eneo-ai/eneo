@@ -42,17 +42,41 @@ function wrapperName(items: IntegrationKnowledge[]): string {
   return named?.wrapper_name ?? items[0]?.name ?? "";
 }
 
-/** SharePoint items sharing a wrapper become one source; every other item is its own. */
+/** The wrapper an item was imported under; only SharePoint imports group by wrapper. */
+function wrapperIdOf(item: IntegrationKnowledge): string | null {
+  return item.wrapper_id && item.integration_type === "sharepoint" ? item.wrapper_id : null;
+}
+
+function wrapperSource(id: string, group: IntegrationKnowledge[]): IntegrationSource | undefined {
+  const [first] = group;
+  if (!first) return undefined;
+  return {
+    kind: "wrapper",
+    id,
+    name: wrapperName(group),
+    integrationType: first.integration_type,
+    items: group,
+    embeddingModelId: first.embedding_model.id
+  };
+}
+
+/**
+ * SharePoint items sharing a wrapper become one source; every other item is
+ * its own. Sorted by name with `compare`: the locale's collator (Astryx
+ * `useCollator().compare`), so the server's HTML and the browser's render agree.
+ */
 export function groupIntegrationSources(
-  items: readonly IntegrationKnowledge[]
+  items: readonly IntegrationKnowledge[],
+  compare: Intl.Collator["compare"]
 ): IntegrationSource[] {
   const wrappers = new Map<string, IntegrationKnowledge[]>();
   const sources: IntegrationSource[] = [];
   for (const item of items) {
-    if (item.wrapper_id && item.integration_type === "sharepoint") {
-      const group = wrappers.get(item.wrapper_id);
+    const wrapperId = wrapperIdOf(item);
+    if (wrapperId) {
+      const group = wrappers.get(wrapperId);
       if (group) group.push(item);
-      else wrappers.set(item.wrapper_id, [item]);
+      else wrappers.set(wrapperId, [item]);
       continue;
     }
     sources.push({
@@ -65,18 +89,21 @@ export function groupIntegrationSources(
     });
   }
   for (const [id, group] of wrappers) {
-    const [first] = group;
-    if (!first) continue;
-    sources.push({
-      kind: "wrapper",
-      id,
-      name: wrapperName(group),
-      integrationType: first.integration_type,
-      items: group,
-      embeddingModelId: first.embedding_model.id
-    });
+    const source = wrapperSource(id, group);
+    if (source) sources.push(source);
   }
-  return sources.sort((a, b) => a.name.localeCompare(b.name));
+  return sources.sort((a, b) => compare(a.name, b.name));
+}
+
+/** One wrapper as a source; undefined when none of `items` was imported under it. */
+export function findWrapperSource(
+  items: readonly IntegrationKnowledge[],
+  wrapperId: string
+): IntegrationSource | undefined {
+  return wrapperSource(
+    wrapperId,
+    items.filter((item) => wrapperIdOf(item) === wrapperId)
+  );
 }
 
 /** The tab a link asks for; older links name "skipped", which is now part of Problems. */
@@ -214,7 +241,8 @@ export function countSourceFilters(
 
 /** Sources per space, for a view that spans spaces; a wrapper never crosses a space. */
 export function groupSourcesBySpace<Space extends { id: string }>(
-  entries: readonly { space: Space; knowledge: IntegrationKnowledge }[]
+  entries: readonly { space: Space; knowledge: IntegrationKnowledge }[],
+  compare: Intl.Collator["compare"]
 ): { space: Space; source: IntegrationSource }[] {
   const bySpace = new Map<string, { space: Space; items: IntegrationKnowledge[] }>();
   for (const { space, knowledge } of entries) {
@@ -223,7 +251,7 @@ export function groupSourcesBySpace<Space extends { id: string }>(
     else bySpace.set(space.id, { space, items: [knowledge] });
   }
   return [...bySpace.values()].flatMap(({ space, items }) =>
-    groupIntegrationSources(items).map((source) => ({ space, source }))
+    groupIntegrationSources(items, compare).map((source) => ({ space, source }))
   );
 }
 

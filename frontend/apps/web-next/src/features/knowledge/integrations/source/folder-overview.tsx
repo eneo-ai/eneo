@@ -1,11 +1,12 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { useCollator } from "@astryxdesign/core/i18n";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 import { Table } from "@/components/astryx/table";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import type { IntegrationKnowledge } from "../../knowledge";
@@ -15,6 +16,7 @@ import { SourceStateLabel } from "../source-status";
 import { itemState } from "../sources";
 import type { ProgressById } from "../sync-progress";
 import { VENDOR } from "../vendor";
+import type { InPlaceLink } from "./in-place-link";
 
 type FolderRow = { id: string; item: IntegrationKnowledge; depth: number };
 
@@ -40,17 +42,20 @@ export function FolderOverview({
   items,
   progress,
   sourceName,
-  hrefFor
+  linkFor
 }: {
   items: IntegrationKnowledge[];
   progress: ProgressById;
   sourceName: string;
-  hrefFor: (itemId: string) => string;
+  linkFor: (itemId: string) => InPlaceLink;
 }) {
   const t = useTranslations();
-  const rows: FolderRow[] = flattenIntegrationTree(buildIntegrationTree(items), () => true).map(
-    (row) => ({ id: row.item.id, item: row.item, depth: row.depth })
-  );
+  const format = useFormatter();
+  const collator = useCollator();
+  const rows: FolderRow[] = flattenIntegrationTree(
+    buildIntegrationTree(items, collator.compare),
+    () => true
+  ).map((row) => ({ id: row.item.id, item: row.item, depth: row.depth }));
 
   const columns: TableColumn<FolderRow>[] = [
     {
@@ -63,9 +68,8 @@ export function FolderOverview({
           style={{ paddingInlineStart: `${row.depth * 1.25}rem` }}
         >
           <Link
-            href={hrefFor(row.item.id)}
-            scroll={false}
-            replace
+            {...linkFor(row.item.id)}
+            prefetch={false}
             className="text-ax-text focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 w-fit items-center font-semibold break-words hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
           >
             {row.item.name}
@@ -94,7 +98,7 @@ export function FolderOverview({
       align: "end",
       renderCell: (row) => (
         <span className="tabular-nums">
-          {progress[row.item.id] ? "–" : (row.item.metadata?.document_count ?? 0)}
+          {progress[row.item.id] ? "–" : format.number(row.item.metadata?.document_count ?? 0)}
         </span>
       )
     },

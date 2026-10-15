@@ -22,8 +22,7 @@ export const VENDOR: Record<
   }
 };
 
+/** The vendor's logo; decorative, since it always sits next to the item's name. */
 export function VendorIcon({ type, size = 16 }: { type: IntegrationType; size?: number }) {
-  return (
-    <Image src={VENDOR[type].logo} alt={type} width={size} height={size} className="shrink-0" />
-  );
+  return <Image src={VENDOR[type].logo} alt="" width={size} height={size} className="shrink-0" />;
 }

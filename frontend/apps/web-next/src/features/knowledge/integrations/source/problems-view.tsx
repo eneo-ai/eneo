@@ -32,6 +32,7 @@ import type {
   SourceProblems,
   SyncFailure
 } from "../source-problems";
+import type { InPlaceLink } from "./in-place-link";
 
 const FILES_SHOWN = 10;
 
@@ -176,11 +177,11 @@ function CredentialsCard({
 function FailureCard({
   failure,
   showFolders,
-  folderHref
+  folderLink
 }: {
   failure: SyncFailure;
   showFolders: boolean;
-  folderHref: (itemId: string) => string;
+  folderLink: (itemId: string) => InPlaceLink;
 }) {
   const t = useTranslations();
   const [first] = failure.items;
@@ -211,7 +212,7 @@ function FailureCard({
           <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
             {failure.items.map((item) => (
               <li key={item.id}>
-                <Link href={folderHref(item.id)} className="font-medium">
+                <Link {...folderLink(item.id)} className="font-medium">
                   {t("integration_problem_open_named_folder", { name: folderLabel(item) })}
                 </Link>
               </li>
@@ -228,13 +229,13 @@ function FileGroupRow({
   isExpanded,
   onToggleExpanded,
   showFolders,
-  folderHref
+  folderLink
 }: {
   group: FileProblemGroup;
   isExpanded: boolean;
   onToggleExpanded: () => void;
   showFolders: boolean;
-  folderHref: (itemId: string) => string;
+  folderLink: (itemId: string) => InPlaceLink;
 }) {
   const t = useTranslations();
   const meta = CATEGORIES[group.category];
@@ -278,7 +279,7 @@ function FileGroupRow({
               <span className="min-w-0 font-medium break-all">{file.file}</span>
               {showFolders ? (
                 <Link
-                  href={folderHref(file.item.id)}
+                  {...folderLink(file.item.id)}
                   color="secondary"
                   className="min-w-0 justify-self-start break-all"
                 >
@@ -310,12 +311,12 @@ function FileGroups({
   groups,
   openFirst,
   showFolders,
-  folderHref
+  folderLink
 }: {
   groups: FileProblemGroup[];
   openFirst: boolean;
   showFolders: boolean;
-  folderHref: (itemId: string) => string;
+  folderLink: (itemId: string) => InPlaceLink;
 }) {
   const [expanded, setExpanded] = useState<ReadonlySet<FileProblemCategory>>(new Set());
   const first = groups[0]?.category;
@@ -341,7 +342,7 @@ function FileGroups({
           isExpanded={expanded.has(group.category)}
           onToggleExpanded={() => toggle(group.category)}
           showFolders={showFolders}
-          folderHref={folderHref}
+          folderLink={folderLink}
         />
       ))}
     </CollapsibleGroup>
@@ -361,14 +362,15 @@ export function ProblemsView({
   problems,
   isAdmin,
   adminIntegrationsUrl,
-  folderHref,
+  folderLink,
   showFolders,
   onRetry
 }: {
   problems: SourceProblems | null;
   isAdmin: boolean;
   adminIntegrationsUrl: string;
-  folderHref: (itemId: string) => string;
+  /** Opens a folder's contents. */
+  folderLink: (itemId: string) => InPlaceLink;
   /** The source has more than one item, so each file names its folder. */
   showFolders: boolean;
   /** Loads the skipped lists again for the items whose list could not be loaded. */
@@ -429,7 +431,7 @@ export function ProblemsView({
                   key={failure.message}
                   failure={failure}
                   showFolders={showFolders}
-                  folderHref={folderHref}
+                  folderLink={folderLink}
                 />
               ))}
             </div>
@@ -456,7 +458,7 @@ export function ProblemsView({
             groups={problems.fixable}
             openFirst
             showFolders={showFolders}
-            folderHref={folderHref}
+            folderLink={folderLink}
           />
         </section>
       ) : null}
@@ -473,7 +475,7 @@ export function ProblemsView({
             groups={problems.intentional}
             openFirst={false}
             showFolders={showFolders}
-            folderHref={folderHref}
+            folderLink={folderLink}
           />
         </section>
       ) : null}

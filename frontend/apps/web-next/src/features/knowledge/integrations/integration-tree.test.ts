@@ -16,6 +16,8 @@ function item(
   return { id: name, name, folder_path, selected_item_type } as IntegrationKnowledge;
 }
 
+const swedish = new Intl.Collator("sv").compare;
+
 function shape(nodes: IntegrationTreeNode[]): unknown {
   return nodes.map((node) => [node.item.name, shape(node.children)]);
 }
@@ -35,11 +37,14 @@ describe("folderPathKey", () => {
 
 describe("buildIntegrationTree", () => {
   it("keeps items whose paths are not prefixes of each other as siblings, sorted by name", () => {
-    const tree = buildIntegrationTree([
-      item("Rutiner", "/Documents/Rutiner"),
-      item("Protokoll", "/Documents/Protokoll"),
-      item("Protokollbilagor", "/Documents/Protokollbilagor")
-    ]);
+    const tree = buildIntegrationTree(
+      [
+        item("Rutiner", "/Documents/Rutiner"),
+        item("Protokoll", "/Documents/Protokoll"),
+        item("Protokollbilagor", "/Documents/Protokollbilagor")
+      ],
+      swedish
+    );
     expect(shape(tree)).toEqual([
       ["Protokoll", []],
       ["Protokollbilagor", []],
@@ -48,12 +53,15 @@ describe("buildIntegrationTree", () => {
   });
 
   it("nests an item under the deepest item whose path is a strict prefix, in any input order", () => {
-    const tree = buildIntegrationTree([
-      item("2026", "/Documents/Protokoll/Bilagor/2026"),
-      item("Protokoll", "/Documents/Protokoll"),
-      item("KS-1.pdf", "/documents/protokoll/KS-1.pdf", "file"),
-      item("Bilagor", "/Documents/Protokoll/Bilagor/")
-    ]);
+    const tree = buildIntegrationTree(
+      [
+        item("2026", "/Documents/Protokoll/Bilagor/2026"),
+        item("Protokoll", "/Documents/Protokoll"),
+        item("KS-1.pdf", "/documents/protokoll/KS-1.pdf", "file"),
+        item("Bilagor", "/Documents/Protokoll/Bilagor/")
+      ],
+      swedish
+    );
     expect(shape(tree)).toEqual([
       [
         "Protokoll",
@@ -66,11 +74,14 @@ describe("buildIntegrationTree", () => {
   });
 
   it("puts whole-site imports first and never nests folders under them", () => {
-    const tree = buildIntegrationTree([
-      item("Protokoll", "/Documents/Protokoll"),
-      item("Hela intranätet", undefined, "site_root"),
-      item("Arkiv", null, "site_root")
-    ]);
+    const tree = buildIntegrationTree(
+      [
+        item("Protokoll", "/Documents/Protokoll"),
+        item("Hela intranätet", undefined, "site_root"),
+        item("Arkiv", null, "site_root")
+      ],
+      swedish
+    );
     expect(shape(tree)).toEqual([
       ["Arkiv", []],
       ["Hela intranätet", []],
@@ -78,11 +89,39 @@ describe("buildIntegrationTree", () => {
     ]);
   });
 
-  it("treats two imports of the same folder as siblings", () => {
-    const tree = buildIntegrationTree([
-      item("Protokoll", "/Documents/Protokoll"),
-      item("Protokoll (igen)", "/Documents/Protokoll/")
+  it("orders siblings with the locale's collator, so Swedish puts Ä after Z", () => {
+    const items = [
+      item("Äldreomsorg", "/Documents/Äldreomsorg"),
+      item("Vuxen", "/Documents/Vuxen"),
+      item("Arkiv", "/Documents/Arkiv"),
+      item("Översikt", undefined, "site_root"),
+      item("Alla", undefined, "site_root")
+    ];
+    expect(shape(buildIntegrationTree(items, swedish))).toEqual([
+      ["Alla", []],
+      ["Översikt", []],
+      ["Arkiv", []],
+      ["Vuxen", []],
+      ["Äldreomsorg", []]
     ]);
+    // English sorts Ä as an A: the order follows the collator, not the runtime's default.
+    expect(shape(buildIntegrationTree(items, new Intl.Collator("en").compare))).toEqual([
+      ["Alla", []],
+      ["Översikt", []],
+      ["Äldreomsorg", []],
+      ["Arkiv", []],
+      ["Vuxen", []]
+    ]);
+  });
+
+  it("treats two imports of the same folder as siblings", () => {
+    const tree = buildIntegrationTree(
+      [
+        item("Protokoll", "/Documents/Protokoll"),
+        item("Protokoll (igen)", "/Documents/Protokoll/")
+      ],
+      swedish
+    );
     expect(shape(tree)).toEqual([
       ["Protokoll", []],
       ["Protokoll (igen)", []]
@@ -91,11 +130,14 @@ describe("buildIntegrationTree", () => {
 });
 
 describe("flattenIntegrationTree", () => {
-  const tree = buildIntegrationTree([
-    item("Protokoll", "/Documents/Protokoll"),
-    item("Bilagor", "/Documents/Protokoll/Bilagor"),
-    item("Rutiner", "/Documents/Rutiner")
-  ]);
+  const tree = buildIntegrationTree(
+    [
+      item("Protokoll", "/Documents/Protokoll"),
+      item("Bilagor", "/Documents/Protokoll/Bilagor"),
+      item("Rutiner", "/Documents/Rutiner")
+    ],
+    swedish
+  );
 
   it("lists expanded subtrees with their depth and hides collapsed ones", () => {
     const expandedRows = flattenIntegrationTree(tree, () => true);
@@ -113,11 +155,14 @@ describe("flattenIntegrationTree", () => {
 
 describe("filterIntegrationTree", () => {
   it("keeps matching nodes and the ancestors of matching descendants", () => {
-    const tree = buildIntegrationTree([
-      item("Protokoll", "/Documents/Protokoll"),
-      item("Bilagor", "/Documents/Protokoll/Bilagor"),
-      item("Rutiner", "/Documents/Rutiner")
-    ]);
+    const tree = buildIntegrationTree(
+      [
+        item("Protokoll", "/Documents/Protokoll"),
+        item("Bilagor", "/Documents/Protokoll/Bilagor"),
+        item("Rutiner", "/Documents/Rutiner")
+      ],
+      swedish
+    );
     expect(shape(filterIntegrationTree(tree, "bil"))).toEqual([["Protokoll", [["Bilagor", []]]]]);
     expect(filterIntegrationTree(tree, "   ")).toBe(tree);
   });

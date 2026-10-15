@@ -1,9 +1,10 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { useCollator } from "@astryxdesign/core/i18n";
 import { Plug } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { useAppContext } from "@/components/providers/app-context";
@@ -13,7 +14,7 @@ import { NoCreatePermissionInfo } from "../no-create-permission-info";
 import { IntegrationsBetaNotice } from "../notices";
 import { ImportKnowledgeDialog, useImportableIntegrations } from "./import/import-dialog";
 import { integrationSetupAction } from "./setup-action";
-import { SourcesTable } from "./sources-table";
+import { SourcesList, type SourceGroup } from "./sources-table";
 import { groupIntegrationSources } from "./sources";
 import { useSyncProgress } from "./use-sync-progress";
 
@@ -60,19 +61,33 @@ export function IntegrationsTab({
   labelledBy: string;
 }) {
   const t = useTranslations();
+  const collator = useCollator();
   const { space } = useSpace();
-  const groupId = useId();
 
   const items = space.knowledge.integration_knowledge_list.items.filter(
     (item) => item.space_id === space.id
   );
-  const sources = groupIntegrationSources(items);
+  const sources = groupIntegrationSources(items, collator.compare);
   const progress = useSyncProgress();
   const models = embeddingModelsInUse(items, space.embedding_models);
   const grouped =
     models.length > 1 ||
     space.embedding_models.length > 1 ||
     models.some((model) => !model.inSpace);
+  const groups: SourceGroup[] = grouped
+    ? models.flatMap((model) => {
+        const modelSources = sources.filter((source) => source.embeddingModelId === model.id);
+        return modelSources.length === 0
+          ? []
+          : [
+              {
+                key: model.id,
+                heading: model.inSpace ? model.name : `${model.name} (${t("disabled")})`,
+                sources: modelSources
+              }
+            ];
+      })
+    : [{ key: "all", heading: null, sources }];
   const action = canCreate ? (
     <ImportAction />
   ) : (
@@ -96,28 +111,7 @@ export function IntegrationsTab({
       ) : (
         <>
           <div className="flex flex-wrap justify-end gap-2">{action}</div>
-          {(grouped ? models : [null]).map((model) => {
-            const modelSources = model
-              ? sources.filter((source) => source.embeddingModelId === model.id)
-              : sources;
-            if (modelSources.length === 0) return null;
-            const headingId = model ? `${groupId}-${model.id}` : undefined;
-            return (
-              <div key={model?.id ?? "all"} className="flex flex-col gap-2">
-                {model && (
-                  <h3 id={headingId} className="text-ax-text-secondary text-sm font-semibold">
-                    {model.name}
-                    {model.inSpace ? "" : ` (${t("disabled")})`}
-                  </h3>
-                )}
-                <SourcesTable
-                  sources={modelSources}
-                  progress={progress}
-                  labelledBy={headingId ?? labelledBy}
-                />
-              </div>
-            );
-          })}
+          <SourcesList groups={groups} progress={progress} labelledBy={labelledBy} />
         </>
       )}
     </div>

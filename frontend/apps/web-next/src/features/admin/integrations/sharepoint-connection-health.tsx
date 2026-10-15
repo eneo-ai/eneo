@@ -7,12 +7,13 @@ import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Circle, TriangleAlert, X } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import type { Schema } from "@/lib/api/models";
+import { rescueFocus } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
 import {
   SHAREPOINT_APP_KEY,
@@ -218,6 +219,7 @@ function WatchCheck({ watch }: { watch: ReturnType<typeof useWatchHealth> }) {
   const renewExpired = useRenewExpiredSubscriptions();
   const [open, setOpen] = useState(false);
   const panelId = useId();
+  const toggleRef = useRef<HTMLButtonElement>(null);
   const { query, total, expired, failing, active } = watch;
 
   const description = query.isPending
@@ -243,11 +245,14 @@ function WatchCheck({ watch }: { watch: ReturnType<typeof useWatchHealth> }) {
               isLoading={renewExpired.isPending}
               isInterruptible
               onClick={() => {
-                if (!renewExpired.isPending) renewExpired.mutate();
+                if (renewExpired.isPending) return;
+                // Once nothing has expired the button goes; focus moves to its neighbour.
+                renewExpired.mutate(undefined, { onSuccess: () => rescueFocus(toggleRef.current) });
               }}
             />
           ) : null}
           <Button
+            ref={toggleRef}
             label={open ? t("sharepoint_health_watch_hide") : t("sharepoint_health_watch_show")}
             variant="ghost"
             size="sm"
