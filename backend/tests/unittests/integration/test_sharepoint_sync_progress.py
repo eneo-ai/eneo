@@ -14,6 +14,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from eneo.integration.infrastructure.content_service.types import SyncStats
 from eneo.integration.infrastructure.sharepoint_sync_progress import (
+    CLEAR_RUN_SCRIPT,
     FINISHED_TTL_SECONDS,
     SYNC_PROGRESS_TTL_SECONDS,
     SharePointSyncProgressStore,
@@ -310,9 +311,17 @@ class TransactionEnd:
             await callback()
 
 
-def _latest_entry(redis_client: AsyncMock) -> None:
-    """Make GET return what the last SET wrote, as Redis would."""
-    redis_client.get.side_effect = lambda key: redis_client.set.await_args.args[1]
+def _cleared_runs(redis_client: AsyncMock) -> list[tuple[str, str]]:
+    """(key, started_at) of each clear that removes one run's entry only.
+
+    Redis compares and removes atomically; what it then keeps is tested
+    against Redis in tests/integration/test_sharepoint_sync_progress_redis.py.
+    """
+    assert all(
+        call.args[:2] == (CLEAR_RUN_SCRIPT, 1)
+        for call in redis_client.eval.await_args_list
+    )
+    return [call.args[2:] for call in redis_client.eval.await_args_list]
 
 
 async def test_a_finished_sync_stays_visible_until_its_transaction_ends(
@@ -326,7 +335,6 @@ async def test_a_finished_sync_stays_visible_until_its_transaction_ends(
         clock=lambda: STARTED,
         monotonic=monotonic,
     )
-    _latest_entry(redis_client)
     item_id = uuid4()
     await reporter.begin(item_id, "full")
     await reporter.set_phase("finishing", _stats(files_processed=3))
@@ -335,16 +343,21 @@ async def test_a_finished_sync_stays_visible_until_its_transaction_ends(
 
     key = sync_progress_key(item_id)
     redis_client.delete.assert_not_awaited()
+    redis_client.eval.assert_not_awaited()
     # Should the transaction's end never be seen, the entry lapses soon.
     redis_client.expire.assert_awaited_once_with(key, FINISHED_TTL_SECONDS)
     assert _saved(redis_client)[-1]["phase"] == "finishing"
 
     await transaction.end()
 
-    redis_client.delete.assert_awaited_once_with(key)
+    # This run's entry only, named by its start as the entry stores it.
+    assert _cleared_runs(redis_client) == [
+        (key, _saved(redis_client)[-1]["started_at"])
+    ]
+    redis_client.delete.assert_not_awaited()
 
 
-async def test_the_transaction_end_leaves_a_later_sync_of_the_item_alone(
+async def test_the_transaction_end_clears_the_run_that_ended_not_a_later_one(
     redis_client, monotonic
 ):
     transaction = TransactionEnd()
@@ -357,7 +370,6 @@ async def test_the_transaction_end_leaves_a_later_sync_of_the_item_alone(
         clock=lambda: next(clock),
         monotonic=monotonic,
     )
-    _latest_entry(redis_client)
     await first.begin(item_id, "full")
     await first.end()
     # The lease is released before the commit, so the next sync may already
@@ -372,11 +384,14 @@ async def test_the_transaction_end_leaves_a_later_sync_of_the_item_alone(
 
     await transaction.end()
 
+    assert _cleared_runs(redis_client) == [
+        (sync_progress_key(item_id), "2026-10-14T09:00:00Z")
+    ]
+    assert _saved(redis_client)[-1]["started_at"] == "2026-10-14T09:05:00Z"
     redis_client.delete.assert_not_awaited()
-    assert _saved(redis_client)[-1]["sync_type"] == "delta"
 
 
-async def test_nested_syncs_defer_one_clear_and_runs_in_one_transaction_all_go(
+async def test_nested_syncs_defer_one_clear_per_run_of_the_transaction(
     redis_client, monotonic
 ):
     transaction = TransactionEnd()
@@ -388,7 +403,6 @@ async def test_nested_syncs_defer_one_clear_and_runs_in_one_transaction_all_go(
         clock=lambda: next(ticks),
         monotonic=monotonic,
     )
-    _latest_entry(redis_client)
     item_id = uuid4()
     # A delta that falls back to a full sync, then a pending delta pass in the
     # same transaction.
@@ -402,9 +416,13 @@ async def test_nested_syncs_defer_one_clear_and_runs_in_one_transaction_all_go(
     assert len(transaction.callbacks) == 2
     await transaction.end()
 
-    # The full sync's clear finds the pending pass's entry and keeps it; the
-    # pass's own clear removes it.
-    redis_client.delete.assert_awaited_once_with(sync_progress_key(item_id))
+    # One clear per run that ended (each write also takes a tick): the full
+    # sync started at :02, the pending pass at :04.
+    key = sync_progress_key(item_id)
+    assert _cleared_runs(redis_client) == [
+        (key, "2026-10-14T09:00:02Z"),
+        (key, "2026-10-14T09:00:04Z"),
+    ]
 
 
 async def test_without_a_transaction_hook_the_entry_goes_at_once(
@@ -422,18 +440,46 @@ async def test_without_a_transaction_hook_the_entry_goes_at_once(
     await reporter.end()
 
     redis_client.delete.assert_awaited_once_with(sync_progress_key(item_id))
-    redis_client.get.assert_not_awaited()
+    redis_client.eval.assert_not_awaited()
     redis_client.expire.assert_not_awaited()
 
 
-async def test_a_malformed_entry_is_removed_by_the_deferred_clear(redis_client):
-    redis_client.get.return_value = b"{not json"
-    store = SharePointSyncProgressStore(redis_client)
-    item_id = uuid4()
+async def test_a_failing_transaction_hook_clears_at_once(redis_client, monotonic):
+    def unavailable(callback: Callable[[], Coroutine[Any, Any, None]]) -> bool:
+        raise RuntimeError("session already closed")
 
-    await store.clear(item_id, started_at=STARTED)
+    reporter = SyncProgressReporter(
+        SharePointSyncProgressStore(redis_client),
+        heartbeat_interval_seconds=None,
+        after_transaction=unavailable,
+        monotonic=monotonic,
+    )
+    item_id = uuid4()
+    await reporter.begin(item_id, "full")
+
+    await reporter.end()
 
     redis_client.delete.assert_awaited_once_with(sync_progress_key(item_id))
+    redis_client.expire.assert_not_awaited()
+
+
+async def test_a_run_is_cleared_by_its_start_as_the_entry_stores_it(redis_client):
+    started = datetime(2026, 10, 14, 9, 0, 1, 123456, tzinfo=timezone.utc)
+    reporter = SyncProgressReporter(
+        SharePointSyncProgressStore(redis_client),
+        heartbeat_interval_seconds=None,
+        after_transaction=(transaction := TransactionEnd()),
+        clock=lambda: started,
+    )
+    item_id = uuid4()
+    await reporter.begin(item_id, "delta")
+    await reporter.end()
+
+    await transaction.end()
+
+    assert _cleared_runs(redis_client) == [
+        (sync_progress_key(item_id), _saved(redis_client)[-1]["started_at"])
+    ]
 
 
 async def test_heartbeat_rewrites_the_state_while_one_file_takes_long(redis_client):
@@ -499,6 +545,60 @@ async def test_a_heartbeat_write_in_flight_never_lands_after_the_clear(redis_cli
     redis_client.delete.assert_awaited_once()
 
 
+async def test_end_clears_only_after_a_heartbeat_write_already_sent_has_landed(
+    redis_client,
+):
+    """Cancelling the heartbeat cannot take back a command already sent;
+    end() waits for the heartbeat to finish before it clears."""
+    entries: dict[str, str] = {}
+    in_flight = asyncio.Event()
+
+    async def set_entry(key, value, ex):
+        if redis_client.set.await_count == 1:
+            entries[key] = value
+            return
+        in_flight.set()
+        try:
+            await asyncio.sleep(3600)
+        finally:
+            entries[key] = value
+
+    async def delete_entry(key):
+        entries.pop(key, None)
+
+    redis_client.set.side_effect = set_entry
+    redis_client.delete.side_effect = delete_entry
+    reporter = SyncProgressReporter(
+        SharePointSyncProgressStore(redis_client), heartbeat_interval_seconds=0.01
+    )
+    await reporter.begin(uuid4(), "full")
+    await asyncio.wait_for(in_flight.wait(), timeout=1)
+
+    await reporter.end()
+    await asyncio.sleep(0.03)
+
+    assert entries == {}
+
+
+async def test_a_nested_run_reuses_the_running_heartbeat(redis_client):
+    """A delta that falls back to a full sync starts no second heartbeat."""
+    reporter = SyncProgressReporter(
+        SharePointSyncProgressStore(redis_client), heartbeat_interval_seconds=3600
+    )
+    item_id = uuid4()
+    before = asyncio.all_tasks()
+
+    await reporter.begin(item_id, "delta")
+    heartbeat = reporter._heartbeat
+    await reporter.begin(item_id, "full")
+
+    assert heartbeat is not None and reporter._heartbeat is heartbeat
+    assert asyncio.all_tasks() - before == {heartbeat}
+    await reporter.end()
+    await reporter.end()
+    assert heartbeat.done()
+
+
 async def test_redis_failures_never_reach_the_sync_or_the_reader(redis_client):
     redis_client.set.side_effect = RedisConnectionError("redis down")
     redis_client.delete.side_effect = RedisConnectionError("redis down")
@@ -515,7 +615,7 @@ async def test_redis_failures_never_reach_the_sync_or_the_reader(redis_client):
     redis_client.delete.assert_awaited_once()
 
     redis_client.expire.side_effect = RedisConnectionError("redis down")
-    redis_client.get.side_effect = RedisConnectionError("redis down")
+    redis_client.eval.side_effect = RedisConnectionError("redis down")
     transaction = TransactionEnd()
     deferred = SyncProgressReporter(store, after_transaction=transaction)
     await deferred.begin(uuid4(), "delta")
@@ -523,7 +623,7 @@ async def test_redis_failures_never_reach_the_sync_or_the_reader(redis_client):
     await transaction.end()
 
     redis_client.expire.assert_awaited_once()
-    redis_client.get.assert_awaited_once()
+    redis_client.eval.assert_awaited_once()
 
 
 async def test_reader_returns_running_items_in_one_round_trip(redis_client):

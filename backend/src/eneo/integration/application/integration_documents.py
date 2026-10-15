@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unicodedata
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Protocol
 from urllib.parse import unquote, urlsplit
 
 from eneo.integration.presentation.models import (
@@ -16,12 +16,26 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from eneo.info_blobs.info_blob import InfoBlobInDBNoText
-    from eneo.integration.domain.entities.integration_knowledge import (
-        IntegrationKnowledge,
-    )
     from eneo.integration.domain.entities.sync_log import SyncLog
 
 SortOrder = Literal["asc", "desc"]
+
+
+class DocumentSource(Protocol):
+    """What the Documents page reads of an item: an entity or its location."""
+
+    @property
+    def integration_type(self) -> str: ...
+
+    @property
+    def url(self) -> str | None: ...
+
+    @property
+    def folder_path(self) -> str | None: ...
+
+    @property
+    def resource_type(self) -> str | None: ...
+
 
 ONEDRIVE_RESOURCE_TYPE = "onedrive"
 SHAREPOINT_INTEGRATION_TYPE = "sharepoint"
@@ -91,12 +105,12 @@ def relative_document_path(
     return "/".join(folders)
 
 
-def document_url_anchor(item: IntegrationKnowledge) -> str | None:
+def document_url_anchor(item: DocumentSource) -> str | None:
     """The item's URL as its document URLs start, for searching below it."""
     return item.url.rstrip("/") or None if item.url else None
 
 
-def _relative_path_for(item: IntegrationKnowledge, document_url: str | None) -> str:
+def _relative_path_for(item: DocumentSource, document_url: str | None) -> str:
     # Confluence pages are not files under an imported folder; their URL path
     # (wiki/spaces/KEY/pages/123) says nothing a user would call a folder.
     if item.integration_type != SHAREPOINT_INTEGRATION_TYPE:
@@ -127,7 +141,7 @@ def ordered_by_relative_path(
 
 
 def document_items(
-    documents: Iterable[InfoBlobInDBNoText], item: IntegrationKnowledge
+    documents: Iterable[InfoBlobInDBNoText], item: DocumentSource
 ) -> list[IntegrationDocumentItem]:
     return [
         IntegrationDocumentItem(

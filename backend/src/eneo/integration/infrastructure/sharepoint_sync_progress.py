@@ -13,11 +13,11 @@ from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID
 
 import redis.asyncio as redis
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from redis.exceptions import RedisError
 
 from eneo.integration.infrastructure.content_service.types import SyncStats
@@ -54,6 +54,23 @@ def sync_progress_key(integration_knowledge_id: UUID) -> str:
     return f"sharepoint_sync_progress:{integration_knowledge_id}"
 
 
+# Removes KEYS[1] unless it holds the entry of a run other than the one that
+# started at ARGV[1]. ARGV[1] is serialized like the entry's own started_at.
+CLEAR_RUN_SCRIPT = """
+local value = redis.call('GET', KEYS[1])
+if not value then
+    return 0
+end
+local ok, entry = pcall(cjson.decode, value)
+if ok and type(entry) == 'table' and type(entry['started_at']) == 'string'
+        and entry['started_at'] ~= ARGV[1] then
+    return 0
+end
+return redis.call('DEL', KEYS[1])
+"""
+_STARTED_AT: TypeAdapter[datetime] = TypeAdapter(datetime)
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -75,22 +92,18 @@ class SharePointSyncProgressStore:
     ) -> None:
         """Remove the entry; with ``started_at``, only the entry of that run.
 
-        The check and the delete are two round trips: a run that starts in
-        between loses its entry until its next write.
+        The run's entry is compared and removed in one step in Redis, so a
+        run that has started meanwhile keeps its entry. An entry without a
+        readable start is removed.
         """
         key = sync_progress_key(integration_knowledge_id)
-        if started_at is not None:
-            value: bytes | str | None = await self.redis_client.get(key)
-            if value is None:
-                return
-            try:
-                current = IntegrationSyncProgress.model_validate_json(value)
-            except ValidationError:
-                pass
-            else:
-                if current.started_at != started_at:
-                    return
-        await self.redis_client.delete(key)
+        if started_at is None:
+            await self.redis_client.delete(key)
+            return
+        # Redis EVAL runs the Lua script atomically; it is not Python's eval.
+        await cast(Any, self.redis_client).eval(
+            CLEAR_RUN_SCRIPT, 1, key, _STARTED_AT.dump_python(started_at, mode="json")
+        )
 
     async def expire(self, integration_knowledge_id: UUID, seconds: int) -> None:
         await self.redis_client.expire(
@@ -249,9 +262,18 @@ class SyncProgressReporter:
         # clear runs (the lease is released before the commit), so only this
         # run's entry is removed.
         deferred_clear = partial(self._clear, item_id, started_at=run.started_at)
-        if self._after_transaction is not None and self._after_transaction(
-            deferred_clear
-        ):
+        try:
+            deferred = self._after_transaction is not None and self._after_transaction(
+                deferred_clear
+            )
+        except Exception as exc:  # noqa: BLE001 - progress must never fail a sync
+            logger.warning(
+                "Could not wait for the transaction of integration knowledge %s: %s",
+                item_id,
+                exc,
+            )
+            deferred = False
+        if deferred:
             try:
                 await store.expire(item_id, FINISHED_TTL_SECONDS)
             except Exception as exc:  # noqa: BLE001 - progress must never fail a sync

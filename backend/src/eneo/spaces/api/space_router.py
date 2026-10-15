@@ -1293,11 +1293,11 @@ async def get_integration_knowledge_skipped_documents(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
-    knowledge = await service.get_readable_knowledge(
+    await service.require_readable_knowledge(
         space_id=id, integration_knowledge_id=integration_knowledge_id
     )
     sync_logs = await container.sync_log_repo().get_by_integration_knowledge(
-        knowledge.id, tenant_id=container.user().tenant_id, limit=1
+        integration_knowledge_id, tenant_id=container.user().tenant_id, limit=1
     )
     return skipped_documents(sync_logs[0] if sync_logs else None)
 

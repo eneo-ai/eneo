@@ -20,6 +20,9 @@ from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.integration.domain.entities.sync_log import SyncLog
+from eneo.integration.domain.repositories.integration_knowledge_repo import (
+    IntegrationKnowledgeLocation,
+)
 from eneo.integration.infrastructure.sharepoint_sync_progress import (
     sync_progress_key,
 )
@@ -44,6 +47,7 @@ class DocumentsAPI:
     info_blobs: AsyncMock
     sync_logs: AsyncMock
     progress_redis: AsyncMock
+    knowledge_repo: AsyncMock
 
     @property
     def progress_url(self) -> str:
@@ -118,8 +122,8 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
     space.integration_knowledge_list = [knowledge]
     space_repo = AsyncMock()
     space_repo.one.return_value = space
-    # The progress route reads the caller's facts and the item ids only; both
-    # follow the space as a test leaves it.
+    # The routes read the caller's facts and the item ids only; both follow
+    # the space as a test leaves it.
     space_repo.get_space_access_facts.side_effect = (
         lambda space_id: SpaceAccessFacts.from_space(space)
     )
@@ -127,6 +131,14 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
         lambda space_id, tenant_space_id: [
             item.id for item in space.integration_knowledge_list
         ]
+    )
+    knowledge_repo = AsyncMock()
+    knowledge_repo.get_location.side_effect = lambda id: IntegrationKnowledgeLocation(
+        id=id,
+        integration_type="sharepoint",
+        url=knowledge.url,
+        folder_path=knowledge.folder_path,
+        resource_type=knowledge.resource_type,
     )
     info_blobs = AsyncMock()
     info_blobs.get_integration_knowledge_page.return_value = IntegrationDocumentsPage(
@@ -147,7 +159,7 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
         tenant_integration_repo=providers.Object(AsyncMock()),
         tenant_sharepoint_app_repo=providers.Object(AsyncMock()),
         oauth_token_repo=providers.Object(AsyncMock()),
-        integration_knowledge_repo=providers.Object(AsyncMock()),
+        integration_knowledge_repo=providers.Object(knowledge_repo),
         embedding_model_repo2=providers.Object(AsyncMock()),
         job_service=providers.Object(AsyncMock()),
         sharepoint_subscription_service=providers.Object(AsyncMock()),
@@ -165,7 +177,15 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
                 ):
                     app.dependency_overrides[dependency.call] = lambda: container
     return DocumentsAPI(
-        app, user, space, knowledge, space_repo, info_blobs, sync_logs, progress_redis
+        app,
+        user,
+        space,
+        knowledge,
+        space_repo,
+        info_blobs,
+        sync_logs,
+        progress_redis,
+        knowledge_repo,
     )
 
 
@@ -448,3 +468,105 @@ async def test_sync_progress_of_an_unknown_space_is_not_found(documents_api):
 
     assert response.status_code == 404, response.text
     api.progress_redis.mget.assert_not_awaited()
+
+
+@pytest.mark.parametrize("path", ["", "skipped/"])
+async def test_documents_routes_check_access_without_the_space_aggregate(
+    documents_api, path
+):
+    """The source page asks once per folder; the aggregate loads every member,
+    assistant and attachment of the space."""
+    api = documents_api
+
+    response = await _get(api, api.url(path))
+
+    assert response.status_code == 200, response.text
+    api.space_repo.one.assert_not_awaited()
+    api.space_repo.get_space_access_facts.assert_awaited_once_with(api.space.id)
+    api.space_repo.get_visible_integration_knowledge_ids.assert_awaited_once_with(
+        api.space.id, api.space.tenant_space_id
+    )
+
+
+@pytest.mark.parametrize("path", ["", "skipped/"])
+async def test_documents_routes_of_an_unknown_space_are_not_found(documents_api, path):
+    api = documents_api
+    api.space_repo.get_space_access_facts.side_effect = NotFoundException()
+
+    response = await _get(api, api.url(path))
+
+    assert response.status_code == 404, response.text
+    api.space_repo.get_visible_integration_knowledge_ids.assert_not_awaited()
+    api.knowledge_repo.get_location.assert_not_awaited()
+
+
+_SIGNED_URL = (
+    "https://contoso.sharepoint.com/sites/KS/_layouts/15/download.aspx"
+    "?UniqueId=abc&tempauth=v1.eyJhdWQiOiJ4In0.c2lnbmF0dXJl"
+)
+
+
+async def test_skipped_documents_written_before_the_cleanup_are_served_clean(
+    documents_api,
+):
+    api = documents_api
+    api.sync_logs.get_by_integration_knowledge.return_value = [
+        SyncLog(
+            integration_knowledge_id=api.knowledge.id,
+            sync_type="delta",
+            status="success",
+            started_at=datetime(2026, 10, 13, 7, tzinfo=timezone.utc),
+            metadata={
+                "skipped_details": [
+                    {
+                        "file": "a.docx",
+                        "reason": f"Error: 403, message='Forbidden', url='{_SIGNED_URL}'",
+                    }
+                ],
+                "skipped_total": 1,
+            },
+        )
+    ]
+
+    response = await _get(api, api.url("skipped/"))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["items"] == [
+        {"file": "a.docx", "reason": "Error: HTTP 403 Forbidden"}
+    ]
+    assert "tempauth" not in response.text
+
+
+async def test_sync_progress_written_before_the_cleanup_is_served_clean(
+    documents_api,
+):
+    api = documents_api
+    running = {
+        "integration_knowledge_id": str(api.knowledge.id),
+        "sync_type": "delta",
+        "phase": "processing",
+        "started_at": "2026-10-14T09:00:00Z",
+        "updated_at": "2026-10-14T09:02:00Z",
+        "total": None,
+        "done": 1,
+        "indexed": 0,
+        "unchanged": 0,
+        "skipped": 1,
+        "deleted": 0,
+        "current": None,
+        "recent": [
+            {
+                "name": "a.docx",
+                "outcome": "skipped",
+                "reason": f"Error: 403, message='Forbidden', url='{_SIGNED_URL}'",
+            }
+        ],
+    }
+    api.progress_redis.mget.return_value = [json.dumps(running).encode()]
+
+    response = await _get(api, api.progress_url)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["items"][0]["recent"] == [
+        {"name": "a.docx", "outcome": "skipped", "reason": "Error: HTTP 403 Forbidden"}
+    ]

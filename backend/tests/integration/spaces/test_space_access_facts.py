@@ -10,6 +10,17 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.actors.actors.space_actor import SpaceActor
+from eneo.authentication.auth_models import (
+    ApiKeyOwnership,
+    ApiKeyPermission,
+    ApiKeyScopeType,
+    ApiKeyState,
+    ApiKeyType,
+    ApiKeyV2InDB,
+)
+from eneo.database.tables.app_table import Apps
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.integration_knowledge_spaces_table import (
     IntegrationKnowledgesSpaces,
 )
@@ -247,3 +258,196 @@ async def test_visible_knowledge_ids_are_what_the_space_loader_shows(
     assert organization_visible == [organization_item]
     # The aggregate loader's set, within the caller's tenant.
     assert loaded == visible
+
+
+async def test_another_tenants_group_attached_to_a_space_grants_nothing(
+    db_container, admin_user, tenancy, tenant_factory
+):
+    async with db_container() as container:
+        session = container.session()
+        foreign_tenant = await tenant_factory(session)
+        foreign_group = await _group(session, tenant_id=foreign_tenant.id)
+        await session.execute(
+            sa.insert(SpacesUserGroups).values(
+                space_id=tenancy.other_space, user_group_id=foreign_group, role="admin"
+            )
+        )
+
+    # The caller's own record claims the group, as a corrupt sync could.
+    caller = tenancy.caller(admin_user, foreign_group)
+    async with db_container(user=caller) as container:
+        repo = container.space_repo()
+        facts = await repo.get_space_access_facts(tenancy.other_space)
+        many = await repo.get_spaces_access_facts([tenancy.other_space])
+
+    assert not facts.group_members
+    assert not many[tenancy.other_space].group_members
+    assert not SpaceActor(caller, facts).can_read_space()
+
+
+@dataclass
+class ScopedResources:
+    assistant: UUID
+    default_assistant: UUID
+    assistant_elsewhere: UUID
+    app: UUID
+    app_elsewhere: UUID
+
+
+@pytest.fixture
+async def scoped_resources(db_container, tenancy) -> ScopedResources:
+    async with db_container() as container:
+        session = container.session()
+
+        async def assistant(space_id: UUID, *, is_default: bool = False) -> UUID:
+            row = Assistants(
+                name=f"assistant-{uuid4()}",
+                user_id=tenancy.caller_id,
+                space_id=space_id,
+                logging_enabled=False,
+                is_default=is_default,
+                published=False,
+            )
+            session.add(row)
+            await session.flush()
+            return row.id
+
+        async def app(space_id: UUID) -> UUID:
+            row = Apps(
+                name=f"app-{uuid4()}",
+                tenant_id=tenancy.tenant_id,
+                user_id=tenancy.caller_id,
+                space_id=space_id,
+                published=False,
+            )
+            session.add(row)
+            await session.flush()
+            return row.id
+
+        return ScopedResources(
+            assistant=await assistant(tenancy.space),
+            default_assistant=await assistant(tenancy.space, is_default=True),
+            assistant_elsewhere=await assistant(tenancy.other_space),
+            app=await app(tenancy.space),
+            app_elsewhere=await app(tenancy.other_space),
+        )
+
+
+def _key(
+    tenant_id: UUID,
+    *,
+    owner: UUID | None,
+    scope_type: ApiKeyScopeType,
+    scope_id: UUID | None,
+) -> ApiKeyV2InDB:
+    return ApiKeyV2InDB(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        owner_user_id=owner,
+        ownership=ApiKeyOwnership.SERVICE if owner is None else ApiKeyOwnership.USER,
+        name="key",
+        key_prefix="sk_",
+        key_suffix="test",
+        key_type=ApiKeyType.SK,
+        key_hash="hash",
+        hash_version="sha256",
+        permission=ApiKeyPermission.READ,
+        state=ApiKeyState.ACTIVE,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    )
+
+
+@pytest.mark.parametrize("ownership", ["user", "service"])
+@pytest.mark.parametrize(
+    ("scope_type", "scoped_to", "expected"),
+    [
+        # (scope, the resource the key names, the ids each space's facts hold)
+        (
+            ApiKeyScopeType.TENANT,
+            None,
+            {"space": (set(), set()), "other": (set(), set())},
+        ),
+        (
+            ApiKeyScopeType.SPACE,
+            "space",
+            {"space": (set(), set()), "other": (set(), set())},
+        ),
+        (
+            ApiKeyScopeType.ASSISTANT,
+            "assistant",
+            {"space": ({"assistant"}, set()), "other": (set(), set())},
+        ),
+        # A key for the default assistant (the personal chat's) reaches no space.
+        (
+            ApiKeyScopeType.ASSISTANT,
+            "default_assistant",
+            {"space": (set(), set()), "other": (set(), set())},
+        ),
+        (
+            ApiKeyScopeType.ASSISTANT,
+            "assistant_elsewhere",
+            {"space": (set(), set()), "other": ({"assistant_elsewhere"}, set())},
+        ),
+        (
+            ApiKeyScopeType.APP,
+            "app",
+            {"space": (set(), {"app"}), "other": (set(), set())},
+        ),
+        (
+            ApiKeyScopeType.APP,
+            "app_elsewhere",
+            {"space": (set(), set()), "other": (set(), {"app_elsewhere"})},
+        ),
+    ],
+)
+async def test_a_key_brings_only_the_resource_it_is_scoped_to(
+    db_container,
+    admin_user,
+    tenancy,
+    scoped_resources,
+    ownership,
+    scope_type,
+    scoped_to,
+    expected,
+):
+    names = {
+        "space": tenancy.space,
+        **{
+            name: getattr(scoped_resources, name)
+            for name in ScopedResources.__dataclass_fields__
+        },
+    }
+    key = _key(
+        tenancy.tenant_id,
+        owner=tenancy.caller_id if ownership == "user" else None,
+        scope_type=scope_type,
+        scope_id=names[scoped_to] if scoped_to else None,
+    )
+    if ownership == "user":
+        caller = tenancy.caller(admin_user, tenancy.group).model_copy(
+            update={"active_api_key": key}
+        )
+    else:
+        async with db_container() as container:
+            caller = await container.user_service()._build_service_user(key)
+
+    async with db_container(user=caller) as container:
+        facts = await container.space_repo().get_spaces_access_facts(
+            [tenancy.space, tenancy.other_space]
+        )
+
+    by_id = {value: name for name, value in names.items()}
+    for space, space_id in (("space", tenancy.space), ("other", tenancy.other_space)):
+        assistants, apps = expected[space]
+        assert {by_id[id] for id in facts[space_id].assistant_ids} == assistants
+        assert {by_id[id] for id in facts[space_id].app_ids} == apps
+        assert facts[space_id].default_assistant_id is None
+    # Memberships are the caller's own, whatever the key: none for a service key.
+    if ownership == "service":
+        assert not facts[tenancy.space].members
+        assert not facts[tenancy.space].group_members
+    else:
+        assert {id: fact.role for id, fact in facts[tenancy.space].members.items()} == {
+            tenancy.caller_id: "viewer"
+        }

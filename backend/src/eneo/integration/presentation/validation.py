@@ -1,8 +1,10 @@
-"""Shape constraints for identifiers that end up in Microsoft Graph URLs."""
+"""Shape constraints for identifiers that end up in Microsoft Graph URLs, and
+for the links the UIs render."""
 
 from __future__ import annotations
 
 from typing import Optional
+from urllib.parse import urlsplit
 
 # Graph site ids (host,guid,guid), drive ids (b!base64url), item and list ids
 # are URL-safe tokens; anything else would have to be a path or query injection.
@@ -34,3 +36,26 @@ def validate_folder_path(value: Optional[str]) -> Optional[str]:
     if any(segment in (".", "..") for segment in value.split("/")):
         raise ValueError("folder_path must not contain '.' or '..' segments")
     return value
+
+
+def is_https_url(value: str) -> bool:
+    """An absolute https URL with a host, without user info or whitespace."""
+    if not value or any(char.isspace() or not char.isprintable() for char in value):
+        return False
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return False
+    return parts.scheme == "https" and bool(parts.hostname) and "@" not in parts.netloc
+
+
+def validate_https_url(value: str) -> str:
+    """An item's link as rendered by the UIs; "" when the source gave none."""
+    if value and not is_https_url(value):
+        raise ValueError("url must be an absolute https URL")
+    return value
+
+
+def https_url_or_none(value: Optional[str]) -> Optional[str]:
+    """A stored link as served: anything but an https URL is never a link."""
+    return value if value and is_https_url(value) else None

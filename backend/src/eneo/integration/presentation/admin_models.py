@@ -2,9 +2,10 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eneo.integration.presentation.models import IntegrationKnowledgePublic
+from eneo.observability.error_text import user_visible_error
 
 
 def _empty_uuid_list() -> list[UUID]:
@@ -156,6 +157,12 @@ class SharePointSubscriptionPublic(BaseModel):
     owner_type: str = Field(..., description="Type of owner: 'user' or 'organization'")
 
     model_config = ConfigDict(from_attributes=True)
+
+    # Failures stored before renewal errors were cleaned may hold URLs or host names.
+    @field_validator("last_renewal_error")
+    @classmethod
+    def _clean_renewal_error(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else user_visible_error(value)
 
 
 class SubscriptionRenewalResult(BaseModel):

@@ -16,6 +16,7 @@ from eneo.integration.infrastructure.content_service.sharepoint_content_service 
 )
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 from eneo.worker.worker import Worker
 
 if TYPE_CHECKING:
@@ -203,7 +204,9 @@ async def renew_expiring_subscriptions(container: Container):
             )
             # The savepoint above has rolled back, so the transaction is clean for
             # this failure write (which uses its own savepoint).
-            await record_renewal_failure(subscription, container, str(exc))
+            await record_renewal_failure(
+                subscription, container, user_visible_error(exc)
+            )
             failed_count += 1
 
     logger.info(
