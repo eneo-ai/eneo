@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   activityKind,
   appendPage,
+  itemsToPage,
   groupActivityByDay,
   mergeActivity,
   mergeFirstPage,
@@ -191,5 +192,33 @@ describe("paging an item's logs", () => {
 
   it("appends an older page without the logs a newer sync pushed into it", () => {
     expect(ids(appendPage(logs("l5", "l4"), logs("l4", "l3")))).toEqual(["l5", "l4", "l3"]);
+  });
+});
+
+describe("itemsToPage", () => {
+  const at = (id: string, startedAt: string) => log({ id, started_at: startedAt });
+
+  it("pages only the folders that hold the timeline's cutoff, and those not loaded yet", () => {
+    const busy = {
+      item: itemA,
+      total: 30,
+      logs: [at("a2", "2026-10-10T10:00:00Z"), at("a1", "2026-10-09T10:00:00Z")]
+    };
+    const quiet = { item: itemB, total: 5, logs: [at("b1", "2026-10-01T10:00:00Z")] };
+    const fresh = { item: { id: "c", name: "C" } as IntegrationKnowledge, total: 3, logs: [] };
+    const complete = {
+      item: { id: "d", name: "D" } as IntegrationKnowledge,
+      total: 1,
+      logs: [at("d1", "2026-10-11T10:00:00Z")]
+    };
+
+    // The quiet folder's older syncs sit below the busy one's oldest loaded sync: paging
+    // it would show nothing until the busy folder is loaded back that far.
+    expect(itemsToPage([busy, quiet, fresh, complete]).map((source) => source.item.id)).toEqual([
+      "a",
+      "c"
+    ]);
+    expect(itemsToPage([quiet, complete]).map((source) => source.item.id)).toEqual(["b"]);
+    expect(itemsToPage([complete])).toEqual([]);
   });
 });

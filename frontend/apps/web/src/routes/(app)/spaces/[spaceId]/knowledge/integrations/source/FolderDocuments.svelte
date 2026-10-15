@@ -178,7 +178,7 @@
           {/if}
           {#if knowledge.integration_type === "sharepoint"}
             <span class={watchState === "expired" ? "text-warning-stronger" : undefined}>
-              {watchStateLabel(watchState)}
+              {m.integration_source_watch_state_line({ state: watchStateLabel(watchState) })}
             </span>
           {/if}
           {#if knowledge.folder_path}

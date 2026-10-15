@@ -118,16 +118,17 @@ export function itemWatchState(item: IntegrationKnowledge, now = Date.now()): Wa
   return left <= WATCH_EXPIRING_MS ? "expiring" : "active";
 }
 
+/** In the words of the source's "Change notifications" figure (On/Off). */
 export function watchStateLabel(state: WatchState): string {
   switch (state) {
     case "active":
-      return m.sharepoint_webhook_active();
+      return m.integration_source_watch_on();
     case "expiring":
-      return m.sharepoint_webhook_expiring_soon();
+      return m.integration_source_watch_state_expiring();
     case "expired":
-      return m.sharepoint_webhook_expired();
+      return m.integration_source_watch_state_expired();
     case "none":
-      return m.sharepoint_webhook_none();
+      return m.integration_source_watch_off();
   }
 }
 

@@ -15,6 +15,7 @@
     appendPage,
     groupActivityByDay,
     mergeActivity,
+    itemsToPage,
     mergeFirstPage,
     readSyncLogExtras,
     skippedNotListed,
@@ -113,7 +114,7 @@
   }
 
   function loadOlder() {
-    const targets = loaded.filter((entry) => entry.total > entry.logs.length);
+    const targets = itemsToPage(loaded);
     void run(async () => {
       const pages = await Promise.all(
         targets.map(async ({ item, logs }) => ({ item, page: await fetchPage(item, logs.length) }))

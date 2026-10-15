@@ -149,10 +149,16 @@ describe("IntegrationsTable", () => {
     // The wrapper is deleted and the failing source recovers: one source, none failing.
     currentSpace.set(spaceWith([knowledge("c", "HR-handboken", {}, 100)]));
 
-    await expect.element(page.getByText(m.integration_filter_no_match())).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: m.integration_filter_show_all() }))
+      .toBeVisible();
     await expect
       .element(page.getByRole("group", { name: m.integration_filter_label() }))
       .toBeVisible();
+    // The live region was there before the message, so screen readers announce it.
+    expect(
+      [...document.querySelectorAll('[role="status"]')].map((region) => region.textContent?.trim())
+    ).toContain(m.integration_filter_no_match());
     expect(
       page.getByText(m.ui_no_items_configured({ resourceNamePlural: "integration" })).elements()
     ).toHaveLength(0);
@@ -160,6 +166,13 @@ describe("IntegrationsTable", () => {
 
     click(page.getByRole("button", { name: m.integration_filter_show_all() }));
     await expect.poll(sourceNames).toEqual(["HR-handboken"]);
+    // The pressed button is gone; focus lands on the filter now in use, which stays.
+    await expect
+      .poll(() => document.activeElement?.textContent?.trim())
+      .toBe(m.integration_filter_all({ count: 1 }));
+    await expect
+      .element(page.getByRole("group", { name: m.integration_filter_label() }))
+      .toBeVisible();
   });
 
   it("keeps a row's open dialog with its own source when a filter drops it", async () => {

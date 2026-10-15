@@ -205,12 +205,13 @@ describe("source page", () => {
     const overview = page.getByRole("table", {
       name: m.integration_source_folders_table_label({ name: "Kommunstyrelsen" })
     });
+    // Folder, status, documents, last up to date, change notifications.
+    const watchCell = (folder: string) =>
+      overview.getByRole("row").filter({ hasText: folder }).getByRole("cell").nth(4);
+    await expect.element(watchCell("Protokoll")).toHaveTextContent(m.integration_source_watch_on());
     await expect
-      .element(overview.getByRole("row").filter({ hasText: "Protokoll" }))
-      .toHaveTextContent(m.sharepoint_webhook_active());
-    await expect
-      .element(overview.getByRole("row").filter({ hasText: "Skannade" }))
-      .toHaveTextContent(m.sharepoint_webhook_expired());
+      .element(watchCell("Skannade"))
+      .toHaveTextContent(m.integration_source_watch_state_expired());
     await expect.element(page.getByText(m.integration_source_watch_expired_one())).toBeVisible();
     // A state is told by its shape as well as its colour.
     const link = (name: RegExp) => folders.getByRole("link", { name }).element();
@@ -231,7 +232,13 @@ describe("source page", () => {
       .element(folders.getByRole("link", { name: /Protokoll/ }))
       .toHaveAttribute("aria-current", "page");
     await expect.element(page.getByRole("heading", { name: "Protokoll", level: 2 })).toBeVisible();
-    await expect.element(page.getByText(m.sharepoint_webhook_active())).toBeVisible();
+    await expect
+      .element(
+        page.getByText(
+          m.integration_source_watch_state_line({ state: m.integration_source_watch_on() })
+        )
+      )
+      .toBeVisible();
     await expect.poll(() => api.listDocuments.mock.calls.at(-1)?.[0].knowledge.id).toBe("ik-a");
     await expect
       .element(

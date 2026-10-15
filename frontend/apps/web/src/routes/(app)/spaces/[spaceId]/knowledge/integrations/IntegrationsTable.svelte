@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as Table from "$lib/components/resource-table/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { tick } from "svelte";
   import { derived, writable } from "svelte/store";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -56,6 +57,20 @@
     $rows.filter((row) => matchesSourceFilter(row.summary, $statusFilter))
   );
   let filterCounts = $derived(countSourceFilters($rows.map((row) => row.summary)));
+  // Once a filter has been chosen the bar stays, so the pressed button never vanishes under focus.
+  let filterUsed = $state(false);
+  $effect(() => {
+    if ($statusFilter !== "all") filterUsed = true;
+  });
+  let showFilterBar = $derived($rows.length > 1 || filterUsed);
+  let noMatch = $derived($rows.length > 0 && $visibleRows.length === 0);
+  let filterBar = $state<HTMLElement>();
+
+  async function showAllSources() {
+    $statusFilter = "all";
+    await tick();
+    filterBar?.querySelector<HTMLElement>('button[aria-pressed="true"]')?.focus();
+  }
 
   // The badges already mark failing sources; only a refused SharePoint sign-in, which
   // stops every source and only an admin can fix, gets a banner of its own.
@@ -243,17 +258,18 @@
   </div>
 {/if}
 
-<!-- A chosen filter keeps its bar, or a filter that hides every source has no way back. -->
-{#if $rows.length > 1 || $statusFilter !== "all"}
-  <div class="pt-3 pr-3">
+{#if showFilterBar && $rows.length > 0}
+  <div class="pt-3 pr-3" bind:this={filterBar}>
     <SourceStatusFilter counts={filterCounts} bind:value={$statusFilter} />
+    <!-- Mounted with the bar, so the message is announced when it appears. -->
+    <p class="sr-only" role="status">{noMatch ? m.integration_filter_no_match() : ""}</p>
   </div>
 {/if}
 
-{#if $rows.length > 0 && $visibleRows.length === 0}
+{#if noMatch}
   <div class="flex flex-col items-start gap-3 py-8 pr-3 text-sm">
-    <p class="text-secondary" role="status">{m.integration_filter_no_match()}</p>
-    <Button variant="outline" size="sm" onclick={() => ($statusFilter = "all")}>
+    <p class="text-secondary">{m.integration_filter_no_match()}</p>
+    <Button variant="outline" size="sm" onclick={showAllSources}>
       {m.integration_filter_show_all()}
     </Button>
   </div>

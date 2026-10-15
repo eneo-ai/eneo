@@ -230,6 +230,12 @@
                   <SourceStateBadge state={row.summary.state} />
                   {#if failure}
                     <span class="text-secondary text-xs break-words">{failure}</span>
+                  {:else if row.summary.waitingItems > 0 && row.summary.state !== "never"}
+                    <span class="text-secondary text-xs">
+                      {row.summary.waitingItems === 1
+                        ? m.integration_source_waiting_one()
+                        : m.integration_source_waiting_other({ count: row.summary.waitingItems })}
+                    </span>
                   {/if}
                 </div>
               </Table.Cell>

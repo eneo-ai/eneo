@@ -133,9 +133,10 @@
   let problems = $derived(skippedLoaded ? buildSourceProblems(source.items, skippedByItem) : null);
   // Before the skipped lists arrive, the failures alone already give the blocking causes.
   let problemCount = $derived((problems ?? buildSourceProblems(source.items, {})).causeCount);
+  // Counted over the current items: a removed folder's list stays in skippedByItem.
   let skippedTotal = $derived(
     skippedLoaded
-      ? Object.values(skippedByItem).reduce((sum, skipped) => sum + (skipped?.total ?? 0), 0)
+      ? source.items.reduce((sum, item) => sum + (skippedByItem[item.id]?.total ?? 0), 0)
       : null
   );
 

@@ -128,4 +128,23 @@ describe("AdminSourcesOverview", () => {
     await page.getByRole("searchbox", { name: m.admin_sources_search() }).fill("arkiv");
     await expect.poll(sourceLinks).toEqual(["Socialförvaltningen"]);
   });
+
+  it("says how many folders of a source still wait for their first sync", async () => {
+    const folder = { wrapper_id: "w2", wrapper_name: "Nämnden" };
+    const waiting = knowledge("e", "Bilagor", folder);
+    waiting.metadata = {
+      ...waiting.metadata,
+      last_sync_status: "never",
+      last_synced_at: null,
+      document_count: 0
+    } as IntegrationKnowledge["metadata"];
+    show([
+      { space: social, knowledge: knowledge("d", "Protokoll", folder) },
+      { space: social, knowledge: waiting }
+    ]);
+
+    await expect
+      .element(page.getByRole("row").filter({ hasText: "Nämnden" }))
+      .toHaveTextContent(m.integration_source_waiting_one());
+  });
 });
