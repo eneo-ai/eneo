@@ -45,6 +45,9 @@ vi.mock("$lib/core/Eneo", () => ({
     infoBlobs: { get: vi.fn() }
   })
 }));
+vi.mock("$lib/core/AppContext", () => ({
+  getAppContext: () => ({ user: { hasPermission: () => false } })
+}));
 vi.mock("$lib/features/jobs/JobManager", () => ({
   jobCompletionEvents: writable(null),
   getJobManager: () => ({ startFastUpdatePolling: vi.fn() })
@@ -139,12 +142,13 @@ function showWrapper(search = "") {
     `http://localhost/spaces/space-1/knowledge/integrations/wrapper/w1${search}`
   );
   const [source] = groupIntegrationSources([protokoll, skannade]);
-  return render(SourcePage, { source, isAdmin: false });
+  return render(SourcePage, { source });
 }
 
 describe("source page", () => {
   beforeEach(() => {
     api.route.state = {};
+    api.route.url = new URL("http://localhost/spaces/space-1/knowledge/integrations/wrapper/w1");
     api.listDocuments.mockReset().mockResolvedValue({
       items: [],
       total_count: 0,
@@ -244,10 +248,87 @@ describe("source page", () => {
     await expectNoAxeViolations({ exclude: [["h1"]] });
   });
 
+  it("groups failures by message and shortens long file lists", async () => {
+    const timeout = "Graph request failed: 504 Gateway Timeout";
+    const failing = ["Vuxen", "Arkiv"].map((name, index) =>
+      knowledge(`ik-f${index}`, name, {}, { last_sync_status: "error", last_sync_error: timeout })
+    );
+    api.listSkippedDocuments.mockImplementation(async ({ knowledge: item }) =>
+      item.id === "ik-a"
+        ? skippedList(
+            Array.from(
+              { length: 14 },
+              (_, i) =>
+                [`scan-${i}.pdf`, "No text layer (scanned document; OCR is not supported)"] as [
+                  string,
+                  string
+                ]
+            )
+          )
+        : skippedList([])
+    );
+    api.route.state = { tab: "problems" };
+    api.route.url = new URL(
+      "http://localhost/spaces/space-1/knowledge/integrations/wrapper/w1?tab=problems"
+    );
+    render(SourcePage, { source: groupIntegrationSources([protokoll, ...failing])[0] });
+
+    await expect
+      .element(page.getByText(m.integration_problem_sync_failed_many_title({ count: 2 })))
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: m.integration_problem_open_named_folder({ name: "/Shared Documents/Arkiv" })
+        })
+      )
+      .toBeVisible();
+    // Two folders failing the same way are one cause, the scanned files another.
+    await expect
+      .element(page.getByRole("tab", { name: `${m.integration_source_tab_problems()} 2` }))
+      .toBeVisible();
+    await expect.element(page.getByText("scan-9.pdf")).toBeVisible();
+    expect(page.getByText("scan-10.pdf").elements()).toHaveLength(0);
+    (
+      page
+        .getByRole("button", { name: m.integration_problem_show_all({ count: 14 }) })
+        .element() as HTMLElement
+    ).click();
+    await expect.element(page.getByText("scan-13.pdf")).toBeVisible();
+  });
+
+  it("filters and collapses a long folder list and loads activity only when opened", async () => {
+    const parent = knowledge("ik-p", "Arkiv", { folder_path: "/Arkiv" });
+    const years = Array.from({ length: 9 }, (_, i) =>
+      knowledge(`ik-y${i}`, `${2016 + i}`, { folder_path: `/Arkiv/${2016 + i}` })
+    );
+    render(SourcePage, { source: groupIntegrationSources([parent, ...years])[0] });
+
+    const folders = page.getByRole("navigation", { name: m.integration_source_folders() });
+    await expect.element(folders.getByRole("link", { name: /2024/ })).toBeVisible();
+    // The page body has no height outside the app shell, so act on the elements directly.
+    (
+      folders
+        .getByRole("button", { name: m.integration_source_collapse_folder({ name: "Arkiv" }) })
+        .element() as HTMLElement
+    ).click();
+    await expect.poll(() => folders.getByRole("link", { name: /2024/ }).elements().length).toBe(0);
+
+    const filter = folders
+      .getByRole("searchbox", { name: m.integration_source_filter_folders() })
+      .element() as HTMLInputElement;
+    filter.value = "2019";
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
+    await expect.element(folders.getByRole("link", { name: /2019/ })).toBeVisible();
+    expect(folders.getByRole("link", { name: /2018/ }).elements()).toHaveLength(0);
+
+    expect(api.getSyncLogs).not.toHaveBeenCalled();
+  });
+
   it("shows a source of one folder without a folder list", async () => {
     const alone = knowledge("ik-c", "Rutiner", { wrapper_id: null, wrapper_name: null });
     api.route.url = new URL("http://localhost/spaces/space-1/knowledge/integrations/ik-c");
-    render(SourcePage, { source: groupIntegrationSources([alone])[0], isAdmin: false });
+    render(SourcePage, { source: groupIntegrationSources([alone])[0] });
 
     await expect.poll(() => api.listDocuments.mock.calls.at(-1)?.[0].knowledge.id).toBe("ik-c");
     expect(

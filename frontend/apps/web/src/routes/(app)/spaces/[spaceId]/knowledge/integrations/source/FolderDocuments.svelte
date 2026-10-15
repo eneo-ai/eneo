@@ -148,6 +148,9 @@
       <div class="flex min-w-0 flex-col gap-1">
         <h2 id="folder-documents-{knowledge.id}" class="truncate text-base font-semibold">
           {knowledge.name}
+          {#if knowledge.original_name && knowledge.original_name !== knowledge.name}
+            <span class="text-secondary text-sm font-normal">({knowledge.original_name})</span>
+          {/if}
         </h2>
         <div class="text-secondary flex flex-wrap items-center gap-2 text-xs">
           <SourceStateBadge state={folderState} />
@@ -155,6 +158,12 @@
             <span>
               {m.integration_source_last_up_to_date_at({
                 time: formatRelativeTime(knowledge.metadata.last_synced_at)
+              })}
+            </span>
+          {:else if knowledge.metadata?.last_sync_attempted_at}
+            <span>
+              {m.integration_source_last_attempt_at({
+                time: formatRelativeTime(knowledge.metadata.last_sync_attempted_at)
               })}
             </span>
           {/if}

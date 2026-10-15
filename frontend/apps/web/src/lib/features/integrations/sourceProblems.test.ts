@@ -67,10 +67,10 @@ describe("buildSourceProblems", () => {
     ]);
     expect(problems.intentional.map((group) => group.category)).toEqual(["unsupported"]);
     expect(problems.fixable[0].files[1].item).toBe(b);
-    expect(problems.attentionCount).toBe(5);
+    expect(problems.causeCount).toBe(4);
   });
 
-  it("collects sign-in failures once and other failures per item", () => {
+  it("collects sign-in failures once and other failures per message", () => {
     const problems = buildSourceProblems(
       [
         item("a", {
@@ -83,15 +83,20 @@ describe("buildSourceProblems", () => {
           last_sync_error: CREDENTIALS,
           last_synced_at: "2026-10-03T10:00:00Z"
         }),
-        item("c", { last_sync_status: "error", last_sync_error: " Graph timeout " })
+        item("c", { last_sync_status: "error", last_sync_error: " Graph timeout " }),
+        item("d", { last_sync_status: "error", last_sync_error: "Graph timeout" }),
+        item("e", { last_sync_status: "error", last_sync_error: "itemNotFound" })
       ],
       {}
     );
 
     expect(problems.credentials?.items.map((i) => i.id)).toEqual(["a", "b"]);
     expect(problems.credentials?.lastSyncedAt).toBe("2026-10-03T10:00:00Z");
-    expect(problems.failures.map((f) => [f.item.id, f.message])).toEqual([["c", "Graph timeout"]]);
-    expect(problems.attentionCount).toBe(2);
+    expect(problems.failures.map((f) => [f.message, f.items.map((i) => i.id)])).toEqual([
+      ["Graph timeout", ["c", "d"]],
+      ["itemNotFound", ["e"]]
+    ]);
+    expect(problems.causeCount).toBe(3);
   });
 
   it("reports capped lists and lists that could not be loaded", () => {
@@ -99,13 +104,15 @@ describe("buildSourceProblems", () => {
     const problems = buildSourceProblems([item("a"), failed], {
       a: skipped([["x.png", "Unsupported file type (image/png)"]], {
         total: 40,
-        truncated: true
+        truncated: true,
+        synced_at: "2026-10-14T03:00:00Z"
       }),
       b: null
     });
 
     expect(problems.notListed).toBe(39);
+    expect(problems.skippedAsOf).toBe("2026-10-14T03:00:00Z");
     expect(problems.unavailable).toEqual([failed]);
-    expect(problems.attentionCount).toBe(0);
+    expect(problems.causeCount).toBe(0);
   });
 });

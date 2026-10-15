@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { untrack } from "svelte";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
@@ -26,9 +26,11 @@
     items: IntegrationKnowledge[];
     /** The source has more than one item, so each entry names its folder. */
     showFolders: boolean;
+    /** Changes when a sync of the source finishes, so the timeline reloads. */
+    refreshKey: string;
   }
 
-  let { items, showFolders }: Props = $props();
+  let { items, showFolders, refreshKey }: Props = $props();
 
   const eneo = getEneo();
   const PAGE_SIZE = 10;
@@ -43,6 +45,7 @@
   let days = $derived(groupActivityByDay(entries));
   let totals = $derived(summarizeActivity(entries));
   let hasMore = $derived(loaded.some((entry) => entry.total > entry.logs.length));
+  let syncCount = $derived(loaded.reduce((sum, entry) => sum + entry.total, 0));
 
   async function load(nextLimit: number) {
     const current = ++generation;
@@ -70,8 +73,9 @@
     }
   }
 
-  onMount(() => {
-    void load(limit);
+  $effect(() => {
+    void refreshKey;
+    untrack(() => void load(limit));
   });
 
   function title(log: SyncLog, kind: ActivityKind): string {
@@ -250,6 +254,11 @@
       <h2 id="activity-totals" class="text-sm font-semibold">
         {m.integration_activity_totals_heading({ count: totals.syncs })}
       </h2>
+      {#if syncCount > totals.syncs}
+        <p class="text-secondary -mt-2 text-xs">
+          {m.integration_activity_totals_of_all({ total: syncCount })}
+        </p>
+      {/if}
       <dl class="grid grid-cols-2 gap-3">
         <div>
           <dt class="text-secondary text-xs">{m.integration_activity_totals_failed()}</dt>
@@ -264,6 +273,10 @@
         <div>
           <dt class="text-secondary text-xs">{m.integration_activity_totals_changed()}</dt>
           <dd class="text-lg font-semibold tabular-nums">{totals.changedFiles}</dd>
+        </div>
+        <div>
+          <dt class="text-secondary text-xs">{m.integration_activity_totals_unchanged()}</dt>
+          <dd class="text-lg font-semibold tabular-nums">{totals.unchanged}</dd>
         </div>
         <div>
           <dt class="text-secondary text-xs">{m.integration_activity_totals_deleted()}</dt>

@@ -212,9 +212,13 @@
         <p class="font-medium">{m.sharepoint_health_sign_in_title()}</p>
         {#if signInState === "error"}
           <p class="text-sm">
-            {guidance
-              ? getMicrosoftAuthGuidanceText(guidance)
-              : m.sharepoint_health_sign_in_error({ time: time(config.last_auth_error_at) })}
+            {#if guidance}
+              {getMicrosoftAuthGuidanceText(guidance)}
+            {:else if config.last_auth_error_at}
+              {m.sharepoint_health_sign_in_error({ time: time(config.last_auth_error_at) })}
+            {:else}
+              {m.sharepoint_health_sign_in_refused()}
+            {/if}
           </p>
           <p class="text-secondary text-sm">{m.sharepoint_health_sign_in_impact()}</p>
           {#if config.last_auth_error}
@@ -223,7 +227,7 @@
               <p class="mt-1 font-mono break-words">{config.last_auth_error}</p>
             </details>
           {/if}
-        {:else if signInState === "ok"}
+        {:else if signInState === "ok" && config.last_auth_success_at}
           <p class="text-secondary text-sm">
             {m.sharepoint_auth_last_success({ time: time(config.last_auth_success_at) })}
           </p>

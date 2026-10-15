@@ -45,14 +45,27 @@ export function activityKind(log: SyncLog): ActivityKind {
 
 export type ActivityEntry = { log: SyncLog; item: IntegrationKnowledge };
 
-/** Every item's sync logs as one timeline, newest first. */
+const startedAt = (log: SyncLog) => new Date(log.started_at).getTime();
+
+/**
+ * Every item's loaded sync logs as one timeline, newest first. Each item is
+ * loaded newest first and only partly, so the timeline stops where the first
+ * partly loaded item runs out: below that point another item's older syncs
+ * would be missing between the ones shown.
+ */
 export function mergeActivity(
-  sources: readonly { item: IntegrationKnowledge; logs: readonly SyncLog[] }[]
+  sources: readonly { item: IntegrationKnowledge; logs: readonly SyncLog[]; total?: number }[]
 ): ActivityEntry[] {
+  let cutoff = -Infinity;
+  for (const { logs, total } of sources) {
+    if (logs.length === 0 || total === undefined || total <= logs.length) continue;
+    const oldest = Math.min(...logs.map(startedAt));
+    cutoff = Math.max(cutoff, oldest);
+  }
   const entries = sources.flatMap(({ item, logs }) => logs.map((log) => ({ log, item })));
-  return entries.sort(
-    (a, b) => new Date(b.log.started_at).getTime() - new Date(a.log.started_at).getTime()
-  );
+  return entries
+    .filter((entry) => startedAt(entry.log) >= cutoff)
+    .sort((a, b) => startedAt(b.log) - startedAt(a.log));
 }
 
 export type ActivityDay = { day: string; entries: ActivityEntry[] };
@@ -81,16 +94,18 @@ export type ActivityTotals = {
   syncs: number;
   failed: number;
   changedFiles: number;
+  unchanged: number;
   deleted: number;
 };
 
 export function summarizeActivity(entries: readonly ActivityEntry[]): ActivityTotals {
-  const totals: ActivityTotals = { syncs: 0, failed: 0, changedFiles: 0, deleted: 0 };
+  const totals: ActivityTotals = { syncs: 0, failed: 0, changedFiles: 0, unchanged: 0, deleted: 0 };
   for (const { log } of entries) {
     totals.syncs += 1;
     if (log.status === "error") totals.failed += 1;
     totals.changedFiles += asCount(log.files_processed) + asCount(log.pages_processed);
     totals.deleted += asCount(log.files_deleted);
+    totals.unchanged += readSyncLogExtras(log).unchangedItems;
   }
   return totals;
 }

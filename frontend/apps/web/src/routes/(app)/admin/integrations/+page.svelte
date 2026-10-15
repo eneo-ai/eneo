@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { writable } from "svelte/store";
   import { Info, EllipsisVertical, RefreshCw, Trash2 } from "@lucide/svelte";
   import { Page, Settings } from "$lib/components/layout";
@@ -34,7 +35,9 @@
   let showWebhookManagement = $state(false);
 
   const loadSharePointStatus = createAsyncState(async () => {
-    sharePointConfigStatus = "loading";
+    // A reload keeps the configured view mounted, so open panels and a test result survive it.
+    // Untracked: the effects that call this must not rerun when it stores the config.
+    if (!untrack(() => sharePointConfig)) sharePointConfigStatus = "loading";
     try {
       const config = await data.eneo.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "get"

@@ -8,6 +8,7 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { Page } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { getAppContext } from "$lib/core/AppContext";
   import { getEneo } from "$lib/core/Eneo";
   import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { previewLinkLabel } from "$lib/features/integrations/IntegrationData";
@@ -35,10 +36,12 @@
 
   interface Props {
     source: IntegrationSource;
-    isAdmin: boolean;
   }
 
-  let { source, isAdmin }: Props = $props();
+  let { source }: Props = $props();
+
+  const { user } = getAppContext();
+  const isAdmin = user.hasPermission("admin");
 
   const eneo = getEneo();
   const {
@@ -112,9 +115,8 @@
   });
 
   let problems = $derived(skippedLoaded ? buildSourceProblems(source.items, skippedByItem) : null);
-  let problemCount = $derived(
-    problems?.attentionCount ?? (summary.credentialsFailed ? 1 : summary.failedItems.length)
-  );
+  // Before the skipped lists arrive, the failures alone already give the blocking causes.
+  let problemCount = $derived((problems ?? buildSourceProblems(source.items, {})).causeCount);
   let skippedTotal = $derived(
     skippedLoaded
       ? Object.values(skippedByItem).reduce((sum, skipped) => sum + (skipped?.total ?? 0), 0)
@@ -123,11 +125,17 @@
 
   // --- Change notifications (SharePoint subscriptions) ---
 
-  let watchedCount = $derived(
-    source.items.filter((item) => {
+  const EXPIRING_SOON_MS = 48 * 60 * 60 * 1000;
+  let watchExpiry = $derived(
+    source.items.map((item) => {
       const expires = item.metadata?.sharepoint_subscription_expires_at;
-      return expires ? new Date(expires).getTime() > Date.now() : false;
-    }).length
+      return expires ? new Date(expires).getTime() - Date.now() : null;
+    })
+  );
+  let watchedCount = $derived(watchExpiry.filter((left) => left !== null && left > 0).length);
+  let expiredWatchCount = $derived(watchExpiry.filter((left) => left !== null && left <= 0).length);
+  let expiringWatchCount = $derived(
+    watchExpiry.filter((left) => left !== null && left > 0 && left <= EXPIRING_SOON_MS).length
   );
   let watchLabel = $derived.by(() => {
     if (watchedCount === source.items.length) return m.integration_source_watch_on();
@@ -216,9 +224,17 @@
 
   <Page.Main>
     <div class="flex flex-col gap-5 py-4 pr-4">
-      <div class="text-secondary flex items-center gap-2 text-sm">
+      <div class="text-secondary flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <IntegrationVendorIcon size="sm" type={source.integrationType} />
         <span>{sourceContentsLabel(source.items)}</span>
+        {#if singleItem?.folder_path}
+          <span aria-hidden="true">·</span>
+          <span class="break-all">{singleItem.folder_path}</span>
+        {/if}
+        {#if singleItem?.original_name && singleItem.original_name !== singleItem.name}
+          <span aria-hidden="true">·</span>
+          <span>{m.integration_source_original_name({ name: singleItem.original_name })}</span>
+        {/if}
       </div>
 
       {#if summary.failedItems.length > 0 && $tab !== "problems"}
@@ -241,7 +257,7 @@
                 : m.integration_source_failed_description()}
             </p>
           </div>
-          <Button variant="outline" size="sm" onclick={() => ($tab = "problems")}>
+          <Button variant="outline" size="sm" href={problemsHref()}>
             {m.integration_source_show_problems()}
           </Button>
         </div>
@@ -269,8 +285,23 @@
           </div>
           <div class="border-default flex flex-col gap-1 border-l px-4 py-3 max-lg:border-t">
             <dt class="text-secondary text-xs">{m.integration_source_stat_watch()}</dt>
-            <dd class="pt-1 text-sm font-semibold">
+            <dd class="flex flex-col gap-0.5 pt-1 text-sm font-semibold">
               {source.integrationType === "sharepoint" ? watchLabel : "–"}
+              {#if source.integrationType === "sharepoint"}
+                {#if expiredWatchCount > 0}
+                  <span class="text-warning-stronger text-xs font-normal">
+                    {m.integration_source_watch_expired({ count: expiredWatchCount })}
+                  </span>
+                {:else if expiringWatchCount > 0}
+                  <span class="text-secondary text-xs font-normal">
+                    {m.integration_source_watch_expiring({ count: expiringWatchCount })}
+                  </span>
+                {:else if watchedCount === 0}
+                  <span class="text-secondary text-xs font-normal">
+                    {m.integration_source_watch_off_hint()}
+                  </span>
+                {/if}
+              {/if}
             </dd>
           </div>
         </dl>
@@ -313,7 +344,7 @@
               {progress}
               skippedCount={skippedLoaded ? (skippedByItem[singleItem.id]?.total ?? 0) : null}
               problemsHref={problemsHref()}
-              showHeader={false}
+              showHeader={source.kind === "wrapper"}
             />
           {/key}
         {/if}
@@ -326,11 +357,19 @@
           {adminIntegrationsUrl}
           folderHref={folderContentHref}
           showFolders={multiple}
+          onRetry={() => void loadSkipped(source.items)}
         />
       </Page.Tab>
 
       <Page.Tab id="activity">
-        <SourceActivityView items={source.items} showFolders={multiple} />
+        <!-- Each folder's history is a request of its own; only fetch it when it is looked at. -->
+        {#if $tab === "activity"}
+          <SourceActivityView
+            items={source.items}
+            showFolders={multiple}
+            refreshKey={syncSignature}
+          />
+        {/if}
       </Page.Tab>
     </div>
   </Page.Main>

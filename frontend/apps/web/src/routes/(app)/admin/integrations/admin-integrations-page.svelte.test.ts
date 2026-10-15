@@ -11,6 +11,8 @@ const api = vi.hoisted(() => ({
   integrations: {
     admin: {
       sharepoint: {
+        listSubscriptions: vi.fn(async () => []),
+        testStoredConnection: vi.fn(async () => ({ success: true })),
         restartServiceAccountAuth: vi.fn(async () => ({
           auth_url: "https://login.microsoftonline.com/authorize",
           state: "state-123"
@@ -153,5 +155,21 @@ describe("admin integrations page: SharePoint credential health", () => {
     expect(
       page.getByRole("button", { name: m.sharepoint_reauth_with_microsoft() }).query()
     ).toBeNull();
+  });
+
+  it("keeps a connection test result on screen while the stored config reloads", async () => {
+    show(config());
+    const appFetches = () =>
+      api.client.fetch.mock.calls.filter(([path]) => path === "/api/v1/admin/sharepoint/app")
+        .length;
+    const runTest = page.getByRole("button", { name: m.sharepoint_health_test_run() });
+    await expect.element(runTest).toBeVisible();
+    const before = appFetches();
+
+    await runTest.click();
+
+    await expect.element(page.getByText(m.sharepoint_health_test_ok())).toBeVisible();
+    // The test records credential health, so the config is fetched again.
+    expect(appFetches()).toBe(before + 1);
   });
 });

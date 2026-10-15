@@ -88,6 +88,25 @@ describe("the activity timeline", () => {
     }
   ]);
 
+  it("stops where a partly loaded item runs out, so no item's syncs go missing", () => {
+    const partial = mergeActivity([
+      {
+        item: itemA,
+        logs: [log({ id: "a1", started_at: "2026-10-13T08:00:00" })],
+        total: 5
+      },
+      {
+        item: itemB,
+        logs: [
+          log({ id: "b1", started_at: "2026-10-13T18:00:00" }),
+          log({ id: "b2", started_at: "2026-10-12T09:00:00" })
+        ],
+        total: 2
+      }
+    ]);
+    expect(partial.map((entry) => entry.log.id)).toEqual(["b1", "a1"]);
+  });
+
   it("merges every item's logs newest first", () => {
     expect(entries.map((entry) => [entry.log.id, entry.item.id])).toEqual([
       ["b1", "b"],
@@ -110,6 +129,7 @@ describe("the activity timeline", () => {
       syncs: 3,
       failed: 1,
       changedFiles: 4,
+      unchanged: 0,
       deleted: 1
     });
   });

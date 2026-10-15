@@ -38,7 +38,8 @@
     ).map((source): SourceRow => ({ source, summary: summarizeSource(source.items, $progress) }))
   );
 
-  let needsAttention = $derived($rows.filter((row) => row.summary.state === "attention"));
+  // A source that syncs right now can still have folders whose latest sync failed.
+  let needsAttention = $derived($rows.filter((row) => row.summary.failedItems.length > 0));
   let attentionIsSignIn = $derived(
     needsAttention.length > 0 && needsAttention.every((row) => row.summary.credentialsFailed)
   );
@@ -77,7 +78,19 @@
 
   function updatedLabel(summary: SourceSummary): string {
     if (summary.progress) return m.integration_source_updating_now();
-    return summary.lastSyncedAt ? formatRelativeTime(summary.lastSyncedAt) : "–";
+    if (summary.lastSyncedAt) return formatRelativeTime(summary.lastSyncedAt);
+    if (summary.lastSyncAttemptedAt) {
+      return m.integration_source_last_attempt_at({
+        time: formatRelativeTime(summary.lastSyncAttemptedAt)
+      });
+    }
+    return "–";
+  }
+
+  const STATE_ORDER: SourceSummary["state"][] = ["attention", "syncing", "never", "empty", "ok"];
+
+  function timeOf(value: string | null): number {
+    return value ? new Date(value).getTime() : 0;
   }
 
   const table = Table.createWithStore(rows);
@@ -91,8 +104,17 @@
           name: row.source.name,
           integrationType: row.source.integrationType,
           href: sourceHref($currentSpace.routeId, row.source),
-          subtitle: sourceContentsLabel(row.source.items)
-        })
+          subtitle: sourceContentsLabel(row.source.items),
+          originalName: row.source.kind === "item" ? row.source.items[0].original_name : null
+        }),
+      plugins: {
+        // A source is found by its own name or by any of its folders' names.
+        tableFilter: {
+          getFilterValue: (row) =>
+            [row.source.name, ...row.source.items.map((item) => item.name)].join(" ")
+        },
+        sort: { getSortValue: (row) => row.source.name.toLowerCase() }
+      }
     }),
     table.column({
       header: m.integration_source_column_contents(),
@@ -103,7 +125,11 @@
             row.summary.documentCount === 1
               ? m.integration_documents_one({ count: row.summary.documentCount })
               : m.integration_documents_other({ count: row.summary.documentCount })
-        })
+        }),
+      plugins: {
+        tableFilter: { exclude: true },
+        sort: { getSortValue: (row) => row.summary.documentCount }
+      }
     }),
     table.column({
       header: m.status(),
@@ -113,7 +139,11 @@
           summary: row.summary,
           sourceName: row.source.name,
           problemsHref: sourceHref($currentSpace.routeId, row.source, { tab: "problems" })
-        })
+        }),
+      plugins: {
+        tableFilter: { exclude: true },
+        sort: { getSortValue: (row) => STATE_ORDER.indexOf(row.summary.state) }
+      }
     }),
     table.column({
       header: m.integration_source_column_updated(),
@@ -122,7 +152,13 @@
         Table.renderComponent(Table.FormattedCell, {
           value: updatedLabel(row.summary),
           class: "text-secondary"
-        })
+        }),
+      plugins: {
+        tableFilter: { exclude: true },
+        sort: {
+          getSortValue: (row) => timeOf(row.summary.lastSyncedAt ?? row.summary.lastSyncAttemptedAt)
+        }
+      }
     }),
     table.columnActions({
       cell: ({ value: row }) => {

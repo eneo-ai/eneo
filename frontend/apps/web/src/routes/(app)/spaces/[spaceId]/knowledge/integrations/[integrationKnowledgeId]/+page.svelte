@@ -18,12 +18,6 @@
   );
   let source = $derived(item ? groupIntegrationSources([item])[0] : null);
 
-  let isAdmin = $derived(
-    data.user?.roles?.some((role: { permissions?: string[] }) =>
-      role.permissions?.includes("admin")
-    ) ?? false
-  );
-
   // The item was deleted from its actions menu: this page has nothing left to show.
   $effect(() => {
     if (!item && $currentSpace.id === data.currentSpace.id) {
@@ -35,6 +29,6 @@
 
 {#if source}
   {#key source.id}
-    <SourcePage {source} {isAdmin} />
+    <SourcePage {source} />
   {/key}
 {/if}

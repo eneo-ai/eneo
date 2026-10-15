@@ -51,6 +51,9 @@
             class="focus-visible:ring-stronger block truncate rounded font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
           >
             {item.name}
+            {#if item.original_name && item.original_name !== item.name}
+              <span class="text-secondary font-normal">({item.original_name})</span>
+            {/if}
           </a>
           <!-- eslint-enable svelte/no-navigation-without-resolve -->
           {#if item.folder_path}
@@ -65,7 +68,15 @@
           {progress[item.id] ? "–" : (item.metadata?.document_count ?? 0)}
         </Table.Cell>
         <Table.Cell class="text-secondary">
-          {item.metadata?.last_synced_at ? formatRelativeTime(item.metadata.last_synced_at) : "–"}
+          {#if item.metadata?.last_synced_at}
+            {formatRelativeTime(item.metadata.last_synced_at)}
+          {:else if item.metadata?.last_sync_attempted_at}
+            {m.integration_source_last_attempt_at({
+              time: formatRelativeTime(item.metadata.last_sync_attempted_at)
+            })}
+          {:else}
+            –
+          {/if}
         </Table.Cell>
         <Table.Cell>
           <div class="flex items-center justify-end gap-1">

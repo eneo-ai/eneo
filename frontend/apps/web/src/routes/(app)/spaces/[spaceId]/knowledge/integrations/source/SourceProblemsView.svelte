@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Component } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import FileBox from "@lucide/svelte/icons/file-box";
@@ -32,9 +33,19 @@
     folderHref: (itemId: string) => string;
     /** The source has more than one item, so each file names its folder. */
     showFolders: boolean;
+    /** Load the skipped lists again, for the items whose list could not be loaded. */
+    onRetry: () => void;
   }
 
-  let { problems, isAdmin, adminIntegrationsUrl, folderHref, showFolders }: Props = $props();
+  let { problems, isAdmin, adminIntegrationsUrl, folderHref, showFolders, onRetry }: Props =
+    $props();
+
+  const FILES_SHOWN = 10;
+  const expandedGroups = new SvelteSet<string>();
+
+  function folderLabel(item: { name: string; folder_path?: string | null }): string {
+    return item.folder_path || item.name;
+  }
 
   const categories: Record<
     FileProblemCategory,
@@ -83,7 +94,10 @@
   };
 
   let blockingCount = $derived(
-    problems ? (problems.credentials ? 1 : 0) + problems.failures.length : 0
+    problems
+      ? (problems.credentials ? 1 : 0) +
+          problems.failures.reduce((sum, failure) => sum + failure.items.length, 0)
+      : 0
   );
   let fixableCount = $derived(
     problems?.fixable.reduce((sum, group) => sum + group.files.length, 0) ?? 0
@@ -129,9 +143,10 @@
       />
     </Collapsible.Trigger>
     <Collapsible.Content>
+      {@const expanded = expandedGroups.has(group.category)}
       <ul class="flex flex-col px-4 pb-3 pl-15 text-sm">
         <!-- The same file name recurs across folders, so the key needs the position. -->
-        {#each group.files as file, index (`${index}:${file.item.id}:${file.file}`)}
+        {#each expanded ? group.files : group.files.slice(0, FILES_SHOWN) as file, index (`${index}:${file.item.id}:${file.file}`)}
           <li
             class="border-dimmer flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 border-t py-2"
           >
@@ -144,7 +159,7 @@
                   <a
                     href={folderHref(file.item.id)}
                     class="focus-visible:ring-stronger rounded hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                    >{file.item.name}</a
+                    >{folderLabel(file.item)}</a
                   >
                   <!-- eslint-enable svelte/no-navigation-without-resolve -->
                 </span>
@@ -154,6 +169,21 @@
           </li>
         {/each}
       </ul>
+      {#if group.files.length > FILES_SHOWN}
+        <div class="px-4 pb-3 pl-15">
+          <Button
+            variant="link"
+            size="sm"
+            class="h-auto p-0"
+            onclick={() =>
+              expanded ? expandedGroups.delete(group.category) : expandedGroups.add(group.category)}
+          >
+            {expanded
+              ? m.integration_problem_show_fewer()
+              : m.integration_problem_show_all({ count: group.files.length })}
+          </Button>
+        </div>
+      {/if}
     </Collapsible.Content>
   </Collapsible.Root>
 {/snippet}
@@ -223,7 +253,7 @@
             </div>
           </div>
         {/if}
-        {#each problems.failures as failure (failure.item.id)}
+        {#each problems.failures as failure (failure.message)}
           <div class="border-negative-default flex gap-3 rounded-lg border p-4">
             <span
               class="bg-negative-dimmer text-negative-stronger flex size-8 shrink-0 items-center justify-center rounded-md"
@@ -232,7 +262,13 @@
             </span>
             <div class="flex min-w-0 flex-1 flex-col gap-1.5">
               <p class="font-medium">
-                {m.integration_problem_sync_failed_title({ name: failure.item.name })}
+                {failure.items.length === 1
+                  ? m.integration_problem_sync_failed_title({
+                      name: folderLabel(failure.items[0])
+                    })
+                  : m.integration_problem_sync_failed_many_title({
+                      count: failure.items.length
+                    })}
               </p>
               <p class="text-sm">{m.integration_problem_sync_failed_description()}</p>
               {#if failure.message}
@@ -244,14 +280,20 @@
                 </details>
               {/if}
               {#if showFolders}
-                <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
-                <a
-                  href={folderHref(failure.item.id)}
-                  class="text-accent-default focus-visible:ring-stronger w-fit rounded text-sm font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                >
-                  {m.integration_problem_open_folder()}
-                </a>
-                <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                <ul class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                  {#each failure.items as item (item.id)}
+                    <li>
+                      <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
+                      <a
+                        href={folderHref(item.id)}
+                        class="text-accent-default focus-visible:ring-stronger rounded font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                      >
+                        {m.integration_problem_open_named_folder({ name: folderLabel(item) })}
+                      </a>
+                      <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                    </li>
+                  {/each}
+                </ul>
               {/if}
             </div>
           </div>
@@ -267,6 +309,11 @@
         >
           {m.integration_problems_fixable_heading({ count: fixableCount })}
         </h2>
+        {#if problems.skippedAsOf}
+          <p class="text-secondary -mt-1 text-xs">
+            {m.integration_problems_as_of({ time: formatDateTime(problems.skippedAsOf) })}
+          </p>
+        {/if}
         <div class="border-default overflow-hidden rounded-lg border">
           {#each problems.fixable as group, index (group.category)}
             {@render fileGroup(group, index === 0)}
@@ -297,11 +344,14 @@
       </p>
     {/if}
     {#if problems.unavailable.length > 0}
-      <p class="text-secondary text-sm" role="status">
-        {m.integration_problems_unavailable({
-          names: problems.unavailable.map((item) => item.name).join(", ")
-        })}
-      </p>
+      <div class="text-secondary flex flex-wrap items-center gap-3 text-sm" role="status">
+        <p>
+          {m.integration_problems_unavailable({
+            names: problems.unavailable.map((item) => item.name).join(", ")
+          })}
+        </p>
+        <Button variant="outline" size="sm" onclick={onRetry}>{m.retry()}</Button>
+      </div>
     {/if}
   {/if}
 </div>

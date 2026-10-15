@@ -18,12 +18,6 @@
   );
   let source = $derived(items.length > 0 ? groupIntegrationSources(items)[0] : null);
 
-  let isAdmin = $derived(
-    data.user?.roles?.some((role: { permissions?: string[] }) =>
-      role.permissions?.includes("admin")
-    ) ?? false
-  );
-
   // The wrapper was deleted from its actions menu: this page has nothing left to show.
   $effect(() => {
     if (items.length === 0 && $currentSpace.id === data.currentSpace.id) {
@@ -34,5 +28,8 @@
 </script>
 
 {#if source}
-  <SourcePage {source} {isAdmin} />
+  <!-- Another wrapper is another source: start its page fresh. -->
+  {#key data.wrapperId}
+    <SourcePage {source} />
+  {/key}
 {/if}

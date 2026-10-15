@@ -64,7 +64,8 @@ export type FileProblemGroup = {
   files: ProblemFile[];
 };
 
-export type SyncFailure = { item: IntegrationKnowledge; message: string };
+/** Items whose latest sync failed with the same message. */
+export type SyncFailure = { message: string; items: IntegrationKnowledge[] };
 
 export type SourceProblems = {
   /** Set when the sign-in failed; every item listed stopped updating. */
@@ -74,10 +75,12 @@ export type SourceProblems = {
   intentional: FileProblemGroup[];
   /** Skipped files the capped per-item lists leave out. */
   notListed: number;
+  /** When the newest of the skipped lists was written. */
+  skippedAsOf: string | null;
   /** Items whose skipped list could not be loaded. */
   unavailable: IntegrationKnowledge[];
-  /** What needs someone's attention: blocking failures plus fixable files. */
-  attentionCount: number;
+  /** Distinct things to act on: the sign-in, each failure message, each fixable cause. */
+  causeCount: number;
 };
 
 function latest(a: string | null, b: string | null | undefined): string | null {
@@ -92,10 +95,11 @@ export function buildSourceProblems(
 ): SourceProblems {
   const credentialItems: IntegrationKnowledge[] = [];
   let credentialsLastSynced: string | null = null;
-  const failures: SyncFailure[] = [];
+  const failures = new Map<string, SyncFailure>();
   const groups = new Map<FileProblemCategory, FileProblemGroup>();
   const unavailable: IntegrationKnowledge[] = [];
   let notListed = 0;
+  let skippedAsOf: string | null = null;
 
   for (const item of items) {
     const metadata = item.metadata;
@@ -105,7 +109,9 @@ export function buildSourceProblems(
         credentialItems.push(item);
         credentialsLastSynced = latest(credentialsLastSynced, metadata.last_synced_at);
       } else {
-        failures.push({ item, message });
+        const failure = failures.get(message);
+        if (failure) failure.items.push(item);
+        else failures.set(message, { message, items: [item] });
       }
     }
 
@@ -115,6 +121,7 @@ export function buildSourceProblems(
       continue;
     }
     if (!skipped) continue;
+    if (skipped.items.length > 0) skippedAsOf = latest(skippedAsOf, skipped.synced_at);
     if (skipped.truncated) notListed += Math.max(0, skipped.total - skipped.items.length);
     for (const entry of skipped.items) {
       const category = CATEGORY_BY_KIND[skipReasonKind(entry.reason)];
@@ -133,20 +140,20 @@ export function buildSourceProblems(
   });
   const fixable = ordered.filter((group) => group.severity === "fixable");
   const intentional = ordered.filter((group) => group.severity === "intentional");
+  const failureList = [...failures.values()];
+  const blocking = (credentialItems.length > 0 ? 1 : 0) + failureList.length;
 
   return {
     credentials:
       credentialItems.length > 0
         ? { items: credentialItems, lastSyncedAt: credentialsLastSynced }
         : null,
-    failures,
+    failures: failureList,
     fixable,
     intentional,
     notListed,
+    skippedAsOf,
     unavailable,
-    attentionCount:
-      (credentialItems.length > 0 ? 1 : 0) +
-      failures.length +
-      fixable.reduce((sum, group) => sum + group.files.length, 0)
+    causeCount: blocking + fixable.length
   };
 }
