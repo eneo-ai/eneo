@@ -393,6 +393,11 @@ async def test_sync_progress_lists_the_space_items_that_are_syncing(documents_ap
         "unchanged": 12,
         "skipped": 3,
         "deleted": 1,
+        "current": "Protokoll.docx",
+        "recent": [
+            {"name": "Budget.xlsm", "outcome": "skipped", "reason": "Unsupported"},
+            {"name": "Rutin.pdf", "outcome": "indexed", "reason": None},
+        ],
     }
     api.progress_redis.mget.return_value = [json.dumps(running).encode(), None]
 

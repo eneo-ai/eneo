@@ -362,6 +362,20 @@ class IntegrationSkippedDocuments(BaseModel):
     )
 
 
+class IntegrationSyncProgressFile(BaseModel):
+    """A file or page a running sync has finished with."""
+
+    name: str
+    outcome: Literal["indexed", "unchanged", "skipped"]
+    reason: Optional[str] = Field(
+        default=None, description="Why a skipped file was skipped, when known"
+    )
+
+
+def _no_finished_files() -> list[IntegrationSyncProgressFile]:
+    return []
+
+
 class IntegrationSyncProgress(BaseModel):
     """Live progress of a SharePoint sync that is running now.
 
@@ -389,6 +403,14 @@ class IntegrationSyncProgress(BaseModel):
     unchanged: int
     skipped: int
     deleted: int = Field(description="Local documents removed in this sync")
+    current: Optional[str] = Field(
+        default=None,
+        description="Name of the file or page being handled now; never a folder",
+    )
+    recent: list[IntegrationSyncProgressFile] = Field(
+        default_factory=_no_finished_files,
+        description="Files and pages finished most recently, newest first, at most 8",
+    )
 
 
 class IntegrationSyncProgressList(BaseModel):

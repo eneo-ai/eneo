@@ -15699,6 +15699,34 @@ export interface components {
        * @description Local documents removed in this sync
        */
       deleted: number;
+      /**
+       * Current
+       * @description Name of the file or page being handled now; never a folder
+       */
+      current?: string | null;
+      /**
+       * Recent
+       * @description Files and pages finished most recently, newest first, at most 8
+       */
+      recent?: components["schemas"]["IntegrationSyncProgressFile"][];
+    };
+    /**
+     * IntegrationSyncProgressFile
+     * @description A file or page a running sync has finished with.
+     */
+    IntegrationSyncProgressFile: {
+      /** Name */
+      name: string;
+      /**
+       * Outcome
+       * @enum {string}
+       */
+      outcome: "indexed" | "unchanged" | "skipped";
+      /**
+       * Reason
+       * @description Why a skipped file was skipped, when known
+       */
+      reason?: string | null;
     };
     /**
      * IntegrationSyncProgressList

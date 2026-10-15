@@ -715,11 +715,14 @@ class SharePointContentService:
 
                 await self._progress.set_phase("processing", stats)
                 for item in changes:
-                    await self._progress.update(stats)
                     item_name = item.get("name", "")
                     item_id = item.get("id")
                     is_deleted = has_graph_facet(item, "deleted")
                     is_folder = has_graph_facet(item, "folder")
+                    await self._progress.update(
+                        stats,
+                        current=None if is_deleted or is_folder else item_name,
+                    )
 
                     logger.debug(
                         f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder})"
@@ -1028,6 +1031,7 @@ class SharePointContentService:
                         )
                         self._progress.add_total(1)
                         await self._progress.set_phase("processing", stats)
+                        await self._progress.update(stats, current=item_name)
 
                         unsupported_reason = unsupported_file_reason(item_name)
                         if unsupported_reason:
@@ -1128,7 +1132,10 @@ class SharePointContentService:
         self._progress.add_total(self._file_count(documents))
         await self._progress.set_phase("processing", stats)
         for document in documents:
-            await self._progress.update(stats)
+            await self._progress.update(
+                stats,
+                current=None if document.get("folder") else document.get("name"),
+            )
             drive_id = document.get("parentReference", {}).get("driveId")
             site_id = document.get("parentReference", {}).get("siteId")
             item_id = document.get("id")
@@ -1198,7 +1205,6 @@ class SharePointContentService:
         self._progress.add_total(self._file_count(pages))
         await self._progress.set_phase("processing", stats)
         for page in pages:
-            await self._progress.update(stats)
             site_id = page.get("parentReference", {}).get("siteId")
             page_id = page.get("id")
             if not site_id or not page_id:
@@ -1206,6 +1212,7 @@ class SharePointContentService:
             page_name = (
                 page.get("name", "") or page.get("title", "") or f"Page {page_id}"
             )
+            await self._progress.update(stats, current=page_name)
             try:
                 content = await client.get_page_content(
                     site_id=site_id, page_id=page_id
@@ -1790,7 +1797,6 @@ class SharePointContentService:
 
         indexed_ids = {item_id for _, item_id in indexed}
         for descendant in descendants:
-            await self._progress.update(stats)
             descendant_id = descendant.get("id")
             if (
                 not descendant_id
@@ -1798,6 +1804,7 @@ class SharePointContentService:
                 or descendant_id in change_ids
             ):
                 continue
+            await self._progress.update(stats, current=descendant.get("name"))
             await self._sync_changed_file(
                 content_client=content_client,
                 drive_id=drive_id,
@@ -2123,7 +2130,6 @@ class SharePointContentService:
         await self._progress.set_phase("processing", stats)
 
         for item in results:
-            await self._progress.update(stats)
             item_id = item.get("id")
 
             if item_id in processed_items:
@@ -2135,6 +2141,9 @@ class SharePointContentService:
             item_name = item.get("name", "")
             item_type = self._get_item_type(item)
             web_url = item.get("webUrl", "")
+            await self._progress.update(
+                stats, current=None if item_type == "folder" else item_name
+            )
 
             if item_type == "folder":
                 stats["folders_processed"] += 1

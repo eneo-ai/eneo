@@ -28,7 +28,9 @@ class FakeMonotonic:
         return self.now
 
 
-def _stats(**counts: int) -> SyncStats:
+def _stats(
+    skipped_details: list[tuple[str, str]] | None = None, **counts: int
+) -> SyncStats:
     stats: SyncStats = {
         "files_processed": 0,
         "files_deleted": 0,
@@ -37,7 +39,9 @@ def _stats(**counts: int) -> SyncStats:
         "pages_processed": 0,
         "unchanged_items": 0,
         "skipped_items": 0,
-        "skipped_details": [],
+        "skipped_details": [
+            {"file": file, "reason": reason} for file, reason in skipped_details or []
+        ],
     }
     stats.update(counts)  # type: ignore[typeddict-item]
     return stats
@@ -105,6 +109,8 @@ async def test_progress_is_published_per_item_with_the_listed_total(
             "unchanged": 0,
             "skipped": 0,
             "deleted": 0,
+            "current": None,
+            "recent": [],
         },
         {
             "integration_knowledge_id": str(item_id),
@@ -118,6 +124,8 @@ async def test_progress_is_published_per_item_with_the_listed_total(
             "unchanged": 3,
             "skipped": 1,
             "deleted": 4,
+            "current": None,
+            "recent": [],
         },
     ]
 
@@ -161,6 +169,109 @@ async def test_total_is_null_until_listed_and_never_below_done(
     await reporter.set_phase("finishing", stats)
 
     assert _saved(redis_client)[-1]["total"] == expected_total
+
+
+@pytest.fixture
+def feed_reporter(
+    redis_client: AsyncMock, monotonic: FakeMonotonic
+) -> SyncProgressReporter:
+    return SyncProgressReporter(
+        SharePointSyncProgressStore(redis_client),
+        clock=lambda: STARTED,
+        monotonic=monotonic,
+    )
+
+
+async def test_each_finished_file_enters_the_feed_with_its_outcome(
+    feed_reporter, redis_client
+):
+    unsupported = ("c.zip", "Unsupported file type")
+    no_text = ("f.pdf", "No text found")
+    cleanup_failed = ("f.pdf", "Could not remove unextractable: 503")
+    await feed_reporter.begin(uuid4(), "full")
+    await feed_reporter.set_phase("processing", _stats())
+
+    await feed_reporter.update(_stats(), current="a.docx")
+    await feed_reporter.update(_stats(files_processed=1), current="b.docx")
+    # A folder is never current, so what its subtree adds goes to no file.
+    await feed_reporter.update(_stats(files_processed=1, unchanged_items=1))
+    await feed_reporter.update(
+        _stats(files_processed=4, unchanged_items=1), current="c.zip"
+    )
+    await feed_reporter.update(
+        _stats([unsupported], files_processed=4, unchanged_items=1, skipped_items=1),
+        current="d.docx",
+    )
+    # d.docx is skipped without a recorded reason.
+    await feed_reporter.update(
+        _stats([unsupported], files_processed=4, unchanged_items=1, skipped_items=2),
+        current="e.docx",
+    )
+    # e.docx counts nothing, like an item already handled.
+    await feed_reporter.update(
+        _stats([unsupported], files_processed=4, unchanged_items=1, skipped_items=2),
+        current="f.pdf",
+    )
+    await feed_reporter.update(
+        _stats(
+            [unsupported, no_text, cleanup_failed],
+            files_processed=4,
+            unchanged_items=1,
+            skipped_items=4,
+        ),
+        current="Start.aspx",
+    )
+    await feed_reporter.set_phase(
+        "finishing",
+        _stats(
+            [unsupported, no_text, cleanup_failed],
+            files_processed=4,
+            pages_processed=1,
+            unchanged_items=1,
+            skipped_items=4,
+        ),
+    )
+
+    finishing = _saved(redis_client)[-1]
+    assert finishing["phase"] == "finishing"
+    assert finishing["current"] is None
+    assert finishing["recent"] == [
+        {"name": "Start.aspx", "outcome": "indexed", "reason": None},
+        {"name": "f.pdf", "outcome": "skipped", "reason": "No text found"},
+        {"name": "d.docx", "outcome": "skipped", "reason": None},
+        {"name": "c.zip", "outcome": "skipped", "reason": "Unsupported file type"},
+        {"name": "b.docx", "outcome": "unchanged", "reason": None},
+        {"name": "a.docx", "outcome": "indexed", "reason": None},
+    ]
+
+
+async def test_the_file_being_handled_is_published_with_the_files_before_it(
+    feed_reporter, redis_client, monotonic
+):
+    await feed_reporter.begin(uuid4(), "delta")
+    await feed_reporter.set_phase("processing", _stats())
+    await feed_reporter.update(_stats(), current="a.docx")
+    monotonic.now += 1.0
+
+    await feed_reporter.update(_stats(unchanged_items=1), current="b.docx")
+
+    processing = _saved(redis_client)[-1]
+    assert (processing["phase"], processing["current"]) == ("processing", "b.docx")
+    assert processing["recent"] == [
+        {"name": "a.docx", "outcome": "unchanged", "reason": None}
+    ]
+
+
+async def test_feed_keeps_the_newest_eight_files_first(feed_reporter, redis_client):
+    await feed_reporter.begin(uuid4(), "full")
+    await feed_reporter.set_phase("processing", _stats())
+    for done in range(10):
+        await feed_reporter.update(_stats(files_processed=done), current=f"{done}.docx")
+    await feed_reporter.set_phase("finishing", _stats(files_processed=10))
+
+    assert [f["name"] for f in _saved(redis_client)[-1]["recent"]] == [
+        f"{done}.docx" for done in range(9, 1, -1)
+    ]
 
 
 async def test_end_removes_the_entry_and_stops_reporting(reporter, redis_client):
@@ -211,7 +322,10 @@ async def test_reader_returns_running_items_in_one_round_trip(redis_client):
 
     progress = await store.get_many([running, idle, broken])
 
-    assert [item.model_dump(mode="json") for item in progress] == [entry]
+    # Entries written before the file feed existed read with an empty feed.
+    assert [item.model_dump(mode="json") for item in progress] == [
+        {**entry, "current": None, "recent": []}
+    ]
     redis_client.mget.assert_awaited_once_with(
         [sync_progress_key(running), sync_progress_key(idle), sync_progress_key(broken)]
     )

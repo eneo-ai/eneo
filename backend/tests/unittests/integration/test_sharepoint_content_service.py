@@ -3942,13 +3942,21 @@ class TestSyncProgress:
                     token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
                 )
 
+        phases = _progress_phases(progress_redis)
         assert [
             (p["sync_type"], p["phase"], p["total"], p["done"], p["indexed"])
-            for p in _progress_phases(progress_redis)
+            for p in phases
         ] == [
             ("full", "discovering", None, 0, 0),
             ("full", "processing", 2, 0, 0),
             ("full", "finishing", 4, 4, 3),
+        ]
+        # The folder Bilagor is never in the feed; the page is.
+        assert [(f["name"], f["outcome"]) for f in phases[-1]["recent"]] == [
+            ("Start", "indexed"),
+            ("c.docx", "indexed"),
+            ("b.docx", "unchanged"),
+            ("a.docx", "indexed"),
         ]
         progress_redis.delete.assert_awaited_once_with(sync_progress_key(ik.id))
 
@@ -3989,13 +3997,19 @@ class TestSyncProgress:
                     token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
                 )
 
+        phases = _progress_phases(progress_redis)
         assert [
             (p["sync_type"], p["phase"], p["total"], p["done"], p["deleted"])
-            for p in _progress_phases(progress_redis)
+            for p in phases
         ] == [
             ("delta", "discovering", None, 0, 0),
             ("delta", "processing", None, 0, 0),
             ("delta", "finishing", None, 2, 1),
+        ]
+        # The deleted old.docx is counted under deleted, not in the feed.
+        assert [(f["name"], f["outcome"]) for f in phases[-1]["recent"]] == [
+            ("b.docx", "unchanged"),
+            ("a.docx", "indexed"),
         ]
         progress_redis.delete.assert_awaited_once_with(sync_progress_key(ik.id))
 
