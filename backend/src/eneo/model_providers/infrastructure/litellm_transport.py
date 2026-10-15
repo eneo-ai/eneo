@@ -305,10 +305,12 @@ def classify_provider_failure(exc: BaseException) -> ProviderFailure:
         return PROVIDER_RATE_LIMITED
     if any(isinstance(c, _CONNECT_FAILURES) for c in chain):
         return PROVIDER_UNREACHABLE
-    if any(isinstance(c, _CONNECTION_DROPS) for c in chain):
-        return PROVIDER_CONNECTION_LOST
+    # LiteLLM also wraps mid-stream read timeouts in MidStreamFallbackError;
+    # the concrete cause takes precedence over that generic stream wrapper.
     if statuses & {408, 504} or any(isinstance(c, _TIMEOUTS) for c in chain):
         return PROVIDER_TIMEOUT
+    if any(isinstance(c, _CONNECTION_DROPS) for c in chain):
+        return PROVIDER_CONNECTION_LOST
     # Some providers answer an unknown model with 404 and LiteLLM may still
     # wrap it as BadRequestError, so this precedes the rejection check.
     if 404 in statuses or any(isinstance(c, NotFoundError) for c in chain):

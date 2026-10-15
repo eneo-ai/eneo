@@ -780,6 +780,16 @@ export class ChatService {
       let requestOpened = false;
       let stopMirroringUploads: (() => void) | undefined;
 
+      const flushReceivedContent = () => {
+        // Drain both buffers before deciding whether an answer is empty or
+        // replacing it with an error. Repeated calls have nothing left to append.
+        this.#finalizeStream();
+        if (inrefBuffer) {
+          ref.answer += inrefBuffer;
+          inrefBuffer = "";
+        }
+      };
+
       const ensureCurrentSession = (event: { session_id: string }) => {
         if (event.session_id !== this.currentConversation.id) {
           abortController?.abort();
@@ -1110,6 +1120,7 @@ export class ChatService {
           if (index !== -1) this.currentConversation.messages.splice(index, 1);
         }
         if (isStale()) return;
+        flushReceivedContent();
 
         if (!requestOpened) {
           // Nothing was sent: propagate so ConversationInput can restore the
@@ -1152,13 +1163,7 @@ export class ChatService {
       } finally {
         stopMirroringUploads?.();
         if (this.#streamGen === streamGen) {
-          // Flush the frame-buffered text first, then anything still held back
-          // as a possible <inref>, so the answer keeps its arrival order.
-          this.#finalizeStream();
-          if (ref && inrefBuffer) {
-            ref.answer += inrefBuffer;
-            inrefBuffer = "";
-          }
+          flushReceivedContent();
           this.#activeDiagnosticsStreamGeneration = null;
           if (this.debugPanelOpen) {
             void this.#confirmPendingDiagnosticsMessages();

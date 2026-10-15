@@ -47,7 +47,7 @@ class _StubProvider(BaseHTTPRequestHandler):
         if mode == "hang":
             time.sleep(_HANG_SECONDS)
             return
-        if mode == "drop":
+        if mode in {"drop", "stream-hang"}:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Transfer-Encoding", "chunked")
@@ -62,6 +62,10 @@ class _StubProvider(BaseHTTPRequestHandler):
             data = f"data: {json.dumps(chunk)}\n\n".encode()
             self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n")
             self.wfile.flush()
+            if mode == "stream-hang":
+                time.sleep(_HANG_SECONDS)
+                self.close_connection = True
+                return
             self.connection.shutdown(socket.SHUT_RDWR)
             return
         status = int(mode)
@@ -80,6 +84,8 @@ def provider_url() -> Iterator[str]:
     thread.start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
     server.shutdown()
+    server.server_close()
+    thread.join()
 
 
 def _closed_port_url() -> str:
@@ -89,7 +95,9 @@ def _closed_port_url() -> str:
     return f"http://127.0.0.1:{port}"
 
 
-async def _fail(api_base: str, *, stream: bool) -> BaseException:
+async def _fail(
+    api_base: str, *, stream: bool, received_text: list[str] | None = None
+) -> BaseException:
     try:
         response = await litellm_transport.acompletion(
             model="openai/m",
@@ -101,8 +109,9 @@ async def _fail(api_base: str, *, stream: bool) -> BaseException:
             timeout=httpx.Timeout(0.5, connect=0.5),
         )
         if stream:
-            async for _ in response:
-                pass
+            async for chunk in response:
+                if received_text is not None:
+                    received_text.append(chunk.choices[0].delta.content or "")
     except Exception as exc:
         return exc
     pytest.fail("the stub provider call succeeded")
@@ -142,12 +151,22 @@ async def test_a_refused_connection_is_unreachable_not_a_server_error():
 
 
 @pytest.mark.asyncio
-async def test_a_stream_the_provider_drops_is_a_lost_connection(provider_url):
-    exc = await _fail(f"{provider_url}/drop/v1", stream=True)
+@pytest.mark.parametrize(
+    ("mode", "code"),
+    [("drop", "provider_connection_lost"), ("stream-hang", "provider_timeout")],
+)
+async def test_a_failed_stream_keeps_the_cause_after_receiving_text(
+    provider_url, mode, code
+):
+    received_text: list[str] = []
+    exc = await _fail(
+        f"{provider_url}/{mode}/v1", stream=True, received_text=received_text
+    )
 
     failure = classify_stream_failure(exc)
+    assert "".join(received_text) == "Hej"
     assert failure is not None
-    assert failure.code == "provider_connection_lost"
+    assert failure.code == code
 
 
 @pytest.mark.parametrize(
