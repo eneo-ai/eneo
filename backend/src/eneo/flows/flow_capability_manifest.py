@@ -52,7 +52,7 @@ from eneo.flows.output_modes import (
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 11
+FCM_VERSION: int = 12
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -304,6 +304,16 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
                 ),
             ),
         ),
+        FlowOutputMode.COPY_INPUT: (
+            "Deterministic JSON copy",
+            "Preserves the resolved JSON object or array, validates its output contract directly, and applies the inline output byte ceiling without a completion model or model-output field normalization.",
+            (
+                InvariantSpec(
+                    id="requires_json_input_json_output",
+                    description="Steps using `copy_input` must have `input_type=JSON` and `output_type=JSON`.",
+                ),
+            ),
+        ),
         FlowOutputMode.COMPOSE_TEXT: (
             "Deterministic text compose",
             (
@@ -467,6 +477,9 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
 # still runs them and the platform preserves saved steps that use them.
 _NOT_EXPOSED_OUTPUT_MODES: Mapping[FlowOutputMode, str] = MappingProxyType(
     {
+        FlowOutputMode.COPY_INPUT: (
+            "JSON copying is authored by hand; the Builder preserves saved steps but does not propose this mode."
+        ),
         FlowOutputMode.HTTP_POST: (
             "HTTP delivery is configured by hand in the editor: its config holds "
             "credentials that an authoring spec never carries, and the Builder "
@@ -538,7 +551,7 @@ def _seed_citation_sidecar_capability() -> FlowCapability:
                 id="forbids_template_fill_or_transcribe_only",
                 description=(
                     "Citation capability is disabled when `output_mode` is "
-                    "`compose_text`, `template_fill`, `transcribe_only`, or "
+                    "`compose_text`, `copy_input`, `template_fill`, `transcribe_only`, or "
                     "`render_verbatim` (non-LLM pathways). Any other "
                     "output_mode preserves capability when the rest holds."
                 ),
@@ -682,6 +695,7 @@ def supports_step_io_tuple(
 
     Rules:
 
+    - `COPY_INPUT` is legal only for `JSON` input → `JSON` output.
     - `COMPOSE_TEXT` is legal only for `TEXT` input → `TEXT` output.
     - `TEMPLATE_FILL` is legal only when `output_type` is `DOCX`.
     - `TRANSCRIBE_ONLY` is legal only for `AUDIO` input → `TEXT` output.
@@ -703,6 +717,8 @@ def supports_step_io_tuple(
         return output_type is FlowOutputType.DOCX
     if output_mode is FlowOutputMode.TRANSCRIBE_ONLY:
         return input_type is FlowInputType.AUDIO and output_type is FlowOutputType.TEXT
+    if output_mode is FlowOutputMode.COPY_INPUT:
+        return input_type is FlowInputType.JSON and output_type is FlowOutputType.JSON
     if output_mode is FlowOutputMode.COMPOSE_TEXT:
         return input_type is FlowInputType.TEXT and output_type is FlowOutputType.TEXT
     if output_mode is FlowOutputMode.RENDER_VERBATIM:
@@ -790,6 +806,7 @@ def is_citation_capable_step(
         return False
     return output_mode not in {
         FlowOutputMode.COMPOSE_TEXT,
+        FlowOutputMode.COPY_INPUT,
         FlowOutputMode.TEMPLATE_FILL,
         FlowOutputMode.TRANSCRIBE_ONLY,
         FlowOutputMode.RENDER_VERBATIM,

@@ -60,8 +60,8 @@ it records:
 - result payload, diagnostics, and generated files;
 - current step-result projection.
 
-A step that calls no completion model (`compose_text`, `render_verbatim`,
-`template_fill`, `transcribe_only`) records what it read and names no
+A step that calls no completion model (`compose_text`, `copy_input`,
+`render_verbatim`, `template_fill`, `transcribe_only`) records what it read and names no
 completion model, provider, model settings or prompt. The model an
 attempt names is the one the step was about to ask, not proof that it was
 called; the provider-call receipts record the calls that were made.

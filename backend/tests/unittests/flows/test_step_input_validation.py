@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from eneo.flows.runtime.step_input_validation import (
+    check_contract_in_child,
     validate_input_contract,
     validate_runtime_input_policy,
 )
@@ -146,13 +147,14 @@ def test_validate_runtime_input_policy_rejects_mixed_image_and_non_image_files(
     assert exc.value.code == "typed_io_invalid_file_type"
 
 
-def test_validate_input_contract_returns_json_contract_metadata() -> None:
-    contract_validation = validate_input_contract(
+async def test_validate_input_contract_returns_json_contract_metadata() -> None:
+    contract_validation = await validate_input_contract(
         step_order=4,
         input_type="json",
         input_contract={"type": "object", "properties": {"name": {"type": "string"}}},
         text='{"name":"A"}',
         structured={"name": "A"},
+        check_in_child=False,
     )
 
     assert contract_validation == {
@@ -163,26 +165,28 @@ def test_validate_input_contract_returns_json_contract_metadata() -> None:
     }
 
 
-def test_validate_input_contract_rejects_json_without_structured_input() -> None:
+async def test_validate_input_contract_rejects_json_without_structured_input() -> None:
     with pytest.raises(TypedIOValidationException) as exc:
-        validate_input_contract(
+        await validate_input_contract(
             step_order=5,
             input_type="json",
             input_contract={"type": "object"},
             text='{"name":"A"}',
             structured=None,
+            check_in_child=False,
         )
 
     assert exc.value.code == "typed_io_invalid_json_input"
 
 
-def test_validate_input_contract_parses_text_for_structured_schema() -> None:
-    contract_validation = validate_input_contract(
+async def test_validate_input_contract_parses_text_for_structured_schema() -> None:
+    contract_validation = await validate_input_contract(
         step_order=6,
         input_type="text",
         input_contract={"type": "object", "properties": {"a": {"type": "number"}}},
         text='{"a":1}',
         structured=None,
+        check_in_child=False,
     )
 
     assert contract_validation == {
@@ -193,13 +197,14 @@ def test_validate_input_contract_parses_text_for_structured_schema() -> None:
     }
 
 
-def test_validate_input_contract_keeps_text_for_string_schema() -> None:
-    contract_validation = validate_input_contract(
+async def test_validate_input_contract_keeps_text_for_string_schema() -> None:
+    contract_validation = await validate_input_contract(
         step_order=7,
         input_type="text",
         input_contract={"type": "string"},
         text="hello",
         structured=None,
+        check_in_child=False,
     )
 
     assert contract_validation == {
@@ -210,16 +215,19 @@ def test_validate_input_contract_keeps_text_for_string_schema() -> None:
     }
 
 
-def test_validate_input_contract_invalid_text_json_attaches_parse_metadata() -> None:
+async def test_validate_input_contract_invalid_text_json_attaches_parse_metadata() -> (
+    None
+):
     raw_text = "{invalid-json"
 
     with pytest.raises(TypedIOValidationException) as exc:
-        validate_input_contract(
+        await validate_input_contract(
             step_order=41,
             input_type="text",
             input_contract={"type": "object", "properties": {"a": {"type": "number"}}},
             text=raw_text,
             structured=None,
+            check_in_child=False,
         )
 
     assert exc.value.code == "typed_io_contract_violation"
@@ -230,3 +238,13 @@ def test_validate_input_contract_invalid_text_json_attaches_parse_metadata() -> 
     assert contract_validation["parse_attempted"] is True
     assert contract_validation["parse_succeeded"] is False
     assert contract_validation["candidate_type"] == "str"
+
+
+async def test_a_non_json_input_value_is_a_typed_refusal_in_the_child_check() -> None:
+    # Kills a child check that lets the encoder's error escape as a worker fault.
+    with pytest.raises(TypedIOValidationException) as exc:
+        await check_contract_in_child(
+            {"n": float("nan")}, {"type": "object"}, label="Step 1 input", side="input"
+        )
+
+    assert exc.value.code == "typed_io_invalid_json_input"

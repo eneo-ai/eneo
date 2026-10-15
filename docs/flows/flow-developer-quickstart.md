@@ -110,7 +110,7 @@ The fields below explain most step behavior.
 | `input_type` | Expected input kind: `text`, `json`, `image`, `audio`, `document`, `file`, or `any`. |
 | `input_bindings` | Structured references to form answers, source refs, or prior structured fields. Prefer this for explicit data flow. |
 | `input_config` | Step input configuration, including HTTP or runtime file settings. |
-| `output_mode` | Execution behavior: `pass_through`, `compose_text`, `http_post`, `transcribe_only`, `speaker_mapping`, `template_fill`, or `render_verbatim`. |
+| `output_mode` | Execution behavior: `pass_through`, `compose_text`, `copy_input`, `http_post`, `transcribe_only`, `speaker_mapping`, `template_fill`, or `render_verbatim`. |
 | `output_type` | Final type produced by the step: `text`, `json`, `pdf`, or `docx`. |
 | `output_contract` | Typed output shape, validation rules, and artifact expectations. |
 | `output_config` | Renderer, HTTP delivery, or output-mode-specific configuration. |

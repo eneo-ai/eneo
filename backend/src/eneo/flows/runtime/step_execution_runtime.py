@@ -1342,12 +1342,15 @@ async def prepare_step_execution(
             max_inline_text_bytes=step_input.processing_ceiling_bytes
             or deps.max_inline_text_bytes,
         )
-        contract_validation = validate_input_contract(
+        contract_validation = await validate_input_contract(
             step_order=step.step_order,
             input_type=step.input_type,
             input_contract=step.input_contract,
             text=step_input.text,
             structured=step_input.structured,
+            # A copy step's value can be a third-party tool's answer that no
+            # model bounds; its contract checks run where a time limit holds.
+            check_in_child=step.output_mode == FlowOutputMode.COPY_INPUT,
             binding_context=(
                 "input_bindings" if step_input.used_question_binding else None
             ),

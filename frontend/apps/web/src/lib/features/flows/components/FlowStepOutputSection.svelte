@@ -94,6 +94,8 @@
 
   function getCompatibilityIssueText(issue: OutputModeCompatibilityIssue): string {
     switch (issue) {
+      case "copy_input_requires_json":
+        return m.flow_output_mode_invalid_copy_input();
       case "compose_text_requires_text":
         return m.flow_output_mode_invalid_compose_text();
       case "render_verbatim_requires_text_document":

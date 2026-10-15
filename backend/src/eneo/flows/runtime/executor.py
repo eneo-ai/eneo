@@ -234,6 +234,7 @@ from eneo.flows.runtime.step_execution_runtime import (
 from eneo.flows.runtime.step_handlers import resolve_handler_mode
 from eneo.flows.runtime.step_handlers.base import PreparedAssistantStep, StepHandler
 from eneo.flows.runtime.step_handlers.compose_text import ComposeTextStepHandler
+from eneo.flows.runtime.step_handlers.copy_input import CopyInputStepHandler
 from eneo.flows.runtime.step_handlers.http_post import HttpPostStepHandler
 from eneo.flows.runtime.step_handlers.pass_through import PassThroughStepHandler
 from eneo.flows.runtime.step_handlers.render_verbatim import RenderVerbatimStepHandler
@@ -1515,6 +1516,10 @@ class FlowRunExecutor:
                     mapped_execution_policy=self.mapped_execution_policy,
                     rag_evidence_policy=self.rag_evidence_policy,
                 )
+            case FlowOutputMode.COPY_INPUT:
+                return CopyInputStepHandler(
+                    prepare_assistant_step=self._prepare_assistant_step
+                )
             case FlowOutputMode.COMPOSE_TEXT:
                 return ComposeTextStepHandler(
                     prepare_assistant_step=self._prepare_assistant_step
@@ -2423,11 +2428,12 @@ class FlowRunExecutor:
                 step=step,
             )
         elif isinstance(exc, ToolArgumentCheckFailed):
-            # Before the tool call and before the step's model: nothing was
-            # asked of a provider or of the tool.
+            # A tool's argument check runs before the step's model, and a copy
+            # step has none; its tool, if any, may already have answered.
             public_error = (
                 f"Flow step {step.step_order} failed because this worker could not "
-                "run the check of the tool's arguments; the tool was not called."
+                "run its schema check; no model was called for the step and it "
+                "produced no result."
             )
         else:
             public_error = _with_provider_work_disclosure(

@@ -879,3 +879,23 @@ def test_parse_runtime_steps_loads_published_section_step_reading_json_step() ->
 
     assert [step.step_order for step in parsed] == [1, 2]
     assert parsed[1].input_bindings == {"question": "{{ step_1.output.text }}"}
+
+
+@pytest.mark.parametrize(
+    ("input_type", "output_type"),
+    [("json", "json"), ("text", "json"), ("json", "text")],
+)
+def test_snapshot_copy_input_uses_only_json_input_and_output(input_type, output_type):
+    # Kills a snapshot reader that accepts the vocabulary but bypasses IO validation.
+    definition = _definition(
+        _step_snapshot(
+            input_type=input_type, output_type=output_type, output_mode="copy_input"
+        )
+    )
+    if input_type == output_type == "json":
+        assert parse_runtime_steps(definition)[0].output_mode == "copy_input"
+    else:
+        with pytest.raises(
+            BadRequestException, match="copy_input.*requires input_type 'json'"
+        ):
+            parse_runtime_steps(definition)

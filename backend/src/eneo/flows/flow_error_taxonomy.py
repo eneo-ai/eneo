@@ -1003,6 +1003,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Fix the JSON shape against the contract before saving or starting a new run.",
         user_action="Fix the structured output and save again.",
     ),
+    FlowApiErrorCode.TYPED_IO_CONTRACT_NOT_CHECKED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="A copy_input step's value could not be checked against its contract in time, which a larger value or a contract with more work per item reaches sooner, or at all.",
+        consumer_action="Send a smaller value or simplify the contract, then start a new run.",
+        user_action="Ask a flow editor to simplify the step's format, or use less material.",
+    ),
     FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",

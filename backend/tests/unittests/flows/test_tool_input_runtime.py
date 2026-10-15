@@ -92,6 +92,7 @@ from tests.unittests.flows.test_resolved_input_runtime import _result
 from tests.unittests.flows.test_tool_publish_pin import _Facts, _facts
 from tests.unittests.flows.test_typed_io_executor import (
     _build_executor,
+    _mock_assistant_for_execute_step,
     _run,
     _runtime_step,
 )
@@ -1060,8 +1061,53 @@ async def test_a_check_whose_process_does_not_start_fails_the_step_as_the_host(
     # Not retryable: an earlier tool step of the run may have been called.
     assert error.retryable is False
     assert error.message == (
-        "Flow step 2 failed because this worker could not run the check of the "
-        "tool's arguments; the tool was not called."
+        "Flow step 2 failed because this worker could not run its schema check; "
+        "no model was called for the step and it produced no result."
+    )
+
+
+async def test_a_copy_of_a_tool_answer_whose_check_cannot_run_names_no_tool_claim(
+    user, monkeypatch
+) -> None:
+    # Kills a host-fault sentence that says the step called no tool: a copy
+    # step's contract check runs after its tool has answered.
+    monkeypatch.setattr(
+        tool_argument_check,
+        "_COPY_CHECKER",
+        ToolArgumentChecker(tool_argument_check.copy_contract_limit_seconds),
+    )
+    monkeypatch.setattr(tool_argument_check, "_START_TIMEOUT_SECONDS", 0.0)
+    facts = _facts()
+    caller = _answered({"ok": True})
+    executor = _tool_executor(user, _Facts(facts), caller)
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_prompt_text.return_value = ""
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = replace(
+        _tool_step(facts),
+        output_type="json",
+        output_mode="copy_input",
+        output_contract={"type": "object"},
+    )
+    run = _running(user)
+    with pytest.raises(ToolArgumentCheckFailed) as failed:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+    claimed = _failing(executor, user, step)
+
+    await executor._handle_generic_step_failure(
+        run_id=claimed.flow_run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        state=_empty_execution_state(),
+        exc=failed.value,
+    )
+
+    assert len(caller.calls) == 1
+    assert executor._terminalize_run.await_args.kwargs["error"].message == (
+        "Flow step 2 failed because this worker could not run its schema check; "
+        "no model was called for the step and it produced no result."
     )
 
 

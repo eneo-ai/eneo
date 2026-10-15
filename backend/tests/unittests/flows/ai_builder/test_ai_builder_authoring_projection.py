@@ -1525,11 +1525,13 @@ def test_edit_overlay_modify_step_uses_document_delivery_mode_derivation() -> No
     assert result.steps[0].output_mode == OutputMode.RENDER_VERBATIM
 
 
-@pytest.mark.parametrize("mode", [OutputMode.COMPOSE_TEXT, OutputMode.SPEAKER_MAPPING])
+@pytest.mark.parametrize(
+    "mode", [OutputMode.COMPOSE_TEXT, OutputMode.SPEAKER_MAPPING, OutputMode.COPY_INPUT]
+)
 def test_edit_overlay_keeps_an_authored_mode_while_the_step_io_stays_legal(
     mode: OutputMode,
 ) -> None:
-    """compose_text and speaker_mapping are authored choices no derivation
+    """Authored modes are choices no derivation
     produces. An identity-only entry (a keep, or a saved step the fragment
     left out) compiles to the base step itself; an instructions-only patch
     and a same-IO binding edit keep the mode, because the engine still
@@ -1542,12 +1544,12 @@ def test_edit_overlay_keeps_an_authored_mode_while_the_step_io_stays_legal(
             "existing_step_1",
             "Authored",
             output_mode=mode,
-            input_type=InputType.TEXT
-            if mode is OutputMode.COMPOSE_TEXT
+            input_type=InputType.JSON
+            if mode is OutputMode.COPY_INPUT
             else InputType.TEXT,
             output_type=(
                 OutputType.JSON
-                if mode is OutputMode.SPEAKER_MAPPING
+                if mode in {OutputMode.SPEAKER_MAPPING, OutputMode.COPY_INPUT}
                 else OutputType.TEXT
             ),
         )

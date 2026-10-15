@@ -268,6 +268,17 @@ export function applyOutputModeChange({
     );
   }
 
+  if (nextMode === "copy_input") {
+    return sanitizeFlowStepReviewPolicy(
+      sanitizeStepCitationMode({
+        ...step,
+        output_mode: "copy_input",
+        output_type: "json",
+        output_contract: step.output_type === "json" ? step.output_contract : null
+      })
+    );
+  }
+
   if (nextMode === "compose_text") {
     return sanitizeFlowStepReviewPolicy(
       sanitizeStepCitationMode({

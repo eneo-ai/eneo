@@ -7,7 +7,6 @@ from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
-    StepExecutionOutput,
 )
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -15,6 +14,7 @@ from eneo.flows.output_modes import render_verbatim_violation
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import attach_typed_failure_context
 from eneo.flows.runtime.step_handlers.base import PrepareAssistantStepFn
+from eneo.flows.runtime.step_handlers.deterministic_result import deterministic_result
 from eneo.main.exceptions import TypedIOValidationException
 
 
@@ -76,10 +76,14 @@ class RenderVerbatimStepHandler:
             run=run,
             step=step,
         )
-        diagnostics = [
-            *prepared.diagnostics,
-            *typed_output.diagnostics,
-            StepDiagnostic(
+        return deterministic_result(
+            prepared=prepared,
+            typed_output=typed_output,
+            output_text=output_text,
+            persisted_text=persisted_text,
+            generated_file_ids=generated_file_ids,
+            mode=self.output_mode,
+            diagnostic=StepDiagnostic(
                 code="render_verbatim_used",
                 message=(
                     f"Step {step.step_order}: render_verbatim mode rendered "
@@ -87,25 +91,4 @@ class RenderVerbatimStepHandler:
                 ),
                 severity="info",
             ),
-        ]
-        return StepExecutionResult(
-            output=StepExecutionOutput(
-                input_text=prepared.step_input.text,
-                source_text=prepared.step_input.source_text,
-                input_source=prepared.step_input.input_source,
-                used_question_binding=prepared.step_input.used_question_binding,
-                full_text=output_text,
-                persisted_text=persisted_text,
-                generated_file_ids=generated_file_ids,
-                tool_calls_metadata=None,
-                num_tokens_input=0,
-                num_tokens_output=0,
-                effective_prompt="",
-                model_parameters_json={"mode": "render_verbatim"},
-                contract_validation=prepared.contract_validation,
-                structured_output=typed_output.structured_output,
-                artifacts=typed_output.artifacts,
-                diagnostics=diagnostics,
-                runtime_input_metadata=prepared.step_input.runtime_input_metadata,
-            )
         )

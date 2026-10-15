@@ -71,6 +71,14 @@ describe("getStepAiWorkKind", () => {
     );
   });
 
+  it("says a JSON copy step passes its JSON on without AI", () => {
+    // Kills a capsule that calls a JSON copy text work ("Uses the text without AI").
+    const copied = step({ input_type: "json", output_mode: "copy_input", output_type: "json" });
+    expect(getStepAiWork(copied, { instructionPresent: false }).text).toBe(
+      m.flow_capsule_ai_copy()
+    );
+  });
+
   it("marks an LLM step with an instruction as process", () => {
     expect(getStepAiWorkKind(step({}), { instructionPresent: true })).toBe("process");
   });

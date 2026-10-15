@@ -494,6 +494,7 @@
   const OUTPUT_MODE_LABELS: Record<string, () => string> = {
     pass_through: m.flow_output_mode_pass_through,
     compose_text: m.flow_output_mode_compose_text,
+    copy_input: m.flow_output_mode_copy_input,
     render_verbatim: m.flow_output_mode_render_verbatim,
     template_fill: m.flow_output_mode_template_fill,
     transcribe_only: m.flow_output_mode_transcribe_only,
@@ -560,6 +561,7 @@
    */
   function nodeModeLabel(step: StepSpec): string | null {
     if (step.output_mode === "compose_text") return m.ai_builder_node_mode_compose_text();
+    if (step.output_mode === "copy_input") return m.ai_builder_node_mode_copy_input();
     if (step.output_mode === "render_verbatim") return m.ai_builder_node_mode_render_verbatim();
     return null;
   }

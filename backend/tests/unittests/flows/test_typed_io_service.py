@@ -615,3 +615,24 @@ def test_input_contract_on_json_allowed(user):
     service = _service(user)
     steps = [_step(input_type="json", input_contract={"type": "object"})]
     service._validate_steps(steps)  # should not raise
+
+
+@pytest.mark.parametrize(
+    ("input_type", "output_type"),
+    [("json", "json"), ("text", "json"), ("json", "text")],
+)
+def test_publish_copy_input_uses_only_json_input_and_output(
+    user, input_type, output_type
+):
+    # Kills a new enum admitted at save but unsupported or over-broad at publish.
+    service = _service(user)
+    steps = [
+        _step(input_type=input_type, output_type=output_type, output_mode="copy_input")
+    ]
+    if input_type == output_type == "json":
+        service._validate_steps(steps)
+    else:
+        with pytest.raises(
+            BadRequestException, match="copy_input.*requires input_type 'json'"
+        ):
+            service._validate_steps(steps)

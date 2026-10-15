@@ -391,3 +391,23 @@ describe("applyOutputModeChange speaker_mapping", () => {
     expect(next.output_mode).toBe("pass_through");
   });
 });
+
+describe("copy_input mode transition", () => {
+  it("selects JSON while preserving an existing JSON output contract", () => {
+    // Kills a copy output changed to text or losing the author's contract.
+    const step = makeStep({
+      input_type: "json",
+      output_type: "json",
+      output_contract: { type: "object" }
+    });
+    const result = applyOutputModeChange({
+      step,
+      nextMode: "copy_input",
+      runtimeInputConfig: makeRuntimeInputConfig(),
+      templateFillConfig: getTemplateFillOutputConfig(step)
+    });
+    expect(result.output_mode).toBe("copy_input");
+    expect(result.output_type).toBe("json");
+    expect(result.output_contract).toEqual(step.output_contract);
+  });
+});

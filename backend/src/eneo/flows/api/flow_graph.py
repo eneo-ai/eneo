@@ -8,7 +8,11 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.config import JsonDict
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStepResultAnnotation
-from eneo.flows.enums import FlowInputSource
+from eneo.flows.enums import (
+    FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE,
+    FlowInputSource,
+    FlowPrimaryOutputExecutionKind,
+)
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.step_lineage import (
     build_step_ref_mapping,
@@ -72,6 +76,13 @@ class GraphResponse(BaseModel):
     edges: list[GraphEdge]
 
 
+_ASSEMBLY_OUTPUT_MODES = frozenset(
+    mode.value
+    for mode, kind in FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE.items()
+    if kind is FlowPrimaryOutputExecutionKind.DETERMINISTIC
+)
+
+
 def build_graph_from_steps(
     steps: Sequence[FlowPersistedJsonObject],
 ) -> tuple[list[GraphNode], list[GraphEdge]]:
@@ -85,11 +96,7 @@ def build_graph_from_steps(
         step_id = str(step.get("step_id") or step.get("id"))
         label = step.get("user_description") or f"Steg {step['step_order']}"
         output_mode = step.get("output_mode")
-        node_type = (
-            "assembly"
-            if output_mode in {"compose_text", "template_fill", "render_verbatim"}
-            else "llm"
-        )
+        node_type = "assembly" if output_mode in _ASSEMBLY_OUTPUT_MODES else "llm"
         nodes.append(
             GraphNode(
                 id=step_id,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -1246,12 +1247,13 @@ async def test_resolve_step_input_json_source_refs_build_exact_structured_projec
     assert json.loads(resolved.text) == resolved.structured
     assert "unused" not in resolved.text
     assert len(resolved.edges) == 2
-    assert validate_input_contract(
+    assert await validate_input_contract(
         step_order=3,
         input_type="json",
         input_contract=input_contract,
         text=resolved.text,
         structured=resolved.structured,
+        check_in_child=False,
         binding_context="input_bindings.source_refs",
     ) == {
         "schema_type_hint": "object",
@@ -6000,14 +6002,22 @@ async def test_output_violation_fact_is_identical_for_every_model_route(user):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("input_type", ["json", "text"])
-async def test_input_violation_fact_names_the_input_side(user, input_type):
+@pytest.mark.parametrize(
+    ("input_type", "output_mode"),
+    [("json", "pass_through"), ("text", "pass_through"), ("json", "copy_input")],
+)
+async def test_input_violation_fact_names_the_input_side(user, input_type, output_mode):
     from eneo.flows.flow_run_error import FlowRunContractViolation
 
     executor, _, _, _ = _build_executor(user)
     assistant = _mock_assistant_for_execute_step()
     executor._load_assistant = AsyncMock(return_value=assistant)
-    step = _runtime_step(input_type=input_type, input_contract=_FACT_CONTRACT)
+    step = _runtime_step(
+        input_type=input_type,
+        input_contract=_FACT_CONTRACT,
+        output_mode=output_mode,
+        output_type="json" if output_mode == "copy_input" else "text",
+    )
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
@@ -6232,3 +6242,209 @@ async def test_hostile_contract_context_still_terminalizes_without_a_fact(
     assert executor._terminalize_run.await_args.kwargs["target_status"] == (
         FlowRunStatus.FAILED
     )
+
+
+@pytest.mark.parametrize(
+    ("value", "contract", "ceiling", "failure"),
+    [
+        pytest.param(
+            {
+                "Case_ID": "Å-17",
+                "extra": {"fält": [None, True, 2.5]},
+                "unlisted": "漢字",
+            },
+            {"type": "object", "properties": {"Case_ID": {"type": "string"}}},
+            4096,
+            None,
+            id="whole-object-keys-unicode",
+        ),
+        pytest.param(
+            [{"x": "å"}, None, False, 2.5],
+            {"type": "array"},
+            4096,
+            None,
+            id="whole-array",
+        ),
+        pytest.param(
+            {"count": "five"},
+            {"properties": {"count": {"type": "integer"}}},
+            4096,
+            "typed_io_contract_violation",
+            id="wrong-output-value",
+        ),
+        pytest.param(
+            {"Case_ID": "x"},
+            {"properties": {"case_id": {"type": "string"}}, "required": ["case_id"]},
+            4096,
+            "typed_io_contract_violation",
+            id="key-not-renamed-to-contract",
+        ),
+        pytest.param(
+            {},
+            {"type": "missing"},
+            4096,
+            "typed_io_contract_violation",
+            id="unevaluable-output-schema",
+        ),
+        pytest.param(
+            [0] * 430,
+            {"type": "array"},
+            1200,
+            "typed_io_structured_output_exceeds_limit",
+            id="encoded-output-cap",
+        ),
+        *[
+            pytest.param(
+                {"nested": [number]},
+                None,
+                4096,
+                "typed_io_invalid_json_input",
+                id=f"nonfinite-{label}",
+            )
+            for label, number in [
+                ("nan", float("nan")),
+                ("positive-infinity", float("inf")),
+                ("negative-infinity", -float("inf")),
+            ]
+        ],
+        pytest.param(
+            None, None, 4096, "typed_io_invalid_json_input", id="no-container"
+        ),
+    ],
+)
+async def test_copy_input_preserves_the_container_without_a_model(
+    user, value, contract, ceiling, failure
+) -> None:
+    # Kills model dispatch, JSON field normalization, skipped direct output
+    # validation (even with no compiled validator), and skipped byte admission.
+    executor, _, _, _ = _build_executor(user, max_inline_text_bytes=ceiling)
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_prompt_text.return_value = ""
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    raw = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text=raw, source_text=raw, structured=value, input_source="flow_input"
+        )
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    step = _runtime_step(
+        input_type="json",
+        output_type="json",
+        output_mode="copy_input",
+        output_contract=contract,
+    )
+    if failure:
+        with pytest.raises(TypedIOValidationException) as refused:
+            await executor._execute_step(step=step, run=run, attempt_no=1)
+        assert refused.value.code == failure
+        if refused.value.context and failure == "typed_io_contract_violation":
+            assert refused.value.context["contract_side"] == "output"
+    else:
+        output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+        assert output.structured_output == value
+        assert json.loads(output.full_text) == value
+        assert json.loads(output.persisted_text) == value
+        assert output.model_parameters_json == {"mode": "copy_input"}
+        assert output.num_tokens_input == output.num_tokens_output == 0
+        assert output.generated_file_ids == []
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.parametrize("side", ["input", "output"])
+async def test_copy_input_checks_a_backtracking_contract_off_the_event_loop(
+    user, monkeypatch, side
+) -> None:
+    # Kills an in-process contract check on either side of a copy step: Python's
+    # re holds the GIL on this pattern for seconds, so the loop stops beating
+    # and the step ends with a pattern violation instead of at the limit.
+    from eneo.flows.runtime import tool_argument_check
+
+    monkeypatch.setattr(tool_argument_check, "COPY_CONTRACT_CHECK_TIMEOUT_SECONDS", 0.5)
+    executor, _, _, _ = _build_executor(user)
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_prompt_text.return_value = ""
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    contract = {"properties": {"code": {"pattern": "^(a+)+$"}}}
+    step = _runtime_step(
+        input_type="json",
+        output_type="json",
+        output_mode="copy_input",
+        **{f"{side}_contract": contract},
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    def copy_of(value: dict[str, object]) -> AsyncMock:
+        raw = json.dumps(value)
+        return AsyncMock(
+            return_value=StepInputValue(
+                text=raw, source_text=raw, structured=value, input_source="flow_input"
+            )
+        )
+
+    beats: list[float] = []
+
+    async def heartbeat() -> None:
+        while True:
+            beats.append(time.monotonic())
+            await asyncio.sleep(0.01)
+
+    executor._resolve_step_input = copy_of({"code": "a" * 27 + "!"})
+    beating = asyncio.create_task(heartbeat())
+    started = time.monotonic()
+    try:
+        with pytest.raises(TypedIOValidationException) as refused:
+            await executor._execute_step(step=step, run=run, attempt_no=1)
+    finally:
+        ended = time.monotonic()
+        beating.cancel()
+    marks = [started, *beats, ended]
+    assert max(b - a for a, b in zip(marks, marks[1:])) < 0.25
+    assert ended - started < 3.0
+    assert refused.value.code == "typed_io_contract_not_checked"
+
+    executor._resolve_step_input = copy_of({"code": "aaa"})
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+    assert output.structured_output == {"code": "aaa"}
+    assistant.get_response.assert_not_awaited()
+
+
+async def test_copy_input_checks_a_large_valid_value_past_the_tool_argument_limit(
+    user, monkeypatch
+) -> None:
+    # Kills copy contract checks bound by the tool-argument limit: a valid
+    # value at the step's byte ceiling whose check takes longer than that
+    # limit would fail the step although it fits the contract.
+    from eneo.flows.runtime import tool_argument_check
+
+    monkeypatch.setattr(
+        tool_argument_check, "TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS", 0.01
+    )
+    value = [[index] for index in range(20_000)]
+    raw = json.dumps(value)
+    # The input cap also counts the step's format instructions.
+    executor, _, _, _ = _build_executor(user, max_inline_text_bytes=len(raw) + 4096)
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_prompt_text.return_value = ""
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text=raw, source_text=raw, structured=value, input_source="flow_input"
+        )
+    )
+    contract = {
+        "type": "array",
+        "items": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+    }
+    step = _runtime_step(
+        input_type="json",
+        output_type="json",
+        output_mode="copy_input",
+        input_contract=contract,
+        output_contract=contract,
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assert output.structured_output == value

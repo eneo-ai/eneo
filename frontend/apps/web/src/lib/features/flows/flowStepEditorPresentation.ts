@@ -9,7 +9,15 @@ import { outputModeUsesCompletionModel } from "$lib/features/flows/flowStepTypes
  * contradict each other.
  */
 export type StepAiWorkKind =
-  "transcribe" | "speakers" | "http" | "template" | "document" | "compose" | "missing" | "process";
+  | "transcribe"
+  | "speakers"
+  | "http"
+  | "template"
+  | "document"
+  | "compose"
+  | "copy"
+  | "missing"
+  | "process";
 
 export function getStepAiWorkKind(
   step: FlowStep,
@@ -21,6 +29,7 @@ export function getStepAiWorkKind(
     return "http";
   }
   if (step.output_mode === "template_fill") return "template";
+  if (step.output_mode === "copy_input") return "copy";
   if (!outputModeUsesCompletionModel(step.output_mode)) {
     // No model works on this step, so the header must not say that AI does.
     return step.output_type === "docx" || step.output_type === "pdf" ? "document" : "compose";
@@ -100,8 +109,10 @@ export function getStepAiWork(
               ? m.flow_capsule_ai_document()
               : kind === "compose"
                 ? m.flow_capsule_ai_compose()
-                : kind === "missing"
-                  ? m.flow_capsule_ai_missing()
-                  : m.flow_capsule_ai_process();
+                : kind === "copy"
+                  ? m.flow_capsule_ai_copy()
+                  : kind === "missing"
+                    ? m.flow_capsule_ai_missing()
+                    : m.flow_capsule_ai_process();
   return { text, missing: kind === "missing" };
 }

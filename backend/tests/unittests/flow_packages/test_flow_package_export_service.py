@@ -562,7 +562,8 @@ def test_export_drops_a_speaker_mapping_block_on_a_step_that_does_not_map() -> N
     assert envelope.draft.spec.steps[0].output_config is None
 
 
-def test_export_omits_disabled_portable_config_when_mode_irrelevant() -> None:
+@pytest.mark.parametrize("mode", ["compose_text", "copy_input"])
+def test_export_omits_disabled_portable_config_when_mode_irrelevant(mode) -> None:
     assistant_id = uuid4()
     envelope = _build_envelope(
         flow=_flow(
@@ -570,8 +571,9 @@ def test_export_omits_disabled_portable_config_when_mode_irrelevant() -> None:
                 _step(
                     1,
                     assistant_id=assistant_id,
-                    input_type="text",
-                    output_mode="compose_text",
+                    input_type="json" if mode == "copy_input" else "text",
+                    output_type="json" if mode == "copy_input" else "text",
+                    output_mode=mode,
                     input_config={
                         "runtime_input": {"enabled": False},
                         "item_map": {"enabled": False},
@@ -587,6 +589,8 @@ def test_export_omits_disabled_portable_config_when_mode_irrelevant() -> None:
     step = envelope.draft.spec.steps[0]
     assert step.input_config is None
     assert step.output_config is None
+    assert step.output_mode.value == mode
+    assert read_flow_package(write_flow_package(envelope)) == envelope
 
 
 @pytest.mark.parametrize(

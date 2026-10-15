@@ -63,6 +63,7 @@ export const OUTPUT_TYPES: OutputOption<OutputType>[] = [
 const OUTPUT_MODE_LABELS: Record<OutputMode, () => string> = {
   pass_through: () => m.flow_output_mode_pass_through(),
   compose_text: () => m.flow_output_mode_compose_text(),
+  copy_input: () => m.flow_output_mode_copy_input(),
   transcribe_only: () => m.flow_output_mode_transcribe_only(),
   speaker_mapping: () => m.flow_output_mode_speaker_mapping(),
   template_fill: () => m.flow_output_mode_template_fill(),
@@ -73,6 +74,7 @@ const OUTPUT_MODE_LABELS: Record<OutputMode, () => string> = {
 const OUTPUT_MODE_ORDER: OutputMode[] = [
   "pass_through",
   "compose_text",
+  "copy_input",
   "transcribe_only",
   "speaker_mapping",
   "template_fill",
@@ -90,6 +92,7 @@ export const OUTPUT_MODES: OutputOption<OutputMode>[] = OUTPUT_MODE_ORDER.map((v
 }));
 
 export type OutputModeCompatibilityIssue =
+  | "copy_input_requires_json"
   | "compose_text_requires_text"
   | "render_verbatim_requires_text_document"
   | "template_fill_requires_docx"
@@ -422,7 +425,7 @@ export function getAvailableOutputTypes(
         ? ["docx"]
         : step.output_mode === "render_verbatim"
           ? ["pdf", "docx"]
-          : step.output_mode === "speaker_mapping"
+          : step.output_mode === "speaker_mapping" || step.output_mode === "copy_input"
             ? ["json"]
             : OUTPUT_TYPES.map((type) => type.value);
 
@@ -453,6 +456,7 @@ export function getAvailableOutputModes(params: {
     if (mode.value === "compose_text" || mode.value === "render_verbatim") {
       return step.input_type === "text";
     }
+    if (mode.value === "copy_input") return step.input_type === "json";
     if (mode.value === "transcribe_only") return step.input_type === "audio";
     if (mode.value === "speaker_mapping") {
       // The mapping reads the previous step's diarized transcript.
@@ -468,6 +472,11 @@ export function getAvailableOutputModes(params: {
 export function getOutputModeCompatibilityIssue(
   step: Pick<FlowStep, "input_type" | "output_type" | "output_mode">
 ): OutputModeCompatibilityIssue | null {
+  if (step.output_mode === "copy_input") {
+    return step.input_type === "json" && step.output_type === "json"
+      ? null
+      : "copy_input_requires_json";
+  }
   if (step.output_mode === "compose_text") {
     return step.input_type === "text" && step.output_type === "text"
       ? null
