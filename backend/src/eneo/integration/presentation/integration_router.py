@@ -33,6 +33,7 @@ from eneo.integration.presentation.validation import (
     validate_folder_path,
 )
 from eneo.main.container.container import Container
+from eneo.observability.error_text import user_visible_error
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
@@ -559,7 +560,9 @@ async def get_sharepoint_folder_tree(
             },
             exc_info=True,
         )
-        raise BadRequestException(f"Failed to fetch SharePoint folder tree: {str(e)}")
+        raise BadRequestException(
+            f"Failed to fetch SharePoint folder tree: {user_visible_error(e)}"
+        )
 
 
 @router.get(

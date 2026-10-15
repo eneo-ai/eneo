@@ -252,6 +252,27 @@ _SIGNED_DOWNLOAD_URL = (
 )
 
 
+def _signed_request_info() -> RequestInfo:
+    url = URL(_SIGNED_DOWNLOAD_URL)
+    return RequestInfo(
+        url,
+        "GET",
+        CIMultiDictProxy(CIMultiDict({"Authorization": "Bearer mock-token"})),
+        url,
+    )
+
+
+class _FailedRequest(_FakeResponse):
+    """A download aiohttp gives up on before it hands back a response."""
+
+    def __init__(self, error: Exception):
+        super().__init__([], {})
+        self._error = error
+
+    async def __aenter__(self):
+        raise self._error
+
+
 class _RefusedResponse(_FakeResponse):
     """A download answered with an error status, as aiohttp reports it."""
 
@@ -307,6 +328,41 @@ class TestRefusedDownloads:
             assert "eyJ" not in text
             assert "mock-token" not in text
         assert str(error.request_info.real_url) == _SIGNED_DOWNLOAD_URL.split("?")[0]
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                aiohttp.TooManyRedirects(
+                    _signed_request_info(),
+                    # aiohttp keeps every redirect, each with the signed URL.
+                    (MagicMock(__repr__=lambda _: _SIGNED_DOWNLOAD_URL),),
+                    status=302,
+                    message="Found",
+                ),
+                id="too-many-redirects",
+            ),
+            pytest.param(
+                aiohttp.InvalidUrlRedirectClientError(
+                    _SIGNED_DOWNLOAD_URL, "Invalid redirect URL"
+                ),
+                id="invalid-redirect",
+            ),
+        ],
+    )
+    async def test_a_request_that_fails_before_a_response_drops_the_token_too(
+        self, signed_client: SharePointContentClient, error: aiohttp.ClientError
+    ):
+        signed_client.client.client.get = MagicMock(return_value=_FailedRequest(error))
+
+        with pytest.raises(aiohttp.ClientError) as caught:
+            await signed_client.get_file_extraction_by_id("drive", "item")
+
+        logged = "".join(traceback.format_exception(caught.value))
+        for text in (str(caught.value), repr(caught.value), logged):
+            assert "tempauth" not in text
+            assert "eyJ" not in text
+            assert "mock-token" not in text
 
     async def test_throttled_downloads_are_still_retried(
         self, signed_client: SharePointContentClient

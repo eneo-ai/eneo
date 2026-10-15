@@ -41,12 +41,14 @@ def _visible_error(value: Optional[str]) -> Optional[str]:
 
 
 # Skips of delta items never placed in the item's scope: older syncs named
-# their file, which may lie anywhere in the drive.
+# their file, which may lie anywhere in the drive. "Could not remove:" is what
+# releases before 2.2 wrote for deleted items, which were never placed either.
 _UNPLACED_SKIP_REASONS = (
     "Folder scope path unavailable",
     "Missing item id",
     "Could not remove out-of-scope",
     "Could not remove removed:",
+    "Could not remove:",
 )
 
 
@@ -76,9 +78,13 @@ def _visible_detail(detail: object) -> object:
         return detail
     entry = cast(Dict[str, object], detail)
     file, reason = entry.get("file"), entry.get("reason")
-    if not isinstance(file, str) or not isinstance(reason, str):
-        return entry
-    return {**entry, **_visible_skip(file, reason)}
+    return {
+        **entry,
+        **_visible_skip(
+            file if isinstance(file, str) else "",
+            reason if isinstance(reason, str) else "",
+        ),
+    }
 
 
 def _visible_sync_metadata(metadata: SyncMetadata) -> SyncMetadata:

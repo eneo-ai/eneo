@@ -283,10 +283,10 @@ class SyncProgressReporter:
                     exc,
                 )
             return
-        await self._clear(item_id)
+        await self._clear(item_id, started_at=run.started_at)
 
     async def _clear(
-        self, integration_knowledge_id: UUID, *, started_at: datetime | None = None
+        self, integration_knowledge_id: UUID, *, started_at: datetime
     ) -> None:
         if self._store is None:
             return

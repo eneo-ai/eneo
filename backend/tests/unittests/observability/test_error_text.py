@@ -251,3 +251,28 @@ def test_nothing_secret_survives_any_path():
     for text in texts:
         for secret in ("tempauth", "eyJ", "graph-token", "INSERT INTO", "Lönelista"):
             assert secret not in text
+
+
+def test_a_cause_chain_that_loops_back_is_described_by_its_kind():
+    first, second = InternalHTTPException(), InternalHTTPException()
+    first.__cause__, second.__cause__ = second, first
+
+    assert user_visible_error(first) == "InternalHTTPException"
+
+
+def test_a_long_chain_of_silent_wrappers_still_reaches_its_cause():
+    error: BaseException = aiohttp.ServerDisconnectedError("gone")
+    for _ in range(5_000):
+        wrapper = InternalHTTPException()
+        wrapper.__cause__ = error
+        error = wrapper
+
+    assert user_visible_error(error) == "Connection error"
+
+
+def test_an_error_whose_text_cannot_be_built_is_described_by_its_kind():
+    class Unprintable(Exception):
+        def __str__(self) -> str:
+            raise RuntimeError("no text")
+
+    assert user_visible_error(Unprintable()) == "Unprintable"
