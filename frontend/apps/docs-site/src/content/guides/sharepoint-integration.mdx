@@ -253,6 +253,8 @@ Importing SharePoint content into shared or organization spaces works differentl
 
 Only users with **administrator permissions** in Eneo can import SharePoint content into shared spaces. Non-admin users will not see SharePoint as an available integration when adding knowledge to a shared space.
 
+The same applies to a source imported with these credentials once it is in the space: only administrators can rename it, start a full sync or remove it. Other members see the source, its status and its pages, but not those actions.
+
 This restriction exists because the centralized authentication grants broad access to SharePoint content — either all sites in the organization (tenant app) or all sites the service account has access to (service account). Limiting imports to administrators ensures that content is added intentionally.
 
 #### How It Works
