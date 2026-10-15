@@ -363,7 +363,7 @@ The page is titled with the source's name, with a breadcrumb back to **Integrati
 
 #### The Contents tab
 
-For a source with several items, the folders are listed on the left. An item imported from a folder inside another imported folder is nested under it, whole-site imports come first and siblings are sorted by name. Each folder shows its state (also read out to screen readers) and its number of documents, or the files done while it syncs. **All folders** shows a table of the folders with their status, number of documents, when each was last up to date, **Open in SharePoint** and the folder's actions menu. Selecting a folder shows its documents; the selected folder is part of the page address, so it can be linked to. A source imported as a single item shows its documents directly.
+For a source with several items, the folders are listed on the left. An item imported from a folder inside another imported folder is nested under it, whole-site imports come first and siblings are sorted by name. A source with more than eight folders gets a **Filter folders** box, and a folder with folders under it can be collapsed. Each folder shows its state (also read out to screen readers) and its number of documents, or the files done while it syncs. **All folders** shows a table of the folders with their status, number of documents, when each was last up to date, **Open in SharePoint** and the folder's actions menu. Selecting a folder shows its documents; the selected folder is part of the page address, so it can be linked to. A source imported as a single item shows its documents directly.
 
 The documents of a folder are listed 50 per page:
 
@@ -376,10 +376,10 @@ The search box matches the name or the path. Each of the four column headings so
 
 #### The Problems tab
 
-**Problems** collects what needs attention across the source's folders; the number on the tab counts the blocking problems and the files that can be fixed. It is split into three groups:
+**Problems** collects what needs attention across the source's folders; the number on the tab counts the distinct things to act on: a refused sign-in, each failure message and each cause of files that can be fixed. It is split into three groups:
 
 - **Stops the sync**: a refused SharePoint sign-in, which stops every folder from updating and can only be fixed by an administrator under **Admin > Integrations** (an administrator gets a button to go there, others can copy a link to send to one), and any other failed synchronization, with its technical details.
-- **Files that did not become searchable**: the skipped files grouped by cause, each with what to do about it, for example _Scanned documents without text_ (save the file as a searchable PDF), _Files that are too large_, _Too much text_, _Password-protected files_, _Damaged files_, _Files without text_ and _Temporary errors_ (tried again at the next sync). Each group opens to list its files with their folder and the exact reason.
+- **Files that did not become searchable**: the skipped files grouped by cause, each with what to do about it, for example _Scanned documents without text_ (save the file as a searchable PDF), _Files that are too large_, _Too much text_, _Password-protected files_, _Damaged files_, _Files without text_ and _Temporary errors_ (tried again at the next sync). Each group opens to list its files with their folder and the exact reason; a long group shows its first ten files with **Show all N files**. Folders whose latest sync failed with the same message share one entry.
 - **Skipped on purpose**: file types that are never used as knowledge, such as images and videos.
 
 The reasons are the ones listed under [Supported File Types](#supported-file-types). The lists reflect the latest synchronization of each folder: a file that was skipped earlier but indexed since is no longer listed. Each folder's list holds at most 50 files; when more were skipped, a line says how many are not listed.
@@ -427,6 +427,16 @@ Fixture mode is deliberately separate from the real integration:
 - An invalid or misspelled fixture scenario remains in fixture mode and never falls back to Microsoft Graph.
 
 The deterministic catalog is owned by `backend/src/eneo/integration/sharepoint_fixture/catalog.py`; fixture behavior and real Graph behavior do not share a service path.
+
+### Imported knowledge at scale
+
+The fixture catalog covers the import dialog only. To see imported knowledge as it looks at scale, `backend/scripts/seed_sharepoint_showcase.py` creates the shared space _SharePoint – storskaligt_ with six sources: a site imported as a 35-folder tree with every sync state and skip reason, a source with thousands of documents and long names, a whole-site import under a second embedding model, a OneDrive folder, a source whose sign-in was refused and one that never synced. Subscriptions are active, expired, failing or about to expire, and every folder has weeks of sync history. It runs only while fixture mode is active and recreates the space on every run. From `backend/` in the devcontainer:
+
+```bash
+uv run python scripts/seed_sharepoint_showcase.py
+```
+
+`--simulate-sync` then writes live progress for four of the items for about 90 seconds, so the progress bars can be watched without a SharePoint tenant, and `--remove` deletes the space.
 
 ### Admin setup demo
 
