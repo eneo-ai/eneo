@@ -14,6 +14,7 @@ from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     ProviderInactiveException,
     ProviderNotFoundException,
+    ProviderRejectedRequestException,
 )
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_route import resolve_model_route
@@ -84,9 +85,11 @@ class RerankService:
             ProviderNotFoundException,
             ProviderInactiveException,
             APIKeyNotConfiguredException,
+            ProviderRejectedRequestException,
         ) as exc:
-            # A disabled or misconfigured provider leaves its models in the
-            # catalogue; the search must still answer, in vector order.
+            # A disabled or misconfigured provider, or outbound headers that
+            # cannot be decrypted, leaves its models in the catalogue; the
+            # search must still answer, in vector order.
             logger.warning(
                 "Rerank model %s is not usable (%s); searching without it",
                 model.name,
