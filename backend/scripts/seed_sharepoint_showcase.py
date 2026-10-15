@@ -45,7 +45,10 @@ from eneo.integration.infrastructure.sharepoint_sync_progress import (
     SYNC_PROGRESS_TTL_SECONDS,
     sync_progress_key,
 )
-from eneo.integration.presentation.models import IntegrationSyncProgress
+from eneo.integration.presentation.models import (
+    IntegrationSyncProgress,
+    IntegrationSyncProgressFile,
+)
 from eneo.main.config import Settings, get_settings
 from eneo.redis.connection import build_redis_auth_kwargs, build_redis_url
 from eneo.settings.encryption_service import EncryptionService
@@ -835,6 +838,28 @@ async def simulate_sync(settings: Settings) -> None:
     ]
     first_sync = sid("knowledge/namnd2027")
 
+    def feed(
+        stem: str, done: int, skipped_at: set[int], *, unchanged_upto: int = 0
+    ) -> dict[str, Any]:
+        """The file being read and the eight latest outcomes, as a sync reports them."""
+
+        def name(number: int) -> str:
+            return f"{stem} {number:03d}{'.png' if number in skipped_at else '.docx'}"
+
+        recent = [
+            IntegrationSyncProgressFile(
+                name=name(number),
+                outcome="skipped"
+                if number in skipped_at
+                else ("unchanged" if number <= unchanged_upto else "indexed"),
+                reason="Unsupported file type (image)"
+                if number in skipped_at
+                else None,
+            )
+            for number in range(done, max(0, done - 8), -1)
+        ]
+        return {"current": name(done + 1), "recent": recent}
+
     async def write(knowledge_id: uuid.UUID, **values: Any) -> None:
         progress = IntegrationSyncProgress(
             integration_knowledge_id=knowledge_id,
@@ -865,6 +890,11 @@ async def simulate_sync(settings: Settings) -> None:
                 indexed=indexed,
                 unchanged=0,
                 skipped=skipped_now,
+                **(
+                    feed("Projektplan", indexed + skipped_now, {7, 19, 31})
+                    if 2 <= step <= 40
+                    else {}
+                ),
             )
             for offset, knowledge_id in enumerate(deltas):
                 if step < 30 + offset * 8:
@@ -877,6 +907,12 @@ async def simulate_sync(settings: Settings) -> None:
                         indexed=step // 4,
                         unchanged=step // 3 - step // 4,
                         skipped=0,
+                        **feed(
+                            "Utredning" if offset == 0 else "Hemtjänstrutin",
+                            step // 3,
+                            set(),
+                            unchanged_upto=step // 3 - step // 4,
+                        ),
                     )
                 else:
                     await client.delete(sync_progress_key(knowledge_id))
@@ -889,6 +925,7 @@ async def simulate_sync(settings: Settings) -> None:
                 indexed=max(0, (step - 10) * 5),
                 unchanged=0,
                 skipped=0,
+                **(feed("Nämndhandling", (step - 10) * 5, set()) if step >= 10 else {}),
             )
             await asyncio.sleep(2)
     finally:
