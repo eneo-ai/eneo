@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatService, type ChatPartner } from "./ChatService.svelte";
 import { projectTurnDebugDetails } from "./turnDebugProjection";
-import type { Conversation } from "@eneo/eneo-js";
+import type { Conversation, UploadedFile } from "@eneo/eneo-js";
+import { writable } from "svelte/store";
+import { UploadsNotReadyError } from "$lib/features/attachments/AttachmentManager";
 
 function assistantPartner(overrides: Partial<ChatPartner> = {}): ChatPartner {
   return {
@@ -593,4 +595,223 @@ it("uses the available title and body when complete call metadata overtakes part
   expect(chat.writingDocument).toBeNull();
   finish();
   await request;
+});
+
+describe("pending question", () => {
+  const question = (chat: ChatService) =>
+    chat.currentConversation.messages.map((message) => message.question);
+
+  it("shows the question before the backend has answered", async () => {
+    let callbacks!: { onOpen: () => Promise<void>; onFirstChunk: (chunk: object) => void };
+    let finish!: () => void;
+    const ask = vi.fn().mockImplementation(
+      ({ callbacks: received }) =>
+        new Promise<void>((resolve) => {
+          callbacks = received;
+          finish = resolve;
+        })
+    );
+    const chat = chatService(vi.fn(), { ask });
+
+    const sending = chat.askQuestion("Hello");
+    expect(question(chat)).toEqual(["Hello"]);
+    expect(chat.askQuestion.isLoading).toBe(true);
+
+    await callbacks.onOpen();
+    callbacks.onFirstChunk({
+      id: "message-1",
+      session_id: "session-1",
+      answer: "",
+      references: []
+    });
+    expect(chat.currentConversation.messages[0].id).toBe("message-1");
+    expect(chat.currentConversation.id).toBe("session-1");
+    finish();
+    await sending;
+    expect(question(chat)).toEqual(["Hello"]);
+  });
+
+  it("takes the question back out when the request fails before the backend accepts it", async () => {
+    const ask = vi.fn().mockRejectedValue(new Error("context window exceeded"));
+    const chat = chatService(vi.fn(), { ask });
+
+    await expect(chat.askQuestion("Too long")).rejects.toThrow("context window exceeded");
+    expect(question(chat)).toEqual([]);
+  });
+
+  it("takes the question back out when the send is cancelled before it was accepted", async () => {
+    const controller = new AbortController();
+    const ask = vi.fn().mockImplementation(() => {
+      controller.abort();
+      return Promise.reject(new DOMException("The user aborted a request.", "AbortError"));
+    });
+    const chat = chatService(vi.fn(), { ask });
+
+    await expect(chat.askQuestion("Hello", [], undefined, false, controller)).rejects.toThrow();
+    expect(question(chat)).toEqual([]);
+  });
+
+  it("keeps the question when the stream is stopped after the backend accepted it", async () => {
+    const controller = new AbortController();
+    const ask = vi.fn().mockImplementation(async ({ callbacks }) => {
+      await callbacks.onOpen();
+      controller.abort();
+      throw new Error("The operation was aborted");
+    });
+    const chat = chatService(vi.fn(), { ask });
+
+    await chat.askQuestion("Hello", [], undefined, false, controller);
+    expect(question(chat)).toEqual(["Hello"]);
+  });
+
+  it("does not send a question whose stop was pressed before its turn came", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const ask = vi.fn();
+    const chat = chatService(vi.fn(), { ask });
+
+    await expect(chat.askQuestion("Hello", [], undefined, false, controller)).rejects.toThrow();
+    expect(ask).not.toHaveBeenCalled();
+    expect(question(chat)).toEqual([]);
+  });
+
+  it("removes a stale pending question that a newer request has already replaced", async () => {
+    let failFirst!: (error: Error) => void;
+    const ask = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_, reject) => {
+            failFirst = reject;
+          })
+      )
+      .mockImplementationOnce(completedAsk());
+    const chat = chatService(vi.fn(), { ask });
+
+    const first = chat.askQuestion("First");
+    await chat.askQuestion("Second");
+    expect(question(chat)).toEqual(["First", "Second"]);
+
+    failFirst(new Error("late failure"));
+    await first;
+    expect(question(chat)).toEqual(["Second"]);
+  });
+
+  it("merges first-chunk tool references with those that streamed ahead of it", async () => {
+    const ask = vi.fn().mockImplementation(async ({ callbacks }) => {
+      await callbacks.onOpen();
+      callbacks.onToolCall({
+        session_id: "",
+        tools: [{ tool_call_id: "call-1", server_name: "warehouse", tool_name: "query" }],
+        mcp_tool_references: [{ id: "ref-a" }]
+      });
+      callbacks.onFirstChunk({
+        id: "message-1",
+        session_id: "",
+        answer: "",
+        references: [],
+        mcp_tool_references: [{ id: "ref-b" }]
+      });
+    });
+    const chat = chatService(vi.fn(), { ask });
+
+    await chat.askQuestion("Hello");
+    expect(chat.currentConversation.messages[0].mcp_tool_references?.map((r) => r.id)).toEqual([
+      "ref-a",
+      "ref-b"
+    ]);
+  });
+
+  describe("with attachments still uploading", () => {
+    type Listed = {
+      id: string;
+      file: File;
+      status: "queued" | "uploading" | "completed";
+      progress: number;
+      fileRef?: UploadedFile;
+      remove: () => void;
+    };
+    const uploadedFile = (name: string) =>
+      ({ id: `server-${name}`, name, mimetype: "text/plain", size: 3 }) as UploadedFile;
+
+    function batch(ids: string[]) {
+      const store = writable<Listed[]>(
+        ids.map((id) => ({
+          id,
+          file: new File(["abc"], `${id}.txt`, { type: "text/plain" }),
+          status: "uploading",
+          progress: 0,
+          remove: () => {}
+        }))
+      );
+      let resolveReady!: (files: UploadedFile[]) => void;
+      let rejectReady!: (error: Error) => void;
+      const readyPromise = new Promise<UploadedFile[]>((resolve, reject) => {
+        resolveReady = resolve;
+        rejectReady = reject;
+      });
+      const ready = vi.fn(() => readyPromise);
+      return {
+        pending: { ids, subscribe: store.subscribe, ready },
+        store,
+        ready,
+        complete: () => {
+          store.update((list) =>
+            list.map((item) => ({
+              ...item,
+              status: "completed" as const,
+              progress: 100,
+              fileRef: uploadedFile(item.id)
+            }))
+          );
+          resolveReady(ids.map(uploadedFile));
+        },
+        fail: () => rejectReady(new UploadsNotReadyError("failed", "upload failed"))
+      };
+    }
+
+    it("waits in the conversation, mirroring upload progress, and sends once they are ready", async () => {
+      const ask = completedAsk();
+      const chat = chatService(vi.fn(), { ask });
+      const uploads = batch(["a", "b"]);
+
+      const sending = chat.askQuestion("Read these", uploads.pending);
+      const message = chat.currentConversation.messages[0] as {
+        question: string;
+        files: UploadedFile[];
+        pending_uploads?: Array<{ id: string; progress: number; status: string }>;
+      };
+      expect(message.question).toBe("Read these");
+      expect(message.pending_uploads?.map((upload) => upload.id)).toEqual(["a", "b"]);
+      expect(ask).not.toHaveBeenCalled();
+
+      uploads.store.update((list) =>
+        list.map((item) => (item.id === "a" ? { ...item, progress: 40 } : item))
+      );
+      expect(message.pending_uploads?.[0].progress).toBe(40);
+
+      uploads.complete();
+      await sending;
+      expect(ask).toHaveBeenCalledWith(
+        expect.objectContaining({ files: [{ id: "server-a" }, { id: "server-b" }] })
+      );
+      expect(message.pending_uploads).toBeUndefined();
+      expect(message.files.map((file) => file.id)).toEqual(["server-a", "server-b"]);
+    });
+
+    it("takes the question back out when an upload fails", async () => {
+      const ask = vi.fn();
+      const chat = chatService(vi.fn(), { ask });
+      const uploads = batch(["a"]);
+
+      const sending = chat.askQuestion("Read this", uploads.pending);
+      expect(question(chat)).toEqual(["Read this"]);
+
+      uploads.fail();
+      await expect(sending).rejects.toBeInstanceOf(UploadsNotReadyError);
+      expect(ask).not.toHaveBeenCalled();
+      expect(question(chat)).toEqual([]);
+      expect(chat.askQuestion.isLoading).toBe(false);
+    });
+  });
 });
