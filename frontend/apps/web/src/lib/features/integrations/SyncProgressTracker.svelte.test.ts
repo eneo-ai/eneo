@@ -51,6 +51,20 @@ describe("SyncProgressTracker", () => {
     tracker.stop();
   });
 
+  it("keeps the same object while nothing changes, so readers do not re-render", async () => {
+    const load = vi.fn(async () => ({ items: [] as IntegrationSyncProgress[] }));
+    const tracker = new SyncProgressTracker({ load });
+
+    tracker.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const first = tracker.byId;
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(tracker.byId).toBe(first);
+    tracker.stop();
+  });
+
   it("stops for good when the backend has no progress endpoint", async () => {
     const load = vi.fn(async () => {
       throw Object.assign(new Error("Not found"), { status: 404 });

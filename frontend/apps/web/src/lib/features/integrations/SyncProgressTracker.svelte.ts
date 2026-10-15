@@ -58,7 +58,8 @@ export class SyncProgressTracker {
       const next: Record<string, IntegrationSyncProgress> = {};
       for (const item of items) next[item.integration_knowledge_id] = item;
       const finished = Object.keys(this.byId).filter((id) => !(id in next));
-      this.byId = next;
+      // Every reader re-renders on a new object; keep the old one when nothing moved.
+      if (JSON.stringify(next) !== JSON.stringify(this.byId)) this.byId = next;
       if (finished.length > 0) this.#onSettled?.(finished);
     } catch (error) {
       if (generation !== this.#generation) return;
