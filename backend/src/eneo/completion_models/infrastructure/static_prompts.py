@@ -55,7 +55,8 @@ ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     "When content is needed, pass file_ref unchanged in the tool's URL input; "
     "Eneo supplies the authorized URL before execution. Never construct, copy "
     "or repair download URLs or tokens. Use the references in this request, "
-    "including references returned for newly generated files. "
+    "including references returned for newly generated files and references "
+    "a knowledge tool returns for a document's original file. "
     "Entries introduced as attached to this assistant by its author are standing "
     "material available on every turn, not something the user just uploaded. "
     "Open a referenced file only when answering the user's message requires its "
@@ -65,7 +66,11 @@ ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     "and never ask the user to re-upload a file listed in a reference entry. "
     "Prefer a tool suited to the file and task. When no specific tool fits or a "
     'chosen tool fails, read_file ("Read attached file"), when available, accepts '
-    'every file_ref in its url input. Entries with "kind": "image" are images; '
+    "every file_ref in its url input. A file whose text is not in this prompt "
+    "because it did not fit is read the same way; for a summary, comparison "
+    "or extraction over such a file, or over several files at once, "
+    'digest_files ("Digest attached files"), when available, takes the same '
+    'file_refs. Entries with "kind": "image" are images; '
     "pass their file_ref to image tools, not read_file. "
     "For an attached CSV, TSV or Excel file, use inspect_table and query_table, "
     "which read the file itself: to describe what it contains as well as for "

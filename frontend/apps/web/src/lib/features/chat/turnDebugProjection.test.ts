@@ -3,7 +3,8 @@ import type { ConversationMessage } from "@eneo/eneo-js";
 import {
   listPersistedDebugTurns,
   projectTurnDebugDetails,
-  readToolUsage
+  readToolUsage,
+  readReaderUsage
 } from "./turnDebugProjection";
 
 function message(id: string | null, question = "Question"): ConversationMessage {
@@ -88,7 +89,8 @@ describe("turn debug projection", () => {
         serverName: "calendar",
         toolName: "list_events",
         status: "complete",
-        usage: null
+        usage: null,
+        readerUsage: null
       }
     ]);
     expect(projected.knowledge).toEqual([{ order: 1, title: "MCP", uri: null }]);
@@ -147,6 +149,68 @@ describe("turn debug projection", () => {
     });
   });
 
+  it("reads the reader model's spend apart from the turn's and sums it over tool calls", () => {
+    const source = {
+      ...message("message-1"),
+      num_tokens_question: 28_328,
+      num_tokens_answer: 6_635,
+      tool_calls: [
+        {
+          server_name: "knowledge",
+          tool_name: "list_knowledge_sources",
+          result_status: "succeeded"
+        },
+        {
+          server_name: "knowledge",
+          tool_name: "digest_documents",
+          result_status: "succeeded",
+          meta: {
+            "gen_ai.request.model": "gpt-5.4",
+            "gen_ai.usage.input_tokens": 10_807,
+            "gen_ai.usage.output_tokens": 3_476,
+            "eneo.reader.model": "gpt-5.4-mini",
+            "eneo.reader.input_tokens": 302_478,
+            "eneo.reader.output_tokens": 9_996
+          }
+        },
+        {
+          server_name: "files",
+          tool_name: "digest_files",
+          result_status: "succeeded",
+          meta: {
+            "eneo.reader.model": "gpt-5.4-mini",
+            "eneo.reader.input_tokens": 1_000,
+            "eneo.reader.output_tokens": 100
+          }
+        }
+      ]
+    } as unknown as ConversationMessage;
+
+    const projected = projectTurnDebugDetails(source);
+
+    expect(projected.tools[0].readerUsage).toBeNull();
+    expect(projected.tools[1].readerUsage).toEqual({
+      model: "gpt-5.4-mini",
+      inputTokens: 302_478,
+      outputTokens: 9_996
+    });
+    // The turn's own counts stay what the message says; the reader is apart.
+    expect([projected.inputTokens, projected.outputTokens]).toEqual([28_328, 6_635]);
+    expect(projected.readerUsage).toEqual({
+      model: "gpt-5.4-mini",
+      inputTokens: 303_478,
+      outputTokens: 10_096
+    });
+  });
+
+  it("needs model and both counts before it reports a reader", () => {
+    expect(readReaderUsage({ "eneo.reader.model": "mini" })).toBeNull();
+    expect(
+      readReaderUsage({ "eneo.reader.input_tokens": 5, "eneo.reader.output_tokens": 1 })
+    ).toBeNull();
+    expect(projectTurnDebugDetails(message("message-1")).readerUsage).toBeNull();
+  });
+
   it("prefers the activation evidence for model id and route, keeping the display name", () => {
     const source = {
       ...message("message-1"),
@@ -191,7 +255,8 @@ describe("turn debug projection", () => {
         serverName: "warehouse",
         toolName: "query",
         status: "complete",
-        usage: null
+        usage: null,
+        readerUsage: null
       }
     ]);
     expect(JSON.stringify(projected)).not.toMatch(/SENSITIVE_/);

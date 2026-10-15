@@ -350,6 +350,8 @@ class SpaceService:
         security_classification: Union[ModelId, NotProvided, None] = NOT_PROVIDED,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        reader_model: Union[ModelId, NotProvided, None] = NOT_PROVIDED,
+        reader_model_inherit: Union[bool, NotProvided] = NOT_PROVIDED,
     ) -> Space:
         space = await self.get_space(id)
         actor = self._get_actor(space)
@@ -366,6 +368,16 @@ class SpaceService:
                 space_security_classification = await self.security_classification_service.get_security_classification(  # noqa: E501
                     classification_id
                 )
+
+        space_reader_model: Union["CompletionModel", NotProvided, None] = NOT_PROVIDED
+        if is_provided(reader_model):
+            space_reader_model = (
+                await self.completion_model_crud_service.get_completion_model(
+                    model_id=reader_model.id
+                )
+                if reader_model is not None
+                else None
+            )
 
         completion_models: list["CompletionModel"] | None = None
         if completion_model_ids is not None:
@@ -513,6 +525,8 @@ class SpaceService:
             ),
             data_retention_days=data_retention_days,
             icon_id=icon_id,
+            reader_model=space_reader_model,
+            reader_model_inherit=reader_model_inherit,
         )
 
         # Convert MCPToolSetting objects to tuples for repository
@@ -542,6 +556,12 @@ class SpaceService:
                 ),
                 data_retention_days=data_retention_days,
                 icon_id=icon_id,
+                reader_model_id=(
+                    (space.reader_model.id if space.reader_model is not None else None)
+                    if is_provided(reader_model)
+                    else NOT_PROVIDED
+                ),
+                reader_model_inherit=reader_model_inherit,
                 completion_model_ids=completion_model_ids,
                 embedding_model_ids=embedding_model_ids,
                 transcription_model_ids=transcription_model_ids,

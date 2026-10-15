@@ -96,6 +96,7 @@ type Policy = {
     configured?: boolean;
     inline_file_text?: boolean | null;
   } | null;
+  reader_policy?: { inherit: boolean; completion_model_id?: string | null } | null;
   skills: { bindings: AssistantSkillBindingSummary[] };
 };
 
@@ -122,6 +123,7 @@ type PolicyUpdate = {
   file_policy?: {
     inline_file_text: boolean;
   };
+  reader_policy?: { inherit: boolean; completion_model_id: string | null };
   skills?: {
     bindings: AssistantSkillBindingInput[];
   };
@@ -146,6 +148,7 @@ const EMPTY_POLICY: Policy = {
   prompt_enforcement: { enabled: false, prompt_library_id: null },
   reasoning_policy: { default_effort: null, allow_user_override: false },
   file_policy: { configured: false, inline_file_text: null },
+  reader_policy: { inherit: true, completion_model_id: null },
   skills: { bindings: [] }
 };
 
@@ -192,6 +195,10 @@ export class PolicyDraft {
   // the capability. Ungoverned policies seed as off (the assistant default);
   // flipping the switch governs the dimension on save.
   openFilesEnabled = $state(false);
+  // The reader model for digests in personal spaces: follow the organisation
+  // default, or name one of the allowed models (null = none).
+  readerInherit = $state(true);
+  readerModelId = $state<string | null>(null);
   skillBindings = $state<AssistantSkillBindingInput[]>([]);
 
   // ---- Save lifecycle ------------------------------------------------------
@@ -277,6 +284,8 @@ export class PolicyDraft {
     this.defaultReasoningEffort = policy.reasoning_policy?.default_effort ?? null;
     this.allowUserReasoningEffort = policy.reasoning_policy?.allow_user_override ?? false;
     this.openFilesEnabled = policy.file_policy?.inline_file_text === false;
+    this.readerInherit = policy.reader_policy?.inherit ?? true;
+    this.readerModelId = policy.reader_policy?.completion_model_id ?? null;
     this.skillBindingSummaries = policy.skills.bindings;
     this.skillBindings = policy.skills.bindings.map((binding) => ({
       skill_id: binding.skill_id,
@@ -411,6 +420,11 @@ export class PolicyDraft {
   #fileDirty = $derived(
     this.openFilesEnabled !== (this.#policy.file_policy?.inline_file_text === false)
   );
+  #readerDirty = $derived(
+    this.readerInherit !== (this.#policy.reader_policy?.inherit ?? true) ||
+      (!this.readerInherit &&
+        this.readerModelId !== (this.#policy.reader_policy?.completion_model_id ?? null))
+  );
   #initialSkillBindings = $derived(
     this.#policy.skills.bindings.map((binding) => ({
       skill_id: binding.skill_id,
@@ -435,6 +449,7 @@ export class PolicyDraft {
       this.#mcpDirty ||
       this.#promptDirty ||
       this.#fileDirty ||
+      this.#readerDirty ||
       this.#skillsDirty
   );
 
@@ -520,6 +535,27 @@ export class PolicyDraft {
       : this.openFilesEnabled
         ? m.governance_files_summary_open_files()
         : m.governance_files_summary_inline()
+  );
+  readerOptions = $derived.by(() => {
+    const pool = this.modelsEnabled
+      ? this.#allModels.filter((model) => this.effectiveModelIds.has(model.id))
+      : this.#allModels;
+    return pool.map((model) => ({ id: model.id, label: model.nickname ?? model.name }));
+  });
+  readerLocked = $derived(this.modelsEnabled && this.effectiveModelIds.size === 1);
+  tenantReaderDefaultLabel = $derived.by(() => {
+    const model = this.#allModels.find(
+      (candidate) => (candidate as { is_org_reader?: boolean }).is_org_reader === true
+    );
+    return model ? (model.nickname ?? model.name) : null;
+  });
+  readerSummary = $derived(
+    this.readerInherit
+      ? m.governance_reader_summary_inherit()
+      : this.readerModelId === null
+        ? m.governance_reader_summary_none()
+        : (this.readerOptions.find((option) => option.id === this.readerModelId)?.label ??
+          m.governance_reader_summary_none())
   );
   promptSummary = $derived(
     !this.promptEnabled
@@ -705,6 +741,12 @@ export class PolicyDraft {
       }
       if (this.#fileDirty) {
         update.file_policy = { inline_file_text: !this.openFilesEnabled };
+      }
+      if (this.#readerDirty) {
+        update.reader_policy = {
+          inherit: this.readerInherit,
+          completion_model_id: this.readerInherit ? null : this.readerModelId
+        };
       }
       if (this.#skillsDirty) {
         update.skills = {

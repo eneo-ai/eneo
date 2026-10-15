@@ -389,6 +389,22 @@ async def test_space_rename_preserves_every_child_row(persisted):
     )
 
 
+async def test_reader_model_choice_is_a_space_scalar_write(persisted):
+    add_hidden_mappings(persisted)
+    add_resource_rows(persisted)
+    before = snapshot(persisted, exclude=(Spaces,))
+    await persisted.space_repo.update_settings(
+        persisted.space_id,
+        SpaceUpdate(reader_model_id=None, reader_model_inherit=False),
+    )
+    assert snapshot(persisted, exclude=(Spaces,)) == before
+    assert persisted.connection.execute(
+        sa.select(Spaces.reader_model_id, Spaces.reader_model_inherit).where(
+            Spaces.id == persisted.space_id
+        )
+    ).one() == (None, False)
+
+
 async def test_membership_edit_does_not_remove_hidden_members(persisted):
     add_hidden_mappings(persisted)
     before = persisted.connection.execute(

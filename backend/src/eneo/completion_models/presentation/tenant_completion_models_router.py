@@ -71,6 +71,9 @@ class TenantCompletionModelUpdate(BaseModel):
     # the same transaction; `security_classification` is validated against
     # the caller's tenant.
     is_default: bool | None = None
+    # The tenant's fast model for the per-segment work of the digest tools;
+    # `True` unsets the sibling flag the same way `is_default` does.
+    is_reader: bool | None = None
     security_classification: ModelId | None = None
 
 

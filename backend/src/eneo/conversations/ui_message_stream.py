@@ -11,6 +11,9 @@ Custom data parts (consumed by the web-next chat UI):
   v2's first_chunk metadata.
 - `data-mcp-tool-references`: MCP resource citations emitted by tool calls.
 - `data-token-usage`: transient prompt/completion/turn token counts.
+- `data-tool-progress`: transient progress a server reported for a running
+  tool call (MCP progress notification): `toolCallId`, `progress`, `total`,
+  `message`.
 - `data-tool-approval`: MCP tool approval requests; reconciled in place by
   part id (the approval_id), so the decision (approved / denied) or a timeout
   (timeout_denied) updates the pending part. The Redis-backed approval
@@ -380,6 +383,18 @@ async def _ui_message_chunks(
             # renders calls from their TOOL_CALL snapshots, which carry the
             # complete arguments, so the deltas add nothing here.
             continue
+
+        elif response_type == ResponseType.TOOL_PROGRESS:
+            yield {
+                "type": "data-tool-progress",
+                "data": {
+                    "toolCallId": completion.tool_call_id or "",
+                    "progress": completion.progress or 0.0,
+                    "total": completion.progress_total,
+                    "message": completion.progress_message,
+                },
+                "transient": True,
+            }
 
         elif response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
             assert completion.approval_id is not None

@@ -601,6 +601,19 @@ class SpaceFactory:
             else None
         )
 
+        reader_model = (
+            next(
+                (
+                    m
+                    for m in space_completion_models
+                    if m.id == space_in_db.reader_model_id
+                ),
+                None,
+            )
+            if space_in_db.reader_model_id is not None
+            else None
+        )
+
         return Space(
             created_at=space_in_db.created_at,
             updated_at=space_in_db.updated_at,
@@ -629,4 +642,6 @@ class SpaceFactory:
             security_classification=space_security_classification,
             data_retention_days=space_in_db.data_retention_days,
             icon_id=space_in_db.icon_id,
+            reader_model=reader_model,
+            reader_model_inherit=space_in_db.reader_model_inherit,
         )

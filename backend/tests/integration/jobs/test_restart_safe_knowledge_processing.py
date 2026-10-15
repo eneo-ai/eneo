@@ -42,7 +42,12 @@ pytestmark = pytest.mark.integration
 
 class StubExtractor:
     async def extract_bounded(
-        self, filepath: Path, mimetype: str, filename: str | None = None
+        self,
+        filepath: Path,
+        mimetype: str,
+        filename: str | None = None,
+        *,
+        index_tabular: bool = False,
     ) -> str:
         return "replacement knowledge"
 
@@ -397,7 +402,12 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
 
     class PhaseExtractor:
         async def extract_bounded(
-            self, filepath: Path, mimetype: str, filename: str | None = None
+            self,
+            filepath: Path,
+            mimetype: str,
+            filename: str | None = None,
+            *,
+            index_tabular: bool = False,
         ) -> str:
             if stalled_phase == "extraction":
                 await asyncio.to_thread(stall_sync_phase)

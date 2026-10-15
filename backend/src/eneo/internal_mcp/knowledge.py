@@ -11,24 +11,67 @@ authentication model shared by all internal servers.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple
 from uuid import UUID
 
 from mcp.server.fastmcp import Context, FastMCP
-from mcp.types import EmbeddedResource, TextContent, TextResourceContents
+from mcp.types import (
+    CallToolResult,
+    EmbeddedResource,
+    ResourceLink,
+    TextContent,
+    TextResourceContents,
+)
 from pydantic import AnyUrl
 
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.signed_urls import (
+    build_signed_info_blob_original_download_url,
+)
+from eneo.completion_models.application.map_reduce import DigestItem
+from eneo.files.file_reference import file_reference_base_url
+from eneo.files.tabular_index import is_table_index_text
 from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.info_blobs.info_blob_chunk_repo import InfoBlobChunkExcerpt
-from eneo.info_blobs.info_blob_repo import InfoBlobListing
+from eneo.info_blobs.info_blob_repo import InfoBlobListing, InfoBlobText
 from eneo.info_blobs.source_metadata import format_source_metadata_lines
+from eneo.integration.infrastructure.content_service.originals import (
+    retain_original_bytes,
+)
+from eneo.integration.infrastructure.content_service.utils import (
+    UNEXTRACTABLE_SENTINELS,
+)
 from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
+from eneo.internal_mcp.digest import (
+    CitationStub,
+    DigestRefused,
+    SetAside,
+    cited_keys,
+    clip_title,
+    digest_meta,
+    disconnect_check,
+    estimated_segments,
+    format_digest,
+    log_digest,
+    plan_or_refuse,
+    prepare_digest_model,
+    progress_reporter,
+    run_bounded_digest,
+    validate_instruction,
+)
 from eneo.internal_mcp.foundation import (
+    bearer_from_ctx,
     build_ephemeral_server,
     default_page_cap,
+    digest_claims_from_token,
     internal_tool_context,
 )
+from eneo.main.config import get_settings
 from eneo.main.exceptions import NotFoundException
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 
@@ -69,6 +112,13 @@ OVERVIEW_EXCERPT_CHARS = 700
 # and out-of-scope must be indistinguishable, so this is a constant, never
 # interpolated with what was asked for.
 NOT_FOUND_MESSAGE = "No document with that id in this assistant's knowledge sources."
+# Originals handed to tools per result: enough for every document a page can
+# show, small enough that the reference lines stay a footnote.
+ORIGINAL_LINKS_CAP = 20
+# Lexical title matches complement passage search for documents without
+# searchable passages (spreadsheets kept for tools only).
+TITLE_MATCH_CAP = 5
+TITLE_MATCH_TERMS_CAP = 6
 
 # The same discipline for the `within` scope argument, which accepts either a
 # source id or a document id: one message covers every way it can miss.
@@ -197,8 +247,9 @@ def _matching_sources(assistant, ref: str) -> list[KnowledgeScope]:
     argument address all of them without a scope-kind discriminator.
 
     The name fallback exists because models tend to pass back the name they were
-    shown rather than the id beside it. It can only ever match inside the
-    assistant's own scope, so it grants no reach.
+    shown rather than the id beside it, either bare or as the catalog label
+    ("Collection 'Minutes'"). It can only ever match inside the assistant's
+    own scope, so it grants no reach.
     """
     candidates = _source_scopes(assistant)
     ref = ref.strip()
@@ -210,7 +261,10 @@ def _matching_sources(assistant, ref: str) -> list[KnowledgeScope]:
         return [scope for scope in candidates if scope.source_id == wanted]
 
     folded = ref.casefold()
-    return [scope for scope in candidates if scope.name.casefold() == folded]
+    by_name = [scope for scope in candidates if scope.name.casefold() == folded]
+    if by_name:
+        return by_name
+    return [scope for scope in candidates if scope.label.casefold() == folded]
 
 
 def _ambiguous_source_message(ref: str) -> str:
@@ -263,6 +317,17 @@ async def _resolve_scope(container, assistant, within: str | None) -> KnowledgeS
     if scope is None:
         raise _ScopeNotResolved(SCOPE_NOT_FOUND_MESSAGE)
     return scope
+
+
+def _source_ids(scope: KnowledgeScope) -> dict[str, list[UUID]]:
+    """The repository's source-filter arguments for a scope."""
+    return {
+        "group_ids": [collection.id for collection in scope.collections],
+        "website_ids": [website.id for website in scope.websites],
+        "integration_knowledge_ids": [
+            knowledge.id for knowledge in scope.integration_knowledge_list
+        ],
+    }
 
 
 def _clamp_max_results(max_results: int) -> int:
@@ -525,6 +590,105 @@ def _sample_targets(
     ]
 
 
+KnowledgeContent = TextContent | EmbeddedResource | ResourceLink
+
+
+def _title_terms(query: str) -> list[str]:
+    """Distinct query words long enough to mean something in a title."""
+    terms: list[str] = []
+    for term in re.findall(r"[\w.\-]{3,}", query.lower()):
+        if term not in terms:
+            terms.append(term)
+        if len(terms) == TITLE_MATCH_TERMS_CAP:
+            break
+    return terms
+
+
+@dataclass(frozen=True, slots=True)
+class _LinkedDocument:
+    """Audit target for a minted link: the document, named by its title."""
+
+    id: UUID
+    name: str
+
+
+async def _original_links(
+    container,
+    *,
+    user,
+    blob_ids: Sequence[UUID],
+    titles: Mapping[UUID, str] | None = None,
+) -> list[ResourceLink]:
+    """Signed links to the originals behind these documents, for tool hand-off.
+
+    Emitted as MCP ``resource_link`` blocks. The completion layer verifies each
+    as an Eneo-signed original of this tenant, admits it into the
+    conversation's reference map and shows the model a credential-free handle;
+    the link itself never reaches the model. Nothing is minted without a
+    reference base URL, since no tool could fetch it. Each mint is audited
+    like a download link created by hand.
+    """
+    ids = list(dict.fromkeys(blob_ids))[:ORIGINAL_LINKS_CAP]
+    settings = get_settings()
+    base_url = file_reference_base_url(settings)
+    if not ids or not base_url:
+        return []
+    originals = await container.info_blob_repo().get_originals(ids)
+    expires_in = settings.file_reference_url_expiry_seconds
+    links: list[ResourceLink] = []
+    for blob_id in ids:
+        original = originals.get(blob_id)
+        if original is None or not original.usable:
+            continue
+        title = (titles or {}).get(blob_id) or original.original_filename
+        url = build_signed_info_blob_original_download_url(
+            info_blob_id=blob_id,
+            base_url=base_url,
+            expires_in=expires_in,
+            tenant_id=user.tenant_id,
+        )
+        links.append(
+            ResourceLink(
+                type="resource_link",
+                uri=AnyUrl(url),
+                name=original.original_filename,
+                mimeType=original.media_type,
+                _meta={"info_blob_id": str(blob_id), "title": title},
+            )
+        )
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED,
+            entity_type=EntityType.INFO_BLOB,
+            entity_id=blob_id,
+            description="Handed a knowledge document's original to tools",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=_LinkedDocument(id=blob_id, name=title),
+                extra={
+                    "source": "knowledge_tool",
+                    "variant": "original",
+                    "expires_in": expires_in,
+                },
+            ),
+        )
+    return links
+
+
+def _title_match_content(listings: Sequence[InfoBlobListing]) -> list[TextContent]:
+    if not listings:
+        return []
+    lines = [
+        "Documents whose title matches the query (no passage of theirs scored; "
+        "spreadsheets among them are opened with the table tools):"
+    ]
+    lines.extend(
+        f"- {listing.label}  document_id: {listing.id}" for listing in listings
+    )
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
 def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedResource]:
     """Convert search hits to MCP content blocks.
 
@@ -675,7 +839,7 @@ async def search_knowledge(
     mode: Literal["specific", "overview"] = "specific",
     max_results: int | None = None,
     within: str | None = None,
-) -> list[TextContent | EmbeddedResource]:
+) -> list[KnowledgeContent]:
     """Search this assistant's knowledge sources for relevant passages.
 
     Write the query as a focused, self-contained natural-language phrase in
@@ -701,11 +865,18 @@ async def search_knowledge(
 
     This tool always needs a content query. To answer what a source covers or
     contains, use describe_source; to list the sources themselves, use
-    list_knowledge_sources.
+    list_knowledge_sources; to synthesise across many or all documents of a
+    source (summaries, timelines, comparisons, extractions), use
+    digest_documents.
+
+    Documents whose original file is retained (spreadsheets, for example)
+    come with a File reference entry; pass its file_ref to a table or document
+    tool to compute over the file instead of reading excerpts. Documents that
+    match the query by title without a scoring passage are listed too.
     """
     fetch, autocut_cutoff, cap = _resolve_search_params(mode, max_results)
     logger.debug("[RAG] search_knowledge query=%r within=%r", query[:120], within)
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx) as (container, user, assistant_id):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         # The embedding model comes from the assistant, not the scope: a
         # document scope carries no source to read it from.
@@ -762,6 +933,33 @@ async def search_knowledge(
             )
             chunks = _merge_adjacent_chunks(chunks, neighbors)
 
+        hit_ids = list(dict.fromkeys(chunk.info_blob_id for chunk in chunks))
+        title_matches: list[InfoBlobListing] = []
+        if not scope.info_blob_ids:
+            title_matches = await container.info_blob_repo().find_titles_by_sources(
+                group_ids=[collection.id for collection in scope.collections],
+                website_ids=[website.id for website in scope.websites],
+                integration_knowledge_ids=[
+                    knowledge.id for knowledge in scope.integration_knowledge_list
+                ],
+                terms=_title_terms(query),
+                limit=TITLE_MATCH_CAP,
+                exclude_ids=hit_ids,
+            )
+        links = await _original_links(
+            container,
+            user=user,
+            blob_ids=[*hit_ids, *(listing.id for listing in title_matches)],
+            titles={
+                **{
+                    chunk.info_blob_id: chunk.info_blob_title
+                    for chunk in chunks
+                    if chunk.info_blob_title
+                },
+                **{listing.id: listing.label for listing in title_matches},
+            },
+        )
+
     if scope.info_blob_ids:
         # Within one document the model is reading, not ranking: reading order
         # carries more meaning than relevance order.
@@ -779,7 +977,11 @@ async def search_knowledge(
         top_score,
     )
 
-    return _search_result_content(query, chunks)
+    return [
+        *_search_result_content(query, chunks),
+        *_title_match_content(title_matches),
+        *links,
+    ]
 
 
 @mcp.tool(title="Read source document")
@@ -787,13 +989,14 @@ async def read_source(
     document_id: str,
     ctx: Context,
     offset: int = 0,
-) -> list[TextContent | EmbeddedResource]:
+) -> list[KnowledgeContent]:
     """Read the full text of one document from the knowledge sources.
 
     Use after search_knowledge when chunks are not enough (procedures,
     tables, full policies): pass the document_id shown in a search result.
     Long documents are returned in parts; the truncation notice gives the
-    offset for the next part.
+    offset for the next part. A document whose original file is retained also
+    comes with a File reference entry for the table and document tools.
     """
     not_found = TextContent(type="text", text=NOT_FOUND_MESSAGE)
     try:
@@ -802,7 +1005,7 @@ async def read_source(
         return [TextContent(type="text", text="Invalid document_id.")]
     offset = max(0, offset)
 
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx) as (container, user, assistant_id):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         try:
             blob = await container.info_blob_repo().get(blob_id)
@@ -822,6 +1025,12 @@ async def read_source(
                 blob_id,
             )
             return [not_found]
+        links = await _original_links(
+            container,
+            user=user,
+            blob_ids=[blob.id],
+            titles={blob.id: blob.title or ""},
+        )
 
     logger.info(
         "[RAG] read_source assistant=%s document=%s offset=%d size=%d",
@@ -830,7 +1039,10 @@ async def read_source(
         offset,
         len(blob.text),
     )
-    return _document_page_content(blob, offset=offset, page_cap=default_page_cap())
+    return [
+        *_document_page_content(blob, offset=offset, page_cap=default_page_cap()),
+        *links,
+    ]
 
 
 @mcp.tool(title="Describe knowledge source")
@@ -838,7 +1050,7 @@ async def describe_source(
     ctx: Context,
     source_id: str | None = None,
     offset: int = 0,
-) -> list[TextContent | EmbeddedResource]:
+) -> list[KnowledgeContent]:
     """Survey one knowledge source without a search query: what it contains.
 
     Use for questions about a source itself rather than about a fact inside
@@ -856,10 +1068,12 @@ async def describe_source(
     returned in parts; keep calling with the offset from each truncation notice
     and do not answer until the title listing is complete. To go deeper on one
     document, read it with read_source or query it with search_knowledge and
-    within=<document_id>.
+    within=<document_id>. To synthesise the documents' contents (a summary of
+    all meetings, every decision on a topic), use digest_documents: this tool
+    only samples.
     """
     offset = max(0, offset)
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx) as (container, user, assistant_id):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         sources = _source_scopes(assistant)
         if not sources:
@@ -896,13 +1110,7 @@ async def describe_source(
                 return [TextContent(type="text", text=SCOPE_NOT_FOUND_MESSAGE)]
             scope = matches[0]
 
-        source_ids = {
-            "group_ids": [collection.id for collection in scope.collections],
-            "website_ids": [website.id for website in scope.websites],
-            "integration_knowledge_ids": [
-                knowledge.id for knowledge in scope.integration_knowledge_list
-            ],
-        }
+        source_ids = _source_ids(scope)
         blob_repo = container.info_blob_repo()
         total = await blob_repo.count_by_sources(**source_ids)
         listings = await blob_repo.list_by_sources(
@@ -921,6 +1129,19 @@ async def describe_source(
             if targets
             else []
         )
+        # Originals for the sampled documents and for every spreadsheet on
+        # the page, so a tabular question can go straight to the table tools.
+        tabular = [
+            listing
+            for listing in kept
+            if listing.title is not None and retain_original_bytes(listing.title)
+        ]
+        links = await _original_links(
+            container,
+            user=user,
+            blob_ids=[listing.id for listing in [*targets, *tabular]],
+            titles={listing.id: listing.label for listing in [*targets, *tabular]},
+        )
 
     logger.info(
         "[RAG] describe_source assistant=%s scope=%s total=%d offset=%d titles=%d "
@@ -932,13 +1153,242 @@ async def describe_source(
         len(title_lines),
         len(excerpts),
     )
-    return _overview_content(
-        scope=scope,
-        total=total,
-        offset=offset,
-        title_lines=title_lines,
-        excerpts=excerpts,
-        excerpt_titles={listing.id: listing.label for listing in targets},
+    return [
+        *_overview_content(
+            scope=scope,
+            total=total,
+            offset=offset,
+            title_lines=title_lines,
+            excerpts=excerpts,
+            excerpt_titles={listing.id: listing.label for listing in targets},
+        ),
+        *links,
+    ]
+
+
+DIGEST_SOURCE_REQUIRED_MESSAGE = (
+    "This assistant has several knowledge sources. Pass one of their source_ids "
+    "as 'within' (see list_knowledge_sources)."
+)
+DIGEST_FITS_ONE_READ_MESSAGE = (
+    "That document fits one read: call read_source with its document_id instead."
+)
+DIGEST_NARROW_HINT = (
+    "Narrow the selection with title_contains or max_documents, or run several "
+    "digests over parts of the source."
+)
+
+
+def _refusal(message: str) -> CallToolResult:
+    return CallToolResult(content=[TextContent(type="text", text=message)])
+
+
+def _is_table_or_unextractable(text: str) -> bool:
+    return is_table_index_text(text) or text.strip() in UNEXTRACTABLE_SENTINELS
+
+
+@mcp.tool(title="Digest documents")
+async def digest_documents(
+    instruction: str,
+    ctx: Context,
+    within: str | None = None,
+    title_contains: str | None = None,
+    max_documents: int | None = None,
+) -> CallToolResult:
+    """Read every document of one knowledge source and answer an instruction
+    across all of them.
+
+    Use this for summaries, overviews, timelines, comparisons or extractions
+    that need many or all documents of a source ("summarise all meeting
+    minutes", "every decision about the budget", "which projects were
+    discussed, by date"). It is an exhaustive pass, not a search: every
+    selected document is read in full, so give a precise instruction (what
+    to extract, which period, how to group) and call it once rather than
+    emulating it with repeated read_source or search_knowledge calls.
+
+    'within' is the source_id (or exact name) from list_knowledge_sources; it
+    may also be a document_id when one long document should be digested on
+    its own. A document that fits one read is refused: use read_source.
+    'title_contains' keeps only documents whose title contains the text
+    (case-insensitive), for example a year; 'max_documents' caps how many
+    are read, alphabetically by title, and the result says how many were
+    left out.
+
+    Cost: one model call per text segment plus the merges, up to several
+    minutes for a large source. The result starts with the documents read
+    ([D1], [D2], ...), a coverage line and a compression line (words read
+    into words answered); relay the body and its citations faithfully,
+    state the coverage line when it is partial, cite the compression when
+    asked how complete or reliable the digest is, and pass the body
+    unchanged to a document tool when a document is wanted. Spreadsheets
+    are not digested: they are listed with a File reference for the table
+    tools. A too-large selection is refused with the counts; narrow it and
+    call again. For a single fact, use search_knowledge instead.
+    """
+    try:
+        instruction = validate_instruction(instruction)
+    except DigestRefused as refused:
+        return _refusal(refused.message)
+    claims = digest_claims_from_token(bearer_from_ctx(ctx))
+    should_stop = disconnect_check(ctx)
+
+    async with internal_tool_context(ctx) as tool_ctx:
+        container, user, assistant_id = tool_ctx
+        assistant, _ = await container.assistant_service().get_assistant(assistant_id)
+        sources = _source_scopes(assistant)
+        if not sources:
+            return _refusal("This assistant has no knowledge sources attached.")
+        if within is None:
+            if len(sources) > 1:
+                return _refusal(DIGEST_SOURCE_REQUIRED_MESSAGE)
+            scope = sources[0]
+        else:
+            try:
+                scope = await _resolve_scope(container, assistant, within)
+            except _ScopeNotResolved as unresolved:
+                return _refusal(unresolved.message)
+
+        try:
+            digest_model = await prepare_digest_model(
+                tool_ctx, assistant, claims, instruction=instruction
+            )
+        except DigestRefused as refused:
+            return _refusal(refused.message)
+
+        blob_repo = container.info_blob_repo()
+        ceiling = get_settings().digest_max_segments
+        omitted = 0
+        if scope.info_blob_ids:
+            # One document: the assistant's whole scope is the filter.
+            texts = await blob_repo.list_texts_by_ids(
+                scope.info_blob_ids, **_source_ids(_assistant_scope(assistant))
+            )
+            if texts and texts[0].length <= default_page_cap():
+                return _refusal(DIGEST_FITS_ONE_READ_MESSAGE)
+        else:
+            source_ids = _source_ids(scope)
+            total, total_chars = await blob_repo.size_by_sources(
+                **source_ids, title_contains=title_contains
+            )
+            if total == 0:
+                return _refusal(
+                    "No documents match in that source"
+                    + (
+                        f" with title_contains={title_contains!r}"
+                        if title_contains
+                        else ""
+                    )
+                    + "."
+                )
+            limit = (
+                total if max_documents is None else max(1, min(max_documents, total))
+            )
+            if (
+                limit == total
+                and estimated_segments(total_chars, digest_model) > ceiling
+            ):
+                return _refusal(
+                    f"Too much text for one digest: {total} documents with about "
+                    f"{total_chars // 4} tokens exceed the limit of {ceiling} "
+                    f"segments. {DIGEST_NARROW_HINT}"
+                )
+            listings = await blob_repo.list_by_sources(
+                **source_ids, limit=limit, title_contains=title_contains
+            )
+            omitted = total - len(listings)
+            texts = await blob_repo.list_texts_by_ids(
+                [listing.id for listing in listings], **source_ids
+            )
+        if not texts:
+            return _refusal("No documents match in that source.")
+
+        items: list[DigestItem] = []
+        by_key: dict[str, InfoBlobText] = {}
+        aside: list[InfoBlobText] = []
+        for text in texts:
+            if _is_table_or_unextractable(text.text):
+                aside.append(text)
+                continue
+            key = f"D{len(items) + 1}"
+            items.append(
+                DigestItem(key=key, title=clip_title(text.label), text=text.text)
+            )
+            by_key[key] = text
+        set_aside = [
+            SetAside(
+                title=clip_title(text.label),
+                reason=(
+                    "table; use the table tools with its File reference "
+                    f"(document_id: {text.id})"
+                ),
+            )
+            for text in aside
+        ]
+        links = await _original_links(
+            container,
+            user=user,
+            blob_ids=[text.id for text in aside],
+            titles={text.id: text.label for text in aside},
+        )
+        try:
+            plan = plan_or_refuse(items, digest_model, narrow_hint=DIGEST_NARROW_HINT)
+        except DigestRefused as refused:
+            return _refusal(refused.message)
+
+    if not items:
+        header = "\n".join(
+            [
+                f"Digest of {scope.label}: no prose documents to digest.",
+                "Not digested (tables):",
+                *(f"- {entry.title}: {entry.reason}" for entry in set_aside),
+            ]
+        )
+        return CallToolResult(content=[TextContent(type="text", text=header), *links])
+
+    # The model calls run outside the request-scoped transaction.
+    result, seconds = await run_bounded_digest(
+        plan,
+        digest_model,
+        instruction=instruction,
+        should_stop=should_stop,
+        on_progress=progress_reporter(ctx),
+    )
+    stubs = [
+        CitationStub(
+            key=key,
+            uri=f"eneo://info-blob/{by_key[key].id}",
+            text=f"[{key}] {clip_title(by_key[key].label)} (document_id: {by_key[key].id})",
+            meta={
+                "title": clip_title(by_key[key].label),
+                "info_blob_id": str(by_key[key].id),
+            },
+        )
+        for key in cited_keys(result.output, list(by_key))
+    ]
+    content = format_digest(
+        heading=(
+            f"Digest of {scope.label}: {len(items)} documents read with "
+            f"{digest_model.models_label}."
+        ),
+        items=items,
+        result=result,
+        set_aside=set_aside,
+        omitted=omitted,
+        stubs=stubs,
+        body_cap=digest_model.body_cap_chars,
+        item_word="documents",
+    )
+    log_digest(
+        "[RAG]",
+        assistant_id=assistant_id,
+        scope=scope.label,
+        result=result,
+        digest_model=digest_model,
+        seconds=seconds,
+        items=items,
+    )
+    return CallToolResult(
+        content=[*content, *links], _meta=digest_meta(result, digest_model, items)
     )
 
 
@@ -1008,7 +1458,10 @@ async def build_knowledge_mcp_server(
         description="Loopback server for searching this assistant's knowledge.",
         token=token,
         tenant_id=tenant_id,
-        tool_description_suffixes={"search_knowledge": _sources_suffix(source_labels)}
+        tool_description_suffixes={
+            "search_knowledge": _sources_suffix(source_labels),
+            "digest_documents": _sources_suffix(source_labels),
+        }
         if source_labels
         else None,
     )

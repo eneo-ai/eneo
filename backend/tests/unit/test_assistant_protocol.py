@@ -84,6 +84,26 @@ def test_tool_call_delta_sse_carries_the_call_and_its_next_arguments():
     assert payload["arguments_delta"] == '{"title":"Pl'
 
 
+def test_tool_progress_sse_carries_the_call_and_the_servers_progress():
+    event = to_sse_response(
+        Completion(
+            response_type=ResponseType.TOOL_PROGRESS,
+            tool_call_id="call_1",
+            progress=12,
+            progress_total=44,
+            progress_message="Read 12 of 44 parts",
+        ),
+        uuid4(),
+    )
+
+    assert event.event == "tool_progress"
+    payload = json.loads(event.data)
+    assert payload["tool_call_id"] == "call_1"
+    assert payload["progress"] == 12
+    assert payload["total"] == 44
+    assert payload["message"] == "Read 12 of 44 parts"
+
+
 def test_tool_call_sse_carries_the_capability_purpose():
     """A capability provider's call is rendered by purpose, so the purpose
     must reach the client alongside the provider's name."""

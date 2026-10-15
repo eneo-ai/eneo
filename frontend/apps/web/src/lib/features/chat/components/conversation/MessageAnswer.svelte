@@ -26,10 +26,13 @@
   import { getChatService } from "../../ChatService.svelte";
   import {
     capabilityProviderDetail,
+    digestReaderDetail,
     internalToolDoneLabel,
     isSkillActivation,
     serverDisplayName,
     toolDisplayName,
+    toolProgressFraction,
+    toolProgressLabel,
     toolStepIcon,
     toolStepKind,
     type ToolStepKind
@@ -233,12 +236,23 @@
         // the step already names it: as a view, or as a document being written.
         detail:
           readFileDetail(tc) ??
+          digestReaderDetail(tc) ??
           (view || createsFile ? null : titleArgument(tc.arguments)) ??
           capabilityProviderDetail(tc),
         skillName: isSkillActivation(tc) ? (tc.title ?? tc.tool_name) : null,
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
         status,
+        // A running call's progress, as its server reports it.
+        progress: (() => {
+          const reported = chat.toolProgressOf(tc.tool_call_id);
+          return reported
+            ? {
+                label: toolProgressLabel(tc.tool_name, tc.server_name, tc.is_internal, reported),
+                fraction: toolProgressFraction(reported)
+              }
+            : null;
+        })(),
         previousAttempt: status === "failed" && !isSkillActivation(tc) && previousAttempts.has(i),
         // Function steps (capability calls, whichever provider served them)
         // and context steps (Eneo's own lookups) render as slim lines in runs
@@ -279,10 +293,11 @@
     return runs;
   });
 
-  // Internal steps take up a single line per run: while the assistant works,
-  // only the run's latest step shows and each new call replaces the previous
-  // one in place; once the run completes it folds into a one-line summary
-  // that expands to the full list. A single step never folds — the summary
+  // Internal steps fold into a one-line summary that expands to the full
+  // list. While the assistant works, the run's latest step shows beneath the
+  // folded summary and each new call replaces it in place; the summary opens
+  // the full list mid-run as well, so an earlier step can be inspected while
+  // later calls are still running. A single step never folds — the summary
   // would be no smaller than the step itself. Runs only ever append during a
   // turn, so the run index is a stable key for the expanded state.
   const openInternalRuns = new SvelteSet<number>();
@@ -439,12 +454,14 @@
       </div>
     {:else}
       <!-- The same keyed {#each} renders the run whether it is still working
-           (latest step only) or done (every step), so a step opened mid-run
-           keeps its panel open when the result lands. -->
+           (latest step, or every step once the summary is opened) or done
+           (every step), so a step opened mid-run keeps its panel open when
+           the result lands. -->
       {@const working = runWorking(run, runIndex)}
       {@const foldable = run.steps.filter((step) => !createdDocument(step))}
-      {@const folded = !working && foldable.length > 1}
-      {@const visibleSteps = working ? run.steps.slice(-1) : run.steps}
+      {@const folded = foldable.length > 1}
+      {@const expanded = openInternalRuns.has(runIndex)}
+      {@const visibleSteps = !folded || expanded ? run.steps : working ? run.steps.slice(-1) : []}
       <!-- Function rows carry a chip taller than their text, so they get more air than rows of plain text. -->
       {@const rowGap = run.kind === "function" ? "gap-1.5" : "gap-0.5"}
       <div class="mb-4 flex flex-col {rowGap}">
@@ -485,7 +502,7 @@
             <span class="truncate font-medium">{runSummary(run.steps)}</span>
           </button>
         {/if}
-        {#if !folded || openInternalRuns.has(runIndex)}
+        {#if visibleSteps.length > 0}
           <div class="flex flex-col {rowGap} {folded ? 'pl-7' : ''}">
             {#each visibleSteps as step, i (step.toolCallId ?? i)}
               {#if step.skillName !== null}
@@ -509,6 +526,7 @@
                   document={step.document}
                   icon={step.icon}
                   view={step.view}
+                  progress={step.progress}
                   onLoadResult={step.toolCallId
                     ? () => chat.getToolCallResult(step.toolCallId!)
                     : undefined}
@@ -517,8 +535,8 @@
             {/each}
           </div>
         {/if}
-        {#if folded && !openInternalRuns.has(runIndex)}
-          {#each run.steps.filter(createdDocument) as step, i (step.toolCallId ?? i)}
+        {#if folded && !expanded}
+          {#each run.steps.filter((step) => createdDocument(step) && !visibleSteps.includes(step)) as step, i (step.toolCallId ?? i)}
             <InternalToolStep
               runningLabel={step.toolName}
               doneLabel={step.doneLabel}

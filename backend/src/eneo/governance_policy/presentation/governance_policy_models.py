@@ -75,12 +75,21 @@ class SkillsPolicyInput(BaseModel):
     )
 
 
+class ReaderPolicyInput(BaseModel):
+    # The reader model takes a digest's per-segment notes; the assistant's own
+    # model still writes every answer. `inherit` follows the organisation
+    # default; otherwise `completion_model_id` names one, or None for none.
+    inherit: bool = True
+    completion_model_id: UUID | None = None
+
+
 class GovernancePolicyUpdate(BaseModel):
     models_restriction: ModelsRestrictionInput | None = None
     mcp_restriction: McpRestrictionInput | None = None
     prompt_enforcement: PromptEnforcementInput | None = None
     reasoning_policy: ReasoningPolicyInput | None = None
     file_policy: FilePolicyInput | None = None
+    reader_policy: ReaderPolicyInput | None = None
     skills: SkillsPolicyInput | None = None
 
 
@@ -134,12 +143,18 @@ class SkillsPolicyPublic(BaseModel):
     bindings: list[AssistantSkillBindingSummary]
 
 
+class ReaderPolicyPublic(BaseModel):
+    inherit: bool
+    completion_model_id: UUID | None
+
+
 class GovernancePolicyPublic(BaseModel):
     models_restriction: ModelsRestrictionPublic
     mcp_restriction: McpRestrictionPublic
     prompt_enforcement: PromptEnforcementPublic
     reasoning_policy: ReasoningPolicyPublic
     file_policy: FilePolicyPublic
+    reader_policy: ReaderPolicyPublic
     skills: SkillsPolicyPublic
     updated_at: datetime | None
     updated_by_user_id: UUID | None

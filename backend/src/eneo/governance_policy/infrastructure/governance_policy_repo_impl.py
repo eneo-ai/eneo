@@ -90,6 +90,8 @@ class GovernancePolicyRepoImpl:
             default_reasoning_effort=row.default_reasoning_effort,
             allow_user_reasoning_effort=row.allow_user_reasoning_effort,
             inline_file_text=row.inline_file_text,
+            reader_model_inherit=row.reader_model_inherit,
+            reader_model_id=row.reader_model_id,
             updated_at=row.updated_at,
             updated_by_user_id=row.updated_by_user_id,
         )
@@ -158,6 +160,8 @@ class GovernancePolicyRepoImpl:
                 default_reasoning_effort=policy.default_reasoning_effort,
                 allow_user_reasoning_effort=policy.allow_user_reasoning_effort,
                 inline_file_text=policy.inline_file_text,
+                reader_model_inherit=policy.reader_model_inherit,
+                reader_model_id=policy.reader_model_id,
                 updated_by_user_id=updated_by_user_id,
             )
         )

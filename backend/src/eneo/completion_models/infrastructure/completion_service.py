@@ -17,7 +17,10 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.authentication.signed_urls import build_signed_original_download_url
+from eneo.authentication.signed_urls import (
+    build_signed_info_blob_original_download_url,
+    build_signed_original_download_url,
+)
 from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
@@ -27,6 +30,7 @@ from eneo.files.file_reference import (
     reference_url_file_ids,
 )
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.main.config import SETTINGS, Settings
 from eneo.main.exceptions import ProviderInactiveException
 from eneo.main.logging import get_logger
@@ -129,6 +133,12 @@ class CompletionService:
             encryption_service=self.encryption_service
         )
         super().__init__()
+
+    async def build_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
+        """The provider-bound adapter for ``model``, for callers that run their
+        own completions (the digest tools). Needs the service's session to load
+        the provider; the adapter itself is then usable outside it."""
+        return await self._get_adapter(model)
 
     async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
         """
@@ -287,6 +297,47 @@ class CompletionService:
                     tenant_id=self.tenant.id,
                 )
         return urls
+
+    async def _build_knowledge_reference_urls(
+        self, session: SessionInDB | None
+    ) -> dict[UUID, str]:
+        """Fresh links for knowledge documents earlier turns handed to tools.
+
+        A knowledge tool's result admitted them into this session as verified,
+        tenant-checked Eneo links. Like generated files they are minted again
+        every turn so a follow-up can pass the same handle. Documents whose
+        original is no longer available, or outside this tenant, are dropped.
+        """
+        base_url = file_reference_base_url(self.config)
+        if (
+            not base_url
+            or self.tenant is None
+            or self.session is None
+            or session is None
+        ):
+            return {}
+        document_ids = list(
+            dict.fromkeys(
+                document_id
+                for question in session.questions
+                for tool_call in question.tool_calls or []
+                for document_id in tool_call.referenced_file_ids or []
+            )
+        )
+        if not document_ids:
+            return {}
+        originals = await InfoBlobRepository(self.session).get_originals(document_ids)
+        expires_in = self.config.file_reference_url_expiry_seconds
+        return {
+            document_id: build_signed_info_blob_original_download_url(
+                info_blob_id=document_id,
+                base_url=base_url,
+                expires_in=expires_in,
+                tenant_id=self.tenant.id,
+            )
+            for document_id, original in originals.items()
+            if original.usable and original.tenant_id == self.tenant.id
+        }
 
     async def _mint_generated_file_url(
         self, file: File, session: SessionInDB | None
@@ -494,6 +545,7 @@ class CompletionService:
         file_reference_urls = self._build_file_reference_urls(
             files + history_files + referenced_prompt_files
         )
+        file_reference_urls.update(await self._build_knowledge_reference_urls(session))
         # The previous turn's generated files are minted for the first time on
         # this turn, so they are "new" exactly once, here. Persistent
         # attachments are re-minted every turn of a session but represent one
@@ -529,6 +581,7 @@ class CompletionService:
                 app_view_repo=(
                     McpAppViewRepo(self.session) if self.session is not None else None
                 ),
+                tenant_id=self.tenant.id if self.tenant is not None else None,
             )
             # Tools may only be handed links to the files minted above.
             mcp_proxy.allow_file_references(file_reference_urls)

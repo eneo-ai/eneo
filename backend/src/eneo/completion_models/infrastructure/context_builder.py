@@ -101,29 +101,42 @@ _GENERATED_PLACEHOLDER = re.compile(r"\[(Image|File) (\d+) \(")
 def _with_generated_image_references(
     tc: ToolCallInfo, file_reference_urls: Optional[dict[UUID, str]]
 ) -> str:
-    """The persisted result plus one reference line per generated file.
+    """The persisted result plus one reference line per file it made available.
 
-    Labels follow the "[Image N ...]" and "[File N ...]" placeholders the
-    result already carries: they appear in the order the files were persisted
-    for this call, so the n-th placeholder names the n-th generated file.
+    Generated files: labels follow the "[Image N ...]" and "[File N ...]"
+    placeholders the result already carries, in the order the files were
+    persisted for this call, so the n-th placeholder names the n-th file.
+    Referenced documents (knowledge originals a tool result linked to) are
+    named by document id, which the result text already states.
     """
     result = model_file_references(tc.result or "", file_reference_urls or {})
-    if not tc.generated_file_ids or not file_reference_urls:
+    if not file_reference_urls:
         return result
-    labels = [
-        f"{kind} {number}" for kind, number in _GENERATED_PLACEHOLDER.findall(result)
-    ]
+    lines: list[str] = []
+    if tc.generated_file_ids:
+        labels = [
+            f"{kind} {number}"
+            for kind, number in _GENERATED_PLACEHOLDER.findall(result)
+        ]
 
-    def label(position: int) -> str:
-        # Results persisted before documents existed carry image placeholders
-        # only, which the list covers; fall back to the old numbering anyway.
-        return labels[position] if position < len(labels) else f"Image {position + 1}"
+        def label(position: int) -> str:
+            # Results persisted before documents existed carry image
+            # placeholders only, which the list covers; fall back to the old
+            # numbering anyway.
+            return (
+                labels[position] if position < len(labels) else f"Image {position + 1}"
+            )
 
-    lines = [
-        f"File reference for {label(position)}: {file_handle(file_id)}"
-        for position, file_id in enumerate(tc.generated_file_ids)
+        lines.extend(
+            f"File reference for {label(position)}: {file_handle(file_id)}"
+            for position, file_id in enumerate(tc.generated_file_ids)
+            if file_id in file_reference_urls
+        )
+    lines.extend(
+        f"File reference for document {file_id}: {file_handle(file_id)}"
+        for file_id in tc.referenced_file_ids or []
         if file_id in file_reference_urls
-    ]
+    )
     if not lines:
         return result
     return "\n".join([result, *lines]) if result else "\n".join(lines)

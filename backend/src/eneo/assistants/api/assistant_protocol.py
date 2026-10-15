@@ -35,6 +35,7 @@ from eneo.sessions.session import (
     SSEToolApprovalTimeout,
     SSEToolCall,
     SSEToolCallDelta,
+    SSEToolProgress,
     TokenUsageEvent,
     ToolCallInfo,
 )
@@ -265,6 +266,15 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
             session_id=session_id,
             tool_call_id=chunk.tool_call_id or "",
             arguments_delta=chunk.arguments_delta or "",
+        )
+
+    elif chunk.response_type == ResponseType.TOOL_PROGRESS:
+        data = SSEToolProgress(
+            session_id=session_id,
+            tool_call_id=chunk.tool_call_id or "",
+            progress=chunk.progress or 0.0,
+            total=chunk.progress_total,
+            message=chunk.progress_message,
         )
 
     elif chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:

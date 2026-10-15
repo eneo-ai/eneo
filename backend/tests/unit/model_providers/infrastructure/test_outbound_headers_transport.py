@@ -322,6 +322,14 @@ def _completion_adapter(
 
 
 class _FakeMCPProxy:
+    def verify_reference_link(self, url):
+        # Admits no tool-result links; this suite is about transport headers.
+        del url
+        return None
+
+    def allow_file_references(self, file_ids):
+        del file_ids
+
     def __init__(self) -> None:
         self.calls: list[Any] = []
 
@@ -349,7 +357,12 @@ class _FakeMCPProxy:
     async def refresh_tools(self, touched_tool_names: list[str]) -> bool:
         return False
 
-    async def call_tools_parallel(self, proxy_calls: list[Any]) -> list[dict[str, Any]]:
+    async def connect_for_tools(self, proxy_calls) -> None:
+        pass
+
+    async def call_tools_parallel(
+        self, proxy_calls: list[Any], on_progress=None
+    ) -> list[dict[str, Any]]:
         self.calls.append(proxy_calls)
         return [
             {"content": [{"type": "text", "text": "tool-ok"}], "is_error": False}

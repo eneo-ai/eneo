@@ -131,6 +131,17 @@ class UpdateSpaceRequest(BaseModel):
             "Omit to keep the current security classification unchanged."
         ),
     )
+    reader_model: Union[ModelId, NotProvided, None] = Field(
+        default=NOT_PROVIDED,
+        description=(
+            "The space's own reader model for digests, one of its completion "
+            "models; null for none. Omit to keep the current choice."
+        ),
+    )
+    reader_model_inherit: Union[bool, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description="Whether the organisation's default reader model applies here.",
+    )
     icon_id: Union[UUID, None, NotProvided] = Field(
         default=NOT_PROVIDED,
         description="Icon ID referencing an uploaded icon. Set to null to remove.",
@@ -208,6 +219,23 @@ class SpaceRole(BaseModel):
         return self.value.value.capitalize()
 
 
+class ReaderModelPublic(BaseModel):
+    """The space's reader model for digests: the stored choice, the model
+    that applies today and why, and the organisation default it may inherit."""
+
+    inherit: bool
+    model: Optional[CompletionModelPublic]
+    effective: Optional[CompletionModelPublic]
+    reason: str
+    tenant_default: Optional[CompletionModelPublic]
+
+
+def _no_reader_model() -> ReaderModelPublic:
+    return ReaderModelPublic(
+        inherit=True, model=None, effective=None, reason="none", tenant_default=None
+    )
+
+
 class SpacePublic(SpaceDashboard):
     enabled_capabilities: list[CapabilityPurpose] = Field(
         default_factory=list[CapabilityPurpose]
@@ -230,6 +258,7 @@ class SpacePublic(SpaceDashboard):
 
     available_roles: list[SpaceRole]
     security_classification: Optional[SecurityClassificationPublic]
+    reader_model: ReaderModelPublic = Field(default_factory=_no_reader_model)
 
 
 # Assistants

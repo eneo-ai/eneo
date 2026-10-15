@@ -37,6 +37,7 @@ from eneo.files.attachment_budget import (
 )
 from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import (
+    can_fall_back_to_url_only,
     inline_file_text_for_model,
     inlined_attachments,
     url_only_file_ids,
@@ -44,6 +45,7 @@ from eneo.files.file_reference import (
 from eneo.files.file_service import FileService, require_requested_files
 from eneo.files.generated_documents import GeneratedDocumentRejected
 from eneo.governance_policy.domain.policy_resolver import (
+    resolve_reader_model,
     select_effective_completion_model,
     select_effective_inline_file_text,
     select_effective_reasoning_effort,
@@ -96,6 +98,7 @@ from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.prompts.prompt import Prompt
 from eneo.prompts.prompt_service import PromptService
 from eneo.questions.question import ToolAssistant, ToolCallInfo, UseTools
+from eneo.questions.tool_usage import tool_usage_tokens
 from eneo.roles.permissions import (
     Permission,
     validate_permission,
@@ -575,6 +578,29 @@ class AssistantService:
                 integration_knowledge_id=integration_knowledge.id
             ):
                 raise BadRequestException("Invalid integration knowledge")
+
+    async def _resolve_reader_model(
+        self,
+        *,
+        space: "Space",
+        effective_config: "EffectiveConfig | None",
+        turn_model: "CompletionModel",
+    ) -> "CompletionModel | None":
+        """The reader model a digest on this turn may take its notes with."""
+        candidates = (
+            await self.completion_model_crud_service.get_available_completion_models()
+        )
+        tenant_default = next((m for m in candidates if m.is_org_reader), None)
+        return resolve_reader_model(
+            space_is_personal=space.is_personal(),
+            space_completion_models=space.completion_models,
+            space_reader_inherit=space.reader_model_inherit,
+            space_reader_model=space.reader_model,
+            space_security_classification=space.security_classification,
+            tenant_default=tenant_default,
+            effective_config=effective_config,
+            turn_model_id=turn_model.id,
+        ).model
 
     async def _resolve_effective_config(
         self, *, space: "Space", assistant: Assistant
@@ -1485,6 +1511,53 @@ class AssistantService:
             prompt_text=prompt_text,
             files=persistent_files + message_files,
         )
+
+    async def _assert_message_attachments_fit_or_fall_back(
+        self,
+        *,
+        assistant: "Assistant",
+        model: "CompletionModel",
+        prompt_text: str,
+        files: list["File"],
+        validate_persistent_baseline: bool,
+        policy_enforces_inlining: bool,
+    ) -> None:
+        """The fit gate, with one escape: uploads that do not fit inlined can
+        still be read through the files tools when every one of them has a
+        reference URL, so the turn switches to URL-only (request-scoped, like
+        the governance flip; every downstream reader takes the flag from the
+        entity) instead of rejecting the ask. Persistent attachments alone
+        overflowing still fail: they were gated on save."""
+        try:
+            await self._assert_message_attachments_fit(
+                assistant=assistant,
+                model=model,
+                prompt_text=prompt_text,
+                files=files,
+                validate_persistent_baseline=validate_persistent_baseline,
+            )
+        except BadRequestException as overflow:
+            if not can_fall_back_to_url_only(
+                files,
+                completion_model=model,
+                inline_file_text=assistant.inline_file_text,
+                policy_enforces_inlining=policy_enforces_inlining,
+            ):
+                raise
+            assistant.inline_file_text = False
+            logger.info(
+                "[FILES] assistant=%s uploads exceed the window (%s), switched to "
+                "URL-only for this turn",
+                assistant.id,
+                overflow,
+            )
+            await self._assert_message_attachments_fit(
+                assistant=assistant,
+                model=model,
+                prompt_text=prompt_text,
+                files=files,
+                validate_persistent_baseline=validate_persistent_baseline,
+            )
 
     async def get_completion_model(self, space: "Space") -> Optional["CompletionModel"]:
         """Get a completion model for the space. Returns None if no model is available."""
@@ -2503,9 +2576,13 @@ class AssistantService:
                             chunk.generated_file = image_file
                             yield chunk
 
-                        if chunk.response_type == ResponseType.TOOL_CALL_DELTA:
-                            # Shown while the call is written; the complete
-                            # arguments are persisted from its TOOL_CALL chunk.
+                        if chunk.response_type in (
+                            ResponseType.TOOL_CALL_DELTA,
+                            ResponseType.TOOL_PROGRESS,
+                        ):
+                            # Shown while the call is written or runs; the
+                            # complete arguments and the result are persisted
+                            # from its TOOL_CALL chunk.
                             yield chunk
 
                         if chunk.response_type == ResponseType.TOOL_CALL:
@@ -2545,6 +2622,10 @@ class AssistantService:
                                             existing.result = tc.result
                                         if tc.meta is not None:
                                             existing.meta = tc.meta
+                                        if tc.referenced_file_ids is not None:
+                                            existing.referenced_file_ids = (
+                                                tc.referenced_file_ids
+                                            )
                                         if tc.structured_content is not None:
                                             existing.structured_content = (
                                                 tc.structured_content
@@ -2573,6 +2654,7 @@ class AssistantService:
                                                 is_internal=tc.is_internal,
                                                 is_bundled=tc.is_bundled,
                                                 meta=tc.meta,
+                                                referenced_file_ids=tc.referenced_file_ids,
                                                 structured_content=tc.structured_content,
                                                 app_view=tc.app_view,
                                             )
@@ -2736,6 +2818,16 @@ class AssistantService:
                         f"input={num_tokens_question} ({input_source}), "
                         f"output={num_tokens_answer} ({output_source})"
                     )
+                    tool_input, tool_output = tool_usage_tokens(
+                        tool_calls, completion_model.id
+                    )
+                    if tool_input or tool_output:
+                        num_tokens_question += tool_input
+                        num_tokens_answer += tool_output
+                        logger.info(
+                            f"[TokenUsage] assistant={assistant_id} folded tool "
+                            f"usage input={tool_input} output={tool_output}"
+                        )
 
                     skill_provenance, skill_activation = _final_skill_runtime_state()
                     _attach_generated_file_ids(tool_calls, generated_file_ids_by_call)
@@ -2870,6 +2962,7 @@ class AssistantService:
                             is_internal=tc.is_internal,
                             is_bundled=tc.is_bundled,
                             meta=tc.meta,
+                            referenced_file_ids=tc.referenced_file_ids,
                             structured_content=tc.structured_content,
                             app_view=tc.app_view,
                         )
@@ -2970,6 +3063,16 @@ class AssistantService:
                 f"input={num_tokens_question} ({input_source}), "
                 f"output={num_tokens_answer} ({output_source})"
             )
+            tool_input, tool_output = tool_usage_tokens(
+                non_streaming_tool_calls, completion_model.id
+            )
+            if tool_input or tool_output:
+                num_tokens_question += tool_input
+                num_tokens_answer += tool_output
+                logger.info(
+                    f"[TokenUsage] assistant={assistant_id} folded tool usage "
+                    f"input={tool_input} output={tool_output}"
+                )
 
             skill_provenance, skill_activation = _final_skill_runtime_state()
             await self.session_service.complete_question_with_answer(
@@ -3354,7 +3457,7 @@ class AssistantService:
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question
         # row is created — same "fail before persisting" carve-out as governance.
-        await self._assert_message_attachments_fit(
+        await self._assert_message_attachments_fit_or_fall_back(
             assistant=assistant_to_ask,
             model=effective_completion_model,
             prompt_text=skill_composition.prompt,
@@ -3365,6 +3468,10 @@ class AssistantService:
                 and (
                     effective_config.models_enforced or effective_config.prompt_enforced
                 )
+            ),
+            policy_enforces_inlining=(
+                effective_config is not None
+                and effective_config.inline_file_text is not None
             ),
         )
 
@@ -3460,13 +3567,31 @@ class AssistantService:
             server.purpose == "file_analysis" for server in capability_mcp_servers
         )
 
+        # The digest tools take their per-segment notes with the tenant's
+        # reader model when this turn's space and policy allow it.
+        reader_model = await self._resolve_reader_model(
+            space=space,
+            effective_config=effective_config,
+            turn_model=effective_completion_model,
+        )
+
         def mint_scoped_token() -> str:
             nonlocal scoped_token
             if scoped_token is None:
+                # The digest tools run the completion's effective model: a
+                # policy-enforced model and effort travel as claims so the
+                # loopback cannot fall back to the assistant's stored ones.
+                effective_kwargs = (
+                    model_kwargs_override or assistant_to_ask.completion_model_kwargs
+                )
                 scoped_token = self.auth_service.create_scoped_mcp_token(
                     self.user,
                     assistant_id=assistant_to_ask.id,
                     table_tools=table_tools_attached,
+                    completion_model_id=effective_completion_model.id,
+                    reasoning_effort=effective_kwargs.reasoning_effort,
+                    reasoning_enforced=model_kwargs_override is not None,
+                    reader_model_id=reader_model.id if reader_model else None,
                 )
             return scoped_token
 

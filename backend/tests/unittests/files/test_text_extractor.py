@@ -802,3 +802,74 @@ class TestTextExtractorExceptionClasses:
         assert ".doc" in error.message
         assert "not supported" in error.message.lower()
         assert error.code == "UNSUPPORTED_FORMAT"
+
+
+class TestTabularIndexBudget:
+    """Knowledge indexing samples a large table; every other caller gets all rows."""
+
+    @staticmethod
+    def _workbook(path):
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Orders"
+        ws.append(["id", "amount"])
+        for i in range(40):
+            ws.append([i, i * 10])
+        wb.save(path)
+        return path
+
+    @staticmethod
+    def _csv(path, rows=30):
+        path.write_text("id,name\n" + "".join(f"{i},person-{i}\n" for i in range(rows)))
+        return path
+
+    def test_knowledge_indexing_samples_a_large_workbook(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("eneo.files.tabular_index.TABULAR_INDEX_MAX_CHARS", 300)
+        path = self._workbook(tmp_path / "orders.xlsx")
+
+        result = TextExtractor.extract_from_xlsx(
+            path, "orders.xlsx", index_tabular=True
+        )
+
+        assert result.startswith("File: orders.xlsx\n\nLarge table: 40 rows.")
+        assert 'Sheet "Orders" (40 rows): id, amount' in result
+        assert "Sheet: Orders | id: 0 | amount: 0" in result
+
+    def test_knowledge_indexing_samples_a_large_csv(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("eneo.files.tabular_index.TABULAR_INDEX_MAX_CHARS", 250)
+        path = self._csv(tmp_path / "people.csv")
+
+        result = TextExtractor().extract(
+            path, mimetype="text/csv", filename="people.csv", index_tabular=True
+        )
+
+        assert result.startswith("File: people.csv\n\nLarge table: 30 rows.")
+        assert "Table (30 rows): id, name\n0,person-0" in result
+
+    def test_attachment_extraction_keeps_every_row(self, tmp_path, monkeypatch):
+        """A chat attachment's text is all the model has, so nothing is sampled."""
+        monkeypatch.setattr("eneo.files.tabular_index.TABULAR_INDEX_MAX_CHARS", 250)
+        workbook = TextExtractor.extract_from_xlsx(
+            self._workbook(tmp_path / "orders.xlsx"), "orders.xlsx"
+        )
+        csv = TextExtractor().extract(
+            self._csv(tmp_path / "people.csv"),
+            mimetype="text/csv",
+            filename="people.csv",
+        )
+
+        assert workbook.startswith("File: orders.xlsx\n\nSheet: Orders | id: 0")
+        assert "Sheet: Orders | id: 39 | amount: 390" in workbook
+        assert csv.endswith("29,person-29")
+
+    def test_small_csv_is_indexed_verbatim(self, tmp_path):
+        path = tmp_path / "people.csv"
+        path.write_text("id,name\n1,Ada\n")
+
+        result = TextExtractor().extract(
+            path, mimetype="text/csv", filename="people.csv", index_tabular=True
+        )
+
+        assert result == "id,name\n1,Ada"

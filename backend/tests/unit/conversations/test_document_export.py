@@ -94,7 +94,10 @@ class _Proxy:
     def allow_file_references(self, file_ids):
         self.allowed = dict(file_ids)
 
-    async def call_tools_parallel(self, calls):
+    async def connect_for_tools(self, calls) -> None:
+        pass
+
+    async def call_tools_parallel(self, calls, on_progress=None):
         self.called.extend(calls)
         return [self.result]
 

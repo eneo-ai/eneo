@@ -122,9 +122,10 @@ async def _validate_active_provider(
 
 
 async def _unset_other_defaults(
-    session: "AsyncSession", table: Any, tenant_id: UUID
+    session: "AsyncSession", table: Any, tenant_id: UUID, *, flag: str = "is_default"
 ) -> None:
-    """Clear `is_default` on every row of `table` for this tenant.
+    """Clear `flag` (`is_default`, or `is_reader` for completion models) on
+    every row of `table` for this tenant.
 
     Called before creating or promoting a new default — the schema
     accepts multiple defaults but the UI assumes at most one. Doing the
@@ -132,7 +133,7 @@ async def _unset_other_defaults(
     subsequent insert so we never publish a transient state with zero
     (or two) defaults.
     """
-    stmt = sa.update(table).where(table.tenant_id == tenant_id).values(is_default=False)
+    stmt = sa.update(table).where(table.tenant_id == tenant_id).values({flag: False})
     await session.execute(stmt)
 
 
@@ -401,6 +402,15 @@ class TenantCompletionModelService:
                     self.session, CompletionModels, self.user.tenant_id
                 )
             model.is_default = payload.is_default
+        if "is_reader" in provided and payload.is_reader is not None:
+            if payload.is_reader:
+                await _unset_other_defaults(
+                    self.session,
+                    CompletionModels,
+                    self.user.tenant_id,
+                    flag="is_reader",
+                )
+            model.is_reader = payload.is_reader
         if "security_classification" in provided:
             model.security_classification_id = (
                 await resolve_tenant_security_classification(

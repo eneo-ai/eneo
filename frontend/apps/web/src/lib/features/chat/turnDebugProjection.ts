@@ -19,17 +19,32 @@ export type ToolDebugUsage = {
   outputTokens: number | null;
 };
 
+/**
+ * Usage a digest tool reported for its reader model (`eneo.reader.*` on the
+ * tool result's `_meta`): the model that read the material part by part, apart
+ * from the turn's model that wrote the answer. Never part of the message's own
+ * token counts.
+ */
+export type ReaderDebugUsage = {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+};
+
 export type TurnDebugDetails = {
   model: { id: string; name: string; route: string } | null;
   createdAt: string | null;
   inputTokens: number;
   outputTokens: number;
+  /** The reader models' spend over every tool call of the turn, when any. */
+  readerUsage: ReaderDebugUsage | null;
   tools: Array<{
     order: number;
     serverName: string;
     toolName: string;
     status: string | null;
     usage: ToolDebugUsage | null;
+    readerUsage: ReaderDebugUsage | null;
   }>;
   knowledge: Array<{
     order: number;
@@ -67,6 +82,27 @@ export function readToolUsage(meta: unknown): ToolDebugUsage | null {
     outputTokens: metaCount(record, "gen_ai.usage.output_tokens")
   };
   return Object.values(usage).some((value) => value !== null) ? usage : null;
+}
+
+export function readReaderUsage(meta: unknown): ReaderDebugUsage | null {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const record = meta as Record<string, unknown>;
+  const model = metaString(record, "eneo.reader.model");
+  const inputTokens = metaCount(record, "eneo.reader.input_tokens");
+  const outputTokens = metaCount(record, "eneo.reader.output_tokens");
+  if (model === null || inputTokens === null || outputTokens === null) return null;
+  return { model, inputTokens, outputTokens };
+}
+
+function sumReaderUsage(usages: Array<ReaderDebugUsage | null>): ReaderDebugUsage | null {
+  const present = usages.filter((usage): usage is ReaderDebugUsage => usage !== null);
+  if (present.length === 0) return null;
+  const models = [...new Set(present.map((usage) => usage.model))];
+  return {
+    model: models.join(", "),
+    inputTokens: present.reduce((sum, usage) => sum + usage.inputTokens, 0),
+    outputTokens: present.reduce((sum, usage) => sum + usage.outputTokens, 0)
+  };
 }
 
 type StreamingConversationMessage = ConversationMessage & {
@@ -113,7 +149,8 @@ export function projectTurnDebugDetails(
     status:
       tool.result_status ??
       (tool.approved === false ? "rejected" : tool.approved === true ? "approved" : null),
-    usage: readToolUsage(tool.meta)
+    usage: readToolUsage(tool.meta),
+    readerUsage: readReaderUsage(tool.meta)
   }));
 
   const knowledge: TurnDebugDetails["knowledge"] = [];
@@ -154,6 +191,7 @@ export function projectTurnDebugDetails(
     model,
     inputTokens: message.num_tokens_question ?? 0,
     outputTokens: message.num_tokens_answer ?? 0,
+    readerUsage: sumReaderUsage(tools.map((tool) => tool.readerUsage)),
     tools,
     knowledge,
     files: [

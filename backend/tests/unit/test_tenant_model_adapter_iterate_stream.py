@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
     _build_tool_result_with_references,
     _GeneratedFileChunks,
     _ToolResultBudget,
+    _ToolRound,
 )
 from eneo.files.model_file_references import file_handle
 from eneo.main.exceptions import OpenAIException
@@ -130,6 +132,16 @@ class _FakeMCPProxy:
     def __init__(self):
         self.calls = []
         self.refreshed = []
+        self.admitted_references = {}
+
+    def verify_reference_link(self, url):
+        # A plain fake admits no tool-result link; tests that exercise
+        # admission override this with a verifier of their own.
+        del url
+        return None
+
+    def allow_file_references(self, file_ids):
+        self.admitted_references.update(file_ids)
 
     def get_allowed_tool_names(self):
         return {"server__tool"}
@@ -149,7 +161,10 @@ class _FakeMCPProxy:
         del prefixed_tool_name
         return None
 
-    async def call_tools_parallel(self, proxy_calls):
+    async def connect_for_tools(self, proxy_calls) -> None:
+        pass
+
+    async def call_tools_parallel(self, proxy_calls, on_progress=None):
         self.calls.append(proxy_calls)
         return [
             {"content": [{"type": "text", "text": "tool-ok"}], "is_error": False}
@@ -195,7 +210,10 @@ class _ProgressiveMCPProxy(_FakeMCPProxy):
 
 
 class _ResourceMCPProxy(_FakeMCPProxy):
-    async def call_tools_parallel(self, proxy_calls):
+    async def connect_for_tools(self, proxy_calls) -> None:
+        pass
+
+    async def call_tools_parallel(self, proxy_calls, on_progress=None):
         self.calls.append(proxy_calls)
         call_number = len(self.calls)
         return [
@@ -268,7 +286,7 @@ def _make_adapter() -> TenantModelAdapter:
 
 
 def test_build_tool_result_with_references_uses_self_describing_resource_blocks():
-    llm_text, display_text, refs, _ = _build_tool_result_with_references(
+    llm_text, display_text, refs, _, _admitted = _build_tool_result_with_references(
         content_list=[
             {"type": "text", "text": "Tool summary.\n"},
             {
@@ -327,7 +345,7 @@ def test_build_tool_result_with_references_uses_self_describing_resource_blocks(
 
 
 def test_build_tool_result_with_references_skips_unciteable_resources():
-    llm_text, display_text, refs, _ = _build_tool_result_with_references(
+    llm_text, display_text, refs, _, _admitted = _build_tool_result_with_references(
         content_list=[
             {"type": "text", "text": "Tool summary."},
             {
@@ -349,14 +367,16 @@ def test_build_tool_result_with_references_skips_unciteable_resources():
 def test_build_tool_result_with_references_turns_image_blocks_into_generated_images():
     png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
     encoded = base64.b64encode(png_bytes).decode("ascii")
-    llm_text, display_text, refs, images = _build_tool_result_with_references(
-        content_list=[
-            {"type": "text", "text": "Here is your picture."},
-            {"type": "image", "data": encoded, "mime_type": "image/png"},
-        ],
-        tool_call_id="call_img",
-        mcp_tool_name="images__generate",
-        existing_prefixes=set(),
+    llm_text, display_text, refs, images, _admitted = (
+        _build_tool_result_with_references(
+            content_list=[
+                {"type": "text", "text": "Here is your picture."},
+                {"type": "image", "data": encoded, "mime_type": "image/png"},
+            ],
+            tool_call_id="call_img",
+            mcp_tool_name="images__generate",
+            existing_prefixes=set(),
+        )
     )
 
     assert refs == []
@@ -378,7 +398,7 @@ def test_build_tool_result_with_references_turns_image_blocks_into_generated_ima
 def test_build_tool_result_with_references_turns_file_blocks_into_generated_files():
     pdf = b"%PDF-1.7 report"
     encoded = base64.b64encode(pdf).decode("ascii")
-    llm_text, _, refs, files = _build_tool_result_with_references(
+    llm_text, _, refs, files, _admitted = _build_tool_result_with_references(
         content_list=[
             {"type": "text", "text": "Done."},
             {
@@ -431,15 +451,83 @@ def test_saved_files_give_the_model_same_turn_handles_without_credentials():
     )
 
 
-def test_build_tool_result_with_references_skips_undecodable_image_blocks():
-    llm_text, display_text, refs, images = _build_tool_result_with_references(
+def test_build_tool_result_admits_verified_original_links_as_file_references():
+    # A knowledge tool hands a document over as a signed original link. The
+    # verifier (the proxy, tenant-bound) decides; an admitted link becomes a
+    # credential-free reference entry for the model and a display row, and
+    # the link itself never reaches either text.
+    document_id = uuid4()
+    signed = (
+        f"https://eneo.example/api/v1/info-blobs/{document_id}"
+        "/original/download/?token=synthetic"
+    )
+    foreign = (
+        f"https://eneo.example/api/v1/info-blobs/{uuid4()}/original/download/?token=x"
+    )
+    xlsx = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    def verify(url):
+        return ("info_blob", document_id) if url == signed else None
+
+    llm_text, display_text, refs, images, admitted = _build_tool_result_with_references(
         content_list=[
-            {"type": "image", "data": "not base64!!", "mime_type": "image/png"},
-            {"type": "image", "data": "", "mime_type": "image/png"},
+            {"type": "text", "text": "2 result(s)"},
+            {
+                "type": "resource_link",
+                "uri": signed,
+                "name": "sales.xlsx",
+                "mime_type": xlsx,
+                "meta": {"info_blob_id": str(document_id), "title": "Sales"},
+            },
+            {"type": "resource_link", "uri": foreign, "name": "other.xlsx"},
         ],
-        tool_call_id="call_img",
-        mcp_tool_name="images__generate",
+        tool_call_id="call_k",
+        mcp_tool_name="knowledge__search_knowledge",
         existing_prefixes=set(),
+        verify_reference_link=verify,
+    )
+
+    assert admitted == {document_id: signed}
+    assert images == []
+    entry = json.loads(llm_text.split("File reference: ", 1)[1].split("\n", 1)[0])
+    assert entry == {
+        "kind": "document",
+        "filename": "sales.xlsx",
+        "mimetype": xlsx,
+        "file_ref": file_handle(document_id),
+        "document_id": str(document_id),
+    }
+    assert "synthetic" not in llm_text and "synthetic" not in display_text
+    assert "other.xlsx" not in llm_text
+    assert [ref.uri for ref in refs] == [f"eneo://info-blob/{document_id}"]
+    assert refs[0].meta["filename"] == "sales.xlsx"
+
+
+def test_build_tool_result_ignores_original_links_without_a_verifier():
+    document_id = uuid4()
+    signed = f"https://eneo.example/api/v1/info-blobs/{document_id}/original/download/?token=t"
+    llm_text, _, refs, _, admitted = _build_tool_result_with_references(
+        content_list=[{"type": "resource_link", "uri": signed, "name": "sales.xlsx"}],
+        tool_call_id="call_k",
+        mcp_tool_name="knowledge__search_knowledge",
+        existing_prefixes=set(),
+    )
+    assert admitted == {}
+    assert refs == []
+    assert "File reference" not in llm_text
+
+
+def test_build_tool_result_with_references_skips_undecodable_image_blocks():
+    llm_text, display_text, refs, images, _admitted = (
+        _build_tool_result_with_references(
+            content_list=[
+                {"type": "image", "data": "not base64!!", "mime_type": "image/png"},
+                {"type": "image", "data": "", "mime_type": "image/png"},
+            ],
+            tool_call_id="call_img",
+            mcp_tool_name="images__generate",
+            existing_prefixes=set(),
+        )
     )
 
     assert images == []
@@ -669,7 +757,10 @@ async def test_non_streaming_supports_multiple_tool_rounds():
 
 
 class _ErrorSecondRoundMCPProxy(_FakeMCPProxy):
-    async def call_tools_parallel(self, proxy_calls):
+    async def connect_for_tools(self, proxy_calls) -> None:
+        pass
+
+    async def call_tools_parallel(self, proxy_calls, on_progress=None):
         self.calls.append(proxy_calls)
         is_error = len(self.calls) > 1
         text = "boom" if is_error else "tool-ok"
@@ -2099,7 +2190,10 @@ class _AppViewMCPProxy(_FakeMCPProxy):
 
 
 class _ErrorResultAppViewProxy(_AppViewMCPProxy):
-    async def call_tools_parallel(self, proxy_calls):
+    async def connect_for_tools(self, proxy_calls) -> None:
+        pass
+
+    async def call_tools_parallel(self, proxy_calls, on_progress=None):
         self.calls.append(proxy_calls)
         return [
             {"content": [{"type": "text", "text": "boom"}], "is_error": True}
@@ -2118,7 +2212,10 @@ def _app_view_info():
 
 
 class _StructuredResultMixin:
-    async def call_tools_parallel(self, proxy_calls):
+    async def connect_for_tools(self, proxy_calls) -> None:
+        pass
+
+    async def call_tools_parallel(self, proxy_calls, on_progress=None):
         self.calls.append(proxy_calls)  # type: ignore[attr-defined]
         return [
             {
@@ -2264,7 +2361,10 @@ async def test_provider_file_echo_is_converted_before_next_model_request(streami
         def model_result_text(self, text):
             return model_file_references(text, {file_id: url})
 
-        async def call_tools_parallel(self, calls):
+        async def connect_for_tools(self, calls) -> None:
+            pass
+
+        async def call_tools_parallel(self, calls, on_progress=None):
             return [
                 {"content": [{"type": "text", "text": url}], "is_error": False}
                 for _ in calls
@@ -2320,3 +2420,182 @@ async def test_provider_file_echo_is_converted_before_next_model_request(streami
     results = [message["content"] for message in messages if message["role"] == "tool"]
     assert results == [file_handle(file_id)]
     assert "synthetic-secret" not in str(messages)
+
+
+class TestCiteKeyRewrite:
+    """A resource that names its citation key links the result text's
+    bracketed key to the minted source id, so a tool-composed body cites."""
+
+    def _resource(self, key, text, uri="eneo://info-blob/1"):
+        return {
+            "type": "resource",
+            "uri": uri,
+            "text": text,
+            "mime_type": "text/plain",
+            "meta": {"eneo.cite_key": key},
+        }
+
+    def test_keys_become_inref_tags_for_the_model_only(self):
+        content = [
+            {"type": "text", "text": "Decided [D1]; postponed [D10]; see [D1] again."},
+            self._resource("D1", "[D1] Minutes January"),
+            self._resource("D10", "[D10] Minutes October", "eneo://info-blob/10"),
+        ]
+        prefixes: set[str] = set()
+
+        llm_text, display_text, refs, _, _ = _build_tool_result_with_references(
+            content, "call_1", "knowledge__digest_documents", prefixes
+        )
+
+        by_key = {ref.meta["eneo.cite_key"]: str(ref.id)[:8] for ref in refs}
+        first_line = llm_text.splitlines()[0]
+        assert first_line == (
+            f'Decided <inref id="{by_key["D1"]}"/>; postponed '
+            f'<inref id="{by_key["D10"]}"/>; see <inref id="{by_key["D1"]}"/> again.'
+        )
+        assert display_text.startswith("Decided [D1]; postponed [D10]; see [D1] again.")
+
+    def test_keys_without_a_resource_stay_as_written(self):
+        content = [
+            {"type": "text", "text": "Decided [D1] and [D2]."},
+            self._resource("D1", "[D1] Minutes January"),
+        ]
+
+        llm_text, _, refs, _, _ = _build_tool_result_with_references(
+            content, "call_1", "knowledge__digest_documents", set()
+        )
+
+        prefix = str(refs[0].id)[:8]
+        assert llm_text.startswith(f'Decided <inref id="{prefix}"/> and [D2].')
+
+    def test_two_digests_in_one_turn_keep_independent_key_spaces(self):
+        prefixes: set[str] = set()
+        first = _build_tool_result_with_references(
+            [{"type": "text", "text": "A [D1]"}, self._resource("D1", "[D1] A")],
+            "call_1",
+            "knowledge__digest_documents",
+            prefixes,
+        )
+        second = _build_tool_result_with_references(
+            [{"type": "text", "text": "B [D1]"}, self._resource("D1", "[D1] B")],
+            "call_2",
+            "files__digest_files",
+            prefixes,
+        )
+
+        first_prefix = str(first[2][0].id)[:8]
+        second_prefix = str(second[2][0].id)[:8]
+        assert first_prefix != second_prefix
+        assert f'<inref id="{first_prefix}"/>' in first[0]
+        assert f'<inref id="{second_prefix}"/>' in second[0]
+
+
+# --------------------------------------------------------------------------- #
+# Progress a server reports while a call runs
+# --------------------------------------------------------------------------- #
+class _ReportingMCPProxy(_FakeMCPProxy):
+    """A tool that reports progress twice before it answers."""
+
+    async def call_tools_parallel(self, proxy_calls, on_progress=None):
+        self.calls.append(proxy_calls)
+        if on_progress is not None:
+            await on_progress(0, 3, 44, "Read 3 of 44 parts")
+            await on_progress(0, 12, 44, "Read 12 of 44 parts")
+        return [
+            {"content": [{"type": "text", "text": "tool-ok"}], "is_error": False}
+            for _ in proxy_calls
+        ]
+
+
+async def test_iterate_stream_relays_tool_progress_before_the_result():
+    mcp_proxy = _ReportingMCPProxy()
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(tool_call_id="call_1")],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    follow_ups = [_AsyncChunkStream([_text_chunk("done", finish_reason="stop")])]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=follow_ups),
+    ):
+        chunks = await _collect(
+            _make_adapter(),
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    kinds = [c.response_type for c in chunks]
+    progress = [c for c in chunks if c.response_type == ResponseType.TOOL_PROGRESS]
+    assert progress, kinds
+    assert all(c.tool_call_id == "call_1" for c in progress)
+    # Only the latest notification matters to a reader; both are acceptable
+    # but the last one must arrive, before the call's result.
+    assert (progress[-1].progress, progress[-1].progress_total) == (12, 44)
+    assert progress[-1].progress_message == "Read 12 of 44 parts"
+    last_progress = max(i for i, c in enumerate(chunks) if c in progress)
+    result_index = next(
+        i
+        for i, c in enumerate(chunks)
+        if c.response_type == ResponseType.TOOL_CALL
+        and any(t.result_status == "succeeded" for t in c.tool_calls_metadata or [])
+    )
+    assert last_progress < result_index
+
+
+class TestToolRound:
+    async def test_coalesces_to_the_latest_notification_per_call(self):
+        class _Proxy:
+            async def connect_for_tools(self, calls):
+                pass
+
+            async def call_tools_parallel(self, calls, on_progress=None):
+                assert on_progress is not None
+                for step in range(1, 4):
+                    await on_progress(1, step, 3, f"second call {step}")
+                await on_progress(0, 1, 1, "first call done")
+                return [{"a": 1}, {"b": 2}]
+
+        tool_round = _ToolRound(_Proxy(), [("x", {}), ("y", {})], ["c1", "c2"])
+        await tool_round.start()
+        chunks = [chunk async for chunk in tool_round.progress()]
+
+        assert tool_round.results() == [{"a": 1}, {"b": 2}]
+        by_call = {c.tool_call_id: c for c in chunks}
+        assert by_call["c2"].progress == 3 and by_call["c2"].progress_total == 3
+        assert by_call["c1"].progress_message == "first call done"
+        # The queue was drained in order; the last chunk per call is its latest.
+        assert [c.tool_call_id for c in chunks][-2:] in (["c1", "c2"], ["c2", "c1"])
+
+    async def test_cancel_ends_the_calls(self):
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        class _Proxy:
+            async def connect_for_tools(self, calls):
+                pass
+
+            async def call_tools_parallel(self, calls, on_progress=None):
+                started.set()
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+                return []
+
+        tool_round = _ToolRound(_Proxy(), [("x", {})], ["c1"])
+        await tool_round.start()
+        await started.wait()
+
+        await tool_round.cancel()
+
+        assert cancelled.is_set()

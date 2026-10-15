@@ -39,6 +39,14 @@ class _AsyncChunkStream:
 
 
 class _FakeMCPProxy:
+    def verify_reference_link(self, url):
+        # Admits no tool-result links; this suite is about Skill activation.
+        del url
+        return None
+
+    def allow_file_references(self, file_ids):
+        del file_ids
+
     def model_result_text(self, text: str) -> str:
         return text
 
@@ -77,8 +85,15 @@ class _FakeMCPProxy:
         del touched_tool_names
         return False
 
-    async def call_tools_parallel(
+    async def connect_for_tools(
         self, calls: list[tuple[str, dict[str, object]]]
+    ) -> None:
+        pass
+
+    async def call_tools_parallel(
+        self,
+        calls: list[tuple[str, dict[str, object]]],
+        on_progress: object = None,
     ) -> list[dict[str, object]]:
         self.calls.append(calls)
         return [

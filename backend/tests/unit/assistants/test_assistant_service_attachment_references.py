@@ -6,7 +6,7 @@ loopback files server must attach for it, exactly as for URL-only uploads.
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -130,3 +130,62 @@ async def test_completion_file_inputs_pass_url_only_attachments_to_pruning():
     assert service._completion_prompt_files_for_model.await_args.kwargs[
         "url_only_ids"
     ] == {kontoplan.id}
+
+
+class TestFitGateFallback:
+    """An overflowing upload switches the turn to URL-only when the files tool
+    can read it, and is rejected otherwise."""
+
+    def _service(self, outcomes):
+        service = MagicMock()
+        service._assert_message_attachments_fit = AsyncMock(side_effect=outcomes)
+        return service
+
+    async def _run(self, service, *, fallback: bool, assistant=None):
+        from eneo.assistants.assistant_service import AssistantService
+
+        assistant = assistant or SimpleNamespace(id=uuid4(), inline_file_text=True)
+        with patch(
+            "eneo.assistants.assistant_service.can_fall_back_to_url_only",
+            return_value=fallback,
+        ):
+            await AssistantService._assert_message_attachments_fit_or_fall_back(
+                service,
+                assistant=assistant,
+                model=SimpleNamespace(supports_tool_calling=True),
+                prompt_text="",
+                files=[
+                    SimpleNamespace(
+                        id=uuid4(), file_type=FileType.TEXT, original_available=True
+                    )
+                ],
+                validate_persistent_baseline=False,
+                policy_enforces_inlining=False,
+            )
+        return assistant
+
+    async def test_overflow_with_readable_uploads_flips_the_turn_to_url_only(self):
+        from eneo.main.exceptions import BadRequestException
+
+        service = self._service([BadRequestException("too big"), None])
+
+        assistant = await self._run(service, fallback=True)
+
+        assert assistant.inline_file_text is False
+        assert service._assert_message_attachments_fit.await_count == 2
+
+    async def test_overflow_without_a_fallback_keeps_the_error(self):
+        from eneo.main.exceptions import BadRequestException
+
+        service = self._service([BadRequestException("too big")])
+
+        with pytest.raises(BadRequestException):
+            await self._run(service, fallback=False)
+        assert service._assert_message_attachments_fit.await_count == 1
+
+    async def test_a_fitting_message_never_touches_the_flag(self):
+        service = self._service([None])
+
+        assistant = await self._run(service, fallback=True)
+
+        assert assistant.inline_file_text is True

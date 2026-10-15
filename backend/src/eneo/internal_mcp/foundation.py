@@ -68,6 +68,37 @@ def assistant_id_from_token(token: str) -> UUID:
     return UUID(str(raw))
 
 
+class DigestClaims(NamedTuple):
+    """The effective model settings a loopback tool that calls a model uses."""
+
+    completion_model_id: UUID | None
+    reasoning_effort: str | None
+    reasoning_enforced: bool
+    # The tenant's reader model, already judged against the turn's space and
+    # policy by the ask path; the digest takes its per-segment notes with it.
+    reader_model_id: UUID | None = None
+
+
+def digest_claims_from_token(token: str) -> DigestClaims:
+    """Model claims minted at ask time; absent on tokens from older callers."""
+    settings = get_settings()
+    _, claims = AuthService().get_jwt_payload_with_claims(
+        token,
+        key=str(settings.jwt_secret),
+        aud=INTERNAL_MCP_AUDIENCE,
+        algs=[settings.jwt_algorithm],
+    )
+    raw_model = claims.get("completion_model_id")
+    raw_effort = claims.get("reasoning_effort")
+    raw_reader = claims.get("reader_model_id")
+    return DigestClaims(
+        completion_model_id=UUID(str(raw_model)) if raw_model else None,
+        reasoning_effort=str(raw_effort) if raw_effort else None,
+        reasoning_enforced=claims.get("reasoning_enforced") is True,
+        reader_model_id=UUID(str(raw_reader)) if raw_reader else None,
+    )
+
+
 def mcp_server_id_from_token(token: str) -> UUID:
     """The built-in provider row this token was minted for."""
     settings = get_settings()

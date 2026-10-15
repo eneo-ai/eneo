@@ -10,6 +10,15 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from eneo.files.tabular_index import (
+    IndexedSheet,
+    delimited_index_text,
+    fits_index_budget,
+    tabular_sample_text,
+)
+from eneo.integration.infrastructure.content_service.originals import (
+    retain_original_bytes,
+)
 from eneo.integration.infrastructure.content_service.types import SharePointItem
 
 logger = getLogger(__name__)
@@ -325,7 +334,18 @@ def extract_text_from_pptx(
     return "[Could not extract text from PowerPoint presentation]"
 
 
-def extract_text_from_xlsx(binary_data: bytes) -> str:
+_XLSX_TEXT_PREFIX = "Excel sheet data: "
+_XLSX_SHEET_OPEN = "### "
+_XLSX_SHEET_CLOSE = " ###\n"
+
+
+def extract_text_from_xlsx(binary_data: bytes, filename: str = "spreadsheet") -> str:
+    """Every row of every sheet, pipe-separated, under a ``### sheet ###`` heading.
+
+    This is the complete text. Whether a large workbook is indexed whole or as
+    schema plus sample is decided at publication (:func:`sync_index_text`),
+    once it is known that the original is retained for the table tools.
+    """
     try:
         excel_file = io.BytesIO(binary_data)
         xls = pd.ExcelFile(excel_file)
@@ -333,11 +353,52 @@ def extract_text_from_xlsx(binary_data: bytes) -> str:
         for sheet_name in xls.sheet_names:
             df: pd.DataFrame = pd.read_excel(xls, sheet_name=sheet_name)  # type: ignore[assignment]  # pandas stubs return broad type
             csv_text = df.to_csv(index=False, sep="|")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs incomplete
-            csv_data.append(f"### {sheet_name} ###\n{csv_text}")
-        return "Excel sheet data: " + "\n\n".join(csv_data)
+            csv_data.append(
+                f"{_XLSX_SHEET_OPEN}{sheet_name}{_XLSX_SHEET_CLOSE}{csv_text}"
+            )
+        return _XLSX_TEXT_PREFIX + "\n\n".join(csv_data)
     except Exception as e:
         logger.error(f"Error extracting data from Excel: {e}")
         return "[Could not extract text from Excel spreadsheet]"
+
+
+def xlsx_index_text(filename: str, text: str) -> str | None:
+    """Schema plus sample for a serialised workbook over the index budget.
+
+    Reads the layout :func:`extract_text_from_xlsx` writes, so the workbook is
+    not parsed a second time. None when the text fits the budget or is not in
+    that layout.
+    """
+    if fits_index_budget(text) or not text.startswith(_XLSX_TEXT_PREFIX):
+        return None
+    sheets: list[IndexedSheet] = []
+    for block in text[len(_XLSX_TEXT_PREFIX) :].split(f"\n\n{_XLSX_SHEET_OPEN}"):
+        name, found, body = block.removeprefix(_XLSX_SHEET_OPEN).partition(
+            _XLSX_SHEET_CLOSE
+        )
+        if not found:
+            continue
+        header, *rows = body.splitlines() or [""]
+        sheets.append(IndexedSheet(name, header.split("|"), rows))
+    if not sheets:
+        return None
+    return tabular_sample_text(filename, sheets)
+
+
+def sync_index_text(filename: str, text: str, *, retained: bool) -> str | None:
+    """What a synced table is indexed under when its original is retained.
+
+    None means the text itself: the original is not retained (nothing else
+    could serve the rows the sample leaves out), the table fits the index
+    budget, or the file is not a spreadsheet.
+    """
+    if not retained or fits_index_budget(text) or not retain_original_bytes(filename):
+        return None
+    extension = filename.rsplit(".", 1)[-1].lower()
+    if extension == "xlsx":
+        return xlsx_index_text(filename, text)
+    sample = delimited_index_text(filename, text)
+    return None if sample is text else sample
 
 
 def extract_text_from_pdf(binary_data: bytes) -> str:
@@ -499,7 +560,7 @@ def process_sharepoint_response(
         if detected_type in ["docx", "document"]:
             return extract_text_from_docx(response_content), content_type
         elif detected_type in ["xlsx", "spreadsheet"]:
-            return extract_text_from_xlsx(response_content), content_type
+            return extract_text_from_xlsx(response_content, filename), content_type
         elif detected_type in ["pptx", "presentation"]:
             return extract_text_from_pptx(response_content), content_type
         else:

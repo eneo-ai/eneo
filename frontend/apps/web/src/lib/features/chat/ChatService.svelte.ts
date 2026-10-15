@@ -1,5 +1,6 @@
 import { browser } from "$app/environment";
 import { splitPendingInref } from "./inrefBuffer";
+import type { ToolProgress } from "./internalToolLabels";
 import { PAGINATION } from "$lib/core/constants";
 import { toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
@@ -129,6 +130,9 @@ export class ChatService {
   // text so far, and the string values that can already be read from it.
   #argumentText = new SvelteMap<string, string>();
   #partialArguments = new SvelteMap<string, Record<string, string>>();
+  // The latest progress a server reported for a running call (an MCP
+  // progress notification relayed by the stream); gone with the stream.
+  #toolProgress = new SvelteMap<string, ToolProgress>();
   // Calls whose tool has an interactive view. The view is handed the whole
   // of the arguments so far, nested values included, so those are read too.
   // eslint-disable-next-line svelte/prefer-svelte-reactivity -- only decides what is parsed
@@ -163,6 +167,11 @@ export class ChatService {
   /** String arguments of a call that is still being written, as far as they go. */
   partialArgumentsOf(toolCallId: string | null | undefined): Record<string, string> | undefined {
     return toolCallId ? this.#partialArguments.get(toolCallId) : undefined;
+  }
+
+  /** The latest progress a server reported for a call still running, if any. */
+  toolProgressOf(toolCallId: string | null | undefined): ToolProgress | undefined {
+    return toolCallId ? this.#toolProgress.get(toolCallId) : undefined;
   }
 
   /** The documents the assistant created in this conversation, each with its versions. */
@@ -716,6 +725,7 @@ export class ChatService {
       this.#finalizeStream();
       this.#argumentText.clear();
       this.#partialArguments.clear();
+      this.#toolProgress.clear();
       this.#viewCallIds.clear();
       this.#partialInputs.clear();
       const streamGen = ++this.#streamGen;
@@ -871,6 +881,15 @@ export class ChatService {
                 this.#partialInputs.set(event.tool_call_id, readPartialArguments(text));
               }
             },
+            onToolProgress: (event) => {
+              if (!ref || isStale()) return;
+              if (!ensureCurrentSession(event)) return;
+              this.#toolProgress.set(event.tool_call_id, {
+                progress: event.progress,
+                total: event.total ?? null,
+                message: event.message ?? null
+              });
+            },
             onToolCall: (event) => {
               // Guard order matches the other SSE handlers: ref is only set
               // after onFirstChunk lands, so an early tool_call event would
@@ -1018,7 +1037,12 @@ export class ChatService {
       } catch (error) {
         if (isStale()) return;
 
-        const streamAborted = error instanceof Error && error.message.includes("aborted");
+        // The stop button aborts with a reason, which fetch rethrows as-is (a
+        // plain string the SDK can only wrap as an unknown error), so the
+        // signal is the reliable sign of a cancel, the message only a fallback.
+        const streamAborted =
+          abortController?.signal.aborted === true ||
+          (error instanceof Error && error.message.includes("aborted"));
         if (streamAborted) {
           // Backend persists the user's message before stream start and best-effort
           // saves a partial assistant reply on abort, so the conversation survives a
@@ -1048,6 +1072,8 @@ export class ChatService {
 
           this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
             message;
+          // The answer was replaced, so held-back text must not trail the notice.
+          inrefBuffer = "";
           console.error(error);
         }
       } finally {

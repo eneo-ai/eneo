@@ -38,6 +38,7 @@ class CompletionModelAssembler:
             deployment_name=completion_model.deployment_name,
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
+            is_org_reader=completion_model.is_org_reader,
             can_access=completion_model.can_access,
             is_locked=completion_model.is_locked,
             lock_reason=completion_model.lock_reason,

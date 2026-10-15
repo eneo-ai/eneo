@@ -9541,6 +9541,7 @@ export interface components {
       | "integration_connected"
       | "integration_disconnected"
       | "integration_knowledge_created"
+      | "integration_knowledge_updated"
       | "integration_knowledge_deleted"
       | "integration_knowledge_synced"
       | "completion_model_created"
@@ -12173,6 +12174,11 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /**
+       * Is Org Reader
+       * @default false
+       */
+      is_org_reader?: boolean;
       /** Tenant Id */
       tenant_id?: string | null;
       /** Provider Id */
@@ -12304,6 +12310,11 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /**
+       * Is Org Reader
+       * @default false
+       */
+      is_org_reader?: boolean;
       /** Tenant Id */
       tenant_id?: string | null;
       /** Provider Id */
@@ -12421,6 +12432,11 @@ export interface components {
        * @default false
        */
       is_org_default?: boolean;
+      /**
+       * Is Org Reader
+       * @default false
+       */
+      is_org_reader?: boolean;
       /** Tenant Id */
       tenant_id?: string | null;
       /** Provider Id */
@@ -14714,6 +14730,7 @@ export interface components {
       prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
       reasoning_policy: components["schemas"]["ReasoningPolicyPublic"];
       file_policy: components["schemas"]["FilePolicyPublic"];
+      reader_policy: components["schemas"]["ReaderPolicyPublic"];
       skills: components["schemas"]["SkillsPolicyPublic"];
       /** Updated At */
       updated_at: string | null;
@@ -14727,6 +14744,7 @@ export interface components {
       prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
       reasoning_policy?: components["schemas"]["ReasoningPolicyInput"] | null;
       file_policy?: components["schemas"]["FilePolicyInput"] | null;
+      reader_policy?: components["schemas"]["ReaderPolicyInput"] | null;
       skills?: components["schemas"]["SkillsPolicyInput"] | null;
     };
     /** GroupChatAssistantPublic */
@@ -16917,6 +16935,24 @@ export interface components {
        * @description Number of requests made with this model
        */
       request_count: number;
+      /**
+       * Reader Input Token Usage
+       * @description Input tokens spent as a reader model inside digest tool calls; part of input_token_usage
+       * @default 0
+       */
+      reader_input_token_usage?: number;
+      /**
+       * Reader Output Token Usage
+       * @description Output tokens spent as a reader model inside digest tool calls; part of output_token_usage
+       * @default 0
+       */
+      reader_output_token_usage?: number;
+      /**
+       * Reader Token Usage
+       * @description Tokens spent as a reader model (input + output)
+       * @default 0
+       */
+      reader_token_usage?: number;
     };
     /**
      * ModelUsageDetail
@@ -18684,6 +18720,16 @@ export interface components {
        */
       security_classification?: components["schemas"]["ModelId"] | null;
       /**
+       * Reader Model
+       * @description The space's own reader model for digests, one of its completion models; null for none. Omit to keep the current choice.
+       */
+      reader_model?: components["schemas"]["ModelId"] | null;
+      /**
+       * Reader Model Inherit
+       * @description Whether the organisation's default reader model applies here.
+       */
+      reader_model_inherit?: boolean | null;
+      /**
        * Icon Id
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
        */
@@ -19398,6 +19444,37 @@ export interface components {
        * Format: uuid
        */
       session_id: string;
+    };
+    /**
+     * ReaderModelPublic
+     * @description The space's reader model for digests: the stored choice, the model
+     *     that applies today and why, and the organisation default it may inherit.
+     */
+    ReaderModelPublic: {
+      /** Inherit */
+      inherit: boolean;
+      model: components["schemas"]["CompletionModelPublic"] | null;
+      effective: components["schemas"]["CompletionModelPublic"] | null;
+      /** Reason */
+      reason: string;
+      tenant_default: components["schemas"]["CompletionModelPublic"] | null;
+    };
+    /** ReaderPolicyInput */
+    ReaderPolicyInput: {
+      /**
+       * Inherit
+       * @default true
+       */
+      inherit?: boolean;
+      /** Completion Model Id */
+      completion_model_id?: string | null;
+    };
+    /** ReaderPolicyPublic */
+    ReaderPolicyPublic: {
+      /** Inherit */
+      inherit: boolean;
+      /** Completion Model Id */
+      completion_model_id: string | null;
     };
     /** ReasoningPolicyInput */
     ReasoningPolicyInput: {
@@ -21451,6 +21528,7 @@ export interface components {
       /** Available Roles */
       available_roles: components["schemas"]["SpaceRole"][];
       security_classification: components["schemas"]["SecurityClassificationPublic"] | null;
+      reader_model?: components["schemas"]["ReaderModelPublic"];
     };
     /** SpaceRole */
     SpaceRole: {
@@ -21968,6 +22046,8 @@ export interface components {
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Is Default */
       is_default?: boolean | null;
+      /** Is Reader */
+      is_reader?: boolean | null;
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantEmbeddingModelCreate */
@@ -22817,6 +22897,8 @@ export interface components {
       } | null;
       /** Generated File Ids */
       generated_file_ids?: string[] | null;
+      /** Referenced File Ids */
+      referenced_file_ids?: string[] | null;
       /** Structured Content */
       structured_content?: {
         [key: string]: unknown;
@@ -24473,6 +24555,36 @@ export interface components {
       tool_call_id: string;
       /** Arguments Delta */
       arguments_delta: string;
+    };
+    /**
+     * SSEToolProgress
+     * @description The server's latest progress for a running tool call.
+     *
+     *     Relayed from the MCP progress notification the server sends for the
+     *     call (`progress` so far, the `total` when known, a `message`). Sent
+     *     while the call runs and never persisted; the call's `tool_call` event
+     *     follows with its result.
+     */
+    SSEToolProgress: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Tool Call Id */
+      tool_call_id: string;
+      /** Progress */
+      progress: number;
+      /**
+       * Total
+       * @default null
+       */
+      total?: number | null;
+      /**
+       * Message
+       * @default null
+       */
+      message?: string | null;
     };
     /**
      * SSEToolApprovalRequired
@@ -27596,7 +27708,9 @@ export interface operations {
       query: {
         token: string;
       };
-      header?: never;
+      header?: {
+        "if-none-match"?: string | null;
+      };
       path: {
         id: string;
       };
@@ -27613,11 +27727,20 @@ export interface operations {
           "Content-Length"?: number;
           /** @description SHA-256 digest of the original representation */
           "Repr-Digest"?: string;
+          /** @description Content digest for If-None-Match revalidation */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
           "*/*": string;
         };
+      };
+      /** @description Access revalidated; original content is unchanged */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Unauthorized */
       401: {
@@ -29289,6 +29412,11 @@ export interface operations {
                  * @default false
                  */
                 is_org_default?: boolean;
+                /**
+                 * Is Org Reader
+                 * @default false
+                 */
+                is_org_reader?: boolean;
                 /** Tenant Id */
                 tenant_id?: string | null;
                 /** Provider Id */
@@ -29735,6 +29863,11 @@ export interface operations {
                  * @default false
                  */
                 is_org_default?: boolean;
+                /**
+                 * Is Org Reader
+                 * @default false
+                 */
+                is_org_reader?: boolean;
                 /** Tenant Id */
                 tenant_id?: string | null;
                 /** Provider Id */
@@ -30890,6 +31023,8 @@ export interface operations {
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Referenced File Ids */
+                    referenced_file_ids?: string[] | null;
                     /** Structured Content */
                     structured_content?: {
                       [key: string]: unknown;
@@ -30960,6 +31095,8 @@ export interface operations {
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Referenced File Ids */
+                    referenced_file_ids?: string[] | null;
                     /** Structured Content */
                     structured_content?: {
                       [key: string]: unknown;
@@ -31030,6 +31167,8 @@ export interface operations {
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Referenced File Ids */
+                    referenced_file_ids?: string[] | null;
                     /** Structured Content */
                     structured_content?: {
                       [key: string]: unknown;
@@ -31181,6 +31320,11 @@ export interface operations {
                      * @default false
                      */
                     is_org_default?: boolean;
+                    /**
+                     * Is Org Reader
+                     * @default false
+                     */
+                    is_org_reader?: boolean;
                     /** Tenant Id */
                     tenant_id?: string | null;
                     /** Provider Id */

@@ -53,6 +53,32 @@
       <CopyableDebugValue label={m.chat_debug_model_id()} value={details.model.id} />
     {/if}
   </dl>
+  {#if details.readerUsage}
+    <!-- The reader's spend is outside the counts above: it read the material
+         so the message's model could answer. Shown apart so it is not missed. -->
+    <dl
+      class="bg-accent-dimmer text-accent-stronger mt-4 grid grid-cols-1 gap-x-5 gap-y-3 rounded-lg px-3 py-2.5 text-sm @md:grid-cols-2"
+      aria-label={m.chat_debug_reader_usage()}
+    >
+      <div class="min-w-0 @md:col-span-2">
+        <dt class="text-xs font-medium">{m.chat_debug_reader_usage()}</dt>
+        <dd class="mt-0.5 font-medium break-words">{details.readerUsage.model}</dd>
+        <dd class="mt-0.5 text-xs opacity-80">{m.chat_debug_reader_note()}</dd>
+      </div>
+      <div>
+        <dt class="text-xs">{m.chat_debug_input_tokens()}</dt>
+        <dd class="mt-0.5 font-medium tabular-nums">
+          {numberFormatter.format(details.readerUsage.inputTokens)}
+        </dd>
+      </div>
+      <div>
+        <dt class="text-xs">{m.chat_debug_output_tokens()}</dt>
+        <dd class="mt-0.5 font-medium tabular-nums">
+          {numberFormatter.format(details.readerUsage.outputTokens)}
+        </dd>
+      </div>
+    </dl>
+  {/if}
 </ChatDebugSection>
 
 <ChatDebugSection
@@ -114,6 +140,29 @@
                   </dd>
                 </div>
               {/if}
+            </dl>
+          {/if}
+          {#if tool.readerUsage}
+            <dl
+              class="bg-accent-dimmer text-accent-stronger mt-2 grid grid-cols-2 gap-x-5 gap-y-2 rounded-md px-3 py-2 text-sm"
+              aria-label={m.chat_debug_reader_usage()}
+            >
+              <div class="col-span-2 min-w-0">
+                <dt class="text-xs font-medium">{m.chat_debug_reader_usage()}</dt>
+                <dd class="mt-0.5 font-medium break-words">{tool.readerUsage.model}</dd>
+              </div>
+              <div>
+                <dt class="text-xs">{m.chat_debug_input_tokens()}</dt>
+                <dd class="mt-0.5 font-medium tabular-nums">
+                  {numberFormatter.format(tool.readerUsage.inputTokens)}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-xs">{m.chat_debug_output_tokens()}</dt>
+                <dd class="mt-0.5 font-medium tabular-nums">
+                  {numberFormatter.format(tool.readerUsage.outputTokens)}
+                </dd>
+              </div>
             </dl>
           {/if}
         </li>

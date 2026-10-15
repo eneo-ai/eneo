@@ -48,6 +48,7 @@ class CompletionModel(AIModel):
         is_org_default: bool,
         reasoning: bool,
         supports_tool_calling: bool = False,
+        is_org_reader: bool = False,
         base_url: Optional[str] = None,
         litellm_model_name: Optional[str] = None,
         model_kwargs_capabilities: SupportedModelKwargs
@@ -90,6 +91,7 @@ class CompletionModel(AIModel):
             tenant_id=tenant_id,
         )
         self.is_org_default = is_org_default
+        self.is_org_reader = is_org_reader
         self.reasoning = reasoning
         self.vision = vision
         self.supports_tool_calling = supports_tool_calling
@@ -178,6 +180,7 @@ class CompletionModel(AIModel):
             deployment_name=completion_model_db.deployment_name,
             is_org_enabled=completion_model_db.is_enabled,
             is_org_default=completion_model_db.is_default,
+            is_org_reader=completion_model_db.is_reader,
             reasoning=completion_model_db.reasoning,
             supports_tool_calling=completion_model_db.supports_tool_calling,
             base_url=completion_model_db.base_url,

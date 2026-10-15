@@ -74,7 +74,12 @@ class StubExtractor:
         self.result = result
 
     async def extract_bounded(
-        self, filepath: Path, mimetype: str, filename: str | None = None
+        self,
+        filepath: Path,
+        mimetype: str,
+        filename: str | None = None,
+        *,
+        index_tabular: bool = False,
     ) -> str:
         if isinstance(self.result, Exception):
             raise self.result

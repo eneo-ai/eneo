@@ -14,6 +14,8 @@ class SpaceUpdate:
     security_classification_id: UUID | None | NotProvided = NOT_PROVIDED
     data_retention_days: int | None | NotProvided = NOT_PROVIDED
     icon_id: UUID | None | NotProvided = NOT_PROVIDED
+    reader_model_id: UUID | None | NotProvided = NOT_PROVIDED
+    reader_model_inherit: bool | NotProvided = NOT_PROVIDED
     completion_model_ids: list[UUID] | None = None
     embedding_model_ids: list[UUID] | None = None
     transcription_model_ids: list[UUID] | None = None
@@ -31,6 +33,8 @@ class SpaceUpdate:
                 "security_classification_id": self.security_classification_id,
                 "data_retention_days": self.data_retention_days,
                 "icon_id": self.icon_id,
+                "reader_model_id": self.reader_model_id,
+                "reader_model_inherit": self.reader_model_inherit,
             }.items()
             if is_provided(value)
         }

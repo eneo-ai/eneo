@@ -13,11 +13,20 @@ class ModelTokenUsage:
     input_token_usage: int
     output_token_usage: int
     request_count: int
+    # The part of the totals above spent as a reader model inside digest
+    # tool calls: reading long material for another model's answer.
+    reader_input_token_usage: int = 0
+    reader_output_token_usage: int = 0
 
     @property
     def total_token_usage(self) -> int:
         """Get total token usage (input + output)."""
         return self.input_token_usage + self.output_token_usage
+
+    @property
+    def reader_token_usage(self) -> int:
+        """Tokens spent as a reader model (input + output), part of the total."""
+        return self.reader_input_token_usage + self.reader_output_token_usage
 
 
 @dataclass

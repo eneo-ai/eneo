@@ -156,7 +156,7 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "integration_events"
         ]
-        assert len(integration_actions) == 24, (
+        assert len(integration_actions) == 25, (
             f"Expected 24 integration events, got {len(integration_actions)}"
         )
 
@@ -269,7 +269,7 @@ class TestCategoryDistribution:
             "user_actions": 52,
             "security_events": 12,
             "file_operations": 7,
-            "integration_events": 24,
+            "integration_events": 25,
             "system_actions": 3,
             "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
         }

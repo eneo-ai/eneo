@@ -1564,6 +1564,7 @@ class Container(containers.DeclarativeContainer):
         service_account_auth_service=service_account_auth_service,
         sync_log_repo=sync_log_repo,
         change_key_service=office_change_key_service,
+        object_content=object_content_service,
     )
     sharepoint_webhook_service = providers.Factory(
         SharepointWebhookService,

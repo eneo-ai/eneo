@@ -1,15 +1,17 @@
 """Minimal adapter for tenant models using LiteLLM."""
 
+import asyncio
 import base64
 import binascii
+import contextlib
 import json
 import re
 import uuid
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
-    AsyncIterator,
     Literal,
     NoReturn,
     Optional,
@@ -18,6 +20,7 @@ from typing import (
     cast,
 )
 from urllib.parse import urlsplit, urlunsplit
+from uuid import UUID
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -57,6 +60,7 @@ from eneo.completion_models.infrastructure.static_prompts import (
     MCP_TOOL_REFERENCES_INSTRUCTION,
 )
 from eneo.files.model_file_references import file_handle
+from eneo.internal_mcp.constants import CITE_KEY_META
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
@@ -142,12 +146,16 @@ def _mint_ref_id(existing_prefixes: set[str]) -> uuid.UUID:
     return ref_id
 
 
+ReferenceLinkVerifier = Callable[[str], "tuple[str, UUID] | None"]
+
+
 def _build_tool_result_with_references(
     content_list: list[dict[str, Any]],
-    tool_call_id: Optional[str],
-    mcp_tool_name: Optional[str],
+    tool_call_id: str | None,
+    mcp_tool_name: str | None,
     existing_prefixes: set[str],
-) -> tuple[str, str, list[McpToolReference], list[GeneratedFile]]:
+    verify_reference_link: ReferenceLinkVerifier | None = None,
+) -> tuple[str, str, list[McpToolReference], list[GeneratedFile], dict[UUID, str]]:
     """Build LLM-facing and user-facing tool result texts; capture resource refs.
 
     Two texts are produced because they serve different audiences:
@@ -179,12 +187,29 @@ def _build_tool_result_with_references(
     ``GeneratedFile`` values that the ask path persists as generated files.
     The base64 never reaches the model or the persisted result text; both see
     a short placeholder instead.
+
+    A resource whose ``_meta`` carries ``eneo.cite_key`` (for example
+    ``"D3"``) names a key the result's text cites as ``[D3]``: every such
+    key in the text blocks is rewritten to the resource's inline reference
+    tag before the text reaches the model, so a tool that composes a body
+    with its own keys (the digest tools) gets citations the pipeline
+    renders. ``display_text`` keeps the keys as written.
+
+    A non-image ``resource_link`` whose URL ``verify_reference_link`` accepts
+    as an Eneo-signed original (a knowledge document a tool hands over) is
+    returned in the admitted map for the proxy's reference allow-list and is
+    shown to the model as a credential-free file reference entry, the same
+    shape as an attachment's. The link itself never reaches the model or the
+    persisted result; the reference row keeps a credential-free uri.
     """
     text_parts: list[str] = []
     resource_texts: list[str] = []
     llm_blocks: list[str] = []
+    reference_lines: list[str] = []
     refs: list[McpToolReference] = []
     images: list[GeneratedFile] = []
+    admitted: dict[UUID, str] = {}
+    cite_prefixes: dict[str, str] = {}
     # Placeholders number images and documents separately ("Image N",
     # "File N"); replay appends reference urls in the same numbering.
     pictures = 0
@@ -211,6 +236,10 @@ def _build_tool_result_with_references(
             ref_id = _mint_ref_id(existing_prefixes)
             prefix = str(ref_id)[:8]
             resource_text = ci.get("text") or ""
+            resource_meta: dict[str, Any] = ci.get("meta") or {}
+            cite_key = resource_meta.get(CITE_KEY_META)
+            if isinstance(cite_key, str) and cite_key:
+                cite_prefixes.setdefault(cite_key, prefix)
             refs.append(
                 McpToolReference(
                     id=ref_id,
@@ -270,12 +299,48 @@ def _build_tool_result_with_references(
                 MCP_FILE_PLACEHOLDER_TEMPLATE.format(index=documents, filename=filename)
             )
         elif block_type == "resource_link":
+            uri = ci.get("uri") or ""
+            mime = ci.get("mime_type") or ""
+            verified = (
+                verify_reference_link(uri)
+                if uri and verify_reference_link is not None
+                else None
+            )
+            if verified is not None:
+                kind, resource_id = verified
+                link_meta = dict(ci.get("meta") or {})
+                filename = ci.get("name") or link_meta.get("title") or "document"
+                admitted[resource_id] = uri
+                reference_lines.append(
+                    "File reference: "
+                    + json.dumps(
+                        {
+                            "kind": "document",
+                            "filename": filename,
+                            "mimetype": mime or None,
+                            "file_ref": file_handle(resource_id),
+                            "document_id": link_meta.get("info_blob_id")
+                            or str(resource_id),
+                        }
+                    )
+                )
+                refs.append(
+                    McpToolReference(
+                        id=_mint_ref_id(existing_prefixes),
+                        tool_call_id=tool_call_id,
+                        mcp_tool_name=mcp_tool_name,
+                        uri=f"eneo://{'info-blob' if kind == 'info_blob' else 'file'}/{resource_id}",
+                        mime_type=mime or None,
+                        content=None,
+                        meta={**link_meta, "filename": filename},
+                        order=len(refs),
+                    )
+                )
+                continue
             # Typed image block (MCP spec, 2025-11-25). Display-only: it carries
             # no citable text, so it rides the structured channel (the
             # McpToolReference row the frontend renders as a thumbnail) and is
             # not added to the LLM-facing text.
-            uri = ci.get("uri") or ""
-            mime = ci.get("mime_type") or ""
             if not uri or not mime.startswith("image/"):
                 # Scope: only image resource_links get a display surface today.
                 continue
@@ -305,14 +370,34 @@ def _build_tool_result_with_references(
 
     upstream_text = "".join(text_parts)
     if not refs:
-        return upstream_text, upstream_text, refs, images
+        return upstream_text, upstream_text, refs, images, admitted
 
     display_text = "\n\n".join(
         seg.strip() for seg in (upstream_text, *resource_texts) if seg.strip()
     )
-    llm_segments = [seg for seg in (upstream_text, *llm_blocks) if seg]
+    llm_segments = [
+        seg
+        for seg in (
+            _rewrite_cite_keys(upstream_text, cite_prefixes),
+            *llm_blocks,
+            *reference_lines,
+        )
+        if seg
+    ]
     llm_text = "\n".join(llm_segments) + "\n\n" + MCP_TOOL_REFERENCES_INSTRUCTION
-    return llm_text, display_text, refs, images
+    return llm_text, display_text, refs, images, admitted
+
+
+def _rewrite_cite_keys(text: str, prefixes: dict[str, str]) -> str:
+    """``[D3]`` becomes ``<inref id="<prefix>"/>`` for every keyed resource.
+
+    Whole-token match on the bracketed key, so ``[D1]`` never touches
+    ``[D10]``. Keys without a resource stay as written.
+    """
+    if not prefixes or not text:
+        return text
+    pattern = re.compile(r"\[(" + "|".join(re.escape(key) for key in prefixes) + r")\]")
+    return pattern.sub(lambda m: f'<inref id="{prefixes[m.group(1)]}"/>', text)
 
 
 class _GeneratedFileChunks:
@@ -379,6 +464,104 @@ class _ArgumentDeltas:
             return None
         self._sent[index] = redacted
         return redacted[len(sent) :] or None
+
+
+_ToolProgress = tuple[int, float, float | None, str | None]
+
+
+class _ToolRound:
+    """One round of tool calls run on a helper task while the stream goes on.
+
+    The streaming generator cannot yield while it awaits the proxy, so the
+    calls run apart and the progress their servers report (MCP progress
+    notifications, relayed by the proxy as ``(index, progress, total,
+    message)``) lands on a queue the generator drains into TOOL_PROGRESS
+    chunks until the results are in. The proxy connects on the generator's
+    own task first, since its transports belong to the task that opened
+    them; only the calls themselves run apart.
+    """
+
+    def __init__(
+        self,
+        mcp_proxy: Any,
+        proxy_calls: list[tuple[str, dict[str, Any]]],
+        call_ids: list[str],
+    ) -> None:
+        self._mcp_proxy = mcp_proxy
+        self._proxy_calls = proxy_calls
+        self._call_ids = call_ids
+        self._queue: asyncio.Queue[_ToolProgress] = asyncio.Queue()
+        self._task: asyncio.Task[list[dict[str, Any]]] | None = None
+
+    async def start(self) -> None:
+        await self._mcp_proxy.connect_for_tools(self._proxy_calls)
+        self._task = asyncio.create_task(
+            self._mcp_proxy.call_tools_parallel(
+                self._proxy_calls, on_progress=self._note
+            )
+        )
+
+    async def _note(
+        self, index: int, progress: float, total: float | None, message: str | None
+    ) -> None:
+        self._queue.put_nowait((index, progress, total, message))
+
+    async def progress(self) -> AsyncIterator[Completion]:
+        """TOOL_PROGRESS chunks as they arrive, until the calls are done."""
+        task = self._task
+        assert task is not None
+        while not task.done():
+            getter = asyncio.ensure_future(self._queue.get())
+            await asyncio.wait({task, getter}, return_when=asyncio.FIRST_COMPLETED)
+            if getter.done():
+                events = [getter.result(), *self._drain()]
+            else:
+                getter.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await getter
+                events = self._drain()
+            for chunk in self._chunks(events):
+                yield chunk
+        for chunk in self._chunks(self._drain()):
+            yield chunk
+
+    def results(self) -> list[dict[str, Any]]:
+        assert self._task is not None
+        return self._task.result()
+
+    async def cancel(self) -> None:
+        if self._task is None or self._task.done():
+            return
+        self._task.cancel()
+        with contextlib.suppress(BaseException):
+            await self._task
+
+    def _drain(self) -> list[_ToolProgress]:
+        events: list[_ToolProgress] = []
+        while True:
+            try:
+                events.append(self._queue.get_nowait())
+            except asyncio.QueueEmpty:
+                return events
+
+    def _chunks(self, events: list[_ToolProgress]) -> list[Completion]:
+        # Only the latest notification per call matters to a reader.
+        latest: dict[int, _ToolProgress] = {}
+        for event in events:
+            latest[event[0]] = event
+        return [
+            Completion(
+                response_type=ResponseType.TOOL_PROGRESS,
+                tool_call_id=self._call_ids[index],
+                progress=progress,
+                progress_total=total,
+                progress_message=message,
+            )
+            for index, progress, total, message in (
+                latest[key] for key in sorted(latest)
+            )
+            if index < len(self._call_ids)
+        ]
 
 
 async def _has_app_view(mcp_proxy: Any, prefixed_tool_name: str) -> bool:
@@ -1597,17 +1780,24 @@ class TenantModelAdapter(CompletionModelAdapter):
                         content_list = cast(
                             list[dict[str, Any]], result.get("content") or []
                         )
+                        assert mcp_proxy is not None
                         (
                             llm_text,
                             display_text,
                             refs_for_call,
                             images_for_call,
+                            admitted_references,
                         ) = _build_tool_result_with_references(
                             content_list=content_list,
                             tool_call_id=call.call_id,
                             mcp_tool_name=call.name,
                             existing_prefixes=seen_prefixes,
+                            verify_reference_link=mcp_proxy.verify_reference_link,
                         )
+                        # Admit before the result reaches the model so the
+                        # next call may pass the handle on.
+                        if admitted_references:
+                            mcp_proxy.allow_file_references(admitted_references)
                         has_app_view = not result.get(
                             "is_error"
                         ) and await _has_app_view(mcp_proxy, call.name)
@@ -1653,6 +1843,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 is_internal=mcp_proxy.is_internal_tool(call.name),
                                 is_bundled=mcp_proxy.is_bundled_tool(call.name),
                                 meta=result.get("meta") or None,
+                                referenced_file_ids=list(admitted_references) or None,
                                 structured_content=(
                                     result.get("structured_content")
                                     if has_app_view
@@ -1681,6 +1872,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 completion.text = answer_text
                 completion.reasoning_content = reasoning_text
                 completion.stop = choice.finish_reason == "stop"
+                completion.finish_reason = choice.finish_reason
 
             if used_input_estimate:
                 completion.input_token_estimate = cumulative_input_tokens
@@ -2519,7 +2711,21 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                             for tc in approved_tcs
                         ]
-                        results = await mcp_proxy.call_tools_parallel(proxy_calls)
+                        tool_execution = _ToolRound(
+                            mcp_proxy,
+                            proxy_calls,
+                            [tc["id"] or "" for tc in approved_tcs],
+                        )
+                        await tool_execution.start()
+                        try:
+                            async for progress_chunk in tool_execution.progress():
+                                yield progress_chunk
+                        except BaseException:
+                            # The stream ended first (client gone, turn
+                            # cancelled): the calls must not outlive it.
+                            await tool_execution.cancel()
+                            raise
+                        results = tool_execution.results()
                         execution_metadata: list[ToolCallMetadata] = []
                         captured_refs: list[McpToolReference] = []
                         seen_prefixes: set[str] = set()
@@ -2533,12 +2739,18 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 display_text,
                                 refs_for_call,
                                 images_for_call,
+                                admitted_references,
                             ) = _build_tool_result_with_references(
                                 content_list=content_list,
                                 tool_call_id=tc["id"],
                                 mcp_tool_name=tc["function"]["name"],
                                 existing_prefixes=seen_prefixes,
+                                verify_reference_link=mcp_proxy.verify_reference_link,
                             )
+                            # Admit before the result reaches the model so the
+                            # next call may pass the handle on.
+                            if admitted_references:
+                                mcp_proxy.allow_file_references(admitted_references)
                             has_app_view = not result_data.get(
                                 "is_error"
                             ) and await _has_app_view(mcp_proxy, tc["function"]["name"])
@@ -2605,6 +2817,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         tc["function"]["name"]
                                     ),
                                     meta=result_data.get("meta") or None,
+                                    referenced_file_ids=(
+                                        list(admitted_references) or None
+                                    ),
                                     structured_content=(
                                         result_data.get("structured_content")
                                         if has_app_view

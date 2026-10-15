@@ -435,6 +435,11 @@
           <AssistantSettingsMaterialHandling
             fileReferencesEnabled={data.settings.file_references_enabled === true}
             modelSupportsTools={materialModel?.supports_tool_calling === true}
+            readerModel={$currentSpace.reader_model}
+            assistantModelName={materialModel?.nickname ?? materialModel?.name ?? ""}
+            spaceSettingsHref={$currentSpace.personal
+              ? null
+              : `/spaces/${$currentSpace.routeId}/settings`}
           />
         </Settings.Row>
       </Settings.Group>

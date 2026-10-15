@@ -131,7 +131,8 @@ def _session(*, prior_turns: int = 0):
         user_id=uuid4(),
         assistant=SimpleNamespace(id=uuid4()),
         questions=[
-            SimpleNamespace(files=[], generated_files=[]) for _ in range(prior_turns)
+            SimpleNamespace(files=[], generated_files=[], tool_calls=[])
+            for _ in range(prior_turns)
         ],
     )
 

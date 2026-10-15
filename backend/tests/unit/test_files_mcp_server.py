@@ -400,3 +400,207 @@ class TestToolSteering:
 
     def test_read_file_documents_the_offset_resume(self):
         assert "offset" in (read_file.__doc__ or "")
+
+
+# --------------------------------------------------------------------------- #
+# digest_files
+# --------------------------------------------------------------------------- #
+from contextlib import asynccontextmanager as _acm  # noqa: E402
+
+from eneo.completion_models.application.map_reduce import DigestBudgets  # noqa: E402
+from eneo.completion_models.domain.model_kwargs_capabilities import (  # noqa: E402
+    SupportedModelKwargs,
+)
+from eneo.files.tabular_index import TABULAR_INDEX_MAX_CHARS  # noqa: E402
+from eneo.internal_mcp.digest import DigestModel  # noqa: E402
+from eneo.internal_mcp.files import (  # noqa: E402
+    DIGEST_FITS_ONE_READ_MESSAGE,
+    digest_files,
+)
+from eneo.internal_mcp.foundation import DigestClaims  # noqa: E402
+
+
+class _DigestAdapter:
+    def __init__(self):
+        self.calls = []
+
+    async def get_response(self, context, kwargs):
+        self.calls.append(context.prompt.split(" ")[0])
+        text = (
+            "Summary [D1] and [D2]."
+            if context.prompt.startswith("Answer")
+            else "Date: unknown\nnote"
+        )
+        return SimpleNamespace(
+            text=text, usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5)
+        )
+
+
+def _patch_digest_files(monkeypatch, files, *, user_tenant_id):
+    """Files by id, a scripted adapter, and no real token or model lookups."""
+    by_id = {file.id: file for file in files}
+
+    @_acm
+    async def fake_context(_ctx):
+        async def get_by_id(file_id):
+            if file_id not in by_id:
+                raise NotFoundException()
+            return by_id[file_id]
+
+        async def get_assistant(_assistant_id):
+            return SimpleNamespace(completion_model=None), []
+
+        container = SimpleNamespace(
+            file_repo=lambda: SimpleNamespace(get_by_id=get_by_id),
+            object_content_service=lambda: None,
+            assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
+        )
+        yield SimpleNamespace(
+            container=container,
+            user=SimpleNamespace(tenant_id=user_tenant_id),
+            assistant_id=uuid4(),
+        )
+
+    class _FakeLoader:
+        def __init__(self, repo, object_content):
+            pass
+
+        async def load(self, metadata):
+            return {entry.id: by_id[entry.id] for entry in metadata}
+
+    adapter = _DigestAdapter()
+
+    async def prepare(tool_ctx, assistant, claims, *, instruction):
+        return DigestModel(
+            model=SimpleNamespace(
+                id=uuid4(),
+                name="m",
+                get_supported_model_kwargs=lambda: SupportedModelKwargs(),
+            ),
+            adapter=adapter,
+            model_kwargs={},
+            count=lambda text: len(text.split()),
+            budgets=DigestBudgets(segment_tokens=50, reduce_input_tokens=120),
+            body_cap_chars=9_000,
+        )
+
+    monkeypatch.setattr("eneo.internal_mcp.files.internal_tool_context", fake_context)
+    monkeypatch.setattr(
+        "eneo.internal_mcp.file_references.FileContentLoader", _FakeLoader
+    )
+    monkeypatch.setattr("eneo.internal_mcp.files.bearer_from_ctx", lambda ctx: "tok")
+    monkeypatch.setattr(
+        "eneo.internal_mcp.files.digest_claims_from_token",
+        lambda token: DigestClaims(None, None, False),
+    )
+    monkeypatch.setattr("eneo.internal_mcp.files.prepare_digest_model", prepare)
+    monkeypatch.setattr("eneo.internal_mcp.files.disconnect_check", lambda ctx: None)
+    monkeypatch.setattr(
+        "eneo.internal_mcp.digest.get_settings",
+        lambda: SimpleNamespace(
+            digest_timeout_seconds=300,
+            digest_max_segments=120,
+            digest_concurrency=2,
+            mcp_tool_output_max_chars=32768,
+        ),
+    )
+    return adapter
+
+
+class TestDigestFiles:
+    async def test_digests_several_files_and_maps_keys_to_names(self, monkeypatch):
+        tenant = uuid4()
+        files = [
+            _file(name="a.pdf", text="first report " * 20, tenant_id=tenant),
+            _file(name="b.pdf", text="second report " * 20, tenant_id=tenant),
+        ]
+        adapter = _patch_digest_files(monkeypatch, files, user_tenant_id=tenant)
+        urls = [_signed_url(file.id, tenant) for file in files]
+
+        result = await digest_files("Summarise", urls, ctx=object())
+
+        header = result.content[0].text
+        assert header.startswith(
+            "Digest of 2 attached files with m.\n[D1] a.pdf\n[D2] b.pdf"
+        )
+        assert "Coverage: complete." in header
+        assert header.endswith("Summary [D1] and [D2].")
+        assert len(result.content) == 1  # no citation stubs for files
+        assert result.meta["eneo.items_matched"] == 2
+        assert adapter.calls == ["Answer"]
+
+    async def test_malformed_url_is_rejected_before_the_context_opens(
+        self, monkeypatch
+    ):
+        @_acm
+        async def never(_ctx):
+            raise AssertionError("context opened")
+            yield  # pragma: no cover
+
+        monkeypatch.setattr("eneo.internal_mcp.files.internal_tool_context", never)
+
+        result = await digest_files("sum", ["https://x/not-a-reference"], ctx=object())
+
+        assert result.content[0].text == NOT_A_REFERENCE_MESSAGE
+
+    async def test_images_and_large_tables_are_set_aside(self, monkeypatch):
+        tenant = uuid4()
+        prose = _file(name="notes.pdf", text="minutes " * 30, tenant_id=tenant)
+        image = _file(
+            name="photo.png",
+            mimetype="image/png",
+            file_type=FileType.IMAGE,
+            text=None,
+            tenant_id=tenant,
+        )
+        table = _file(
+            name="rows.csv",
+            mimetype="text/csv",
+            text="a,b\n" * (TABULAR_INDEX_MAX_CHARS // 4 + 10),
+            tenant_id=tenant,
+        )
+        _patch_digest_files(monkeypatch, [prose, image, table], user_tenant_id=tenant)
+        urls = [_signed_url(file.id, tenant) for file in (prose, image, table)]
+
+        result = await digest_files("sum", urls, ctx=object())
+
+        header = result.content[0].text
+        assert "[D1] notes.pdf" in header
+        assert "[D2]" not in header.split("Coverage:")[0]
+        assert "- photo.png: image; no text to digest" in header
+        assert f"- rows.csv: table; use the table tools with url {urls[2]}" in header
+        assert "1 files; 1 segments planned; 1 processed" in header
+
+    async def test_one_file_that_fits_a_page_is_refused(self, monkeypatch):
+        tenant = uuid4()
+        small = _file(name="small.txt", text="tiny", tenant_id=tenant)
+        _patch_digest_files(monkeypatch, [small], user_tenant_id=tenant)
+
+        result = await digest_files(
+            "sum", [_signed_url(small.id, tenant)], ctx=object()
+        )
+
+        assert result.content[0].text == DIGEST_FITS_ONE_READ_MESSAGE
+
+    async def test_one_long_file_is_a_valid_digest(self, monkeypatch):
+        tenant = uuid4()
+        # Past one read_file page, under the segment ceiling.
+        long = _file(name="long.pdf", text="word " * 5_000, tenant_id=tenant)
+        adapter = _patch_digest_files(monkeypatch, [long], user_tenant_id=tenant)
+
+        result = await digest_files("sum", [_signed_url(long.id, tenant)], ctx=object())
+
+        header = result.content[0].text
+        assert header.startswith("Digest of 1 attached files with m.\n[D1] long.pdf")
+        assert result.meta["eneo.segments_planned"] > 1
+        assert adapter.calls.count("You") == result.meta["eneo.segments_planned"]
+
+    async def test_server_registers_the_tool_with_the_attachment_suffix(self):
+        server = await build_files_mcp_server(
+            token="tok", tenant_id=uuid4(), attachment_labels=["a.pdf"]
+        )
+
+        by_name = {t.name: t for t in server.tools}
+        assert "digest_files" in by_name
+        assert "reachable through digest_files" in by_name["read_file"].description
+        assert "reachable through digest_files" in by_name["digest_files"].description

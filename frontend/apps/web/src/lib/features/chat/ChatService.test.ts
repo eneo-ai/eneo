@@ -292,7 +292,8 @@ describe("ChatService turn diagnostics", () => {
         serverName: "warehouse",
         toolName: "query",
         status: "complete",
-        usage: null
+        usage: null,
+        readerUsage: null
       }
     ]);
   });
@@ -421,6 +422,29 @@ describe("ChatService independent capabilities", () => {
       enabled_capabilities: ["image_generation"],
       available_capabilities: [{ available: false }]
     });
+  });
+});
+
+describe("ChatService cancelling", () => {
+  it("keeps the streamed answer when the user stops with an abort reason", async () => {
+    const ask = vi.fn().mockImplementationOnce(async ({ callbacks, abortController }) => {
+      callbacks.onFirstChunk({
+        id: "message-1",
+        session_id: "session-1",
+        answer: "",
+        references: []
+      });
+      callbacks.onText({ session_id: "session-1", answer: "Första beslutet", references: [] });
+      // fetch rejects with the abort reason itself, which the SDK can only
+      // wrap as an unknown error without the word "aborted" in it.
+      abortController.abort("User cancelled");
+      throw new Error("UNKNOWN ERROR");
+    });
+    const chat = chatService(vi.fn(), { ask });
+
+    await chat.askQuestion("Hello", undefined, undefined, undefined, new AbortController());
+
+    expect(chat.currentConversation.messages.at(-1)?.answer).toBe("Första beslutet");
   });
 });
 

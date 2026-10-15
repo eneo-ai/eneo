@@ -163,6 +163,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     effective_config_service = AsyncMock()
     effective_config_service.resolve_for.return_value = EffectiveConfig(
         models_enforced=True,
+        reader_governed=False,
         available_models=[effective_model],
         locked_model=None,
         policy_default_model=effective_model,
@@ -268,6 +269,7 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
     effective_config_service = AsyncMock()
     effective_config_service.resolve_for.return_value = SimpleNamespace(
         models_enforced=True,
+        reader_governed=False,
         available_models=[],
         policy_default_model=None,
         mcp_enforced=False,
@@ -356,6 +358,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
     effective_config_service = AsyncMock()
     effective_config_service.resolve_for.return_value = SimpleNamespace(
         models_enforced=False,
+        reader_governed=False,
         available_models=[],
         policy_default_model=None,
         mcp_enforced=True,
@@ -458,6 +461,7 @@ async def test_ask_applies_governed_file_policy_to_personal_assistant(
     effective_config_service = AsyncMock()
     effective_config_service.resolve_for.return_value = SimpleNamespace(
         models_enforced=False,
+        reader_governed=False,
         available_models=[],
         policy_default_model=None,
         mcp_enforced=False,
@@ -542,6 +546,7 @@ async def test_ask_respects_disabled_mcp_server_ids():
     effective_config_service = AsyncMock()
     effective_config_service.resolve_for.return_value = SimpleNamespace(
         models_enforced=False,
+        reader_governed=False,
         available_models=[],
         policy_default_model=None,
         mcp_enforced=True,
@@ -602,6 +607,7 @@ async def test_update_guard_rejects_disallowed_model_on_personal_default_assista
     effective_config_service = AsyncMock()
     effective_config_service.resolve_for.return_value = SimpleNamespace(
         models_enforced=True,
+        reader_governed=False,
         available_models=[TEST_MODEL_GPT4],
         mcp_enforced=False,
         available_mcp_servers=[],
@@ -631,6 +637,7 @@ async def test_update_guard_rejects_prompt_change_when_prompt_enforced():
     effective_config_service = AsyncMock()
     effective_config_service.resolve_for.return_value = SimpleNamespace(
         models_enforced=False,
+        reader_governed=False,
         available_models=[],
         mcp_enforced=False,
         available_mcp_servers=[],
@@ -688,6 +695,7 @@ async def test_update_guard_grandfathers_already_attached_mcp_server():
     effective_config_service = AsyncMock()
     effective_config_service.resolve_for.return_value = SimpleNamespace(
         models_enforced=False,
+        reader_governed=False,
         available_models=[],
         mcp_enforced=True,
         available_mcp_servers=[allowed],
@@ -718,6 +726,7 @@ async def test_update_guard_reuses_passed_effective_config_without_reresolving()
     allowed = SimpleNamespace(id=uuid4())
     pre_resolved = SimpleNamespace(
         models_enforced=False,
+        reader_governed=False,
         available_models=[],
         mcp_enforced=True,
         available_mcp_servers=[allowed],
@@ -751,6 +760,7 @@ async def test_update_guard_rejects_newly_added_disallowed_mcp_server():
     effective_config_service = AsyncMock()
     effective_config_service.resolve_for.return_value = SimpleNamespace(
         models_enforced=False,
+        reader_governed=False,
         available_models=[],
         mcp_enforced=True,
         available_mcp_servers=[allowed],
@@ -836,6 +846,7 @@ async def test_get_assistant_with_effective_config_allows_personal_default_for_b
     effective_config_service.resolve_for = AsyncMock(
         return_value=SimpleNamespace(
             models_enforced=False,
+            reader_governed=False,
             available_models=[],
             default_model=None,
             locked_model=None,
@@ -1196,6 +1207,7 @@ async def test_personal_default_rejects_invalid_direct_bindings_before_history()
     )
     effective_config = SimpleNamespace(
         models_enforced=False,
+        reader_governed=False,
         available_models=[],
         mcp_enforced=False,
         available_mcp_servers=[],
@@ -1225,6 +1237,7 @@ async def test_personal_default_preflight_rejects_blocked_direct_bindings():
     skill_service = _skill_service_with_resolution(blocked=(binding,))
     effective_config = SimpleNamespace(
         models_enforced=False,
+        reader_governed=False,
         available_models=[],
         mcp_enforced=False,
         available_mcp_servers=[],
@@ -1261,6 +1274,7 @@ async def test_governance_skill_composes_after_enforced_prompt():
     skill_service = _empty_skill_service()
     effective_config = SimpleNamespace(
         models_enforced=False,
+        reader_governed=False,
         available_models=[],
         mcp_enforced=False,
         available_mcp_servers=[],
@@ -1305,6 +1319,7 @@ async def test_governance_prompt_rechecks_persistent_baseline_on_plain_turn():
     skill_service = _empty_skill_service()
     effective_config = SimpleNamespace(
         models_enforced=False,
+        reader_governed=False,
         available_models=[],
         mcp_enforced=False,
         available_mcp_servers=[],
@@ -1392,6 +1407,7 @@ async def test_ask_checks_space_with_policy_default_when_assistant_has_no_model(
     effective_config_service = AsyncMock()
     effective_config_service.resolve_for.return_value = EffectiveConfig(
         models_enforced=True,
+        reader_governed=False,
         available_models=[effective_model],
         locked_model=None,
         policy_default_model=effective_model,

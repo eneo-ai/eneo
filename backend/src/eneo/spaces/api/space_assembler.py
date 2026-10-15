@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
+from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
 from eneo.assistants.api.assistant_models import (
     AssistantSparse,
     AssistantType,
@@ -30,6 +31,7 @@ from eneo.spaces.api.space_models import (
     AppSparse,
     CreateSpaceServiceResponse,
     Knowledge,
+    ReaderModelPublic,
     SpaceDashboard,
     SpaceGroupMember,
     SpaceMember,
@@ -56,8 +58,12 @@ if TYPE_CHECKING:
     from eneo.actors import ActorManager, SpaceActor
     from eneo.assistants.api.assistant_assembler import AssistantAssembler
     from eneo.assistants.assistant import Assistant
+    from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.completion_models.presentation import CompletionModelAssembler
-    from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
+    from eneo.governance_policy.domain.policy_resolver import (
+        EffectiveConfig,
+        ReaderResolution,
+    )
 
 
 class SpaceAssembler:
@@ -658,10 +664,21 @@ class SpaceAssembler:
             else None
         )
 
+    def _reader_public(
+        self, model: "CompletionModel | None"
+    ) -> CompletionModelPublic | None:
+        if model is None:
+            return None
+        return self.completion_model_assembler.from_completion_model_to_model(
+            completion_model=model, show_pricing=self.user.can_view_model_pricing
+        )
+
     def from_space_to_model(
         self,
         space: Space,
         default_assistant_effective_config: "EffectiveConfig | None" = None,
+        reader_resolution: "ReaderResolution | None" = None,
+        tenant_reader_default: "CompletionModel | None" = None,
     ) -> SpacePublic:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         self._set_permissions_on_resources(space)
@@ -761,6 +778,15 @@ class SpaceAssembler:
             security_classification=security_classification,
             data_retention_days=space.data_retention_days,
             icon_id=space.icon_id,
+            reader_model=ReaderModelPublic(
+                inherit=space.reader_model_inherit,
+                model=self._reader_public(space.reader_model),
+                effective=self._reader_public(
+                    reader_resolution.model if reader_resolution else None
+                ),
+                reason=reader_resolution.reason if reader_resolution else "none",
+                tenant_default=self._reader_public(tenant_reader_default),
+            ),
         )
 
     def from_space_to_sparse_model(

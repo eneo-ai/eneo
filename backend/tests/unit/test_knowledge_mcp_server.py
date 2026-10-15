@@ -7,10 +7,11 @@ into MCP content blocks that the citation pipeline consumes.
 
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from mcp.types import TextContent
 
 from eneo.authentication.auth_service import AuthService
 from eneo.info_blobs.info_blob_repo import InfoBlobListing
@@ -46,6 +47,16 @@ from eneo.internal_mcp.knowledge import (
 )
 from eneo.main.exceptions import AuthenticationException, NotFoundException
 from tests.fixtures import TEST_USER
+
+
+async def _no_title_matches(**_kwargs):
+    """Repo double: no document matches the query by title."""
+    return []
+
+
+async def _no_originals(_ids):
+    """Repo double: none of the documents has a retained original."""
+    return {}
 
 
 def _chunk(**overrides):
@@ -84,9 +95,13 @@ def _patch_read_source_context(monkeypatch, *, blob=None, repo_error=None):
 
         container = SimpleNamespace(
             assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
-            info_blob_repo=lambda: SimpleNamespace(get=get_blob),
+            info_blob_repo=lambda: SimpleNamespace(
+                find_titles_by_sources=_no_title_matches,
+                get_originals=_no_originals,
+                get=get_blob,
+            ),
         )
-        yield container, SimpleNamespace(), assistant_id
+        yield container, SimpleNamespace(tenant_id=uuid4()), assistant_id
 
     monkeypatch.setattr(
         "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
@@ -471,6 +486,13 @@ class TestMatchingSources:
 
         assert _matching_sources(assistant, "waste faq")[0].source_id == cid
         assert _matching_sources(assistant, "  Waste FAQ ")[0].source_id == cid
+        # The catalog label the model was shown works as well as the bare name.
+        assert (
+            _matching_sources(assistant, "Collection 'Waste FAQ'")[0].source_id == cid
+        )
+        assert (
+            _matching_sources(assistant, "collection 'waste faq'")[0].source_id == cid
+        )
 
     def test_duplicate_names_are_reported_as_several_matches(self):
         assistant = _assistant_with_sources(
@@ -517,13 +539,17 @@ def _patch_search_context(
 
         container = SimpleNamespace(
             assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
-            info_blob_repo=lambda: SimpleNamespace(get=get_blob),
+            info_blob_repo=lambda: SimpleNamespace(
+                find_titles_by_sources=_no_title_matches,
+                get_originals=_no_originals,
+                get=get_blob,
+            ),
             info_blob_chunk_repo=lambda: SimpleNamespace(
                 get_adjacent_chunks=get_adjacent_chunks
             ),
             datastore=lambda: SimpleNamespace(semantic_search=semantic_search),
         )
-        yield container, SimpleNamespace(), uuid4()
+        yield container, SimpleNamespace(tenant_id=uuid4()), uuid4()
 
     monkeypatch.setattr(
         "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
@@ -967,11 +993,14 @@ def _patch_describe_context(monkeypatch, assistant, *, listings=(), excerpts=())
         container = SimpleNamespace(
             assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
             info_blob_repo=lambda: SimpleNamespace(
-                count_by_sources=count_by_sources, list_by_sources=list_by_sources
+                find_titles_by_sources=_no_title_matches,
+                get_originals=_no_originals,
+                count_by_sources=count_by_sources,
+                list_by_sources=list_by_sources,
             ),
             info_blob_chunk_repo=lambda: SimpleNamespace(sample_evenly=sample_evenly),
         )
-        yield container, SimpleNamespace(), uuid4()
+        yield container, SimpleNamespace(tenant_id=uuid4()), uuid4()
 
     monkeypatch.setattr(
         "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
@@ -1078,3 +1107,488 @@ class TestPickEmbeddingModel:
             collections=[], websites=[], integration_knowledge_list=[]
         )
         assert _pick_embedding_model(assistant) is None
+
+
+class TestOriginalLinks:
+    """Documents with a retained original come with a signed link for tools."""
+
+    XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    def _original(self, tenant_id):
+        from eneo.info_blobs.info_blob_repo import InfoBlobOriginal
+        from eneo.object_content.content import ContentAccessClass, ContentState
+
+        return InfoBlobOriginal(
+            content_id=uuid4(),
+            tenant_id=tenant_id,
+            sha256=b"\x01" * 32,
+            access_class=ContentAccessClass.PRIVATE_RESOURCE,
+            state=ContentState.AVAILABLE,
+            original_filename="sales.xlsx",
+            media_type=self.XLSX,
+        )
+
+    def _patch(self, monkeypatch, *, blob, originals, title_matches=(), base_url):
+        tenant_id = uuid4()
+        user = SimpleNamespace(
+            id=uuid4(), tenant_id=tenant_id, username="u", email="u@e"
+        )
+        audit = AsyncMock()
+        assistant = SimpleNamespace(
+            collections=[
+                SimpleNamespace(
+                    id=blob.group_id, name="Sales", embedding_model=MagicMock()
+                )
+            ],
+            websites=[],
+            integration_knowledge_list=[],
+        )
+
+        async def get_assistant(_id):
+            return assistant, []
+
+        async def get_blob(_id):
+            return blob
+
+        async def get_originals(ids):
+            return {
+                blob_id: original
+                for blob_id, original in originals.items()
+                if blob_id in ids
+            }
+
+        async def find_titles(**_kwargs):
+            return list(title_matches)
+
+        async def semantic_search(query, **kwargs):
+            return []
+
+        @asynccontextmanager
+        async def fake_context(_ctx):
+            container = SimpleNamespace(
+                assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
+                info_blob_repo=lambda: SimpleNamespace(
+                    get=get_blob,
+                    get_originals=get_originals,
+                    find_titles_by_sources=find_titles,
+                ),
+                info_blob_chunk_repo=lambda: SimpleNamespace(),
+                datastore=lambda: SimpleNamespace(semantic_search=semantic_search),
+                audit_service=lambda: SimpleNamespace(log_async=audit),
+            )
+            yield container, user, uuid4()
+
+        monkeypatch.setattr(
+            "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
+        )
+        monkeypatch.setattr(
+            "eneo.internal_mcp.knowledge.file_reference_base_url",
+            lambda settings: base_url,
+        )
+        return tenant_id, audit
+
+    @pytest.mark.asyncio
+    async def test_read_source_links_the_original_and_audits_the_mint(
+        self, monkeypatch
+    ):
+        from mcp.types import ResourceLink
+
+        from eneo.authentication.signed_urls import verify_eneo_original_reference
+
+        blob = SimpleNamespace(
+            id=uuid4(),
+            group_id=uuid4(),
+            website_id=None,
+            integration_knowledge_id=None,
+            title="Sales 2026",
+            text="Spreadsheet: sales.xlsx",
+        )
+        tenant_id, audit = self._patch(
+            monkeypatch, blob=blob, originals={}, base_url="https://eneo.example"
+        )
+        # Bind the original to the tenant the context yields.
+        original = self._original(tenant_id)
+        monkeypatch.setattr(
+            "eneo.internal_mcp.knowledge.file_reference_base_url",
+            lambda settings: "https://eneo.example",
+        )
+        tenant_id, audit = self._patch(
+            monkeypatch,
+            blob=blob,
+            originals={blob.id: original},
+            base_url="https://eneo.example",
+        )
+
+        content = await read_source(str(blob.id), ctx=None)
+
+        link = content[-1]
+        assert isinstance(link, ResourceLink)
+        assert link.name == "sales.xlsx" and link.mimeType == self.XLSX
+        assert verify_eneo_original_reference(str(link.uri), tenant_id=tenant_id) == (
+            "info_blob",
+            blob.id,
+        )
+        assert link.meta == {"info_blob_id": str(blob.id), "title": "Sales 2026"}
+        audit.assert_awaited_once()
+        assert audit.await_args.kwargs["entity_id"] == blob.id
+
+    @pytest.mark.asyncio
+    async def test_no_link_without_a_reference_base_url_or_an_original(
+        self, monkeypatch
+    ):
+        from mcp.types import ResourceLink
+
+        blob = SimpleNamespace(
+            id=uuid4(),
+            group_id=uuid4(),
+            website_id=None,
+            integration_knowledge_id=None,
+            title="Prose",
+            text="Minutes",
+        )
+        tenant_id, audit = self._patch(
+            monkeypatch, blob=blob, originals={}, base_url=None
+        )
+        self._patch(
+            monkeypatch,
+            blob=blob,
+            originals={blob.id: self._original(tenant_id)},
+            base_url=None,
+        )
+        content = await read_source(str(blob.id), ctx=None)
+        assert not any(isinstance(block, ResourceLink) for block in content)
+
+        _, audit = self._patch(
+            monkeypatch, blob=blob, originals={}, base_url="https://eneo.example"
+        )
+        content = await read_source(str(blob.id), ctx=None)
+        assert not any(isinstance(block, ResourceLink) for block in content)
+        audit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_search_lists_title_matches_with_their_originals(self, monkeypatch):
+        from mcp.types import ResourceLink
+
+        blob = SimpleNamespace(
+            id=uuid4(),
+            group_id=uuid4(),
+            website_id=None,
+            integration_knowledge_id=None,
+            title="sales.xlsx",
+            text="Spreadsheet: sales.xlsx",
+        )
+        listing = InfoBlobListing(id=blob.id, title="sales.xlsx", url=None)
+        tenant_id, _ = self._patch(
+            monkeypatch,
+            blob=blob,
+            originals={},
+            title_matches=[listing],
+            base_url="https://eneo.example",
+        )
+        self._patch(
+            monkeypatch,
+            blob=blob,
+            originals={blob.id: self._original(tenant_id)},
+            title_matches=[listing],
+            base_url="https://eneo.example",
+        )
+
+        content = await search_knowledge("sum of sales", ctx=None)
+
+        texts = [block.text for block in content if isinstance(block, TextContent)]
+        assert any("title matches the query" in text for text in texts)
+        assert any(f"- sales.xlsx  document_id: {blob.id}" in text for text in texts)
+        links = [block for block in content if isinstance(block, ResourceLink)]
+        assert [link.name for link in links] == ["sales.xlsx"]
+
+
+# --------------------------------------------------------------------------- #
+# digest_documents
+# --------------------------------------------------------------------------- #
+from eneo.completion_models.application.map_reduce import DigestBudgets  # noqa: E402
+from eneo.completion_models.domain.model_kwargs_capabilities import (  # noqa: E402
+    SupportedModelKwargs,
+)
+from eneo.files.tabular_index import IndexedSheet, tabular_sample_text  # noqa: E402
+from eneo.internal_mcp.constants import CITE_KEY_META  # noqa: E402
+from eneo.internal_mcp.digest import DigestModel  # noqa: E402
+from eneo.internal_mcp.foundation import DigestClaims  # noqa: E402
+from eneo.internal_mcp.knowledge import (  # noqa: E402
+    DIGEST_FITS_ONE_READ_MESSAGE,
+    DIGEST_SOURCE_REQUIRED_MESSAGE,
+    digest_documents,
+)
+
+
+class _DigestAdapter:
+    """Scripted model: notes per stage, a final answer citing [D1] and [D2]."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def get_response(self, context, kwargs):
+        self.calls.append(context.prompt.split(" ")[0])
+        if context.prompt.startswith("Answer"):
+            text = "Budget beslutades [D1]. Avslag [D2]."
+        elif context.prompt.startswith("You take notes"):
+            text = "Date: 2026-01-01\nnote"
+        else:
+            text = "merged [D1] [D2]"
+        return SimpleNamespace(
+            text=text, usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5)
+        )
+
+
+def _text(title, text, **overrides):
+    from eneo.info_blobs.info_blob_repo import InfoBlobText
+
+    return InfoBlobText(
+        id=overrides.get("id", uuid4()),
+        title=title,
+        url=None,
+        text=text,
+        length=len(text),
+    )
+
+
+def _patch_digest_context(
+    monkeypatch,
+    *,
+    texts,
+    sources=1,
+    total_chars=None,
+    blob_for_document_scope=None,
+    adapter=None,
+    collection_id=None,
+):
+    """A knowledge server whose model calls hit a scripted adapter."""
+    collections = [
+        SimpleNamespace(
+            id=collection_id if i == 0 and collection_id else uuid4(),
+            name=f"Minutes {i}",
+            embedding_model=object(),
+        )
+        for i in range(sources)
+    ]
+    assistant = SimpleNamespace(
+        collections=collections,
+        websites=[],
+        integration_knowledge_list=[],
+        completion_model=SimpleNamespace(
+            id=uuid4(),
+            name="m",
+            get_supported_model_kwargs=lambda: SupportedModelKwargs(),
+        ),
+        completion_model_kwargs=SimpleNamespace(),
+    )
+    calls: dict[str, list] = {"size": [], "list": [], "texts": []}
+
+    async def size_by_sources(**kwargs):
+        calls["size"].append(kwargs)
+        return len(texts), total_chars if total_chars is not None else sum(
+            t.length for t in texts
+        )
+
+    async def list_by_sources(**kwargs):
+        calls["list"].append(kwargs)
+        limit = kwargs["limit"]
+        return [
+            InfoBlobListing(id=t.id, title=t.title, url=t.url) for t in texts[:limit]
+        ]
+
+    async def list_texts_by_ids(ids, **kwargs):
+        calls["texts"].append(ids)
+        by_id = {t.id: t for t in texts}
+        return [by_id[i] for i in ids if i in by_id]
+
+    async def get(blob_id):
+        if blob_for_document_scope is None:
+            raise NotFoundException()
+        return blob_for_document_scope
+
+    @asynccontextmanager
+    async def fake_context(_ctx):
+        async def get_assistant(_assistant_id):
+            return assistant, []
+
+        container = SimpleNamespace(
+            assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
+            info_blob_repo=lambda: SimpleNamespace(
+                size_by_sources=size_by_sources,
+                list_by_sources=list_by_sources,
+                list_texts_by_ids=list_texts_by_ids,
+                get_originals=_no_originals,
+                get=get,
+            ),
+        )
+        yield container, SimpleNamespace(tenant_id=uuid4()), uuid4()
+
+    adapter = adapter or _DigestAdapter()
+
+    async def prepare(tool_ctx, assistant_, claims, *, instruction):
+        return DigestModel(
+            model=assistant.completion_model,
+            adapter=adapter,
+            model_kwargs={},
+            count=lambda text: len(text.split()),
+            budgets=DigestBudgets(segment_tokens=50, reduce_input_tokens=120),
+            body_cap_chars=9_000,
+        )
+
+    monkeypatch.setattr(
+        "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
+    )
+    monkeypatch.setattr(
+        "eneo.internal_mcp.knowledge.bearer_from_ctx", lambda ctx: "tok"
+    )
+    monkeypatch.setattr(
+        "eneo.internal_mcp.knowledge.digest_claims_from_token",
+        lambda token: DigestClaims(None, None, False),
+    )
+    monkeypatch.setattr("eneo.internal_mcp.knowledge.prepare_digest_model", prepare)
+    monkeypatch.setattr(
+        "eneo.internal_mcp.knowledge.disconnect_check", lambda ctx: None
+    )
+    monkeypatch.setattr(
+        "eneo.internal_mcp.digest.get_settings",
+        lambda: SimpleNamespace(
+            digest_timeout_seconds=300,
+            digest_max_segments=120,
+            digest_concurrency=2,
+            mcp_tool_output_max_chars=32768,
+        ),
+    )
+    return SimpleNamespace(assistant=assistant, adapter=adapter, calls=calls)
+
+
+class TestDigestDocuments:
+    async def test_digests_a_source_and_cites_its_documents(self, monkeypatch):
+        texts = [
+            _text("Jan minutes", "budget approved"),
+            _text("Feb minutes", "rejected"),
+        ]
+        rig = _patch_digest_context(monkeypatch, texts=texts)
+
+        result = await digest_documents("Vilka beslut togs?", ctx=object())
+
+        header = result.content[0].text
+        assert header.startswith(
+            "Digest of Collection 'Minutes 0': 2 documents read with m."
+        )
+        assert "[D1] Jan minutes\n[D2] Feb minutes" in header
+        assert (
+            "Coverage: complete. 2 documents; 2 segments planned; 2 processed."
+            in header
+        )
+        assert header.endswith("Budget beslutades [D1]. Avslag [D2].")
+        stubs = result.content[1:]
+        assert [s.resource.meta[CITE_KEY_META] for s in stubs] == ["D1", "D2"]
+        assert str(stubs[0].resource.uri) == f"eneo://info-blob/{texts[0].id}"
+        assert stubs[0].resource.text == (
+            f"[D1] Jan minutes (document_id: {texts[0].id})"
+        )
+        assert result.meta["eneo.llm_calls"] == 1  # direct path
+        assert result.meta["eneo.coverage"] == "complete"
+        assert result.meta["gen_ai.usage.input_tokens"] == 10
+        assert rig.adapter.calls == ["Answer"]
+
+    async def test_several_sources_need_within(self, monkeypatch):
+        _patch_digest_context(monkeypatch, texts=[_text("a", "x")], sources=2)
+
+        result = await digest_documents("sum", ctx=object())
+
+        assert result.content[0].text == DIGEST_SOURCE_REQUIRED_MESSAGE
+
+    async def test_title_contains_and_max_documents_narrow_the_selection(
+        self, monkeypatch
+    ):
+        texts = [_text("2026 jan", "a"), _text("2026 feb", "b"), _text("2026 mar", "c")]
+        rig = _patch_digest_context(monkeypatch, texts=texts)
+
+        result = await digest_documents(
+            "sum", ctx=object(), title_contains="2026", max_documents=2
+        )
+
+        assert rig.calls["size"][0]["title_contains"] == "2026"
+        assert rig.calls["list"][0]["limit"] == 2
+        assert rig.calls["list"][0]["title_contains"] == "2026"
+        assert rig.calls["texts"][0] == [texts[0].id, texts[1].id]
+        assert "Omitted by max_documents: 1 documents." in result.content[0].text
+
+    async def test_oversized_selection_is_refused_before_loading_texts(
+        self, monkeypatch
+    ):
+        rig = _patch_digest_context(
+            monkeypatch, texts=[_text("a", "x")], total_chars=10**9
+        )
+
+        result = await digest_documents("sum", ctx=object())
+
+        assert result.content[0].text.startswith("Too much text for one digest")
+        assert rig.calls["texts"] == []
+
+    async def test_sampled_tables_are_set_aside_not_digested(self, monkeypatch):
+        sample = tabular_sample_text(
+            "budget.xlsx",
+            [IndexedSheet("Sheet1", ["a", "b"], [f"{i},{i}" for i in range(80)])],
+        )
+        texts = [_text("Jan minutes", "budget approved"), _text("budget.xlsx", sample)]
+        rig = _patch_digest_context(monkeypatch, texts=texts)
+
+        result = await digest_documents("sum", ctx=object())
+
+        header = result.content[0].text
+        assert "[D1] Jan minutes" in header
+        assert "[D2]" not in header.split("Coverage:")[0]
+        assert (
+            "Not digested (tables):\n- budget.xlsx: table; use the table tools"
+            in header
+        )
+        assert f"document_id: {texts[1].id}" in header
+        assert "1 documents; 1 segments planned; 1 processed" in header
+        assert rig.adapter.calls == ["Answer"]
+
+    async def test_document_scope_that_fits_one_read_is_refused(self, monkeypatch):
+        blob_id, collection_id = uuid4(), uuid4()
+        texts = [_text("Long report", "short text", id=blob_id)]
+        blob = SimpleNamespace(
+            id=blob_id,
+            title="Long report",
+            group_id=collection_id,
+            website_id=None,
+            integration_knowledge_id=None,
+        )
+        _patch_digest_context(
+            monkeypatch,
+            texts=texts,
+            blob_for_document_scope=blob,
+            collection_id=collection_id,
+        )
+
+        result = await digest_documents("sum", ctx=object(), within=str(blob_id))
+
+        assert result.content[0].text == DIGEST_FITS_ONE_READ_MESSAGE
+
+    async def test_bad_instruction_never_opens_the_context(self, monkeypatch):
+        @asynccontextmanager
+        async def never(_ctx):
+            raise AssertionError("context opened")
+            yield  # pragma: no cover
+
+        monkeypatch.setattr("eneo.internal_mcp.knowledge.internal_tool_context", never)
+
+        result = await digest_documents("   ", ctx=object())
+
+        assert "Pass an instruction" in result.content[0].text
+
+    async def test_server_registers_the_tool_with_the_sources_suffix(self):
+        server = await build_knowledge_mcp_server(
+            token="tok", tenant_id=uuid4(), source_labels=["Collection 'Minutes'"]
+        )
+
+        by_name = {t.name: t for t in server.tools}
+        assert "digest_documents" in by_name
+        assert "Collection 'Minutes'" in by_name["digest_documents"].description
+        assert by_name["digest_documents"].description.startswith(
+            "Read every document of one knowledge source"
+        )

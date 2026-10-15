@@ -315,6 +315,15 @@ class Settings(BaseSettings):
     # Tool-call budget for the built-in image generation provider. Image
     # models routinely take longer than a general MCP tool call.
     image_generation_timeout_seconds: int = 240
+    # Tool-call budget for the built-in digest tools (knowledge and files
+    # servers): one model call per text segment plus the merges, so a digest
+    # outlasts a general MCP tool call. The loopback knowledge and files
+    # servers get this budget for every call.
+    digest_timeout_seconds: int = 300
+    # Most text segments (one map call each) a single digest may process.
+    digest_max_segments: int = 120
+    # Concurrent model calls one digest issues.
+    digest_concurrency: int = 8
     # Upper bound for one rerank call to a provider, starting with the
     # registration-time connection test.
     rerank_request_timeout_seconds: int = 10
@@ -971,6 +980,19 @@ class Settings(BaseSettings):
                 self.image_generation_timeout_seconds,
             )
             sys.exit(1)
+
+        for name in (
+            "digest_timeout_seconds",
+            "digest_max_segments",
+            "digest_concurrency",
+        ):
+            if getattr(self, name) <= 0:
+                logging.error(
+                    "%s must be greater than zero. Current value: %s",
+                    name.upper(),
+                    getattr(self, name),
+                )
+                sys.exit(1)
 
         if self.mcp_tool_output_max_chars <= 0:
             logging.error(
