@@ -35,8 +35,9 @@ _Decision = tuple[object, ...]
 def _reads_mcp_catalog(sql: str) -> bool:
     """A statement reads an MCP tool, or an MCP server that is not one an
     assistant of the space attaches (the space's server options and the
-    capability providers)."""
-    return "mcp_server_tools" in sql or (
+    capability providers). An assistant's own tool switches
+    (assistant_mcp_server_tools) are part of the assistant, not the catalog."""
+    return re.search(r"\bmcp_server_tools\b", sql) is not None or (
         re.search(r"\bmcp_servers\b", sql) is not None
         and "assistant_mcp_servers" not in sql
     )

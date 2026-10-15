@@ -358,7 +358,7 @@ describe("FlowRunDialog recording rotation", () => {
     expect(screen.getByText(m.recording_time_left({ duration: "3 h 20 min" }))).toBeTruthy();
 
     vi.advanceTimersByTime(10 * 60_000);
-    await flush();
+    await paintedFrame();
     expect(screen.getByText(m.recording_time_left({ duration: "3 h 10 min" }))).toBeTruthy();
   });
 

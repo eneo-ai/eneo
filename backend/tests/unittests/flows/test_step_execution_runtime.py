@@ -37,6 +37,7 @@ from eneo.completion_models.infrastructure.context_builder import (
 from eneo.completion_models.infrastructure.stream_collector import (
     ProviderJsonWhitespaceAbort,
 )
+from eneo.files.model_file_references import file_handle
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import _compile_object_schema
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.citation_sidecar import (
@@ -541,7 +542,9 @@ async def test_dispatch_refreshes_expiring_references_and_remeasures(
         == claims["expires_at"]
     )
     sent = h.transport.await_args.kwargs
-    assert fresh in json.dumps(sent["messages"])
+    # The model sees the file's handle only; the fresh URL reaches the tools.
+    assert file_handle(file.id) in json.dumps(sent["messages"])
+    assert fresh not in json.dumps(sent["messages"])
     assert original not in json.dumps(sent["messages"])
     package = h.prepared.completion_call.selected_package
     assert json.dumps(sent["messages"]) == json.dumps(package.messages)
@@ -615,8 +618,13 @@ async def test_preview_reuses_signed_file_references_at_dispatch(
     )
 
     h.service._build_file_reference_urls.assert_called_once()
+    assert h.prepared.completion_call.preflight.file_reference_urls == {
+        file.id: original
+    }
     sent = h.transport.await_args.kwargs
-    assert original in json.dumps(sent["messages"])
+    # The model sees the file's handle only, never the signed URL.
+    assert file_handle(file.id) in json.dumps(sent["messages"])
+    assert original not in json.dumps(sent["messages"])
     if retrieved:
         assert "Late retrieval marker." in json.dumps(sent["messages"])
         assert h.prepared.completion_call.preflight.retrieval_included is False

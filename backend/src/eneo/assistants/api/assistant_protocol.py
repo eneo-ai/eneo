@@ -24,9 +24,7 @@ from eneo.questions.question import (
 from eneo.sessions.session import (
     AskChatResponse,
     AskResponse,
-    EneoEventType,
     SessionInDB,
-    SSEEneoEvent,
     SSEError,
     SSEFiles,
     SSEFirstChunk,
@@ -36,6 +34,7 @@ from eneo.sessions.session import (
     SSEToolApprovalRequired,
     SSEToolApprovalTimeout,
     SSEToolCall,
+    SSEToolCallDelta,
     TokenUsageEvent,
     ToolCallInfo,
 )
@@ -65,6 +64,8 @@ class _SupportsToolCallMetadata(Protocol):
     meta: dict[str, Any] | None
     purpose: str | None
     is_internal: bool | None
+    is_bundled: bool | None
+    app_view: dict[str, Any] | None
 
 
 def _require_approval_id(chunk: Completion) -> str:
@@ -214,12 +215,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
         data = SSEFiles(
             session_id=session_id,
             generated_files=[FilePublic(**chunk.generated_file.model_dump())],
-        )
-
-    elif chunk.response_type == ResponseType.ENEO_EVENT:
-        data = SSEEneoEvent(
-            session_id=session_id,
-            eneo_event_type=EneoEventType.GENERATING_IMAGE,
+            tool_call_id=chunk.image.tool_call_id if chunk.image else None,
         )
 
     elif chunk.response_type == ResponseType.TOOL_CALL:
@@ -244,6 +240,8 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     mcp_tool_name=tc.mcp_tool_name,
                     purpose=tc.purpose,
                     is_internal=tc.is_internal,
+                    is_bundled=tc.is_bundled,
+                    app_view=tc.app_view,
                     meta=tc.meta,
                 )
                 for tc in tool_calls
@@ -260,6 +258,13 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                 )
                 for ref in (chunk.mcp_tool_references or [])
             ],
+        )
+
+    elif chunk.response_type == ResponseType.TOOL_CALL_DELTA:
+        data = SSEToolCallDelta(
+            session_id=session_id,
+            tool_call_id=chunk.tool_call_id or "",
+            arguments_delta=chunk.arguments_delta or "",
         )
 
     elif chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
@@ -280,6 +285,8 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     result_status=tc.result_status,
                     purpose=tc.purpose,
                     is_internal=tc.is_internal,
+                    is_bundled=tc.is_bundled,
+                    app_view=tc.app_view,
                 )
                 for tc in tool_calls
             ],
@@ -303,6 +310,8 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     result_status=tc.result_status,
                     purpose=tc.purpose,
                     is_internal=tc.is_internal,
+                    is_bundled=tc.is_bundled,
+                    app_view=tc.app_view,
                 )
                 for tc in tool_calls
             ],
@@ -338,6 +347,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
             session_id=session_id,
             error=chunk.error or "",
             error_code=chunk.error_code,
+            code=chunk.error_reason,
         )
 
     else:

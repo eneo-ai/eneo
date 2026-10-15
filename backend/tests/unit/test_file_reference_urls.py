@@ -40,6 +40,7 @@ from eneo.files.file_reference import (
     referenced_file_ids,
     url_only_file_ids,
 )
+from eneo.files.model_file_references import file_handle
 
 
 class TestSignedTokenTenantClaim:
@@ -130,8 +131,9 @@ class TestFileReferencesString:
         with_url, without_url = uuid4(), uuid4()
         files = [self._file(with_url), self._file(without_url)]
         block = build_file_references_string(files, {with_url: "https://x/dl"})
-        assert "https://x/dl" in block
-        assert block.count('"url":') == 1
+        assert file_handle(with_url) in block
+        assert "https://x/dl" not in block
+        assert block.count('"file_ref":') == 1
 
     def test_empty_when_no_file_in_map(self):
         assert build_file_references_string([self._file(uuid4())], {}) == ""
@@ -143,7 +145,7 @@ class TestFileReferencesString:
         # (ATTACHED_FILE_REFERENCES_INSTRUCTION), stated once per request.
         fid = uuid4()
         block = build_file_references_string([self._file(fid)], {fid: "https://x/dl"})
-        assert "signed file reference" in block
+        assert "file_ref" in block
         assert "raw bytes are NOT in this prompt" in block
         assert "read_file" not in block
         assert "re-upload" not in block
@@ -169,7 +171,8 @@ class TestInlineFileTextToggle:
             inline_file_text=True,
         )
         assert "row1,row2" in out  # extracted text inlined
-        assert "https://x/dl" in out  # plus the fetchable URL
+        assert file_handle(fid) in out
+        assert "https://x/dl" not in out
 
     def test_inline_off_drops_text_for_referenced_file(self):
         fid = uuid4()
@@ -180,7 +183,8 @@ class TestInlineFileTextToggle:
             inline_file_text=False,
         )
         assert "huge-csv-body" not in out  # text kept out of the context window
-        assert "https://x/dl" in out  # only the URL is surfaced
+        assert file_handle(fid) in out
+        assert "https://x/dl" not in out
 
     def test_inline_off_still_inlines_file_without_url(self):
         with_url, without_url = uuid4(), uuid4()
@@ -565,9 +569,9 @@ class TestImageReferenceRendering:
             {image_id: "https://x/i", doc_id: "https://x/d"},
         )
         lines = [json.loads(line) for line in block.split("\n\n", 1)[1].splitlines()]
-        assert [(entry["kind"], entry["url"]) for entry in lines] == [
-            ("image", "https://x/i"),
-            ("document", "https://x/d"),
+        assert [(entry["kind"], entry["file_ref"]) for entry in lines] == [
+            ("image", file_handle(image_id)),
+            ("document", file_handle(doc_id)),
         ]
 
     def test_image_gets_a_reference_entry_but_no_inline_text(self):
@@ -578,13 +582,14 @@ class TestImageReferenceRendering:
             file_reference_urls={image_id: "https://x/i"},
         )
         assert '"kind": "image"' in out
-        assert "https://x/i" in out
+        assert file_handle(image_id) in out
+        assert "https://x/i" not in out
         assert out.endswith("make it blue")
         # Images carry no text to inline; the reference block is the only addition.
         assert out.count("photo.png") == 1
 
 
-class TestGeneratedImageMintAudit:
+class TestGeneratedFileMintAudit:
     async def test_previous_turn_generated_images_are_audited_once(self, monkeypatch):
         _enable_file_references(monkeypatch)
         audit_service = AsyncMock()
@@ -753,7 +758,8 @@ class TestAssistantAttachmentReferences:
         assert "skriv kortfattat" in context.prompt
         assert "attached to this assistant by its author" in context.prompt
         assert "Files attached to this assistant by its author" in context.input
-        assert urls[kontoplan.id] in context.input
+        assert file_handle(kontoplan.id) in context.input
+        assert urls[kontoplan.id] not in context.input
         assert "vilket konto?" in context.input
 
     def test_no_reference_block_without_url_only_attachments(self):

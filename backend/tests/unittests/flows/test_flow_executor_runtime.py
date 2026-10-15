@@ -2228,7 +2228,18 @@ async def test_provider_rate_limit_is_typed_and_safe_for_new_logical_run(user):
 
 
 @pytest.mark.asyncio
-async def test_provider_unavailability_is_typed_with_unknown_outcome_disclosure(user):
+@pytest.mark.parametrize(
+    "provider_code",
+    [
+        "provider_unavailable",
+        "provider_unreachable",
+        "provider_timeout",
+        "provider_connection_lost",
+    ],
+)
+async def test_provider_unavailability_is_typed_with_unknown_outcome_disclosure(
+    user, provider_code
+):
     executor, _, flow_run_repo, _ = _build_executor(user)
     flow_run_repo.finish_attempt = AsyncMock()
     flow_run_repo.save_step_result = AsyncMock()
@@ -2253,7 +2264,7 @@ async def test_provider_unavailability_is_typed_with_unknown_outcome_disclosure(
         state=_empty_execution_state(),
         exc=OpenAIException(
             "The AI provider is temporarily unavailable.",
-            code="provider_unavailable",
+            code=provider_code,
         ),
     )
 
@@ -2272,6 +2283,14 @@ async def test_provider_unavailability_is_typed_with_unknown_outcome_disclosure(
     assert terminal_error.code is FlowApiErrorCode.PROVIDER_UNAVAILABLE
     assert terminal_error.retryable is False
     assert "may or may not have started" in terminal_error.message
+
+
+def test_an_eneo_coded_error_that_says_timed_out_is_not_a_provider_outage():
+    # Kills the mutant that classifies by message text: only a provider code
+    # from the transport's table makes a step failure provider unavailable.
+    error = OpenAIException("The skill timed out.", code="skill_prompt_ownership")
+
+    assert executor_module._flow_provider_error_code(error) is None
 
 
 @pytest.mark.asyncio
@@ -8072,8 +8091,6 @@ async def test_v2_foreign_knowledge_is_refused_at_repository_boundary(
         tenant=user.tenant,
         factory=Mock(),
         file_content_loader=executor.file_content_loader,
-        app_repo=Mock(),
-        assistant_repo=Mock(),
         completion_model_repo=mock_repo.completion_model_repo,
         transcription_model_repo=Mock(),
         embedding_model_repo=AsyncMock(),

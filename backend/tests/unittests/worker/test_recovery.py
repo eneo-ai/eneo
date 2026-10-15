@@ -9,6 +9,7 @@ Tests the crawl/recovery.py module to ensure:
 Run with: pytest tests/unittests/worker/test_recovery.py -v
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -161,6 +162,22 @@ class TestIsInvalidTransactionErrorMsg:
         assert is_invalid_transaction_error_msg("Pending Rollback") is True
 
 
+def _session_rolled_back_as_job_is_cancelled(job: list[asyncio.Task]) -> MagicMock:
+    """A broken session whose rollback finishes just as the job is cancelled."""
+
+    async def rollback():
+        job[0].cancel()
+
+    async def close():
+        await asyncio.sleep(0)
+
+    session = MagicMock()
+    session.begin = AsyncMock()
+    session.rollback = AsyncMock(side_effect=rollback)
+    session.close = AsyncMock(side_effect=close)
+    return session
+
+
 class TestRecoverSession:
     """Tests for recover_session function.
 
@@ -285,6 +302,64 @@ class TestRecoverSession:
 
         # Should still create new session
         assert result_session is new_session
+
+
+class TestRecoveryCancellation:
+    """A crawl job cancelled while recovering must stop, not recover."""
+
+    @pytest.mark.asyncio
+    async def test_recover_session_stops_when_the_job_is_cancelled(self):
+        from eneo.worker.crawl.recovery import recover_session
+
+        job: list[asyncio.Task] = []
+        old_session = _session_rolled_back_as_job_is_cancelled(job)
+        mock_sessionmanager = MagicMock()
+        mock_sessionmanager.create_session.return_value.begin = AsyncMock()
+
+        with patch("eneo.database.database.sessionmanager", mock_sessionmanager):
+            job.append(
+                asyncio.create_task(
+                    recover_session(
+                        container=MagicMock(),
+                        old_session=old_session,
+                        created_sessions=[],
+                        logger_instance=MagicMock(),
+                    )
+                )
+            )
+            with pytest.raises(asyncio.CancelledError):
+                await job[0]
+
+        mock_sessionmanager.create_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_with_recovery_does_not_retry_a_cancelled_job(self):
+        from eneo.worker.crawl.recovery import execute_with_recovery
+
+        job: list[asyncio.Task] = []
+        operation = AsyncMock(side_effect=PendingRollbackError("broken"))
+        mock_sessionmanager = MagicMock()
+        mock_sessionmanager.create_session = MagicMock(
+            return_value=_session_rolled_back_as_job_is_cancelled(job)
+        )
+
+        with patch("eneo.database.database.sessionmanager", mock_sessionmanager):
+            job.append(
+                asyncio.create_task(
+                    execute_with_recovery(
+                        container=MagicMock(),
+                        session_holder={"session": MagicMock(), "uploader": None},
+                        created_sessions=[],
+                        operation_name="test_op",
+                        operation=operation,
+                    )
+                )
+            )
+            with pytest.raises(asyncio.CancelledError):
+                await job[0]
+
+        operation.assert_awaited_once()
+        mock_sessionmanager.create_session.assert_called_once()
 
 
 class TestExecuteWithRecovery:

@@ -18,6 +18,7 @@ from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.infrastructure import context_builder
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.files.file_models import File, FileType
+from eneo.files.model_file_references import file_handle
 from eneo.questions.question import ToolCallInfo
 
 
@@ -58,6 +59,21 @@ def _names(files: list[File]) -> list[str]:
     return [file.name for file in files]
 
 
+def test_knowledge_prompt_places_citations_after_sourced_sentences():
+    prompt = context_builder._Prompt(version=2)
+    prompt.knowledge = '"""source_id: a5477f85\nBrasilianskt kaffe har låg syra."""'
+
+    text = str(prompt)
+
+    assert "after the punctuation ending its complete sourced sentence" in text
+    assert "If a list item or table cell has no sentence" in text
+    assert "Never put it after a heading, bold label" in text
+    assert (
+        'Example: **Smakprofil:** Brasilianskt kaffe är fylligt och milt. <inref id="<source_id>"/>'
+        in text
+    )
+
+
 def test_generated_images_replay_only_from_latest_turn():
     session = SimpleNamespace(questions=[_turn(1), _turn(2), _turn(3)])
 
@@ -94,6 +110,76 @@ def _image_tool_call(result: str, generated_file_ids) -> ToolCallInfo:
     )
 
 
+def test_replayed_legacy_arguments_carry_handles_without_credentials():
+    file_id = uuid4()
+    call = ToolCallInfo(
+        server_name="tabular",
+        tool_name="query_table",
+        tool_call_id="call-1",
+        arguments={
+            "file": {
+                "url": f"http://b/api/v1/files/{file_id}/original/download/?token=old.sig",
+                "filename": "a.xlsx",
+            }
+        },
+        result="{}",
+        mcp_tool_name="tabular__query_table",
+    )
+    # Persisted arguments never keep the token.
+    assert "token=old.sig" not in str(call.arguments)
+    session = SimpleNamespace(
+        questions=[
+            SimpleNamespace(
+                question="q",
+                answer="a",
+                files=[],
+                generated_files=[],
+                tool_calls=[call],
+            )
+        ]
+    )
+    fresh = f"http://b/api/v1/files/{file_id}/original/download/?token=fresh.sig"
+
+    messages, _ = ContextBuilder()._build_messages(
+        session, max_tokens=10_000, file_reference_urls={file_id: fresh}
+    )
+
+    assert messages[0].tool_calls[0].arguments == {
+        "file": {"url": file_handle(file_id), "filename": "a.xlsx"}
+    }
+
+
+def test_replayed_references_follow_image_and_file_placeholders():
+    image, document = uuid4(), uuid4()
+    result = (
+        "[Image 1 (image/png) was generated and is shown to the user.]\n"
+        "[File 1 (report.docx) was created and is offered to the user as a download.]"
+    )
+    session = SimpleNamespace(
+        questions=[
+            SimpleNamespace(
+                question="q",
+                answer="a",
+                files=[],
+                generated_files=[],
+                tool_calls=[_image_tool_call(result, [image, document])],
+            )
+        ]
+    )
+
+    messages, _ = ContextBuilder()._build_messages(
+        session,
+        max_tokens=10_000,
+        file_reference_urls={image: "https://x/i", document: "https://x/d"},
+    )
+
+    assert messages[0].tool_calls[0].result == (
+        f"{result}\n"
+        f"File reference for Image 1: {file_handle(image)}\n"
+        f"File reference for File 1: {file_handle(document)}"
+    )
+
+
 def test_replayed_tool_result_carries_a_reference_url_per_generated_image():
     first, second = uuid4(), uuid4()
     result = (
@@ -121,8 +207,8 @@ def test_replayed_tool_result_carries_a_reference_url_per_generated_image():
 
     assert messages[0].tool_calls[0].result == (
         f"{result}\n"
-        "Reference url for Image 1: https://x/1\n"
-        "Reference url for Image 2: https://x/2"
+        f"File reference for Image 1: {file_handle(first)}\n"
+        f"File reference for Image 2: {file_handle(second)}"
     )
     # The persisted row is untouched: URLs are short-lived and replay-time only.
     assert call.result == result
@@ -145,3 +231,15 @@ def test_replayed_tool_result_is_unchanged_without_a_minted_url():
     messages, _ = ContextBuilder()._build_messages(session, max_tokens=10_000)
 
     assert messages[0].tool_calls[0].result == result
+
+
+@pytest.mark.parametrize("has_files", [False, True])
+def test_deliverable_defaults_apply_with_tools_even_without_new_attachments(has_files):
+    from eneo.completion_models.infrastructure.context_builder import _Prompt
+    from eneo.completion_models.infrastructure.static_prompts import (
+        TOOL_DELIVERABLE_INSTRUCTION,
+    )
+
+    prompt = _Prompt(has_tools=True, has_file_references=has_files)
+    assert TOOL_DELIVERABLE_INSTRUCTION in str(prompt)
+    assert TOOL_DELIVERABLE_INSTRUCTION not in str(_Prompt(has_tools=False))

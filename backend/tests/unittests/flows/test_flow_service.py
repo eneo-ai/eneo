@@ -4455,6 +4455,30 @@ async def test_update_flow_assistant_rejects_mcp_configuration(user):
 
 
 @pytest.mark.asyncio
+async def test_update_flow_assistant_rejects_a_document_template(user):
+    from eneo.document_templates.domain import DocumentTemplateChoice
+
+    service = FlowService(
+        user=user,
+        flow_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+        assistant_service=AsyncMock(),
+    )
+
+    with pytest.raises(BadRequestException, match="document template"):
+        await service.update_flow_assistant(
+            flow_id=uuid4(),
+            assistant_id=uuid4(),
+            update=AssistantUpdateCommand(
+                document_template=DocumentTemplateChoice(mode="default")
+            ),
+        )
+
+    service.assistant_service.update_assistant.assert_not_awaited()
+    service.flow_repo.advance_draft_revision.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_create_flow_rejects_duplicate_step_names_case_insensitive(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()

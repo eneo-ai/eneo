@@ -22,6 +22,7 @@
     detail?: string | null;
     args?: Record<string, unknown>;
     toolCallId?: string;
+    previousAttempt?: boolean;
     status: "preparing" | "running" | "complete" | "failed" | "denied";
   };
 
@@ -139,6 +140,7 @@
                   args={step.args}
                   toolCallId={step.toolCallId}
                   status={step.status}
+                  previousAttempt={step.previousAttempt}
                   onLoadResult={loadToolResult && step.toolCallId
                     ? () => loadToolResult(step.toolCallId!)
                     : undefined}

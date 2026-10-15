@@ -68,6 +68,22 @@ def test_tool_call_sse_preserves_null_tool_call_id():
     assert payload["tools"][0]["tool_call_id"] is None
 
 
+def test_tool_call_delta_sse_carries_the_call_and_its_next_arguments():
+    event = to_sse_response(
+        Completion(
+            response_type=ResponseType.TOOL_CALL_DELTA,
+            tool_call_id="call_1",
+            arguments_delta='{"title":"Pl',
+        ),
+        uuid4(),
+    )
+
+    assert event.event == "tool_call_delta"
+    payload = json.loads(event.data)
+    assert payload["tool_call_id"] == "call_1"
+    assert payload["arguments_delta"] == '{"title":"Pl'
+
+
 def test_tool_call_sse_carries_the_capability_purpose():
     """A capability provider's call is rendered by purpose, so the purpose
     must reach the client alongside the provider's name."""
@@ -94,6 +110,33 @@ def test_tool_call_sse_carries_the_capability_purpose():
     assert tools[1]["purpose"] is None
 
 
+def test_tool_call_sse_names_the_view_of_a_pending_call():
+    """A client shows a tool's view from the moment the call is announced, so
+    the view must reach it on the first event, before the call has run."""
+    view = {"view_id": str(uuid4()), "ui": {"prefersBorder": True}}
+    event = to_sse_response(
+        Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[
+                ToolCallMetadata(
+                    server_name="weather",
+                    tool_name="get_weather",
+                    tool_call_id="call-1",
+                    result_status="pending",
+                    app_view=view,
+                ),
+                ToolCallMetadata(server_name="general", tool_name="tool"),
+            ],
+        ),
+        uuid4(),
+    )
+
+    tools = json.loads(event.data)["tools"]
+
+    assert tools[0]["app_view"] == view
+    assert tools[1]["app_view"] is None
+
+
 @pytest.mark.parametrize(
     "response_type",
     [ResponseType.TOOL_CALL, ResponseType.TOOL_APPROVAL_REQUIRED],
@@ -113,6 +156,12 @@ def test_tool_sse_tells_the_client_which_server_is_eneos_own(response_type):
                 ToolCallMetadata(
                     server_name="files", tool_name="echo", is_internal=False
                 ),
+                ToolCallMetadata(
+                    server_name="Ask a file",
+                    tool_name="query_table",
+                    is_internal=False,
+                    is_bundled=True,
+                ),
             ],
         ),
         uuid4(),
@@ -120,7 +169,8 @@ def test_tool_sse_tells_the_client_which_server_is_eneos_own(response_type):
 
     tools = json.loads(event.data)["tools"]
 
-    assert [tool["is_internal"] for tool in tools] == [True, False]
+    assert [tool["is_internal"] for tool in tools] == [True, False, False]
+    assert [tool["is_bundled"] for tool in tools] == [None, None, True]
 
 
 def test_token_usage_sse_separates_turn_cost_from_context_headroom():
@@ -171,3 +221,21 @@ def test_tool_approval_sse_requires_real_approval_id():
             ),
             uuid4(),
         )
+
+
+def test_error_sse_says_why_the_answer_failed():
+    event = to_sse_response(
+        Completion(
+            response_type=ResponseType.ERROR,
+            error="The AI provider could not be reached. Please try again later.",
+            error_code=503,
+            error_reason="provider_unreachable",
+            stop=True,
+        ),
+        uuid4(),
+    )
+
+    data = json.loads(event.data)
+    assert event.event == "error"
+    assert data["error_code"] == 503
+    assert data["code"] == "provider_unreachable"

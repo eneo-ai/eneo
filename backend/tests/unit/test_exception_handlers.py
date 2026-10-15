@@ -12,6 +12,7 @@ from eneo.main.exceptions import (
     ErrorCodes,
     NotFoundException,
     OpenAIException,
+    PromptInUseException,
     ProviderRejectedRequestException,
     UnauthorizedException,
 )
@@ -54,6 +55,7 @@ EXPECTED_DERIVED_ERROR_CODES = frozenset(
         "pydantic_parse_error",
         "query_error",
         "quota_exceeded",
+        "prompt_in_use_by_governance",
         "resource_gone",
         "resource_not_ready",
         "security_classification_mismatch",
@@ -321,3 +323,19 @@ def test_initial_capacity_refusal_uses_registered_http_handler(
     )
     transport.assert_not_awaited()
     observer.started.assert_not_awaited()
+
+
+def test_prompt_in_use_maps_to_409_with_its_own_code():
+    message = (
+        "Prompt 'Standard' is referenced by the personal assistant governance "
+        "policy. Unset it on the policy before deleting."
+    )
+    client = _make_client(PromptInUseException(message))
+
+    response = client.get("/boom")
+
+    assert response.status_code == 409
+    payload = response.json()
+    # Not NAME_COLLISION: clients word that one as a taken name.
+    assert payload["eneo_error_code"] == ErrorCodes.PROMPT_IN_USE_BY_GOVERNANCE == 9069
+    assert payload["message"] == message

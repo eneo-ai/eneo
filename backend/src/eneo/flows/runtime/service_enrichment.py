@@ -30,7 +30,7 @@ from eneo.model_providers.domain.provider_call_observer import (
     ProviderCallObserverError,
 )
 from eneo.model_providers.infrastructure.litellm_transport import (
-    PROVIDER_UNAVAILABLE_CODE,
+    provider_failure_for_code,
 )
 from eneo.transcription_services.client import TIMESTAMP_TASK, SubmissionRejected
 
@@ -204,8 +204,10 @@ def _timing_failure(error: Exception) -> WordTimingOutcome:
         details.get("reason") == f"{TIMESTAMP_TASK}_task_unsupported"
     ):
         return WordTimingOutcome.UNSUPPORTED
-    if isinstance(error, OpenAIException) and error.code == PROVIDER_UNAVAILABLE_CODE:
-        return WordTimingOutcome.UNAVAILABLE
+    if isinstance(error, OpenAIException):
+        failure = provider_failure_for_code(error.code)
+        if failure is not None and failure.unavailable:
+            return WordTimingOutcome.UNAVAILABLE
     return WordTimingOutcome.FAILED
 
 

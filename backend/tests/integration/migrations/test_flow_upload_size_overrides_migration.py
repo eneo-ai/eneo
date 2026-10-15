@@ -15,7 +15,7 @@ async def test_migration_removes_only_retired_policy_and_is_repeatable(
 ):
     path = (
         Path(__file__).parents[3]
-        / "alembic/versions/202610081100_retire_flow_upload_size_overrides.py"
+        / "alembic/versions/202610081105_retire_flow_upload_size_overrides.py"
     )
     spec = importlib.util.spec_from_file_location("retire_flow_sizes", path)
     assert spec is not None and spec.loader is not None

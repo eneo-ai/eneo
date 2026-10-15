@@ -70,12 +70,17 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.presentation import CompletionModelAssembler
 from eneo.conversations.application.conversation_service import ConversationService
+from eneo.conversations.application.recent_conversations_service import (
+    RecentConversationsService,
+)
 from eneo.crawler.destination_policy import DestinationPolicy
 from eneo.crawler.python_engine import PythonCrawlEngine
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
 from eneo.database.database import AsyncSession
+from eneo.document_templates.repo import DocumentTemplateRepository
+from eneo.document_templates.service import DocumentTemplateService
 from eneo.embedding_models.application.embedding_model_crud_service import (
     EmbeddingModelCRUDService,
 )
@@ -191,6 +196,7 @@ from eneo.governance_policy.presentation.governance_policy_assembler import (
     GovernancePolicyAssembler,
 )
 from eneo.group_chat.application.group_chat_service import GroupChatService
+from eneo.group_chat.infrastructure.group_chat_repo import GroupChatRepository
 from eneo.group_chat.presentation.assemblers.group_chat_assembler import (
     GroupChatAssembler,
 )
@@ -342,6 +348,9 @@ from eneo.limits.limit_service import LimitService
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
+    McpAppViewRepo,
+)
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
@@ -392,6 +401,9 @@ from eneo.prompts.prompt_repo import PromptRepository
 from eneo.prompts.prompt_service import PromptService
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.redis.connection import build_redis_pool_kwargs
+from eneo.rerank_models.application import RerankModelCRUDService
+from eneo.rerank_models.application.rerank_service import RerankService
+from eneo.rerank_models.domain import RerankModelRepository
 from eneo.roles.roles_repo import RolesRepository
 from eneo.roles.roles_service import RolesService
 from eneo.scim.repositories.token_repository import ScimTokenRepository
@@ -486,6 +498,7 @@ from eneo.websites.infrastructure.update_website_size_service import (
     UpdateWebsiteSizeService,
 )
 from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
+from eneo.websites.infrastructure.website_repo import WebsiteRepository
 from eneo.whats_new.whats_new_repo import WhatsNewRepository
 from eneo.whats_new.whats_new_service import WhatsNewService
 from eneo.worker.task_manager import TaskManager
@@ -803,6 +816,9 @@ class Container(containers.DeclarativeContainer):
     image_model_repo = providers.Factory(
         ImageModelRepository, session=session, tenant=tenant
     )
+    rerank_model_repo = providers.Factory(
+        RerankModelRepository, session=session, user=user
+    )
     embedding_model_repo = providers.Factory(
         AdminEmbeddingModelsService, session=session
     )
@@ -843,6 +859,7 @@ class Container(containers.DeclarativeContainer):
     mcp_server_tool_repo = providers.Factory(
         MCPServerToolRepoImpl, session=session, mapper=mcp_server_tool_mapper
     )
+    mcp_app_view_repo = providers.Factory(McpAppViewRepo, session=session)
 
     sync_log_repo = providers.Factory(
         SyncLogRepoImpl, session=session, mapper=sync_log_mapper
@@ -1000,8 +1017,6 @@ class Container(containers.DeclarativeContainer):
         factory=space_factory,
         file_content_loader=file_content_loader,
         session=session,
-        app_repo=app_repo,
-        assistant_repo=assistant_repo,
         completion_model_repo=completion_model_repo2,
         transcription_model_repo=transcription_model_repo,
         embedding_model_repo=embedding_model_repo2,
@@ -1013,13 +1028,18 @@ class Container(containers.DeclarativeContainer):
         factory=space_factory,
         file_content_loader=file_content_loader,
         session=session,
-        app_repo=app_repo,
-        assistant_repo=assistant_repo,
         completion_model_repo=completion_model_repo2,
         transcription_model_repo=transcription_model_repo,
         embedding_model_repo=embedding_model_repo2,
         http_auth_encryption=http_auth_encryption_service,
     )
+    group_chat_repo = providers.Factory(GroupChatRepository, session=session)
+    website_repo = providers.Factory(
+        WebsiteRepository,
+        session=session,
+        http_auth_encryption=http_auth_encryption_service,
+    )
+
     app_template_repo = providers.Factory(
         AppTemplateRepository, factory=app_template_factory, session=session
     )
@@ -1034,6 +1054,9 @@ class Container(containers.DeclarativeContainer):
         SecurityClassificationRepoImpl,
         session=session,
         user=user,
+    )
+    document_template_repo = providers.Factory(
+        DocumentTemplateRepository, session=session
     )
 
     # Audit logging
@@ -1140,6 +1163,19 @@ class Container(containers.DeclarativeContainer):
         image_model_repo=image_model_repo,
         security_classification_repo=security_classification_repo,
     )
+    rerank_model_crud_service = providers.Factory(
+        RerankModelCRUDService,
+        user=user,
+        rerank_model_repo=rerank_model_repo,
+        security_classification_repo=security_classification_repo,
+    )
+    rerank_service = providers.Factory(
+        RerankService,
+        session=session,
+        user=user,
+        rerank_model_repo=rerank_model_repo,
+        encryption_service=encryption_service,
+    )
     embedding_model_crud_service = providers.Factory(
         EmbeddingModelCRUDService,
         user=user,
@@ -1232,6 +1268,9 @@ class Container(containers.DeclarativeContainer):
         user=user,
         repo=security_classification_repo,
         tenant_service=tenant_service,
+    )
+    document_template_service = providers.Factory(
+        DocumentTemplateService, user=user, repo=document_template_repo
     )
     api_key_scope_revoker = providers.Factory(
         ApiKeyScopeRevoker,
@@ -1345,7 +1384,6 @@ class Container(containers.DeclarativeContainer):
         CollectionCRUDService,
         user=user,
         space_service=space_service,
-        space_repo=space_repo,
         actor_manager=actor_manager,
         group_service=group_service,
     )
@@ -1394,6 +1432,7 @@ class Container(containers.DeclarativeContainer):
         WebsiteCRUDService,
         user=user,
         space_service=space_service,
+        website_repo=website_repo,
         space_repo=space_repo,
         crawl_run_repo=crawl_run_repo,
         actor_manager=actor_manager,
@@ -1464,6 +1503,8 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         group_service=group_service,
         skill_repo=skill_repo,
+        assistant_repo=assistant_repo,
+        website_repo=website_repo,
     )
     # Personal assistant governance services are declared before assistant_service
     # because runtime enforcement injects effective_config_service into
@@ -1714,6 +1755,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         space_service=space_service,
         space_repo=space_repo,
+        group_chat_repo=group_chat_repo,
         actor_manager=actor_manager,
         assistant_service=assistant_service,
         session_service=session_service,
@@ -1817,6 +1859,7 @@ class Container(containers.DeclarativeContainer):
         encryption_service=encryption_service,
         user_groups_repo=user_groups_repo,
         image_model_repo=image_model_repo,
+        app_view_repo=mcp_app_view_repo,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,
@@ -1997,6 +2040,12 @@ class Container(containers.DeclarativeContainer):
         completion_service=completion_service,
         space_service=space_service,
         file_service=file_service,
+    )
+    recent_conversations_service = providers.Factory(
+        RecentConversationsService,
+        user=user,
+        session_repo=session_repo,
+        actor_manager=actor_manager,
     )
 
     # Token Usage

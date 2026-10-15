@@ -28,6 +28,9 @@ class _FakeMCPProxy:
     def __init__(self):
         self.call_count = 0
 
+    def model_result_text(self, text: str) -> str:
+        return text
+
     def get_allowed_tool_names(self):
         return {"server__tool"}
 
@@ -39,6 +42,10 @@ class _FakeMCPProxy:
         return None
 
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
+
+    def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
         del prefixed_tool_name
         return False
 
@@ -109,6 +116,23 @@ def _tool_call():
             arguments='{"q":"hello"}',
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_an_eneo_side_failure_of_a_plain_request_is_a_public_provider_error():
+    # A stream reports such a failure as Eneo's own (stream_error); a plain
+    # request, as a Flow step makes, still answers with the public
+    # provider_error. Kills the mutant that lets the raw exception escape.
+    adapter = _make_adapter()
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=ValueError("message list was malformed")),
+    ):
+        with pytest.raises(OpenAIException) as caught:
+            await adapter.get_response(context=SimpleNamespace(), model_kwargs={})
+
+    assert caught.value.code == "provider_error"
+    assert "malformed" not in str(caught.value)
 
 
 @pytest.mark.asyncio
@@ -941,6 +965,7 @@ async def test_service_preflight_measures_the_outgoing_package(package_case, str
             get_tool_count=lambda: 1,
             get_allowed_tool_names=lambda: {"server__lookup"},
             prepare_tools_for_context=AsyncMock(),
+            allow_file_references=lambda urls: None,
             close=AsyncMock(),
         )
         service._mcp_proxy_factory = SimpleNamespace(

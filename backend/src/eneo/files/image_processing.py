@@ -9,6 +9,7 @@ through downscale_image() so the stored blob matches what is sent and counted.
 import io
 import logging
 import re
+import threading
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,6 +49,9 @@ _PAGE_RENDER_MAX_DPI = 300
 _MIN_CURVES_FOR_GRAPHICS = 10
 _MIN_DIAGONAL_LINES_FOR_GRAPHICS = 2
 _MIN_FILLED_RECTS_FOR_GRAPHICS = 5
+
+# PDFium is not thread-safe, and uploads render pages from worker threads.
+_PDF_RENDER_LOCK = threading.Lock()
 
 # OOXML archives keep embedded media under a fixed directory per format.
 _OFFICE_MEDIA_DIRS = {
@@ -176,7 +180,8 @@ def _render_page(page: Any) -> ProcessedImage | None:
     resolution = int(MAX_IMAGE_DIMENSION / max(width_inches, height_inches))
     resolution = max(min(resolution, _PAGE_RENDER_MAX_DPI), 1)
 
-    rendered = page.to_image(resolution=resolution)
+    with _PDF_RENDER_LOCK:
+        rendered = page.to_image(resolution=resolution)
     buffer = io.BytesIO()
     rendered.original.convert("RGB").save(buffer, format="JPEG", quality=JPEG_QUALITY)
     processed = downscale_image(buffer.getvalue(), "image/jpeg")
@@ -191,6 +196,7 @@ def extract_images_from_pdf(
     filepath: Path,
     *,
     max_images: int,
+    max_scanned_pages: int | None = None,
     min_dimension: int = MIN_EMBEDDED_IMAGE_DIMENSION,
 ) -> list[ProcessedImage]:
     """Render the PDF pages that carry visual content, for vision input.
@@ -215,6 +221,15 @@ def extract_images_from_pdf(
                         f"'{filepath.name}'; later pages were not scanned"
                     )
                     break
+                if (
+                    max_scanned_pages is not None
+                    and page.page_number > max_scanned_pages
+                ):
+                    logger.info(
+                        f"Page-scan cap ({max_scanned_pages}) reached for "
+                        f"'{filepath.name}'; later pages were not scanned"
+                    )
+                    break
                 try:
                     if not _page_has_visual_content(page, min_dimension):
                         continue
@@ -226,6 +241,10 @@ def extract_images_from_pdf(
                         f"Skipping unrenderable page {page.page_number} "
                         f"of '{filepath.name}': {e}"
                     )
+                finally:
+                    # Parsed page objects stay cached until released, so a
+                    # long scan would otherwise grow by megabytes per page.
+                    page.close()
     except Exception as e:
         logger.warning(f"PDF image extraction failed for '{filepath.name}': {e}")
 

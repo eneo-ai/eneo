@@ -18,6 +18,7 @@ from eneo.governance_policy.domain.governance_policy_repo import (
 )
 from eneo.governance_policy.domain.policy_resolver import resolve_personal_default
 from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.mcp_servers.domain.entities.mcp_server import CAPABILITY_PURPOSES
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.skills.domain.skill import SkillBindingIntent
 from eneo.users.user import UserInDB
@@ -139,10 +140,9 @@ class GovernancePolicyService:
                 await self._validate_mcp_servers_and_tools(servers, disabled_tool_ids)
             if capabilities is not None:
                 purposes = [c.purpose for c in capabilities]
-                if len(purposes) != len(set(purposes)) or set(purposes) - {
-                    "web_search",
-                    "image_generation",
-                }:
+                if len(purposes) != len(set(purposes)) or set(purposes) - set(
+                    CAPABILITY_PURPOSES
+                ):
                     raise BadRequestException("Invalid capability selection")
                 added = set(purposes) - {c.purpose for c in policy.capabilities}
                 if enabled and added:

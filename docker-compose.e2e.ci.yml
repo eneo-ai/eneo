@@ -19,10 +19,21 @@ x-e2e-backend-environment: &e2e-backend-environment
   POSTGRES_PORT: "5432"
   POSTGRES_DB: eneo_test
   REDIS_HOST: e2e-redis
+  TOOL_RUNTIME_URL: http://e2e-tool-runtime:3010
+  TOOL_RUNTIME_TOKEN: e2e-tool-runtime-token-not-a-secret
+  FILE_REFERENCE_BASE_URL: http://e2e-backend:8000
+  MCP_APPS_ENABLED: "true"
+  MCP_APP_CONTENT_BASE_URL: ${E2E_APP_CONTENT_ORIGIN:-http://127.0.0.1:8124}
+  PUBLIC_ORIGIN: http://localhost:4173
   REDIS_PORT: "6379"
-  # No encryption -> seeded provider credentials are plaintext (no real keys).
-  ENCRYPTION_KEY: ""
+  # Credentials are encrypted as in production, so providers can be added
+  # (the backend refuses to store a key without encryption). A fixed,
+  # public test key (CI's backend jobs use it too) that guards only the
+  # stack's dummy keys; e2e/seed.py encrypts the seeded provider's with it.
+  ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
   TENANT_CREDENTIALS_ENABLED: "false"
+  FEDERATION_ENABLED: "false"
+  FEDERATION_PER_TENANT_ENABLED: "false"
   OPENAI_API_KEY: test-openai-key
   ANTHROPIC_API_KEY: test-anthropic-key
   AZURE_API_KEY: test-azure-key
@@ -39,8 +50,9 @@ x-e2e-backend-environment: &e2e-backend-environment
   JWT_TOKEN_PREFIX: Bearer
   URL_SIGNING_KEY: unit-test-url-signing-key-with-at-least-32-bytes
   MAX_IN_QUESTION: "1"
-  # Browser E2E exercises PostgreSQL-inline mode without a remote byte plane.
-  # S3 persistence and recovery use the pinned SeaweedFS backend suite.
+  # Browser E2E exercises healthy PostgreSQL-inline mode without a remote
+  # byte plane. Real S3 persistence/integrity/recovery uses the dedicated
+  # pinned SeaweedFS + PostgreSQL 13 backend suite.
   # Seeded login identity. init_db only seeds when ALL five are set.
   DEFAULT_TENANT_NAME: E2ETenant
   DEFAULT_TENANT_QUOTA_LIMIT: "10737418240"
@@ -88,6 +100,15 @@ services:
       timeout: 3s
       retries: 40
 
+  e2e-tool-runtime:
+    image: eneo-e2e-tools:workflow
+    build:
+      context: ./tool-runtime
+    environment:
+      TOOL_RUNTIME_TOKEN: e2e-tool-runtime-token-not-a-secret
+      TOOL_RUNTIME_FILE_ORIGINS: http://e2e-backend:8000
+    networks: [e2e]
+
   e2e-backend:
     image: eneo-e2e-backend
     build:
@@ -100,6 +121,8 @@ services:
         condition: service_healthy
       e2e-mock-model:
         condition: service_healthy
+      e2e-tool-runtime:
+        condition: service_healthy
     environment: *e2e-backend-environment
     command:
       # Non-login shell + explicit venv on PATH: a login shell (-l) sources
@@ -110,7 +133,7 @@ services:
         set -e
         export PATH="/app/.venv/bin:$$PATH"
         python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
-        python /e2e/seed.py          # seed mock completion model
+        python /e2e/seed.py          # seed mock completion + embedding models
         exec gunicorn src.eneo.server.main:app \
           --workers 1 --worker-class uvicorn.workers.UvicornWorker \
           --keep-alive 75 --bind 0.0.0.0:8000

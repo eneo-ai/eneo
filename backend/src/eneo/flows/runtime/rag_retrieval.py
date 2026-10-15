@@ -83,17 +83,15 @@ async def retrieve_rag_chunks(
     rag_record.attempted = True
     retrieval_started = time.monotonic()
     try:
-        datastore_result = await asyncio.wait_for(
-            deps.references_service.get_references(
+        async with asyncio.timeout(deps.rag_retrieval_timeout_seconds):
+            datastore_result = await deps.references_service.get_references(
                 question=question,
                 collections=assistant.collections,
                 websites=assistant.websites,
                 integration_knowledge_list=assistant.integration_knowledge_list,
                 version=1,
                 include_info_blobs=False,
-            ),
-            timeout=deps.rag_retrieval_timeout_seconds,
-        )
+            )
         info_blob_chunks = list(getattr(datastore_result, "chunks", []) or [])
         no_duplicate_chunks = list(
             getattr(datastore_result, "no_duplicate_chunks", info_blob_chunks) or []

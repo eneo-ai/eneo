@@ -6,13 +6,17 @@ FROM node:22-bookworm-slim AS builder
 COPY --from=oven/bun:1.3.14-slim /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
+ARG APP_VERSION=0.0.0-dev
+ARG APP_REVISION=unknown
+ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}
 COPY . .
 
 # Install dependencies with Bun (uses frozen lockfile)
 RUN bun install --frozen-lockfile
 
+# This image ships apps/web; web-next has its own Dockerfile and build context.
 # Match frontend CI's heap budget for adapter-node bundling.
-RUN NODE_OPTIONS=--max-old-space-size=8192 bun run build
+RUN bun run --filter @eneo/ui build && NODE_OPTIONS=--max-old-space-size=8192 bun run --filter @eneo/web build
 
 # Stage 2: Production runtime using Node.js
 # Required ENV vars, see README.md
@@ -30,3 +34,7 @@ EXPOSE 3000
 USER node
 ENV NODE_ENV="production"
 CMD ["node", "build"]
+
+ARG APP_VERSION=0.0.0-dev
+ARG APP_REVISION=unknown
+ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}

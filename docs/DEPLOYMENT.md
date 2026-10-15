@@ -38,7 +38,7 @@ Before you begin, ensure you have the following:
 Review this checklist before you begin deployment. Ensure your setup meets these security requirements:
 
 - [ ] Domain and email are correctly set in `docker-compose.yml`
-- [ ] All five base-stack image digest suffixes are set in `.env`
+- [ ] The three third-party image digest suffixes are set in `.env`, and the selected release's `release.env` is downloaded
 - [ ] A strong, unique password will be generated for `POSTGRES_PASSWORD`
 - [ ] Strong, unique secrets will be generated for `JWT_SECRET` and `URL_SIGNING_KEY`
 - [ ] You will change the default user password immediately after first login
@@ -53,6 +53,7 @@ The provided `docker-compose.yml` file defines all the services needed to run En
 - **`traefik`**: A reverse proxy that handles incoming traffic, routes it to the correct service, and automatically manages SSL certificates
 - **`frontend`**: The web interface for Eneo
 - **`backend`**: The main API and application logic
+- **`tool-runtime`**: Isolated execution for bundled tools, enabled by administrators
 - **`worker`**: The general ARQ worker for document ingestion, integrations, and audit jobs
 - **`crawler-worker`**: The dedicated ARQ worker for website crawls on the isolated crawler queue
 - **`task-execution-worker`**: The ARQ worker that executes Flow runs on the dedicated execution-capacity queue
@@ -82,7 +83,10 @@ cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
 cp .env.template .env
 chmod 600 .env env_backend.env env_frontend.env env_db.env
+python3 setup.py
 ```
+
+Download the selected release's completed `release.env` and `release.json` alongside these files. Use `--env-file .env --env-file release.env` with Compose commands.
 
 ### Step 2: Configure Your Environment
 
@@ -90,22 +94,19 @@ This is the most critical step. You will set the required variables for your spe
 
 #### A. Immutable Images in `.env`
 
-Docker Compose rejects missing or empty base-stack image digests. Set these five
-values in `.env`, using only the 64-character hexadecimal suffix after
+Docker Compose rejects missing or empty third-party image digests. Set these
+three values in `.env`, using only the 64-character hexadecimal suffix after
 `sha256:`:
 
 ```dotenv
 TRAEFIK_IMAGE_DIGEST=
-ENEO_FRONTEND_IMAGE_DIGEST=
-ENEO_BACKEND_IMAGE_DIGEST=
 PGVECTOR_IMAGE_DIGEST=
 REDIS_IMAGE_DIGEST=
 ```
 
-Copy the linux/amd64 backend and frontend digests from the matching Eneo
-release's `IMAGE-DIGESTS.txt`. Use organization-approved Traefik, pgvector, and
-Redis release digests for the other three values. Keep the complete `.env`
-digest set with each deployment backup.
+Use organization-approved Traefik, pgvector, and Redis release digests. The Eneo
+application images come from the release bundle's `release.env`, which pins them
+by digest. Keep both with each deployment backup.
 
 #### B. Domain & SSL in `docker-compose.yml`
 
@@ -191,10 +192,10 @@ With the configuration complete, you can now start all the services.
 docker network create proxy_tier
 
 # Start all services in the background
-docker compose up -d
+docker compose --env-file .env --env-file release.env up -d
 ```
 
-> **Note on networks**: `proxy_tier` is the only network you create manually. The compose file also defines two managed networks: `data_net` (internal — PostgreSQL and Redis are isolated from the internet and from Traefik/frontend) and `module_net` (used by optional module containers). See the [network isolation section](deployment/README.md#network-isolation) for details, and [MODULES.md](deployment/MODULES.md) for enabling optional modules.
+> **Note on networks**: `proxy_tier` is the only network you create manually. The compose file also defines managed networks including `tool_runtime_net` (private tools runtime access), `data_net` (internal — PostgreSQL and Redis are isolated from the internet and from Traefik/frontend) and `module_net` (used by optional module containers). See the [network isolation section](deployment/README.md#network-isolation) for details, and [MODULES.md](deployment/MODULES.md) for enabling optional modules.
 
 The initial startup may take a few minutes as Docker downloads the necessary container images. Once done, you can visit `https://your-domain.com` in your browser.
 
@@ -224,17 +225,14 @@ docker compose ps
 docker compose logs -f backend
 ```
 
-**Deploy a reviewed image digest set:**
+**Update using a completed application release bundle:**
+Download the selected release's `release.env` and `release.json`, then run:
 ```bash
-# First replace all five digest suffixes in .env and preserve the old set.
-docker compose config --images
-docker compose pull
-docker compose up -d
-curl -fsS https://your-domain.com/version
+docker compose --env-file .env --env-file release.env pull
+docker compose --env-file .env --env-file release.env up -d
 ```
 
-> **Production Tip:** Keep the resolved digest set with the matching backup.
-> Tags identify releases for people; digests identify the artifacts Docker runs.
+Use those environment-file arguments for all Compose commands below when deploying a bundle, including the ones that do not show them. To avoid repeating them, run `export COMPOSE_ENV_FILES=.env,release.env` once in the shell (Docker Compose 2.24 or later).
 
 **Stop and remove all containers:**
 ```bash
@@ -259,42 +257,29 @@ Eneo uses several Docker volumes for persistent data storage:
 
 ## 🔄 Upgrading Your Eneo Instance
 
-### Production Requirement: Immutable Image Digests
+### Production Requirement: Pinned Images
 
-The provided Compose file requires immutable digests for Traefik, frontend,
-backend, pgvector, and Redis. One backend digest supplies the API, general ARQ
-worker, platform execution and maintenance workers, and database initialization roles.
+Frontend, backend, and tools runtime share one version and source revision. Use the
+completed bundle from [GitHub Releases](https://github.com/eneo-ai/eneo/releases):
+`release.json` records the revision and immutable image digests, and `release.env`
+applies them to every application service, including workers and initialization.
 
-**Why pin digests?**
-- **Predictable deployments** - Know exactly which artifacts are running
-- **Controlled upgrades** - Test new artifacts in staging before production
-- **Easy rollbacks** - Return to the previous artifact set
-- **Audit trail** - Record exact artifacts with each backup
+For source examples, set one `ENEO_VERSION` (for example `2.3.0` for Git tag
+`v2.3.0`). No application image defaults to `latest`. Run `python3 setup.py`
+once to create a protected runtime token if absent; it preserves existing settings.
 
-Replace the five digest suffixes in `.env`; do not edit image tags in
-`docker-compose.yml`. Compose builds each identity as
-`repository@sha256:<digest-suffix>` and rejects an unset value.
+Registry aliases change sequentially. External deployment systems must wait for the
+completed bundle and deploy all its images together. Keep the previous bundle for
+rollback, subject to the release's database compatibility guidance.
 
-Find Eneo image digests in `IMAGE-DIGESTS.txt` on the matching
-[GitHub Release](https://github.com/eneo-ai/eneo/releases). Use approved release
-artifacts for the Traefik, pgvector, and Redis digests.
+The runtime is included automatically. Administrators still activate capabilities
+in Admin → Tools. See [Tools runtime](deployment/TOOL_RUNTIME.md) for migration
+from the old overlay, diagnostics, and deployments that omit the runtime.
 
-**Controlled upgrade workflow:**
-```bash
-# 1. Review the release and its IMAGE-DIGESTS.txt.
-
-# 2. Replace all five digest suffixes in .env and retain the previous set.
-
-# 3. Confirm and pull the resolved image identities.
-docker compose config --images
-docker compose pull
-
-# 4. Deploy the reviewed digest set.
-docker compose up -d
-
-# 5. Verify the version baked into the backend image.
-curl -fsS https://your-domain.com/version
-```
+Traefik, pgvector, and Redis are third-party images: set their three digest
+suffixes in `.env`. Compose builds each identity as
+`repository@sha256:<digest-suffix>` and rejects an unset value. Use approved
+release artifacts and keep the previous set with the matching backup.
 
 ### Before You Upgrade
 
@@ -311,19 +296,15 @@ docker run --rm -v eneo_eneo_postgres_data:/data -v $(pwd):/backup ubuntu tar cz
 
 ### Upgrading Between Minor Versions
 
-For routine updates (e.g., v1.2.3 → v1.2.4):
-
-Replace the complete digest set in `.env`, then pull and deploy it:
+Download the next completed bundle, preserve the previous bundle, and apply it:
 
 ```bash
-docker compose config --images
-docker compose pull
-docker compose up -d
-curl -fsS https://your-domain.com/version
+docker compose --env-file .env --env-file release.env pull
+docker compose --env-file .env --env-file release.env up -d
 ```
 
-> **Note:** Restore the previous `.env` digest set to select the previous image
-> artifacts during rollback.
+Check service health and Admin → Tools after deployment. To roll back, apply the
+previous complete bundle with the same commands, after checking database compatibility.
 
 ### Upgrading Between Major Versions or After Long Gaps
 
@@ -350,7 +331,7 @@ docker volume rm eneo_eneo_postgres_data eneo_eneo_redis_data eneo_eneo_backend_
 # Verify volumes are removed: docker volume ls
 
 # 4. Start with fresh installation
-docker compose up -d
+docker compose --env-file .env --env-file release.env up -d
 
 # 5. Restore data if needed (advanced)
 # docker compose exec -T db psql -U postgres eneo < backup.sql
@@ -546,3 +527,44 @@ If you see `middleware "redirect-to-https@docker" does not exist` in Traefik log
   before its own capture/spool or any storage mutation. Use
   ingress/request-body limits and configure and monitor temporary-disk capacity
   to protect that earlier parsing boundary.
+
+### Large documents are rejected or slow to process
+Text is extracted from every uploaded document (chat attachments, knowledge
+uploads and crawled files) in a short-lived child process with CPU, memory,
+time and output limits, set by the `FILE_EXTRACTION_*` variables in
+`env_backend.env`. A document that exceeds a limit is rejected with an
+extraction-limit error; the backend and the workers keep running.
+
+- **"exceeded the PDF page limit"**: the PDF has more pages than
+  `FILE_EXTRACTION_MAX_PDF_PAGES` (default 1,000).
+- **"exceeded the document resource limit"**: the extracted text is larger than
+  `FILE_EXTRACTION_MAX_OUTPUT_BYTES` (default 10 MB), or the parser ran out of
+  `FILE_EXTRACTION_CPU_SECONDS` or `FILE_EXTRACTION_MEMORY_BYTES`. Large
+  spreadsheets usually hit the output limit first.
+- **"exceeded the extraction deadline"**: parsing took longer than
+  `FILE_EXTRACTION_TIMEOUT_SECONDS`.
+
+PDFs up to `FILE_EXTRACTION_PDF_LAYOUT_MAX_PAGES` (default 200) get table
+detection, which is slow (tens of milliseconds of CPU per page). Longer PDFs
+are read from their text layer instead: a 700-page report takes one to two
+seconds and well under 200 MB of memory, but tables come out as plain lines
+of text.
+
+To accept very long PDFs, for example 10,000 pages:
+
+1. Raise `FILE_EXTRACTION_MAX_PDF_PAGES`.
+2. Raise `FILE_EXTRACTION_MAX_OUTPUT_BYTES`. A dense text page is about 2 to
+   2.5 KB of text, so 10,000 pages need roughly 25 MB.
+3. Raise the upload size limits in **Admin > File storage** and at the ingress.
+   A text PDF of that length is typically well over 100 MB.
+4. Restart the backend and the workers.
+
+The default CPU, memory and time limits do not need to change for this. Keep
+in mind that a document of that size is far larger than any model context:
+add it to a knowledge collection, where it is chunked and searched, instead
+of attaching it to a chat.
+
+A `502 Bad Gateway` on a large upload usually means a backend process was
+killed while handling it. Check the backend log for `WORKER TIMEOUT` (the event loop was
+blocked longer than the gunicorn timeout) and the host for out-of-memory
+kills.

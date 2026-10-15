@@ -5,6 +5,142 @@
       "version": "2.3.0",
       "entries": [
         {
+          "id": "bundled-tool-status",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Check built-in tool availability",
+            "sv": "Se status för inbyggda verktyg"
+          },
+          "body": {
+            "en": "You can see the tool service status in Admin > Tools, with guidance for connection and version problems. Your operator can install the application and tool service together, while you keep control over which functions are enabled.",
+            "sv": "Under Administration > Verktyg ser du verktygstjänstens status och får hjälp vid anslutnings- och versionsproblem. Driftansvarig kan installera Eneo och verktygstjänsten tillsammans, medan du fortsatt väljer vilka funktioner som ska vara aktiva."
+          }
+        },
+        {
+          "id": "document-templates",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Word and PDF files follow your document template",
+            "sv": "Word- och PDF-filer följer er dokumentmall"
+          },
+          "body": {
+            "en": "Under Administration › Tools › File creation you can upload your organisation's Word templates and make one the default. Documents the assistants create as Word or PDF are written in the template's own styles, with its header, footer and logo, and PDFs are tagged for accessibility. An assistant can be set to another template or to Eneo's built-in one, which you can download and adapt in Word.",
+            "sv": "Under Administration › Verktyg › Filskapande kan du ladda upp organisationens Word-mallar och göra en till standard. Dokument som assistenterna skapar som Word eller PDF skrivs i mallens egna format, med dess sidhuvud, sidfot och logotyp, och PDF-filerna taggas för tillgänglighet. En assistent kan ställas in på en annan mall eller på Eneos inbyggda, som du kan ladda ner och anpassa i Word."
+          },
+          "showMe": {
+            "href": "/admin/tools",
+            "anchor": "admin-tools"
+          }
+        },
+        {
+          "id": "intermediate-query-tables",
+          "type": "improved",
+          "area": "chat",
+          "title": {
+            "en": "Keep intermediate tables out of chart answers",
+            "sv": "Visa diagram utan onödiga mellantabeller"
+          },
+          "body": {
+            "en": "When you ask for a chart, the assistant can prepare its data without displaying a separate table for each calculation. Tables remain available when you ask to see or explore the figures.",
+            "sv": "När du ber om ett diagram kan assistenten förbereda underlaget utan att visa en separat tabell för varje beräkning. Tabeller finns kvar när du vill se eller utforska siffrorna."
+          }
+        },
+        {
+          "id": "charts-in-documents",
+          "type": "new",
+          "area": "chat",
+          "title": {
+            "en": "Include charts in Word and PDF reports",
+            "sv": "Ta med diagram i Word- och PDF-rapporter"
+          },
+          "body": {
+            "en": "Ask for a Word or PDF report based on your analysis and charts. The assistant is guided to include charts with captions and page-appropriate sizing, and keep images prepared only for the report out of chat.",
+            "sv": "Be om en Word- eller PDF-rapport utifrån analysen och diagrammen. Assistenten får instruktioner att ta med diagram med bildtexter och sidanpassad storlek, utan att visa bilder som bara behövs i rapporten i chatten."
+          }
+        },
+        {
+          "id": "file-creation-progress",
+          "type": "improved",
+          "area": "chat",
+          "title": {
+            "en": "Follow file creation in the side panel",
+            "sv": "Följ när filen skapas i sidopanelen"
+          },
+          "body": {
+            "en": "The side panel opens when file creation starts and updates the title, text and spreadsheet rows as they arrive. Drafts stay visible while a retry starts or the saved file downloads, then give way to the finished file. Interrupted tool calls no longer appear as successfully created files.",
+            "sv": "Sidopanelen öppnas när en fil börjar skapas och uppdaterar titel, text och kalkylbladsrader efter hand. Utkastet visas medan ett nytt försök förbereds eller den sparade filen hämtas, och ersätts sedan av den färdiga filen. Avbrutna verktygsanrop visas inte längre som färdigskapade filer."
+          }
+        },
+        {
+          "id": "file-analysis-trace",
+          "type": "fixed",
+          "area": "chat",
+          "title": {
+            "en": "See which file is being analysed",
+            "sv": "Se vilken fil som analyseras"
+          },
+          "body": {
+            "en": "Analysis steps describe the operation and identify the input separately from exported results, keeping execution order when expanded. Intermediate exports no longer open the side panel automatically. Files pass between tools through stable references so the assistant no longer needs to copy download links.",
+            "sv": "Analyssteg beskriver vad som görs och visar indatafilen separat från exporterade resultat, i körordning när du fäller ut dem. Mellanliggande exporter öppnar inte längre sidopanelen automatiskt. Filer skickas mellan verktyg med stabila referenser så att assistenten inte längre behöver kopiera nedladdningslänkar."
+          }
+        },
+        {
+          "id": "spreadsheet-selection-quotes",
+          "type": "new",
+          "area": "chat",
+          "title": {
+            "en": "Ask about a spreadsheet cell or row",
+            "sv": "Fråga om en cell eller rad i ett kalkylblad"
+          },
+          "body": {
+            "en": "Select a cell or row in the file preview and choose Ask about selection to reference it in your next message. The reference includes headings and its location, and reopens the original file even when newer versions exist.",
+            "sv": "Markera en cell eller rad i förhandsvisningen och välj Fråga om markeringen för att hänvisa till den i nästa meddelande. Referensen innehåller rubriker och plats och öppnar ursprungsfilen även när nyare versioner finns."
+          }
+        },
+        {
+          "id": "conversation-uploads",
+          "type": "improved",
+          "area": "chat",
+          "title": {
+            "en": "Find uploaded files in Documents",
+            "sv": "Hitta uppladdade filer under Dokument"
+          },
+          "body": {
+            "en": "The Documents menu now includes an Uploads section, separate from files created in chat. Open supported files in the side panel or use the download button to save a copy, even before the assistant has created any documents.",
+            "sv": "Menyn Dokument innehåller nu avsnittet Uppladdade filer, separat från filer som skapats i chatten. Öppna filer som stöds i sidopanelen eller använd nedladdningsknappen för att spara en kopia, även innan assistenten har skapat något dokument."
+          }
+        },
+        {
+          "id": "chat-widget-scroll",
+          "type": "fixed",
+          "area": "chat",
+          "title": {
+            "en": "Keep new charts and tables in view",
+            "sv": "Håll nya diagram och tabeller i bild"
+          },
+          "body": {
+            "en": "When you follow the latest reply, the chat now scrolls to the bottom as charts and tables appear or grow. If you scroll up to read earlier messages, your position is preserved.",
+            "sv": "När du följer det senaste svaret rullar chatten nu till slutet när diagram och tabeller visas eller växer. Om du bläddrar upp för att läsa tidigare meddelanden behålls din position."
+          }
+        },
+        {
+          "id": "file-download-links",
+          "type": "fixed",
+          "area": "chat",
+          "title": {
+            "en": "Preview files before downloading",
+            "sv": "Förhandsvisa filer innan du laddar ner dem"
+          },
+          "body": {
+            "en": "Filename links open the sidebar preview; use the Download button to save a copy. Find the Documents menu at the top right of the chat, even while scrolling. When a document is rewritten, the current version stays visible until the new preview is ready.",
+            "sv": "Filnamnslänkar öppnar förhandsvisningen i sidopanelen; använd knappen Ladda ner för att spara en kopia. Menyn Dokument finns uppe till höger i chatten, även när du bläddrar. När ett dokument skrivs om visas den nuvarande versionen tills den nya förhandsvisningen är klar."
+          }
+        },
+        {
           "id": "sharepoint-document-properties",
           "type": "improved",
           "area": "knowledge",
@@ -29,6 +165,50 @@
           "body": {
             "en": "Set file and audio sizes once in Admin > File storage. Flow settings shows the same limits, and old environment settings and separate Flow size limits no longer lower them. Larger files require storage that supports their size.",
             "sv": "Bestäm fil- och ljudstorlek på ett ställe under Admin > Fillagring. Flödesinställningarna visar samma gränser, och gamla miljöinställningar och separata flödesgränser sänker dem inte längre. Större filer kräver lagring som stöder storleken."
+          }
+        },
+        {
+          "id": "model-provider-headers",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Send headers to self-hosted models",
+            "sv": "Skicka headers till självhostade modeller"
+          },
+          "body": {
+            "en": "When you add or edit a vLLM provider under Administration › Models, you can set outbound headers that are sent with every request: fixed text, or attributes from your identity provider such as department or cost centre. A gateway or proxy in front of the model can then route, meter or rate-limit requests by them, and Preview for a user shows what a chosen user's requests would send.",
+            "sv": "När du lägger till eller redigerar en vLLM-leverantör under Administration › Modeller kan du ange utgående headers som skickas med varje förfrågan: fast text eller attribut från er identitetsleverantör, till exempel avdelning eller kostnadsställe. En gateway eller proxy framför modellen kan då styra, mäta eller begränsa förfrågningarna utifrån dem, och med Förhandsgranska för en användare ser du vad en vald användares förfrågningar skulle skicka."
+          },
+          "showMe": {
+            "href": "/admin/models",
+            "anchor": "admin-models"
+          }
+        },
+        {
+          "id": "sign-in-behind-reverse-proxy",
+          "type": "fixed",
+          "area": "platform",
+          "title": {
+            "en": "Sign in behind a reverse proxy",
+            "sv": "Logga in bakom en omvänd proxy"
+          },
+          "body": {
+            "en": "Signing in with username and password no longer fails with a generic error when Eneo runs behind a reverse proxy and the public address was never registered for the backend. When the sign-in service cannot be reached you are told so, instead of being asked to check your password. Integrations that use a secret API key are accepted even when their requests carry a browser Origin header.",
+            "sv": "Inloggning med användarnamn och lösenord misslyckas inte längre med ett allmänt fel när Eneo körs bakom en omvänd proxy och den publika adressen aldrig registrerats i backend. När inloggningstjänsten inte går att nå får du veta det, i stället för att uppmanas kontrollera lösenordet. Integrationer som använder en hemlig API-nyckel accepteras även när deras anrop skickar med en Origin-header från webbläsaren."
+          }
+        },
+        {
+          "id": "space-changes-preserve-resources",
+          "type": "fixed",
+          "area": "spaces",
+          "title": {
+            "en": "Keep resources when changing a Space",
+            "sv": "Behåll resurser när du ändrar ett Space"
+          },
+          "body": {
+            "en": "Changing a Space or one of its resources preserves other assistants, group chat members and saved selections, including resources that are temporarily unavailable. Memberships also remain when a removed user is reactivated.",
+            "sv": "När du ändrar ett Space eller en av dess resurser bevaras andra assistenter, gruppchattmedlemmar och sparade val, även för resurser som tillfälligt inte är tillgängliga. Medlemskap finns också kvar när en borttagen användare återaktiveras."
           }
         }
       ]

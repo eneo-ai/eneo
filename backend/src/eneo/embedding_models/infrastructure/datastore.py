@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from eneo.embedding_models.infrastructure.create_embeddings_service import (
         CreateEmbeddingsService,
     )
+    from eneo.rerank_models.domain.rerank_spec import RerankSpec
     from eneo.websites.domain.website import Website
 
 logger = get_logger(__name__)
@@ -203,7 +204,11 @@ class Datastore:
         num_chunks: Optional[int] = 30,
         autocut_cutoff: Optional[int] = None,
         min_score: Optional[float] = None,
+        *,
+        rerank: Optional["RerankSpec"] = None,
     ) -> list[InfoBlobChunkInDBWithScore]:
+        """Nearest chunks in scope. With ``rerank`` the K best are returned in
+        reranker order with reranker scores and ``autocut`` does not apply."""
         group_ids = [group.id for group in (collections or [])]
         website_ids = [website.id for website in (websites or [])]
         integration_knowledge_ids = [i.id for i in (integration_knowledge_list or [])]
@@ -218,6 +223,11 @@ class Datastore:
                 "combined with collection, website or integration scopes."
             )
 
+        limit = num_chunks if num_chunks is not None else 30
+        # The search covers the reranker's candidates too, so a reranker failure
+        # falls back to the same result as without a spec.
+        candidates = rerank.candidate_count(limit) if rerank is not None else 0
+
         start = time.time()
         search_string_embedding = (
             await self.create_embeddings_service.get_embedding_for_query(
@@ -231,7 +241,7 @@ class Datastore:
             website_ids=website_ids,
             integration_knowledge_ids=integration_knowledge_ids,
             info_blob_ids=info_blob_ids,
-            limit=num_chunks if num_chunks is not None else 30,
+            limit=max(limit, candidates),
         )
         end = time.time()
 
@@ -249,6 +259,18 @@ class Datastore:
                 res for res in semantic_results if res.score >= min_score
             ]
 
+        if rerank is not None:
+            reranked = await self._rerank(rerank, semantic_results[:candidates])
+            if reranked is not None:
+                logger.info(
+                    f"Reranked search: Embed step: {step_1 - start},"
+                    f" Search step: {end - step_1},"
+                    f" Rerank step: {time.time() - end},"
+                    f" candidates: {len(reranked)}, model: {rerank.model_name}"
+                )
+                return reranked
+            semantic_results = semantic_results[:limit]
+
         scores = [res.score for res in semantic_results]
 
         if autocut_cutoff is not None:
@@ -256,3 +278,30 @@ class Datastore:
             return semantic_results[:cut_point]
 
         return semantic_results
+
+    @staticmethod
+    async def _rerank(
+        spec: "RerankSpec", candidates: list[InfoBlobChunkInDBWithScore]
+    ) -> Optional[list[InfoBlobChunkInDBWithScore]]:
+        """The candidates in reranker order with reranker scores, never mixed
+        with vector scores; ``None`` when the reranker failed."""
+        if not candidates:
+            return []
+        try:
+            scores = await spec.reranker.rerank(
+                spec.query, [chunk.text for chunk in candidates]
+            )
+            if len(scores) != len(candidates):
+                raise ValueError(
+                    f"reranker returned {len(scores)} scores for {len(candidates)} candidates"
+                )
+        except Exception:
+            logger.exception(
+                f"Rerank model {spec.model_name} failed; using vector order"
+            )
+            return None
+        rescored = [
+            chunk.model_copy(update={"score": float(score)})
+            for chunk, score in zip(candidates, scores)
+        ]
+        return sorted(rescored, key=lambda chunk: chunk.score, reverse=True)

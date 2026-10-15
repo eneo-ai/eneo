@@ -545,6 +545,11 @@ class FlowService:
             raise BadRequestException(
                 "Flow MCP is unsupported. MCP servers and tools cannot be configured on a Flow assistant."
             )
+        # Flows fill their own step templates and never read this choice.
+        if update.is_set("document_template"):
+            raise BadRequestException(
+                "A document template cannot be chosen on a Flow assistant."
+            )
         flow = await self.get_flow(reservation.flow_id)
         self._ensure_flow_is_mutable(flow)
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)

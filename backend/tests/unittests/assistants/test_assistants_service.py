@@ -17,6 +17,7 @@ from eneo.assistants.api.assistant_models import (
 from eneo.assistants.assistant import Assistant, AssistantOrigin
 from eneo.assistants.assistant_service import AssistantService
 from eneo.assistants.assistant_update import (
+    AssistantUpdate,
     AssistantUpdateCaller,
     AssistantUpdateCommand,
 )
@@ -25,6 +26,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
 )
 from eneo.data_retention.constants import MAX_RETENTION_DAYS
+from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.files.file_models import FileType
 from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
 from eneo.main.exceptions import (
@@ -56,6 +58,16 @@ class Setup:
     group_service: AsyncMock
 
 
+async def test_default_assistant_cannot_be_deleted(setup: Setup):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.is_default = True
+    with pytest.raises(
+        BadRequestException, match="default assistant cannot be deleted"
+    ):
+        await setup.service.delete_assistant(TEST_UUID)
+    setup.service.repo.delete.assert_not_awaited()
+
+
 @pytest.fixture(name="setup")
 def setup_fixture():
     repo = AsyncMock()
@@ -75,6 +87,7 @@ def setup_fixture():
 
     space_repo = AsyncMock()
     mock_assistant = MagicMock()
+    mock_assistant.is_default = False
     mock_assistant.mcp_servers = []
     mock_assistant.collections = []
     mock_assistant.websites = []
@@ -188,7 +201,6 @@ def with_two_different_groups(setup: Setup, attr: str, value_1: Any, value_2: An
     assistant.collections = [collection_1, collection_2]
 
     setup.service.repo.add.return_value = assistant
-    setup.service.repo.update.return_value = assistant
     setup.service.user.id = 1
     setup.service.user.tenant_id = 1
 
@@ -312,14 +324,11 @@ async def test_delete_space_assistant_member(setup: Setup):
 
     # Only the target goes: a whole-space write would rewrite or delete the
     # other assistants from this request's snapshot.
-    setup.service.space_repo.delete_assistant.assert_awaited_once_with(
-        TEST_UUID, TEST_UUID
-    )
-    setup.service.space_repo.update.assert_not_awaited()
+    setup.service.repo.delete.assert_awaited_once_with(TEST_UUID, TEST_UUID)
 
 
 async def test_delete_that_matched_no_row_is_not_found(setup: Setup):
-    setup.service.space_repo.delete_assistant.return_value = False
+    setup.service.repo.delete.return_value = False
 
     with pytest.raises(NotFoundException):
         await setup.service.delete_assistant(TEST_UUID)
@@ -334,11 +343,9 @@ async def test_publish_writes_only_the_published_flag(setup: Setup):
 
     # Reloaded after the permission check, so the result is what is stored now.
     assert setup.service.space_repo.get_space_by_assistant.await_count == 2
-    setup.service.repo.set_published.assert_awaited_once_with(
-        assistant_id=TEST_UUID, space_id=TEST_UUID, published=False
+    setup.service.repo.apply_update.assert_awaited_once_with(
+        TEST_UUID, TEST_UUID, AssistantUpdate(published=False)
     )
-    setup.service.repo.update.assert_not_awaited()
-    setup.service.space_repo.update.assert_not_awaited()
     assistant.update.assert_called_once_with(published=False)
     assert returned is assistant
 
@@ -362,7 +369,6 @@ async def test_delete_flow_managed_assistants_has_every_deletion_effect(
     # Flow edit access authorizes it: no assistant permission check, and one
     # delete statement instead of a space write per assistant.
     service.actor_manager.get_space_actor_from_space.assert_not_called()
-    service.space_repo.update.assert_not_awaited()
     assert {
         call.kwargs["scope_id"]
         for call in service.api_key_scope_revoker.revoke_scope.await_args_list
@@ -670,7 +676,7 @@ async def test_update_assistant_rejects_standalone_flow_managed_before_side_effe
 
     setup.service.prompt_service.create_prompt.assert_not_awaited()
     setup.service.effective_config_service.resolve_for.assert_not_awaited()
-    setup.service.repo.update.assert_not_awaited()
+    setup.service.repo.apply_update.assert_not_awaited()
     assistant.update.assert_not_called()
 
 
@@ -711,7 +717,6 @@ async def test_update_assistant_completion_model_in_space(setup: Setup):
     space = MagicMock()
     space.is_completion_model_in_space.return_value = True
     setup.service.space_service.get_space.return_value = space
-    setup.service.repo.update.return_value = MagicMock(prompt="new prompt!", id=uuid4())
 
     await _update_assistant(setup.service, TEST_UUID)
 
@@ -860,7 +865,7 @@ async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
         replace_bindings
     )
     setup.service._validate_attachments_fit.side_effect = validate_fit
-    setup.service.repo.update.side_effect = persist_parent
+    setup.service.repo.apply_update.side_effect = persist_parent
 
     await _update_assistant(
         setup.service,
@@ -903,7 +908,7 @@ async def test_update_assistant_binding_fit_failure_skips_parent_persist(
         assistant_id=TEST_UUID,
         intents=[],
     )
-    setup.service.repo.update.assert_not_awaited()
+    setup.service.repo.apply_update.assert_not_awaited()
 
 
 def configure_personal_default_assistant(
@@ -911,6 +916,7 @@ def configure_personal_default_assistant(
 ):
     assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
     assistant.id = TEST_UUID
+    assistant.is_default = True
     assistant.collections = []
     assistant.websites = []
     assistant.integration_knowledge_list = []
@@ -921,7 +927,7 @@ def configure_personal_default_assistant(
     space.get_assistant.return_value = assistant
     space.is_completion_model_available.return_value = True
     space.is_completion_model_in_space.return_value = True
-    setup.service.space_repo.update.return_value = space
+    setup.service.space_service.get_space.return_value = space
 
     actor = MagicMock()
     actor.can_edit_default_assistant.return_value = True
@@ -1320,6 +1326,7 @@ async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
         {"metadata_json": {}},
         {"icon_id": uuid4()},
         {"skill_binding_intents": []},
+        {"document_template": DocumentTemplateChoice(mode="builtin")},
     ],
 )
 async def test_personal_chat_cannot_change_extended_default_assistant_fields(
@@ -1334,6 +1341,7 @@ async def test_personal_chat_cannot_change_extended_default_assistant_fields(
         await _update_assistant(setup.service, assistant_id=TEST_UUID, **update)
 
     assistant.update.assert_not_called()
+    setup.service.repo.apply_update.assert_not_awaited()
 
 
 async def test_assistant_managers_can_edit_extended_personal_default_fields(
@@ -1385,7 +1393,7 @@ async def test_create_from_template_prefers_template_model_when_available(
     setup.service.assistant_template_service.get_consumable_assistant_template.return_value = template
     setup.service.file_service.get_file_infos.return_value = []
     setup.service.factory.create_assistant.return_value = created_assistant
-    setup.service.space_repo.add_assistant.return_value = refreshed_space
+    setup.service.space_service.get_space.return_value = refreshed_space
 
     await setup.service._create_from_template(
         space=space,
@@ -1424,7 +1432,7 @@ async def test_create_from_template_keeps_fallback_when_template_has_no_model(
     setup.service.assistant_template_service.get_consumable_assistant_template.return_value = template
     setup.service.file_service.get_file_infos.return_value = []
     setup.service.factory.create_assistant.return_value = created_assistant
-    setup.service.space_repo.add_assistant.return_value = refreshed_space
+    setup.service.space_service.get_space.return_value = refreshed_space
 
     await setup.service._create_from_template(
         space=MagicMock(id=uuid4()),
@@ -1476,8 +1484,9 @@ async def test_update_persists_only_the_updated_assistant(setup: Setup):
         setup.service, include_hidden=True, name="renamed"
     )
 
-    setup.service.repo.update.assert_awaited_once_with(assistant)
-    setup.service.space_repo.update.assert_not_awaited()
+    setup.service.repo.apply_update.assert_awaited_once_with(
+        TEST_UUID, assistant.space_id, AssistantUpdate(name="renamed")
+    )
     setup.service.space_repo.one.assert_awaited_once_with(
         id=assistant.space_id, hidden_assistant_ids={TEST_UUID}
     )
@@ -1526,7 +1535,7 @@ async def test_publish_assistant_rejects_flow_managed_before_side_effects(
         await setup.service.publish_assistant(TEST_UUID, True)
 
     setup.service._validate_attachments_fit.assert_not_awaited()
-    setup.service.space_repo.update.assert_not_awaited()
+    setup.service.repo.apply_update.assert_not_awaited()
     assistant.update.assert_not_called()
 
 

@@ -12,7 +12,6 @@ written."""
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -86,41 +85,6 @@ async def _flow_assistants(db_container, *, space_id: UUID, count: int) -> list[
             )
             ids.append(assistant.id)
     return ids
-
-
-async def _row(db_container, assistant_id: UUID) -> dict[str, Any] | None:
-    async with db_container() as container:
-        row = (
-            await container.session().execute(
-                sa.select(Assistants.__table__).where(Assistants.id == assistant_id)
-            )
-        ).one_or_none()
-    return None if row is None else dict(row._mapping)
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_space_save_leaves_a_hidden_assistant_it_did_not_load_untouched(
-    client, db_container, admin_user, patch_auth_service_jwt
-):
-    _ = patch_auth_service_jwt
-    space_id = await _space(client, db_container, admin_user)
-    loaded_id, absent_id = await _flow_assistants(
-        db_container, space_id=space_id, count=2
-    )
-    before = await _row(db_container, absent_id)
-
-    async with db_container() as container:
-        space_repo = container.space_repo()
-        space = await space_repo.get_space_by_assistant(loaded_id)
-        space.assistants = [a for a in space.assistants if a.id != absent_id]
-        await space_repo.update(space)
-
-    after = await _row(db_container, absent_id)
-    assert before is not None and after is not None
-    # Saving a space clears is_default on every other assistant of the space
-    # in one statement, which touches updated_at whatever the space loaded.
-    assert {**after, "updated_at": None} == {**before, "updated_at": None}
 
 
 async def _hidden_and_visible(client, db_container, admin_user, *, hidden: int):
@@ -386,32 +350,6 @@ async def test_loading_by_the_default_assistant_selects_hidden_ones_without_list
     assert space.default_assistant is not None
     assert {a.id for a in space.default_assistant.tool_assistants} >= set(hidden_ids)
     assert not {str(id) for id in hidden_ids} & set(hidden_filter_params)
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_space_save_keeps_a_concurrent_change_to_an_assistant_it_did_not_load(
-    client, db_container, admin_user, patch_auth_service_jwt
-):
-    _ = patch_auth_service_jwt
-    space_id = await _space(client, db_container, admin_user)
-    loaded_id, absent_id = await _flow_assistants(
-        db_container, space_id=space_id, count=2
-    )
-
-    async with db_container() as container:
-        space_repo = container.space_repo()
-        space = await space_repo.get_space_by_assistant(loaded_id)
-        async with db_container() as concurrent:
-            await concurrent.session().execute(
-                sa.update(Assistants)
-                .where(Assistants.id == absent_id)
-                .values(name="ändrad under tiden")
-            )
-        await space_repo.update(space)
-
-    after = await _row(db_container, absent_id)
-    assert after is not None and after["name"] == "ändrad under tiden"
 
 
 async def _invalid_on_build(db_container, assistant_id: UUID) -> None:

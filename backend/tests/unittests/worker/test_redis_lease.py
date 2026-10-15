@@ -77,6 +77,34 @@ async def test_watchdog_refreshes_ttl_while_held():
 
 
 @pytest.mark.asyncio
+async def test_leaving_while_a_refresh_completes_stops_the_watchdog():
+    # The refresh wakes the body, so the lease's exit cancels the watchdog in
+    # the moment that refresh completes. The watchdog must stop, not swallow the
+    # cancellation and keep renewing a lease nobody holds.
+    redis_mock = _redis(set_result=True)
+    refresh_completed = asyncio.Event()
+
+    async def refresh(*_args):
+        refresh_completed.set()
+        return True
+
+    async def hold_until_refreshed():
+        async with redis_lease(
+            redis_mock, "lock:k", ttl_seconds=300, renew_interval_seconds=0.01
+        ):
+            await refresh_completed.wait()
+
+    with (
+        patch(_REFRESH, new=AsyncMock(side_effect=refresh)) as refresh_mock,
+        patch(_RELEASE, new=AsyncMock(return_value=True)) as release,
+    ):
+        await asyncio.wait_for(hold_until_refreshed(), timeout=2)
+
+    assert refresh_mock.await_count == 1
+    release.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_releases_even_when_body_raises():
     redis_mock = _redis(set_result=True)
 

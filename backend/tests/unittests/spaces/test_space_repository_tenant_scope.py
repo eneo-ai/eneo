@@ -34,8 +34,6 @@ def _repo(*, tenant_id=None, user=None):
         user=user,
         factory=SimpleNamespace(),
         file_content_loader=SimpleNamespace(),
-        app_repo=SimpleNamespace(),
-        assistant_repo=SimpleNamespace(),
         completion_model_repo=SimpleNamespace(),
         transcription_model_repo=SimpleNamespace(),
         embedding_model_repo=SimpleNamespace(),

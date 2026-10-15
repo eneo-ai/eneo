@@ -797,7 +797,11 @@ async def test_submit_answers_become_typed_provider_errors(
         )
 
     if status_code == 500:
-        assert excinfo.value.details == {"reason": "provider_error", "retryable": True}
+        # A server error from the service means it is down, as for any provider.
+        assert excinfo.value.details == {
+            "reason": "provider_unavailable",
+            "retryable": True,
+        }
     settled = [reason for _, reason in observer.rejected_calls + observer.unknown_calls]
     assert settled == [observed_reason]
 
@@ -1291,7 +1295,7 @@ async def test_unreachable_result_download_is_a_provider_outage() -> None:
     with pytest.raises(OpenAIException) as excinfo:
         await make_transcriber(service).wait_for_result(JOB_ID)
 
-    assert excinfo.value.code == "provider_unavailable"
+    assert excinfo.value.code == "provider_unreachable"
 
 
 async def test_submit_retries_rate_limit_then_succeeds(

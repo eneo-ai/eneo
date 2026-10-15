@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -224,28 +225,33 @@ def test_retrieval_service_owns_the_embedding_model_precedence() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retrieve_rag_chunks_timeout_sets_timeout_metadata_and_diagnostic(
-    monkeypatch,
-):
+async def test_retrieve_rag_chunks_timeout_sets_timeout_metadata_and_diagnostic():
+    retrieval_started = asyncio.Event()
+
+    async def slow_references(**_kwargs: object) -> object:
+        retrieval_started.set()
+        await asyncio.Event().wait()
+        return object()
+
     references_service = MagicMock()
-    references_service.get_references = MagicMock(return_value=object())
+    references_service.get_references = slow_references
     logger = MagicMock()
-    wait_for = AsyncMock(side_effect=asyncio.TimeoutError)
-    monkeypatch.setattr("eneo.flows.runtime.rag_retrieval.asyncio.wait_for", wait_for)
+    deps = _deps(references_service, logger=logger)
+    deps = replace(deps, rag_retrieval_timeout_seconds=0.01)
 
     chunks, metadata, diagnostics = await retrieve_rag_chunks(
         assistant=_assistant(has_knowledge=True),
         question="hello",
         run_id=uuid4(),
         step_order=2,
-        deps=_deps(references_service, logger=logger),
+        deps=deps,
     )
 
+    assert retrieval_started.is_set()
     assert chunks == []
     assert metadata["status"] == "timeout"
     assert metadata["error_code"] == "rag_retrieval_timeout"
     assert diagnostics[0].code == "rag_retrieval_timeout"
-    wait_for.assert_awaited_once()
     logger.warning.assert_called_once()
 
 

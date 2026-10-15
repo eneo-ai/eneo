@@ -74,10 +74,13 @@ class _StreamBounds:
 
 
 class _BoundedNativeStream:
-    def __init__(self, stream: Any, bounds: _StreamBounds) -> None:
+    def __init__(
+        self, stream: Any, bounds: _StreamBounds, usages: list[object]
+    ) -> None:
         self._stream = stream
         self._iterator: Any = None
         self._bounds = bounds
+        self._usages = usages
 
     def __aiter__(self) -> _BoundedNativeStream:
         self._iterator = (
@@ -96,6 +99,11 @@ class _BoundedNativeStream:
             if chunk is exhausted:
                 raise StopAsyncIteration
         self._bounds.retain(chunk)
+        # The provider's own usage object, before LiteLLM rebuilds it: a
+        # dimension the provider left out stays None instead of becoming 0.
+        usage = getattr(chunk, "usage", None)
+        if usage is not None:
+            self._usages.append(usage)
         return chunk
 
     async def aclose(self) -> None:
@@ -109,7 +117,7 @@ class _BoundedNativeStream:
 
 
 async def _bounded_wrapper_stream(
-    response: Any, bounds: _StreamBounds
+    response: Any, bounds: _StreamBounds, usages: list[object]
 ) -> AsyncIterator[Any]:
     if response.completion_stream is None:
         await response.fetch_stream()
@@ -118,7 +126,7 @@ async def _bounded_wrapper_stream(
         getattr(native_stream, "__next__", None)
     ):
         # LiteLLM retains usage-only events without yielding them to us.
-        response.completion_stream = _BoundedNativeStream(native_stream, bounds)
+        response.completion_stream = _BoundedNativeStream(native_stream, bounds, usages)
     async for chunk in response:
         yield chunk
 
@@ -216,10 +224,11 @@ async def _collect_provider_stream(
     chunks: list[Any] = []
     bounds = _StreamBounds()
     native_bounds: _StreamBounds | None = None
+    native_usages: list[object] = []
     stream: AsyncIterator[Any]
     if isinstance(response, litellm.CustomStreamWrapper):
         native_bounds = _StreamBounds()
-        stream = _bounded_wrapper_stream(response, native_bounds)
+        stream = _bounded_wrapper_stream(response, native_bounds, native_usages)
     else:
         stream = response.__aiter__()
     progress: dict[int, _JsonProgress] = {}
@@ -257,7 +266,7 @@ async def _collect_provider_stream(
     built = builder(chunks, messages=request.get("messages"))
     if built is None:
         raise ProviderStreamIncomplete("The provider stream could not be rebuilt")
-    built.usage = _native_usage(response, chunks)
+    built.usage = _native_usage(native_usages or _chunk_usages(response, chunks))
     return built
 
 
@@ -290,22 +299,29 @@ class _ProviderUsage:
         return self.prompt_tokens + self.completion_tokens
 
 
-def _native_usage(response: object, chunks: list[Any]) -> _ProviderUsage | None:
-    # SDK-generated usage is not evidence; the wrapper retains provider chunks
-    # separately from its generated final usage event.
+def _chunk_usages(response: object, chunks: list[Any]) -> list[object]:
+    """Usage of streams whose native chunks carry none of their own.
+
+    SDK-generated usage is not evidence; the wrapper retains provider chunks
+    separately from its generated final usage event."""
     provider_chunks: Any = (
         getattr(response, "chunks", None)
         if isinstance(response, litellm.CustomStreamWrapper)
         else chunks
     )
+    return [
+        usage
+        for chunk in provider_chunks or ()
+        if (usage := getattr(chunk, "usage", None)) is not None
+    ]
+
+
+def _native_usage(usages: list[object]) -> _ProviderUsage | None:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     reasoning_tokens: int | None = None
     reported = False
-    for chunk in provider_chunks or ():
-        usage = getattr(chunk, "usage", None)
-        if usage is None:
-            continue
+    for usage in usages:
         reported = True
         prompt_tokens = _largest(prompt_tokens, getattr(usage, "prompt_tokens", None))
         completion_tokens = _largest(

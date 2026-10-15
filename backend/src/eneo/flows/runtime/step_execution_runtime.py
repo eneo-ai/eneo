@@ -736,7 +736,8 @@ async def call_assistant_with_timeout(
             llm_task.add_done_callback(_consume_abandoned_llm_task)
             return
         try:
-            await asyncio.wait_for(asyncio.shield(llm_task), timeout=grace_seconds)
+            async with asyncio.timeout(grace_seconds):
+                await asyncio.shield(llm_task)
         except asyncio.CancelledError:
             return
         except TimeoutError:

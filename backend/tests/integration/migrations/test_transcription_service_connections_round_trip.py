@@ -17,11 +17,11 @@ from eneo.database.tables.transcription_services_table import (
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-_REVISION = "202610141000"
+_REVISION = "202610141005"
 _DEFAULT_REVISION = "202610111900"
-_LAST_CHECK_REVISION = "202610091000"
+_LAST_CHECK_REVISION = "202610091005"
 _OPERATIONS_REVISION = "202610082100"
-_PREVIOUS_REVISION = "202610081100"
+_PREVIOUS_REVISION = "202610081105"
 _TABLES = (
     "transcription_service_connections",
     "spaces_transcription_service_connections",

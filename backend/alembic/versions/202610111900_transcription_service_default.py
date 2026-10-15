@@ -5,7 +5,7 @@ the organisation's default stored as its own choice. No existing connection
 becomes the default: it is marked, never inferred.
 
 Revision ID: 202610111900
-Revises: 202610091000
+Revises: 202610091005
 """
 
 import sqlalchemy as sa
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "202610111900"
-down_revision = "202610091000"
+down_revision = "202610091005"
 branch_labels = None
 depends_on = None
 

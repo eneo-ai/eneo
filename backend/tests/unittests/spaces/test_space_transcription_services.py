@@ -93,7 +93,6 @@ def test_a_disabled_service_keeps_its_grant_but_takes_no_new_work():
     space.update(name="Renamed")
 
     assert _ids(space.linked_transcription_services) == [disabled.id]
-    assert space.link_changes("transcription_service") == (set(), set())
     assert space.usable_transcription_service(disabled.id) is None
 
 
@@ -112,15 +111,6 @@ def test_a_new_grant_must_be_enabled_and_meet_the_classification(candidate, erro
         space.update(transcription_services=[candidate])
 
 
-def test_a_grant_list_records_only_what_it_added_and_removed():
-    kept, dropped, added = _connection(3), _connection(4), _connection(5)
-    space = _space(_classification(3), [kept, dropped])
-
-    space.update(transcription_services=[kept, added])
-
-    assert space.link_changes("transcription_service") == ({added.id}, {dropped.id})
-
-
 def test_raising_the_classification_removes_the_grants_it_no_longer_allows():
     low, high = _connection(2), _connection(5)
     space = _space(_classification(2), [low, high])
@@ -128,7 +118,6 @@ def test_raising_the_classification_removes_the_grants_it_no_longer_allows():
     space.update(security_classification=_classification(3))
 
     assert _ids(space.linked_transcription_services) == [high.id]
-    assert space.link_changes("transcription_service") == (set(), {low.id})
 
 
 def test_a_personal_space_cannot_be_granted_services():

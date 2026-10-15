@@ -265,27 +265,6 @@ def test_cannot_change_completion_models_of_personal_space(space: Space):
         space.update(completion_models=[MagicMock()])
 
 
-def test_remove_assistant_removes_group_chat_membership_by_id(space: Space):
-    assistant = MagicMock(id=uuid4())
-    other_assistant = MagicMock(id=uuid4())
-    group_chat_assistant = SimpleNamespace(assistant=assistant)
-    other_group_chat_assistant = SimpleNamespace(assistant=other_assistant)
-    group_chat = SimpleNamespace(
-        assistants=[group_chat_assistant, other_group_chat_assistant]
-    )
-
-    space.assistants = [assistant]
-    space.group_chats = [group_chat]
-
-    space.remove_assistant(assistant)
-
-    assert space.assistants == []
-    assert group_chat.assistants == [other_group_chat_assistant]
-
-
-# Group Member Tests
-
-
 def test_add_group_member(space: Space):
     group = MagicMock(id=uuid4())
 
@@ -625,36 +604,6 @@ def test_a_new_link_to_a_disabled_model_is_still_refused(kind):
 
     with pytest.raises(UnauthorizedException):
         space.update(**{f"{kind}_models": [allowed, disabled]})
-
-
-@pytest.mark.parametrize("kind", _KINDS)
-def test_an_unrelated_save_changes_no_links(kind):
-    allowed, below = _model(3), _model(1)
-    space = _space_with_models(_classification(3), **{kind: [allowed, below]})
-
-    space.update(name="Renamed")
-
-    assert space.link_changes(kind) == (set(), set())
-
-
-@pytest.mark.parametrize("kind", _KINDS)
-def test_a_model_list_edit_records_only_what_it_added_and_removed(kind):
-    kept, dropped, added = _model(3), _model(1), _model(4)
-    space = _space_with_models(_classification(3), **{kind: [kept, dropped]})
-
-    space.update(**{f"{kind}_models": [kept, added]})
-
-    assert space.link_changes(kind) == ({added.id}, {dropped.id})
-
-
-@pytest.mark.parametrize("kind", _KINDS)
-def test_a_level_change_records_the_links_it_removes(kind):
-    low, high = _model(2), _model(5)
-    space = _space_with_models(_classification(2), **{kind: [low, high]})
-
-    space.update(security_classification=_classification(3))
-
-    assert space.link_changes(kind) == (set(), {low.id})
 
 
 def _transcription_model(*, marked: bool, day: int = 1):

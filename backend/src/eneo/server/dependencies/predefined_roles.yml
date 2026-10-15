@@ -9,6 +9,7 @@ roles:
       - shared_spaces
       - web_search
       - image_generation
+      - file_analysis
 
   - name: 'AI Configurator'
     permissions:
@@ -26,6 +27,7 @@ roles:
       - assistant_debug
       - web_search
       - image_generation
+      - file_analysis
 
   - name: 'Owner'
     permissions:
@@ -57,3 +59,7 @@ roles:
       - assistant_debug
       - web_search
       - image_generation
+      - file_analysis
+      - file_creation
+      - charts
+      - compute

@@ -21,6 +21,7 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     stored_request_model_kwargs,
 )
+from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import url_only_attachment_ids
 from eneo.files.mime_support import (
@@ -56,6 +57,7 @@ if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
     from eneo.collections.domain.collection import Collection
     from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
+    from eneo.document_templates.domain import DocumentTemplateReference
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
@@ -97,6 +99,7 @@ class Assistant(Entity):
         published: bool,
         integration_knowledge_list: list["IntegrationKnowledge"] | None = None,
         mcp_servers: list["MCPServer"] | None = None,
+        mcp_tools: list[tuple[UUID, bool]] | None = None,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
         source_template: Optional["AssistantTemplate"] = None,
@@ -114,6 +117,7 @@ class Assistant(Entity):
         managing_flow_id: UUID | None = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         attachment_inline_text: Mapping[UUID, bool] | None = None,
+        document_template: DocumentTemplateChoice | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -128,6 +132,7 @@ class Assistant(Entity):
         self._collections = collections
         self._integration_knowledge_list = integration_knowledge_list or []
         self.mcp_servers = mcp_servers or []
+        self.mcp_tools = mcp_tools or []
         self.created_at = created_at
         self.updated_at = updated_at
         self._attachments = attachments
@@ -152,14 +157,14 @@ class Assistant(Entity):
             enabled_capabilities or []
         )
         self.available_capabilities: list[CapabilityAvailability] = []
+        # Which document template the file-creation capability renders with.
+        self.document_template: DocumentTemplateChoice = (
+            document_template or DocumentTemplateChoice()
+        )
         self.icon_id = icon_id
         self.hidden = hidden
         self.origin = origin
         self.managing_flow_id = managing_flow_id
-
-        # Temporary attributes for update flow - not persisted directly
-        self._mcp_server_ids: list[UUID] | None = None
-        self._mcp_tool_settings: list[tuple[UUID, bool]] | None = None
 
     def _validate_embedding_model(self, items: _KnowledgeItemList):
         embedding_model_id_set = set([item.embedding_model.id for item in items])
@@ -653,6 +658,7 @@ class Assistant(Entity):
         knowledge_mcp_server: Optional["MCPServer"] = None,
         internal_mcp_servers: Sequence["MCPServer"] = (),
         skill_runtime: "SkillActivationRuntime | None" = None,
+        document_template: "DocumentTemplateReference | None" = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -764,6 +770,7 @@ class Assistant(Entity):
             inline_file_text=self.inline_file_text,
             knowledge_catalog=knowledge_catalog,
             url_only_prompt_file_ids=url_only_prompt_file_ids,
+            document_template=document_template,
         )
 
         return response, datastore_result

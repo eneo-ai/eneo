@@ -876,7 +876,6 @@ class TestModelProvidersBearerRoleContract:
             "provider_type": "openai",
             "config": {},
             "is_active": True,
-            "masked_api_key": "...abcd",
             "created_at": datetime.now(timezone.utc),
             "updated_at": datetime.now(timezone.utc),
         }
@@ -903,6 +902,7 @@ class TestModelProvidersBearerRoleContract:
         provider.to_dict.return_value = self._provider_dict()
         service = AsyncMock()
         service.get_all.return_value = [provider]
+        service.masked_api_key = MagicMock(return_value="...abcd")
         user = SimpleNamespace(permissions=[Permission.ADMIN])
 
         response = await list_providers(user=user, service=service)
@@ -930,6 +930,7 @@ class TestModelProvidersBearerRoleContract:
         provider.to_dict.return_value = self._provider_dict()
         service = AsyncMock()
         service.get_by_id.return_value = provider
+        service.masked_api_key = MagicMock(return_value="...abcd")
         user = SimpleNamespace(permissions=[Permission.ADMIN])
 
         response = await get_provider(provider_id=uuid4(), user=user, service=service)

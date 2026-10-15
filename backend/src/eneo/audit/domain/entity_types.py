@@ -32,6 +32,7 @@ class EntityType(str, Enum):
     TRANSCRIPTION_MODEL = "transcription_model"
     TRANSCRIPTION_SERVICE = "transcription_service"
     IMAGE_MODEL = "image_model"
+    RERANK_MODEL = "rerank_model"
     AUDIT_LOG = "audit_log"
     SESSION = "session"
     MCP_SERVER = "mcp_server"
@@ -42,4 +43,5 @@ class EntityType(str, Enum):
     FLOW_RUN_REVIEW_CHECKPOINT = "flow_run_review_checkpoint"
     AI_BUILDER_SESSION = "ai_builder_session"
     AI_BUILDER_CLIENT_ERROR = "ai_builder_client_error"
+    DOCUMENT_TEMPLATE = "document_template"
     USER_GROUP = "user_group"

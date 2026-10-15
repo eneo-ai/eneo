@@ -337,6 +337,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_file_signed_url_minted,
     description: m.audit_action_file_signed_url_minted_description
   },
+  document_exported: {
+    name: m.audit_action_document_exported,
+    description: m.audit_action_document_exported_description
+  },
   website_created: {
     name: m.audit_action_website_created,
     description: m.audit_action_website_created_description
@@ -484,6 +488,18 @@ const ACTION_MESSAGES = {
   image_model_deleted: {
     name: m.audit_action_image_model_deleted,
     description: m.audit_action_image_model_deleted_description
+  },
+  rerank_model_created: {
+    name: m.audit_action_rerank_model_created,
+    description: m.audit_action_rerank_model_created_description
+  },
+  rerank_model_updated: {
+    name: m.audit_action_rerank_model_updated,
+    description: m.audit_action_rerank_model_updated_description
+  },
+  rerank_model_deleted: {
+    name: m.audit_action_rerank_model_deleted,
+    description: m.audit_action_rerank_model_deleted_description
   },
   template_created: {
     name: m.audit_action_template_created,
@@ -701,6 +717,22 @@ const ACTION_MESSAGES = {
     name: m.audit_action_mcp_server_created,
     description: m.audit_action_mcp_server_created_description
   },
+  document_template_created: {
+    name: m.audit_action_document_template_created,
+    description: m.audit_action_document_template_created_description
+  },
+  document_template_updated: {
+    name: m.audit_action_document_template_updated,
+    description: m.audit_action_document_template_updated_description
+  },
+  document_template_deleted: {
+    name: m.audit_action_document_template_deleted,
+    description: m.audit_action_document_template_deleted_description
+  },
+  document_template_default_set: {
+    name: m.audit_action_document_template_default_set,
+    description: m.audit_action_document_template_default_set_description
+  },
   mcp_server_updated: {
     name: m.audit_action_mcp_server_updated,
     description: m.audit_action_mcp_server_updated_description
@@ -724,6 +756,14 @@ const ACTION_MESSAGES = {
   mcp_server_tool_disabled: {
     name: m.audit_action_mcp_server_tool_disabled,
     description: m.audit_action_mcp_server_tool_disabled_description
+  },
+  mcp_app_view_link_created: {
+    name: m.audit_action_mcp_app_view_link_created,
+    description: m.audit_action_mcp_app_view_link_created_description
+  },
+  mcp_app_tool_called: {
+    name: m.audit_action_mcp_app_tool_called,
+    description: m.audit_action_mcp_app_tool_called_description
   },
   model_provider_headers_updated: {
     name: m.audit_action_model_provider_headers_updated,

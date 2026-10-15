@@ -16,7 +16,7 @@ is changed. A published version keeps a tool step in its definition JSON,
 which no CHECK covers.
 
 Revision ID: 202610121300
-Revises: 202610141000
+Revises: 202610141005
 Create Date: 2026-10-12 13:00:00.000000
 """
 
@@ -28,7 +28,7 @@ from sqlalchemy.engine import Connection
 from alembic import op
 
 revision: str = "202610121300"
-down_revision: str | tuple[str, ...] | None = "202610141000"
+down_revision: str | tuple[str, ...] | None = "202610141005"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

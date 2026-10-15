@@ -9,6 +9,7 @@ import sqlalchemy as sa
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from eneo.database.tables.flow_tables import FlowSteps, FlowVersions
 from eneo.flows.domain.flow import FlowStep
 from tests.integration.flows.test_flow_assistant_update_siblings import (
@@ -74,7 +75,7 @@ async def test_migrated_postgres_saves_and_publishes_copy_input_and_guards_rollb
             await container.session().scalar(
                 sa.text("SELECT version_num FROM alembic_version")
             )
-            == "202610142100"
+            == ScriptDirectory.from_config(config).get_current_head()
         )
         await container.flow_service().update_flow(
             flow_id=flow.id,

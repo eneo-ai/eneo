@@ -852,8 +852,9 @@ def get_application():
                 )
 
         try:
-            snapshot = await asyncio.wait_for(_load_health_snapshot(), timeout=2.0)
-        except asyncio.TimeoutError:
+            async with asyncio.timeout(2.0):
+                snapshot = await _load_health_snapshot()
+        except TimeoutError:
             query_duration_ms = int((time.perf_counter() - query_started_at) * 1000)
             logger.warning("DB query timeout in flow runtime health check")
             return flow_runtime_health_probe_failure_response(
@@ -973,7 +974,9 @@ def get_application():
                 return await CrawlRunRepository(session).health_snapshot()
 
         try:
-            snapshot = await asyncio.wait_for(_query_db_lifecycle(), timeout=2.0)
+            # 2 second timeout to keep endpoint responsive
+            async with asyncio.timeout(2.0):
+                snapshot = await _query_db_lifecycle()
         except asyncio.TimeoutError:
             db_query_error = True
             logger.warning("DB query timeout in crawler health check")
@@ -1051,7 +1054,9 @@ def get_application():
         reason="Deployment health probes and version discovery are intentionally public.",
     )
     async def get_version():
-        return VersionResponse(version=get_settings().app_version)
+        return VersionResponse(
+            version=get_settings().app_version, revision=get_settings().app_revision
+        )
 
     _registered_endpoints = (
         http_exception_handler,

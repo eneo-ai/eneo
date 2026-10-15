@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from eneo.assistants.api.assistant_models import AssistantUpdatePublic
 from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.document_templates.domain import DocumentTemplateChoice
+from eneo.main.exceptions import BadRequestException
 from eneo.skills.presentation.skill_assembler import (
     assistant_skill_binding_intents_from_input,
 )
@@ -80,6 +82,14 @@ def _extract_common_update_fields(
         command_fields["mcp_tools"] = [
             (tool.tool_id, tool.is_enabled) for tool in (assistant.mcp_tools or [])
         ]
+    if "document_template" in payload and assistant.document_template is not None:
+        try:
+            command_fields["document_template"] = DocumentTemplateChoice(
+                mode=assistant.document_template.mode,
+                template_id=assistant.document_template.template_id,
+            )
+        except ValueError as exc:
+            raise BadRequestException(str(exc)) from exc
     if "skill_bindings" in payload:
         command_fields["skill_binding_intents"] = (
             assistant_skill_binding_intents_from_input(assistant.skill_bindings or [])

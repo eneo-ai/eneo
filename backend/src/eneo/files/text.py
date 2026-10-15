@@ -6,7 +6,7 @@ import os
 import signal
 import time
 import zipfile
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -24,7 +24,10 @@ from pdfminer.pdfparser import PDFSyntaxError
 from pptx.exc import PackageNotFoundError
 from pydantic import BaseModel, TypeAdapter
 
-from eneo.files.extraction_limits import FileExtractionLimits
+from eneo.files.extraction_limits import (
+    FileExtractionLimits,
+    get_file_extraction_limits,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +108,11 @@ class NoExtractableTextError(ExtractionError):
 class ExtractionLimitError(ExtractionError):
     def __init__(self, filename: str, limit: str):
         super().__init__(f"File '{filename}' exceeded the {limit}", "EXTRACTION_LIMIT")
+
+
+class PdfPageLimitError(ExtractionLimitError):
+    def __init__(self, filename: str, max_pages: int):
+        super().__init__(filename, f"PDF page limit ({max_pages} pages)")
 
 
 class EncryptedFileError(ExtractionError):
@@ -362,6 +370,51 @@ class TextExtractor:
         return "\n\n".join(parts)
 
     @classmethod
+    def _layout_page_texts(cls, pdf: Any, display_name: str) -> Iterator[str]:
+        for page in pdf.pages:
+            try:
+                try:
+                    page_text = cls._extract_pdf_page(page)
+                except PdfExtractionLimitExceeded:
+                    raise
+                except Exception as e:
+                    logger.warning(
+                        f"Table-aware extraction failed on page "
+                        f"{page.page_number} of '{display_name}', "
+                        f"falling back to plain text: {e}"
+                    )
+                    page_text = str(page.extract_text() or "")
+            finally:
+                # pdfplumber keeps every parsed page's objects alive until the
+                # document closes; releasing them per page keeps memory flat
+                # instead of growing by megabytes per page.
+                page.close()
+            yield page_text
+
+    @staticmethod
+    def _text_layer_page_texts(filepath: Path) -> Iterator[str]:
+        import pypdfium2  # pyright: ignore[reportMissingTypeStubs]  # no stubs published
+
+        document: Any = pypdfium2.PdfDocument(filepath)
+        try:
+            for index in range(len(document)):
+                page = document[index]
+                try:
+                    text_page = page.get_textpage()
+                    try:
+                        text = str(text_page.get_text_bounded())
+                    finally:
+                        text_page.close()
+                finally:
+                    page.close()
+                # PDFium ends lines with CRLF and marks a hyphen that breaks a
+                # word across lines as U+0002; write both the way the layout
+                # path does.
+                yield text.replace("\r\n", "\n").replace("\x02", "-\n")
+        finally:
+            document.close()
+
+    @classmethod
     def extract_from_pdf(
         cls,
         filepath: Path,
@@ -381,14 +434,20 @@ class TextExtractor:
         )
         with cls._pdf_errors(display_name):
             try:
-                return cls._extract_pdf_text(filepath, display_name, pdf_limits)
+                return cls._extract_pdf_text(
+                    filepath,
+                    display_name,
+                    pdf_limits,
+                    layout_max_pages=(
+                        limits or get_file_extraction_limits()
+                    ).pdf_layout_max_pages,
+                )
             except PdfExtractionLimitExceeded as exc:
                 # Background extraction reports every ceiling as one limit error;
                 # the deadline itself is owned by the extraction subprocess.
-                raise ExtractionLimitError(
-                    display_name,
-                    "PDF page limit" if exc.limit == "pages" else "text output limit",
-                ) from exc
+                if exc.limit == "pages":
+                    raise PdfPageLimitError(display_name, exc.ceiling) from exc
+                raise ExtractionLimitError(display_name, "text output limit") from exc
 
     @classmethod
     async def extract_from_pdf_async(
@@ -456,6 +515,7 @@ class TextExtractor:
                     filepath,
                     display_name,
                     limits,
+                    get_file_extraction_limits().pdf_layout_max_pages,
                     started + limits.timeout_seconds,
                     result_path,
                 ),
@@ -528,6 +588,7 @@ class TextExtractor:
         filepath: Path,
         display_name: str,
         limits: PdfExtractionLimits,
+        layout_max_pages: int,
         deadline: float,
         result_path: Path,
     ) -> None:
@@ -540,7 +601,9 @@ class TextExtractor:
         signal.setitimer(signal.ITIMER_REAL, remaining)
         result: str | _PdfLimitResult | _PdfErrorResult
         try:
-            result = cls._extract_pdf_text(filepath, display_name, limits)
+            result = cls._extract_pdf_text(
+                filepath, display_name, limits, layout_max_pages=layout_max_pages
+            )
         except PdfExtractionLimitExceeded as exc:
             result = _PdfLimitResult(
                 limit=exc.limit, measured=exc.measured, ceiling=exc.ceiling
@@ -558,29 +621,31 @@ class TextExtractor:
 
     @classmethod
     def _extract_pdf_text(
-        cls, filepath: Path, display_name: str, limits: PdfExtractionLimits | None
+        cls,
+        filepath: Path,
+        display_name: str,
+        limits: PdfExtractionLimits | None,
+        *,
+        layout_max_pages: int,
     ) -> str:
         with pdfplumber.open(filepath) as pdf:
-            if limits is not None and len(pdf.pages) > limits.max_pages:
-                raise PdfExtractionLimitExceeded(
-                    "pages", len(pdf.pages), limits.max_pages
+            page_count = len(pdf.pages)
+            if limits is not None and page_count > limits.max_pages:
+                raise PdfExtractionLimitExceeded("pages", page_count, limits.max_pages)
+            if page_count > layout_max_pages:
+                logger.info(
+                    f"PDF '{display_name}' has {page_count} pages (over "
+                    f"{layout_max_pages}); reading its text layer without "
+                    "table detection"
                 )
+                texts = cls._text_layer_page_texts(filepath)
+            else:
+                texts = cls._layout_page_texts(pdf, display_name)
             page_texts: list[str] = []
             extracted_bytes = 0
             has_content = False
-            for page in pdf.pages:
-                try:
-                    page_text = cls._extract_pdf_page(page)
-                except PdfExtractionLimitExceeded:
-                    raise
-                except Exception as e:
-                    logger.warning(
-                        f"Table-aware extraction failed on page "
-                        f"{page.page_number} of '{display_name}', "
-                        f"falling back to plain text: {e}"
-                    )
-                    page_text = page.extract_text() or ""
-                framed_text = f"[PAGE {page.page_number}]\n{page_text}"
+            for page_number, page_text in enumerate(texts, start=1):
+                framed_text = f"[PAGE {page_number}]\n{page_text}"
                 if limits is not None:
                     extracted_bytes += len(framed_text.encode("utf-8"))
                     if page_texts:
@@ -735,6 +800,19 @@ class TextExtractor:
                 f"PPTX extraction failed for '{display_name}': {str(e)}"
             )
 
+    @staticmethod
+    def _reject_legacy_format(mimetype: str | None, display_name: str) -> None:
+        if mimetype == TextMimeTypes.DOC.value:
+            raise UnsupportedFormatError(
+                display_name,
+                ".doc (Legacy Word) - please save as .docx",
+            )
+        if mimetype == TextMimeTypes.PPT.value:
+            raise UnsupportedFormatError(
+                display_name,
+                ".ppt (Legacy PowerPoint) - please save as .pptx",
+            )
+
     def extract(
         self,
         filepath: Path,
@@ -747,17 +825,7 @@ class TextExtractor:
         # Use original filename for error messages, fallback to temp filepath
         display_name = filename or filepath.name
 
-        # Reject legacy formats early with helpful message
-        if mimetype == TextMimeTypes.DOC.value:
-            raise UnsupportedFormatError(
-                display_name,
-                ".doc (Legacy Word) - please save as .docx",
-            )
-        if mimetype == TextMimeTypes.PPT.value:
-            raise UnsupportedFormatError(
-                display_name,
-                ".ppt (Legacy PowerPoint) - please save as .pptx",
-            )
+        self._reject_legacy_format(mimetype, display_name)
 
         match mimetype:
             case (
@@ -800,6 +868,9 @@ class TextExtractor:
     ) -> str:
         from eneo.files.bounded_extraction import extract_in_process
 
+        # The child reports failures as an exit status, so the conversion
+        # hint for legacy formats is raised here, before it is spawned.
+        self._reject_legacy_format(mimetype, filename or filepath.name)
         return await extract_in_process(
             filepath, mimetype, filename or filepath.name, limits=limits
         )

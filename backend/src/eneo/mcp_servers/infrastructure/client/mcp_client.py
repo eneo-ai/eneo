@@ -4,7 +4,7 @@ import asyncio
 import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import TracebackType
 from typing import (
     Annotated,
@@ -16,6 +16,7 @@ from typing import (
     Protocol,
     cast,
 )
+from urllib.parse import urlsplit
 
 import httpx
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
@@ -32,10 +33,12 @@ from mcp.types import (
     CallToolRequestParams,
     ClientRequest,
     ServerNotification,
+    TextResourceContents,
     ToolListChangedNotification,
 )
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import AnyUrl, BaseModel, Field, TypeAdapter, ValidationError
 
+from eneo.files.file_reference import file_reference_base_url
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     MCPAuthenticationError,
@@ -43,10 +46,18 @@ from eneo.main.exceptions import (
     MCPToolAnswerTooLarge,
 )
 from eneo.main.logging import get_logger
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, is_builtin_provider
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServer,
+    bundled_tool_name,
+    is_builtin_provider,
+    is_bundled_server,
+)
 from eneo.mcp_servers.domain.server_address import (
     MCPServerAddress,
     loggable_server_address,
+)
+from eneo.mcp_servers.infrastructure.client.mcp_ui_session import (
+    UiCapableClientSession,
 )
 
 logger = get_logger(__name__)
@@ -58,13 +69,27 @@ MCP_TOOL_CALL_TIMEOUT_DEFAULT = _settings.mcp_client_call_timeout_seconds
 MCP_TOOL_LIST_PROTOCOL_OVERHEAD_BYTES = 64 * 1024
 MCP_INITIALIZE_RESPONSE_MAX_BYTES = 1024 * 1024
 MCP_DELETE_RESPONSE_MAX_BYTES = 64 * 1024
+# resources/read is only issued for MCP App view HTML. The wire ceiling counts
+# JSON-escaped bytes, so allow 2x the decoded resource cap plus framing; the
+# exact decoded-size check happens after parsing in read_resource().
+MCP_RESOURCES_READ_RESPONSE_MAX_BYTES = (
+    _settings.mcp_app_resource_max_bytes * 2 + 64 * 1024
+)
 
 # Defensive caps for resource content blocks. An adversarial MCP server can
 # emit arbitrarily large `text` / `_meta` payloads. Cap the parsed resource
 # blocks before they flow into persistence or citation rendering.
 RESOURCE_TEXT_MAX_BYTES = 8 * 1024
 RESOURCE_META_MAX_BYTES = 16 * 1024
+# A tool result's `structuredContent`, which an MCP App view renders from.
+STRUCTURED_CONTENT_MAX_BYTES = 256 * 1024
 MCP_SSE_READ_TIMEOUT_SECONDS = 300.0
+
+
+def _origin(url: str) -> str:
+    """Scheme, host and port of ``url`` (no path, no trailing slash)."""
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 def transport_read_timeout(tool_call_timeout: float) -> float:
@@ -109,6 +134,12 @@ class SdkHttpClientFactory:
 
     def refused_a_connection(self) -> bool:
         return False
+
+
+def _session_class() -> type[ClientSession]:
+    """Runtime settings lookup so tests (and ops) can flip the MCP Apps flag
+    without rebuilding module-level state. Flag off keeps the stock session."""
+    return UiCapableClientSession if get_settings().mcp_apps_enabled else ClientSession
 
 
 def _skip_json_whitespace(data: bytes | bytearray | memoryview, offset: int) -> int:
@@ -262,6 +293,33 @@ def _extract_sse_data(buffer: bytearray, event_end: int) -> bytearray | None:
             found_data = True
         read_offset = line_end + 1
     return data if found_data else None
+
+
+# Requests whose refusal the client reports as a failure of that request.
+_REFUSABLE_METHODS = frozenset({"tools/call", "resources/read"})
+
+
+@dataclass
+class _RequestRefusal:
+    """The HTTP status the server refused a waiting request with, by method.
+
+    A refusal (an error status or a redirect) fails the SDK's transport, which
+    then cancels the request that waits for the answer. The status tells that
+    cancellation apart from a cancelled caller.
+    """
+
+    statuses: dict[str, int] = field(default_factory=dict[str, int])
+    # The status of the refusal that failed the transport. The connection
+    # takes no further request then: its scope stays cancelled, so another
+    # request would be cancelled with no status of its own.
+    failed_with: int | None = None
+
+    def refuse_on_failed_connection(self, operation: str) -> None:
+        if self.failed_with is not None:
+            raise MCPClientError(
+                f"{operation} failed: the connection failed after the server "
+                f"answered HTTP {self.failed_with}"
+            )
 
 
 @dataclass
@@ -476,6 +534,10 @@ async def _bound_mcp_response(
         bounded_method = "initialize"
         max_bytes = MCP_INITIALIZE_RESPONSE_MAX_BYTES
         max_count = None
+    elif method == "resources/read":
+        bounded_method = "resources/read"
+        max_bytes = MCP_RESOURCES_READ_RESPONSE_MAX_BYTES
+        max_count = None
     elif tool_answer_ceiling is not None:
         ceiling = tool_answer_ceiling
         bounded_method = "tools/call"
@@ -595,6 +657,7 @@ async def _open_streamable_http_client(
     tool_catalog_max_count: int,
     tool_catalog_max_bytes: int,
     tool_answer_ceiling: _ToolAnswerCeiling | None = None,
+    request_refusal: _RequestRefusal | None = None,
     terminate_on_close: bool = True,
     http_client_factory: MCPHttpClientFactory,
 ) -> AsyncGenerator[MCPStreams]:
@@ -635,6 +698,18 @@ async def _open_streamable_http_client(
                     ceiling.waiting_request_id = request_id
 
             http_client.event_hooks["request"].append(note_waiting_tool_call)
+        if request_refusal is not None:
+            refusal = request_refusal
+
+            async def note_refused_request(response: httpx.Response) -> None:
+                if not (response.is_error or response.has_redirect_location):
+                    return
+                payload = _json_rpc_request_payload(response.request) or {}
+                method = payload.get("method")
+                if isinstance(method, str) and method in _REFUSABLE_METHODS:
+                    refusal.statuses[method] = response.status_code
+
+            http_client.event_hooks["response"].append(note_refused_request)
         async with streamable_http_client(
             url,
             http_client=http_client,
@@ -820,6 +895,19 @@ def loopback_endpoint(name: str) -> str:
     return f"{base}/internal-mcp/{name}/mcp"
 
 
+def bundled_endpoint(tool: str) -> str | None:
+    """URL of ``tool`` in the bundled tool runtime, if one is configured."""
+    settings = get_settings()
+    if not settings.tool_runtime_url or not settings.tool_runtime_token:
+        return None
+    return f"{settings.tool_runtime_url.rstrip('/')}/mcp/{tool}"
+
+
+def _bundled_endpoint_of(mcp_server: MCPServer) -> str | None:
+    tool = bundled_tool_name(mcp_server.http_url)
+    return bundled_endpoint(tool) if tool else None
+
+
 def endpoint_url(mcp_server: MCPServer) -> str:
     """URL to connect to for ``mcp_server``.
 
@@ -828,9 +916,16 @@ def endpoint_url(mcp_server: MCPServer) -> str:
     The URL stored on its row is the value from the last time the row was
     saved: it goes stale when the setting changes, and the scoped token minted
     for a built-in provider must only ever reach Eneo itself.
+
+    A bundled server likewise follows ``TOOL_RUNTIME_URL`` as it is configured
+    now; its stored URL only names the runtime tool it serves. While the
+    runtime is not configured the stored URL is returned for display, and
+    connecting is refused (see ``_build_auth_headers``).
     """
     if is_builtin_provider(mcp_server.http_auth_type):
         return loopback_endpoint(mcp_server.purpose)
+    if is_bundled_server(mcp_server.http_auth_type):
+        return _bundled_endpoint_of(mcp_server) or mcp_server.http_url
     return mcp_server.http_url
 
 
@@ -904,8 +999,8 @@ class MCPClient:
             auth_credentials: Authentication credentials from tenant settings
             timeout: Connection timeout in seconds (defaults to 30s)
             identity_headers: Acting user/tenant X-Eneo-* headers. Sent on every
-                request ONLY when this server has ``forward_identity=True`` —
-                identity is PII egress, opted into per server.
+                request for bundled servers (opaque IDs only). External servers
+                require ``forward_identity=True`` for identity egress.
             tool_call_max_bytes: The largest tool answer this client accepts,
                 counted as it arrives and before it is decoded, on every
                 stream the server can send it on (see ``_ToolAnswerCeiling``).
@@ -941,6 +1036,7 @@ class MCPClient:
             if tool_call_max_bytes is not None
             else None
         )
+        self._request_refusal = _RequestRefusal()
         self._terminate_session_on_close = terminate_session_on_close
         self._http_client_factory = http_client_factory or SdkHttpClientFactory()
         # Set when a tools/list_changed notification arrives on this session.
@@ -990,6 +1086,28 @@ class MCPClient:
             token = self.auth_credentials.get("token")
             if token:
                 headers["Authorization"] = f"Bearer {token}"
+        elif is_bundled_server(self.mcp_server.http_auth_type):
+            # The bundled tool runtime shares one deployment secret with the
+            # backend; it is read from settings on every connect so rotating
+            # it needs only a redeploy of both sides. The secret is sent only
+            # to the runtime as the deployment configures it now, never to
+            # whatever URL the row still carries.
+            if self.endpoint_url != _bundled_endpoint_of(self.mcp_server):
+                raise MCPClientError(
+                    "The bundled tool runtime is not configured for this deployment"
+                )
+            settings = get_settings()
+            headers["Authorization"] = f"Bearer {settings.tool_runtime_token}"
+            # Where Eneo's signed file links point. The runtime fetches files
+            # only from this origin, so a model-supplied URL can never steer it
+            # elsewhere, and the deployment configures the origin once.
+            base_url = file_reference_base_url(settings)
+            if base_url:
+                headers["X-Eneo-File-Origin"] = _origin(base_url)
+            # Whether the reader is shown tool views (MCP Apps), so a tool can
+            # tell the model what the reader already sees beside the answer.
+            if settings.mcp_apps_enabled and settings.mcp_app_content_base_url:
+                headers["X-Eneo-Tool-Views"] = "shown"
         elif self.mcp_server.http_auth_type == "api_key_header":
             # Admin-chosen header (e.g. X-Api-Key). The name is validated at
             # configuration time against HTTP token syntax and a deny-list of
@@ -1002,7 +1120,17 @@ class MCPClient:
         # Forward acting user/tenant identity only when this server opted in.
         # Added after the bearer token; the builder never emits Authorization,
         # so this cannot clobber it.
-        if getattr(self.mcp_server, "forward_identity", False):
+        if is_bundled_server(self.mcp_server.http_auth_type):
+            # Bundled execution needs opaque IDs for cache isolation and scheduling,
+            # including registrations made before identity forwarding was enabled.
+            headers.update(
+                {
+                    key: value
+                    for key, value in self.identity_headers.items()
+                    if key.lower() in ("x-eneo-user-id", "x-eneo-tenant-id")
+                }
+            )
+        elif getattr(self.mcp_server, "forward_identity", False):
             headers.update(self.identity_headers)
 
         return headers
@@ -1090,6 +1218,7 @@ class MCPClient:
             tool_catalog_max_count=self.mcp_server.tool_catalog_max_count,
             tool_catalog_max_bytes=self.mcp_server.tool_catalog_max_bytes,
             tool_answer_ceiling=self._tool_answer_ceiling,
+            request_refusal=self._request_refusal,
             terminate_on_close=self._terminate_session_on_close,
             http_client_factory=self._http_client_factory,
         )
@@ -1103,7 +1232,7 @@ class MCPClient:
             loggable_server_address(self.endpoint_url),
         )
 
-        session_context = ClientSession(
+        session_context = _session_class()(
             read, write, message_handler=self._handle_session_message
         )
         try:
@@ -1169,10 +1298,8 @@ class MCPClient:
             raise MCPClientError("Not connected to MCP server")
 
         try:
-            response = await asyncio.wait_for(
-                self.session.list_tools(),
-                timeout=self.list_tools_timeout,
-            )
+            async with asyncio.timeout(self.list_tools_timeout):
+                response = await self.session.list_tools()
             if len(response.tools) > self.mcp_server.tool_catalog_max_count:
                 raise MCPClientError(
                     "MCP tool catalog exceeds the configured maximum of "
@@ -1185,12 +1312,21 @@ class MCPClient:
                 title = getattr(annotations, "title", None) or getattr(
                     tool, "title", None
                 )
+                raw_meta = getattr(tool, "meta", None) or getattr(tool, "_meta", None)
                 tools.append(
                     {
                         "name": tool.name,
                         "title": title,
                         "description": tool.description,
                         "input_schema": tool.inputSchema,
+                        # Serialized into the catalog dicts below, so metadata
+                        # counts against the same per-definition and catalog
+                        # byte ceilings as the rest of the contract.
+                        "meta": (
+                            raw_meta
+                            if isinstance(raw_meta, dict) and raw_meta
+                            else None
+                        ),
                     }
                 )
 
@@ -1203,6 +1339,10 @@ class MCPClient:
             logger.debug(f"Listed {len(tools)} tools from {self.mcp_server.name}")
             return tools
 
+        except asyncio.CancelledError:
+            # The caller was cancelled (e.g. the chat stream ended); that is
+            # not a server failure. The catch-all below would report it as one.
+            raise
         except asyncio.TimeoutError as e:
             raise MCPClientError(
                 f"Failed to list tools: request timed out after {self.list_tools_timeout}s"
@@ -1299,11 +1439,11 @@ class MCPClient:
         if not self.session:
             raise MCPClientError("Not connected to MCP server")
 
+        self._request_refusal.refuse_on_failed_connection("Tool call")
+        self._request_refusal.statuses.pop("tools/call", None)
         try:
-            response = await asyncio.wait_for(
-                self.session.call_tool(tool_name, arguments=arguments),
-                timeout=self.tool_call_timeout,
-            )
+            async with asyncio.timeout(self.tool_call_timeout):
+                response = await self.session.call_tool(tool_name, arguments=arguments)
 
             # Extract content from response
             content_list: list[dict[str, Any]] = []
@@ -1349,6 +1489,11 @@ class MCPClient:
                             ),
                             "mime_type": getattr(resource, "mimeType", None),
                             "meta": _truncate_meta(raw_meta, RESOURCE_META_MAX_BYTES),
+                            # Base64 bytes of a binary resource. The proxy
+                            # admits it as a generated file (document and
+                            # spreadsheet providers) or strips it; it never
+                            # reaches the model.
+                            "blob": getattr(resource, "blob", None),
                         }
                     )
                 elif content_item.type == "resource_link":
@@ -1390,9 +1535,40 @@ class MCPClient:
             if result_meta:
                 result["meta"] = result_meta
 
+            # Kept whole or not at all: a view handed part of its data would
+            # show something the tool never returned.
+            structured: object = getattr(response, "structuredContent", None)
+            if isinstance(structured, dict) and structured:
+                structured_bytes = len(
+                    json.dumps(structured, ensure_ascii=False, default=str).encode()
+                )
+                if structured_bytes <= STRUCTURED_CONTENT_MAX_BYTES:
+                    result["structured_content"] = structured
+                else:
+                    logger.warning(
+                        "Dropped %d bytes of structured content from %s on %s (max %d)",
+                        structured_bytes,
+                        tool_name,
+                        self.mcp_server.name,
+                        STRUCTURED_CONTENT_MAX_BYTES,
+                    )
+
             logger.info(f"Called tool {tool_name} on {self.mcp_server.name}")
             return result
 
+        except asyncio.CancelledError:
+            refused = self._request_refusal.statuses.get("tools/call")
+            if refused is None:
+                # As in list_tools: a cancelled caller is not a failed tool
+                # call, and counting it would trip the server's circuit breaker.
+                raise
+            # The server refused the call and the transport cancelled the
+            # request in turn: a failed call, not a cancelled caller.
+            self._request_refusal.failed_with = refused
+            message = f"Tool call failed: the server answered HTTP {refused}"
+            if refused in (401, 403):
+                raise MCPAuthenticationError(message) from None
+            raise MCPClientError(message) from None
         except asyncio.TimeoutError as e:
             raise MCPClientError(
                 f"Tool call failed: request timed out after {self.tool_call_timeout}s"
@@ -1411,6 +1587,65 @@ class MCPClient:
                 f"Failed to call tool {tool_name} on {self.mcp_server.name}: {error_msg}"
             )
             raise MCPClientError(f"Tool call failed: {error_msg}") from e
+
+    async def read_resource(self, uri: str) -> dict[str, Any]:
+        """Read one resource from the MCP server (used for MCP App view HTML).
+
+        Returns ``{"uri", "text", "mime_type", "meta"}`` for the first content
+        block. The decoded text is bounded by ``mcp_app_resource_max_bytes``
+        (the wire response is separately pre-bounded before SDK decoding); the
+        general 8 KiB embedded-resource cap deliberately does not apply here.
+        """
+        if not self.session:
+            raise MCPClientError("Not connected to MCP server")
+
+        self._request_refusal.refuse_on_failed_connection("Resource read")
+        self._request_refusal.statuses.pop("resources/read", None)
+        try:
+            async with asyncio.timeout(self.tool_call_timeout):
+                result = await self.session.read_resource(AnyUrl(uri))
+            if not result.contents:
+                raise MCPClientError(f"Resource {uri} returned no contents")
+            first = result.contents[0]
+            text = first.text if isinstance(first, TextResourceContents) else None
+            max_bytes = get_settings().mcp_app_resource_max_bytes
+            if text is not None and len(text.encode("utf-8")) > max_bytes:
+                raise MCPClientError(
+                    f"Resource {uri} exceeds the configured maximum of "
+                    f"{max_bytes} bytes"
+                )
+            raw_meta = first.meta
+            return {
+                "uri": str(first.uri),
+                "text": text,
+                "mime_type": first.mimeType,
+                "meta": raw_meta if isinstance(raw_meta, dict) else None,
+            }
+        except asyncio.CancelledError:
+            refused = self._request_refusal.statuses.get("resources/read")
+            if refused is None:
+                # As in list_tools: a cancelled caller is not a failed read.
+                raise
+            # As in call_tool: the server refused the read and the transport
+            # cancelled it in turn.
+            self._request_refusal.failed_with = refused
+            raise MCPClientError(
+                f"Resource read failed: the server answered HTTP {refused}"
+            ) from None
+        except asyncio.TimeoutError as e:
+            raise MCPClientError(
+                "Failed to read resource: request timed out after "
+                f"{self.tool_call_timeout}s"
+            ) from e
+        except MCPClientError:
+            raise
+        except BaseException as e:
+            error_msg = _extract_error_message(e) or str(e)
+            logger.error(
+                f"Failed to read resource {uri} from {self.mcp_server.name}: "
+                f"{error_msg}"
+            )
+            raise MCPClientError(f"Resource read failed: {error_msg}") from e
 
     async def disconnect(self) -> None:
         """Disconnect from the MCP server.

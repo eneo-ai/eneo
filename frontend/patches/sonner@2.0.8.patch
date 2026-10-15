@@ -1,0 +1,38 @@
+diff --git a/dist/index.js b/dist/index.js
+index 394dbc2272f43b84642b0f9d5cc7eb1eacb0ffb3..6494f7b28cc45af9899990dba3517bd374af3df4 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1,11 +1,8 @@
+ 'use client';
++// Eneo patch: never inject the stylesheet at runtime. The injected <style> has
++// no CSP nonce, so a nonce-based style-src blocks it; web-next imports
++// sonner/dist/styles.css through its CSS pipeline instead.
+ function __insertCSS(code) {
+-  if (!code || typeof document == 'undefined') return
+-  let head = document.head || document.getElementsByTagName('head')[0]
+-  let style = document.createElement('style')
+-  style.type = 'text/css'
+-  head.appendChild(style)
+-  ;style.styleSheet ? (style.styleSheet.cssText = code) : style.appendChild(document.createTextNode(code))
+ }
+ 
+ Object.defineProperty(exports, '__esModule', { value: true });
+diff --git a/dist/index.mjs b/dist/index.mjs
+index c124f821a68f7070647a5a04441d0caa53689662..37cc5047d4219116de4f745cd203ca0c4d3cd82e 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1,11 +1,8 @@
+ 'use client';
++// Eneo patch: never inject the stylesheet at runtime. The injected <style> has
++// no CSP nonce, so a nonce-based style-src blocks it; web-next imports
++// sonner/dist/styles.css through its CSS pipeline instead.
+ function __insertCSS(code) {
+-  if (!code || typeof document == 'undefined') return
+-  let head = document.head || document.getElementsByTagName('head')[0]
+-  let style = document.createElement('style')
+-  style.type = 'text/css'
+-  head.appendChild(style)
+-  ;style.styleSheet ? (style.styleSheet.cssText = code) : style.appendChild(document.createTextNode(code))
+ }
+ 
+ import React from 'react';

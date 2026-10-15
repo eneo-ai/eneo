@@ -51,6 +51,7 @@ enabled when needed.
 | **General worker**     | ARQ                      | -            | Uploads, crawling, integrations, and audit jobs        |
 | **Execution worker**   | ARQ                      | -            | Flow runtime execution on its own capacity queue       |
 | **Maintenance worker** | ARQ                      | -            | Flow recovery, expiry, and outbox scheduling           |
+| **Tools runtime**      | Bun                      | 3010 private | Isolated execution for bundled tools, enabled by admins |
 | **Database**           | PostgreSQL 16 + pgvector | 5432         | Data storage, vector search                            |
 | **Redis**              | Redis 7                  | 6379         | Cache and independent ARQ task queues                  |
 | **Object content**     | S3-compatible endpoint   | 8333 private | Durable original and derived bytes (optional)          |
@@ -96,7 +97,8 @@ Before running `docker compose up`:
 - set `PUBLIC_ORIGIN` in the backend and frontend files;
 - have at least one AI provider API key ready for **Admin → Models**;
 - create the `proxy_tier` network;
-- set all five required base-stack image digest suffixes in `.env`;
+- set the three required third-party image digest suffixes (Traefik, pgvector, Redis) in `.env`;
+- download the complete `release.env` and `release.json` bundle from the selected release;
 - leave the optional object-store block commented unless you have chosen and
   prepared that storage path.
 
@@ -104,29 +106,29 @@ Before running `docker compose up`:
 ### Get deployment files
 
 ```bash
-# Option A: Clone the repository
-git clone https://github.com/eneo-ai/eneo.git
-cd eneo/docs/deployment/
-
-# Option B: Download files directly
 mkdir eneo-deployment && cd eneo-deployment
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/docker-compose.yml
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/docker-compose.object-content.yml
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_backend.template
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_frontend.template
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_db.template
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/.env.template
+# Download release.json and release.env from the selected GitHub release into this directory.
+# Use its exact source revision for the deployment files too.
+ENEO_SOURCE_REVISION=$(python3 -c 'import json; print(json.load(open("release.json"))["revision"])')
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/docker-compose.yml"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/docker-compose.object-content.yml"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/env_backend.template"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/env_frontend.template"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/env_db.template"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/.env.template"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/setup.py"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/docker-compose.without-tools.yml"
 
 # Only if you plan to run optional modules (see "Optional modules" below)
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/docker-compose.modules.yml
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_modules.template
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_module_ttt.template
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/docker-compose.modules.yml"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/env_modules.template"
+curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/env_module_ttt.template"
 ```
 
 <Callout type="info">
-  The `develop` branch carries the deployment files for the next release. If you
-  run a released version, take the files from that release's tag or branch
-  instead so the templates match the images you deploy.
+  Deployment templates must match the bundle's source revision. The same rule
+  applies when cloning the repository: check out the revision recorded in
+  `release.json` before copying the deployment files.
 </Callout>
 
 ### Create environment files
@@ -136,6 +138,7 @@ cp env_backend.template env_backend.env
 cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
 cp .env.template .env
+python3 setup.py
 chmod 600 .env env_backend.env env_frontend.env env_db.env
 ```
 
@@ -155,21 +158,18 @@ echo "URL_SIGNING_KEY=$(openssl rand -hex 32)"
 echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)"
 ```
 
-Set all five image digest suffixes in `.env`. Enter only the 64-character
-hexadecimal value after `sha256:`:
+Set the three third-party image digest suffixes in `.env`. Enter only the
+64-character hexadecimal value after `sha256:`:
 
 ```dotenv
 TRAEFIK_IMAGE_DIGEST=
-ENEO_FRONTEND_IMAGE_DIGEST=
-ENEO_BACKEND_IMAGE_DIGEST=
 PGVECTOR_IMAGE_DIGEST=
 REDIS_IMAGE_DIGEST=
 ```
 
-Copy the linux/amd64 backend and frontend digests from the matching Eneo
-release's `IMAGE-DIGESTS.txt`. Use organization-approved Traefik, pgvector, and
-Redis release digests for the remaining values. Preserve the complete set with
-the deployment backup.
+Use organization-approved Traefik, pgvector, and Redis release digests. The Eneo
+application images come from the release bundle's `release.env`, which pins them
+by digest. Preserve both with the deployment backup.
 
 Edit `env_db.env`:
 
@@ -191,7 +191,10 @@ Edit `env_frontend.env`:
 - `ENEO_BACKEND_URL` - the external backend URL used by server-side rendering
   (e.g., `https://eneo.example.com`)
 - `ENEO_BACKEND_SERVER_URL` - the internal Docker URL that SSR requests are
-  rewritten to, skipping the reverse proxy (`http://backend:8000`)
+  rewritten to, skipping the reverse proxy (`http://backend:8000`). When
+  `ENEO_BACKEND_URL` is the app's own origin, as above, SSR requests are plain
+  server-to-server calls without a browser `Origin` header and do not depend
+  on the CORS allowlist
 - `PUBLIC_ENEO_BACKEND_URL` - the backend origin used by the browser
   (e.g., `https://eneo.example.com`). **Do not append `/api`**: the client
   adds `/api/v1/...` itself.
@@ -215,7 +218,7 @@ optional SeaweedFS profile or an external compatible endpoint, follow
 docker network create proxy_tier
 
 # Start all services
-docker compose up -d
+docker compose --env-file .env --env-file release.env up -d
 
 # Check status
 docker compose ps
@@ -244,20 +247,21 @@ Then add your first model provider in **Admin → Models** (see
 
 ## Network Isolation
 
-The Docker Compose stack uses four networks:
+The Docker Compose stack uses five networks:
 
 | Network                                 | Services                                                                         | Purpose                                                                       |
 | --------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `proxy_tier` (external)                 | Traefik, frontend, backend, general worker, execution worker, maintenance worker | Ingress and outbound access for APIs, OIDC, crawls, model calls, and webhooks |
 | `data_net` (`internal: true`)           | db, redis, backend, all three workers, db-init                                   | Data layer without internet egress, isolated from Traefik and frontend        |
 | `module_net` (`internal: true`)         | Traefik, backend, optional module containers                                     | Modules reach only `backend:8000`; no internet egress                         |
+| `tool_runtime_net` (`internal: true`)   | tool-runtime, backend, general worker                                            | Bundled tools runtime; no internet, database, or Redis route                  |
 | `object_content_net` (`internal: true`) | optional object-content, backend, general worker, execution worker               | Private S3-compatible byte plane when enabled; never routed publicly          |
 
 PostgreSQL and Redis are only attached to `data_net`. They are not reachable from frontend, Traefik, or module containers, and they have no outbound internet access.
 
 <Callout type="warning">
   **Existing installations:** Older deployment files put every service on
-  `proxy_tier`. Running `docker compose up -d` with the current template
+  `proxy_tier`. Running `docker compose --env-file .env --env-file release.env up -d` with the current template
   recreates containers with the new network membership while keeping PostgreSQL
   and Redis volumes intact. External backup jobs or admin tools that connected
   to `db:5432` or `redis:6379` over `proxy_tier` must run through `docker exec`
@@ -317,7 +321,7 @@ value and a comment.
     REDIS_PASSWORD=<output of: openssl rand -hex 32>
     ```
 
-    Apply the change with `docker compose up -d`. Redis and the backend services
+    Apply the change with `docker compose --env-file .env --env-file release.env up -d`. Redis and the backend services
     restart together; queued jobs and other Redis data stay in the volume. While
     the password is set, run Redis commands with
     `docker compose exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping'`.
@@ -505,7 +509,7 @@ value and a comment.
     | Variable | Template value | Description |
     |----------|----------------|-------------|
     | `ENEO_BACKEND_URL` | `https://your-domain.com` | Backend URL for server-side rendering: the **external** https URL |
-    | `ENEO_BACKEND_SERVER_URL` | `http://backend:8000` | Internal server-to-server URL. SSR requests to `ENEO_BACKEND_URL` are rewritten to this address, skipping the reverse proxy |
+    | `ENEO_BACKEND_SERVER_URL` | `http://backend:8000` | Internal server-to-server URL. SSR requests to `ENEO_BACKEND_URL` are rewritten to this address, skipping the reverse proxy. Leave it empty to call `ENEO_BACKEND_URL` through the proxy instead. With `ENEO_BACKEND_URL` on the app's own origin these calls carry no browser `Origin` header; a backend on another origin must allow the app origin, as it must for the browser |
     | `PUBLIC_ENEO_BACKEND_URL` | `https://your-domain.com` | Backend origin used by the browser. **Bare origin, no `/api`** - the client appends `/api/v1/...` |
     | `ORIGIN` | `https://your-domain.com` | Cookie/CORS origin (same as `PUBLIC_ORIGIN`) |
     | `PUBLIC_ORIGIN` | `https://your-domain.com` | External URL; required for OIDC login and logout |
@@ -576,12 +580,18 @@ same endpoint.
 The download endpoint accepts no session cookie or API key. The signed token
 is the only credential: it names the file and tenant, is signed with
 `URL_SIGNING_KEY`, and expires after `FILE_REFERENCE_URL_EXPIRY_SECONDS`
-(default one hour). Anyone holding an unexpired link can download the file.
-Treat every MCP server that receives file links as a recipient of the file
-contents, and enable such servers only where that data flow is acceptable.
+(default 15 minutes, at most one hour). Anyone holding an unexpired link can
+download the file. Treat every MCP server that receives file links as a
+recipient of the file contents, and enable such servers only where that data
+flow is acceptable.
 
-Two controls limit the exposure of a link:
+Three controls limit the exposure of a link:
 
+- A tool call may only carry links to the files of its own conversation: the
+  attachments and generated files Eneo minted links for in that request. A
+  link to any other file in the arguments, even a valid one pasted in by a
+  user or returned by another tool, stops the call before the MCP server is
+  contacted.
 - Every redemption is audited as `file_original_downloaded` under **File
   operations**, with the caller's address and user agent, next to the
   `file_original_download_link_created` entry written when the link was
@@ -889,7 +899,8 @@ After deployment, some features require additional configuration in the Admin pa
 <Callout type="info">
   Document uploads require the **general worker**. Web crawls require both the
   **general worker and crawler worker**. Enable at least one embedding model in
-  Admin → Models → Embeddings. See [how crawling works](/docs/architecture#worker-service-arq-today).
+  Admin → Models → Embeddings. See [how crawling
+  works](/docs/architecture#worker-service-arq-today).
 </Callout>
 
 When applying source-URL migration `202609071200`, stop the API and both workers,
@@ -1017,28 +1028,51 @@ docker compose logs --tail=100 backend worker crawler-worker \
 
 ## Maintenance
 
-### Immutable Image Digests
+### One version for the application
+
+The standard stack includes the isolated tools runtime. Frontend, backend and
+runtime share one version and source revision; all three workers and db-init
+use the backend image.
+Download `release.env` and `release.json` from the selected release. The bundle
+pins all application images by digest and is published only after the combined
+image checks pass.
+
+Run `python3 setup.py` to generate the missing runtime credential without
+changing existing settings or printing secrets. Use both environment files:
+
+```bash
+docker compose --env-file .env --env-file release.env up -d
+```
+
+Use the same environment-file arguments for later Compose commands.
+Commands that do not show those arguments need them too. To avoid repeating
+them, run `export COMPOSE_ENV_FILES=.env,release.env` once in the shell
+(Docker Compose 2.24 or later). Without a
+bundle, `python3 setup.py --version X.Y.Z` selects one explicit version.
+There are no default application `latest` tags.
+
+For upgrades, replace the complete bundle together. For rollback, restore the
+previous bundle and observe the release's database rollback requirements.
+Do not independently update the tools image. Remove old runtime image pins and
+the optional runtime overlay/profile; the old overlay is a compatibility shim
+for one release. Existing capability settings and external providers are kept.
+
+The **Admin > Tools** status panel reports connectivity, credentials, version,
+confinement and file-origin issues. A version mismatch warns while calls remain
+allowed. Installing the runtime does not enable capabilities. To omit it, add
+`-f docker-compose.yml -f docker-compose.without-tools.yml`; stop any existing
+runtime container first. Ordinary chat and backend readiness remain independent.
+
+### Third-party image digests
 
 <Callout type="warning">
-  The production Compose file requires immutable digests for Traefik, frontend,
-  backend, pgvector, and Redis. Missing or empty digest inputs stop Compose
-  before deployment.
+  The production Compose file requires immutable digests for Traefik, pgvector,
+  and Redis. Missing or empty digest inputs stop Compose before deployment.
 </Callout>
 
-Set the five digest suffixes in `.env`. Compose builds each image identity as
-`repository@sha256:<digest-suffix>`. One backend digest supplies the API,
-general ARQ worker, platform execution worker, platform maintenance worker, and
-database initialization roles.
-
-**Find Eneo image digests:**
-
-- GitHub Releases: https://github.com/eneo-ai/eneo/releases
-- Download `IMAGE-DIGESTS.txt` from the matching release.
-
-<Callout type="info">
-  Review release notes and test a complete digest set before upgrading. Keep the
-  previous set with the matching backup for rollback.
-</Callout>
+Set the three digest suffixes in `.env`. Compose builds each image identity as
+`repository@sha256:<digest-suffix>`. Use organization-approved digests and keep
+the previous set with the matching backup for rollback.
 
 ### Backups
 
@@ -1082,10 +1116,12 @@ checksum and skew-recovery checks.
 ### Updating Eneo
 
 <Steps>
-### Update the image digest set
+### Select a complete release bundle
 
-Replace all five digest suffixes in `.env`. Keep the previous `.env` with the
-matching backup.
+Replace `release.env` and `release.json` together with the new release bundle. Keep the old bundle for rollback. Application image tags have no `v` prefix.
+
+Update the three third-party digest suffixes in `.env` only when you adopt reviewed
+Traefik, pgvector, or Redis artifacts.
 
 ### Rename environment variables that are no longer read
 
@@ -1140,13 +1176,11 @@ content needs no second backup artifact.
 For PostgreSQL-inline content or an external endpoint:
 
 ```bash
-docker compose config --images
-docker compose stop backend worker crawler-worker task-execution-worker task-maintenance-worker
-docker compose pull
-docker compose run --rm db-init
-docker compose up -d
-docker compose ps
-curl -fsS https://eneo.example.eu/version
+docker compose --env-file .env --env-file release.env stop backend worker crawler-worker task-execution-worker task-maintenance-worker
+docker compose --env-file .env --env-file release.env pull
+docker compose --env-file .env --env-file release.env run --rm db-init
+docker compose --env-file .env --env-file release.env up -d
+docker compose --env-file .env --env-file release.env ps
 ```
 
 For the bundled store:
@@ -1290,3 +1324,89 @@ extra `crawler-worker` replicas only add capacity. Set
 - [System Architecture](/docs/architecture) - Complete architecture overview
 - [Object Content Storage](/guides/object-content-storage) - Configure SeaweedFS, MinIO, backups, and readiness
 - [Release SBOMs and attestations](/docs/release-sboms) - Verify shipped image digests and provenance
+
+## Run the Next beta alongside the existing app
+
+The existing Svelte frontend remains `ghcr.io/eneo-ai/eneo-frontend`. The optional
+Next frontend uses `ghcr.io/eneo-ai/eneo-web-next`, published and pinned in the
+same release bundle (`release.env` sets `ENEO_WEB_NEXT_IMAGE`). Deploy both
+against **one backend** from one bundle. They share accounts, permissions,
+conversations, assistants, files, workers and database changes. Beta writes are
+real writes to the same data; this is not a separate sandbox.
+
+Use a separate HTTPS hostname, for example `beta.example.com`, rather than a
+path prefix. Keep the existing app and backend `PUBLIC_ORIGIN` unchanged.
+The beta proxies API and streaming requests server-side to the shared backend.
+No additional database, Redis, worker or backend instance is needed.
+
+1. Back up the existing database and storage, and rehearse the upgrade on staging.
+   Apply backend migrations once with the backend release. The beta's
+   feedback/provider-status migrations follow the release's existing chain;
+   confirm `alembic heads` reports a single head.
+2. Copy `docs/deployment/env_web_next.template` to `env_web_next.env`. Generate a
+   separate `SESSION_SECRET` with `openssl rand -base64 48`, and set
+   `LEGACY_APP_URL=https://app.example.com` for the return link in the beta profile
+   menu. Protect the file as you protect other deployment secrets.
+3. Set `WEB_NEXT_HOST=beta.example.com` in the deployment `.env`. The image
+   comes from the release bundle's `ENEO_WEB_NEXT_IMAGE`, so the beta always
+   runs the build verified with the backend you deploy. Merge the optional
+   overlay into the reference stack:
+
+   ```bash
+   docker compose --env-file .env --env-file release.env \
+     -f docker-compose.yml -f docker-compose.web-next.yml --profile web-next up -d
+   ```
+
+4. For backend-managed federation, add
+   `https://beta.example.com/login/callback` to each applicable federation
+   configuration's `additional_redirect_uris`, and register the same URI with the
+   identity provider. The existing canonical callback stays registered.
+   Use backend-managed authentication for the beta rollout. The separate
+   frontend-managed OIDC flow remains experimental: concurrent requests can reuse
+   a one-time rotating refresh token and invalidate the session. Refresh ownership
+   is not coordinated across requests or replicas. Before releasing that mode,
+   implement shared refresh coordination and validate the intended provider's
+   rotation behavior. Its development configuration uses the beta's `OIDC_*`
+   variables and the client callback `https://beta.example.com/auth/callback`.
+5. For SharePoint and Confluence, retain `OAUTH_CALLBACK_URL` for the existing UI
+   and add this backend runtime variable (a JSON array):
+
+   ```dotenv
+   OAUTH_CALLBACK_URLS=["https://beta.example.com/integrations/callback/token/"]
+   ```
+
+   Register both full callback URLs with the provider, including the trailing
+   slash. The backend accepts only exact registered values and binds the chosen
+   callback to the initiating user's single-use OAuth state. Existing clients
+   that omit a callback keep using the default. Restart the backend after changing
+   its environment; finish or restart in-flight integration logins during upgrade.
+
+6. Verify password/federated login, logout, streaming chat, files, tenant
+   permissions and both integration providers in each UI before inviting users.
+   Each UI has its own host-only session cookie. SSO can reuse the provider session,
+   but a local logout in one UI does not necessarily log out the other.
+
+### Enable the invitation banner
+
+Set these **Svelte frontend runtime** variables and restart that frontend:
+
+```dotenv
+SHOW_NEW_APP_BANNER=true
+NEW_APP_URL=https://beta.example.com
+```
+
+The flag defaults to `false`. Both an enabled flag and a valid HTTP(S) destination
+are required. The invitation appears in the signed-in shell and opens a new tab,
+leaving the current app available. Setting the flag back to `false` hides it; the
+beta remains reachable by its URL. The banner is discoverability, not access control.
+
+To withdraw the beta, disable the invitation and stop the `web-next` service or
+remove its ingress. Keep the shared backend and database running. Do not downgrade
+the shared database simply to turn off the beta; a backend rollback is a separate
+operation that requires a tested migration/restore plan and preserved user data.
+
+Before release, require the normal CI/E2E checks, source/dependency/secret scans
+and the deployment's application-image security checks. Review the temporary dependency
+mitigation in `frontend/patches/SECURITY.md`. Scanner success alone does not prove
+that authentication, tenant separation or accessibility is correct in the actual
+deployment; complete the staging checks with the configured providers.

@@ -10,6 +10,8 @@ from eneo.files.text import ExtractionError
 from eneo.main.exceptions import (
     InfoBlobPublicationConflictError,
     QuotaExceededException,
+    TenantQuotaExceededException,
+    UserQuotaExceededException,
 )
 from eneo.main.models import InDB, Status
 from eneo.object_content.content import (
@@ -80,6 +82,10 @@ _EXTRACTION_FAILURE_CODES = {
 def failure_code_for_exception(error: BaseException) -> JobFailureCode:
     if isinstance(error, asyncio.CancelledError):
         return JobFailureCode.CANCELLED
+    if isinstance(error, TenantQuotaExceededException):
+        return JobFailureCode.TENANT_QUOTA_EXCEEDED
+    if isinstance(error, UserQuotaExceededException):
+        return JobFailureCode.USER_QUOTA_EXCEEDED
     if isinstance(error, QuotaExceededException):
         return JobFailureCode.QUOTA_EXCEEDED
     if isinstance(error, ContentTooLargeError):

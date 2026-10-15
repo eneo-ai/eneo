@@ -28,22 +28,24 @@ DEPLOYMENT_ENV_TEMPLATE = REPO_ROOT / "docs" / "deployment" / ".env.template"
 BACKEND_PROJECT = REPO_ROOT / "backend" / "pyproject.toml"
 REQUIRED_IMAGE_DIGESTS = (
     "TRAEFIK_IMAGE_DIGEST",
-    "ENEO_FRONTEND_IMAGE_DIGEST",
-    "ENEO_BACKEND_IMAGE_DIGEST",
     "PGVECTOR_IMAGE_DIGEST",
     "REDIS_IMAGE_DIGEST",
 )
+# Eneo application images come from the release bundle's release.env, which
+# pins each one by digest; ENEO_VERSION is the source-example fallback.
+ENEO_BACKEND_IMAGE = "${ENEO_BACKEND_IMAGE:-ghcr.io/eneo-ai/eneo-backend:${ENEO_VERSION:?Select one Eneo release or use release.env}}"
 BASE_STACK_SERVICE_IMAGES = {
     "traefik": "traefik@sha256:${TRAEFIK_IMAGE_DIGEST:?Set TRAEFIK_IMAGE_DIGEST in .env}",
-    "frontend": "ghcr.io/eneo-ai/eneo-frontend@sha256:${ENEO_FRONTEND_IMAGE_DIGEST:?Set ENEO_FRONTEND_IMAGE_DIGEST in .env}",
-    "backend": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
-    "worker": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
-    "crawler-worker": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
-    "task-execution-worker": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
-    "task-maintenance-worker": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
+    "frontend": "${ENEO_FRONTEND_IMAGE:-ghcr.io/eneo-ai/eneo-frontend:${ENEO_VERSION:?Select one Eneo release or use release.env}}",
+    "backend": ENEO_BACKEND_IMAGE,
+    "worker": ENEO_BACKEND_IMAGE,
+    "crawler-worker": ENEO_BACKEND_IMAGE,
+    "task-execution-worker": ENEO_BACKEND_IMAGE,
+    "task-maintenance-worker": ENEO_BACKEND_IMAGE,
     "db": "pgvector/pgvector@sha256:${PGVECTOR_IMAGE_DIGEST:?Set PGVECTOR_IMAGE_DIGEST in .env}",
     "redis": "redis@sha256:${REDIS_IMAGE_DIGEST:?Set REDIS_IMAGE_DIGEST in .env}",
-    "db-init": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
+    "db-init": ENEO_BACKEND_IMAGE,
+    "tool-runtime": "${ENEO_TOOL_RUNTIME_IMAGE:-ghcr.io/eneo-ai/eneo-tool-runtime:${ENEO_VERSION:?Select one Eneo release or use release.env}}",
 }
 TASK_WORKER_HEALTH_COMMANDS = {
     "task-execution-worker": "task-execution-worker",
@@ -105,7 +107,7 @@ def test_runtime_dependencies_are_not_installed_after_image_build() -> None:
         assert "apt-get install" not in bootstrap_file.read_text()
 
 
-def test_production_base_stack_images_require_immutable_digests() -> None:
+def test_production_images_come_from_digests_or_the_release_bundle() -> None:
     service_images = _compose_service_images(DEPLOYMENT_COMPOSE.read_text())
 
     assert service_images == BASE_STACK_SERVICE_IMAGES

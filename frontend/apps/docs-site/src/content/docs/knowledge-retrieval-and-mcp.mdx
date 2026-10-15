@@ -99,7 +99,7 @@ but they have different roles in the architecture.
 | --- | --- | --- |
 | **Knowledge source** | A collection, website, or integration knowledge source attached to an assistant and indexed for retrieval. | An MCP server merely because its content came from an integration. |
 | **Injected retrieval** | A backend search performed before the model is called. | A tool call or an MCP exchange. |
-| **Internal/loopback MCP server** | A built-in Eneo Streamable HTTP endpoint, attached ephemerally to a completion and backed by Eneo services. | An administrator-created catalog record or a separate deployment. |
+| **Knowledge/file loopback server** | A built-in Eneo Streamable HTTP endpoint, attached ephemerally to a completion and backed by Eneo services. | An administrator-created catalog record or a separate deployment. |
 | **External MCP server** | A tenant-scoped Streamable HTTP service configured by an administrator and selected through organization, space, assistant, and conversation controls. | Automatically trusted because it uses MCP. |
 
 An integration knowledge source is normalized into the same searchable
@@ -357,12 +357,13 @@ the files tool resolves an attachment.
 
 The second built-in server, `files`, exposes `files__read_file`. It is attached
 when the effective model supports tools and the conversation contains files for
-which Eneo renders signed download-reference entries.
+which Eneo can provide authorised file references.
 
-The model receives a reference object containing the filename, media type,
-size, and URL. The built-in reader treats the URL as a signed capability handle:
-it verifies the token, authorizes the file, and loads already-extracted text
-from Eneo's durable content path. It does **not** fetch the URL over HTTP.
+The model receives the filename, media type, size and a credential-free
+`file_ref`. Eneo replaces that handle with a signed URL immediately before
+calling the reader. The reader verifies the token, authorises the file, and
+loads already-extracted text from Eneo's durable content path. It does **not**
+fetch the URL over HTTP.
 
 This matters in two cases:
 
@@ -441,6 +442,12 @@ references. External servers must survive the organization, space, assistant,
 governance, per-message, and enabled-state filters.
 
 ### Comparison
+
+This comparison covers the ephemeral knowledge/file servers and independently
+operated servers. The registered internal image provider has a different
+lifecycle but the same per-call approval rule; the bundled runtime is a separate service whose
+catalog follows Eneo's code. See [Built-in Tool Servers](/docs/builtin-tool-servers)
+for those two provider patterns.
 
 | Property | Internal loopback MCP | External MCP |
 | --- | --- | --- |
@@ -528,20 +535,26 @@ its name or description. It remains subject to the external approval policy.
 
 ## How attachment references interoperate with external MCP
 
-Signed attachment references are deliberately useful beyond
-`files__read_file`. A model can pass the same URL to an external MCP tool that
-accepts a URL—for example, a spreadsheet analyzer or large-document service.
-In that case:
+File references are useful beyond `files__read_file`. The model receives a
+credential-free `file_ref` (`eneo-file:…`) and passes it unchanged in an MCP
+tool's URL input—for example, to a spreadsheet analysis service:
 
-1. Eneo mints a short-lived original-download reference.
-2. The external MCP server receives the URL as a normal tool argument.
-3. That server must be able to reach `FILE_REFERENCE_BASE_URL` and download the
-   original before the reference expires.
-4. The external server applies its own processing and returns an MCP result.
+1. Eneo resolves the handle against the current request's authorised file map
+   and replaces it with a short-lived signed original-download URL.
+2. The MCP server receives that URL as a normal argument. Its stored schema
+   and implementation need no support for Eneo's model-facing handles.
+3. The server must reach `FILE_REFERENCE_BASE_URL` and download the original
+   before the reference expires; the download still checks access.
+4. The server processes the bytes and returns an MCP result. Accepted generated
+   files receive their own handles for subsequent calls.
+
+An unknown or unavailable handle fails before dispatch. Knowing a file ID is
+not authority to read it. Signed URLs remain the provider-facing transport;
+they are not the file identifiers exposed to the model.
 
 The built-in files server remains the authorized raw-text fallback. If another
 tool fails while its arguments contain an Eneo reference URL, the proxy appends
-a hint telling the model to retry the same URL with `files__read_file` instead
+a hint telling the model to retry the same file reference with `files__read_file` instead
 of repeatedly calling the failed service.
 
 <Callout type="warning">
@@ -702,7 +715,7 @@ incidents right now?"
 ### Attachment plus specialized external processing
 
 The user attaches a spreadsheet and asks for an analysis. Eneo provides a
-signed attachment reference and the built-in files server.
+credential-free file reference and the built-in files server.
 
 1. The model may pass the reference to an approved spreadsheet-analysis MCP
    tool.

@@ -304,6 +304,9 @@ from eneo.model_providers.domain.provider_call_observer import (
 from eneo.model_providers.infrastructure.litellm_provider import (
     load_active_litellm_provider,
 )
+from eneo.model_providers.infrastructure.litellm_transport import (
+    provider_failure_for_code,
+)
 from eneo.object_content.content import ObjectContentIntegrityError
 from eneo.prompts.prompt import Prompt
 from eneo.settings.encryption_service import EncryptionService
@@ -416,7 +419,10 @@ def _flow_provider_error_code(exc: Exception | None) -> FlowApiErrorCode | None:
         return None
     if exc.code == "provider_rate_limited":
         return FlowApiErrorCode.PROVIDER_RATE_LIMITED
-    if exc.code == "provider_unavailable":
+    # Unreachable, timed out, dropped and overloaded providers each keep their
+    # own public code; the transport's code table says which of them mean down.
+    failure = provider_failure_for_code(exc.code)
+    if failure is not None and failure.unavailable:
         return FlowApiErrorCode.PROVIDER_UNAVAILABLE
     return None
 

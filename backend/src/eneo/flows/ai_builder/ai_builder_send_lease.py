@@ -283,14 +283,12 @@ async def _watch_send_ownership(
     failures = _ProbeFailureLog(session_id=session_id, lease=lease)
     while await _next_beat(stop_event, _SEND_OWNERSHIP_PROBE_INTERVAL_SECONDS):
         try:
-            owned = await asyncio.wait_for(
-                _probe_session_send_ownership(
+            async with asyncio.timeout(_SEND_OWNERSHIP_PROBE_TIMEOUT_SECONDS):
+                owned = await _probe_session_send_ownership(
                     session_id=session_id,
                     tenant_id=tenant_id,
                     lease=lease,
-                ),
-                timeout=_SEND_OWNERSHIP_PROBE_TIMEOUT_SECONDS,
-            )
+                )
         except Exception as error:
             failures.record(error)
             continue
@@ -311,8 +309,9 @@ async def _next_beat(stop_event: asyncio.Event, interval: float) -> bool:
     if stop_event.is_set():
         return False
     try:
-        await asyncio.wait_for(stop_event.wait(), timeout=interval)
-    except asyncio.TimeoutError:
+        async with asyncio.timeout(interval):
+            await stop_event.wait()
+    except TimeoutError:
         return True
     return False
 

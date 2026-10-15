@@ -12,7 +12,7 @@ const meta: MetaRecord = {
   "ai-providers": "AI Provider Configuration",
   transcription: "Transcription & Speaker Identification",
   "mcp-servers": "MCP Servers",
-  capabilities: "Web Search & Image Generation",
+  capabilities: "Functions",
   deployment: "Deploy Eneo",
   "file-icon-storage-upgrade": "Upgrade File & Icon Storage",
   "object-content-storage": "Choose Content Storage",

@@ -15,15 +15,17 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 
 ## Deployment and configuration
 
-| Code                                                                                                                              | Pages                                                                      |
-| --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `docs/deployment/env_*.template`, `docs/deployment/docker-compose*.yml`, `docs/deployment/*.md`, `docker/**`                      | `guides/deployment.mdx`, `index.mdx` (quick start), `guides/upgrade-*.mdx` |
-| `backend/src/eneo/main/config.py` (settings, defaults, env names)                                                                 | `guides/deployment.mdx`, plus the feature page for the setting (below)     |
-| `backend/src/eneo/main/removed_env.py`, `frontend/apps/web/src/lib/core/deploymentEnv.server.ts` (removed and required variables) | `guides/upgrade-2-2-0.mdx`, `guides/deployment.mdx`                        |
-| `backend/src/eneo/server/main.py` (API prefix, health endpoints, middleware), `backend/src/eneo/server/routers.py` (mount points) | `docs/api.mdx`, `docs/architecture.mdx`, `guides/deployment.mdx`           |
-| `.devcontainer/**`, `backend/pyproject.toml`, `backend/run.sh`, `frontend/package.json`, `Taskfile.yml`                           | `docs/getting-started.mdx`, `docs/INSTALLATION.md` (root)                  |
-| `backend/alembic/versions/**` (breaking migrations, data migrations)                                                              | `guides/upgrade-*.mdx`, `docs/architecture.mdx` (data model)               |
-| `docs/deployment/docker-compose.modules.yml`, `docs/deployment/env_module*.template`, `docs/deployment/MODULES.md`                | `docs/module-authentication.mdx`, `guides/deployment.mdx`                  |
+| Code                                                                                                                                             | Pages                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `docs/deployment/env_*.template`, `docs/deployment/docker-compose*.yml`, `docs/deployment/*.md`, `docker/**`                                     | `guides/deployment.mdx`, `index.mdx` (quick start), `guides/upgrade-*.mdx`                                   |
+| `backend/src/eneo/main/config.py` (settings, defaults, env names)                                                                                | `guides/deployment.mdx`, plus the feature page for the setting (below)                                       |
+| `backend/src/eneo/main/removed_env.py`, `frontend/apps/web/src/lib/core/deploymentEnv.server.ts` (removed and required variables)                | `guides/upgrade-2-2-0.mdx`, `guides/deployment.mdx`                                                          |
+| `backend/src/eneo/server/main.py` (API prefix, health endpoints, middleware), `backend/src/eneo/server/routers.py` (mount points)                | `docs/api.mdx`, `docs/architecture.mdx`, `guides/deployment.mdx`                                             |
+| `backend/src/eneo/spaces/**`, resource repositories, `sysadmin/stored_model_configuration.py` (write ownership and invalid model-options repair) | `docs/architecture.mdx#space-persistence-ownership`, `docs/api.mdx#inspect-and-repair-invalid-model-options` |
+| `.devcontainer/**`, `backend/pyproject.toml`, `backend/run.sh`, `frontend/package.json`, `Taskfile.yml`                                          | `docs/getting-started.mdx`, `docs/INSTALLATION.md` (root)                                                    |
+| `backend/alembic/versions/**` (breaking migrations, data migrations)                                                                             | `guides/upgrade-*.mdx`, `docs/architecture.mdx` (data model)                                                 |
+| `backend/src/eneo/database/tables/**`, `backend/tests/integration/test_database_schema.py` (registered tables and migrated-schema checks)        | `docs/architecture.mdx` (database schema check)                                                              |
+| `docs/deployment/docker-compose.modules.yml`, `docs/deployment/env_module*.template`, `docs/deployment/MODULES.md`                               | `docs/module-authentication.mdx`, `guides/deployment.mdx`                                                    |
 
 ## Authentication and identity
 
@@ -55,14 +57,23 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 
 ## Knowledge, retrieval, MCP and skills
 
-| Code                                                                                                                                                                                                          | Pages                                                            |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `backend/src/eneo/files/**`, `info_blobs/**`, `embedding_models/infrastructure/datastore.py`, `groups_legacy/**` (upload, extraction, chunking)                                                               | `guides/document-processing.mdx`                                 |
-| `backend/src/eneo/websites/**`, `crawler/**`                                                                                                                                                                  | `guides/document-processing.mdx`                                 |
-| `backend/src/eneo/assistants/references.py`, `internal_mcp/**`, `completion_models/infrastructure/context_builder.py`, `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/assistants/[assistantId]/edit/**` | `docs/knowledge-retrieval-and-mcp.mdx`                           |
-| `backend/src/eneo/mcp_servers/**`, `frontend/apps/web/src/routes/(app)/admin/mcp-servers/**`, space MCP selection UI                                                                                          | `guides/mcp-servers.mdx`, `docs/knowledge-retrieval-and-mcp.mdx` |
-| `backend/src/eneo/skills/**`, skill permissions in `roles/**`, `frontend/apps/web/src/routes/(app)/admin/skills/**`                                                                                           | `guides/skills.mdx`                                              |
-| `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`                                                                                                   | `guides/sharepoint-integration.mdx`                              |
+The cross-feature responsibility map, design rationale and state boundaries
+live in `docs/architecture.mdx#skills-functions-tools-and-views`. Keep that
+overview aligned when changing Skill activation, Function resolution, runtime
+placement, file references, MCP Apps or native document behaviour.
+
+| Code                                                                                                                                                                                                          | Pages                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend/src/eneo/files/**`, `info_blobs/**`, `embedding_models/infrastructure/datastore.py`, `groups_legacy/**` (upload, extraction, chunking)                                                               | `guides/document-processing.mdx`                                                                                                      |
+| `backend/src/eneo/websites/**`, `crawler/**`                                                                                                                                                                  | `guides/document-processing.mdx`                                                                                                      |
+| `backend/src/eneo/assistants/references.py`, `internal_mcp/**`, `completion_models/infrastructure/context_builder.py`, `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/assistants/[assistantId]/edit/**` | `docs/knowledge-retrieval-and-mcp.mdx`                                                                                                |
+| `backend/src/eneo/mcp_servers/**`, `frontend/apps/web/src/routes/(app)/admin/mcp-servers/**`, space MCP selection UI                                                                                          | `guides/mcp-servers.mdx`, `docs/knowledge-retrieval-and-mcp.mdx`                                                                      |
+| `backend/src/eneo/files/model_file_references.py`, `files/file_reference.py`, `internal_mcp/file_references.py`                                                                                               | `docs/knowledge-retrieval-and-mcp.mdx`, `guides/capabilities.mdx` (model handles and provider URLs)                                   |
+| `backend/src/eneo/mcp_apps/**`, `frontend/apps/web/src/lib/features/chat/mcp-apps/**`, `tool-runtime/src/tools/tabular/view/**`, `tool-runtime/src/tools/charts/view/**`                                      | `guides/mcp-servers.mdx`, `docs/deployment/MCP_APPS.md` (root)                                                                        |
+| `tool-runtime/src/tools/**`, `backend/src/eneo/mcp_servers/application/bundled_tools.py`, capability provider resolution                                                                                      | `guides/capabilities.mdx`, `docs/builtin-tool-servers.mdx`, `docs/deployment/TOOL_RUNTIME.md` (root), `tool-runtime/README.md` (root) |
+| `frontend/apps/web/src/lib/features/file-preview/**`, `frontend/apps/web/src/lib/features/chat/documentVersions.ts`, `backend/src/eneo/conversations/document_export.py`                                      | `guides/capabilities.mdx` (native document workspace, versions, previews and exports)                                                 |
+| `backend/src/eneo/skills/**`, skill permissions in `roles/**`, `frontend/apps/web/src/routes/(app)/admin/skills/**`                                                                                           | `guides/skills.mdx`                                                                                                                   |
+| `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`                                                                                                   | `guides/sharepoint-integration.mdx`                                                                                                   |
 
 ## Flows
 
@@ -79,19 +90,24 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 
 ## Storage, workers and operations
 
-| Code                                                                                                                                                       | Pages                                                                                                                   |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `backend/src/eneo/object_content/**`, `worker/object_content_tasks.py`, `worker/upload_tasks.py`, `frontend/apps/web/src/routes/(app)/admin/storage/**`    | `docs/object-content-architecture.mdx`, `guides/object-content-storage.mdx`, `docs/deployment/OBJECT_CONTENT.md` (root) |
-| `backend/src/eneo/worker/**`, `jobs/**`                                                                                                                    | `docs/architecture.mdx`, `guides/object-content-storage.mdx` (drain procedure)                                          |
-| `backend/src/eneo/audit/**`, `api/audit/**`, `data_retention/**`, `actors/actors/space_actor.py`, `frontend/apps/web/src/routes/(app)/admin/audit-logs/**` | `docs/audit-logging.mdx`, `guides/audit-logging.mdx`                                                                    |
-| `backend/src/eneo/conversations/**`, `spaces/**`, `assistants/**`, `analysis/**` (public API and insight access)                                           | `docs/api.mdx`                                                                                                          |
-| `.github/workflows/release_sbom.yml`, `.github/workflows/build_and_push_images.yml`, `docker/seaweedfs/**`                                                 | `docs/release-sboms.mdx`, `docs/object-content-architecture.mdx`                                                        |
+| Code                                                                                                                                                                               | Pages                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `backend/src/eneo/object_content/**`, `worker/object_content_tasks.py`, `worker/upload_tasks.py`, `frontend/apps/web/src/routes/(app)/admin/storage/**`                            | `docs/object-content-architecture.mdx`, `guides/object-content-storage.mdx`, `docs/deployment/OBJECT_CONTENT.md` (root) |
+| `backend/src/eneo/worker/**`, `jobs/**`                                                                                                                                            | `docs/architecture.mdx`, `guides/object-content-storage.mdx` (drain procedure)                                          |
+| `backend/src/eneo/audit/**`, `api/audit/**`, `data_retention/**`, `actors/actors/space_actor.py`, `frontend/apps/web/src/routes/(app)/admin/audit-logs/**`                         | `docs/audit-logging.mdx`, `guides/audit-logging.mdx`                                                                    |
+| `backend/src/eneo/conversations/**`, `spaces/**`, `assistants/**`, `analysis/**` (public API and insight access)                                                                   | `docs/api.mdx`                                                                                                          |
+| `.github/workflows/release_sbom.yml`, `.github/workflows/build_and_push_images.yml`, `.github/workflows/application_image.yml`, `scripts/release_bundle.py`, `docker/seaweedfs/**` | `docs/release-sboms.mdx`, `docs/object-content-architecture.mdx`                                                        |
 
 ## Project and contributing
 
 | Code                                                                                                                                                                                                                   | Pages                               |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `.github/workflows/ci.yml`, `.github/workflows/dependency-review.yml`, `.github/dependabot.yml`, `docs/SECURITY.md`                                                                                                    | `contributing/security.mdx`         |
+| `.github/workflows/ci.yml`, `.github/workflows/security.yml`, `.github/workflows/dependency-review.yml`, `.github/dependabot.yml`, `docs/SECURITY.md`                                                                  | `contributing/security.mdx`         |
 | `.github/workflows/export-roadmap.yml`, `.github/workflows/add-to-project.yml`, `.github/workflows/pr-labels.yml`, `.github/scripts/**`, `scripts/export_github_roadmap.mjs`, `.github/ISSUE_TEMPLATE/**`, `AGENTS.md` | `contributing/project-roadmap.mdx`  |
 | `docs/CONTRIBUTING.md`, `docs/DEPLOYMENT_WORKFLOW.md`, `docs/CODE_QUALITY.md`                                                                                                                                          | `contributing/index.mdx`            |
 | `frontend/apps/docs-site/**` (the site itself)                                                                                                                                                                         | `frontend/apps/docs-site/README.md` |
+
+Bundled runtime lifecycle and diagnostics (`tool-runtime/src/{cache,scheduler,server}.ts`,
+`mcp_servers/application/runtime_status.py`, deployment setup and Compose) are
+documented in `docs/builtin-tool-servers.mdx`, `guides/deployment.mdx`,
+`guides/capabilities.mdx` and root `docs/deployment/TOOL_RUNTIME.md`.

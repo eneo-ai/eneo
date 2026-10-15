@@ -18,10 +18,13 @@ from eneo.flows.runtime.run_cancellation import (
 from eneo.flows.runtime.service_enrichment import (
     DIARIZATION_SKIPPED_EMPTY_TRANSCRIPT,
     SpeakerServiceFailed,
+    WordTimingOutcome,
+    _timing_failure,
 )
 from eneo.flows.runtime.service_transcription import ServiceFlowTranscriber
 from eneo.flows.runtime.step_deadline import StepDeadline, step_deadline_scope
 from eneo.main.exceptions import (
+    OpenAIException,
     ProviderRejectedRequestException,
     TypedIOValidationException,
 )
@@ -485,3 +488,10 @@ async def test_a_recording_is_transcribed_per_part_and_labelled_once(tmp_path) -
     assert labelled.kwargs["max_speakers"] == 3
     assert result.diarization == "external"
     assert result.duration_seconds == 15.0
+
+
+def test_a_typed_timing_failure_that_says_timed_out_is_not_an_outage() -> None:
+    # Kills the mutant that classifies by message text.
+    error = OpenAIException("Word timing timed out.", code="skill_prompt_ownership")
+
+    assert _timing_failure(error) is WordTimingOutcome.FAILED

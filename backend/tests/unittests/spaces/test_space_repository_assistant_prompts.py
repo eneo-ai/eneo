@@ -59,8 +59,6 @@ def _repo(*, assistants, rows):
         tenant=SimpleNamespace(id=uuid4()),  # type: ignore[arg-type]
         factory=SimpleNamespace(),  # type: ignore[arg-type]
         file_content_loader=SimpleNamespace(),  # type: ignore[arg-type]
-        app_repo=SimpleNamespace(),  # type: ignore[arg-type]
-        assistant_repo=SimpleNamespace(),  # type: ignore[arg-type]
         completion_model_repo=SimpleNamespace(),  # type: ignore[arg-type]
         transcription_model_repo=SimpleNamespace(),  # type: ignore[arg-type]
         embedding_model_repo=SimpleNamespace(),  # type: ignore[arg-type]

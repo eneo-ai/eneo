@@ -63,6 +63,9 @@ def one_tool_app(
     session_id: str | None = None,
     get_response: Callable[[Request], Answer] | None = None,
     delete_response: Callable[[], Answer] | None = None,
+    tool_meta: dict[str, object] | None = None,
+    read_response: Callable[[object], Answer] | None = None,
+    extra_tools: Iterable[dict[str, object]] = (),
 ) -> FastAPI:
     """An MCP endpoint with one tool, ``lookup``, answered by ``call_response``.
 
@@ -70,6 +73,9 @@ def one_tool_app(
     returns the HTTP response for it. ``tools/list`` is answered too, with
     ``output_schema`` on the tool, for a client that asks for the catalog.
     ``before_initialize`` runs before each ``initialize`` is answered.
+    ``tool_meta`` is the tool's ``_meta``; ``read_response`` gets the
+    JSON-RPC id of a ``resources/read`` request and answers it.
+    ``extra_tools`` are listed after ``lookup``.
 
     A server that gives ``session_id`` assigns that session: the SDK then
     opens its listening stream (a GET, answered by ``get_response``) and may
@@ -114,11 +120,19 @@ def one_tool_app(
             }
             if output_schema is not None:
                 tool["outputSchema"] = output_schema
+            if tool_meta is not None:
+                tool["_meta"] = tool_meta
             return JSONResponse(
-                {"jsonrpc": "2.0", "id": request_id, "result": {"tools": [tool]}}
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"tools": [tool, *extra_tools]},
+                }
             )
         if method == "tools/call":
             return await _answered(call_response(request_id))
+        if method == "resources/read" and read_response is not None:
+            return await _answered(read_response(request_id))
         return Response(status_code=400)
 
     @app.get("/mcp")

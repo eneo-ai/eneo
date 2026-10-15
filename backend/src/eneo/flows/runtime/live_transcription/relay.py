@@ -159,7 +159,8 @@ async def _close_upstream(upstream: ClientConnection) -> None:
     # close() first flushes its close frame, which a server that stopped reading
     # never takes, and only then applies its own close timeout.
     try:
-        await asyncio.wait_for(upstream.close(), UPSTREAM_CLOSE_TIMEOUT_SECONDS)
+        async with asyncio.timeout(UPSTREAM_CLOSE_TIMEOUT_SECONDS):
+            await upstream.close()
     except TimeoutError:
         upstream.transport.abort()
 
@@ -275,7 +276,8 @@ async def _pump_client(
 ) -> None:
     while True:
         try:
-            message = await asyncio.wait_for(client.receive(), idle_timeout_seconds)
+            async with asyncio.timeout(idle_timeout_seconds):
+                message = await client.receive()
         except TimeoutError as exc:
             raise LiveSessionEnded("idle_timeout", "No audio arrived in time.") from exc
         if message["type"] == "websocket.disconnect":

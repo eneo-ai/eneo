@@ -40,7 +40,6 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
 )
 from eneo.database.database import AsyncSession
-from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.models import (
     CursorPaginatedResponse,
@@ -318,6 +317,11 @@ def _build_assistant_update_changes(
         changes["enabled_capabilities"] = {
             "old": old_assistant.enabled_capabilities,
             "new": updated_assistant.enabled_capabilities,
+        }
+    if old_assistant.document_template != updated_assistant.document_template:
+        changes["document_template"] = {
+            "old": old_assistant.document_template.as_dict(),
+            "new": updated_assistant.document_template.as_dict(),
         }
 
     # Name change
@@ -1217,7 +1221,6 @@ async def transfer_assistant_to_space(
     response_model=PaginatedResponse[PromptSparse],
     description="List the prompt history for an assistant.",
     responses=responses.get_responses([404]),
-    include_in_schema=get_settings().dev,
 )
 @endpoint_access(
     authentication=Authentication.USER,

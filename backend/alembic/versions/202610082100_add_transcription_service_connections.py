@@ -6,7 +6,7 @@ FLOW_TRANSCRIPTION_SERVICE_* settings are not imported: an organisation's
 secret is entered by its own administrator.
 
 Revision ID: 202610082100
-Revises: 202610081100
+Revises: 202610081105
 """
 
 import sqlalchemy as sa
@@ -15,7 +15,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision = "202610082100"
-down_revision = "202610081100"
+down_revision = "202610081105"
 branch_labels = None
 depends_on = None
 

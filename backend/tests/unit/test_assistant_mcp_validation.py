@@ -54,8 +54,8 @@ def _build_assistant_service_with_mocks(
     )
     service.repo = SimpleNamespace(
         session=session,
-        set_mcp_servers=AsyncMock(),
-        _set_mcp_servers=AsyncMock(),
+        lock=AsyncMock(),
+        add_mcp_server=AsyncMock(),
     )
     service.user = SimpleNamespace(tenant_id=uuid4())
     service.effective_config_service = None
@@ -93,8 +93,11 @@ async def test_direct_mcp_mutations_reject_flow_managed_assistants(
     assert exc.value.code == "flow_managed_assistant"
     assert exc.value.context["assistant_id"] == str(assistant_id)
     assert exc.value.context["action"] == expected_action
+    # Only the fit lock an addition takes first may run; no association is
+    # read or written.
     session.scalar.assert_not_awaited()
-    session.execute.assert_not_awaited()
+    assert session.execute.await_count <= 1
+    service.repo.add_mcp_server.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -168,9 +171,11 @@ async def test_add_mcp_to_assistant_allows_personal_space_server_enabled_after_c
         mcp_server_id=mcp_server_id,
     )
 
-    assert session.scalar.await_count == 2
-    service.repo.set_mcp_servers.assert_awaited_once_with(
-        assistant_in_db, [existing_mcp_server.id, mcp_server_id]
+    assert session.scalar.await_count == 1
+    service.repo.add_mcp_server.assert_awaited_once_with(
+        assistant_id,
+        service.space_repo.get_space_by_assistant.return_value.id,
+        mcp_server_id,
     )
     service.space_repo.project_assistant_mcp_servers.assert_awaited_once_with(
         space_id=service.space_repo.get_space_by_assistant.return_value.id,
@@ -207,115 +212,38 @@ async def test_add_mcp_to_assistant_skips_space_mapping_when_governed():
         mcp_server_id=mcp_server_id,
     )
 
-    assert session.scalar.await_count == 2
-    service.repo.set_mcp_servers.assert_awaited_once_with(
-        assistant_in_db, [mcp_server_id]
+    assert session.scalar.await_count == 1
+    service.repo.add_mcp_server.assert_awaited_once_with(
+        assistant_id,
+        service.space_repo.get_space_by_assistant.return_value.id,
+        mcp_server_id,
     )
 
 
 @pytest.mark.asyncio
-async def test_assistant_repo_rejects_tool_overrides_outside_assigned_servers():
+async def test_prune_keeps_only_tool_overrides_inside_selected_servers():
     repo = object.__new__(AssistantRepository)
-    assistant_in_db = SimpleNamespace(id=uuid4())
-    valid_server_id = uuid4()
-    invalid_tool_id = uuid4()
-
-    session = SimpleNamespace(refresh=AsyncMock())
-    call_count = 0
-
-    async def _execute(_stmt):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 2:
-            result = MagicMock()
-            result.fetchall.return_value = [(valid_server_id,)]
-            return result
-        if call_count == 3:
-            result = MagicMock()
-            result.fetchall.return_value = []
-            return result
-        return MagicMock()
-
-    session.execute = _execute
-    repo.session = session
-
-    with pytest.raises(
-        BadRequestException,
-        match="outside assistant MCP servers",
-    ):
-        await repo._set_mcp_tools(assistant_in_db, [(invalid_tool_id, True)])
-
-
-@pytest.mark.asyncio
-async def test_assistant_repo_accepts_tool_overrides_within_assigned_servers():
-    repo = object.__new__(AssistantRepository)
-    assistant_in_db = SimpleNamespace(id=uuid4())
-    valid_server_id = uuid4()
-    valid_tool_id = uuid4()
-
-    session = SimpleNamespace(refresh=AsyncMock())
-    call_count = 0
-
-    async def _execute(_stmt):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 2:
-            result = MagicMock()
-            result.fetchall.return_value = [(valid_server_id,)]
-            return result
-        if call_count == 3:
-            result = MagicMock()
-            result.fetchall.return_value = [(valid_tool_id,)]
-            return result
-        return MagicMock()
-
-    session.execute = _execute
-    repo.session = session
-
-    await repo._set_mcp_tools(assistant_in_db, [(valid_tool_id, False)])
-
-    assert call_count == 4
-    session.refresh.assert_awaited_once_with(assistant_in_db)
-
-
-@pytest.mark.asyncio
-async def test_set_mcp_servers_prunes_tool_overrides_outside_selected_servers():
-    repo = object.__new__(AssistantRepository)
-    assistant_in_db = SimpleNamespace(id=uuid4())
     selected_server_id = uuid4()
-    session = SimpleNamespace(
-        execute=AsyncMock(),
-        refresh=AsyncMock(),
-    )
-    repo.session = session
+    repo.session = SimpleNamespace(execute=AsyncMock())
 
-    await repo.set_mcp_servers(assistant_in_db, [selected_server_id])
+    await repo._prune_mcp_tool_overrides(uuid4(), [selected_server_id])
 
-    assert session.execute.await_count == 3
-    prune_stmt = session.execute.await_args_list[1].args[0]
+    prune_stmt = repo.session.execute.await_args.args[0]
     compiled = str(prune_stmt.compile(compile_kwargs={"literal_binds": True}))
     assert "assistant_mcp_server_tools" in compiled
     assert "mcp_server_tools" in compiled
     assert "NOT IN" in compiled
     assert selected_server_id.hex in compiled
-    session.refresh.assert_awaited_once_with(assistant_in_db)
 
 
 @pytest.mark.asyncio
-async def test_set_mcp_servers_clears_tool_overrides_when_no_servers_remain():
+async def test_prune_clears_every_tool_override_when_no_servers_remain():
     repo = object.__new__(AssistantRepository)
-    assistant_in_db = SimpleNamespace(id=uuid4())
-    session = SimpleNamespace(
-        execute=AsyncMock(),
-        refresh=AsyncMock(),
-    )
-    repo.session = session
+    repo.session = SimpleNamespace(execute=AsyncMock())
 
-    await repo.set_mcp_servers(assistant_in_db, [])
+    await repo._prune_mcp_tool_overrides(uuid4(), [])
 
-    assert session.execute.await_count == 2
-    prune_stmt = session.execute.await_args_list[1].args[0]
+    prune_stmt = repo.session.execute.await_args.args[0]
     compiled = str(prune_stmt.compile(compile_kwargs={"literal_binds": True}))
     assert "assistant_mcp_server_tools" in compiled
     assert "SELECT" not in compiled
-    session.refresh.assert_awaited_once_with(assistant_in_db)

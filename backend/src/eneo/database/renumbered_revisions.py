@@ -1,17 +1,23 @@
 """Refuse to migrate a database stamped at a revision id that changed meaning.
 
-The tidy AI Builder branch once used 202609151000, 202609161000 and
-202609181000 for its own migrations. Develop shipped different migrations
-under the same ids, so the merged history renumbered the branch's three to
-202609151040, 202609161010 and 202609181010. The crawler merge later took
-202609031000 and 202609211200 for its head-merge migrations, so the branch's
-flow_step_transcript_words and inline_external_storage migrations became
-202609031001 and 202609211201. A database stamped at one of the old ids by the
-branch would now be read as develop's migration of that id: Alembic would rerun
-the branch's renamed migrations and skip develop's.
+The flows and builder branch (then the tidy AI Builder branch) once used
+202609151000, 202609161000 and 202609181000 for its own migrations. Develop
+shipped different migrations under the same ids, so the merged history
+renumbered the branch's three to 202609151040, 202609161010 and 202609181010.
+The crawler merge later took 202609031000 and 202609211200 for its head-merge
+migrations, so the branch's flow_step_transcript_words and
+inline_external_storage migrations became 202609031001 and 202609211201. The
+October develop merge took 202610081000, 202610081100, 202610091000 and
+202610141000 for develop's file capabilities, chart capability, document
+templates and rerank models migrations, so the branch's head merge, Flow upload
+size retirement and the two transcription service check migrations became
+202610081005, 202610081105, 202610091005 and 202610141005. A database stamped
+at one of the old ids by the branch would now be read as develop's migration of
+that id: Alembic would rerun the branch's renamed migrations and skip
+develop's.
 
-Such a database is recognised by the schema its branch migration left behind,
-which develop's migration of the same id never creates. It is refused with the
+Such a database is recognised by schema the branch had at that stamp, which
+develop's migration of the same id never creates. It is refused with the
 exact repair instead of migrated.
 """
 
@@ -58,6 +64,30 @@ RENUMBERED_BRANCH_REVISIONS: tuple[RenumberedRevision, ...] = (
         table="object_content_reconciliation_state",
         column="inline_conversion_ready_at",
     ),
+    # Both are data-only or no-op; the branch's Flow retention holds table,
+    # created just before them, is what develop's migrations never create.
+    RenumberedRevision(
+        old="202610081000",
+        new="202610081005",
+        table="flow_retention_holds",
+    ),
+    RenumberedRevision(
+        old="202610081100",
+        new="202610081105",
+        table="flow_retention_holds",
+    ),
+    RenumberedRevision(
+        old="202610091000",
+        new="202610091005",
+        table="transcription_service_connections",
+        column="last_checked_at",
+    ),
+    RenumberedRevision(
+        old="202610141000",
+        new="202610141005",
+        table="transcription_service_connections",
+        column="last_check_reason",
+    ),
 )
 
 
@@ -94,7 +124,7 @@ def check_renumbered_revision_stamp(connection: Connection) -> None:
     for revision in RENUMBERED_BRANCH_REVISIONS:
         if stamps[0] == revision.old and _has_branch_schema(connection, revision):
             raise RenumberedRevisionStampError(
-                f"This database is stamped at {revision.old}, the tidy AI Builder "
+                f"This database is stamped at {revision.old}, the flows and builder "
                 f"branch's old id for the migration now numbered {revision.new}; "
                 f"develop uses {revision.old} for a different migration. Migrating "
                 "it as is would skip develop's migrations. Repair the stamp, then "

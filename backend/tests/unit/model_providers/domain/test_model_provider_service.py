@@ -60,7 +60,7 @@ def _service(provider: ModelProvider) -> tuple[ModelProviderService, AsyncMock]:
     repository = AsyncMock()
     repository.get_by_id.return_value = provider
     repository.get_by_name.return_value = None
-    repository.update.side_effect = lambda p: p
+    repository.update.side_effect = lambda p, **_: p
     repository.session = MagicMock()
     encryption = MagicMock()
     encryption.encrypt.side_effect = lambda value: f"enc({value})"
@@ -332,7 +332,7 @@ def _key_from_a_previous_encryption_key(
     # Each load is its own snapshot, as rows read from the database are.
     repository.get_by_id.side_effect = lambda *_, **__: deepcopy(provider)
     repository.get_by_name.return_value = None
-    repository.update.side_effect = lambda p: p
+    repository.update.side_effect = lambda p, **_: p
     repository.session = MagicMock()
     service = ModelProviderService(repository=repository, encryption=_encryption())
     return provider, service, repository
@@ -411,7 +411,7 @@ def _snapshots(
     # Each load is its own snapshot, as rows read from the database are.
     repository.get_by_id.side_effect = lambda *_, **__: deepcopy(provider)
     repository.get_by_name.return_value = None
-    repository.update.side_effect = lambda p: p
+    repository.update.side_effect = lambda p, **_: p
     repository.session = MagicMock()
     return ModelProviderService(
         repository=repository, encryption=encryption

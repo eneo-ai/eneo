@@ -1,7 +1,7 @@
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal, Optional, Protocol, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Optional, Protocol, TypeVar, Union
 from uuid import UUID
 
 from eneo.main.datetime_utils import datetime_or_utc_min
@@ -58,13 +58,6 @@ class ClassifiedLink(Protocol):
 
 
 _M = TypeVar("_M", bound=ClassifiedLink)
-LinkKind = Literal["completion", "embedding", "transcription", "transcription_service"]
-LINK_KINDS: tuple[LinkKind, ...] = (
-    "completion",
-    "embedding",
-    "transcription",
-    "transcription_service",
-)
 
 
 def _security_level(
@@ -142,9 +135,6 @@ class Space:
         # so they don't auto-create a duplicate default. See SpaceInitService.
         self.default_assistant_load_failed = default_assistant_load_failed
         self.assistants = assistants or []
-        # Assistants this request removed on purpose. A whole-space write
-        # deletes only these, never one it merely did not load.
-        self.removed_assistant_ids: set[UUID] = set()
         # Hidden assistants of the space this load did not build. API-key
         # access facts still count them, as a load of every hidden one did.
         self.unloaded_hidden_assistant_ids = unloaded_hidden_assistant_ids
@@ -172,13 +162,6 @@ class Space:
             "TranscriptionServiceConnection"
         ] = []
         self._split_models_by_classification()
-        # The links as loaded. A save writes only the difference (see
-        # link_changes), so a stored link this space never loaded, such as
-        # one to a deprecated model, is left exactly as it is.
-        self._loaded_link_ids: dict[LinkKind, frozenset[UUID]] = {
-            kind: frozenset(link.id for link in self._linked(kind))
-            for kind in LINK_KINDS
-        }
         self.data_retention_days = data_retention_days
         self.enabled_capabilities: list[CapabilityPurpose] = list(
             enabled_capabilities or []
@@ -522,24 +505,6 @@ class Space:
             *self._transcription_models_below_classification,
         ]
 
-    def _linked(self, kind: LinkKind) -> Sequence[ClassifiedLink]:
-        return {
-            "completion": self.linked_completion_models,
-            "embedding": self.linked_embedding_models,
-            "transcription": self.linked_transcription_models,
-            "transcription_service": self.linked_transcription_services,
-        }[kind]
-
-    def link_changes(self, kind: LinkKind) -> tuple[set[UUID], set[UUID]]:
-        """The links of one kind this space added and removed.
-
-        Only an explicit model-list edit, adding a model, or a change of the
-        space's classification level changes links. A write persists exactly
-        these changes and never touches a stored link it did not load."""
-        loaded = self._loaded_link_ids[kind]
-        current = {link.id for link in self._linked(kind)}
-        return current - loaded, set(loaded - current)
-
     def _split_models_by_classification(self) -> None:
         """Sort every linked model and service into usable and below-classification."""
         self._completion_models, self._completion_models_below_classification = (
@@ -768,20 +733,6 @@ class Space:
 
         self.websites.append(website)
 
-    def remove_website(self, website: "Website"):
-        for assistant in self.assistants:
-            assistant.websites = [w for w in assistant.websites if w.id != website.id]
-
-        self.websites.remove(website)
-
-    def add_group_chat(self, group_chat: "GroupChat"):
-        assert self.group_chats is not None
-        self.group_chats.append(group_chat)
-
-    def remove_group_chat(self, group_chat: "GroupChat"):
-        assert self.group_chats is not None
-        self.group_chats.remove(group_chat)
-
     def add_assistant(self, assistant: "Assistant"):
         if assistant.id in [a.id for a in self.assistants]:
             raise BadRequestException("Assistant is already in the space")
@@ -793,33 +744,6 @@ class Space:
                 self.add_completion_model(cm)
 
         self.assistants.append(assistant)
-
-    def remove_assistant(self, assistant: "Assistant"):
-        for group_chat in self.group_chats or []:
-            group_chat.assistants = [
-                a for a in group_chat.assistants if a.assistant.id != assistant.id
-            ]
-
-        self.assistants.remove(assistant)
-        self.removed_assistant_ids.add(assistant.id)
-
-    def add_collection_owner_move(self, collection: "Collection"):
-        """Byter ägare på en collection till detta space (uppdaterar FK i DB).
-        Använd INTE för import/delning."""
-
-        if collection.id in [_c.id for _c in self.collections]:
-            raise BadRequestException("Collection is already owned by the space")
-        if not self.is_embedding_model_in_space(collection.embedding_model.id):
-            raise BadRequestException("Embedding model is not in the space")
-        self.collections.append(collection)
-
-    def remove_collection(self, collection: "Collection"):
-        for assistant in self.assistants:
-            assistant.collections = [
-                c for c in assistant.collections if c.id != collection.id
-            ]
-
-        self.collections = [c for c in self.collections if c.id != collection.id]
 
     def can_use_knowledge(
         self, knowledge: list[Union["Website", "Collection", "IntegrationKnowledge"]]
