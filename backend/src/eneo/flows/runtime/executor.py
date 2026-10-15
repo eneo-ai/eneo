@@ -51,6 +51,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptToolCallStart,
     parse_flow_step_attempt_input,
 )
+from eneo.flows.domain.flow_step_validation import require_completion_model_for_step
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     resolve_flow_mapped_execution_policy,
@@ -1004,6 +1005,7 @@ class FlowRunExecutor:
         )
         try:
             self._refuse_unacceptable_http_configs(steps)
+            await self._refuse_model_steps_without_a_model(steps, state=state)
             tool_preflight = await self._tool_preflight(steps, run=run, state=state)
             step_output_levels = await self._resolve_step_output_levels(
                 steps=steps, state=state, run=run, tool_preflight=tool_preflight
@@ -3280,6 +3282,22 @@ class FlowRunExecutor:
                     code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
                     context={"step_order": step.step_order},
                 )
+
+    async def _refuse_model_steps_without_a_model(
+        self, steps: list[RuntimeStep], *, state: RunExecutionState
+    ) -> None:
+        """Refuse a run with a step that would call a completion model it does
+        not have (a version published before publishing checked this), before
+        any step, so no earlier step calls its tool or model first."""
+        for step in steps:
+            assistant = await self._load_assistant(
+                step.assistant_id, state, snapshot=step.assistant_snapshot
+            )
+            require_completion_model_for_step(
+                step_order=step.step_order,
+                output_mode=step.output_mode,
+                has_completion_model=assistant.completion_model is not None,
+            )
 
     def _refuse_timeout_over_the_cap(
         self, step: RuntimeStep, label: str, timeout_seconds: int

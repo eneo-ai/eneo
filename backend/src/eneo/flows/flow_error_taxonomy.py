@@ -691,8 +691,11 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     ),
     FlowApiErrorCode.ASSISTANT_MODEL_PROVIDER_REQUIRED: _entry(
         category="Published definition",
-        surfaced_through="API error response",
-        cause="The step assistant uses a model without a provider binding.",
+        surfaced_through="API response and run error payload",
+        cause=(
+            "The step assistant uses a model without a provider binding, or a step "
+            "that calls a completion model has none."
+        ),
         consumer_action="Select a provider-backed model for the step assistant before publishing.",
         user_action="Select a model connected to a provider before publishing the flow.",
     ),

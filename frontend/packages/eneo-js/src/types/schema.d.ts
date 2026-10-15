@@ -22094,6 +22094,7 @@ export interface components {
        * @enum {string}
        */
       code:
+        | "flow_assistant_model_provider_required"
         | "flow_assistant_snapshot_drift"
         | "flow_assistant_snapshot_republish_required"
         | "flow_assistant_snapshot_resource_invalid"
@@ -24892,6 +24893,7 @@ export interface components {
       /** @description Stable machine-readable step failure code. Clients should branch on this code when present and treat error_message as technical detail. */
       error_code?:
         | (
+            | "flow_assistant_model_provider_required"
             | "flow_assistant_snapshot_drift"
             | "flow_assistant_snapshot_republish_required"
             | "flow_assistant_snapshot_resource_invalid"
@@ -26297,6 +26299,7 @@ export interface components {
       /** @description Stable machine-readable attempt failure code. */
       error_code?:
         | (
+            | "flow_assistant_model_provider_required"
             | "flow_assistant_snapshot_drift"
             | "flow_assistant_snapshot_republish_required"
             | "flow_assistant_snapshot_resource_invalid"
@@ -59030,7 +59033,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
-      /** @description The flow cannot be published because its draft definition is incomplete or invalid. A step whose tool the instance or the space does not allow is refused with `typed_io_tool_not_allowed`; `context` holds `step_order`, `refusal` (the refusing level), `mcp_server_id` and `tool_id`. A step whose tool has an input schema that is not a valid JSON Schema, or of a draft Eneo does not support, is refused with `typed_io_tool_invalid_schema`. A step that gives no value for an argument the schema's top-level `required` names is refused with `typed_io_tool_invalid_config` (not for a `required` beside a top-level `$ref` in drafts 3, 4, 6 and 7, which a run does not read either); `context` holds `step_order`, `field`, `argument` and `problem` `missing_required`. A step whose fixed (not bound) argument value does not fit the subschema the input schema's top-level `properties` gives for that argument is refused with `typed_io_tool_invalid_config` and `problem` `outside_schema`; not beside a top-level `$ref` in drafts 3, 4, 6 and 7, and not when the bounded property check times out, cannot evaluate the subschema, or cannot run on this host: a run checks those. */
+      /** @description The flow cannot be published because its draft definition is incomplete or invalid. A step whose tool the instance or the space does not allow is refused with `typed_io_tool_not_allowed`; `context` holds `step_order`, `refusal` (the refusing level), `mcp_server_id` and `tool_id`. A step whose tool has an input schema that is not a valid JSON Schema, or of a draft Eneo does not support, is refused with `typed_io_tool_invalid_schema`. A step that gives no value for an argument the schema's top-level `required` names is refused with `typed_io_tool_invalid_config` (not for a `required` beside a top-level `$ref` in drafts 3, 4, 6 and 7, which a run does not read either); `context` holds `step_order`, `field`, `argument` and `problem` `missing_required`. A step whose fixed (not bound) argument value does not fit the subschema the input schema's top-level `properties` gives for that argument is refused with `typed_io_tool_invalid_config` and `problem` `outside_schema`; not beside a top-level `$ref` in drafts 3, 4, 6 and 7, and not when the bounded property check times out, cannot evaluate the subschema, or cannot run on this host: a run checks those. A step that calls an AI model while its assistant has no model, or a step whose model has no provider, is refused with `flow_assistant_model_provider_required`; `context` holds `issue_code` and `step_order`. When security classifications are on and such a step must clear a classification level, publish reports the classification refusal first. */
       400: {
         headers: {
           [name: string]: unknown;

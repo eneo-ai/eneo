@@ -737,7 +737,13 @@ async def delete_flow(
                 "`typed_io_tool_invalid_config` and `problem` `outside_schema`; "
                 "not beside a top-level `$ref` in drafts 3, 4, 6 and 7, and not "
                 "when the bounded property check times out, cannot evaluate the "
-                "subschema, or cannot run on this host: a run checks those."
+                "subschema, or cannot run on this host: a run checks those. "
+                "A step that calls an AI model while its assistant has no model, "
+                "or a step whose model has no provider, is refused with "
+                "`flow_assistant_model_provider_required`; `context` holds "
+                "`issue_code` and `step_order`. When security classifications "
+                "are on and such a step must clear a classification level, "
+                "publish reports the classification refusal first."
             ),
             message="Flow cannot be published in its current state.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,

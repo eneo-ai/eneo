@@ -65,6 +65,8 @@ const CODE_TO_MESSAGE: Record<string, (subject?: string) => string> = {
   flow_speaker_service_not_chosen: () => m.flow_validation_msg_speaker_service_not_chosen(),
   flow_speaker_service_unavailable: () => m.flow_validation_msg_speaker_service_unavailable(),
   flow_step_limit_exceeded: () => m.flow_error_flow_step_limit_exceeded(),
+  flow_assistant_model_provider_required: () =>
+    m.flow_error_flow_assistant_model_provider_required(),
   // The server names three of the editor's own checks differently.
   duplicate_step_order: () => m.flow_validation_msg_duplicate_step_order(),
   step_order_not_contiguous: () => m.flow_validation_msg_non_contiguous_step_order(),

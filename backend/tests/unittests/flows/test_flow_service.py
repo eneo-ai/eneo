@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -24,8 +25,9 @@ from eneo.flows.domain.flow_invariant_exceptions import (
 from eneo.flows.domain.flow_step_validation import (
     FlowGraphIssueCode,
     FlowStepValidationError,
+    require_completion_model_for_step,
 )
-from eneo.flows.enums import FlowInputSource
+from eneo.flows.enums import FlowInputSource, FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
@@ -189,6 +191,20 @@ def _stub_template_asset_lookup(
     return asset
 
 
+def _provider_backed_model() -> SimpleNamespace:
+    """A model a published step can bind: publishing refuses a model step
+    without one."""
+    return SimpleNamespace(
+        id=uuid4(),
+        tenant_id=None,
+        can_access=True,
+        provider_id=uuid4(),
+        provider_type="openai",
+        get_model_route=lambda: "openai/model-a",
+        security_classification=None,
+    )
+
+
 def _service(
     *,
     user,
@@ -216,7 +232,7 @@ def _service(
             id=assistant_id,
             user=None,
             space_id=uuid4(),
-            completion_model=None,
+            completion_model=_provider_backed_model(),
             name="Assistant",
             prompt=None,
             completion_model_kwargs=ModelKwargs(),
@@ -490,7 +506,7 @@ async def test_publish_flow_snapshots_the_assistants_it_validated(user):
                 id=assistant_id,
                 user=None,
                 space_id=uuid4(),
-                completion_model=None,
+                completion_model=_provider_backed_model(),
                 name="Assistant",
                 prompt=SimpleNamespace(text=prompt),
                 completion_model_kwargs=ModelKwargs(),
@@ -876,13 +892,29 @@ async def test_publish_flow_accepts_reads_the_run_collects(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "binding", ["missing", "missing_id", "missing_type", "provider_backed"]
+    "binding",
+    [
+        "no_model",
+        "no_model_no_ai_mode",
+        "missing",
+        "missing_id",
+        "missing_type",
+        "provider_backed",
+    ],
 )
 async def test_publish_flow_requires_provider_binding(user, binding):
+    # Kills: publish not asking the model rule (a model step without a model
+    # was published and failed at run time), and a refusal without the
+    # context the editor routes into its banner. no_model_no_ai_mode kills
+    # publish asking the rule about another mode than the step's.
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
     step = _step()
+    if binding == "no_model_no_ai_mode":
+        step = step.model_copy(
+            update={"output_mode": "render_verbatim", "output_type": "pdf"}
+        )
     flow = Flow(
         id=uuid4(),
         tenant_id=user.tenant_id,
@@ -913,10 +945,15 @@ async def test_publish_flow_requires_provider_binding(user, binding):
         get_model_route=lambda: "openai/model-a",
         security_classification=None,
     )
+    if binding in {"no_model", "no_model_no_ai_mode"}:
+        assistant.completion_model = None
     service.assistant_service.get_assistant.side_effect = None
     service.assistant_service.get_assistant.return_value = (assistant, [])
 
-    if binding == "provider_backed":
+    if binding == "no_model_no_ai_mode":
+        await service.publish_flow(flow_id=flow.id)
+        version_repo.create.assert_awaited_once()
+    elif binding == "provider_backed":
         result = await service.publish_flow(flow_id=flow.id)
         assert result.published_version == 1
         version_repo.create.assert_awaited_once()
@@ -932,11 +969,42 @@ async def test_publish_flow_requires_provider_binding(user, binding):
             await service.publish_flow(flow_id=flow.id)
         assert caught.value.code == "flow_assistant_model_provider_required"
         assert caught.value.step_order == step.step_order
+        assert caught.value.context == {
+            "issue_code": "flow_assistant_model_provider_required",
+            "step_order": step.step_order,
+        }
         assert "Select a provider-backed model" in str(caught.value)
         version_repo.create.assert_not_awaited()
         flow_repo.lock_publication_pointer.assert_not_awaited()
         flow_repo.allocate_next_version.assert_not_awaited()
         flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.parametrize("output_mode", list(FlowOutputMode))
+@pytest.mark.parametrize("has_completion_model", [True, False])
+def test_only_a_model_step_without_a_model_is_refused(
+    output_mode, has_completion_model
+):
+    # Kills: refusing a deterministic or transcription step for the model it
+    # does not call, and letting a model step without one through.
+    refused = not has_completion_model and output_mode in {
+        FlowOutputMode.PASS_THROUGH,
+        FlowOutputMode.HTTP_POST,
+        FlowOutputMode.SPEAKER_MAPPING,
+    }
+    check = partial(
+        require_completion_model_for_step,
+        step_order=2,
+        output_mode=output_mode.value,
+        has_completion_model=has_completion_model,
+    )
+    if refused:
+        with pytest.raises(FlowStepValidationError) as caught:
+            check()
+        assert caught.value.code == "flow_assistant_model_provider_required"
+        assert caught.value.step_order == 2
+    else:
+        check()
 
 
 @pytest.mark.asyncio

@@ -39,6 +39,8 @@ from eneo.flows.domain.flow_invariant_exceptions import (
 from eneo.flows.domain.flow_step_validation import (
     FlowGraphIssueCode,
     FlowStepValidationError,
+    provider_backed_model_required,
+    require_completion_model_for_step,
 )
 from eneo.flows.domain.step_config import clean_inactive_step_config
 from eneo.flows.domain.tool_facts import (
@@ -1360,11 +1362,12 @@ class FlowService:
             )
         model = assistant.completion_model
         if model is not None and (model.provider_id is None or not model.provider_type):
-            raise FlowStepValidationError(
-                f"Step {step.step_order}: Select a provider-backed model before publishing the flow.",
-                step_order=step.step_order,
-                code=FlowApiErrorCode.ASSISTANT_MODEL_PROVIDER_REQUIRED.value,
-            )
+            raise provider_backed_model_required(step.step_order)
+        require_completion_model_for_step(
+            step_order=step.step_order,
+            output_mode=step.output_mode,
+            has_completion_model=model is not None,
+        )
         assistant_snapshot = build_assistant_execution_snapshot(
             assistant=assistant,
         )

@@ -11,7 +11,9 @@ from eneo.flows.enums import (
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
+    flow_output_mode_uses_completion_model,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.main.exceptions import BadRequestException
 
@@ -27,6 +29,30 @@ class FlowStepValidationError(BadRequestException):
     ) -> None:
         super().__init__(message, code=code, context=context)
         self.step_order = step_order
+
+
+def provider_backed_model_required(step_order: int) -> FlowStepValidationError:
+    """The refusal of a step that lacks the provider-backed model it needs.
+    ``context`` carries ``issue_code`` and ``step_order`` so the editor can
+    name the step."""
+    code = FlowApiErrorCode.ASSISTANT_MODEL_PROVIDER_REQUIRED.value
+    return FlowStepValidationError(
+        f"Step {step_order}: Select a provider-backed model before publishing the flow.",
+        step_order=step_order,
+        code=code,
+        context={"issue_code": code, "step_order": step_order},
+    )
+
+
+def require_completion_model_for_step(
+    *, step_order: int, output_mode: str, has_completion_model: bool
+) -> None:
+    """Refuse a step whose output mode calls a completion model while its
+    assistant has none. A run uses only the model the published step binds,
+    so publishing and the run's preflight both ask this before any step runs."""
+    if has_completion_model or not flow_output_mode_uses_completion_model(output_mode):
+        return
+    raise provider_backed_model_required(step_order)
 
 
 class FlowGraphIssueCode(StrEnum):

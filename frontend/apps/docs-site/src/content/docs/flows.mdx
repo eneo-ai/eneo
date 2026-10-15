@@ -79,6 +79,13 @@ When a run starts, Eneo compares the published assistant surface with the curren
 assistant configuration. If the assistant changed after publish, the run fails
 before any step executes. Republish the Flow after reviewing the change.
 
+A step that calls an AI model runs only with the model its published snapshot
+names. Publishing refuses such a step when its assistant has no model, with
+`flow_assistant_model_provider_required` naming the step. When security
+classifications are on and such a step must clear a classification level,
+publish reports the classification refusal first. A run of a version published without one fails with the same code
+before any step executes.
+
 This protects against silent configuration drift. It does not freeze the contents
 behind a knowledge source. If that source changes, the Flow still uses its current
 data at run time. A step's assistant does not use MCP servers or tools in a

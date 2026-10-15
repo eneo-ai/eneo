@@ -1296,7 +1296,7 @@ def _execute_setup_for_security(
     *,
     space_level: int,
     model_level: int,
-    model_levels: list[int] | None = None,
+    model_levels: list[int | None] | None = None,
     step_fields: dict[str, object] | None = None,
     step_fields_index: int = 0,
 ):
@@ -1645,6 +1645,53 @@ async def test_execute_fails_a_security_mismatch_before_any_step_runs(user):
     flow_run_repo.claim_step_result.assert_not_awaited()
     executor._execute_step.assert_not_awaited()
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_mode", ["pass_through", "render_verbatim"])
+async def test_execute_fails_a_model_step_without_a_model_before_any_step_runs(
+    user, output_mode
+):
+    # Kills: the run reaching its steps (an earlier step's tool call included)
+    # before it meets a model step without a model, which then failed mid-run
+    # saying the provider may have started work; and (render_verbatim) the
+    # preflight asking about another mode than the step's.
+    executor, flow_run_repo, queued_run = _execute_setup_for_security(
+        user,
+        space_level=1,
+        model_level=1,
+        model_levels=[1, None],
+        step_fields={"output_mode": output_mode, "output_type": "pdf"}
+        if output_mode == "render_verbatim"
+        else None,
+        step_fields_index=1,
+    )
+    # With classifications on, the level check already refuses a step whose
+    # assistant has no model; the model rule must hold without it.
+    executor.security_classification_enabled = False
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    if output_mode == "render_verbatim":
+        # The run goes on to claim its first step.
+        assert result == {"status": "skipped", "reason": "step_already_claimed"}
+        return
+    assert result == {
+        "status": "failed",
+        "error": "flow_assistant_model_provider_required",
+    }
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    executor._execute_step.assert_not_awaited()
+    terminalized = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
+    assert terminalized["error"].step_order == 2
+    assert terminalized["source"] == FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
 
 
 @pytest.mark.asyncio
@@ -4919,12 +4966,15 @@ async def test_execute_cancels_as_flow_deleted_when_the_flow_is_gone_at_assistan
 
 
 def _security_assistant(
-    assistant_id: UUID, *, model_level: int = 3, prompt: str = ""
+    assistant_id: UUID, *, model_level: int | None = 3, prompt: str = ""
 ) -> SimpleNamespace:
+    """``model_level`` None: the assistant has no model."""
     return SimpleNamespace(
         id=assistant_id,
         get_prompt_text=lambda: prompt,
-        completion_model=SimpleNamespace(
+        completion_model=None
+        if model_level is None
+        else SimpleNamespace(
             security_classification=SimpleNamespace(security_level=model_level)
         ),
         collections=[],

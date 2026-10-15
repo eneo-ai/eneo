@@ -78,6 +78,28 @@ describe("FlowValidationBanner server issues", () => {
     expect(onNavigateToStep).toHaveBeenCalledWith("step-3");
   });
 
+  it("says a step needs a model when publish refuses a model step without one", async () => {
+    // Kills: the refusal shown as its bare code instead of a sentence.
+    const onNavigateToStep = vi.fn();
+    const errors = new Map([
+      [
+        "flow:server:flow_assistant_model_provider_required:3",
+        ["Step 3: Select a provider-backed model before publishing the flow."]
+      ]
+    ]);
+
+    render(FlowValidationBanner, {
+      errors,
+      steps: [makeStep()],
+      onNavigateToStep,
+      isExpanded: true
+    });
+
+    expect(screen.getByText(m.flow_error_flow_assistant_model_provider_required())).toBeTruthy();
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_validation_go_to_step() }));
+    expect(onNavigateToStep).toHaveBeenCalledWith("step-3");
+  });
+
   it("says a read of free-text run input on a form or upload flow is not received, not that a step is unusable", async () => {
     const raw =
       "Step 3: '{{ indata_text }}' reads the run's free-text input, but this flow's run collects only its form fields, so publish refuses a step that reads run text on such a flow.";
