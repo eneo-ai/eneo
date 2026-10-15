@@ -7,15 +7,14 @@
     MiniMap,
     MarkerType,
     Panel,
-    Position,
     getViewportForBounds,
     type Node,
     type Edge,
     type Rect,
-    type NodeEventWithPointer
+    type NodeEventWithPointer,
+    type FitViewOptions
   } from "@xyflow/svelte";
   import "@xyflow/svelte/dist/style.css";
-  import dagre from "dagre";
   import type { Flow, FlowStep } from "@eneo/eneo-js";
   import {
     securityClassName,
@@ -24,12 +23,12 @@
   } from "$lib/features/flows/flowClassificationNames";
   import FlowNodeLlm from "./FlowNodeLlm.svelte";
   import FlowNodeIO from "./FlowNodeIO.svelte";
+  import FlowNodeTool from "./FlowNodeTool.svelte";
   import FlowEdgeInteractive from "./FlowEdgeInteractive.svelte";
   import FlowGraphAutoFit from "./FlowGraphAutoFit.svelte";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import {
-    buildFlowGraphTopology,
     computeFlowExportSize,
     computeFlowGraphEmphasis,
     planFlowExportCaption,
@@ -40,6 +39,9 @@
     flowGraphLayoutKey,
     getEdgePayloadKind
   } from "$lib/features/flows/flowStepPresentation";
+  import { planFlowGraph } from "$lib/features/flows/flowGraphPlan";
+  import { getFlowFormSchemaMetadata } from "$lib/features/flows/flowFormSchema";
+  import type { ToolOptionsLoad } from "./tool/toolInputConfig";
   import { IconDownload } from "@eneo/icons/download";
   import { Button } from "$lib/components/ui/button/index.js";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
@@ -59,6 +61,7 @@
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
   const assistantRevision = flowEditor.assistantRevision;
+  const toolOptions = flowEditor.state.toolOptions;
 
   let containerEl: HTMLDivElement | undefined = $state();
   let layoutRevision = $state(0);
@@ -85,7 +88,7 @@
     input: FlowNodeIO,
     output: FlowNodeIO,
     http_source: FlowNodeIO,
-    tool_source: FlowNodeIO,
+    tool_source: FlowNodeTool,
     http_target: FlowNodeIO
   };
   const edgeTypes = {
@@ -125,15 +128,35 @@
   let lastStepsJson = "";
   let lastMode = "";
   let lastMetaJson = "";
-  let cachedLayout: { nodes: Node[]; edges: Edge[] } = { nodes: [], edges: [] };
+  let cachedLayout: {
+    nodes: Node[];
+    edges: Edge[];
+    /** Tool node id -> the step it belongs to. */
+    ownerOf: Record<string, string>;
+    /** The laid-out extent, edges under the steps included. */
+    size: { width: number; height: number };
+  } = { nodes: [], edges: [], ownerOf: {}, size: { width: 0, height: 0 } };
+  // The binding edge the pointer is on, which lights the argument row it fills.
+  let hoveredEdgeId = $state<string | null>(null);
+  // Nodes glide to a new place only right after a layout change, never while
+  // someone pans or zooms.
+  let gliding = $state(false);
+  let glideTimer: ReturnType<typeof setTimeout> | undefined;
 
   $effect(() => {
     const orderedSteps = flow?.steps ?? [];
     const stepsJson = flowGraphLayoutKey(orderedSteps);
     // The class names are part of what a node shows, so renamed classes
     // rebuild the nodes too.
+    // What a tool node shows decides its height, so a tool list that arrives
+    // or changes rebuilds the layout too.
+    const toolLoad = $toolOptions;
+    const formSchema = getFlowFormSchemaMetadata(flow?.metadata_json);
     const metaJson = JSON.stringify({
       classifications,
+      // A renamed run-form field changes which tool arguments read the run's input.
+      formSchema,
+      tools: toolLoad,
       steps: orderedSteps.map((s) => ({
         assistant_id: s.assistant_id,
         meta: s.assistant_id ? (assistantMetaById.get(s.assistant_id) ?? null) : null
@@ -145,16 +168,33 @@
       lastStepsJson = stepsJson;
       lastMode = currentMode;
       lastMetaJson = metaJson;
-      cachedLayout = buildLayout(flow?.steps ?? [], activeStepId, currentMode);
+      cachedLayout = buildLayout(
+        flow?.steps ?? [],
+        activeStepId,
+        currentMode,
+        toolLoad,
+        formSchema
+      );
       // A counter, not a signature: rewiring one step's underlag changes the
       // laid-out width without changing the mode, the JSON length, or the node
       // and edge counts, and a collision leaves the old frame in place.
       layoutRevision += 1;
+      if (layoutRevision > 1) glide();
     }
-    applyEmphasis(activeStepId, previewStepId);
+    applyEmphasis(activeStepId, previewStepId, hoveredEdgeId);
   });
 
-  function applyEmphasis(activeId: string | null, previewId: string | null): void {
+  function glide(): void {
+    gliding = true;
+    clearTimeout(glideTimer);
+    glideTimer = setTimeout(() => (gliding = false), 260);
+  }
+
+  function applyEmphasis(
+    activeId: string | null,
+    previewId: string | null,
+    hoveredEdge: string | null
+  ): void {
     const emphasis = computeFlowGraphEmphasis({
       edges: cachedLayout.edges.map((edge) => ({
         id: edge.id,
@@ -162,20 +202,36 @@
         target: edge.target
       })),
       activeId,
-      previewId
+      previewId,
+      ownerOf: cachedLayout.ownerOf
     });
+    // Only pointing at a step quiets the rest: a selection persists, and a
+    // graph faded around whichever step is open would stay faded.
+    const previewing = emphasis.isPreview;
+    const litArguments = (nodeId: string): string[] =>
+      cachedLayout.edges
+        .filter(
+          (edge) =>
+            edge.target === nodeId &&
+            ((previewing && emphasis.litEdges[edge.id] === true) || edge.id === hoveredEdge)
+        )
+        .flatMap((edge) => (Array.isArray(edge.data?.arguments) ? edge.data.arguments : []))
+        .filter((argument): argument is string => typeof argument === "string");
     nodes = cachedLayout.nodes.map((node) => ({
       ...node,
       data: {
         ...node.data,
-        isActive: node.id === activeId
+        isActive: node.id === activeId,
+        dimmed: previewing && emphasis.litNodes[node.id] !== true,
+        lifted: previewing && emphasis.litNodes[node.id] === true,
+        ...(node.type === "tool_source" ? { litArguments: litArguments(node.id) } : {})
       }
     }));
     edges = cachedLayout.edges.map((edge) => ({
       ...edge,
       data: {
         ...edge.data,
-        // The dot runs only while someone is pointing at a step. A selection
+        // The dash runs only while someone is pointing at a step. A selection
         // persists, and a persistent selection lighting a dozen edges would
         // leave a dozen animations running at rest -- ambient motion on a
         // screen whose whole register is calm, and motion nobody started.
@@ -185,10 +241,13 @@
     }));
   }
 
-  function isStepNode(id: string | undefined): boolean {
-    if (!id) return false;
+  /** The step a node opens and previews: a step itself, or the step a tool node belongs to. */
+  function stepOfNode(id: string | undefined): string | null {
+    if (!id) return null;
+    const owner = cachedLayout.ownerOf[id];
+    if (owner !== undefined) return owner;
     const node = cachedLayout.nodes.find((candidate) => candidate.id === id);
-    return node?.type === "llm" || node?.type === "assembly";
+    return node?.type === "llm" || node?.type === "assembly" ? id : null;
   }
 
   function parseAssistantMeta(assistant: unknown): AssistantFlowMeta {
@@ -307,60 +366,79 @@
   function buildLayout(
     steps: FlowStep[],
     activeId: string | null,
-    userMode: string
-  ): { nodes: Node[]; edges: Edge[] } {
+    userMode: string,
+    toolLoad: ToolOptionsLoad,
+    formSchema: ReturnType<typeof getFlowFormSchemaMetadata>
+  ): typeof cachedLayout {
     const orderedSteps = structuredClone(steps).sort((a, b) => a.step_order - b.step_order);
     const isPowerUser = userMode === "power_user";
-    // These have to match what the nodes actually render, or dagre spaces the
-    // graph for a size that no longer exists: the pill grew to give names room
-    // and the card grew a second name line and a badge row.
-    const nodeWidth = isPowerUser ? 300 : 200;
-    const nodeHeight = isPowerUser ? 176 : 64;
-    const inputNodeSize = { width: 160, height: 74 };
-    const outputNodeSize = { width: 170, height: 78 };
-
-    const g = new dagre.graphlib.Graph();
-    g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({
-      rankdir: "LR",
-      ranksep: isPowerUser ? 140 : 80,
-      nodesep: isPowerUser ? 50 : 30,
-      marginx: 20,
-      marginy: 16
+    // What exists, what tool nodes show and where everything goes is owned by
+    // planFlowGraph; this component only renders it.
+    const plan = planFlowGraph({
+      steps: orderedSteps,
+      formSchema,
+      toolLoad,
+      detailed: isPowerUser
     });
-
-    // Topology (which nodes and edges exist) is owned by
-    // buildFlowGraphTopology in flowStepPresentation; this component only
-    // renders it.
-    const topology = buildFlowGraphTopology(orderedSteps);
+    const { layout, metrics, boxOf, ownerOf } = plan;
+    const topology = { nodes: plan.nodes };
+    const toolById = plan.tools;
+    const drawnEdges = plan.edges;
     const stepByOrder = new SvelteMap<number, FlowStep>();
     orderedSteps.forEach((step) => stepByOrder.set(step.step_order, step));
     const stepById = new SvelteMap<string, FlowStep>();
     orderedSteps.forEach((step) => stepById.set(step.id ?? `step-${step.step_order}`, step));
+    oncontentsize?.(layout.size);
+
+    const toolLabel = (nodeId: string): string =>
+      toolById.get(nodeId)?.toolName ?? m.flow_graph_tool_fallback();
+    const stepLabel = (step: FlowStep | undefined, order: number | string): string =>
+      step?.user_description ?? m.flow_step_fallback_label({ order });
 
     const resultNodes: Node[] = [];
     for (const node of topology.nodes) {
+      const position = layout.positions.get(node.id) ?? { x: 0, y: 0 };
       if (node.kind === "step") {
         const step = stepById.get(node.id);
         if (!step) continue;
-        g.setNode(node.id, { width: nodeWidth, height: nodeHeight });
         resultNodes.push({
           id: node.id,
           type: step.output_mode === "template_fill" ? "assembly" : "llm",
-          sourcePosition: Position.Right,
-          targetPosition: Position.Left,
-          position: { x: 0, y: 0 },
+          position,
           data: {
-            label: step.user_description ?? m.flow_step_fallback_label({ order: step.step_order }),
+            label: stepLabel(step, step.step_order),
             step,
             isActive: node.id === activeId,
             mode: userMode,
+            handleY: metrics.spineHandleY,
             modelName: assistantMetaById.get(step.assistant_id)?.modelName ?? null,
             ...classBadges(
               assistantMetaById.get(step.assistant_id)?.assistantClassificationLevel ?? null,
               getClassificationLevel(step)
             )
           }
+        });
+        continue;
+      }
+      if (node.kind === "tool_source") {
+        const tool = toolById.get(node.id);
+        if (!tool) continue;
+        const box = boxOf(node);
+        resultNodes.push({
+          id: node.id,
+          type: "tool_source",
+          position,
+          width: box.width,
+          height: box.height,
+          ariaLabel:
+            tool.toolName === null
+              ? m.flow_graph_tool_node_label_unnamed({ order: String(node.stepOrder) })
+              : m.flow_graph_tool_node_label({
+                  tool: tool.toolName,
+                  server: tool.serverName ?? m.flow_graph_tool_fallback(),
+                  order: String(node.stepOrder)
+                }),
+          data: { tool, mode: userMode }
         });
         continue;
       }
@@ -371,10 +449,7 @@
             ? m.flow_graph_node_output()
             : node.kind === "http_source"
               ? m.flow_graph_node_http_source()
-              : node.kind === "tool_source"
-                ? m.flow_graph_node_tool_source()
-                : m.flow_graph_node_http_target();
-      g.setNode(node.id, node.kind === "input" ? inputNodeSize : outputNodeSize);
+              : m.flow_graph_node_http_target();
       resultNodes.push({
         id: node.id,
         type: node.kind,
@@ -383,84 +458,53 @@
         // that answer Enter with nothing, under a description promising they
         // would open a step.
         focusable: false,
-        ...(node.kind === "input" || node.kind === "http_source" || node.kind === "tool_source"
-          ? { sourcePosition: Position.Right }
-          : { targetPosition: Position.Left }),
-        position: { x: 0, y: 0 },
+        position,
+        width: boxOf(node).width,
+        height: boxOf(node).height,
         data: { label: ioLabel, nodeType: node.kind, mode: userMode }
       });
     }
 
-    const edgeSpecs = topology.edges;
-    for (const edge of edgeSpecs) {
-      g.setEdge(edge.source, edge.target);
-    }
-
-    dagre.layout(g);
-
-    // dagre knows the exact extent of what it just laid out, which is what a
-    // host needs to decide how much room the graph deserves.
-    const laidOut = g.graph();
-    if (typeof laidOut.width === "number" && typeof laidOut.height === "number") {
-      oncontentsize?.({ width: laidOut.width, height: laidOut.height });
-    }
-
-    for (const node of resultNodes) {
-      const pos = g.node(node.id);
-      if (pos) {
-        node.position = {
-          x: pos.x - (pos.width ?? 0) / 2,
-          y: pos.y - (pos.height ?? 0) / 2
-        };
-      }
-    }
-
-    const incomingEdgeCounts = new SvelteMap<string, number>();
-    const incomingEdgeLane = new SvelteMap<string, number>();
-    for (const edge of edgeSpecs) {
-      incomingEdgeCounts.set(edge.target, (incomingEdgeCounts.get(edge.target) ?? 0) + 1);
-    }
-
-    const resultEdges: Edge[] = [];
-    for (const edge of edgeSpecs) {
+    const kindOf = new Map(topology.nodes.map((node) => [node.id, node.kind]));
+    const fromAbove = (id: string) => {
+      const kind = kindOf.get(id);
+      return kind === "input" || kind === "http_source" || kind === "tool_source";
+    };
+    const resultEdges: Edge[] = drawnEdges.map((edge, index) => {
       const sourceStep =
         edge.sourceStepOrder > 0 ? stepByOrder.get(edge.sourceStepOrder) : undefined;
       const targetStep =
         edge.targetStepOrder != null ? stepByOrder.get(edge.targetStepOrder) : undefined;
-      const sourceLevel = getClassificationLevel(sourceStep);
-      const targetLevel = getClassificationLevel(targetStep);
+      const isBinding = edge.kind === "tool_argument";
+      // A binding sends a step's output to a tool's server, which the step's
+      // own classification badge does not describe.
+      const sourceLevel = isBinding ? null : getClassificationLevel(sourceStep);
+      const targetLevel = isBinding ? null : getClassificationLevel(targetStep);
       const isEscalation = sourceLevel != null && targetLevel != null && targetLevel > sourceLevel;
       const isViolation = sourceLevel != null && targetLevel != null && targetLevel < sourceLevel;
-      const laneIndex = incomingEdgeLane.get(edge.target) ?? 0;
-      incomingEdgeLane.set(edge.target, laneIndex + 1);
-      const laneCount = incomingEdgeCounts.get(edge.target) ?? 1;
-      const labelOffsetY = (laneIndex - (laneCount - 1) / 2) * 22;
       const sourceLabel =
         edge.source === "input"
           ? m.flow_graph_node_input()
           : edge.source === "http-source"
             ? m.flow_graph_node_http_source()
-            : edge.source === "tool-source"
-              ? m.flow_graph_node_tool_source()
-              : (sourceStep?.user_description ??
-                m.flow_step_fallback_label({ order: edge.sourceStepOrder }));
+            : kindOf.get(edge.source) === "tool_source"
+              ? toolLabel(edge.source)
+              : stepLabel(sourceStep, edge.sourceStepOrder);
       const targetLabel =
         edge.target === "output"
           ? m.flow_graph_node_output()
           : edge.target === "http-target"
             ? m.flow_graph_node_http_target()
-            : (targetStep?.user_description ??
-              m.flow_step_fallback_label({ order: edge.targetStepOrder ?? "?" }));
-      const payloadKind = getEdgePayloadKind({
-        edgeKind: edge.kind,
-        sourceStep,
-        targetStep
-      });
-      const payload = buildPayloadPreview(sourceStep, targetStep, sourceLevel, targetLevel);
+            : kindOf.get(edge.target) === "tool_source"
+              ? toolLabel(edge.target)
+              : stepLabel(targetStep, edge.targetStepOrder ?? "?");
+      const targetHandle = edge.targetHandle ?? (fromAbove(edge.source) ? "top" : "left");
+      const carried = edge.arguments ?? [];
       const allowInsert =
         edge.kind !== "all_previous_steps" &&
         edge.kind !== "http_get" &&
         edge.kind !== "tool" &&
+        edge.kind !== "tool_argument" &&
         edge.kind !== "http_post" &&
         // An inserted step would not feed a consumer whose underlag names
         // its producer explicitly, so underlag edges offer no insertion.
@@ -471,37 +515,61 @@
         ? "var(--negative-default)"
         : isEscalation
           ? "var(--warning-default)"
-          : undefined;
-      resultEdges.push({
-        id: `e-${edge.source}-${edge.target}-${edge.kind}-${laneIndex}`,
+          : isBinding
+            ? "var(--color-accent-default)"
+            : // xyflow draws an arrowhead without a colour as nothing at all.
+              "var(--border-strongest)";
+      return {
+        id: `e-${edge.source}-${edge.target}-${edge.kind}-${edge.argument ?? ""}`,
         type: "interactive",
         source: edge.source,
         target: edge.target,
+        targetHandle,
+        ...(isBinding
+          ? {
+              ariaLabel: m.flow_graph_edge_tool_argument({
+                argument: carried.join(", "),
+                source: sourceLabel
+              })
+            }
+          : {}),
         markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12, color: markerColor },
         data: {
           mode: userMode,
           readOnly: flow.published_version != null,
-          dataType: payloadKind,
+          dataType: getEdgePayloadKind({ edgeKind: edge.kind, sourceStep, targetStep }),
           edgeKind: edge.kind,
+          route: layout.routes[index],
+          arguments: carried,
+          argumentLabel:
+            carried.length === 1
+              ? carried[0]
+              : m.flow_graph_edge_tool_arguments_count({ count: String(carried.length) }),
           allowInsert,
-          labelOffsetY,
           sourceStepOrder: edge.sourceStepOrder,
           sourceLabel,
           targetLabel,
-          payload,
+          payload: buildPayloadPreview(sourceStep, targetStep, sourceLevel, targetLevel),
           classificationEscalation: isEscalation,
           classificationViolation: isViolation,
           sourceClassification: sourceLevel,
           targetClassification: targetLevel,
           onInsert: handleEdgeInsert,
           onInspect: handleEdgeInspect
-        },
-        style:
-          edge.kind === "all_previous_steps" ? "stroke-dasharray: 4 4; opacity: 0.6" : undefined
-      });
-    }
+        }
+      };
+    });
 
-    return { nodes: resultNodes, edges: resultEdges };
+    // Tab order follows reading order: a tool node comes right before its step.
+    const toolOfStep = new Map(Object.entries(ownerOf).map(([tool, step]) => [step, tool]));
+    const nodeById = new Map(resultNodes.map((node) => [node.id, node]));
+    const readingOrder = resultNodes
+      .filter((node) => node.type !== "tool_source")
+      .flatMap((node) => {
+        const tool = nodeById.get(toolOfStep.get(node.id) ?? "");
+        return tool ? [tool, node] : [node];
+      });
+    return { nodes: readingOrder, edges: resultEdges, ownerOf, size: layout.size };
   }
 
   let isExporting = $state(false);
@@ -522,7 +590,13 @@
    */
   async function addExportCaption(
     dataUrl: string,
-    spec: { width: number; height: number; scale: number; hasBulkEdges: boolean }
+    spec: {
+      width: number;
+      height: number;
+      scale: number;
+      hasBulkEdges: boolean;
+      hasBindingEdges: boolean;
+    }
   ): Promise<string> {
     const graph = new Image();
     await new Promise((resolve, reject) => {
@@ -573,7 +647,14 @@
     });
     if (plan.rows === 0) return dataUrl;
 
-    const band = font * plan.rows + gap * (plan.rows + 1);
+    // The binding key takes a row of its own under the rest, so the planned
+    // rows keep their widths.
+    const bindingLabel =
+      spec.hasBindingEdges && plan.rows > 0
+        ? fitText(m.flow_graph_legend_binding(), available - keyWidth - gap, bodyFont)
+        : null;
+    const rows = plan.rows + (bindingLabel !== null ? 1 : 0);
+    const band = font * rows + gap * (rows + 1);
     const canvas = document.createElement("canvas");
     canvas.width = spec.width;
     canvas.height = spec.height + band;
@@ -625,6 +706,22 @@
         ctx.setLineDash([]);
       }
     }
+    if (bindingLabel !== null) {
+      const lastRow = plan.showLegend || plan.showCaption ? legendRow : row - font - gap;
+      const bindingRow = lastRow + font + gap;
+      ctx.font = bodyFont;
+      const labelWidth = measure.measureText(bindingLabel).width;
+      const right = canvas.width - margin;
+      ctx.fillText(bindingLabel, right - labelWidth, bindingRow);
+      ctx.strokeStyle = style.getPropertyValue("--color-accent-default").trim() || style.color;
+      ctx.lineWidth = Math.max(1, Math.round(spec.scale));
+      ctx.setLineDash([font / 3, font / 4]);
+      ctx.beginPath();
+      ctx.moveTo(right - labelWidth - gap - keyWidth, bindingRow + font / 2);
+      ctx.lineTo(right - labelWidth - gap, bindingRow + font / 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     ctx.globalAlpha = 1;
 
     return canvas.toDataURL("image/png");
@@ -635,7 +732,19 @@
     try {
       const { toPng } = await import("html-to-image");
       const viewportEl = containerEl?.querySelector(".svelte-flow__viewport") as HTMLElement | null;
-      const bounds = graphBounds?.();
+      const nodeBounds = graphBounds?.();
+      // Node bounds leave out the lanes edges take under the steps, so the
+      // image spans the laid-out extent as well.
+      const bounds = nodeBounds && {
+        x: Math.min(nodeBounds.x, 0),
+        y: Math.min(nodeBounds.y, 0),
+        width:
+          Math.max(nodeBounds.x + nodeBounds.width, cachedLayout.size.width) -
+          Math.min(nodeBounds.x, 0),
+        height:
+          Math.max(nodeBounds.y + nodeBounds.height, cachedLayout.size.height) -
+          Math.min(nodeBounds.y, 0)
+      };
       const size = bounds ? computeFlowExportSize(bounds) : null;
       if (!viewportEl || !bounds || !size) return;
 
@@ -674,7 +783,8 @@
         width: size.width,
         height: size.height,
         scale: size.scale,
-        hasBulkEdges: edges.some((edge) => edge.data?.edgeKind === "all_previous_steps")
+        hasBulkEdges: edges.some((edge) => edge.data?.edgeKind === "all_previous_steps"),
+        hasBindingEdges: edges.some((edge) => edge.data?.edgeKind === "tool_argument")
       });
 
       const link = document.createElement("a");
@@ -714,17 +824,32 @@
   // the same value so a gesture after a deep fit is not snapped back by d3's
   // scale extent; "Visa hela flödet" is the way back from a deep zoom-out.
   const MIN_ZOOM = 0;
-  const fitViewOptions = { padding: 0.12, maxZoom: 1, minZoom: MIN_ZOOM };
+
   // The whole graph is framed on arrival, so a minimap earns its place only
   // once someone zooms in past that -- which is Avancerad's kind of reading,
   // and only worth the clutter when there is enough graph to get lost in.
   const showMiniMap = $derived($mode === "power_user" && nodes.length > 6);
+  // The key sits bottom right and the minimap bottom left, over the canvas;
+  // the fitted graph keeps clear of them.
+  const fitViewOptions: FitViewOptions = $derived({
+    padding: { x: "4%", top: "6%", bottom: showMiniMap ? "132px" : "84px" },
+    maxZoom: 1,
+    minZoom: MIN_ZOOM
+  });
+  // The key names only what this graph draws.
+  const legend = $derived({
+    binding: edges.some((edge) => edge.data?.edgeKind === "tool_argument"),
+    external: nodes.some(
+      (node) =>
+        node.type === "tool_source" || node.type === "http_source" || node.type === "http_target"
+    )
+  });
 
   const handleNodeClick: NodeEventWithPointer<MouseEvent | TouchEvent, Node> = ({ node }) => {
-    if ((node?.type === "llm" || node?.type === "assembly") && node.data?.step) {
-      onPreview({ type: "activate", id: node.id });
-      onnodeclick?.(node.id);
-    }
+    const stepId = stepOfNode(node?.id);
+    if (stepId === null) return;
+    onPreview({ type: "activate", id: stepId });
+    onnodeclick?.(stepId);
   };
 
   // xyflow makes every node focusable and treats Enter and Space as "select",
@@ -738,11 +863,11 @@
     const nodeEl = target.closest<HTMLElement>(".svelte-flow__node");
     const id = nodeEl?.dataset.id;
     if (!id) return;
-    const node = nodes.find((candidate) => candidate.id === id);
-    if (node?.type !== "llm" && node?.type !== "assembly") return;
+    const stepId = stepOfNode(id);
+    if (stepId === null) return;
     event.preventDefault();
-    onPreview({ type: "activate", id });
-    onnodeclick?.(id);
+    onPreview({ type: "activate", id: stepId });
+    onnodeclick?.(stepId);
   }
 
   // xyflow ships these in English, and its stock node description offers a
@@ -755,7 +880,10 @@
     const id = target.closest<HTMLElement>(".svelte-flow__node")?.dataset.id;
     // Moving focus is a new gesture wherever it lands, including back where
     // it came from, so it is reported either way.
-    onPreview(isStepNode(id) && id ? { type: "focus", id } : { type: "blur" });
+    // Only keyboard focus previews: the enlarged dialog focuses the first node
+    // when it opens, and that must not fade the graph around it.
+    const stepId = target.matches(":focus-visible") ? stepOfNode(id) : null;
+    onPreview(stepId !== null ? { type: "focus", id: stepId } : { type: "blur" });
   }
 
   function handleFocusOut(event: FocusEvent): void {
@@ -781,7 +909,11 @@
      and renders itself; this element only carries the listener to them. -->
 <div
   bind:this={containerEl}
-  class="flow-graph h-full w-full {$mode === 'power_user' ? '' : 'user-mode'}"
+  class={[
+    "flow-graph h-full w-full",
+    $mode !== "power_user" && "user-mode",
+    gliding && "is-gliding"
+  ]}
   onkeydown={handleNodeKeydown}
   onfocusin={handleFocusIn}
   onfocusout={handleFocusOut}
@@ -802,9 +934,14 @@
     zoomOnScroll={true}
     onnodeclick={handleNodeClick}
     onnodepointerenter={({ node }) => {
-      if (isStepNode(node?.id)) onPreview({ type: "hover", id: node.id });
+      const stepId = stepOfNode(node?.id);
+      if (stepId !== null) onPreview({ type: "hover", id: stepId });
     }}
     onnodepointerleave={() => onPreview({ type: "unhover" })}
+    onedgepointerenter={({ edge }) => {
+      if (edge.data?.edgeKind === "tool_argument") hoveredEdgeId = edge.id;
+    }}
+    onedgepointerleave={() => (hoveredEdgeId = null)}
   >
     <FlowGraphAutoFit
       container={containerEl}
@@ -815,7 +952,14 @@
     />
     <Controls position="top-left" showLock={false} />
     {#if showMiniMap}
-      <MiniMap width={168} height={104} nodeColor={minimapNodeColor} pannable zoomable />
+      <MiniMap
+        position="bottom-left"
+        width={168}
+        height={104}
+        nodeColor={minimapNodeColor}
+        pannable
+        zoomable
+      />
     {/if}
     {#if $mode === "power_user"}
       <Background variant={BackgroundVariant.Dots} />
@@ -840,33 +984,60 @@
     <!-- The one sentence that makes the picture readable: a numbered chain
          run in order, with arrows standing for what each step reads. It
          belongs in Enkel most of all, so it sits outside the mode branch. -->
-    <Panel position="bottom-left">
+    <Panel position="bottom-right">
       <div
-        class="bg-primary text-secondary border-default flex flex-wrap items-center gap-x-3 gap-y-1 rounded border px-2.5 py-1.5 text-xs shadow-sm"
+        class="bg-primary text-secondary border-default flex max-w-[28rem] flex-col gap-1 rounded border px-2.5 py-1.5 text-xs shadow-sm"
       >
         <span>{m.flow_graph_order_hint()}</span>
         {#if $mode === "power_user"}
-          <span class="flex items-center gap-1.5">
-            <svg width="20" height="2"
-              ><line x1="0" y1="1" x2="20" y2="1" stroke="currentColor" stroke-width="1.5" /></svg
-            >
-            {m.flow_graph_legend_direct()}
-          </span>
-          <span class="flex items-center gap-1.5">
-            <svg width="20" height="2"
-              ><line
-                x1="0"
-                y1="1"
-                x2="20"
-                y2="1"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-dasharray="4 4"
-                opacity="0.6"
-              /></svg
-            >
-            {m.flow_graph_legend_all_previous()}
-          </span>
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span class="flex items-center gap-1.5">
+              <svg width="20" height="2" aria-hidden="true"
+                ><line x1="0" y1="1" x2="20" y2="1" stroke="currentColor" stroke-width="1.5" /></svg
+              >
+              {m.flow_graph_legend_direct()}
+            </span>
+            <span class="flex items-center gap-1.5">
+              <svg width="20" height="2" aria-hidden="true"
+                ><line
+                  x1="0"
+                  y1="1"
+                  x2="20"
+                  y2="1"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-dasharray="4 4"
+                  opacity="0.6"
+                /></svg
+              >
+              {m.flow_graph_legend_all_previous()}
+            </span>
+            {#if legend.binding}
+              <span class="flex items-center gap-1.5">
+                <svg width="20" height="2" aria-hidden="true"
+                  ><line
+                    x1="0"
+                    y1="1"
+                    x2="20"
+                    y2="1"
+                    stroke="var(--color-accent-default)"
+                    stroke-width="1.25"
+                    stroke-dasharray="5 4"
+                  /></svg
+                >
+                {m.flow_graph_legend_binding()}
+              </span>
+            {/if}
+            {#if legend.external}
+              <span class="flex items-center gap-1.5">
+                <span
+                  class="border-strongest h-2.5 w-5 rounded-sm border border-dashed"
+                  aria-hidden="true"
+                ></span>
+                {m.flow_graph_legend_external()}
+              </span>
+            {/if}
+          </div>
         {/if}
       </div>
     </Panel>
@@ -930,24 +1101,68 @@
     overflow: hidden;
   }
 
+  /* Handles only anchor edges here -- nothing is connected by hand -- and a
+     dot on every unused side reads as an edge that is missing. */
   .flow-graph :global(.svelte-flow__handle) {
-    width: 6px;
-    height: 6px;
-  }
-
-  .flow-graph.user-mode :global(.svelte-flow__handle) {
     opacity: 0;
     pointer-events: none;
   }
 
-  .flow-graph :global(.svelte-flow__edge-path) {
+  /* The nodes draw their own surface; xyflow's default input and output
+     frame would draw a second box around them. */
+  .flow-graph :global(.svelte-flow__node-input),
+  .flow-graph :global(.svelte-flow__node-output) {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  /* Pointing at a step quiets what does not feed it and lifts what does. */
+  .flow-graph :global(.flow-node) {
     transition:
-      stroke var(--duration-quick) var(--ease-smooth-out),
-      stroke-width var(--duration-quick) var(--ease-smooth-out);
+      opacity 150ms ease-out,
+      transform 150ms ease-out,
+      box-shadow 150ms ease-out,
+      border-color var(--duration-fast) var(--ease-smooth-out);
+  }
+
+  /* The quieting is carried by the edges; a node fades only as far as its
+     muted text keeps AA contrast (4.76:1 on white at 0.9, 2.57:1 at 0.6). */
+  .flow-graph :global(.flow-node.is-dimmed) {
+    opacity: 0.9;
+  }
+
+  .flow-graph :global(.flow-node.is-lifted) {
+    box-shadow: 0 4px 12px var(--shadow-stronger);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .flow-graph :global(.flow-node.is-lifted) {
+      transform: translateY(-1px);
+    }
+
+    /* A node that appears rises into place; one that moves glides there,
+       but only right after the layout changed, never while panning. */
+    .flow-graph :global(.flow-node) {
+      animation: flow-node-enter 220ms ease-out backwards;
+    }
+
+    .flow-graph.is-gliding :global(.svelte-flow__node) {
+      transition: transform 200ms ease-out;
+    }
+  }
+
+  @keyframes -global-flow-node-enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .flow-graph :global(.svelte-flow__edge-path) {
+    .flow-graph :global(.flow-node) {
       transition: none;
     }
   }

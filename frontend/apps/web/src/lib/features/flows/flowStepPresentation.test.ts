@@ -175,7 +175,8 @@ describe("buildFlowGraphTopology", () => {
     id: id ?? `s${order}`,
     step_order: order,
     input_source: inputSource,
-    output_mode: outputMode
+    output_mode: outputMode,
+    output_type: "text"
   });
 
   const ids = (topology: { nodes: { id: string }[] }) => topology.nodes.map((n) => n.id);
@@ -245,22 +246,100 @@ describe("buildFlowGraphTopology", () => {
     expect(t.edges.filter((e) => e.kind === "http_get").map((e) => e.target)).toEqual(["s1", "s2"]);
   });
 
-  // Kills the mutant that draws a tool step with no source (it would look
-  // like a step that reads nothing) or hangs it on the HTTP source node.
-  it("gives tool steps one external source node of their own", () => {
-    const t = buildFlowGraphTopology([step(1, "tool"), step(2, "tool"), step(3, "http_get")]);
-    expect(ids(t)).toEqual(["s1", "s2", "s3", "output", "tool-source", "http-source"]);
-    expect(
-      t.edges.filter((e) => e.kind === "tool").map((e) => [e.source, e.target, e.sourceStepOrder])
-    ).toEqual([
-      ["tool-source", "s1", 0],
-      ["tool-source", "s2", 0]
+  const toolStep = (order: number, args: Record<string, unknown>): FlowGraphTopologyStepLike => ({
+    ...step(order, "tool"),
+    input_config: { tool: { mcp_server_id: "srv", tool_id: `t${order}`, arguments: args } }
+  });
+  const edgeKey = (e: { source: string; target: string; kind: string; argument?: string }) =>
+    [e.source, e.target, e.kind, e.argument ?? ""].join(" ");
+
+  // The owner's four-step flow: step 2 reads a tool and none of its arguments
+  // is bound. Kills a shared tool node, an edge from step 1 into step 2 or its
+  // tool, a doubled edge, and any edge whose end is not a node.
+  it("draws a tool step's own source node and no edge from a step it does not read", () => {
+    const t = buildFlowGraphTopology([
+      step(1, "flow_input", "transcribe_only"),
+      toolStep(2, { from_date: "2026-09-01" }),
+      step(3, "previous_step"),
+      step(4, "previous_step", "render_verbatim")
     ]);
-    expect(t.edges.filter((e) => e.kind === "flow_output").map((e) => e.source)).toEqual([
-      "s1",
-      "s2",
-      "s3"
+    expect(t.nodes.filter((n) => n.kind === "tool_source")).toEqual([
+      { id: "tool-s2", kind: "tool_source", stepOrder: 2 }
     ]);
+    expect(t.edges.map(edgeKey)).toEqual([
+      "input s1 flow_input ",
+      "tool-s2 s2 tool ",
+      "s2 s3 previous_step ",
+      "s3 s4 previous_step ",
+      "s1 output flow_output ",
+      "s4 output flow_output "
+    ]);
+    const nodeIds = new Set(ids(t));
+    expect(t.edges.every((e) => nodeIds.has(e.source) && nodeIds.has(e.target))).toBe(true);
+  });
+
+  // The SEAB flow: step 2's `days` reads step 1. Kills a binding drawn into
+  // the step instead of its tool, a missing binding, a binding to a later
+  // step, and step 1 counted as a flow result although step 2 reads it.
+  it("draws one binding edge into the tool node per argument bound to an earlier step", () => {
+    const t = buildFlowGraphTopology([
+      toolStep(1, { view: "features_daily" }),
+      toolStep(2, {
+        days: "{{step_1.output.structured.anomaly_days}}",
+        site: ["{{ step_1.output.text }}", "{{step_3.output.text}}"]
+      }),
+      step(3, "previous_step")
+    ]);
+    expect(ids(t).filter((id) => id.startsWith("tool-"))).toEqual(["tool-s1", "tool-s2"]);
+    expect(t.edges.filter((e) => e.kind === "tool_argument")).toEqual([
+      {
+        source: "s1",
+        target: "tool-s2",
+        kind: "tool_argument",
+        argument: "days",
+        sourceStepOrder: 1,
+        targetStepOrder: 2
+      },
+      {
+        source: "s1",
+        target: "tool-s2",
+        kind: "tool_argument",
+        argument: "site",
+        sourceStepOrder: 1,
+        targetStepOrder: 2
+      }
+    ]);
+    expect(t.edges.filter((e) => e.target === "output").map((e) => e.source)).toEqual(["s3"]);
+    expect(new Set(t.edges.map(edgeKey)).size).toBe(t.edges.length);
+  });
+
+  // Kills a resolver that knows only `step_N`: a step named by its name or as
+  // the previous step, a value nested in an object, a run-form field and a
+  // flow-input alias are bindings too, and a tool that alone reads the run's
+  // input still gets the input node.
+  it("resolves every reference form the editor offers for a tool argument", () => {
+    const t = buildFlowGraphTopology(
+      [
+        { ...step(1, "http_get"), user_description: "Hämta" },
+        step(2, "previous_step"),
+        toolStep(3, {
+          a: "{{Hämta}}",
+          b: "{{föregående_steg}}",
+          c: "{{datum_från}}",
+          d: { nested: "{{step_1.output.text}}" },
+          e: "{{indata_text}}"
+        })
+      ],
+      { fields: [{ name: "datum_från", type: "text" }] }
+    );
+    expect(t.edges.filter((e) => e.kind === "tool_argument").map(edgeKey)).toEqual([
+      "s1 tool-s3 tool_argument a",
+      "s2 tool-s3 tool_argument b",
+      "input tool-s3 tool_argument c",
+      "s1 tool-s3 tool_argument d",
+      "input tool-s3 tool_argument e"
+    ]);
+    expect(ids(t)).toContain("input");
   });
 
   it("routes an HTTP delivery step to both the receiver and the flow output", () => {
@@ -315,6 +394,15 @@ describe("buildFlowGraphTopology", () => {
     };
     const bound = { ...base, input_bindings: { question: "{{ step_1.output.text }}" } };
     expect(flowGraphLayoutKey([bound])).not.toEqual(flowGraphLayoutKey([base]));
+    // Kills a key that misses a tool argument rebound to another step.
+    const tool = (days: string): FlowStep => ({
+      ...base,
+      input_source: "tool",
+      input_config: { tool: { mcp_server_id: "srv", tool_id: "t", arguments: { days } } }
+    });
+    expect(flowGraphLayoutKey([tool("{{step_1.output.text}}")])).not.toEqual(
+      flowGraphLayoutKey([tool("{{step_2.output.text}}")])
+    );
   });
 
   it("connects form-field underlag to the flow input and fixed text to nothing", () => {

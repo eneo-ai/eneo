@@ -4,7 +4,7 @@ import type { Flow } from "@eneo/eneo-js";
 import Panel from "./FlowGraphPanel.svelte";
 
 /**
- * The real graph needs @xyflow/svelte, dagre and a layout engine jsdom does
+ * The real graph needs @xyflow/svelte and a layout engine jsdom does
  * not have, so the module is the thing to stand in for. These two cases share
  * one resolved module deliberately: `vi.resetModules()` would hand a
  * re-imported component a second Svelte runtime and orphan its effects. The
@@ -55,7 +55,7 @@ afterEach(() => {
 });
 
 /**
- * The module carries @xyflow/svelte and dagre. Every flow page mounts this
+ * The module carries @xyflow/svelte. Every flow page mounts this
  * panel collapsed, so fetching on mount made all of them pay for a graph
  * nobody had asked to see.
  */

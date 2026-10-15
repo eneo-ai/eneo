@@ -1,4 +1,5 @@
 import {
+  FLOW_INPUT_ALIASES,
   isFlowFormFieldBareAliasSafe,
   PRIMARY_FLOW_INPUT_KEYS,
   RESERVED_RUNTIME_VARIABLES,
@@ -75,6 +76,25 @@ export function collectTemplateStepReferenceOrders(text: string): number[] {
     orders.add(Number(stepMatch[1]));
   }
   return [...orders].sort((a, b) => a - b);
+}
+
+/** A reference to the flow's own input: an alias, or a flow input path that is not a form field. */
+export function readsFlowInputToken(
+  token: string,
+  context: VariableClassificationContext
+): boolean {
+  if (FLOW_INPUT_ALIASES.has(token)) return true;
+  return (
+    (token.startsWith("flow_input.") || token.startsWith("flow.input.")) &&
+    classifyVariable(token, context) === "technical"
+  );
+}
+
+/** The field path of a `step_N.output.structured.…` reference; null for any other. */
+export function structuredOutputField(token: string): string | null {
+  const structured = STRUCTURED_OUTPUT_TOKEN_PATTERN.exec(token);
+  const field = structured ? token.slice(structured[0].length) : "";
+  return field === "" ? null : field;
 }
 
 export function getInputTemplateSourceConflictStepOrders({

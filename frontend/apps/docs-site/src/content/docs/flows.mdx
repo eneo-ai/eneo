@@ -179,6 +179,8 @@ The backend sorts steps by `step_order`. A later step can:
 
 The flow graph endpoint and the web editor both expose this structure directly.
 
+In the editor's flow view the steps stand left to right in `step_order`, whatever they read, and the result comes after the last step. A step whose `input_source` is `tool` has a node of its own above it, which names the tool and its server, or "MCP tool" until the editor's tool list names them. The flow input and an HTTP source sit above the first step they feed; when a tool node holds that place, or they feed a tool node, they sit to the left of it. A tool node is marked, with the reason in Advanced mode, when the space's tools no longer include the tool or a run may not call it. In Advanced mode it lists up to three arguments, those that read other data first. An argument that reads an earlier step or the flow input is a dashed edge from that step or from the flow input to the tool node, at the argument's row in Advanced mode; the arguments the node does not list share one counted edge per source. Two steps are joined by an edge only when the later one reads the earlier.
+
 ## Published runtime inputs and run contracts
 
 Published flows can expose two runtime input shapes to API consumers:

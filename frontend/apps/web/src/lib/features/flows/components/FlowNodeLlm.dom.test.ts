@@ -26,6 +26,7 @@ it.each([
           label: "Step",
           step: {
             step_order: 1,
+            input_source: "tool",
             input_type: "json",
             output_type: "json",
             output_mode: outputMode,
@@ -34,6 +35,7 @@ it.each([
           },
           isActive: false,
           mode: "power_user",
+          handleY: 18,
           modelName: "Model A",
           assistantClassLevel: 2,
           assistantClassName: "Internal",
@@ -42,6 +44,11 @@ it.each([
       }
     });
     expect(screen.queryByText("Model A") !== null).toBe(named);
+    // Kills a copying tool step drawn without saying that no AI runs, or
+    // with an In chip for the input it passes on unchanged.
+    const copies = outputMode === "copy_input";
+    expect(screen.queryByText(m.flow_graph_copy_input_tool_badge()) !== null).toBe(copies);
+    expect(screen.queryByText(/^In: /) !== null).toBe(!copies);
     expect(screen.queryByText(m.flow_node_model_class_badge({ name: "Internal" })) !== null).toBe(
       named
     );

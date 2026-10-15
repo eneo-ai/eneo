@@ -52,6 +52,23 @@ describe("computeFlowGraphEmphasis", () => {
    * Selecting a step asks "where does this sit in the flow" -- the whole path
    * it lies on, to both ends, so the answer reaches the input and the output.
    */
+  // Kills a preview of a tool step that leaves dark the step whose output
+  // fills one of the tool's arguments.
+  it("lights the bindings into a step's own tool node when the step is pointed at", () => {
+    const emphasis = computeFlowGraphEmphasis({
+      edges: [
+        { id: "bind", source: "s1", target: "tool-s2" },
+        { id: "tool", source: "tool-s2", target: "s2" },
+        { id: "next", source: "s2", target: "s3" }
+      ],
+      activeId: null,
+      previewId: "s2",
+      ownerOf: { "tool-s2": "s2" }
+    });
+    expect(Object.keys(emphasis.litEdges).sort()).toEqual(["bind", "tool"]);
+    expect(Object.keys(emphasis.litNodes).sort()).toEqual(["s1", "s2", "tool-s2"]);
+  });
+
   it("traces the whole path through a selected step, both directions", () => {
     const emphasis = computeFlowGraphEmphasis({ edges, activeId: "s4", previewId: null });
 

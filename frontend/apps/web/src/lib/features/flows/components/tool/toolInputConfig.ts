@@ -1,6 +1,13 @@
 import type { components, FlowStep } from "@eneo/eneo-js";
 import { isJsonObject, type JsonObject } from "$lib/features/flows/jsonObject";
-import { TEMPLATE_TOKEN_PATTERN_SOURCE } from "$lib/features/flows/flowVariableTokens";
+import {
+  classifyVariable,
+  extractTemplateTokens,
+  readsFlowInputToken,
+  referencedStepOrder,
+  TEMPLATE_TOKEN_PATTERN_SOURCE,
+  type VariableClassificationContext
+} from "$lib/features/flows/flowVariableTokens";
 
 /** One tool a step of the flow can name, with the level that refuses it when one does. */
 export type FlowToolOption = components["schemas"]["FlowToolOptionPublic"];
@@ -119,6 +126,40 @@ export function holdsVariable(value: unknown): boolean {
   if (typeof value === "string") return VARIABLE.test(value);
   if (Array.isArray(value)) return value.some(holdsVariable);
   return isJsonObject(value) && Object.values(value).some(holdsVariable);
+}
+
+/**
+ * What an argument's value reads, wherever in the value a reference sits: the
+ * earlier steps, through the editor's one resolver for a step named by
+ * number, by name or as the previous step, and whether it reads the run's
+ * own input (a form field or what is sent in), as a step's source line says.
+ */
+export function argumentReads(
+  value: unknown,
+  context: VariableClassificationContext
+): { stepOrders: number[]; readsFlowInput: boolean } {
+  const orders = new Set<number>();
+  let readsFlowInput = false;
+  const visit = (item: unknown): void => {
+    if (typeof item === "string") {
+      for (const token of extractTemplateTokens(item)) {
+        const order = referencedStepOrder(token, context);
+        if (order !== null) orders.add(order);
+        else if (
+          classifyVariable(token, context) === "field" ||
+          readsFlowInputToken(token, context)
+        ) {
+          readsFlowInput = true;
+        }
+      }
+    } else if (Array.isArray(item)) {
+      item.forEach(visit);
+    } else if (isJsonObject(item)) {
+      Object.values(item).forEach(visit);
+    }
+  };
+  visit(value);
+  return { stepOrders: [...orders].sort((a, b) => a - b), readsFlowInput };
 }
 
 /**

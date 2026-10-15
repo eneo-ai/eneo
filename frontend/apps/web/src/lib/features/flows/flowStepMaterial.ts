@@ -1,7 +1,6 @@
 import type { FlowStep } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
-import { FLOW_INPUT_ALIASES } from "./flowFormSchema";
 import { parseFlowInputBindings } from "./flowInputBindings";
 import { buildContext } from "./components/flowPromptVariables";
 import { getRuntimeInputConfig } from "./flowRuntimeInputConfig";
@@ -9,6 +8,7 @@ import {
   classifyVariable,
   extractTemplateTokens,
   isValidStepInputPath,
+  readsFlowInputToken,
   referencedStepOrder,
   type VariableClassificationContext
 } from "./flowVariableTokens";
@@ -136,15 +136,6 @@ export type StepSourceLine = {
   readsRunInput: boolean;
 };
 
-/** A reference to the flow's own input: an alias, or a flow input path that is not a form field. */
-function readsFlowInput(token: string, context: VariableClassificationContext): boolean {
-  if (FLOW_INPUT_ALIASES.has(token)) return true;
-  return (
-    (token.startsWith("flow_input.") || token.startsWith("flow.input.")) &&
-    classifyVariable(token, context) === "technical"
-  );
-}
-
 function listed(parts: string[]): string {
   return new Intl.ListFormat(getLocale(), { type: "conjunction" }).format(parts);
 }
@@ -178,7 +169,7 @@ export function getStepSourceLine(
       );
       const upload = material.kind === "own_text" && material.withUpload;
       const form = tokens.some((token) => classifyVariable(token, context) === "field");
-      const flowInput = tokens.some((token) => readsFlowInput(token, context));
+      const flowInput = tokens.some((token) => readsFlowInputToken(token, context));
       // Every way to read an earlier step, through one resolver: chosen results
       // and text references alike may name a step by number or by name, and
       // the text may use the previous-step alias. Later or missing steps read nothing.

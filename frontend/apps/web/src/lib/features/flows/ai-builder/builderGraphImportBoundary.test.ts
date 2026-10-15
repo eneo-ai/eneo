@@ -7,7 +7,6 @@ const aiBuilderDir = fileURLToPath(new URL(".", import.meta.url));
 const sourceExtensions = new Set([".svelte", ".ts"]);
 const forbiddenImports = [
   /@xyflow\/svelte/,
-  /\bdagre\b/,
   /FlowGraph\.svelte/,
   /\bdraftSpecToFlow\b/,
   /\bplanStepsToFlowSteps\b/

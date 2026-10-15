@@ -30,7 +30,7 @@
   let FlowGraphComponent: typeof FlowGraph | null = $state(null);
   let loadState: "idle" | "loading" | "ready" | "error" = $state("idle");
 
-  // The graph chunk carries @xyflow/svelte and dagre, so it is fetched the
+  // The graph chunk carries @xyflow/svelte, so it is fetched the
   // first time someone actually asks to see the graph -- not on mount, where
   // every flow page would pay for a panel that starts collapsed.
   $effect(() => {

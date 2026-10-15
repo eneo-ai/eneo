@@ -28,7 +28,7 @@ type PromptFormSchema =
  * collections.
  */
 export function buildContext(
-  steps: FlowStep[],
+  steps: Pick<FlowStep, "step_order" | "user_description" | "output_type" | "input_config">[],
   formSchema: PromptFormSchema,
   transcriptionEnabled: boolean,
   currentStepOrder: number,

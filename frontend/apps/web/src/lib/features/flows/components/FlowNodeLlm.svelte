@@ -8,6 +8,7 @@
   import { outputModeUsesCompletionModel } from "$lib/features/flows/flowStepTypes";
   import type { SecurityClassStanding } from "$lib/features/flows/flowClassificationNames";
   import UserCheck from "@lucide/svelte/icons/user-check";
+  import { cn } from "$lib/utils.js";
 
   let {
     data
@@ -17,6 +18,7 @@
       step: Pick<
         FlowStep,
         | "step_order"
+        | "input_source"
         | "input_type"
         | "output_type"
         | "output_mode"
@@ -25,7 +27,10 @@
       >;
       isActive: boolean;
       mode: "user" | "power_user";
-      direction?: "LR" | "TB";
+      /** Distance from the top of the node to its row handles, shared by every step. */
+      handleY: number;
+      dimmed?: boolean;
+      lifted?: boolean;
       modelName?: string;
       classLevel?: number | null;
       assistantClassLevel?: number | null;
@@ -49,6 +54,9 @@
   // A step that calls no completion model has no model whose name or class to show.
   const callsModel = $derived(outputModeUsesCompletionModel(data.step.output_mode));
   const hasHumanReview = $derived(data.step.review_policy != null);
+  // A step that only passes its JSON on says so where the model would be named,
+  // and its input type is the output type, so no In chip.
+  const copiesInput = $derived(data.step.output_mode === "copy_input");
   const nextChannelLabel = $derived(
     isAssembly
       ? m.flow_template_fill_card_badge()
@@ -95,7 +103,16 @@
 
 {#if isPowerUser}
   <!-- Power User: Technical card -->
-  <Card.Root class="{surfaceClass} flow-node border-2 py-0 {borderColor}" style="width: 300px;">
+  <Card.Root
+    class={cn(
+      "flow-node border-2 py-0",
+      surfaceClass,
+      borderColor,
+      data.dimmed && "is-dimmed",
+      data.lifted && "is-lifted"
+    )}
+    style="width: 300px;"
+  >
     <Card.Header class="{headerClass} flex-row items-start justify-between gap-2 px-3 py-1.5">
       <div class="flex min-w-0 items-start gap-2">
         <span
@@ -125,7 +142,13 @@
       </div>
     </Card.Header>
     <Card.Content class="space-y-1 px-3 py-2 text-xs">
-      {#if callsModel && data.modelName}
+      {#if copiesInput}
+        <Badge variant="secondary" class="bg-positive-dimmer text-positive-stronger text-xs">
+          {data.step.input_source === "tool"
+            ? m.flow_graph_copy_input_tool_badge()
+            : m.flow_graph_copy_input_badge()}
+        </Badge>
+      {:else if callsModel && data.modelName}
         <div class="text-secondary">{data.modelName}</div>
       {/if}
       <div class="flex flex-wrap items-center gap-1">
@@ -143,9 +166,11 @@
             {m.flow_graph_review_badge()}
           </Badge>
         {/if}
-        <Badge variant="secondary" class="bg-hover-dimmer text-primary text-xs">
-          {m.flow_step_card_input_short()}: {inputTypeLabel}
-        </Badge>
+        {#if !copiesInput}
+          <Badge variant="secondary" class="bg-hover-dimmer text-primary text-xs">
+            {m.flow_step_card_input_short()}: {inputTypeLabel}
+          </Badge>
+        {/if}
         <Badge variant="secondary" class="bg-hover-dimmer text-primary text-xs">
           {m.flow_step_card_output_short()}: {outputTypeLabel}
         </Badge>
@@ -163,8 +188,13 @@
 {:else}
   <!-- User Mode: Compact pill -->
   <Card.Root
-    class="bg-primary flow-node flex-row items-center gap-2 border-2 px-3 py-1.5 {borderColor}"
-    style="min-width: 120px; max-width: {data.direction === 'TB' ? '260px' : '200px'};"
+    class={cn(
+      "bg-primary flow-node flex-row items-center gap-2 border-2 px-3 py-1.5",
+      borderColor,
+      data.dimmed && "is-dimmed",
+      data.lifted && "is-lifted"
+    )}
+    style="width: 200px; height: 48px;"
   >
     <span
       class="bg-hover-default flex size-5 shrink-0 items-center justify-center rounded text-xs font-bold"
@@ -185,8 +215,11 @@
   </Card.Root>
 {/if}
 
-<Handle type="target" position={data.direction === "TB" ? Position.Top : Position.Left} />
-<Handle type="source" position={data.direction === "TB" ? Position.Bottom : Position.Right} />
+<!-- Steps read along one line, so every step's row handles share one height;
+     a source above a step hands down into its top. -->
+<Handle type="target" id="left" position={Position.Left} style="top: {data.handleY}px" />
+<Handle type="target" id="top" position={Position.Top} />
+<Handle type="source" position={Position.Right} style="top: {data.handleY}px" />
 
 <style>
   /* Two lines of name before the ellipsis: a step called "11. Mellanmänskliga
@@ -198,15 +231,5 @@
     line-clamp: 2;
     overflow: hidden;
     overflow-wrap: anywhere;
-  }
-
-  :global(.flow-node) {
-    transition: border-color var(--duration-fast) var(--ease-smooth-out);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    :global(.flow-node) {
-      transition: none;
-    }
   }
 </style>

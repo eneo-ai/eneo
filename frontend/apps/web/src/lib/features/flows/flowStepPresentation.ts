@@ -1,5 +1,7 @@
 import type { FlowStep } from "@eneo/eneo-js";
 import { getFlowStepUnderlag } from "./flowInputBindings";
+import { argumentReads, readToolInputConfig } from "./components/tool/toolInputConfig";
+import { buildContext } from "./components/flowPromptVariables";
 import type { SelectableInputTypeOption } from "./flowStepTypes";
 
 type InputSource = FlowStep["input_source"];
@@ -130,6 +132,7 @@ export type FlowEdgeKind =
   | "flow_output"
   | "http_get"
   | "tool"
+  | "tool_argument"
   | "http_post";
 
 export function getEdgePayloadKind(params: {
@@ -139,7 +142,10 @@ export function getEdgePayloadKind(params: {
 }): FlowEdgePayloadKind {
   const { edgeKind, sourceStep, targetStep } = params;
 
-  if (edgeKind === "flow_output" || edgeKind === "http_post") return "none";
+  // A binding edge is named by its argument, not by a payload type.
+  if (edgeKind === "flow_output" || edgeKind === "http_post" || edgeKind === "tool_argument") {
+    return "none";
+  }
   if (edgeKind === "flow_input") return "flow_input";
   if (edgeKind === "all_previous_steps") return "text";
   if (edgeKind === "http_get" || edgeKind === "tool") {
@@ -165,22 +171,23 @@ export function getRuntimeFileOriginKind(params: {
 
 export type FlowGraphTopologyStepLike = Pick<
   FlowStep,
-  "id" | "step_order" | "input_source" | "output_mode" | "input_bindings"
+  | "id"
+  | "step_order"
+  | "input_source"
+  | "output_mode"
+  | "input_bindings"
+  | "input_config"
+  | "user_description"
+  | "output_type"
 >;
 
 export type FlowGraphTopologyNode =
   | { id: "input"; kind: "input" }
   | { id: "output"; kind: "output" }
   | { id: "http-source"; kind: "http_source" }
-  | { id: "tool-source"; kind: "tool_source" }
+  | { id: string; kind: "tool_source"; stepOrder: number }
   | { id: "http-target"; kind: "http_target" }
   | { id: string; kind: "step"; stepOrder: number };
-
-// A step fed from outside the flow hangs on one node per kind of source.
-const EXTERNAL_SOURCE_NODES = {
-  http_get: { id: "http-source", kind: "http_source" },
-  tool: { id: "tool-source", kind: "tool_source" }
-} as const;
 
 export type FlowGraphTopologyEdge = {
   source: string;
@@ -188,7 +195,14 @@ export type FlowGraphTopologyEdge = {
   kind: FlowEdgeKind;
   sourceStepOrder: number;
   targetStepOrder: number | null;
+  /** The tool argument a `tool_argument` edge fills. */
+  argument?: string;
 };
+
+/** The node of the tool a tool step calls; each tool step has its own. */
+export function flowGraphToolNodeId(stepId: string): string {
+  return `tool-${stepId}`;
+}
 
 /**
  * The step fields whose change must rebuild the graph layout. Underlag is
@@ -202,6 +216,7 @@ export function flowGraphLayoutKey(steps: FlowStep[]): string {
       user_description: step.user_description,
       input_source: step.input_source,
       input_bindings: step.input_bindings ?? null,
+      input_config: step.input_source === "tool" ? (step.input_config ?? null) : null,
       input_type: step.input_type,
       output_type: step.output_type,
       output_mode: step.output_mode,
@@ -219,9 +234,15 @@ export function flowGraphLayoutKey(steps: FlowStep[]): string {
  * The pure node/edge contract behind Flödesvy. All HTTP endpoints share one
  * external-source and one external-receiver node: the graph answers "where
  * does data come from and go", while each step's own summary names its URL,
- * so per-endpoint nodes would only add clutter.
+ * so per-endpoint nodes would only add clutter. A tool step's node is its
+ * own, because it names the tool and the arguments that step sends it: an
+ * argument bound to an earlier step is an edge from that step into the tool.
  */
-export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
+export function buildFlowGraphTopology(
+  steps: FlowGraphTopologyStepLike[],
+  /** The run form, whose fields a tool argument may read. */
+  formSchema?: Parameters<typeof buildContext>[1]
+): {
   nodes: FlowGraphTopologyNode[];
   edges: FlowGraphTopologyEdge[];
 } {
@@ -237,7 +258,23 @@ export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
   const underlagByStep = new Map(
     orderedSteps.map((step) => [step.step_order, getFlowStepUnderlag(step)])
   );
+  // What each argument of a tool step reads, as the step editor resolves it.
+  const toolReadsByStep = new Map(
+    orderedSteps
+      .filter((step) => step.input_source === "tool")
+      .map((step) => {
+        const context = buildContext(orderedSteps, formSchema, false, step.step_order);
+        const toolArguments = readToolInputConfig(step.input_config)?.arguments ?? {};
+        const reads = Object.entries(toolArguments).map(([argument, value]) => ({
+          argument,
+          ...argumentReads(value, context)
+        }));
+        return [step.step_order, reads] as const;
+      })
+  );
   const readsFlowInput = (step: FlowGraphTopologyStepLike): boolean => {
+    const toolReads = toolReadsByStep.get(step.step_order);
+    if (toolReads !== undefined) return toolReads.some((read) => read.readsFlowInput);
     const underlag = underlagByStep.get(step.step_order) ?? null;
     if (underlag !== null) return underlag.readsFlowInput;
     return (
@@ -258,19 +295,55 @@ export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
   }
   nodes.push({ id: "output", kind: "output" });
 
-  const externalSourcesDrawn = new Set<string>();
+  let httpSourceDrawn = false;
   for (const step of orderedSteps) {
     const id = stepId(step);
-    if (step.input_source === "http_get" || step.input_source === "tool") {
-      const externalSource = EXTERNAL_SOURCE_NODES[step.input_source];
-      if (!externalSourcesDrawn.has(externalSource.id)) {
-        externalSourcesDrawn.add(externalSource.id);
-        nodes.push(externalSource);
+    if (step.input_source === "http_get") {
+      if (!httpSourceDrawn) {
+        httpSourceDrawn = true;
+        nodes.push({ id: "http-source", kind: "http_source" });
       }
       edges.push({
-        source: externalSource.id,
+        source: "http-source",
         target: id,
-        kind: step.input_source,
+        kind: "http_get",
+        sourceStepOrder: 0,
+        targetStepOrder: step.step_order
+      });
+      continue;
+    }
+    if (step.input_source === "tool") {
+      const toolId = flowGraphToolNodeId(id);
+      nodes.push({ id: toolId, kind: "tool_source", stepOrder: step.step_order });
+      for (const { argument, stepOrders, readsFlowInput } of toolReadsByStep.get(step.step_order) ??
+        []) {
+        if (readsFlowInput) {
+          edges.push({
+            source: "input",
+            target: toolId,
+            kind: "tool_argument",
+            argument,
+            sourceStepOrder: 0,
+            targetStepOrder: step.step_order
+          });
+        }
+        for (const order of stepOrders) {
+          const sourceStep = byOrder.get(order);
+          if (!sourceStep) continue;
+          edges.push({
+            source: stepId(sourceStep),
+            target: toolId,
+            kind: "tool_argument",
+            argument,
+            sourceStepOrder: order,
+            targetStepOrder: step.step_order
+          });
+        }
+      }
+      edges.push({
+        source: toolId,
+        target: id,
+        kind: "tool",
         sourceStepOrder: 0,
         targetStepOrder: step.step_order
       });
@@ -346,17 +419,12 @@ export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
   }
 
   if (orderedSteps.length > 0) {
-    const outgoingSteps = new Set<string>();
-    for (const edge of edges) {
-      if (
-        edge.source !== "input" &&
-        edge.source !== "http-source" &&
-        edge.source !== "tool-source" &&
-        edge.target !== "output"
-      ) {
-        outgoingSteps.add(edge.source);
-      }
-    }
+    // A step whose output something reads -- a later step, or a tool argument
+    // -- is not a result of the flow on its own.
+    const stepIds = new Set(orderedSteps.map(stepId));
+    const outgoingSteps = new Set(
+      edges.filter((edge) => stepIds.has(edge.source)).map((edge) => edge.source)
+    );
     let hasHttpTarget = false;
     for (const step of orderedSteps) {
       const id = stepId(step);
@@ -497,15 +565,20 @@ export function computeFlowGraphEmphasis(params: {
   edges: FlowGraphEmphasisEdge[];
   activeId: string | null;
   previewId: string | null;
+  /**
+   * Nodes that belong to one step, by node id: a tool step's tool node. What
+   * feeds such a node feeds its step, so a preview reaches through it.
+   */
+  ownerOf?: Record<string, string>;
 }): FlowGraphEmphasis {
-  const { edges, activeId, previewId } = params;
+  const { edges, activeId, previewId, ownerOf = {} } = params;
   const litNodes: Record<string, true> = {};
   const litEdges: Record<string, true> = {};
 
   if (previewId !== null) {
     litNodes[previewId] = true;
     for (const edge of edges) {
-      if (edge.target === previewId) {
+      if (edge.target === previewId || ownerOf[edge.target] === previewId) {
         litEdges[edge.id] = true;
         litNodes[edge.source] = true;
       }
