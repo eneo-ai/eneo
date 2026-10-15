@@ -48,10 +48,10 @@
   );
   let filterCounts = $derived(countSourceFilters($rows.map((row) => row.summary)));
 
-  // A source that syncs right now can still have folders whose latest sync failed.
-  let needsAttention = $derived($rows.filter((row) => row.summary.failedItems.length > 0));
-  let attentionIsSignIn = $derived(
-    needsAttention.length > 0 && needsAttention.every((row) => row.summary.credentialsFailed)
+  // The badges already mark failing sources; only a refused SharePoint sign-in, which
+  // stops every source and only an admin can fix, gets a banner of its own.
+  let signInStopped = $derived(
+    $rows.filter((row) => row.summary.failedItems.length > 0 && row.summary.credentialsFailed)
   );
 
   // --- Embedding model groups ---
@@ -193,8 +193,8 @@
   }
 </script>
 
-{#if needsAttention.length > 0}
-  {@const first = needsAttention[0]}
+{#if signInStopped.length > 0}
+  {@const first = signInStopped[0]}
   <div
     class="border-negative-default bg-negative-dimmer text-negative-stronger mt-3 mr-3 flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3 text-sm"
     role="status"
@@ -202,17 +202,15 @@
     <TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
       <p class="font-medium">
-        {needsAttention.length === 1
+        {signInStopped.length === 1
           ? m.integration_sources_attention_one()
-          : m.integration_sources_attention_other({ count: needsAttention.length })}
+          : m.integration_sources_attention_other({ count: signInStopped.length })}
       </p>
       <p>
-        {attentionIsSignIn
-          ? m.integration_sources_attention_sign_in()
-          : m.integration_sources_attention_generic()}
+        {m.integration_sources_attention_sign_in()}
       </p>
     </div>
-    {#if needsAttention.length === 1}
+    {#if signInStopped.length === 1}
       <!-- eslint-disable svelte/no-navigation-without-resolve -- dynamic space route -->
       <a
         href={sourceHref($currentSpace.routeId, first.source, { tab: "problems" })}

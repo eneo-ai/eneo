@@ -1716,7 +1716,6 @@
   "integration_sources_attention_one": "1 källa uppdateras inte",
   "integration_sources_attention_other": "{count} källor uppdateras inte",
   "integration_sources_attention_sign_in": "Inloggningen till SharePoint har gått ut och en administratör behöver logga in igen. Befintliga dokument går fortfarande att söka i.",
-  "integration_sources_attention_generic": "Öppna källan för att se vad som behöver åtgärdas. Befintliga dokument går fortfarande att söka i.",
   "integration_sources_attention_open_one": "Öppna källan",
   "integration_sources_attention_show_them": "Visa dem",
   "integration_source_tab_content": "Innehåll",

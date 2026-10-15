@@ -1683,7 +1683,6 @@
   "integration_sources_attention_one": "1 source is not updating",
   "integration_sources_attention_other": "{count} sources are not updating",
   "integration_sources_attention_sign_in": "The sign-in to SharePoint has expired and an administrator needs to sign in again. Existing documents can still be searched.",
-  "integration_sources_attention_generic": "Open the source to see what needs to be done. Existing documents can still be searched.",
   "integration_sources_attention_open_one": "Open the source",
   "integration_sources_attention_show_them": "Show them",
   "integration_source_tab_content": "Contents",

@@ -104,4 +104,24 @@ describe("IntegrationsTable", () => {
 
     await expect.poll(sourceNames).toEqual(["HR-handboken"]);
   });
+
+  it("keeps a banner only for a refused SharePoint sign-in", async () => {
+    render(IntegrationsTable);
+    await expect.element(page.getByRole("link", { name: "HR-handboken" })).toBeVisible();
+    // A plain failure is marked by its badge alone.
+    expect(page.getByText(m.integration_sources_attention_sign_in()).elements()).toHaveLength(0);
+
+    const signInRefused = knowledge("d", "Rutiner", {}, 5, "error");
+    signInRefused.metadata!.last_sync_error =
+      "SharePoint credentials are invalid or expired; an administrator must reconnect the integration";
+    currentSpace.update((space) => ({
+      ...space,
+      knowledge: { integrationKnowledge: [...space.knowledge.integrationKnowledge, signInRefused] }
+    }));
+
+    await expect.element(page.getByText(m.integration_sources_attention_sign_in())).toBeVisible();
+    await expect
+      .element(page.getByRole("link", { name: m.integration_sources_attention_open_one() }))
+      .toBeVisible();
+  });
 });
