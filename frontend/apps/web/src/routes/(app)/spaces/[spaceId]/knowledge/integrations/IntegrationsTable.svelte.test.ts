@@ -16,7 +16,8 @@ function knowledge(
   id: string,
   name: string,
   fields: Partial<IntegrationKnowledge> = {},
-  documents = 3
+  documents = 3,
+  status = "success"
 ): IntegrationKnowledge {
   return {
     id,
@@ -31,7 +32,8 @@ function knowledge(
     ...fields,
     metadata: {
       size: 0,
-      last_sync_status: "success",
+      last_sync_status: status,
+      last_sync_error: status === "error" ? "Graph timeout" : null,
       document_count: documents,
       last_synced_at: "2026-10-13T08:00:00Z"
     }
@@ -46,7 +48,7 @@ const currentSpace = writable({
     integrationKnowledge: [
       knowledge("a", "Protokoll", { wrapper_id: "w1", wrapper_name: "Kommunstyrelsen" }, 40),
       knowledge("b", "Bilagor", { wrapper_id: "w1", wrapper_name: "Kommunstyrelsen" }, 2),
-      knowledge("c", "HR-handboken", {}, 100)
+      knowledge("c", "HR-handboken", {}, 100, "error")
     ]
   }
 });
@@ -88,5 +90,18 @@ describe("IntegrationsTable", () => {
 
     // Alphabetically HR-handboken comes first; by documents (42 against 100) it comes last.
     await expect.poll(sourceNames).toEqual(["Kommunstyrelsen", "HR-handboken"]);
+  });
+
+  it("narrows the list to the sources that need attention", async () => {
+    render(IntegrationsTable);
+    await expect.element(page.getByRole("link", { name: "HR-handboken" })).toBeVisible();
+
+    (
+      page
+        .getByRole("button", { name: m.integration_filter_attention({ count: 1 }) })
+        .element() as HTMLElement
+    ).click();
+
+    await expect.poll(sourceNames).toEqual(["HR-handboken"]);
   });
 });

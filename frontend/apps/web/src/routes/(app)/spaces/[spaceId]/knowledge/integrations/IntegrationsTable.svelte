@@ -4,12 +4,16 @@
   import { derived, writable } from "svelte/store";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { formatRelativeTime } from "$lib/core/formatting/dateTime";
+  import SourceStatusFilter from "$lib/features/integrations/components/SourceStatusFilter.svelte";
   import {
+    countSourceFilters,
     groupIntegrationSources,
+    matchesSourceFilter,
     sourceContentsLabel,
     sourceHref,
     summarizeSource,
     type IntegrationSource,
+    type SourceFilter,
     type SourceSummary
   } from "$lib/features/integrations/sources";
   import type { IntegrationSyncProgress } from "$lib/features/integrations/syncProgress";
@@ -37,6 +41,12 @@
       $currentSpace.knowledge.integrationKnowledge.filter((k) => k.space_id === $currentSpace.id)
     ).map((source): SourceRow => ({ source, summary: summarizeSource(source.items, $progress) }))
   );
+
+  const statusFilter = writable<SourceFilter>("all");
+  const visibleRows = derived([rows, statusFilter], ([$rows, $statusFilter]) =>
+    $rows.filter((row) => matchesSourceFilter(row.summary, $statusFilter))
+  );
+  let filterCounts = $derived(countSourceFilters($rows.map((row) => row.summary)));
 
   // A source that syncs right now can still have folders whose latest sync failed.
   let needsAttention = $derived($rows.filter((row) => row.summary.failedItems.length > 0));
@@ -93,7 +103,7 @@
     return value ? new Date(value).getTime() : 0;
   }
 
-  const table = Table.createWithStore(rows);
+  const table = Table.createWithStore(visibleRows);
 
   const viewModel = table.createViewModel([
     table.column({
@@ -137,8 +147,7 @@
       cell: ({ value: row }) =>
         Table.renderComponent(SourceStatusCell, {
           summary: row.summary,
-          sourceName: row.source.name,
-          problemsHref: sourceHref($currentSpace.routeId, row.source, { tab: "problems" })
+          sourceName: row.source.name
         }),
       plugins: {
         tableFilter: { exclude: true },
@@ -203,16 +212,30 @@
           : m.integration_sources_attention_generic()}
       </p>
     </div>
-    <!-- eslint-disable svelte/no-navigation-without-resolve -- dynamic space route -->
-    <a
-      href={sourceHref($currentSpace.routeId, first.source, { tab: "problems" })}
-      class="focus-visible:ring-stronger shrink-0 rounded font-medium underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
-    >
-      {needsAttention.length === 1
-        ? m.integration_sources_attention_open_one()
-        : m.integration_sources_attention_open_first({ name: first.source.name })}
-    </a>
-    <!-- eslint-enable svelte/no-navigation-without-resolve -->
+    {#if needsAttention.length === 1}
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- dynamic space route -->
+      <a
+        href={sourceHref($currentSpace.routeId, first.source, { tab: "problems" })}
+        class="focus-visible:ring-stronger shrink-0 rounded font-medium underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+      >
+        {m.integration_sources_attention_open_one()}
+      </a>
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
+    {:else if $statusFilter !== "attention"}
+      <button
+        type="button"
+        onclick={() => ($statusFilter = "attention")}
+        class="focus-visible:ring-stronger shrink-0 rounded font-medium underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+      >
+        {m.integration_sources_attention_show_them()}
+      </button>
+    {/if}
+  </div>
+{/if}
+
+{#if $rows.length > 1}
+  <div class="pt-3 pr-3">
+    <SourceStatusFilter counts={filterCounts} bind:value={$statusFilter} />
   </div>
 {/if}
 

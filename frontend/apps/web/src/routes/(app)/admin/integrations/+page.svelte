@@ -16,6 +16,7 @@
   import SharePointAppConfigDialog from "$lib/features/integrations/sharepoint/SharePointAppConfigDialog.svelte";
   import SharePointAuthHealth from "$lib/features/integrations/sharepoint/SharePointAuthHealth.svelte";
   import SharePointConnectionHealth from "$lib/features/integrations/sharepoint/SharePointConnectionHealth.svelte";
+  import AdminSourcesOverview from "$lib/features/integrations/components/AdminSourcesOverview.svelte";
   import SharePointAppDeleteDialog from "$lib/features/integrations/sharepoint/SharePointAppDeleteDialog.svelte";
   import SharePointSetupFixtureLauncher from "$lib/features/integrations/sharepoint/SharePointSetupFixtureLauncher.svelte";
   import SharePointSubscriptions from "./SharePointSubscriptions.svelte";
@@ -199,6 +200,14 @@
             {/if}
           </Settings.Row>
         {/if}
+
+        <Settings.Row
+          fullWidth
+          title={m.admin_sources_heading()}
+          description={m.admin_sources_row_description()}
+        >
+          <AdminSourcesOverview eneo={data.eneo} />
+        </Settings.Row>
 
         <Settings.Row
           fullWidth

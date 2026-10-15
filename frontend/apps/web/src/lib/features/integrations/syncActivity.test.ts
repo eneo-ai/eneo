@@ -44,15 +44,46 @@ describe("readSyncLogExtras", () => {
           } as SyncLog["metadata"]
         })
       )
-    ).toEqual({ unchangedItems: 7, skippedTruncated: true, reconcileWarning: "Delta token reset" });
+    ).toEqual({
+      unchangedItems: 7,
+      changedFiles: [],
+      changedTotal: 0,
+      skippedTruncated: true,
+      reconcileWarning: "Delta token reset"
+    });
   });
 
   it("defaults for syncs recorded before the fields existed", () => {
     expect(readSyncLogExtras(log({ metadata: null }))).toEqual({
       unchangedItems: 0,
+      changedFiles: [],
+      changedTotal: 0,
       skippedTruncated: false,
       reconcileWarning: null
     });
+  });
+});
+
+describe("the changed files of a sync", () => {
+  it("keeps the well-formed entries and the total the cap leaves out", () => {
+    const extras = readSyncLogExtras(
+      log({
+        metadata: {
+          changed_details: [
+            { file: "a.pdf", change: "added" },
+            { file: "b.pdf", change: "renamed" },
+            { file: "c.pdf", change: "deleted" },
+            "garbage"
+          ],
+          changed_total: 70
+        } as SyncLog["metadata"]
+      })
+    );
+    expect(extras.changedFiles).toEqual([
+      { file: "a.pdf", change: "added" },
+      { file: "c.pdf", change: "deleted" }
+    ]);
+    expect(extras.changedTotal).toBe(70);
   });
 });
 

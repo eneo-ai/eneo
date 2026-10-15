@@ -1,6 +1,13 @@
 import type { IntegrationKnowledge } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
-import { groupIntegrationSources, sourceHref, summarizeSource } from "./sources";
+import {
+  countSourceFilters,
+  groupIntegrationSources,
+  groupSourcesBySpace,
+  matchesSourceFilter,
+  sourceHref,
+  summarizeSource
+} from "./sources";
 import type { IntegrationSyncProgress } from "./syncProgress";
 
 type Metadata = NonNullable<IntegrationKnowledge["metadata"]>;
@@ -142,5 +149,39 @@ describe("summarizeSource", () => {
       {}
     );
     expect(summary.credentialsFailed).toBe(false);
+  });
+});
+
+describe("source status filters", () => {
+  it("counts every filter, with a syncing source that has failed folders under both", () => {
+    const failingWhileSyncing = summarizeSource(
+      [item("a", {}, { last_sync_status: "error", last_sync_error: "Graph timeout" })],
+      { a: progress("a") }
+    );
+    const counts = countSourceFilters([
+      failingWhileSyncing,
+      summarizeSource([item("b")], {}),
+      summarizeSource([item("c", {}, { document_count: 0 })], {})
+    ]);
+
+    expect(counts).toEqual({ all: 3, attention: 1, syncing: 1, never: 0, empty: 1, ok: 1 });
+    expect(matchesSourceFilter(failingWhileSyncing, "attention")).toBe(true);
+  });
+});
+
+describe("groupSourcesBySpace", () => {
+  it("groups each space's items into its own sources", () => {
+    const spaceA = { id: "s1", name: "Socialtjänsten" };
+    const spaceB = { id: "s2", name: "Stadsbyggnad" };
+    const grouped = groupSourcesBySpace([
+      { space: spaceA, knowledge: item("a", { wrapper_id: "w1", wrapper_name: "KS" }) },
+      { space: spaceB, knowledge: item("b") },
+      { space: spaceA, knowledge: item("c", { wrapper_id: "w1", wrapper_name: "KS" }) }
+    ]);
+
+    expect(grouped.map(({ space, source }) => [space.id, source.id, source.items.length])).toEqual([
+      ["s1", "w1", 2],
+      ["s2", "b", 1]
+    ]);
   });
 });

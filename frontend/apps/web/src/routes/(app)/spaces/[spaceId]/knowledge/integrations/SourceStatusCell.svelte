@@ -7,23 +7,12 @@
   interface Props {
     summary: SourceSummary;
     sourceName: string;
-    problemsHref: string;
   }
 
-  let { summary, sourceName, problemsHref }: Props = $props();
+  let { summary, sourceName }: Props = $props();
 </script>
 
-{#snippet problemsLink()}
-  <!-- eslint-disable svelte/no-navigation-without-resolve -- link is a typed prop passed from caller -->
-  <a
-    href={problemsHref}
-    class="text-negative-stronger focus-visible:ring-stronger w-fit rounded text-xs hover:underline focus-visible:ring-2 focus-visible:outline-none"
-  >
-    {m.integration_source_show_problems()}
-  </a>
-  <!-- eslint-enable svelte/no-navigation-without-resolve -->
-{/snippet}
-
+<!-- The problems themselves are on the source's page; the list only says that there are some. -->
 {#if summary.progress}
   {@const progress = summary.progress}
   <div class="flex w-40 max-w-full flex-col gap-1.5 text-xs">
@@ -34,14 +23,9 @@
     </span>
     <SyncProgressBar {progress} label={m.integration_progress_label({ name: sourceName })} />
     {#if summary.failedItems.length > 0}
-      {@render problemsLink()}
+      <SourceStateBadge state="attention" class="w-fit" />
     {/if}
   </div>
 {:else}
-  <div class="flex flex-col items-start gap-1">
-    <SourceStateBadge state={summary.state} />
-    {#if summary.state === "attention"}
-      {@render problemsLink()}
-    {/if}
-  </div>
+  <SourceStateBadge state={summary.state} />
 {/if}

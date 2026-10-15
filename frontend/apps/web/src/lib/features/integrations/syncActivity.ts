@@ -2,8 +2,14 @@ import type { components, IntegrationKnowledge } from "@eneo/eneo-js";
 
 export type SyncLog = components["schemas"]["SyncLog"];
 
+export type FileChange = { file: string; change: "added" | "updated" | "deleted" };
+
 export type SyncLogExtras = {
   unchangedItems: number;
+  /** The files the sync added, re-indexed or removed, capped by the writer. */
+  changedFiles: FileChange[];
+  /** Every change, also those the capped list leaves out. */
+  changedTotal: number;
   /** The skipped list was capped; `skipped_items` still counts every skipped item. */
   skippedTruncated: boolean;
   reconcileWarning: string | null;
@@ -13,13 +19,26 @@ function asCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
+function isFileChange(value: unknown): value is FileChange {
+  const entry = value as Partial<FileChange> | null;
+  return (
+    typeof entry?.file === "string" &&
+    (entry.change === "added" || entry.change === "updated" || entry.change === "deleted")
+  );
+}
+
 // The sync writer stores these next to the counts the schema declares; they
 // only exist for syncs run after the fields were introduced.
 export function readSyncLogExtras(log: SyncLog): SyncLogExtras {
   const metadata = (log.metadata ?? {}) as Record<string, unknown>;
   const warning = metadata.reconcile_warning;
+  const changedFiles = Array.isArray(metadata.changed_details)
+    ? (metadata.changed_details as unknown[]).filter(isFileChange)
+    : [];
   return {
     unchangedItems: asCount(metadata.unchanged_items),
+    changedFiles,
+    changedTotal: Math.max(asCount(metadata.changed_total), changedFiles.length),
     skippedTruncated: metadata.skipped_truncated === true,
     reconcileWarning: typeof warning === "string" && warning.trim() !== "" ? warning : null
   };

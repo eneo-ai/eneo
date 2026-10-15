@@ -342,10 +342,10 @@ A space's **Knowledge** list has one row per SharePoint source: the items import
 
 - **Source**: the name, with what it holds, for example _5 folders_. The name opens the [source page](#imported-documents).
 - **Contents**: the number of indexed documents across the source.
-- **Status**: **Up to date**, **Syncing**, **Needs attention** (the latest sync of at least one item failed, with a **Show problems** link), **Empty** (synced, but no document is indexed, for example because every file was skipped) or **Waiting for first sync**. While a sync runs, the status is replaced by a progress bar, see [Sync progress](#sync-progress).
+- **Status**: **Up to date**, **Syncing**, **Needs attention** (the latest sync of at least one item failed; open the source to see why), **Empty** (synced, but no document is indexed, for example because every file was skipped) or **Waiting for first sync**. While a sync runs, the status is replaced by a progress bar, see [Sync progress](#sync-progress).
 - **Updated**: when the source was last synchronized successfully. It moves on every successful run, also when nothing had changed, so a healthy source never looks stale.
 
-When one or more sources stop updating, a banner above the list says so. If the cause is that the organization's SharePoint sign-in was refused, the banner says that an administrator needs to sign in again; existing documents can still be searched in the meantime.
+Status buttons above the list (**All**, **Needs attention**, **Syncing**, **Waiting**, **Empty**, **Up to date**, each with its count) narrow it to the sources in that state. When one or more sources stop updating, a banner above the list says so, and with several of them **Show them** filters the list to those sources. If the cause is that the organization's SharePoint sign-in was refused, the banner says that an administrator needs to sign in again; existing documents can still be searched in the meantime.
 
 The actions menu of a source imported together has **Resync all items**, which queues a full synchronization of every item in it; a single item has **Full Sync** in its own menu.
 
@@ -388,7 +388,7 @@ The reasons are the ones listed under [Supported File Types](#supported-file-typ
 
 #### The Activity tab
 
-**Activity** replaces the sync history: a timeline of every folder's synchronizations, newest first and grouped by day. Each entry says what happened (for example _12 files synced, 1 file deleted_, _Everything up to date, no changes_ or _The sync failed_ with the reason), which folder it concerned, whether it was a full or a delta synchronization and how long it took. Unchanged items are files Eneo had already indexed in the same version, so nothing was re-processed; they are counted separately from skipped files. **Show N skipped** lists the files a run skipped with their reasons, at most 50 per run. A **Reconciliation warning** appears when a full synchronization could not safely clean up documents that no longer exist in SharePoint, either because the site could not be listed completely or because the number of missing documents was above the safety cap; the documents are kept, and the next successful full synchronization tries again. **Show older events** loads earlier synchronizations, and a summary beside the timeline totals the failed syncs, new or changed files and removed files among those shown.
+**Activity** replaces the sync history: a timeline of every folder's synchronizations, newest first and grouped by day. Each entry says what happened (for example _12 files synced, 1 file deleted_, _Everything up to date, no changes_ or _The sync failed_ with the reason), which folder it concerned, whether it was a full or a delta synchronization and how long it took. Unchanged items are files Eneo had already indexed in the same version, so nothing was re-processed; they are counted separately from skipped files. **Show N files** lists the files a run changed, each marked **New**, **Changed**, **Removed** or **Skipped** (with the reason), at most 50 of each kind per run. A **Reconciliation warning** appears when a full synchronization could not safely clean up documents that no longer exist in SharePoint, either because the site could not be listed completely or because the number of missing documents was above the safety cap; the documents are kept, and the next successful full synchronization tries again. **Show older events** loads earlier synchronizations, and a summary beside the timeline totals the failed syncs, new or changed files and removed files among those shown.
 
 #### After an import
 
@@ -432,13 +432,13 @@ The deterministic catalog is owned by `backend/src/eneo/integration/sharepoint_f
 
 ### Imported knowledge at scale
 
-The fixture catalog covers the import dialog only. To see imported knowledge as it looks at scale, `backend/scripts/seed_sharepoint_showcase.py` creates the shared space _SharePoint – storskaligt_ with six sources: a site imported as a 35-folder tree with every sync state and skip reason, a source with thousands of documents and long names, a whole-site import under a second embedding model, a OneDrive folder, a source whose sign-in was refused and one that never synced. Subscriptions are active, expired, failing or about to expire, and every folder has weeks of sync history. It runs only while fixture mode is active and recreates the space on every run. From `backend/` in the devcontainer:
+The fixture catalog covers the import dialog only. To see imported knowledge as it looks at scale, `backend/scripts/seed_sharepoint_showcase.py` creates the shared spaces _SharePoint – storskaligt_ and _SharePoint – HR och nämnd_ with six sources: a site imported as a 35-folder tree with every sync state and skip reason, a source with thousands of documents and long names, a whole-site import under a second embedding model, a OneDrive folder, a source whose sign-in was refused and one that never synced. A seventh, failing source goes into the user's personal space, so the admin overview has one to count. Subscriptions are active, expired, failing or about to expire, and every folder has weeks of sync history that names the files each sync changed. It runs only while fixture mode is active and recreates the space on every run. From `backend/` in the devcontainer:
 
 ```bash
 uv run python scripts/seed_sharepoint_showcase.py
 ```
 
-`--simulate-sync` then writes live progress for four of the items for about 90 seconds, so the progress bars can be watched without a SharePoint tenant, and `--remove` deletes the space.
+`--simulate-sync` then writes live progress for four of the items for about 90 seconds, so the progress bars can be watched without a SharePoint tenant, and `--remove` deletes the spaces and the personal source.
 
 ### Admin setup demo
 
@@ -459,6 +459,10 @@ Webhook subscriptions have a maximum lifetime of approximately 29 days according
 Each notification from Microsoft names the subscription it belongs to. Eneo matches it against the subscriptions it has stored and ignores notifications for unknown subscriptions or with the wrong `clientState`, so a stale subscription from an earlier installation cannot trigger synchronization.
 
 The **SharePoint connection** section lists four checks, each with its state and the fix next to it: **App registration in Entra ID** (the tenant domain and the end of the client ID, with **Change**), **Sign-in to Microsoft** (the credential health above, with what stops while it fails), **Change notifications from SharePoint** (how many watches are active, expired or failing to renew, with **Renew expired** and **Show watches**) and **Test the connection**. A badge in its heading sums up the worst state.
+
+### Sources Across the Organization
+
+Under the connection checks, **Sources across the organisation** lists every source imported into a shared space or the organization space, with its space, number of documents, status and when it was last up to date. Sources that need attention come first, the status buttons narrow the list, and the search matches the source, its folders and the space. A summary shows how many sources there are, how many need attention and in how many spaces, and how many documents they hold. Sources in personal spaces can hold a person's own OneDrive folders, so they are only counted, with how many of them fail. The source name opens the source page in its space.
 
 ### Managing Webhooks
 

@@ -202,3 +202,58 @@ export function sourceContentsLabel(items: IntegrationKnowledge[]): string {
   }
   return parts.join(", ");
 }
+
+/** The status filters above a list of sources; "attention" also covers a source that syncs. */
+export type SourceFilter = "all" | "attention" | "syncing" | "never" | "empty" | "ok";
+
+export const SOURCE_FILTERS: SourceFilter[] = [
+  "all",
+  "attention",
+  "syncing",
+  "never",
+  "empty",
+  "ok"
+];
+
+export function matchesSourceFilter(summary: SourceSummary, filter: SourceFilter): boolean {
+  switch (filter) {
+    case "all":
+      return true;
+    case "attention":
+      return summary.failedItems.length > 0;
+    case "syncing":
+      return summary.progress !== null;
+    default:
+      return summary.state === filter;
+  }
+}
+
+export function countSourceFilters(
+  summaries: readonly SourceSummary[]
+): Record<SourceFilter, number> {
+  const counts = Object.fromEntries(SOURCE_FILTERS.map((filter) => [filter, 0])) as Record<
+    SourceFilter,
+    number
+  >;
+  for (const summary of summaries) {
+    for (const filter of SOURCE_FILTERS) {
+      if (matchesSourceFilter(summary, filter)) counts[filter] += 1;
+    }
+  }
+  return counts;
+}
+
+/** Sources per space, for a view that spans spaces; a wrapper never crosses a space. */
+export function groupSourcesBySpace<Space extends { id: string }>(
+  entries: readonly { space: Space; knowledge: IntegrationKnowledge }[]
+): { space: Space; source: IntegrationSource }[] {
+  const bySpace = new Map<string, { space: Space; items: IntegrationKnowledge[] }>();
+  for (const { space, knowledge } of entries) {
+    const entry = bySpace.get(space.id);
+    if (entry) entry.items.push(knowledge);
+    else bySpace.set(space.id, { space, items: [knowledge] });
+  }
+  return [...bySpace.values()].flatMap(({ space, items }) =>
+    groupIntegrationSources(items).map((source) => ({ space, source }))
+  );
+}

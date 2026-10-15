@@ -114,6 +114,23 @@
     return Number.isNaN(ms) ? null : formatDuration(Math.max(ms, 1000));
   }
 
+  const changeStyle = {
+    added: "text-positive-stronger",
+    updated: "text-accent-stronger",
+    deleted: "text-negative-stronger"
+  } as const;
+
+  function changeLabel(change: "added" | "updated" | "deleted"): string {
+    switch (change) {
+      case "added":
+        return m.integration_activity_change_added();
+      case "updated":
+        return m.integration_activity_change_updated();
+      case "deleted":
+        return m.integration_activity_change_deleted();
+    }
+  }
+
   const iconStyles: Record<ActivityKind, string> = {
     failed: "bg-negative-dimmer text-negative-stronger",
     running: "bg-accent-dimmer text-accent-stronger",
@@ -200,28 +217,46 @@
                     .filter((part) => part !== null)
                     .join(" · ")}
                 </p>
-                {#if log.skipped_items > 0 && log.skipped_details?.length > 0}
-                  {@const notListed = skippedNotListed(log)}
+                {#if extras.changedFiles.length > 0 || log.skipped_details?.length > 0}
+                  {@const notListed =
+                    skippedNotListed(log) +
+                    Math.max(0, extras.changedTotal - extras.changedFiles.length)}
                   <details class="text-sm">
                     <summary
-                      class="text-warning-stronger focus-visible:ring-stronger w-fit cursor-pointer rounded text-xs hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                      class="text-secondary focus-visible:ring-stronger w-fit cursor-pointer rounded text-xs hover:underline focus-visible:ring-2 focus-visible:outline-none"
                     >
-                      {m.integration_activity_show_skipped({ count: log.skipped_items })}
+                      {m.integration_activity_show_files({
+                        count: extras.changedTotal + log.skipped_items
+                      })}
                     </summary>
-                    <ul class="text-secondary mt-1 flex flex-col gap-0.5 pl-4 text-xs">
+                    <ul class="mt-1 flex flex-col gap-0.5 pl-1 text-xs">
                       <!-- The same file name recurs across folders, so the key needs the position. -->
-                      {#each log.skipped_details as detail, index (`${index}:${detail.file}`)}
-                        <li>
-                          <span class="text-primary break-all">{detail.file}</span>
-                          – {describeSkipReason(detail.reason)}
+                      {#each extras.changedFiles as change, index (`c${index}:${change.file}`)}
+                        <li class="flex gap-2">
+                          <span class="w-20 shrink-0 font-medium {changeStyle[change.change]}"
+                            >{changeLabel(change.change)}</span
+                          >
+                          <span class="text-primary min-w-0 break-all">{change.file}</span>
                         </li>
                       {/each}
-                      {#if extras.skippedTruncated || notListed > 0}
-                        <li class="italic">
-                          {notListed > 0
-                            ? m.skipped_and_n_more({ count: notListed })
-                            : m.skipped_list_truncated()}
+                      {#each log.skipped_details ?? [] as detail, index (`s${index}:${detail.file}`)}
+                        <li class="flex gap-2">
+                          <span class="text-warning-stronger w-20 shrink-0 font-medium"
+                            >{m.integration_activity_change_skipped()}</span
+                          >
+                          <span class="min-w-0 break-all">
+                            <span class="text-primary">{detail.file}</span>
+                            <span class="text-secondary">– {describeSkipReason(detail.reason)}</span
+                            >
+                          </span>
                         </li>
+                      {/each}
+                      {#if notListed > 0}
+                        <li class="text-secondary italic">
+                          {m.skipped_and_n_more({ count: notListed })}
+                        </li>
+                      {:else if extras.skippedTruncated}
+                        <li class="text-secondary italic">{m.skipped_list_truncated()}</li>
                       {/if}
                     </ul>
                   </details>
