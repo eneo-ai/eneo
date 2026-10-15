@@ -9,6 +9,7 @@ import {
   classifyVariable,
   parsePromptSegments,
   getChipClasses,
+  isVariablePathSegment,
   type VariableClassificationContext
 } from "./flowVariableTokens";
 
@@ -17,6 +18,26 @@ function collectInvalidTokens(text: string, context: VariableClassificationConte
     .filter((analysis) => analysis.kind === "invalid")
     .map((analysis) => analysis.token);
 }
+
+// Kills: a name the server's path split (variable_path_segments: split at dots,
+// str.strip() each) or the token pattern (no braces) cannot reach counted as a
+// variable, an inner space, which both keep, refused, and JavaScript's trim()
+// used in place of Python's strip (U+FEFF kept, U+001F and U+0085 stripped).
+it.each([
+  ["anomaly days", true],
+  ["dag_1", true],
+  ["a.b", false],
+  [" a", false],
+  ["a ", false],
+  ["{a", false],
+  ["a}", false],
+  ["", false],
+  ["\ufeffa", true],
+  ["a\x1f", false],
+  ["\x85a", false]
+])("isVariablePathSegment(%j) is %s", (name, usable) => {
+  expect(isVariablePathSegment(name)).toBe(usable);
+});
 
 describe("replaceExactTemplateToken", () => {
   it("rewrites only exact friendly tokens", () => {

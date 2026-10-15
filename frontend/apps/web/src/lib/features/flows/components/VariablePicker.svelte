@@ -24,6 +24,7 @@
   } from "$lib/features/flows/flowFormSchema";
   import {
     getChipClasses,
+    isVariablePathSegment,
     VARIABLE_CATEGORY_CLASSES,
     type VariableCategory
   } from "$lib/features/flows/flowVariableTokens";
@@ -96,10 +97,13 @@
     const properties = (step.output_contract as { properties?: Record<string, { type?: unknown }> })
       ?.properties;
     if (!properties || typeof properties !== "object") return [];
-    return Object.entries(properties).map(([name, schema]) => ({
-      name,
-      type: typeof schema?.type === "string" ? schema.type : ""
-    }));
+    // A name no variable path reaches would insert a token that reads another field.
+    return Object.entries(properties)
+      .filter(([name]) => isVariablePathSegment(name))
+      .map(([name, schema]) => ({
+        name,
+        type: typeof schema?.type === "string" ? schema.type : ""
+      }));
   }
 
   // The same variables the editor's autocomplete accepts, grouped the way an

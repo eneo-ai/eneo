@@ -33,6 +33,27 @@ export function formatAdvancedJson(value: unknown): string {
   return value == null ? "" : JSON.stringify(value, null, 2);
 }
 
+/** True when a draft holds more than nothing or an empty object. */
+export function hasCustomJson(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed !== "{}";
+}
+
+/**
+ * True when the step's output mode and type let the author set an output
+ * contract; the publish check (_validate_output_contract_compatibility)
+ * refuses one on a text answer, a fixed Word template, a verbatim document
+ * and a speaker mapping, whose contract is fixed.
+ */
+export function acceptsOutputContract(step: Pick<FlowStep, "output_mode" | "output_type">) {
+  return (
+    step.output_type !== "text" &&
+    step.output_mode !== "template_fill" &&
+    step.output_mode !== "render_verbatim" &&
+    step.output_mode !== "speaker_mapping"
+  );
+}
+
 export function getStepKeyForAdvancedJson(step: FlowStep | null): string | null {
   if (!step) return null;
   return `${step.id ?? "new"}:${step.step_order}`;

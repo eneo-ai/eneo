@@ -22,6 +22,23 @@ export function isValidStepInputPath(path: string): boolean {
 
 export const TEMPLATE_TOKEN_PATTERN_SOURCE = String.raw`\{\{\s*([^{}]+)\s*\}\}`;
 const TEMPLATE_TOKEN_PATTERN = new RegExp(TEMPLATE_TOKEN_PATTERN_SOURCE, "g");
+
+// The characters Python's str.strip() removes (str.isspace), which differ from
+// JavaScript's trim(): U+001C-U+001F and U+0085 are stripped, U+FEFF is not.
+const PYTHON_WHITESPACE = String.raw`[\t-\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]`;
+const PYTHON_STRIPPED_EDGE = new RegExp(`^${PYTHON_WHITESPACE}|${PYTHON_WHITESPACE}$`);
+
+/**
+ * True when a property name can be one segment of a variable path. The server
+ * splits a path at each dot and strips each segment with str.strip()
+ * (variable_path_segments), and a token cannot hold a brace (the pattern
+ * above), so a name with a dot, a brace or stripped whitespace at either end
+ * names a key no path reaches.
+ */
+export function isVariablePathSegment(name: string): boolean {
+  return name.length > 0 && !PYTHON_STRIPPED_EDGE.test(name) && !/[.{}]/.test(name);
+}
+
 const STEP_ORDER_TOKEN_PATTERN = /^step_(\d+)(\..+)?$/;
 const STEP_REFERENCE_TOKEN_PATTERN = /^step_(\d+)(\.|$)/;
 const STRUCTURED_OUTPUT_TOKEN_PATTERN = /^step_(\d+)\.output\.structured(?:\.|$)/;

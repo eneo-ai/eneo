@@ -10,12 +10,15 @@
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import { slide } from "svelte/transition";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import type {
-    AdvancedJsonDrafts,
-    AdvancedJsonErrors,
-    AdvancedJsonField
+  import {
+    acceptsOutputContract,
+    hasCustomJson,
+    type AdvancedJsonDrafts,
+    type AdvancedJsonErrors,
+    type AdvancedJsonField
   } from "./advancedJsonDrafts";
   import FlowStepAdvancedJsonField from "./FlowStepAdvancedJsonField.svelte";
+  import FlowOutputContractFromExample from "./FlowOutputContractFromExample.svelte";
 
   const reducedMotion = prefersReducedMotion();
 
@@ -41,16 +44,14 @@
   // user explicitly opts to edit — Avancerat shouldn't open onto a wall of JSON.
   let editInputContract = $state(false);
   let editOutputContract = $state(false);
-  const hasCustomJson = (value: string) => {
-    const trimmed = value.trim();
-    return trimmed.length > 0 && trimmed !== "{}";
-  };
   const showInputContractField = $derived(
     editInputContract || hasCustomJson(advancedJsonDrafts.input_contract)
   );
   const showOutputContractField = $derived(
     editOutputContract || hasCustomJson(advancedJsonDrafts.output_contract)
   );
+  // A JSON step's contract fields are what later steps can pick as variables.
+  const namesVariables = $derived(step.output_type === "json" && acceptsOutputContract(step));
   // Re-hide the editors when the edited step changes so a manual reveal on one
   // step doesn't carry into the next.
   let lastStepOrder = $state(untrack(() => step.step_order));
@@ -138,7 +139,14 @@
           </Tooltip.Root>
         </Tooltip.Provider>
       </svelte:fragment>
-      {#if step.output_contract == null || step.output_type === "text" || step.output_mode === "render_verbatim" || step.output_mode === "speaker_mapping"}
+      <svelte:fragment slot="description">
+        {#if namesVariables}
+          <p class="text-secondary text-[0.8125rem] leading-relaxed">
+            {m.flow_step_output_contract_variables_hint()}
+          </p>
+        {/if}
+      </svelte:fragment>
+      {#if step.output_contract == null || !acceptsOutputContract(step)}
         <Alert.Root
           class="bg-warning-dimmer/50 text-warning-stronger mb-2 rounded-lg"
           role="status"
@@ -157,6 +165,30 @@
           </Alert.Description>
         </Alert.Root>
       {/if}
+      <!-- One action instance whether or not the editor shows, so the dialog
+           and the focus it returns survive the editor opening on create. -->
+      {#if !showOutputContractField || namesVariables}
+        <div class="mb-2 flex flex-wrap gap-2">
+          {#if !showOutputContractField}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isPublished}
+              onclick={() => (editOutputContract = true)}
+            >
+              {m.flow_step_contract_edit_json()}
+            </Button>
+          {/if}
+          {#if namesVariables}
+            <FlowOutputContractFromExample
+              currentContract={advancedJsonDrafts.output_contract}
+              disabled={isPublished}
+              onCreate={(contractText) =>
+                onJsonFieldUpdate?.({ field: "output_contract", value: contractText })}
+            />
+          {/if}
+        </div>
+      {/if}
       {#if showOutputContractField}
         <FlowStepAdvancedJsonField
           field="output_contract"
@@ -168,16 +200,6 @@
           onUpdate={onJsonFieldUpdate}
           onFormat={onJsonFieldFormat}
         />
-      {:else}
-        <Button
-          variant="outline"
-          size="sm"
-          class="self-start"
-          disabled={isPublished}
-          onclick={() => (editOutputContract = true)}
-        >
-          {m.flow_step_contract_edit_json()}
-        </Button>
       {/if}
     </Settings.Row>
 

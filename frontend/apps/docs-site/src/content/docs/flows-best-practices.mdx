@@ -39,6 +39,24 @@ the answer compact, and lets the flow refuse a malformed answer instead of
 passing it on. Use free text only for the step that writes the document the
 reader sees.
 
+The named fields of a JSON step's **Output contract** (under **Contracts and
+integrations** in **Advanced**) are the variables later steps can pick. Instead
+of writing the JSON Schema by hand, choose **Create from an example** and paste
+an example of the answer, such as what a tool returns. The action is not offered
+on a speaker-naming step, whose contract is fixed. The editor lists the fields
+it will create and writes a contract in which each key of the example is a
+required field typed by its value: text, number (any number, also a whole one),
+yes/no, an object, or a list typed by its first element. Values are read four
+levels deep, the top level being the first; a deeper object or list keeps only
+its type. The dialog notes an empty list (any content), a `null` (text or
+empty) and a list whose elements differ in kind or fields (typed by the first
+element), so you can adjust the type. A top-level field whose name has a dot or
+a brace, or whitespace at its start or end, is marked: later steps cannot use it
+as a variable and the variable picker does not offer it, but it stays in the
+contract. An example over 200,000 characters or 500 fields is refused. The
+example is only read in the editor; no tool is called. If the step already has a
+contract, the editor asks before replacing it.
+
 Keep the schema small. Every optional field is a field the model may fill with
 guesses; every long free-text field is output that counts against the model's
 output limit.

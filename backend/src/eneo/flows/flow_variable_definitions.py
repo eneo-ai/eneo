@@ -142,7 +142,9 @@ def unreceived_flow_input_aliases(run_input: FlowRunInput) -> frozenset[str]:
 
 def variable_path_segments(path: str) -> list[str]:
     """The segments the resolver walks a template path by: split at each dot,
-    each stripped (an empty one is the resolver's error to report)."""
+    each stripped (an empty one is the resolver's error to report). The web
+    editor mirrors this split in isVariablePathSegment (flowVariableTokens.ts)
+    to tell which contract field names a path can reach."""
 
     return [segment.strip() for segment in path.split(".")]
 
