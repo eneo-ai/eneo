@@ -5016,7 +5016,7 @@ export interface paths {
     };
     /**
      * Get Integration Knowledge Documents
-     * @description List the indexed documents of an integration knowledge item, with their folder relative to the imported item.
+     * @description List the indexed documents of an integration knowledge item, with their folder relative to the imported item. `q` matches the title, the path or a property value.
      */
     get: operations["get_integration_knowledge_documents_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__documents__get"];
     put?: never;
@@ -42533,7 +42533,7 @@ export interface operations {
   get_integration_knowledge_documents_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__documents__get: {
     parameters: {
       query?: {
-        /** @description Matches the title or the path */
+        /** @description Matches the title, the path or a property value */
         q?: string | null;
         sort?: "name" | "path" | "size" | "updated_at";
         order?: "asc" | "desc";

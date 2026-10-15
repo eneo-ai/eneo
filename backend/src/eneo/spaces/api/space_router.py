@@ -1226,7 +1226,8 @@ async def update_integration_knowledge(
     "/{id}/knowledge/integrations/{integration_knowledge_id}/documents/",
     response_model=IntegrationDocumentsPage,
     description="List the indexed documents of an integration knowledge item, "
-    "with their folder relative to the imported item.",
+    "with their folder relative to the imported item. `q` matches the title, "
+    "the path or a property value.",
     responses=responses.get_responses([403, 404]),
 )
 @endpoint_access(
@@ -1240,7 +1241,10 @@ async def get_integration_knowledge_documents(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     q: Annotated[
         str | None,
-        Query(max_length=200, description="Matches the title or the path"),
+        Query(
+            max_length=200,
+            description="Matches the title, the path or a property value",
+        ),
     ] = None,
     sort: Annotated[IntegrationDocumentSort, Query()] = "path",
     order: Annotated[SortOrder, Query()] = "asc",

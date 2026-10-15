@@ -10,7 +10,10 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 from eneo.database.tables.info_blobs_table import InfoBlobs
-from eneo.info_blobs.info_blob_repo import InfoBlobRepository, _document_matches
+from eneo.info_blobs.info_blob_repo import (
+    InfoBlobRepository,
+    _title_or_path_matches,
+)
 
 ANCHOR = "https://contoso.sharepoint.com/sites/KS/Shared%20Documents/Protokoll"
 ANCHOR_LIKE = ANCHOR.replace("%", "\\%")
@@ -19,6 +22,12 @@ BELOW_ANCHOR = (
     f"CASE WHEN (info_blobs.url ILIKE '{ANCHOR_LIKE}%' ESCAPE '\\') "
     f"THEN SUBSTRING(info_blobs.url FROM {len(ANCHOR) + 1}) "
     "ELSE info_blobs.url END"
+)
+# Each property value, also each entry of a multi-value list; never a name or
+# label, which every document of a library shares.
+PROPERTY_VALUE = (
+    "EXISTS (SELECT * FROM jsonb_array_elements_text(jsonb_path_query_array("
+    "info_blobs.source_metadata, '$[*].value[*]')) AS value WHERE value"
 )
 
 
@@ -65,7 +74,9 @@ def session():
     return session
 
 
-async def test_page_filters_active_documents_of_the_item_on_title_or_path(session):
+async def test_page_filters_active_documents_of_the_item_on_title_path_or_property(
+    session,
+):
     knowledge_id = uuid4()
     record = _record(knowledge_id)
     session.scalars.return_value = [record]
@@ -86,6 +97,9 @@ async def test_page_filters_active_documents_of_the_item_on_title_or_path(sessio
         assert "info_blobs.version_state = 'active'" in sql
         assert "info_blobs.title ILIKE '%50\\%\\_x%' ESCAPE '\\'" in sql
         assert f"{BELOW_ANCHOR} ILIKE '%50\\%\\_x%' ESCAPE '\\'" in sql
+        assert f"{PROPERTY_VALUE} ILIKE '%50\\%\\_x%' ESCAPE '\\'" in " ".join(
+            sql.split()
+        )
     assert "count(*)" in totals_sql
     assert "coalesce(sum(info_blobs.size), 0)" in totals_sql
     assert "LIMIT 50 OFFSET 100" in page_sql
@@ -159,7 +173,7 @@ async def test_page_orders_by_the_requested_key_with_a_stable_tiebreak(
 def test_search_matches_the_title_and_the_url_below_the_item(
     q, anchor, expected_url_matches
 ):
-    sql = _compiled(sa.select(sa.literal(1)).where(_document_matches(q, anchor)))
+    sql = _compiled(sa.select(sa.literal(1)).where(_title_or_path_matches(q, anchor)))
 
     assert f"info_blobs.title ILIKE '%{q}%'" in sql
     for expected in expected_url_matches:
@@ -191,7 +205,7 @@ def documents():
         )
 
     def matching(q: str, anchor: str | None) -> list[str]:
-        query = sa.select(InfoBlobs.title).where(_document_matches(q, anchor))
+        query = sa.select(InfoBlobs.title).where(_title_or_path_matches(q, anchor))
         with engine.connect() as connection:
             return sorted(connection.scalars(query))
 
