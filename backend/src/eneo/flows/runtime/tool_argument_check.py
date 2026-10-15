@@ -1,9 +1,14 @@
-"""Bounded tool schema checks in a killable child, shared by publish and runs.
+"""Bounded JSON Schema checks in a killable child: a tool's arguments at
+publish and in runs, and a copy_input step's value against its contracts.
 
 A schema can hold the GIL while matching an expression or expand references
-without a bound. A thread cannot stop that work. One child serves one event
-loop's checks, serialized over a local Pipe. A fresh interpreter starts only
-the checker entry module, never the server's or worker's main script.
+without a bound. A thread cannot stop that work. Tool arguments and copy
+values each have their own checker and time limit; a checker's child serves
+one event loop's checks, serialized over a local Pipe, so a check can wait for
+every check queued before it on the same checker, each up to that checker's
+limit. A copy check never delays a tool's argument check. A fresh interpreter
+starts only the checker entry module, never the server's or worker's main
+script.
 
 One owned thread handles every framed pipe read and write, including partial
 messages. The deadline starts before the request is written, after the child's
@@ -23,7 +28,7 @@ import logging
 import signal
 import subprocess
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
 from multiprocessing import Pipe
@@ -45,6 +50,13 @@ logger = logging.getLogger(__name__)
 # Includes the pipe writes, evaluation and answer, but not earlier checks or
 # child startup. Ordinary arguments take milliseconds; this leaves host headroom.
 TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS = 2.0
+# A copy value can be as large as the inline byte ceiling (8 MiB by default).
+# On a development host (load about 6) the slowest valid 8 MiB value measured,
+# a list of one-integer lists checked for type and minimum, took 21 s; flat
+# integer lists took 14 s and a large object 5 s. Close to three times that
+# leaves room for a loaded host. The check's time grows with the value's size
+# and the contract's work per item.
+COPY_CONTRACT_CHECK_TIMEOUT_SECONDS = 60.0
 # Importing jsonschema takes about 0.15 s on an idle host. Startup failure is a
 # host fault, so it has a separate, generous budget.
 _START_TIMEOUT_SECONDS = 10.0
@@ -55,7 +67,8 @@ class ToolArgumentCheckFailed(Exception):
 
 
 class ToolArgumentsNotJson(Exception):
-    """Arguments contain a non-JSON number or exceed the JSON encoder's nesting."""
+    """The checked value contains a non-JSON number or exceeds the JSON
+    encoder's nesting."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,14 +98,14 @@ _CheckAnswer = ContractFinding | FixedPropertyViolation
 
 
 class _Operation(Enum):
-    FULL_ARGUMENTS = auto()
+    WHOLE_VALUE = auto()
     FIXED_PROPERTIES = auto()
 
 
 @dataclass(frozen=True, slots=True)
 class _Request:
     operation: _Operation
-    arguments_text: bytes
+    value_text: bytes
     schema_text: bytes
 
 
@@ -136,13 +149,12 @@ def serve_tool_argument_checks(connection: Connection, alarm_seconds: float) -> 
         try:
             if not isinstance(request, _Request):
                 raise TypeError("Unexpected tool check request")
-            arguments: dict[str, object] = json.loads(request.arguments_text)
             schema: dict[str, object] = json.loads(request.schema_text)
             answer: _CheckAnswer | _CheckRaised
-            if request.operation is _Operation.FULL_ARGUMENTS:
-                answer = evaluate_contract(arguments, schema)
+            if request.operation is _Operation.WHOLE_VALUE:
+                answer = evaluate_contract(json.loads(request.value_text), schema)
             else:
-                answer = _fixed_properties(arguments, schema)
+                answer = _fixed_properties(json.loads(request.value_text), schema)
         except Exception as exc:  # the child's boundary: the parent logs the type
             answer = _CheckRaised(type(exc).__name__)
         finally:
@@ -156,7 +168,7 @@ class _Child:
     connection: Connection
 
 
-def _start_child() -> _Child:
+def _start_child(alarm_seconds: float) -> _Child:
     ours, theirs = Pipe()
     try:
         process = subprocess.Popen(
@@ -164,7 +176,7 @@ def _start_child() -> _Child:
                 sys.executable,
                 str(Path(__file__).resolve().with_name("tool_argument_check_child.py")),
                 str(theirs.fileno()),
-                str(TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS + 1),
+                str(alarm_seconds),
             ],
             pass_fds=(theirs.fileno(),),
         )
@@ -184,14 +196,26 @@ def _exchange(connection: Connection, request: _Request) -> object:
     return answer
 
 
-def _json_text(value: Mapping[str, object]) -> bytes:
+def _json_text(value: object) -> bytes:
     return json.dumps(value, allow_nan=False).encode()
+
+
+def tool_argument_limit_seconds() -> float:
+    return TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS
+
+
+def copy_contract_limit_seconds() -> float:
+    return COPY_CONTRACT_CHECK_TIMEOUT_SECONDS
 
 
 class ToolArgumentChecker:
     """Checks one request at a time on one child of the current event loop."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self, limit_seconds: Callable[[], float] = tool_argument_limit_seconds
+    ) -> None:
+        """``limit_seconds`` gives the check's time limit, read at each check."""
+        self._limit_seconds = limit_seconds
         self._loop: asyncio.AbstractEventLoop | None = None
         self._lock = asyncio.Lock()
         self._child: _Child | None = None
@@ -201,15 +225,17 @@ class ToolArgumentChecker:
         self._pipe_call: concurrent.futures.Future[object] | None = None
 
     async def check(
-        self, arguments: Mapping[str, object], schema: Mapping[str, object]
+        self,
+        value: Mapping[str, object] | Sequence[object],
+        schema: Mapping[str, object],
     ) -> ToolArgumentCheckResult:
-        """Validate the full object, including its schema's metaschema.
+        """Validate the whole value, including its schema's metaschema.
 
-        Raises ToolArgumentsNotJson for non-JSON arguments and
+        Raises ToolArgumentsNotJson for a non-JSON value and
         ToolArgumentCheckFailed for host faults. Cancellation and deadlines
         kill the child; the next check starts a new one.
         """
-        return await self._check(arguments, schema, _Operation.FULL_ARGUMENTS)
+        return await self._check(value, schema, _Operation.WHOLE_VALUE)
 
     async def check_fixed_properties(
         self, fixed: Mapping[str, object], schema: Mapping[str, object]
@@ -224,52 +250,51 @@ class ToolArgumentChecker:
     @overload
     async def _check(
         self,
-        arguments: Mapping[str, object],
+        value: Mapping[str, object] | Sequence[object],
         schema: Mapping[str, object],
-        operation: Literal[_Operation.FULL_ARGUMENTS],
+        operation: Literal[_Operation.WHOLE_VALUE],
     ) -> ToolArgumentCheckResult: ...
 
     @overload
     async def _check(
         self,
-        arguments: Mapping[str, object],
+        value: Mapping[str, object],
         schema: Mapping[str, object],
         operation: Literal[_Operation.FIXED_PROPERTIES],
     ) -> FixedPropertyCheckResult: ...
 
     async def _check(
         self,
-        arguments: Mapping[str, object],
+        value: Mapping[str, object] | Sequence[object],
         schema: Mapping[str, object],
         operation: _Operation,
     ) -> ToolArgumentCheckResult | FixedPropertyCheckResult:
         try:
-            arguments_text = _json_text(arguments)
+            value_text = _json_text(value)
         except (RecursionError, ValueError) as exc:
             raise ToolArgumentsNotJson from exc
         try:
             schema_text = _json_text(schema)
         except (RecursionError, ValueError):
-            logger.warning("A tool's input schema cannot be written as JSON text.")
+            logger.warning("A schema cannot be written as JSON text.")
             return ArgumentCheckUnfinished(timed_out=False)
-        request = _Request(operation, arguments_text, schema_text)
+        request = _Request(operation, value_text, schema_text)
         async with self._lock_of_running_loop():
             try:
                 answer = await self._ask(request)
             except TimeoutError:
                 exit_code = self._end_child()
                 logger.warning(
-                    "A tool argument check ran past %s seconds; its process "
+                    "A schema check ran past %s seconds; its process "
                     "was killed (exit code before: %s).",
-                    TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS,
+                    self._limit_seconds(),
                     exit_code,
                 )
                 return ArgumentCheckUnfinished(timed_out=True)
             except ToolArgumentCheckFailed as exc:
                 exit_code = self._end_child()
                 logger.error(
-                    "A tool argument check could not run: %s (exit code "
-                    "before the kill: %s).",
+                    "A schema check could not run: %s (exit code before the kill: %s).",
                     exc,
                     exit_code,
                 )
@@ -279,9 +304,7 @@ class ToolArgumentChecker:
                 self._end_child()
                 raise
         if isinstance(answer, _CheckRaised):
-            logger.warning(
-                "A tool argument check raised %s in its process.", answer.exception
-            )
+            logger.warning("A schema check raised %s in its process.", answer.exception)
             return ArgumentCheckUnfinished(timed_out=False)
         return answer
 
@@ -298,7 +321,7 @@ class ToolArgumentChecker:
             child = self._child or await self._started_child()
         except (EOFError, OSError) as exc:
             raise ToolArgumentCheckFailed("its process ended") from exc
-        async with asyncio.timeout(TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS):
+        async with asyncio.timeout(self._limit_seconds()):
             try:
                 answer = await self._on_pipe_thread(
                     lambda: _exchange(child.connection, request)
@@ -307,7 +330,7 @@ class ToolArgumentChecker:
                 raise ToolArgumentCheckFailed("its process ended") from exc
         if answer is None or isinstance(answer, ContractNotEvaluable | _CheckRaised):
             return answer
-        if request.operation is _Operation.FULL_ARGUMENTS and isinstance(
+        if request.operation is _Operation.WHOLE_VALUE and isinstance(
             answer, ContractViolation
         ):
             return answer
@@ -318,7 +341,9 @@ class ToolArgumentChecker:
         raise ToolArgumentCheckFailed(f"its process answered {type(answer).__name__}")
 
     async def _started_child(self) -> _Child:
-        child = self._child = _start_child()
+        # The child's own alarm ends it a second after the limit if this
+        # process disappears during a check.
+        child = self._child = _start_child(self._limit_seconds() + 1)
         try:
             async with asyncio.timeout(_START_TIMEOUT_SECONDS):
                 ready = await self._on_pipe_thread(child.connection.recv)
@@ -352,6 +377,7 @@ class ToolArgumentChecker:
 
 
 _CHECKER = ToolArgumentChecker()
+_COPY_CHECKER = ToolArgumentChecker(copy_contract_limit_seconds)
 
 
 async def check_tool_arguments(
@@ -359,6 +385,14 @@ async def check_tool_arguments(
 ) -> ToolArgumentCheckResult:
     """Check a run's full arguments with this event loop's killable checker."""
     return await _CHECKER.check(arguments, schema)
+
+
+async def check_contract_value(
+    value: Mapping[str, object] | Sequence[object], schema: Mapping[str, object]
+) -> ToolArgumentCheckResult:
+    """Check a copy_input step's JSON value in its own killable checker, with
+    the copy limit."""
+    return await _COPY_CHECKER.check(value, schema)
 
 
 async def check_fixed_tool_properties(

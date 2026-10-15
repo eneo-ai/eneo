@@ -15,7 +15,13 @@ from eneo.flows.api.flow_graph import (
     enrich_nodes_with_run_results,
 )
 from eneo.flows.domain.flow import FlowStep, FlowStepResultAnnotation
-from eneo.flows.enums import FlowOutputType, FlowStepResultStatus
+from eneo.flows.enums import (
+    FlowOutputMode,
+    FlowOutputType,
+    FlowPrimaryOutputExecutionKind,
+    FlowStepResultStatus,
+    flow_output_mode_primary_execution_kind,
+)
 from eneo.flows.flow_validators import validate_steps
 
 _GOLDEN_FLOW_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -719,3 +725,23 @@ def test_speaker_identification_stays_unset_without_a_service_or_when_off() -> N
 
     for nodes in (without_service, switched_off, malformed):
         assert [node.speaker_identification for node in nodes] == [None, None]
+
+
+def test_graph_draws_every_model_free_mode_as_assembly() -> None:
+    # Kills a graph reader that keeps its own mode list: a newer model-free
+    # mode (copy_input) would be drawn as an LLM step.
+    nodes, _ = build_graph_from_steps(
+        [
+            {**_step(step_order=order, input_source="flow_input"), "output_mode": mode}
+            for order, mode in enumerate(FlowOutputMode, start=1)
+        ]
+    )
+    assert {node.output_mode: node.type for node in nodes[1:-1]} == {
+        mode.value: (
+            "assembly"
+            if flow_output_mode_primary_execution_kind(mode)
+            is FlowPrimaryOutputExecutionKind.DETERMINISTIC
+            else "llm"
+        )
+        for mode in FlowOutputMode
+    }

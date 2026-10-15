@@ -44,8 +44,8 @@ def children(monkeypatch):
     started: list[tool_argument_check._Child] = []
     start = tool_argument_check._start_child
 
-    def tracked_start():
-        child = start()
+    def tracked_start(alarm_seconds: float):
+        child = start(alarm_seconds)
         started.append(child)
         return child
 
@@ -135,7 +135,7 @@ async def test_a_slow_start_does_not_count_against_the_checks_limit(
     monkeypatch.setattr(tool_argument_check, "TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS", 0.3)
     real_start = tool_argument_check._start_child
 
-    def start_one_late() -> tool_argument_check._Child:
+    def start_one_late(alarm_seconds: float) -> tool_argument_check._Child:
         monkeypatch.setattr(tool_argument_check, "_start_child", real_start)
         child = _fixture_child(_READY_LATE)
         children.append(child)
@@ -189,7 +189,7 @@ async def test_an_answer_sent_in_parts_ends_at_the_limit_off_the_event_loop(
     )
     real_start = tool_argument_check._start_child
 
-    def start_one_in_parts() -> tool_argument_check._Child:
+    def start_one_in_parts(alarm_seconds: float) -> tool_argument_check._Child:
         monkeypatch.setattr(tool_argument_check, "_start_child", real_start)
         child = _fixture_child(_ANSWER_IN_PARTS)
         children.append(child)
@@ -309,12 +309,12 @@ def test_a_checker_serves_a_second_event_loop() -> None:
 @pytest.mark.parametrize("active", [False, True], ids=["idle-eof", "active-alarm"])
 def test_a_child_does_not_outlive_its_parent_pipe(children, active) -> None:
     # Kills missing EOF exit and missing active-work alarm after parent death.
-    child = tool_argument_check._start_child()
+    child = tool_argument_check._start_child(3.0)
     assert isinstance(child.connection.recv(), tool_argument_check._Ready)
     if active:
         child.connection.send(
             tool_argument_check._Request(
-                tool_argument_check._Operation.FULL_ARGUMENTS,
+                tool_argument_check._Operation.WHOLE_VALUE,
                 tool_argument_check._json_text({"code": "a" * 30 + "!"}),
                 tool_argument_check._json_text(_SLOW_SCHEMA),
             )

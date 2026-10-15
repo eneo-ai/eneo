@@ -66,6 +66,16 @@ def compose_text_violation(
     return None
 
 
+def copy_input_violation(
+    *, step_order: int, input_type: str, output_type: str, output_mode: str
+) -> str | None:
+    if output_mode != FlowOutputMode.COPY_INPUT:
+        return None
+    if input_type != "json" or output_type != "json":
+        return f"Step {step_order}: output_mode 'copy_input' requires input_type 'json' and output_type 'json'."
+    return None
+
+
 def speaker_mapping_violation(
     *,
     step_order: int,

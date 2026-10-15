@@ -53,7 +53,23 @@ const validEvents: AIBuilderStreamEvent[] = [
       proposal: {
         spec: {
           flow_name: "Create a report",
-          steps: []
+          steps: [
+            {
+              plan_step_ref: "copy",
+              existing_step_ref: "existing_step_1",
+              name: "Copy JSON",
+              assistant_spec: { instructions: "", model_ref: null, knowledge_refs: [] },
+              input_source: "flow_input",
+              input_type: "json",
+              output_type: "json",
+              output_mode: "copy_input",
+              input_bindings: null,
+              input_contract: null,
+              output_contract: { type: "object" },
+              input_config: null,
+              output_config: null
+            }
+          ]
         },
         execution_shape: {
           completion_model_step_count: 0,

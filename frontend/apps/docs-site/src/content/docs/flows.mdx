@@ -136,7 +136,7 @@ _A worked example: audio goes in, a DOCX document comes out. Each step declares 
 | -------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------- |
 | `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, `tool`                                                        | Explicit per step |
 | `input_type`                     | What kind of input the step expects                | `text`, `json`, `audio`, `document`, `file`, `any`. `image` exists in the enum but the runtime rejects it; do not build on it. | Explicit per step |
-| `output_mode`                    | How the step produces its result                   | `pass_through`, `compose_text`, `http_post`, `transcribe_only`, `render_verbatim`, `template_fill`                             | Explicit per step |
+| `output_mode`                    | How the step produces its result                   | `pass_through`, `compose_text`, `copy_input`, `http_post`, `transcribe_only`, `render_verbatim`, `template_fill`                             | Explicit per step |
 | `output_type`                    | The result shape                                   | `text`, `json`, `pdf`, `docx`                                                                                                  | Explicit per step |
 | `output_classification_override` | Optional higher classification for the step output | integer: the level of one of your organisation's security classes                                                              | No override       |
 
@@ -359,6 +359,7 @@ wildcards in text inputs are not supported.
 | ----------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `pass_through`    | Standard LLM-backed generation                    | Historical name; the step still runs an LLM and returns the configured `output_type` |
 | `compose_text`    | Deterministic text assembly from resolved refs    | Requires `input_type=text`, `output_type=text`, and authored input bindings          |
+| `copy_input`      | Deterministic copy of the complete JSON input | Requires `input_type=json` and `output_type=json`; validates the output contract without changing JSON keys or values |
 | `http_post`       | Send the step output to an external HTTP endpoint | Requires valid authored HTTP config                                                  |
 | `transcribe_only` | Audio transcription                               | Requires `input_type=audio` and `output_type=text`                                   |
 | `render_verbatim` | Zero-LLM PDF/DOCX rendering from resolved text    | Requires `input_type=text` and `output_type=pdf` or `output_type=docx`               |
@@ -511,6 +512,30 @@ Current validation rules are strict:
 - if runtime input is enabled for that step, its runtime input format must also be `audio`
 
 This is the normal starting point for flows that ingest recorded meetings, interviews, or citizen-submitted audio.
+
+### `copy_input`
+
+Use **JSON without AI** to return the complete resolved JSON object or array as
+JSON output. The step preserves nested values, arrays, extra keys and Unicode;
+it does not call a completion model or normalize keys against the output schema.
+The assistant's prompt is not used: it is not resolved, selects no earlier
+material and does not count against the input byte ceiling.
+The input contract is checked when material is resolved. The existing inline
+output byte ceiling applies to the copied container, and then the output
+contract is checked directly against it. Both contract checks run in a separate
+checking process with a time limit chosen from measured checks of values at the
+default 8 MiB ceiling. The check takes longer for a larger value and for a contract
+with more work per item; a value that cannot be checked in time fails the step
+with `typed_io_contract_not_checked`, and a value that breaks the contract fails
+it with `typed_io_contract_violation`. Copying does not remove fields to make
+the value fit.
+
+The editor offers this mode for JSON material and selects JSON as its output.
+The AI Builder can preserve a saved copy step but does not propose the mode.
+Deploy the database migration and a runtime that understands `copy_input` before
+saving or running such steps. Rolling back requires replacing or removing copy
+steps from drafts first; already published copy steps also need a compatible
+runtime.
 
 ### `render_verbatim`
 

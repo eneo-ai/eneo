@@ -183,6 +183,7 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_unsupported_output_mode: m.flow_error_flow_unsupported_output_mode,
   flow_unsupported_output_type: m.flow_error_flow_unsupported_output_type,
   typed_io_contract_violation: m.flow_error_typed_io_contract_violation,
+  typed_io_contract_not_checked: m.flow_error_typed_io_contract_not_checked,
   typed_io_validation_failed: m.flow_error_typed_io_validation_failed,
   typed_io_variable_resolution_failed: m.flow_error_typed_io_variable_resolution_failed,
   typed_io_audio_invalid_file_type: m.flow_error_typed_io_audio_invalid_file_type,

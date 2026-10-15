@@ -100,6 +100,7 @@ from eneo.flows.input_binding_contract_rules import (
 from eneo.flows.output_modes import (
     ALLOWED_OUTPUT_MODES,
     compose_text_violation,
+    copy_input_violation,
     render_verbatim_violation,
     speaker_mapping_violation,
     text_document_pass_through_violation,
@@ -436,6 +437,20 @@ def collect_step_graph_issues(
                 _flow_step_issue(
                     code=FlowGraphIssueCode.FLOW_STEP_INVALID,
                     message=render_verbatim_error,
+                    step_order=step.step_order,
+                )
+            )
+        copy_input_error = copy_input_violation(
+            step_order=step.step_order,
+            input_type=step.input_type,
+            output_type=step.output_type,
+            output_mode=step.output_mode,
+        )
+        if copy_input_error is not None:
+            issues.append(
+                _flow_step_issue(
+                    code=FlowGraphIssueCode.FLOW_STEP_INVALID,
+                    message=copy_input_error,
                     step_order=step.step_order,
                 )
             )

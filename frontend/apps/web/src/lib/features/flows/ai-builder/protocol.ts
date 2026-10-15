@@ -357,6 +357,7 @@ const stepSpecSchema = z.object({
     .enum([
       "pass_through",
       "compose_text",
+      "copy_input",
       "transcribe_only",
       "template_fill",
       "render_verbatim",

@@ -128,6 +128,7 @@ class FlowApiErrorCode(StrEnum):
     UNSUPPORTED_OUTPUT_MODE = "flow_unsupported_output_mode"
     UNSUPPORTED_OUTPUT_TYPE = "flow_unsupported_output_type"
     TYPED_IO_CONTRACT_VIOLATION = "typed_io_contract_violation"
+    TYPED_IO_CONTRACT_NOT_CHECKED = "typed_io_contract_not_checked"
     TYPED_IO_VALIDATION_FAILED = "typed_io_validation_failed"
     TYPED_IO_VARIABLE_RESOLUTION_FAILED = "typed_io_variable_resolution_failed"
     TYPED_IO_AUDIO_INVALID_FILE_TYPE = "typed_io_audio_invalid_file_type"
@@ -290,6 +291,7 @@ FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.UNSUPPORTED_OUTPUT_MODE,
         FlowApiErrorCode.UNSUPPORTED_OUTPUT_TYPE,
         FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION,
+        FlowApiErrorCode.TYPED_IO_CONTRACT_NOT_CHECKED,
         FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
         FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED,
         FlowApiErrorCode.TYPED_IO_AUDIO_INVALID_FILE_TYPE,

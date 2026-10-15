@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import ContractSide
 from eneo.flows.output_processing import (
+    raise_contract_finding,
     schema_expects_structured,
     validate_against_contract,
+)
+from eneo.flows.runtime.tool_argument_check import (
+    ArgumentCheckUnfinished,
+    ToolArgumentsNotJson,
+    check_contract_value,
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 from eneo.main.exceptions import TypedIOValidationException
@@ -73,16 +81,52 @@ def validate_runtime_input_policy(
     return policy
 
 
-def validate_input_contract(
+async def check_contract_in_child(
+    value: Mapping[str, object] | Sequence[object],
+    schema: Mapping[str, object],
+    *,
+    label: str,
+    side: ContractSide,
+) -> None:
+    """Raise what validate_against_contract raises, evaluated in the killable
+    checker process: a contract whose matching holds the GIL then ends at the
+    check's time limit instead of holding the event loop."""
+    try:
+        finding = await check_contract_value(value, schema)
+    except ToolArgumentsNotJson:
+        raise TypedIOValidationException(
+            f"{label}: the value is not JSON (a NaN, an infinity, or nesting "
+            "too deep), so it cannot be checked against the contract.",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_JSON_INPUT.value,
+        ) from None
+    if isinstance(finding, ArgumentCheckUnfinished):
+        raise TypedIOValidationException(
+            f"{label}: the value could not be checked against the contract"
+            + (
+                " within the time limit, which a larger value or a contract "
+                "with more work per item reaches sooner"
+                if finding.timed_out
+                else ""
+            )
+            + "; it was not found invalid.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_NOT_CHECKED.value,
+        )
+    raise_contract_finding(finding, schema, label=label, side=side)
+
+
+async def validate_input_contract(
     *,
     step_order: int,
     input_type: str,
     input_contract: dict[str, Any] | None,
     text: str,
     structured: dict[str, Any] | list[Any] | None,
+    check_in_child: bool,
     binding_context: str | None = None,
 ) -> dict[str, Any] | None:
-    """Validate a resolved step input against input_contract and return validation metadata."""
+    """Validate a resolved step input against input_contract and return
+    validation metadata. ``check_in_child`` checks a JSON input in the
+    killable checker process (``check_contract_in_child``)."""
     if input_contract is None:
         return None
 
@@ -113,13 +157,16 @@ def validate_input_contract(
             "parse_succeeded": True,
             "candidate_type": type(structured).__name__,
         }
+        label = f"Step {step_order} input"
         try:
-            validate_against_contract(
-                structured,
-                input_contract,
-                label=f"Step {step_order} input",
-                side="input",
-            )
+            if check_in_child:
+                await check_contract_in_child(
+                    structured, input_contract, label=label, side="input"
+                )
+            else:
+                validate_against_contract(
+                    structured, input_contract, label=label, side="input"
+                )
         except TypedIOValidationException as exc:
             setattr(exc, "contract_validation", contract_validation)
             raise

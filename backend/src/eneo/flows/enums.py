@@ -66,6 +66,7 @@ class FlowOutputDelivery(str, Enum):
 class FlowOutputMode(str, Enum):
     PASS_THROUGH = "pass_through"
     COMPOSE_TEXT = "compose_text"
+    COPY_INPUT = "copy_input"
     HTTP_POST = "http_post"
     TRANSCRIBE_ONLY = "transcribe_only"
     TEMPLATE_FILL = "template_fill"
@@ -88,6 +89,7 @@ FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE: Mapping[
     {
         FlowOutputMode.PASS_THROUGH: FlowPrimaryOutputExecutionKind.COMPLETION_MODEL,
         FlowOutputMode.COMPOSE_TEXT: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
+        FlowOutputMode.COPY_INPUT: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
         FlowOutputMode.HTTP_POST: FlowPrimaryOutputExecutionKind.COMPLETION_MODEL,
         FlowOutputMode.TRANSCRIBE_ONLY: (
             FlowPrimaryOutputExecutionKind.TRANSCRIPTION_MODEL
@@ -165,6 +167,7 @@ class FlowAuthoringOutputMode(str, Enum):
 
     PASS_THROUGH = FlowOutputMode.PASS_THROUGH.value
     COMPOSE_TEXT = FlowOutputMode.COMPOSE_TEXT.value
+    COPY_INPUT = FlowOutputMode.COPY_INPUT.value
     TRANSCRIBE_ONLY = FlowOutputMode.TRANSCRIBE_ONLY.value
     TEMPLATE_FILL = FlowOutputMode.TEMPLATE_FILL.value
     RENDER_VERBATIM = FlowOutputMode.RENDER_VERBATIM.value

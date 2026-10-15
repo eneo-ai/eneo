@@ -657,7 +657,7 @@ async def test_publish_leaves_a_checker_host_fault_to_the_run(
     user, monkeypatch
 ) -> None:
     # Kills a host startup failure escaping publication as a server error.
-    def cannot_start():
+    def cannot_start(alarm_seconds: float):
         raise OSError("checker start unavailable")
 
     checker = ToolArgumentChecker()

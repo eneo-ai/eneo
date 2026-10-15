@@ -5,6 +5,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
+  import { outputModeUsesCompletionModel } from "$lib/features/flows/flowStepTypes";
   import type { SecurityClassStanding } from "$lib/features/flows/flowClassificationNames";
   import UserCheck from "@lucide/svelte/icons/user-check";
 
@@ -45,6 +46,8 @@
 
   const isPowerUser = $derived(data.mode === "power_user");
   const isAssembly = $derived(data.step.output_mode === "template_fill");
+  // A step that calls no completion model has no model whose name or class to show.
+  const callsModel = $derived(outputModeUsesCompletionModel(data.step.output_mode));
   const hasHumanReview = $derived(data.step.review_policy != null);
   const nextChannelLabel = $derived(
     isAssembly
@@ -103,7 +106,7 @@
         <span class="flow-node-name text-sm font-semibold" title={data.label}>{data.label}</span>
       </div>
       <div class="flex items-center gap-1">
-        {#if data.assistantClassLevel != null}
+        {#if callsModel && data.assistantClassLevel != null}
           <Badge
             variant="secondary"
             class="bg-accent-dimmer text-accent-stronger text-xs font-bold"
@@ -111,7 +114,7 @@
             {m.flow_node_model_class_badge({ name: data.assistantClassName ?? "" })}
           </Badge>
         {/if}
-        {#if data.classLevel != null && data.classLevel !== data.assistantClassLevel}
+        {#if data.classLevel != null && (!callsModel || data.classLevel !== data.assistantClassLevel)}
           <Badge
             variant="secondary"
             class={["text-xs font-bold", data.classStanding && CLASS_TONE[data.classStanding]]}
@@ -122,7 +125,7 @@
       </div>
     </Card.Header>
     <Card.Content class="space-y-1 px-3 py-2 text-xs">
-      {#if data.modelName}
+      {#if callsModel && data.modelName}
         <div class="text-secondary">{data.modelName}</div>
       {/if}
       <div class="flex flex-wrap items-center gap-1">

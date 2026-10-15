@@ -66,7 +66,12 @@ from eneo.flows.domain.step_output import (
     sample_rejected_output,
 )
 from eneo.flows.domain.text_processing import SummarizationProvenance
-from eneo.flows.enums import FlowOutputMode, FlowOutputType, FlowStepPhase
+from eneo.flows.enums import (
+    FlowOutputMode,
+    FlowOutputType,
+    FlowStepPhase,
+    flow_output_mode_uses_completion_model,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_capability_manifest import is_citation_capable_step
 from eneo.flows.flow_run_provenance import (
@@ -1219,7 +1224,11 @@ async def prepare_step_execution(
     assistant = await deps.load_assistant(
         step.assistant_id, state, snapshot=step.assistant_snapshot
     )
-    prompt_text = assistant.get_prompt_text()
+    # A step that calls no completion model sends no prompt, so its assistant
+    # prompt is not resolved: it selects no earlier material, is not counted
+    # against the input limit and cannot fail the step on its references.
+    uses_completion_model = flow_output_mode_uses_completion_model(step.output_mode)
+    prompt_text = assistant.get_prompt_text() if uses_completion_model else ""
     effective_prompt = ""
     input_payload_for_result: dict[str, Any] = {
         "text": "",
@@ -1305,33 +1314,32 @@ async def prepare_step_execution(
             effective_prompt=effective_prompt,
         ) from exc
 
-    prompt_context = deps.variable_resolver.build_context_with_evidence(
-        run.input_payload_json,
-        context_results,
-        current_step_order=step.step_order,
-        step_names_by_order=state.step_names_by_order,
-        step_ref_mapping=state.step_ref_mapping,
-        current_step_input=step_input.runtime_input_metadata,
-        input_config=step.input_config,
-        resolved_file_text={
-            material.identity: material.text for material in step_input.materials
-        },
-    )
-    prompt_interpolation = (
-        deps.variable_resolver.interpolate_with_evidence(
-            prompt_text,
-            prompt_context,
-            binding_ref="assistant_prompt",
+    prompt_interpolation = FlowVariableInterpolation(text="", edges=())
+    if uses_completion_model:
+        prompt_context = deps.variable_resolver.build_context_with_evidence(
+            run.input_payload_json,
+            context_results,
+            current_step_order=step.step_order,
+            step_names_by_order=state.step_names_by_order,
+            step_ref_mapping=state.step_ref_mapping,
+            current_step_input=step_input.runtime_input_metadata,
+            input_config=step.input_config,
+            resolved_file_text={
+                material.identity: material.text for material in step_input.materials
+            },
         )
-        if prompt_text
-        else FlowVariableInterpolation(text="", edges=())
-    )
-    effective_prompt = prompt_interpolation.text
-    output_format_spec = resolve_format_spec(step.output_type)
-    effective_prompt = append_output_format_instructions(
-        effective_prompt,
-        output_format_spec.prompt_instructions(step.output_contract),
-    )
+        if prompt_text:
+            prompt_interpolation = deps.variable_resolver.interpolate_with_evidence(
+                prompt_text,
+                prompt_context,
+                binding_ref="assistant_prompt",
+            )
+        effective_prompt = append_output_format_instructions(
+            prompt_interpolation.text,
+            resolve_format_spec(step.output_type).prompt_instructions(
+                step.output_contract
+            ),
+        )
     diagnostics = list(step_input.diagnostics)
 
     try:
@@ -1342,12 +1350,15 @@ async def prepare_step_execution(
             max_inline_text_bytes=step_input.processing_ceiling_bytes
             or deps.max_inline_text_bytes,
         )
-        contract_validation = validate_input_contract(
+        contract_validation = await validate_input_contract(
             step_order=step.step_order,
             input_type=step.input_type,
             input_contract=step.input_contract,
             text=step_input.text,
             structured=step_input.structured,
+            # A copy step's value can be a third-party tool's answer that no
+            # model bounds; its contract checks run where a time limit holds.
+            check_in_child=step.output_mode == FlowOutputMode.COPY_INPUT,
             binding_context=(
                 "input_bindings" if step_input.used_question_binding else None
             ),

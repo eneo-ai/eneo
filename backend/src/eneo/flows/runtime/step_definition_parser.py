@@ -42,6 +42,7 @@ from eneo.flows.input_binding_contract_rules import (
 from eneo.flows.output_modes import (
     ALLOWED_OUTPUT_MODES,
     compose_text_violation,
+    copy_input_violation,
     render_verbatim_violation,
     speaker_mapping_violation,
     text_document_pass_through_violation,
@@ -658,6 +659,14 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
             )
             if render_verbatim_error is not None:
                 raise BadRequestException(render_verbatim_error)
+            copy_input_error = copy_input_violation(
+                step_order=identity.step_order,
+                input_type=input_fields.input_type,
+                output_type=output_fields.output_type,
+                output_mode=output_fields.output_mode,
+            )
+            if copy_input_error is not None:
+                raise BadRequestException(copy_input_error)
             compose_text_error = compose_text_violation(
                 step_order=identity.step_order,
                 input_type=input_fields.input_type,

@@ -61,8 +61,8 @@ def _flow_capability_manifest_source() -> Path:
     )
 
 
-def test_fcm_version_is_eleven() -> None:
-    assert FCM_VERSION == 11
+def test_fcm_version_is_twelve() -> None:
+    assert FCM_VERSION == 12
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
@@ -526,6 +526,7 @@ def test_is_citation_capable_step_rejects_template_fill_and_transcribe_only() ->
         )
         expected = output_mode not in {
             FlowOutputMode.COMPOSE_TEXT,
+            FlowOutputMode.COPY_INPUT,
             FlowOutputMode.TEMPLATE_FILL,
             FlowOutputMode.TRANSCRIBE_ONLY,
             FlowOutputMode.RENDER_VERBATIM,
@@ -699,6 +700,10 @@ _EXPECTED_OUTPUT_MODE_CAPABILITIES: dict[FlowOutputMode, tuple[str, frozenset[st
         "output_mode_compose_text",
         frozenset({"requires_text_input_text_output"}),
     ),
+    FlowOutputMode.COPY_INPUT: (
+        "output_mode_copy_input",
+        frozenset({"requires_json_input_json_output"}),
+    ),
     FlowOutputMode.TRANSCRIBE_ONLY: (
         "output_mode_transcribe_only",
         frozenset(
@@ -743,7 +748,9 @@ def test_registry_has_output_mode_capability(
         f"expected id {capability_id!r}"
     )
     assert capability.exposure == (
-        "not_exposed" if output_mode is FlowOutputMode.HTTP_POST else "builder"
+        "not_exposed"
+        if output_mode in {FlowOutputMode.HTTP_POST, FlowOutputMode.COPY_INPUT}
+        else "builder"
     ), f"{capability_id} exposure must match what the Builder can propose"
     invariant_ids = frozenset(inv.id for inv in capability.invariants)
     assert invariant_ids == expected_invariant_ids, (
@@ -1013,7 +1020,7 @@ def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
     )
 
 
-_FCM_SURFACE_FINGERPRINT_V11: tuple[object, ...] = (
+_FCM_SURFACE_FINGERPRINT_V12: tuple[object, ...] = (
     (
         "applies_to_tuples",
         "channel",
@@ -1038,6 +1045,7 @@ _FCM_SURFACE_FINGERPRINT_V11: tuple[object, ...] = (
         "input_json",
         "input_text",
         "output_mode_compose_text",
+        "output_mode_copy_input",
         "output_mode_http_post",
         "output_mode_pass_through",
         "output_mode_render_verbatim",
@@ -1055,7 +1063,7 @@ _FCM_SURFACE_FINGERPRINT_V11: tuple[object, ...] = (
             (
                 (
                     "forbids_template_fill_or_transcribe_only",
-                    "Citation capability is disabled when `output_mode` is `compose_text`, "
+                    "Citation capability is disabled when `output_mode` is `compose_text`, `copy_input`, "
                     "`template_fill`, `transcribe_only`, or `render_verbatim` (non-LLM pathways). "
                     "Any other output_mode preserves capability when the rest holds.",
                 ),
@@ -1172,7 +1180,7 @@ _FCM_SURFACE_FINGERPRINT_V11: tuple[object, ...] = (
             "builder",
             "text_only",
             "text",
-            "c7b4cac8010fb7d51ba5042e46c580356904df735e113ab444f67496e484bae5",
+            "5df8f8ff9253b6b9c2f8a55810a9ed2091730ca64e366418f463c513465f92fe",
             (),
             (),
         ),
@@ -1195,6 +1203,20 @@ _FCM_SURFACE_FINGERPRINT_V11: tuple[object, ...] = (
                     "Steps using `compose_text` must have `input_type=TEXT` and "
                     "`output_type=TEXT`; any other IO pair is rejected by "
                     "`supports_step_io_tuple`.",
+                ),
+            ),
+            (),
+        ),
+        (
+            "not_exposed",
+            None,
+            None,
+            "10092c5cc34de51e099c7405767214e1e206e283f970e0b56f09c16a43147ae6",
+            (
+                (
+                    "requires_json_input_json_output",
+                    "Steps using `copy_input` must have `input_type=JSON` and "
+                    "`output_type=JSON`.",
                 ),
             ),
             (),
@@ -1391,11 +1413,11 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
-    assert actual == _FCM_SURFACE_FINGERPRINT_V11, (
+    assert actual == _FCM_SURFACE_FINGERPRINT_V12, (
         "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
         f"{FCM_VERSION + 1} and update the expected fingerprint constant "
         "in this test.\n\n"
-        f"Expected: {_FCM_SURFACE_FINGERPRINT_V11}\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V12}\n\n"
         f"Actual:   {actual}"
     )
 
@@ -1582,3 +1604,14 @@ class TestCoverageReport:
         assert isinstance(report, CoverageReport)
         with pytest.raises(FrozenInstanceError):
             report.total_cells = 0  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("input_type", list(FlowInputType))
+@pytest.mark.parametrize("output_type", list(FlowOutputType))
+def test_copy_input_accepts_only_json_to_json(input_type, output_type) -> None:
+    # Kills a missing mode and a mode that accidentally admits non-JSON IO.
+    mode = FlowOutputMode("copy_input")
+    assert supports_step_io_tuple(
+        input_type=input_type, output_type=output_type, output_mode=mode
+    ) is (input_type is FlowInputType.JSON and output_type is FlowOutputType.JSON)
+    assert not requires_completion_model(mode)

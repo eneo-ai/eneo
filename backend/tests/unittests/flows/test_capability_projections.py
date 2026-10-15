@@ -107,7 +107,7 @@ LEGAL_CELLS = frozenset(cell for cell in ALL_CELLS if _legal(cell))
 def test_inspectable_is_every_cell_the_listed_rules_admit() -> None:
     inspectable = projection_cells(CapabilityProjection.INSPECTABLE)
     assert inspectable == LEGAL_CELLS
-    assert (len(inspectable), len(_triples(inspectable))) == (176, 66)
+    assert (len(inspectable), len(_triples(inspectable))) == (180, 67)
 
 
 def test_http_cells_stay_inspectable() -> None:
@@ -117,7 +117,7 @@ def test_http_cells_stay_inspectable() -> None:
         for cell in inspectable
         if FlowInputSource.HTTP_GET in cell or FlowOutputMode.HTTP_POST in cell
     }
-    assert len(http) == 92
+    assert len(http) == 93
     assert any(FlowInputType.IMAGE in cell for cell in inspectable)
 
 
@@ -132,7 +132,7 @@ def test_a_tool_input_is_inspectable_as_text_or_json_and_never_authored() -> Non
         for cell in projection_cells(CapabilityProjection.INSPECTABLE)
         if cell[0] is FlowInputSource.TOOL
     }
-    assert len(tool) == 17
+    assert len(tool) == 18
     assert {cell[1] for cell in tool} == {FlowInputType.TEXT, FlowInputType.JSON}
     assert FlowOutputMode.TEMPLATE_FILL not in {cell[3] for cell in tool}
     assert not tool & projection_cells(CapabilityProjection.EDITABLE_EXISTING)
@@ -142,7 +142,7 @@ def test_a_tool_input_is_inspectable_as_text_or_json_and_never_authored() -> Non
 def test_editable_existing_is_what_an_authoring_spec_can_carry() -> None:
     editable = projection_cells(CapabilityProjection.EDITABLE_EXISTING)
     assert editable == frozenset(cell for cell in LEGAL_CELLS if _authorable(cell))
-    assert (len(editable), len(_triples(editable))) == (60, 33)
+    assert (len(editable), len(_triples(editable))) == (62, 34)
 
 
 @pytest.mark.parametrize(
@@ -176,6 +176,7 @@ def test_proposable_new_is_what_the_builder_may_author_from_scratch() -> None:
         assert FlowInputSource.TOOL not in cell
         assert FlowOutputMode.HTTP_POST not in cell
         assert FlowOutputMode.SPEAKER_MAPPING not in cell
+        assert FlowOutputMode.COPY_INPUT not in cell
         assert FlowInputType.IMAGE not in cell
 
 
@@ -190,9 +191,9 @@ def test_coverage_report_exposed_is_exactly_proposable_new() -> None:
     report = coverage_report()
     assert dict(report.by_classification) == {
         "exposed": 59,
-        "not_exposed": 117,
-        "illegal_io_triple": 650,
-        "illegal_source_type_pair": 154,
+        "not_exposed": 121,
+        "illegal_io_triple": 785,
+        "illegal_source_type_pair": 155,
     }
     assert report.has_drift is False
 
@@ -231,10 +232,10 @@ def test_proposable_vocabulary_values() -> None:
     }
 
 
-def test_editable_vocabulary_adds_only_speaker_mapping() -> None:
+def test_editable_vocabulary_adds_hand_authored_modes() -> None:
     proposable = projection_values(CapabilityProjection.PROPOSABLE_NEW, "output_mode")
     editable = projection_values(CapabilityProjection.EDITABLE_EXISTING, "output_mode")
-    assert set(editable) - set(proposable) == {"speaker_mapping"}
+    assert set(editable) - set(proposable) == {"speaker_mapping", "copy_input"}
     for axis in ("input_source", "input_type", "output_type"):
         assert projection_values(
             CapabilityProjection.EDITABLE_EXISTING, axis
@@ -307,6 +308,7 @@ def test_capability_ids_are_unchanged() -> None:
             "input_json",
             "input_text",
             "output_mode_compose_text",
+            "output_mode_copy_input",
             "output_mode_http_post",
             "output_mode_pass_through",
             "output_mode_render_verbatim",
@@ -322,7 +324,7 @@ def test_descriptions_are_distinct_facts_not_placeholders() -> None:
     descriptions = [
         capability.description for capability in CAPABILITY_REGISTRY.values()
     ]
-    assert len(descriptions) == len(set(descriptions)) == 16
+    assert len(descriptions) == len(set(descriptions)) == 17
     assert not any("Seeded from" in description for description in descriptions)
 
 
@@ -338,7 +340,7 @@ def test_http_post_exposure_matches_the_builder_vocabulary() -> None:
 def test_resolution_inside_the_authoring_enums_follows_proposable_new() -> None:
     proposable = projection_cells(CapabilityProjection.PROPOSABLE_NEW)
     authorable = [cell for cell in ALL_CELLS if _authorable(cell)]
-    assert len(authorable) == 432
+    assert len(authorable) == 504
     for cell in authorable:
         resolved = resolve_capability_for_tuple(
             input_source=cell[0],
@@ -395,8 +397,8 @@ def test_step_triple_refuses_modes_the_builder_cannot_propose(output_mode: str) 
 
 
 def test_planning_state_stamps_the_manifest_version_and_loads_older_stamps() -> None:
-    assert FCM_VERSION == 11
-    assert PlanningState.empty().fcm_version == 11
+    assert FCM_VERSION == 12
+    assert PlanningState.empty().fcm_version == 12
     restored = PlanningState.model_validate(
         {**PlanningState.empty().model_dump(mode="json"), "fcm_version": 9}
     )

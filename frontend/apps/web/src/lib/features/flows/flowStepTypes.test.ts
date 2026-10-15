@@ -28,6 +28,7 @@ describe("output mode catalog", () => {
     expect(OUTPUT_MODES.map((mode) => mode.value)).toEqual([
       "pass_through",
       "compose_text",
+      "copy_input",
       "transcribe_only",
       "speaker_mapping",
       "template_fill",
@@ -503,5 +504,26 @@ describe("speaker_mapping output mode", () => {
         outputStep({ input_type: "text", output_type: "json", output_mode: "speaker_mapping" })
       ).map((type) => type.value)
     ).toEqual(["json"]);
+  });
+});
+
+describe("copy_input JSON compatibility", () => {
+  it("offers only JSON copying and preserves an invalid saved format for repair", () => {
+    // Kills missing vocabulary, non-JSON admission and silent saved-value loss.
+    const json = outputStep({ input_type: "json", output_type: "json", output_mode: "copy_input" });
+    expect(getOutputModeCompatibilityIssue(json)).toBeNull();
+    expect(
+      getAvailableOutputModes({ step: json, isAdvancedMode: false }).map((x) => x.value)
+    ).toContain("copy_input");
+    expect(
+      getAvailableOutputModes({ step: outputStep(), isAdvancedMode: false }).map((x) => x.value)
+    ).not.toContain("copy_input");
+    expect(getOutputModeCompatibilityIssue({ ...json, input_type: "text" })).toBe(
+      "copy_input_requires_json"
+    );
+    expect(getAvailableOutputTypes({ ...json, output_type: "text" })).toMatchObject([
+      { value: "text", legacyInvalid: true },
+      { value: "json", legacyInvalid: false }
+    ]);
   });
 });
