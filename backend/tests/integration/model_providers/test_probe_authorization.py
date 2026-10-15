@@ -80,3 +80,27 @@ async def test_provider_probes_require_admin(
     assert admin_response.status_code == 200, admin_response.text
     assert admin_response.json() == result
     assert calls == 1
+
+
+async def test_model_list_accepts_the_rerank_mode_filter(
+    client, tenant_tokens, monkeypatch
+):
+    """The ``mode`` query parameter is a fixed list; ``rerank`` must be in it,
+    otherwise the request is rejected with 422 before the service runs."""
+    seen: dict[str, object] = {}
+
+    async def fake_list(self, provider_id, mode=None):  # noqa: ARG001
+        seen["mode"] = mode
+        return [{"name": "rerank-v3.5", "mode": "rerank"}]
+
+    monkeypatch.setattr(ModelProviderService, "list_available_models", fake_list)
+    admin_token, _ = tenant_tokens
+
+    response = await client.get(
+        f"/api/v1/admin/model-providers/{uuid4()}/models/?mode=rerank",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert seen["mode"] == "rerank"
+    assert response.json() == [{"name": "rerank-v3.5", "mode": "rerank"}]

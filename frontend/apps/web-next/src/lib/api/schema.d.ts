@@ -39662,7 +39662,7 @@ export interface operations {
     parameters: {
       query?: {
         /** @description Filter response to a single mode. */
-        mode?: ("completion" | "embedding" | "transcription" | "image") | null;
+        mode?: ("completion" | "embedding" | "transcription" | "image" | "rerank") | null;
       };
       header?: never;
       path: {

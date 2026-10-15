@@ -10,6 +10,7 @@ transport so a wrong model name or endpoint shows up at registration time.
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from eneo.model_providers.domain import model_provider_service
@@ -121,3 +122,27 @@ class TestValidateRerankModel:
             result = await service.validate_model(uuid4(), "rerank-v3.5", "rerank")
 
         assert result == {"success": False, "error": expected}
+
+
+class TestListAvailableModelsRerankFilter:
+    async def test_mode_filter_keeps_only_rerank_entries(self):
+        """A provider's live list mixes modes; ``mode="rerank"`` narrows it."""
+        service = _service("openai", endpoint="http://models.example")
+        payload = {
+            "data": [
+                {"id": "bge-reranker-v2-m3"},
+                {"id": "gpt-4o"},
+                {"id": "text-embedding-3-small"},
+            ]
+        }
+
+        async def fake_get(self, url, headers=None, **kwargs):  # noqa: ARG001
+            return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
+
+        with (
+            patch("httpx.AsyncClient.get", new=fake_get),
+            patch("litellm.model_cost", {}),
+        ):
+            result = await service.list_available_models(uuid4(), mode="rerank")
+
+        assert result == [{"name": "bge-reranker-v2-m3", "mode": "rerank"}]
