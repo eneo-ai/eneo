@@ -11,8 +11,9 @@ enforcement.
 """
 
 import copy
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 from eneo.mcp_servers.domain.capabilities import (
@@ -28,6 +29,9 @@ if TYPE_CHECKING:
         GovernancePolicy,
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.security_classifications.domain.entities.security_classification import (
+        SecurityClassification,
+    )
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,13 @@ class EffectiveConfig:
     reasoning_effort_user_configurable: bool = False
     # None = not governed; otherwise replaces the assistant's own flag.
     inline_file_text: bool | None = None
+
+    # The reader model for digests in personal spaces: governed whenever a
+    # policy applies; `reader_model` is the policy's own choice when it does
+    # not inherit the organisation default.
+    reader_governed: bool = False
+    reader_model_inherit: bool = True
+    reader_model: "CompletionModel | None" = None
 
     # Allowed servers that start switched OFF in the user's chat (UX seed
     # only — the user can still enable them per conversation).
@@ -195,11 +206,24 @@ def resolve_personal_default(
     if policy.prompt_enforcement_enabled and library_prompt_text is not None:
         enforced_prompt_text = library_prompt_text
 
+    # ---- READER -----------------------------------------------------------
+    reader_model: "CompletionModel | None" = None
+    if not policy.reader_model_inherit and policy.reader_model_id is not None:
+        pool = (
+            available_models
+            if policy.models_restriction_enabled
+            else tenant_completion_models
+        )
+        reader_model = next((m for m in pool if m.id == policy.reader_model_id), None)
+
     return EffectiveConfig(
         models_enforced=policy.models_restriction_enabled,
         available_models=available_models,
         locked_model=locked_model,
         policy_default_model=policy_default_model,
+        reader_governed=True,
+        reader_model_inherit=policy.reader_model_inherit,
+        reader_model=reader_model,
         mcp_enforced=policy.mcp_restriction_enabled,
         available_mcp_servers=available_mcp_servers,
         default_disabled_mcp_server_ids=default_disabled_mcp_server_ids,
@@ -237,6 +261,87 @@ def resolve_personal_default(
             else SkillRuntimeResolution(eligible=(), blocked=())
         ),
     )
+
+
+ReaderReason = Literal[
+    "inherited",
+    "own",
+    "policy",
+    "none",
+    "no_tenant_default",
+    "tenant_default_below_classification",
+    "own_below_classification",
+    "policy_disallows",
+    "no_tool_capable_model",
+    "same_as_turn",
+]
+
+
+@dataclass(frozen=True)
+class ReaderResolution:
+    """The reader model a digest may take its notes with, and why."""
+
+    model: "CompletionModel | None"
+    reason: ReaderReason
+
+
+def resolve_reader_model(
+    *,
+    space_is_personal: bool,
+    space_completion_models: "Sequence[CompletionModel]",
+    space_reader_inherit: bool,
+    space_reader_model: "CompletionModel | None",
+    space_security_classification: "SecurityClassification | None",
+    tenant_default: "CompletionModel | None",
+    effective_config: "EffectiveConfig | None",
+    turn_model_id: "UUID | None" = None,
+) -> ReaderResolution:
+    """Decide the reader model for a space, or a turn in it.
+
+    The reader reads the same material the turn's model reads, so it clears
+    the same bars: the space's security classification, and the models
+    policy when one is enforced. Precedence: the personal-space policy when
+    it governs, then the space's own choice, then the organisation default
+    (``tenant_default``, the model flagged ``is_org_reader``). The turn's
+    own model is never its own reader; with no ``turn_model_id`` the result
+    is the space's standing choice, for display.
+    """
+
+    def _passes(model: "CompletionModel") -> ReaderResolution | None:
+        if turn_model_id is not None and model.id == turn_model_id:
+            return ReaderResolution(None, "same_as_turn")
+        if effective_config is not None and effective_config.models_enforced:
+            allowed = {allowed.id for allowed in effective_config.available_models}
+            if model.id not in allowed:
+                return ReaderResolution(None, "policy_disallows")
+        return None
+
+    if not space_is_personal and not any(
+        model.supports_tool_calling for model in space_completion_models
+    ):
+        # Without a tool-capable model nothing in the space searches or opens
+        # material on demand, so no digest ever runs here.
+        return ReaderResolution(None, "no_tool_capable_model")
+
+    if effective_config is not None and effective_config.reader_governed:
+        if not effective_config.reader_model_inherit:
+            model = effective_config.reader_model
+            if model is None:
+                return ReaderResolution(None, "none")
+            return _passes(model) or ReaderResolution(model, "policy")
+    elif not space_reader_inherit:
+        model = space_reader_model
+        if model is None:
+            return ReaderResolution(None, "none")
+        if not model.meets_security_classification(space_security_classification):
+            return ReaderResolution(None, "own_below_classification")
+        return _passes(model) or ReaderResolution(model, "own")
+
+    if tenant_default is None:
+        return ReaderResolution(None, "no_tenant_default")
+    if not tenant_default.meets_security_classification(space_security_classification):
+        return ReaderResolution(None, "tenant_default_below_classification")
+    return _passes(tenant_default) or ReaderResolution(tenant_default, "inherited")
 
 
 def select_effective_completion_model(

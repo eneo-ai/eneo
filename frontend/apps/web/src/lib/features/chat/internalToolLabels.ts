@@ -21,6 +21,8 @@ type ToolCallLike = {
   is_internal?: boolean | null;
   /** Stamped by the backend for a server built into Eneo (the bundled tool runtime). */
   is_bundled?: boolean | null;
+  /** The call's result `_meta`, as the backend persisted it. */
+  meta?: Record<string, unknown> | null;
 };
 
 type CatalogLabels = { title: () => string; description: () => string };
@@ -81,6 +83,12 @@ const INTERNAL_SERVERS: Record<
       describe_source: {
         running: () => m.tool_describe_source(),
         done: () => m.tool_describe_source_done()
+      },
+      // A digest reads every document of a source part by part; the step says
+      // so in plain words, since "digest" means nothing to a reader.
+      digest_documents: {
+        running: () => m.tool_digest_documents(),
+        done: () => m.tool_digest_documents_done()
       }
     }
   },
@@ -90,6 +98,10 @@ const INTERNAL_SERVERS: Record<
       read_file: {
         running: () => m.tool_read_file(),
         done: () => m.tool_read_file_done()
+      },
+      digest_files: {
+        running: () => m.tool_digest_files(),
+        done: () => m.tool_digest_files_done()
       }
     }
   },
@@ -312,6 +324,63 @@ export function serverDisplayName(
  * stays visible; null for Eneo's own servers (loopback or built in), and
  * for general tools.
  */
+/**
+ * The reader model that took a digest's notes, named in the step's detail so
+ * a run on two models reads as one ("notes by gpt-5-mini"); null for every
+ * other call, and for a digest the turn's model did alone.
+ */
+/** The latest progress a server reported for a running call. */
+export type ToolProgress = {
+  progress: number;
+  total: number | null;
+  message: string | null;
+};
+
+/**
+ * What a running step says about how far it has come. Eneo's own digests
+ * report parts read of parts planned, so the line is formed here in the UI
+ * language; any other server's progress is shown as the server put it,
+ * or as a count when it sent no message.
+ */
+export function toolProgressLabel(
+  toolName: string,
+  serverName: string,
+  isInternal: boolean | null | undefined,
+  progress: ToolProgress
+): string {
+  const own = internalServer(serverName, isInternal);
+  if (own && (toolName === "digest_documents" || toolName === "digest_files")) {
+    const total = progress.total ?? 0;
+    if (total > 0 && progress.progress < total) {
+      return m.tool_digest_progress({
+        done: String(Math.round(progress.progress)),
+        total: String(Math.round(total))
+      });
+    }
+    return m.tool_digest_progress_finishing();
+  }
+  if (progress.message) return progress.message;
+  if (progress.total !== null && progress.total > 0) {
+    return m.tool_progress_generic({
+      done: String(Math.round(progress.progress)),
+      total: String(Math.round(progress.total))
+    });
+  }
+  return String(Math.round(progress.progress));
+}
+
+/** The share done, 0 to 1, when the server named a total; null otherwise. */
+export function toolProgressFraction(progress: ToolProgress): number | null {
+  if (progress.total === null || progress.total <= 0) return null;
+  return Math.max(0, Math.min(1, progress.progress / progress.total));
+}
+
+export function digestReaderDetail(call: ToolCallLike): string | null {
+  if (!isInternalToolCall(call)) return null;
+  const reader = call.meta?.["eneo.reader.model"];
+  return typeof reader === "string" && reader ? m.digest_notes_by({ model: reader }) : null;
+}
+
 export function capabilityProviderDetail(call: ToolCallLike): string | null {
   if (capabilityPurpose(call.purpose) === null || isInternalToolCall(call)) {
     return null;

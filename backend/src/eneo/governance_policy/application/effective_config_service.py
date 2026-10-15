@@ -112,7 +112,9 @@ class EffectiveConfigService:
         # scans per resolution. These loads stay sequential because the
         # request-scoped repositories share one SQLAlchemy AsyncSession.
         async def _load_models() -> "list[CompletionModel]":
-            if not policy.models_restriction_enabled:
+            if not policy.models_restriction_enabled and (
+                policy.reader_model_inherit or policy.reader_model_id is None
+            ):
                 return []
             # Tenant-accessible completion models. Global models (tenant_id=NULL)
             # show up here because `can_access` already accounts for them.

@@ -67,6 +67,14 @@
       cell: (item) => formatNumber(item.value)
     }),
 
+    // The share of the total a model spent as a reader model: reading long
+    // material inside digests so another model could answer.
+    table.column({
+      header: m.usage_reader_tokens(),
+      accessor: (item) => item.reader_token_usage ?? 0,
+      cell: (item) => (item.value > 0 ? formatNumber(item.value) : "–")
+    }),
+
     table.column({
       header: m.estimated_cost(),
       accessor: (item) => item,

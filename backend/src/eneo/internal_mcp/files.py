@@ -42,6 +42,7 @@ from eneo.internal_mcp.digest import (
     log_digest,
     plan_or_refuse,
     prepare_digest_model,
+    progress_reporter,
     run_bounded_digest,
     validate_instruction,
 )
@@ -352,10 +353,14 @@ async def digest_files(
         return _refusal(header)
 
     result, seconds = await run_bounded_digest(
-        plan, digest_model, instruction=instruction, should_stop=should_stop
+        plan,
+        digest_model,
+        instruction=instruction,
+        should_stop=should_stop,
+        on_progress=progress_reporter(ctx),
     )
     content = format_digest(
-        heading=f"Digest of {len(items)} attached files with {digest_model.model.name}.",
+        heading=f"Digest of {len(items)} attached files with {digest_model.models_label}.",
         items=items,
         result=result,
         set_aside=set_aside,

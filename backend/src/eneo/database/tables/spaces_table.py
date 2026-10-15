@@ -46,6 +46,12 @@ class Spaces(BasePublic):
     icon_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Icons.id, ondelete="SET NULL"), nullable=True
     )
+    # The reader model for digests in this space: inherit the organisation
+    # default, or name one of the space's models (NULL with inherit off = none).
+    reader_model_inherit: Mapped[bool] = mapped_column(server_default="True")
+    reader_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(CompletionModels.id, ondelete="SET NULL"), nullable=True
+    )
 
     tenant_space_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("spaces.id", ondelete="SET NULL"), nullable=True, index=True

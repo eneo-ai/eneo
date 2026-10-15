@@ -1842,3 +1842,45 @@ async def test_loopback_knowledge_and_files_servers_get_the_digest_budget(monkey
     assert options[lookalike.id]["tool_call_timeout"] is None
     assert options[knowledge.id]["tool_call_timeout"] == budget
     assert options[files.id]["tool_call_timeout"] == budget
+
+
+class _ProgressReportingClient(_FakeMCPClient):
+    """A server that reports progress once per call when asked to."""
+
+    progress_requests: list[bool] = []
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, object],
+        progress_callback=None,
+    ) -> dict[str, object]:
+        type(self).progress_requests.append(progress_callback is not None)
+        if progress_callback is not None:
+            await progress_callback(1, 2, f"{name} half way")
+        return {"content": [{"type": "text", "text": name}], "is_error": False}
+
+
+async def test_parallel_calls_forward_each_servers_progress_with_the_calls_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_client(monkeypatch, live_tools_by_user={"": [{"name": "tool"}]})
+    _ProgressReportingClient.progress_requests = []
+    monkeypatch.setattr(proxy_module, "MCPClient", _ProgressReportingClient)
+    server = _make_server()
+    proxy = MCPProxySession([server])
+    heard: list[tuple[int, float, float | None, str | None]] = []
+
+    async def on_progress(index, progress, total, message):
+        heard.append((index, progress, total, message))
+
+    results = await proxy.call_tools_parallel(
+        [("server__tool", {}), ("server__tool", {})], on_progress=on_progress
+    )
+    await proxy.call_tools_parallel([("server__tool", {})])
+    await proxy.close()
+
+    assert [r["is_error"] for r in results] == [False, False]
+    assert sorted(heard) == [(0, 1, 2, "tool half way"), (1, 1, 2, "tool half way")]
+    # Progress is requested only when someone listens.
+    assert _ProgressReportingClient.progress_requests == [True, True, False]

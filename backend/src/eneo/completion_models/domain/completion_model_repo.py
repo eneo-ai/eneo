@@ -128,6 +128,7 @@ class CompletionModelRepository:
             .values(
                 is_enabled=completion_model.is_org_enabled,
                 is_default=completion_model.is_org_default,
+                is_reader=completion_model.is_org_reader,
                 security_classification_id=(
                     completion_model.security_classification.id
                     if completion_model.security_classification
@@ -141,11 +142,17 @@ class CompletionModelRepository:
         )
         await self.session.execute(stmt)
 
-        if completion_model.is_org_default:
-            # Set all other models to not default (for this tenant)
+        # One default and one reader model per tenant: promoting a model
+        # demotes its siblings in the same transaction.
+        for flag, column in (
+            (completion_model.is_org_default, CompletionModels.is_default),
+            (completion_model.is_org_reader, CompletionModels.is_reader),
+        ):
+            if not flag:
+                continue
             stmt = (
                 sa.update(CompletionModels)
-                .values(is_default=False)
+                .values({column: False})
                 .where(
                     CompletionModels.id != completion_model.id,
                     CompletionModels.tenant_id == self.user.tenant_id,

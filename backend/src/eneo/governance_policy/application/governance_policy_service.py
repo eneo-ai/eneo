@@ -119,6 +119,7 @@ class GovernancePolicyService:
         prompt_enforcement: tuple[bool, UUID | None] | None = None,
         reasoning_policy: tuple[str | None, bool] | None = None,
         inline_file_text: bool | None = None,
+        reader_policy: tuple[bool, UUID | None] | None = None,
         skill_intents: list[SkillBindingIntent] | None = None,
     ) -> GovernancePolicy:
         policy = await self.get_policy_for_update()
@@ -176,6 +177,15 @@ class GovernancePolicyService:
 
         if inline_file_text is not None:
             policy.set_file_policy(inline_file_text=inline_file_text)
+        if reader_policy is not None:
+            inherit, reader_model_id = reader_policy
+            if not inherit and reader_model_id is not None:
+                await self._validate_models_belong_to_tenant(
+                    [PolicyCompletionModel(completion_model_id=reader_model_id)]
+                )
+            policy.set_reader_policy(
+                inherit=inherit, completion_model_id=reader_model_id
+            )
 
         if (
             models_restriction is not None or reasoning_policy is not None

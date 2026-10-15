@@ -357,7 +357,12 @@ class _FakeMCPProxy:
     async def refresh_tools(self, touched_tool_names: list[str]) -> bool:
         return False
 
-    async def call_tools_parallel(self, proxy_calls: list[Any]) -> list[dict[str, Any]]:
+    async def connect_for_tools(self, proxy_calls) -> None:
+        pass
+
+    async def call_tools_parallel(
+        self, proxy_calls: list[Any], on_progress=None
+    ) -> list[dict[str, Any]]:
         self.calls.append(proxy_calls)
         return [
             {"content": [{"type": "text", "text": "tool-ok"}], "is_error": False}

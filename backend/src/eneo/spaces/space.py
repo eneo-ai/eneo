@@ -82,6 +82,8 @@ class Space:
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         group_members: dict[UUID, SpaceGroupMember] | None = None,
         default_assistant_load_failed: bool = False,
+        reader_model: Optional["CompletionModel"] = None,
+        reader_model_inherit: bool = True,
     ):
         super().__init__()
         self.id = id
@@ -118,6 +120,10 @@ class Space:
         self.available_capabilities: list[CapabilityAvailability] = []
         self.icon_id = icon_id
         self.group_members = group_members if group_members is not None else {}
+        # The reader model for digests here: inherit the organisation default,
+        # or one of the space's own models (None with inherit off = none).
+        self.reader_model = reader_model
+        self.reader_model_inherit = reader_model_inherit
 
     def _get_member_ids(self):
         return self.members.keys()
@@ -341,6 +347,8 @@ class Space:
         ] = NOT_PROVIDED,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        reader_model: Union["CompletionModel", NotProvided, None] = NOT_PROVIDED,
+        reader_model_inherit: Union[bool, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:
             if self.is_personal():
@@ -430,6 +438,31 @@ class Space:
 
         if is_provided(icon_id):
             self.icon_id = icon_id
+        if is_provided(reader_model_inherit):
+            if self.is_personal():
+                raise BadRequestException(
+                    "Can not choose a reader model for a personal space"
+                )
+            self.reader_model_inherit = reader_model_inherit
+        if is_provided(reader_model):
+            if self.is_personal():
+                raise BadRequestException(
+                    "Can not choose a reader model for a personal space"
+                )
+            if reader_model is not None:
+                if not self.is_completion_model_in_space(reader_model.id):
+                    raise BadRequestException(
+                        "The reader model must be one of the space's completion models"
+                    )
+                self.validate_model_security_compatibility(reader_model)
+                self.reader_model_inherit = False
+            self.reader_model = reader_model
+        # A reader that left the space's models (removed, or filtered out by a
+        # raised classification) no longer applies.
+        if self.reader_model is not None and not self.is_completion_model_in_space(
+            self.reader_model.id
+        ):
+            self.reader_model = None
 
     def add_member(self, user: SpaceMember):
         if self.is_personal():

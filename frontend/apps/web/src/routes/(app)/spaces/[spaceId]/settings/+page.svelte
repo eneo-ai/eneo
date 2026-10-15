@@ -14,6 +14,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import SelectSpaceModels from "./SelectSpaceModels.svelte";
+  import SelectReaderModel from "./SelectReaderModel.svelte";
   import Hint from "$lib/components/Hint.svelte";
   import EditNameAndDescription from "./EditNameAndDescription.svelte";
   import SelectMCPServers from "./SelectMCPServers.svelte";
@@ -203,6 +204,8 @@
           description={m.completion_models_description()}
           hint={m.enable_completion_model_for_assistants()}
         />
+
+        <SelectReaderModel />
 
         <SelectSpaceModels
           field="embedding_models"

@@ -1,7 +1,9 @@
 """Minimal adapter for tenant models using LiteLLM."""
 
+import asyncio
 import base64
 import binascii
+import contextlib
 import json
 import re
 import uuid
@@ -462,6 +464,104 @@ class _ArgumentDeltas:
             return None
         self._sent[index] = redacted
         return redacted[len(sent) :] or None
+
+
+_ToolProgress = tuple[int, float, float | None, str | None]
+
+
+class _ToolRound:
+    """One round of tool calls run on a helper task while the stream goes on.
+
+    The streaming generator cannot yield while it awaits the proxy, so the
+    calls run apart and the progress their servers report (MCP progress
+    notifications, relayed by the proxy as ``(index, progress, total,
+    message)``) lands on a queue the generator drains into TOOL_PROGRESS
+    chunks until the results are in. The proxy connects on the generator's
+    own task first, since its transports belong to the task that opened
+    them; only the calls themselves run apart.
+    """
+
+    def __init__(
+        self,
+        mcp_proxy: Any,
+        proxy_calls: list[tuple[str, dict[str, Any]]],
+        call_ids: list[str],
+    ) -> None:
+        self._mcp_proxy = mcp_proxy
+        self._proxy_calls = proxy_calls
+        self._call_ids = call_ids
+        self._queue: asyncio.Queue[_ToolProgress] = asyncio.Queue()
+        self._task: asyncio.Task[list[dict[str, Any]]] | None = None
+
+    async def start(self) -> None:
+        await self._mcp_proxy.connect_for_tools(self._proxy_calls)
+        self._task = asyncio.create_task(
+            self._mcp_proxy.call_tools_parallel(
+                self._proxy_calls, on_progress=self._note
+            )
+        )
+
+    async def _note(
+        self, index: int, progress: float, total: float | None, message: str | None
+    ) -> None:
+        self._queue.put_nowait((index, progress, total, message))
+
+    async def progress(self) -> AsyncIterator[Completion]:
+        """TOOL_PROGRESS chunks as they arrive, until the calls are done."""
+        task = self._task
+        assert task is not None
+        while not task.done():
+            getter = asyncio.ensure_future(self._queue.get())
+            await asyncio.wait({task, getter}, return_when=asyncio.FIRST_COMPLETED)
+            if getter.done():
+                events = [getter.result(), *self._drain()]
+            else:
+                getter.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await getter
+                events = self._drain()
+            for chunk in self._chunks(events):
+                yield chunk
+        for chunk in self._chunks(self._drain()):
+            yield chunk
+
+    def results(self) -> list[dict[str, Any]]:
+        assert self._task is not None
+        return self._task.result()
+
+    async def cancel(self) -> None:
+        if self._task is None or self._task.done():
+            return
+        self._task.cancel()
+        with contextlib.suppress(BaseException):
+            await self._task
+
+    def _drain(self) -> list[_ToolProgress]:
+        events: list[_ToolProgress] = []
+        while True:
+            try:
+                events.append(self._queue.get_nowait())
+            except asyncio.QueueEmpty:
+                return events
+
+    def _chunks(self, events: list[_ToolProgress]) -> list[Completion]:
+        # Only the latest notification per call matters to a reader.
+        latest: dict[int, _ToolProgress] = {}
+        for event in events:
+            latest[event[0]] = event
+        return [
+            Completion(
+                response_type=ResponseType.TOOL_PROGRESS,
+                tool_call_id=self._call_ids[index],
+                progress=progress,
+                progress_total=total,
+                progress_message=message,
+            )
+            for index, progress, total, message in (
+                latest[key] for key in sorted(latest)
+            )
+            if index < len(self._call_ids)
+        ]
 
 
 async def _has_app_view(mcp_proxy: Any, prefixed_tool_name: str) -> bool:
@@ -1772,6 +1872,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 completion.text = answer_text
                 completion.reasoning_content = reasoning_text
                 completion.stop = choice.finish_reason == "stop"
+                completion.finish_reason = choice.finish_reason
 
             if used_input_estimate:
                 completion.input_token_estimate = cumulative_input_tokens
@@ -2610,7 +2711,21 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                             for tc in approved_tcs
                         ]
-                        results = await mcp_proxy.call_tools_parallel(proxy_calls)
+                        tool_execution = _ToolRound(
+                            mcp_proxy,
+                            proxy_calls,
+                            [tc["id"] or "" for tc in approved_tcs],
+                        )
+                        await tool_execution.start()
+                        try:
+                            async for progress_chunk in tool_execution.progress():
+                                yield progress_chunk
+                        except BaseException:
+                            # The stream ended first (client gone, turn
+                            # cancelled): the calls must not outlive it.
+                            await tool_execution.cancel()
+                            raise
+                        results = tool_execution.results()
                         execution_metadata: list[ToolCallMetadata] = []
                         captured_refs: list[McpToolReference] = []
                         seen_prefixes: set[str] = set()

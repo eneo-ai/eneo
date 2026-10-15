@@ -80,9 +80,19 @@ class GovernancePolicy:
     # True inlines attachment text; False sends signed URLs the model reads
     # with the files tool, keeping large uploads out of the context window.
     inline_file_text: bool | None = None
+    # The reader model that takes a digest's per-segment notes in personal
+    # spaces: inherit the organisation default, or name one (None = none).
+    reader_model_inherit: bool = True
+    reader_model_id: UUID | None = None
 
     updated_at: datetime | None = None
     updated_by_user_id: UUID | None = None
+
+    def set_reader_policy(
+        self, *, inherit: bool, completion_model_id: UUID | None
+    ) -> None:
+        self.reader_model_inherit = inherit
+        self.reader_model_id = None if inherit else completion_model_id
 
     def set_models_restriction(
         self,

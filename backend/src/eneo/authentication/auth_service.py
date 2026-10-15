@@ -133,6 +133,7 @@ class AuthService:
         completion_model_id: UUID | None = None,
         reasoning_effort: str | None = None,
         reasoning_enforced: bool = False,
+        reader_model_id: UUID | None = None,
         expires_in: int = 15,
     ) -> str:
         """Mint a short-lived access token for a loopback MCP server.
@@ -160,6 +161,8 @@ class AuthService:
         the assistant's stored ones) to loopback tools that call a model
         themselves; ``reasoning_enforced`` says whether the effort is policy,
         which such a tool must then keep instead of choosing a cheaper one.
+        ``reader_model_id`` names the tenant's reader model when this turn
+        may hand it background work, judged here against space and policy.
         """
         claims: dict[str, object] = {"assistant_id": str(assistant_id)}
         if mcp_server_id is not None:
@@ -172,6 +175,8 @@ class AuthService:
             claims["reasoning_effort"] = reasoning_effort
         if reasoning_enforced:
             claims["reasoning_enforced"] = True
+        if reader_model_id is not None:
+            claims["reader_model_id"] = str(reader_model_id)
         return self.create_access_token_for_user(
             user,
             audience=INTERNAL_MCP_AUDIENCE,

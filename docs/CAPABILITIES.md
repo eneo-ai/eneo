@@ -197,14 +197,41 @@ answer. When everything fits one call, a single call answers directly.
   the loopback token as claims minted after governance resolution. An enforced
   reasoning policy is kept; otherwise the digest uses the lowest effort the
   model supports.
+- **Reader model.** A fast model that reads the material part by part: it
+  takes the per-segment notes and the per-document merges at its lowest
+  reasoning effort, while the batch merges and the answer stay with the
+  turn's model. It is never used for ordinary answers. The choice lives where
+  the material's classification is governed: the organisation default is a
+  card on the admin models page (one completion model flagged `is_reader`),
+  every space chooses in its AI models settings between the organisation
+  default, one of its own enabled models, or none, and the personal-space
+  policy has the same picker limited to its allowed models. The space's choice
+  wins over the default, the policy wins in personal spaces. A reader applies
+  only when it clears the same bars as the turn's model: enabled, classified
+  at or above the space's security classification, and allowed by an enforced
+  models policy; the space settings show the model that applies and why,
+  including a default refused by classification and a space with no
+  tool-capable model. The ask path hands the resolved id to the loopback
+  token; usage is reported under `eneo.reader.*` and in the digest log line,
+  while the question row folds only the turn model's share.
 - **Coverage is explicit.** The result opens with the items read (`[D1]`,
   `[D2]`, ...) and a coverage line: `complete`, or `partial` with the reason
-  (deadline, failed segments, excluded at reduce) and the keys not fully
-  covered. Nothing is dropped silently.
+  (deadline, failed segments, excluded at reduce, notes / merge / answer cut
+  short) and the keys not fully covered. Nothing is dropped silently: reduce
+  batches are evenly sized rather than greedily filled, a merge the provider
+  stopped at `max_tokens` (`finish_reason == "length"`) is redone on its
+  halves, and the answer is asked for once more with a tighter word cap when
+  it is cut or longer than the result page; only what is still over is cut at
+  a line, marked, and reported as partial.
 - **Citations.** Each cited knowledge document comes back as a resource whose
   `_meta.eneo.cite_key` names its key; the completion layer rewrites `[Dn]` in
   the body to the inline reference tag, so the answer cites like a search
   result. Any MCP server may use the same `_meta` key.
+- **Progress.** The core reports segments read of planned, then the start of
+  the merges and of the answer; the loopback servers relay that as MCP
+  progress notifications (`Context.report_progress`). The chat step shows it
+  ("Läser del 12 av 44", with a bar), formed in the UI language from the
+  counts. The plumbing is general, see "Tool progress" below.
 - **Tables.** A knowledge document indexed as a table sample or placeholder,
   and an attached spreadsheet over the index budget, are listed under "Not
   digested (tables)" with their file reference for the table tools; the rows
@@ -220,13 +247,35 @@ answer. When everything fits one call, a single call answers directly.
 - **Usage.** The tokens a digest spends are reported in the tool result
   `_meta` (`gen_ai.usage.*`) and folded into the question row when the tool
   ran on Eneo's own server (proxy-decided) and on the turn's model, so token
-  statistics include them. A turn that fails after the tool ran persists no
-  answer row; the `[RAG] digest` / `[FILES] digest` log line is the record.
+  statistics include them. The reader model's share stays in the call's
+  `_meta` (`eneo.reader.*`): the message debug panel shows it apart from the
+  message's own counts (overview and the tool call), and the per-model token
+  statistics sum it from the stored calls onto the reader model
+  (`reader_*_token_usage`, the "of which as reader model" column), again only
+  for calls the proxy marked internal. A turn that fails after the tool ran
+  persists no answer row; the `[RAG] digest` / `[FILES] digest` log line is
+  the record.
 - **Uploads that do not fit.** When a message's uploads overflow the model's
   window and every one of them has a reference url, the turn switches to
   URL-only instead of rejecting the ask (unless a governance file policy
   enforces inlining); the model then reaches them through `read_file` and
   `digest_files`.
+
+### Tool progress
+
+Any MCP server, external or Eneo's own, can report progress for a running
+tool call with the protocol's `notifications/progress`. Eneo asks for it: the
+proxy's `call_tools_parallel(on_progress=...)` passes a per-call callback to
+`MCPClient.call_tool`, which puts a progress token on the request, so a
+server that reports nothing costs nothing. In a streamed turn the adapter runs
+the round's calls on a helper task (after `connect_for_tools` on its own task,
+since the transports belong to the task that opened them) and drains the
+notifications into `TOOL_PROGRESS` chunks between the calls' start and their
+results, keeping only the latest per call. The SSE stream carries them as
+`tool_progress` (`tool_call_id`, `progress`, `total`, `message`); the UI
+message stream as a transient `data-tool-progress` part. Nothing is
+persisted. The Svelte app shows the server's message, or a count when there
+is none, beside the running step; Eneo's own digests get a localized line.
 
 ## 5. Extending the capability set
 

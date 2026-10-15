@@ -12,10 +12,12 @@ import asyncio
 import json
 import re
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
+
+from mcp.shared.session import ProgressFnT
 
 from eneo.authentication.signed_urls import (
     reference_file_ids,
@@ -68,6 +70,15 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger(__name__)
+
+# ``(progress, total, message)`` for one call, as the MCP notification carries
+# it: the SDK's own protocol, passed straight through to the client session.
+ProgressCallback = ProgressFnT
+# ``(index, progress, total, message)``: the same for the call at ``index`` of
+# a parallel round.
+ToolsProgressCallback = Callable[
+    [int, float, float | None, str | None], Awaitable[None]
+]
 
 _settings = get_settings()
 
@@ -1265,6 +1276,7 @@ class MCPProxySession:
         self,
         tool_name: str,
         arguments: dict[str, Any],
+        progress_callback: ProgressCallback | None = None,
     ) -> dict[str, Any]:
         """
         Call a tool by its prefixed name.
@@ -1274,6 +1286,8 @@ class MCPProxySession:
         Args:
             tool_name: Prefixed tool name (e.g., "context7__resolve_library_id")
             arguments: Tool arguments
+            progress_callback: Receives the server's progress notifications
+                for this call while it runs (MCP ``notifications/progress``)
 
         Returns:
             Tool execution result with structure:
@@ -1372,7 +1386,12 @@ class MCPProxySession:
         try:
             # Execute tool with timing
             start_time = time.perf_counter()
-            result = await client.call_tool(original_tool_name, arguments)
+            if progress_callback is None:
+                result = await client.call_tool(original_tool_name, arguments)
+            else:
+                result = await client.call_tool(
+                    original_tool_name, arguments, progress_callback=progress_callback
+                )
             elapsed_ms = (time.perf_counter() - start_time) * 1000
 
             is_error = result.get("is_error", False)
@@ -1418,9 +1437,40 @@ class MCPProxySession:
             await self._record_failure(server.id)
             raise
 
+    async def connect_for_tools(
+        self, tool_calls: list[tuple[str, dict[str, Any]]]
+    ) -> None:
+        """Connect to every server the calls need, from the owner task.
+
+        Must run on the proxy session's owner task, sequentially:
+        streamablehttp_client uses anyio cancel scopes bound to the connecting
+        task. A connect dispatched to another task (asyncio.gather, or a
+        caller's helper task) would leak the underlying HTTP read/write loops
+        when close() later runs from the owner, creeping CPU toward 100 %
+        over the worker's lifetime. A server that cannot be reached is marked
+        failed and its calls answer unavailable.
+        """
+        servers_needed: dict[UUID, MCPServer] = {}
+        for tool_name, _ in tool_calls:
+            if tool_name in self._tool_registry:
+                server, _, _ = self._tool_registry[tool_name]
+                servers_needed[server.id] = server
+
+        for server in servers_needed.values():
+            if server.id in self._clients or server.id in self._failed_server_ids:
+                continue
+            try:
+                await self._get_or_create_client(server)
+            except Exception as exc:
+                logger.warning(
+                    f"[MCPProxy] Failed to pre-connect to '{server.name}': {exc}"
+                )
+                self._mark_server_failed(server.id)
+
     async def call_tools_parallel(
         self,
         tool_calls: list[tuple[str, dict[str, Any]]],
+        on_progress: ToolsProgressCallback | None = None,
     ) -> list[dict[str, Any]]:
         """
         Execute multiple tool calls in parallel.
@@ -1429,6 +1479,10 @@ class MCPProxySession:
 
         Args:
             tool_calls: List of (tool_name, arguments) tuples
+            on_progress: Receives ``(index, progress, total, message)`` for
+                each progress notification a server sends for the call at
+                ``index`` in ``tool_calls``. Asking for progress is what
+                makes servers send it, so without a callback none is requested.
 
         Returns:
             List of results in same order as input
@@ -1441,36 +1495,29 @@ class MCPProxySession:
         logger.debug(f"[MCPProxy] Executing {len(tool_calls)} tool(s): {tool_names}")
         total_start = time.perf_counter()
 
-        # First, identify all servers we need to connect to (by ID to avoid hashability issues)
-        servers_needed: dict[UUID, MCPServer] = {}
-        for tool_name, _ in tool_calls:
-            if tool_name in self._tool_registry:
-                server, _, _ = self._tool_registry[tool_name]
-                servers_needed[server.id] = server
-
-        # Pre-connect SEQUENTIALLY in this task. Sequential is required:
-        # streamablehttp_client uses anyio cancel scopes bound to the connecting
-        # task. asyncio.gather would dispatch each connect to its own gather
-        # task — close() later runs from the proxy session's owning task and
-        # anyio's task-boundary check would silently leak the underlying HTTP
-        # read/write loops, creeping CPU toward 100% over the worker's lifetime.
-        for server in servers_needed.values():
-            if server.id in self._clients or server.id in self._failed_server_ids:
-                continue
-            try:
-                await self._get_or_create_client(server)
-            except Exception as exc:
-                logger.warning(
-                    f"[MCPProxy] Failed to pre-connect to '{server.name}': {exc}"
-                )
-                self._mark_server_failed(server.id)
+        # A caller that runs the calls on a helper task connects first on the
+        # owner task (connect_for_tools); then this is a no-op.
+        await self.connect_for_tools(tool_calls)
 
         # Execute all tool calls in parallel
         async def execute_single(
-            tool_name: str, arguments: dict[str, Any]
+            index: int, tool_name: str, arguments: dict[str, Any]
         ) -> dict[str, Any]:
+            progress_callback: ProgressCallback | None = None
+            if on_progress is not None:
+                report = on_progress
+
+                async def relay(
+                    progress: float, total: float | None, message: str | None
+                ) -> None:
+                    await report(index, progress, total, message)
+
+                progress_callback = relay
+
             try:
-                return await self.call_tool(tool_name, arguments)
+                return await self.call_tool(
+                    tool_name, arguments, progress_callback=progress_callback
+                )
             except Exception:
                 logger.error(f"[MCPProxy] Tool {tool_name} failed")
                 return {
@@ -1479,7 +1526,10 @@ class MCPProxySession:
                 }
 
         results = await asyncio.gather(
-            *[execute_single(name, args) for name, args in tool_calls]
+            *[
+                execute_single(index, name, args)
+                for index, (name, args) in enumerate(tool_calls)
+            ]
         )
 
         total_elapsed_ms = (time.perf_counter() - total_start) * 1000

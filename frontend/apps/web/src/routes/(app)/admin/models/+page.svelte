@@ -8,6 +8,7 @@
   import { Page } from "$lib/components/layout/index.js";
   import { setSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
   import CompletionModelsTable from "./CompletionModelsTable.svelte";
+  import ReaderModelCard from "./ReaderModelCard.svelte";
   import EmbeddingModelsTable from "./EmbeddingModelsTable.svelte";
   import TranscriptionModelsTable from "./TranscriptionModelsTable.svelte";
   import ImageModelsTable from "./ImageModelsTable.svelte";
@@ -36,6 +37,7 @@
   </Page.Header>
   <Page.Main>
     <Page.Tab id="completion_models">
+      <ReaderModelCard completionModels={data.models.completionModels} />
       <CompletionModelsTable
         completionModels={data.models.completionModels}
         providers={data.providers}

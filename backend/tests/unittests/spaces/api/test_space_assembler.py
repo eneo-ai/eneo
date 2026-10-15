@@ -116,6 +116,8 @@ def space():
         icon_id=None,
     )
     space.name = TEST_NAME
+    space.reader_model = None
+    space.reader_model_inherit = True
 
     return space
 

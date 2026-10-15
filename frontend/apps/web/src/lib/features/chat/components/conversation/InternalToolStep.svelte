@@ -45,7 +45,8 @@
     previousAttempt = false,
     document = null,
     icon = null,
-    view = null
+    view = null,
+    progress = null
   }: {
     /** Present-tense label without ellipsis, e.g. "Söker kunskap". */
     runningLabel: string;
@@ -73,6 +74,11 @@
     icon?: CapabilityDescriptor["icon"] | null;
     /** The view of the call's result that the panel can show, named and opened from the step. */
     view?: { name: string; open: () => void } | null;
+    /**
+     * How far a running call has come, as its server reported it: a line
+     * ("Läser del 12 av 44") and the share done when a total is known.
+     */
+    progress?: { label: string; fraction: number | null } | null;
   } = $props();
 
   const preview = getFilePreview();
@@ -189,7 +195,14 @@
     <AppWindow class="text-muted h-3.5 w-3.5 shrink-0" aria-hidden="true" />
   </button>
 {:else}
-  <div role={isActive ? "status" : undefined} aria-label={isActive ? runningLabel : undefined}>
+  <div
+    role={isActive ? "status" : undefined}
+    aria-label={isActive
+      ? progress
+        ? `${runningLabel} · ${progress.label}`
+        : runningLabel
+      : undefined}
+  >
     <button
       type="button"
       class="group flex w-fit max-w-full items-start justify-start gap-2 text-left text-sm leading-tight transition-colors {isActive
@@ -224,6 +237,23 @@
             class="text-muted min-w-0 max-w-full truncate text-xs {isActive ? '' : 'opacity-70'}"
             title={detail}>{detail}</span
           >
+        {/if}
+        {#if isActive && progress}
+          <!-- The server's own account of the run, beside the step's name. -->
+          <span class="text-muted flex min-w-0 items-center gap-1.5 text-xs tabular-nums">
+            {#if progress.fraction !== null}
+              <span
+                class="bg-secondary relative h-1 w-16 shrink-0 overflow-hidden rounded-full"
+                aria-hidden="true"
+              >
+                <span
+                  class="bg-accent-default absolute inset-y-0 left-0 rounded-full transition-[width] duration-300"
+                  style="width: {Math.round(progress.fraction * 100)}%"
+                ></span>
+              </span>
+            {/if}
+            <span class="truncate">{progress.label}</span>
+          </span>
         {/if}
         {#if isNegative}
           <span class="text-negative-default text-xs">

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
     _build_tool_result_with_references,
     _GeneratedFileChunks,
     _ToolResultBudget,
+    _ToolRound,
 )
 from eneo.files.model_file_references import file_handle
 from eneo.main.exceptions import OpenAIException
@@ -159,7 +161,10 @@ class _FakeMCPProxy:
         del prefixed_tool_name
         return None
 
-    async def call_tools_parallel(self, proxy_calls):
+    async def connect_for_tools(self, proxy_calls) -> None:
+        pass
+
+    async def call_tools_parallel(self, proxy_calls, on_progress=None):
         self.calls.append(proxy_calls)
         return [
             {"content": [{"type": "text", "text": "tool-ok"}], "is_error": False}
@@ -205,7 +210,10 @@ class _ProgressiveMCPProxy(_FakeMCPProxy):
 
 
 class _ResourceMCPProxy(_FakeMCPProxy):
-    async def call_tools_parallel(self, proxy_calls):
+    async def connect_for_tools(self, proxy_calls) -> None:
+        pass
+
+    async def call_tools_parallel(self, proxy_calls, on_progress=None):
         self.calls.append(proxy_calls)
         call_number = len(self.calls)
         return [
@@ -749,7 +757,10 @@ async def test_non_streaming_supports_multiple_tool_rounds():
 
 
 class _ErrorSecondRoundMCPProxy(_FakeMCPProxy):
-    async def call_tools_parallel(self, proxy_calls):
+    async def connect_for_tools(self, proxy_calls) -> None:
+        pass
+
+    async def call_tools_parallel(self, proxy_calls, on_progress=None):
         self.calls.append(proxy_calls)
         is_error = len(self.calls) > 1
         text = "boom" if is_error else "tool-ok"
@@ -2179,7 +2190,10 @@ class _AppViewMCPProxy(_FakeMCPProxy):
 
 
 class _ErrorResultAppViewProxy(_AppViewMCPProxy):
-    async def call_tools_parallel(self, proxy_calls):
+    async def connect_for_tools(self, proxy_calls) -> None:
+        pass
+
+    async def call_tools_parallel(self, proxy_calls, on_progress=None):
         self.calls.append(proxy_calls)
         return [
             {"content": [{"type": "text", "text": "boom"}], "is_error": True}
@@ -2198,7 +2212,10 @@ def _app_view_info():
 
 
 class _StructuredResultMixin:
-    async def call_tools_parallel(self, proxy_calls):
+    async def connect_for_tools(self, proxy_calls) -> None:
+        pass
+
+    async def call_tools_parallel(self, proxy_calls, on_progress=None):
         self.calls.append(proxy_calls)  # type: ignore[attr-defined]
         return [
             {
@@ -2344,7 +2361,10 @@ async def test_provider_file_echo_is_converted_before_next_model_request(streami
         def model_result_text(self, text):
             return model_file_references(text, {file_id: url})
 
-        async def call_tools_parallel(self, calls):
+        async def connect_for_tools(self, calls) -> None:
+            pass
+
+        async def call_tools_parallel(self, calls, on_progress=None):
             return [
                 {"content": [{"type": "text", "text": url}], "is_error": False}
                 for _ in calls
@@ -2468,3 +2488,114 @@ class TestCiteKeyRewrite:
         assert first_prefix != second_prefix
         assert f'<inref id="{first_prefix}"/>' in first[0]
         assert f'<inref id="{second_prefix}"/>' in second[0]
+
+
+# --------------------------------------------------------------------------- #
+# Progress a server reports while a call runs
+# --------------------------------------------------------------------------- #
+class _ReportingMCPProxy(_FakeMCPProxy):
+    """A tool that reports progress twice before it answers."""
+
+    async def call_tools_parallel(self, proxy_calls, on_progress=None):
+        self.calls.append(proxy_calls)
+        if on_progress is not None:
+            await on_progress(0, 3, 44, "Read 3 of 44 parts")
+            await on_progress(0, 12, 44, "Read 12 of 44 parts")
+        return [
+            {"content": [{"type": "text", "text": "tool-ok"}], "is_error": False}
+            for _ in proxy_calls
+        ]
+
+
+async def test_iterate_stream_relays_tool_progress_before_the_result():
+    mcp_proxy = _ReportingMCPProxy()
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(tool_call_id="call_1")],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    follow_ups = [_AsyncChunkStream([_text_chunk("done", finish_reason="stop")])]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=follow_ups),
+    ):
+        chunks = await _collect(
+            _make_adapter(),
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    kinds = [c.response_type for c in chunks]
+    progress = [c for c in chunks if c.response_type == ResponseType.TOOL_PROGRESS]
+    assert progress, kinds
+    assert all(c.tool_call_id == "call_1" for c in progress)
+    # Only the latest notification matters to a reader; both are acceptable
+    # but the last one must arrive, before the call's result.
+    assert (progress[-1].progress, progress[-1].progress_total) == (12, 44)
+    assert progress[-1].progress_message == "Read 12 of 44 parts"
+    last_progress = max(i for i, c in enumerate(chunks) if c in progress)
+    result_index = next(
+        i
+        for i, c in enumerate(chunks)
+        if c.response_type == ResponseType.TOOL_CALL
+        and any(t.result_status == "succeeded" for t in c.tool_calls_metadata or [])
+    )
+    assert last_progress < result_index
+
+
+class TestToolRound:
+    async def test_coalesces_to_the_latest_notification_per_call(self):
+        class _Proxy:
+            async def connect_for_tools(self, calls):
+                pass
+
+            async def call_tools_parallel(self, calls, on_progress=None):
+                assert on_progress is not None
+                for step in range(1, 4):
+                    await on_progress(1, step, 3, f"second call {step}")
+                await on_progress(0, 1, 1, "first call done")
+                return [{"a": 1}, {"b": 2}]
+
+        tool_round = _ToolRound(_Proxy(), [("x", {}), ("y", {})], ["c1", "c2"])
+        await tool_round.start()
+        chunks = [chunk async for chunk in tool_round.progress()]
+
+        assert tool_round.results() == [{"a": 1}, {"b": 2}]
+        by_call = {c.tool_call_id: c for c in chunks}
+        assert by_call["c2"].progress == 3 and by_call["c2"].progress_total == 3
+        assert by_call["c1"].progress_message == "first call done"
+        # The queue was drained in order; the last chunk per call is its latest.
+        assert [c.tool_call_id for c in chunks][-2:] in (["c1", "c2"], ["c2", "c1"])
+
+    async def test_cancel_ends_the_calls(self):
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        class _Proxy:
+            async def connect_for_tools(self, calls):
+                pass
+
+            async def call_tools_parallel(self, calls, on_progress=None):
+                started.set()
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+                return []
+
+        tool_round = _ToolRound(_Proxy(), [("x", {})], ["c1"])
+        await tool_round.start()
+        await started.wait()
+
+        await tool_round.cancel()
+
+        assert cancelled.is_set()

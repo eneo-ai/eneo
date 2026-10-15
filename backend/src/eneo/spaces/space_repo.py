@@ -1797,6 +1797,10 @@ class SpaceRepository:
                 ),
                 data_retention_days=space.data_retention_days,
                 icon_id=space.icon_id,
+                reader_model_id=(
+                    space.reader_model.id if space.reader_model is not None else None
+                ),
+                reader_model_inherit=space.reader_model_inherit,
             )
             .where(Spaces.id == space.id)
             .returning(Spaces)

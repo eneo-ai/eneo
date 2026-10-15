@@ -40,6 +40,24 @@ class ModelUsage(BaseModel):
     request_count: int = Field(
         ..., description="Number of requests made with this model"
     )
+    reader_input_token_usage: int = Field(
+        default=0,
+        description=(
+            "Input tokens spent as a reader model inside digest tool calls; "
+            "part of input_token_usage"
+        ),
+    )
+    reader_output_token_usage: int = Field(
+        default=0,
+        description=(
+            "Output tokens spent as a reader model inside digest tool calls; "
+            "part of output_token_usage"
+        ),
+    )
+    reader_token_usage: int = Field(
+        default=0,
+        description="Tokens spent as a reader model (input + output)",
+    )
 
     @classmethod
     def from_domain(cls, domain_model: "DomainModelTokenUsage") -> "ModelUsage":
@@ -53,6 +71,9 @@ class ModelUsage(BaseModel):
             output_token_usage=domain_model.output_token_usage,
             total_token_usage=domain_model.total_token_usage,
             request_count=domain_model.request_count,
+            reader_input_token_usage=domain_model.reader_input_token_usage,
+            reader_output_token_usage=domain_model.reader_output_token_usage,
+            reader_token_usage=domain_model.reader_token_usage,
         )
 
 

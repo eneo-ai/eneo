@@ -112,6 +112,22 @@
     </Tooltip.Root>
   {/if}
 
+  {#if "is_org_reader" in model && model.is_org_reader}
+    <Tooltip.Root delayDuration={150}>
+      <Tooltip.Trigger>
+        {#snippet child({ props })}
+          <div
+            {...props}
+            class="border-dimmer text-muted inline-flex cursor-default items-center rounded-full border bg-transparent px-2 py-[2px] text-[11px] font-medium tracking-wide"
+          >
+            {m.reader_model()}
+          </div>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content>{m.reader_model_tooltip()}</Tooltip.Content>
+    </Tooltip.Root>
+  {/if}
+
   {#if usedBy.length > 0}
     <Tooltip.Root delayDuration={150}>
       <Tooltip.Trigger>

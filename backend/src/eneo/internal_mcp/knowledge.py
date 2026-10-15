@@ -60,6 +60,7 @@ from eneo.internal_mcp.digest import (
     log_digest,
     plan_or_refuse,
     prepare_digest_model,
+    progress_reporter,
     run_bounded_digest,
     validate_instruction,
 )
@@ -1344,7 +1345,11 @@ async def digest_documents(
 
     # The model calls run outside the request-scoped transaction.
     result, seconds = await run_bounded_digest(
-        plan, digest_model, instruction=instruction, should_stop=should_stop
+        plan,
+        digest_model,
+        instruction=instruction,
+        should_stop=should_stop,
+        on_progress=progress_reporter(ctx),
     )
     stubs = [
         CitationStub(
@@ -1361,7 +1366,7 @@ async def digest_documents(
     content = format_digest(
         heading=(
             f"Digest of {scope.label}: {len(items)} documents read with "
-            f"{digest_model.model.name}."
+            f"{digest_model.models_label}."
         ),
         items=items,
         result=result,

@@ -15,6 +15,7 @@ from eneo.governance_policy.presentation.governance_policy_models import (
     PolicyCompletionModelPublic,
     PolicyMcpServerPublic,
     PromptEnforcementPublic,
+    ReaderPolicyPublic,
     ReasoningPolicyPublic,
     SkillsPolicyPublic,
 )
@@ -69,6 +70,10 @@ class GovernancePolicyAssembler:
             file_policy=FilePolicyPublic(
                 configured=policy.inline_file_text is not None,
                 inline_file_text=policy.inline_file_text,
+            ),
+            reader_policy=ReaderPolicyPublic(
+                inherit=policy.reader_model_inherit,
+                completion_model_id=policy.reader_model_id,
             ),
             skills=SkillsPolicyPublic(
                 bindings=[

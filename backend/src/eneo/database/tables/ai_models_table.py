@@ -73,6 +73,8 @@ class CompletionModels(BasePublic):
     # Settings (previously in separate completion_model_settings table)
     is_enabled: Mapped[bool] = mapped_column(server_default="True")
     is_default: Mapped[bool] = mapped_column(server_default="False")
+    # The tenant's fast model for background work (digest notes); one per tenant.
+    is_reader: Mapped[bool] = mapped_column(server_default="False")
     security_classification_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(SecurityClassificationsTable.id, ondelete="SET NULL"), nullable=True
     )

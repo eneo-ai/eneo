@@ -10,8 +10,11 @@ import {
   serverDisplayName,
   toolDisplayName,
   toolStepIcon,
-  toolStepKind
+  toolStepKind,
+  toolProgressFraction,
+  toolProgressLabel
 } from "./internalToolLabels";
+import { m } from "$lib/paraglide/messages";
 
 /**
  * A tool call renders as a built-in step when it serves a capability (web
@@ -210,5 +213,42 @@ describe("toolStepIcon", () => {
     expect(toolStepIcon("charts")).toBe(getCapability("charts")?.icon);
     expect(toolStepIcon("general")).toBeNull();
     expect(toolStepIcon(null)).toBeNull();
+  });
+});
+
+describe("toolProgressLabel", () => {
+  it("forms a digest's progress in the UI language from parts read of planned", () => {
+    expect(
+      toolProgressLabel("digest_documents", "knowledge", true, {
+        progress: 12,
+        total: 44,
+        message: "Read 12 of 44 parts"
+      })
+    ).toBe(m.tool_digest_progress({ done: "12", total: "44" }));
+    expect(
+      toolProgressLabel("digest_files", "files", true, {
+        progress: 44,
+        total: 44,
+        message: "Writing the answer"
+      })
+    ).toBe(m.tool_digest_progress_finishing());
+  });
+
+  it("shows another server's progress as the server put it, or as a count", () => {
+    expect(
+      toolProgressLabel("render", "acme", false, { progress: 3, total: 9, message: "Rendering" })
+    ).toBe("Rendering");
+    expect(
+      toolProgressLabel("render", "acme", false, { progress: 3, total: 9, message: null })
+    ).toBe(m.tool_progress_generic({ done: "3", total: "9" }));
+    expect(
+      toolProgressLabel("render", "acme", false, { progress: 3, total: null, message: null })
+    ).toBe("3");
+  });
+
+  it("gives the share done only when a total is known", () => {
+    expect(toolProgressFraction({ progress: 11, total: 44, message: null })).toBe(0.25);
+    expect(toolProgressFraction({ progress: 50, total: 44, message: null })).toBe(1);
+    expect(toolProgressFraction({ progress: 3, total: null, message: null })).toBeNull();
   });
 });

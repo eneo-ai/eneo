@@ -26,10 +26,13 @@
   import { getChatService } from "../../ChatService.svelte";
   import {
     capabilityProviderDetail,
+    digestReaderDetail,
     internalToolDoneLabel,
     isSkillActivation,
     serverDisplayName,
     toolDisplayName,
+    toolProgressFraction,
+    toolProgressLabel,
     toolStepIcon,
     toolStepKind,
     type ToolStepKind
@@ -233,12 +236,23 @@
         // the step already names it: as a view, or as a document being written.
         detail:
           readFileDetail(tc) ??
+          digestReaderDetail(tc) ??
           (view || createsFile ? null : titleArgument(tc.arguments)) ??
           capabilityProviderDetail(tc),
         skillName: isSkillActivation(tc) ? (tc.title ?? tc.tool_name) : null,
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
         status,
+        // A running call's progress, as its server reports it.
+        progress: (() => {
+          const reported = chat.toolProgressOf(tc.tool_call_id);
+          return reported
+            ? {
+                label: toolProgressLabel(tc.tool_name, tc.server_name, tc.is_internal, reported),
+                fraction: toolProgressFraction(reported)
+              }
+            : null;
+        })(),
         previousAttempt: status === "failed" && !isSkillActivation(tc) && previousAttempts.has(i),
         // Function steps (capability calls, whichever provider served them)
         // and context steps (Eneo's own lookups) render as slim lines in runs
@@ -512,6 +526,7 @@
                   document={step.document}
                   icon={step.icon}
                   view={step.view}
+                  progress={step.progress}
                   onLoadResult={step.toolCallId
                     ? () => chat.getToolCallResult(step.toolCallId!)
                     : undefined}

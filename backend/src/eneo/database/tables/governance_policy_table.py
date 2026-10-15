@@ -52,6 +52,13 @@ class GovernancePolicies(BasePublic):
     # assistant's own flag applies.
     inline_file_text: Mapped[Optional[bool]] = mapped_column(nullable=True)
 
+    # The reader model for digests in personal spaces: inherit the
+    # organisation default, or name one (NULL with inherit off = none).
+    reader_model_inherit: Mapped[bool] = mapped_column(server_default="True")
+    reader_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(CompletionModels.id, ondelete="SET NULL"), nullable=True
+    )
+
     updated_by_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
     )

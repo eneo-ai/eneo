@@ -201,6 +201,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.TokenUsage) => void} [params.callbacks.onEneoEvent] Callback to run when a token-usage event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
      * @param {(data: import("../types/resources").SSE.ToolCallDelta) => void} [params.callbacks.onToolCallDelta] Callback to run when the next piece of a pending tool call's arguments is received
+     * @param {(data: import("../types/resources").SSE.ToolProgress) => void} [params.callbacks.onToolProgress] Callback to run when a server reports progress for a running tool call
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
      * @param {(data: import("../types/resources").SSE.ToolApprovalTimeout) => void} [params.callbacks.onToolApprovalTimeout] Callback to run when a pending tool approval expires
      * @param {(response: Response) => Promise<void>} [params.callbacks.onOpen] Callback to run once the initial response of the backend is received
@@ -306,6 +307,10 @@ export function initConversations(client) {
 
                 case "tool_call_delta":
                   callbacks?.onToolCallDelta?.(data);
+                  break;
+
+                case "tool_progress":
+                  callbacks?.onToolProgress?.(data);
                   break;
 
                 case "tool_approval_required":

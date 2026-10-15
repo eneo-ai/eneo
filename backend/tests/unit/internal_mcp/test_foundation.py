@@ -30,13 +30,14 @@ class TestDigestClaims:
         from eneo.internal_mcp.foundation import digest_claims_from_token
         from tests.fixtures import TEST_USER
 
-        model_id = uuid4()
+        model_id, reader_id = uuid4(), uuid4()
         token = AuthService().create_scoped_mcp_token(
             TEST_USER,
             assistant_id=uuid4(),
             completion_model_id=model_id,
             reasoning_effort="medium",
             reasoning_enforced=True,
+            reader_model_id=reader_id,
         )
 
         claims = digest_claims_from_token(token)
@@ -44,6 +45,7 @@ class TestDigestClaims:
         assert claims.completion_model_id == model_id
         assert claims.reasoning_effort == "medium"
         assert claims.reasoning_enforced is True
+        assert claims.reader_model_id == reader_id
 
     def test_tokens_without_the_claims_resolve_to_nothing(self):
         from eneo.authentication.auth_service import AuthService

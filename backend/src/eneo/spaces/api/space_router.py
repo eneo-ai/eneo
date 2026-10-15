@@ -21,6 +21,7 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
 )
 from eneo.collections.presentation.collection_models import CollectionPublic
+from eneo.governance_policy.domain.policy_resolver import resolve_reader_model
 from eneo.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
 from eneo.integration.presentation.assemblers.integration_knowledge_assembler import (
     IntegrationKnowledgeAssembler,
@@ -96,8 +97,24 @@ async def _space_response(container: Container, space: "Space") -> SpacePublic:
         effective_config = await effective_config_service.resolve_for(
             space.default_assistant, space_is_personal=space.is_personal()
         )
+    tenant_models = await (
+        container.completion_model_crud_service().get_available_completion_models()
+    )
+    tenant_reader_default = next((m for m in tenant_models if m.is_org_reader), None)
+    reader_resolution = resolve_reader_model(
+        space_is_personal=space.is_personal(),
+        space_completion_models=space.completion_models,
+        space_reader_inherit=space.reader_model_inherit,
+        space_reader_model=space.reader_model,
+        space_security_classification=space.security_classification,
+        tenant_default=tenant_reader_default,
+        effective_config=effective_config,
+    )
     return assembler.from_space_to_model(
-        space, default_assistant_effective_config=effective_config
+        space,
+        default_assistant_effective_config=effective_config,
+        reader_resolution=reader_resolution,
+        tenant_reader_default=tenant_reader_default,
     )
 
 
@@ -234,6 +251,12 @@ async def update_space(
     icon_id = NOT_PROVIDED
     if "icon_id" in original_request:
         icon_id = update_space_req.icon_id
+    reader_model = NOT_PROVIDED
+    if "reader_model" in original_request:
+        reader_model = update_space_req.reader_model
+    reader_model_inherit = NOT_PROVIDED
+    if "reader_model_inherit" in original_request:
+        reader_model_inherit = update_space_req.reader_model_inherit
 
     space = await service.update_space(
         id=id,
@@ -250,6 +273,8 @@ async def update_space(
         security_classification=security_classification,
         data_retention_days=data_retention_days,
         icon_id=icon_id,
+        reader_model=reader_model,
+        reader_model_inherit=reader_model_inherit,
     )
 
     # Track changes

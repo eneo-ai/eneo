@@ -247,6 +247,13 @@ async def update_governance_policy(
     if payload.file_policy is not None:
         inline_file_text = payload.file_policy.inline_file_text
 
+    reader_policy = None
+    if payload.reader_policy is not None:
+        reader_policy = (
+            payload.reader_policy.inherit,
+            payload.reader_policy.completion_model_id,
+        )
+
     skill_intents = None
     if payload.skills is not None:
         skill_intents = assistant_skill_binding_intents_from_input(
@@ -255,6 +262,7 @@ async def update_governance_policy(
 
     policy = await service.update_policy(
         models_restriction=models_restriction,
+        reader_policy=reader_policy,
         mcp_restriction=mcp_restriction,
         capabilities=[
             PolicyCapability(purpose=c.purpose, is_default_enabled=c.is_default_enabled)

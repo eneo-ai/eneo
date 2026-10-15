@@ -17,6 +17,7 @@ from mcp.client.streamable_http import (
 )
 from mcp.shared._httpx_utils import create_mcp_http_client
 from mcp.shared.message import SessionMessage
+from mcp.shared.session import ProgressFnT
 from mcp.types import (
     LATEST_PROTOCOL_VERSION,
     ServerNotification,
@@ -40,6 +41,10 @@ from eneo.mcp_servers.infrastructure.client.mcp_ui_session import (
 )
 
 logger = get_logger(__name__)
+
+# ``(progress, total, message)`` as the MCP progress notification carries them:
+# the SDK's own protocol, so a callback passes straight through to the session.
+ProgressCallback = ProgressFnT
 
 _settings = get_settings()
 MCP_CONNECTION_TIMEOUT_DEFAULT = _settings.mcp_client_connect_timeout_seconds
@@ -1017,7 +1022,10 @@ class MCPClient:
             raise MCPClientError(f"Failed to list tools: {error_msg}") from e
 
     async def call_tool(
-        self, tool_name: str, arguments: dict[str, Any]
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        progress_callback: ProgressCallback | None = None,
     ) -> dict[str, Any]:
         """
         Call a tool on the MCP server.
@@ -1025,6 +1033,10 @@ class MCPClient:
         Args:
             tool_name: Name of the tool to call
             arguments: Arguments to pass to the tool
+            progress_callback: Receives the server's progress notifications
+                for this call as ``(progress, total, message)`` while it
+                runs. Passing one asks the server for them (a progress token
+                rides on the request); without one the server sends none.
 
         Returns:
             Tool execution result
@@ -1034,7 +1046,16 @@ class MCPClient:
 
         try:
             async with asyncio.timeout(self.tool_call_timeout):
-                response = await self.session.call_tool(tool_name, arguments=arguments)
+                if progress_callback is None:
+                    response = await self.session.call_tool(
+                        tool_name, arguments=arguments
+                    )
+                else:
+                    response = await self.session.call_tool(
+                        tool_name,
+                        arguments=arguments,
+                        progress_callback=progress_callback,
+                    )
 
             # Extract content from response
             content_list: list[dict[str, Any]] = []

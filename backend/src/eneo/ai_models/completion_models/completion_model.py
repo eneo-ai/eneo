@@ -48,6 +48,9 @@ class ResponseType(str, Enum):
     REASONING = "reasoning"
     TOOL_CALL = "tool_call"
     TOOL_CALL_DELTA = "tool_call_delta"
+    # A server's progress notification for a running call (MCP
+    # notifications/progress): shown while the call runs, never persisted.
+    TOOL_PROGRESS = "tool_progress"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
     FILES = "image"
@@ -192,6 +195,11 @@ class Completion:
     # text) before the call runs. Never persisted.
     tool_call_id: Optional[str] = None
     arguments_delta: Optional[str] = None
+    # TOOL_PROGRESS events: the server's latest progress for the call named
+    # by ``tool_call_id``, as the MCP notification carries it.
+    progress: Optional[float] = None
+    progress_total: Optional[float] = None
+    progress_message: Optional[str] = None
     mcp_tool_references: Optional[list[McpToolReference]] = None
     approval_id: Optional[str] = None  # For TOOL_APPROVAL_REQUIRED events
     image: Optional[GeneratedFile] = None  # For FILES events (streaming)
@@ -203,6 +211,9 @@ class Completion:
     # same turn. Never persisted.
     reference_url: Optional[str] = None
     stop: bool = False
+    # The provider's reason for ending the last round ("stop", "length",
+    # "tool_calls", ...); "length" means the text was cut at max_tokens.
+    finish_reason: Optional[str] = None
     error: Optional[str] = None
     error_code: Optional[int] = None
     usage: Optional[TokenUsage] = None
@@ -322,6 +333,8 @@ class CompletionModelUpdateFlags(BaseModel):
 class CompletionModel(CompletionModelBase, InDB):
     is_org_enabled: bool = False
     is_org_default: bool = False
+    # The tenant's fast model for background work such as digest notes.
+    is_org_reader: bool = False
     # Tenant model fields (required for provider-based architecture)
     tenant_id: Optional[UUID] = None
     provider_id: Optional[UUID] = None
@@ -382,6 +395,7 @@ class CompletionModelPublic(CompletionModel):
             ),
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
+            is_org_reader=completion_model.is_org_reader,
             can_access=completion_model.can_access,
             is_locked=completion_model.is_locked,
             lock_reason=completion_model.lock_reason,

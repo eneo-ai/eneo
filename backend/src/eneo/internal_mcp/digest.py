@@ -17,7 +17,7 @@ import random
 import re
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from mcp.types import (
@@ -35,6 +35,8 @@ from eneo.completion_models.application.map_reduce import (
     DigestItem,
     DigestPlan,
     DigestResult,
+    ProgressFn,
+    Stage,
     Usage,
     final_prompt,
     plan_segments,
@@ -57,7 +59,9 @@ STUB_MAX_CHARS = 160
 # Share of the proxy's output cap one digest result may fill, header, body and
 # citation stubs together, leaving room for the proxy's own framing.
 PAYLOAD_SHARE = 0.75
-BODY_PAGE_SHARE = 0.6
+# The body takes the whole page: the header and citation stubs ride outside
+# it under the payload cap, and a 50-row chronological list needs the room.
+BODY_PAGE_SHARE = 1.0
 # Provider reasons worth a retry: the request was fine, the provider was not.
 RETRYABLE_REASONS = frozenset({"provider_rate_limited", "provider_unavailable"})
 MAX_ATTEMPTS = 3
@@ -101,6 +105,17 @@ def clip_title(title: str | None, fallback: str = "Untitled") -> str:
 # Model resolution and budgets
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
+class ReaderTarget:
+    """The tenant's reader model, taking the segment notes and item merges."""
+
+    model: Any
+    adapter: Any
+    model_kwargs: dict[str, Any]
+    count: Callable[[str], int]
+    segment_tokens: int
+
+
+@dataclass(frozen=True)
 class DigestModel:
     model: Any
     adapter: Any
@@ -108,6 +123,18 @@ class DigestModel:
     count: Callable[[str], int]
     budgets: DigestBudgets
     body_cap_chars: int
+    reader: ReaderTarget | None = None
+
+    @property
+    def segment_count(self) -> Callable[[str], int]:
+        """The counter of the model that reads the segments."""
+        return self.reader.count if self.reader is not None else self.count
+
+    @property
+    def models_label(self) -> str:
+        if self.reader is None:
+            return str(self.model.name)
+        return f"{self.model.name} (notes by {self.reader.model.name})"
 
 
 def body_cap_chars() -> int:
@@ -130,6 +157,10 @@ async def prepare_digest_model(
     governance resolution), falling back to the assistant's own. Reasoning
     effort is the claimed value when a policy enforces it, otherwise the
     cheapest the model supports: notes and merges do not need deep thought.
+
+    A claimed reader model takes the segment notes and per-item merges; the
+    segments are then sized to its window while the reduce budgets stay with
+    the turn's model, which writes the answer.
     """
     container = tool_ctx.container
     model = None
@@ -169,6 +200,9 @@ async def prepare_digest_model(
         instruction=instruction,
         body_cap=body_cap_chars(),
     )
+    reader = await _prepare_reader(container, claims, model, instruction=instruction)
+    if reader is not None:
+        budgets = replace(budgets, segment_tokens=reader.segment_tokens)
     return DigestModel(
         model=model,
         adapter=adapter,
@@ -176,6 +210,51 @@ async def prepare_digest_model(
         count=count,
         budgets=budgets,
         body_cap_chars=body_cap_chars(),
+        reader=reader,
+    )
+
+
+async def _prepare_reader(
+    container: Any, claims: DigestClaims, turn_model: Any, *, instruction: str
+) -> ReaderTarget | None:
+    """The claimed reader model, ready to call, or None to stay on one model.
+
+    The ask path judged it against the space and the policy; here it only
+    has to exist and hold a segment. It always runs at its lowest reasoning
+    effort: notes do not need deep thought, and speed is its whole point.
+    """
+    if claims.reader_model_id is None or claims.reader_model_id == turn_model.id:
+        return None
+    model = await container.completion_model_repo2().one_or_none(claims.reader_model_id)
+    if model is None:
+        logger.warning("[digest] reader model %s not found", claims.reader_model_id)
+        return None
+    route = model.get_model_route()
+
+    def count(text: str) -> int:
+        return count_tokens(text, route)
+
+    try:
+        budgets = compute_budgets(
+            window=model.max_input_tokens,
+            count=count,
+            instruction=instruction,
+            body_cap=body_cap_chars(),
+        )
+    except DigestRefused:
+        logger.warning("[digest] reader model %s window too small", model.name)
+        return None
+    model_kwargs: dict[str, Any] = {}
+    lowest = _lowest_reasoning_effort(model)
+    if lowest is not None:
+        model_kwargs["reasoning_effort"] = lowest
+    adapter = await container.completion_service().build_adapter(model)
+    return ReaderTarget(
+        model=model,
+        adapter=adapter,
+        model_kwargs=model_kwargs,
+        count=count,
+        segment_tokens=budgets.segment_tokens,
     )
 
 
@@ -187,11 +266,13 @@ def compute_budgets(
     Refuses when the model's window cannot hold one segment or one reduce
     batch with its prompt and reply.
     """
-    final_words = max(300, body_cap // 7)
+    # Eight characters a word, spaces and citation keys included, so the
+    # answer tends to land under the page; the core re-asks once when over.
+    final_words = max(300, body_cap // 8)
     final_max_tokens = body_cap // 3 + 200
     # The longest prompt plus chat framing; the instruction rides in each.
     overhead = count(final_prompt(instruction, final_words)) + 64
-    segment_room = window - overhead - 600
+    segment_room = window - overhead - DigestBudgets.map_max_tokens
     reduce_room = window - overhead - final_max_tokens
     if segment_room < 1_000 or reduce_room < 4_000:
         raise DigestRefused(
@@ -205,6 +286,7 @@ def compute_budgets(
         reduce_input_tokens=reduce_input_tokens,
         final_words=final_words,
         final_max_tokens=final_max_tokens,
+        final_chars=body_cap,
     )
 
 
@@ -219,7 +301,7 @@ def plan_or_refuse(
 ) -> DigestPlan:
     """Plan the segments or refuse with counts and the way to narrow."""
     ceiling = get_settings().digest_max_segments
-    plan = plan_segments(items, digest_model.budgets, digest_model.count)
+    plan = plan_segments(items, digest_model.budgets, digest_model.segment_count)
     if plan.total_segments > ceiling:
         largest = sorted(plan.items, key=lambda p: len(p.segments), reverse=True)[:3]
         named = "; ".join(
@@ -290,10 +372,18 @@ class ProviderCalls:
         process_slots: asyncio.Semaphore = _PROCESS_SLOTS,
         sleep: Callable[[float], Any] = asyncio.sleep,
         rng: Callable[[float, float], float] = random.uniform,
+        target: Any = None,
+        slots: asyncio.Semaphore | None = None,
     ) -> None:
+        """Calls on ``target`` (adapter and kwargs; the digest model itself
+        by default, or its reader target), sharing ``slots`` when given so
+        two targets of one digest stay under one concurrency bound."""
         self.digest_model = digest_model
+        self.target = target if target is not None else digest_model
         self.deadline = deadline
-        self.slots = asyncio.Semaphore(max(1, concurrency))
+        self.slots = (
+            slots if slots is not None else asyncio.Semaphore(max(1, concurrency))
+        )
         self.process_slots = process_slots
         self.sleep = sleep
         self.rng = rng
@@ -315,7 +405,7 @@ class ProviderCalls:
         self, system: str, user: str, max_tokens: int
     ) -> tuple[str, Usage]:
         context = Context(prompt=system, input=user)
-        kwargs = {**self.digest_model.model_kwargs, "max_tokens": max_tokens}
+        kwargs = {**self.target.model_kwargs, "max_tokens": max_tokens}
         attempt = 0
         while True:
             attempt += 1
@@ -324,9 +414,7 @@ class ProviderCalls:
                 raise DigestDeadlineExceeded()
             try:
                 async with asyncio.timeout(min(CALL_TIMEOUT_SECONDS, remaining)):
-                    completion = await self.digest_model.adapter.get_response(
-                        context, kwargs
-                    )
+                    completion = await self.target.adapter.get_response(context, kwargs)
             except TimeoutError:
                 if self.deadline.remaining() <= 0:
                     raise DigestDeadlineExceeded() from None
@@ -345,6 +433,9 @@ class ProviderCalls:
                 Usage(
                     int((usage.prompt_tokens if usage else 0) or 0),
                     int((usage.completion_tokens if usage else 0) or 0),
+                    length_stopped=(
+                        getattr(completion, "finish_reason", None) == "length"
+                    ),
                 ),
             )
 
@@ -356,12 +447,47 @@ class ProviderCallTimeout(RuntimeError):
 # --------------------------------------------------------------------------- #
 # Running
 # --------------------------------------------------------------------------- #
+def progress_reporter(ctx: Any) -> ProgressFn:
+    """The core's progress hook as MCP progress notifications on ``ctx``.
+
+    Sent only when the client asked (a progress token on the request), so a
+    client that does not care costs nothing. The notification is tied to the
+    request it reports on (``related_request_id``): the streamable HTTP
+    transport routes a notification without that link to the standalone GET
+    stream, which a stateless server never has, so ``ctx.report_progress``
+    (which omits the link in mcp 1.28) would silently drop every one. A
+    failure to send never reaches the digest.
+    """
+
+    async def report(done: int, total: int, stage: Stage) -> None:
+        if stage == "reading":
+            message = f"Read {done} of {total} parts"
+        elif stage == "merging":
+            message = "Merging the notes"
+        else:
+            message = "Writing the answer"
+        meta = ctx.request_context.meta
+        progress_token = meta.progressToken if meta is not None else None
+        if progress_token is None:
+            return
+        await ctx.session.send_progress_notification(
+            progress_token=progress_token,
+            progress=done,
+            total=total,
+            message=message,
+            related_request_id=ctx.request_id,
+        )
+
+    return report
+
+
 async def run_bounded_digest(
     plan: DigestPlan,
     digest_model: DigestModel,
     *,
     instruction: str,
     should_stop: Callable[[], Any] | None,
+    on_progress: ProgressFn | None = None,
 ) -> tuple[DigestResult, float]:
     """Run the core under the configured deadline; returns (result, seconds)."""
     settings = get_settings()
@@ -370,6 +496,15 @@ async def run_bounded_digest(
     calls = ProviderCalls(
         digest_model, deadline=deadline, concurrency=settings.digest_concurrency
     )
+    map_calls = None
+    if digest_model.reader is not None:
+        map_calls = ProviderCalls(
+            digest_model,
+            deadline=deadline,
+            concurrency=settings.digest_concurrency,
+            target=digest_model.reader,
+            slots=calls.slots,
+        )
     started = time.monotonic()
     result = await run_digest(
         plan,
@@ -378,9 +513,11 @@ async def run_bounded_digest(
         budgets=digest_model.budgets,
         count=digest_model.count,
         deadline=deadline.at,
+        on_progress=on_progress,
         reduce_reserve_seconds=total * REDUCE_RESERVE_SHARE,
         should_stop=should_stop,
         map_batch=settings.digest_concurrency,
+        complete_map=map_calls,
     )
     return result, time.monotonic() - started
 
@@ -502,8 +639,10 @@ def format_digest(
 
 
 def digest_meta(result: DigestResult, digest_model: DigestModel) -> dict[str, Any]:
+    """The call's ``_meta``: the turn model's usage under the GenAI keys (what
+    the question row folds), the reader model's under its own."""
     progress = result.item_progress
-    return {
+    meta: dict[str, Any] = {
         "gen_ai.operation.name": "chat",
         "gen_ai.request.model": digest_model.model.name,
         "gen_ai.usage.input_tokens": result.usage.input_tokens,
@@ -517,6 +656,12 @@ def digest_meta(result: DigestResult, digest_model: DigestModel) -> dict[str, An
         "eneo.coverage": result.coverage,
         "eneo.items_partial": result.partial_keys,
     }
+    if digest_model.reader is not None:
+        meta["eneo.reader_model_id"] = str(digest_model.reader.model.id)
+        meta["eneo.reader.model"] = digest_model.reader.model.name
+        meta["eneo.reader.input_tokens"] = result.map_usage.input_tokens
+        meta["eneo.reader.output_tokens"] = result.map_usage.output_tokens
+    return meta
 
 
 def log_digest(
@@ -531,7 +676,8 @@ def log_digest(
     progress = result.item_progress
     logger.info(
         "%s digest assistant=%s scope=%s model=%s items=%d segments=%d/%d "
-        "calls=%d levels=%d coverage=%s tokens_in=%d tokens_out=%d seconds=%.1f",
+        "calls=%d levels=%d coverage=%s tokens_in=%d tokens_out=%d "
+        "reader=%s reader_tokens_in=%d reader_tokens_out=%d seconds=%.1f",
         tag,
         assistant_id,
         scope,
@@ -544,6 +690,9 @@ def log_digest(
         result.coverage,
         result.usage.input_tokens,
         result.usage.output_tokens,
+        digest_model.reader.model.name if digest_model.reader else "-",
+        result.map_usage.input_tokens,
+        result.map_usage.output_tokens,
         seconds,
     )
 
@@ -554,6 +703,7 @@ __all__ = [
     "CitationStub",
     "Deadline",
     "DigestModel",
+    "ReaderTarget",
     "DigestRefused",
     "ProviderCallTimeout",
     "ProviderCalls",
@@ -567,6 +717,7 @@ __all__ = [
     "disconnect_check",
     "estimated_segments",
     "format_digest",
+    "progress_reporter",
     "is_retryable",
     "log_digest",
     "plan_or_refuse",

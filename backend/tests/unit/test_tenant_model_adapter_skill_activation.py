@@ -85,8 +85,15 @@ class _FakeMCPProxy:
         del touched_tool_names
         return False
 
-    async def call_tools_parallel(
+    async def connect_for_tools(
         self, calls: list[tuple[str, dict[str, object]]]
+    ) -> None:
+        pass
+
+    async def call_tools_parallel(
+        self,
+        calls: list[tuple[str, dict[str, object]]],
+        on_progress: object = None,
     ) -> list[dict[str, object]]:
         self.calls.append(calls)
         return [

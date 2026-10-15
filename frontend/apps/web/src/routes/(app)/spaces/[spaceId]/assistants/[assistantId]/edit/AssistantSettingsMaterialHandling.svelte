@@ -6,14 +6,37 @@
   import { Settings } from "$lib/components/layout";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
+  import type { Space } from "@eneo/eneo-js";
   import { getAssistantEditor } from "$lib/features/assistants/AssistantEditor";
   import { m } from "$lib/paraglide/messages";
 
+  type ReaderModel = Space["reader_model"];
   type Props = {
     fileReferencesEnabled: boolean;
     modelSupportsTools: boolean;
+    /** The space's reader model for digests, as resolved by the backend. */
+    readerModel?: ReaderModel | null;
+    assistantModelName?: string;
+    /** Where the space's choice is made; null when the user cannot change it. */
+    spaceSettingsHref?: string | null;
   };
-  let { fileReferencesEnabled, modelSupportsTools }: Props = $props();
+  let {
+    fileReferencesEnabled,
+    modelSupportsTools,
+    readerModel = null,
+    assistantModelName = "",
+    spaceSettingsHref = null
+  }: Props = $props();
+
+  const readerName = $derived(
+    readerModel?.effective ? (readerModel.effective.nickname ?? readerModel.effective.name) : null
+  );
+  const readerText = $derived.by(() => {
+    if (!modelSupportsTools) return m.reader_assistant_no_tools();
+    if (readerName === null) return m.reader_assistant_none();
+    if (readerModel?.reason === "policy") return m.reader_assistant_policy({ reader: readerName });
+    return m.reader_assistant_active({ reader: readerName, model: assistantModelName });
+  });
   const uid = $props.id();
   const {
     state: { update, currentChanges }
@@ -94,4 +117,25 @@
       </p>
     {/if}
   </Settings.Row>
+
+  {#if readerModel}
+    <Settings.Row
+      fullWidth
+      title={m.reader_assistant_heading()}
+      description={m.reader_assistant_description()}
+    >
+      <div class="border-default rounded-lg border px-4 py-3 text-sm leading-relaxed">
+        <p>{readerText}</p>
+        {#if $update.knowledge_mode !== "tool" && readerName !== null && modelSupportsTools}
+          <p class="text-secondary mt-2">{m.reader_assistant_inject()}</p>
+        {/if}
+        {#if spaceSettingsHref}
+          <!-- eslint-disable svelte/no-navigation-without-resolve -- in-app path built by the page -->
+          <a href={spaceSettingsHref} class="mt-2 inline-block">{m.reader_assistant_space_link()}</a
+          >
+          <!-- eslint-enable svelte/no-navigation-without-resolve -->
+        {/if}
+      </div>
+    </Settings.Row>
+  {/if}
 </div>

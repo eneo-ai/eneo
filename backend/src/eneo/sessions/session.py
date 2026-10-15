@@ -158,6 +158,21 @@ class SSEToolCallDelta(SSEBase):
     arguments_delta: str
 
 
+class SSEToolProgress(SSEBase):
+    """The server's latest progress for a running tool call.
+
+    Relayed from the MCP progress notification the server sends for the
+    call (`progress` so far, the `total` when known, a `message`). Sent
+    while the call runs and never persisted; the call's `tool_call` event
+    follows with its result.
+    """
+
+    tool_call_id: str
+    progress: float
+    total: Optional[float] = None
+    message: Optional[str] = None
+
+
 class ToolCallResultPublic(BaseModel):
     """Lazy-loaded payload for a single tool call's upstream response.
 
@@ -279,6 +294,7 @@ SSE_MODELS = [
     SSEReasoning,
     SSEToolCall,
     SSEToolCallDelta,
+    SSEToolProgress,
     SSEToolApprovalRequired,
     SSEToolApprovalTimeout,
     SSETokenUsage,

@@ -12,6 +12,7 @@
   } from "$lib/features/skills/skillBindingCatalog";
   import { m } from "$lib/paraglide/messages";
   import FilePolicySection from "./FilePolicySection.svelte";
+  import ReaderPolicySection from "./ReaderPolicySection.svelte";
   import McpRestrictionSection from "./McpRestrictionSection.svelte";
   import ModelRestrictionSection from "./ModelRestrictionSection.svelte";
   import PolicyConfirmDialog from "./PolicyConfirmDialog.svelte";
@@ -103,6 +104,14 @@
           />
         </div>
       {/if}
+      <ReaderPolicySection
+        bind:readerInherit={draft.readerInherit}
+        bind:readerModelId={draft.readerModelId}
+        options={draft.readerOptions}
+        tenantDefaultLabel={draft.tenantReaderDefaultLabel}
+        summary={draft.readerSummary}
+        locked={draft.readerLocked}
+      />
       <SkillsPolicySection
         bind:skillBindings={draft.skillBindings}
         initialCatalogPage={draft.skillCatalogPage}

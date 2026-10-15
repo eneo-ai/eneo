@@ -4,10 +4,16 @@ retried provider call, and the result shape with its coverage account."""
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
+import httpx
 import pytest
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+from mcp.server.fastmcp import Context, FastMCP
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.completion_models.application.map_reduce import (
@@ -31,6 +37,7 @@ from eneo.internal_mcp.digest import (
     DigestRefused,
     ProviderCalls,
     ProviderCallTimeout,
+    ReaderTarget,
     SetAside,
     cited_keys,
     compute_budgets,
@@ -40,6 +47,7 @@ from eneo.internal_mcp.digest import (
     is_retryable,
     plan_or_refuse,
     prepare_digest_model,
+    progress_reporter,
     validate_instruction,
 )
 from eneo.internal_mcp.foundation import DigestClaims
@@ -68,16 +76,23 @@ def _model(*, reasoning=True, window=128_000, name="gpt-x"):
     )
 
 
-def _tool_ctx(*, claimed_model=None, adapter=None):
+def _tool_ctx(*, claimed_model=None, adapter=None, reader_model=None):
     async def one(model_id):
         assert claimed_model is not None and model_id == claimed_model.id
         return claimed_model
+
+    async def one_or_none(model_id):
+        if reader_model is not None and model_id == reader_model.id:
+            return reader_model
+        return None
 
     async def build_adapter(model):
         return adapter or SimpleNamespace(model=model)
 
     container = SimpleNamespace(
-        completion_model_repo2=lambda: SimpleNamespace(one=one),
+        completion_model_repo2=lambda: SimpleNamespace(
+            one=one, one_or_none=one_or_none
+        ),
         completion_service=lambda: SimpleNamespace(build_adapter=build_adapter),
     )
     return SimpleNamespace(container=container, user=SimpleNamespace(tenant_id=uuid4()))
@@ -126,8 +141,9 @@ class TestBudgets:
 
         assert budgets.segment_tokens == 12_000
         assert budgets.reduce_input_tokens == 60_000
-        assert budgets.final_words == 9_000 // 7
+        assert budgets.final_words == 9_000 // 8
         assert budgets.final_max_tokens == 9_000 // 3 + 200
+        assert budgets.final_chars == 9_000
 
     def test_small_windows_get_smaller_segments_and_tiny_ones_are_refused(self):
         budgets = compute_budgets(
@@ -234,6 +250,72 @@ class TestPrepareDigestModel:
                 instruction="s",
             )
 
+    async def test_claimed_reader_model_takes_the_segments(self):
+        turn = _model(name="gpt-big", window=32_000)
+        reader = _model(name="mini", window=200_000)
+        tool_ctx = _tool_ctx(claimed_model=turn, reader_model=reader)
+
+        digest_model = await prepare_digest_model(
+            tool_ctx,
+            _assistant(turn, temperature=0.4),
+            DigestClaims(turn.id, None, False, reader.id),
+            instruction="sum",
+        )
+
+        assert digest_model.reader is not None
+        assert digest_model.reader.model is reader
+        assert digest_model.reader.adapter.model is reader
+        # Notes never need deep thought; the assistant's own kwargs stay with
+        # the turn's model.
+        assert digest_model.reader.model_kwargs == {"reasoning_effort": "low"}
+        assert digest_model.segment_count is digest_model.reader.count
+        # Segments are sized to the reader window, the reduces to the turn's.
+        turn_only = compute_budgets(
+            window=32_000,
+            count=digest_model.count,
+            instruction="sum",
+            body_cap=digest_model.body_cap_chars,
+        )
+        assert digest_model.budgets.segment_tokens == 12_000
+        assert digest_model.budgets.segment_tokens > turn_only.segment_tokens
+        assert digest_model.budgets.reduce_input_tokens == turn_only.reduce_input_tokens
+        assert digest_model.models_label == "gpt-big (notes by mini)"
+
+    async def test_reader_model_that_cannot_hold_a_segment_is_dropped(self):
+        turn = _model(name="gpt-big")
+        reader = _model(name="tiny", window=5_000)
+
+        digest_model = await prepare_digest_model(
+            _tool_ctx(claimed_model=turn, reader_model=reader),
+            _assistant(turn),
+            DigestClaims(turn.id, None, False, reader.id),
+            instruction="sum",
+        )
+
+        assert digest_model.reader is None
+        assert digest_model.models_label == "gpt-big"
+
+    async def test_reader_claims_naming_the_turn_model_or_nothing_are_ignored(
+        self,
+    ):
+        turn = _model(name="gpt-big")
+
+        same = await prepare_digest_model(
+            _tool_ctx(claimed_model=turn),
+            _assistant(turn),
+            DigestClaims(turn.id, None, False, turn.id),
+            instruction="sum",
+        )
+        missing = await prepare_digest_model(
+            _tool_ctx(claimed_model=turn),
+            _assistant(turn),
+            DigestClaims(turn.id, None, False, uuid4()),
+            instruction="sum",
+        )
+
+        assert same.reader is None
+        assert missing.reader is None
+
 
 # --------------------------------------------------------------------------- #
 # The provider call
@@ -267,8 +349,14 @@ class _Adapter:
             raise outcome
         if callable(outcome):
             return await outcome()
+        if isinstance(outcome, tuple):
+            text, finish_reason = outcome
+        else:
+            text, finish_reason = outcome, "stop"
         return SimpleNamespace(
-            text=outcome, usage=SimpleNamespace(prompt_tokens=10, completion_tokens=4)
+            text=text,
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=4),
+            finish_reason=finish_reason,
         )
 
 
@@ -309,6 +397,42 @@ class TestProviderCalls:
         assert adapter.calls[0]["input"] == "user"
         assert adapter.calls[0]["max_tokens"] == 123
         assert adapter.calls[0]["temperature"] == 0.2
+
+    async def test_a_length_finish_marks_the_usage_as_cut(self):
+        adapter = _Adapter([("half a note", "length")])
+
+        text, usage = await _calls(adapter)("system", "user", 123)
+
+        assert text == "half a note"
+        assert usage.length_stopped is True
+        assert usage == Usage(10, 4, length_stopped=True)
+
+    async def test_a_target_routes_calls_to_its_adapter_under_shared_slots(self):
+        turn_adapter, reader_adapter = _Adapter(["final"]), _Adapter(["note"])
+        calls = _calls(turn_adapter)
+        target = ReaderTarget(
+            model=_model(name="mini"),
+            adapter=reader_adapter,
+            model_kwargs={"reasoning_effort": "low"},
+            count=_count,
+            segment_tokens=100,
+        )
+        map_calls = ProviderCalls(
+            calls.digest_model,
+            deadline=Deadline(30.0),
+            concurrency=2,
+            process_slots=asyncio.Semaphore(8),
+            target=target,
+            slots=calls.slots,
+        )
+
+        text, usage = await map_calls("s", "u", 50)
+
+        assert (text, usage) == ("note", Usage(10, 4))
+        assert reader_adapter.calls[0]["reasoning_effort"] == "low"
+        assert "temperature" not in reader_adapter.calls[0]
+        assert turn_adapter.calls == []
+        assert map_calls.slots is calls.slots
 
     async def test_rate_limit_is_retried_with_bounded_backoff(self):
         adapter = _Adapter([_provider_error("provider_rate_limited"), "note"])
@@ -386,6 +510,34 @@ def _result(**overrides) -> DigestResult:
 
 
 class TestResultShape:
+    def test_digest_meta_keeps_turn_usage_under_genai_keys_and_reader_apart(self):
+        turn = _digest_model()
+        reader = ReaderTarget(
+            model=_model(name="mini"),
+            adapter=None,
+            model_kwargs={},
+            count=_count,
+            segment_tokens=100,
+        )
+        result = _result(usage=Usage(500, 80), map_usage=Usage(9_000, 700))
+
+        plain = digest_meta(result, turn)
+        meta = digest_meta(result, replace(turn, reader=reader))
+
+        # The question row folds the GenAI keys: only the turn model's share.
+        assert plain["gen_ai.usage.input_tokens"] == 500
+        assert "eneo.reader_model_id" not in plain
+        assert meta["gen_ai.usage.input_tokens"] == 500
+        assert meta["eneo.reader_model_id"] == str(reader.model.id)
+        assert meta["eneo.reader.model"] == "mini"
+        assert (
+            meta["eneo.reader.input_tokens"],
+            meta["eneo.reader.output_tokens"],
+        ) == (
+            9_000,
+            700,
+        )
+
     def test_cited_keys_keeps_only_known_keys_in_first_seen_order(self):
         assert cited_keys("x [D2] y [D9] z [D1] [D2]", ["D1", "D2", "D3"]) == [
             "D2",
@@ -520,3 +672,100 @@ class TestResultShape:
         assert meta["eneo.coverage"] == "partial"
         assert meta["eneo.items_partial"] == ["D2"]
         assert meta["eneo.llm_calls"] == 5
+
+
+class _ProgressCtx:
+    """A FastMCP ``Context`` as the reporter sees it: request meta + session."""
+
+    def __init__(self, progress_token: int | str | None):
+        self.request_context = SimpleNamespace(
+            meta=None
+            if progress_token is None
+            else SimpleNamespace(progressToken=progress_token)
+        )
+        self.request_id = "7"
+        self.sent: list[dict[str, Any]] = []
+        self.session = SimpleNamespace(
+            send_progress_notification=self._send_progress_notification
+        )
+
+    async def _send_progress_notification(self, **kwargs: Any) -> None:
+        self.sent.append(kwargs)
+
+
+class TestProgressReporter:
+    async def test_relays_the_core_stages_as_mcp_progress(self):
+        ctx = _ProgressCtx(progress_token=7)
+
+        report = progress_reporter(ctx)
+        await report(3, 44, "reading")
+        await report(44, 44, "merging")
+        await report(44, 44, "answering")
+
+        assert [(s["progress"], s["total"], s["message"]) for s in ctx.sent] == [
+            (3, 44, "Read 3 of 44 parts"),
+            (44, 44, "Merging the notes"),
+            (44, 44, "Writing the answer"),
+        ]
+
+    async def test_ties_every_notification_to_the_running_request(self):
+        """A stateless server can only deliver a notification on the stream
+        of the request it belongs to."""
+        ctx = _ProgressCtx(progress_token=7)
+
+        await progress_reporter(ctx)(1, 2, "reading")
+
+        assert ctx.sent[0]["progress_token"] == 7
+        assert ctx.sent[0]["related_request_id"] == "7"
+
+    async def test_sends_nothing_when_the_client_asked_for_no_progress(self):
+        ctx = _ProgressCtx(progress_token=None)
+
+        await progress_reporter(ctx)(1, 2, "reading")
+
+        assert ctx.sent == []
+
+    async def test_reaches_the_client_through_a_stateless_server(self):
+        """The loopback servers are stateless over streamable HTTP, where a
+        notification is only deliverable on the stream of the request it
+        belongs to. Proven over the real transport, not a fake context."""
+        server = FastMCP("probe", stateless_http=True)
+
+        @server.tool()
+        async def probe(ctx: Context) -> str:
+            report = progress_reporter(ctx)
+            await report(1, 2, "reading")
+            await report(2, 2, "answering")
+            return "done"
+
+        app = server.streamable_http_app()
+
+        def client_factory(headers=None, timeout=None, auth=None):
+            return httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://localhost:8000",
+                headers=headers,
+                timeout=timeout,
+                auth=auth,
+            )
+
+        received: list[tuple[float, float | None, str | None]] = []
+
+        async def on_progress(progress, total, message) -> None:
+            received.append((progress, total, message))
+
+        async with server.session_manager.run():
+            async with streamablehttp_client(
+                "http://localhost:8000/mcp", httpx_client_factory=client_factory
+            ) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.call_tool(
+                        "probe", {}, progress_callback=on_progress
+                    )
+
+        assert result.content[0].text == "done"  # type: ignore[union-attr]
+        assert received == [
+            (1, 2, "Read 1 of 2 parts"),
+            (2, 2, "Writing the answer"),
+        ]

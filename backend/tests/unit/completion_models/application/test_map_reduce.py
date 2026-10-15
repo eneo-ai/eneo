@@ -4,6 +4,7 @@ coverage account that says what the answer leaves out."""
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 import pytest
 
@@ -14,6 +15,7 @@ from eneo.completion_models.application.map_reduce import (
     DigestItem,
     Usage,
     batch_by_tokens,
+    fitting_prefix,
     parse_map_output,
     plan_segments,
     run_digest,
@@ -38,12 +40,29 @@ def _budgets(**overrides) -> DigestBudgets:
 class _ScriptedModel:
     """A ``complete`` that answers by stage and records every call."""
 
-    def __init__(self, *, fail_on: set[str] | None = None, usage=(10, 5)):
+    def __init__(
+        self,
+        *,
+        fail_on: set[str] | None = None,
+        usage=(10, 5),
+        cut_when: Callable[[str, str], bool] | None = None,
+        final_replies: list[str] | None = None,
+    ):
         self.calls: list[tuple[str, str, int]] = []
         self.fail_on = fail_on or set()
         self.usage = Usage(*usage)
+        # Marks a call as stopped at max_tokens, as a provider would report.
+        self.cut_when = cut_when or (lambda system, user: False)
+        # Scripted answers for the final calls, in order; the default after.
+        self.final_replies = list(final_replies or [])
 
     async def __call__(self, system: str, user: str, max_tokens: int):
+        text, usage = await self._reply(system, user, max_tokens)
+        if self.cut_when(system, user):
+            usage = Usage(usage.input_tokens, usage.output_tokens, length_stopped=True)
+        return text, usage
+
+    async def _reply(self, system: str, user: str, max_tokens: int):
         self.calls.append((system, user, max_tokens))
         for marker in self.fail_on:
             if marker in user:
@@ -62,6 +81,8 @@ class _ScriptedModel:
             )
             return "merged " + " ".join(f"[{k}]" for k in keys), self.usage
         if system.startswith("Answer the instruction"):
+            if self.final_replies:
+                return self.final_replies.pop(0), self.usage
             return "FINAL: " + user[:40], self.usage
         raise AssertionError(f"unexpected prompt: {system[:40]}")
 
@@ -96,13 +117,30 @@ class TestPlanSegments:
         assert plan_segments(small, _budgets(), _count).direct_fits is True
         assert plan_segments(big, _budgets(), _count).direct_fits is False
 
-    def test_batch_by_tokens_is_greedy_and_isolates_oversized_texts(self):
+    def test_batch_by_tokens_keeps_order_and_isolates_oversized_texts(self):
         texts = [_words(40), _words(40), _words(60), _words(200), _words(10)]
 
         batches = batch_by_tokens(texts, _count, 100)
 
         assert [len(b) for b in batches] == [2, 1, 1, 1]
         assert batches[2] == [_words(200)]
+
+    def test_batch_by_tokens_sizes_batches_evenly_not_greedily(self):
+        # Greedy filling would give nine and one; the merge of nine notes
+        # would then carry nearly all the compression.
+        texts = [_words(10)] * 9 + [_words(55)]
+
+        batches = batch_by_tokens(texts, _count, 100)
+
+        assert [len(b) for b in batches] == [7, 3]
+        assert [sum(_count(t) for t in b) for b in batches] == [70, 75]
+
+    def test_fitting_prefix_counts_leading_texts_within_budget(self):
+        texts = [_words(40), _words(40), _words(40)]
+
+        assert fitting_prefix(texts, _count, 100) == 2
+        assert fitting_prefix(texts, _count, 1000) == 3
+        assert fitting_prefix(texts, _count, 10) == 1  # never nothing
 
 
 class TestParseMapOutput:
@@ -414,6 +452,40 @@ async def test_usage_is_summed_over_every_call():
     assert result.usage == Usage(7 * len(model.calls), 3 * len(model.calls))
 
 
+async def test_a_map_model_takes_notes_and_item_merges_with_its_own_usage():
+    turn, utility = _ScriptedModel(usage=(10, 5)), _ScriptedModel(usage=(3, 1))
+    items = [DigestItem(f"D{i}", f"T{i}", _words(120, f"x{i}")) for i in range(1, 6)]
+    plan = plan_segments(items, _budgets(), _count)
+
+    result = await run_digest(
+        plan,
+        turn,
+        instruction="sum",
+        budgets=_budgets(),
+        count=_count,
+        complete_map=utility,
+    )
+
+    assert utility.calls and turn.calls
+    assert all(
+        system.startswith(("You take notes", "Merge notes taken from consecutive"))
+        for system, _, _ in utility.calls
+    )
+    assert all(
+        system.startswith(("Merge notes from several", "Answer the instruction"))
+        for system, _, _ in turn.calls
+    )
+    assert result.coverage == "complete"
+    assert result.llm_calls == len(turn.calls) + len(utility.calls)
+    assert result.map_usage == Usage(3 * len(utility.calls), len(utility.calls))
+    assert result.usage == Usage(10 * len(turn.calls), 5 * len(turn.calls))
+
+    single = await run_digest(
+        plan, _ScriptedModel(), instruction="sum", budgets=_budgets(), count=_count
+    )
+    assert single.map_usage == Usage()
+
+
 async def test_map_batch_bounds_concurrency():
     running = 0
     peak = 0
@@ -434,3 +506,184 @@ async def test_map_batch_bounds_concurrency():
     )
 
     assert peak <= 3
+
+
+# --------------------------------------------------------------------------- #
+# Calls the provider stopped at max_tokens
+# --------------------------------------------------------------------------- #
+def _merge_keys(user: str) -> int:
+    return len(set(part.split("]")[0] for part in user.split("[")[1:]))
+
+
+async def test_cut_batch_merge_is_redone_on_halves_and_nothing_is_lost():
+    # Four notes in one merge come back cut; pairs merge whole.
+    model = _ScriptedModel(
+        cut_when=lambda system, user: (
+            system.startswith("Merge notes from several") and _merge_keys(user) > 2
+        )
+    )
+    budgets = _budgets(segment_tokens=50, reduce_input_tokens=40)
+    items = [DigestItem(f"D{i}", f"T{i}", _words(20, f"x{i}")) for i in range(1, 9)]
+    plan = plan_segments(items, budgets, _count)
+
+    result = await run_digest(
+        plan, model, instruction="sum", budgets=budgets, count=_count
+    )
+
+    merges = [u for s, u, _ in model.calls if s.startswith("Merge notes from several")]
+    assert any(_merge_keys(u) > 2 for u in merges)  # the cut merges happened
+    assert all(_merge_keys(u) <= 2 for u in merges if _merge_keys(u) != 4)
+    final_input = next(u for s, u, _ in model.calls if s.startswith("Answer"))
+    assert all(f"[D{i}]" in final_input for i in range(1, 9))
+    assert result.coverage == "complete"
+    assert result.excluded == []
+
+
+async def test_single_note_merge_that_is_cut_is_kept_and_reported():
+    model = _ScriptedModel(
+        cut_when=lambda system, user: system.startswith("Merge notes from several")
+    )
+    budgets = _budgets(segment_tokens=50, reduce_input_tokens=8)
+    items = [DigestItem(f"D{i}", f"T{i}", _words(20, f"x{i}")) for i in range(1, 4)]
+    plan = plan_segments(items, budgets, _count)
+
+    result = await run_digest(
+        plan, model, instruction="sum", budgets=budgets, count=_count
+    )
+
+    assert result.coverage == "partial"
+    assert "merge cut short" in result.reasons
+
+
+async def test_cut_segment_notes_mark_the_item_partial_but_are_kept():
+    model = _ScriptedModel(
+        cut_when=lambda system, user: (
+            system.startswith("You take notes") and user.startswith("[D2]")
+        )
+    )
+    # Three one-segment items, over the direct path's budget, so each gets
+    # one map call and its note reaches the final call unmerged.
+    items = [DigestItem(f"D{i}", f"T{i}", _words(45, f"x{i}")) for i in range(1, 4)]
+    plan = plan_segments(items, _budgets(), _count)
+    assert not plan.direct_fits
+
+    result = await run_digest(
+        plan, model, instruction="sum", budgets=_budgets(), count=_count
+    )
+
+    assert result.coverage == "partial"
+    assert "notes cut short" in result.reasons
+    assert result.partial_keys == ["D2"]
+    assert result.item_progress["D2"].cut == 1
+    final_input = next(u for s, u, _ in model.calls if s.startswith("Answer"))
+    assert "note from D2" in final_input  # what came back is still used
+
+
+async def test_answer_over_the_page_is_asked_again_tighter():
+    long, short = "x " * 60, "fits"
+    model = _ScriptedModel(final_replies=[long, short])
+    budgets = _budgets(final_chars=40)
+    items = [DigestItem("D1", "A", _words(60)), DigestItem("D2", "B", _words(60))]
+    plan = plan_segments(items, budgets, _count)
+
+    result = await run_digest(
+        plan, model, instruction="sum", budgets=budgets, count=_count
+    )
+
+    finals = [(s, m) for s, _, m in model.calls if s.startswith("Answer")]
+    assert len(finals) == 2
+    first_words = int(finals[0][0].split("at most ")[1].split(" words")[0])
+    second_words = int(finals[1][0].split("at most ")[1].split(" words")[0])
+    assert second_words < first_words
+    assert result.output == short
+    assert result.coverage == "complete"
+
+
+async def test_answer_cut_by_the_provider_is_asked_again_tighter():
+    seen = {"finals": 0}
+
+    def first_final_only(system: str, user: str) -> bool:
+        if not system.startswith("Answer"):
+            return False
+        seen["finals"] += 1
+        return seen["finals"] == 1
+
+    model = _ScriptedModel(cut_when=first_final_only)
+    items = [DigestItem("D1", "A", _words(20))]
+    plan = plan_segments(items, _budgets(), _count)
+
+    result = await run_digest(
+        plan, model, instruction="sum", budgets=_budgets(), count=_count
+    )
+
+    assert model.stage_counts()["Answer"] == 2
+    assert result.coverage == "complete"
+    assert "answer cut short" not in result.reasons
+
+
+async def test_answer_still_over_the_page_is_cut_at_a_line_and_reported():
+    long = "\n".join(f"line {i} of the answer" for i in range(10))
+    model = _ScriptedModel(final_replies=[long, long])
+    budgets = _budgets(final_chars=80)
+    items = [DigestItem("D1", "A", _words(20))]
+    plan = plan_segments(items, budgets, _count)
+
+    result = await run_digest(
+        plan, model, instruction="sum", budgets=budgets, count=_count
+    )
+
+    assert result.coverage == "partial"
+    assert "answer cut short" in result.reasons
+    assert len(result.output) <= 80
+    assert result.output.endswith("[Answer cut short.]")
+    body = result.output.removesuffix("\n[Answer cut short.]")
+    assert body.splitlines()[-1].startswith("line ")  # cut at a line, not mid-word
+    assert body.splitlines()[-1].endswith("of the answer")
+
+
+async def test_progress_reports_each_segment_then_the_merges_and_the_answer():
+    model = _ScriptedModel()
+    reports: list[tuple[int, int, str]] = []
+
+    async def on_progress(done: int, total: int, stage: str) -> None:
+        reports.append((done, total, stage))
+
+    items = [DigestItem("D1", "A", _words(60)), DigestItem("D2", "B", _words(60))]
+    plan = plan_segments(items, _budgets(), _count)
+
+    result = await run_digest(
+        plan,
+        model,
+        instruction="sum",
+        budgets=_budgets(),
+        count=_count,
+        on_progress=on_progress,
+    )
+
+    total = plan.total_segments
+    reading = [r for r in reports if r[2] == "reading"]
+    assert [r[0] for r in reading] == list(range(1, total + 1))
+    assert all(r[1] == total for r in reading)
+    assert reports[-2:] == [(total, total, "merging"), (total, total, "answering")]
+    assert result.coverage == "complete"
+
+
+async def test_a_failing_progress_hook_never_ends_the_run():
+    model = _ScriptedModel()
+
+    async def on_progress(done: int, total: int, stage: str) -> None:
+        raise RuntimeError("listener gone")
+
+    items = [DigestItem("D1", "A", _words(60)), DigestItem("D2", "B", _words(60))]
+    plan = plan_segments(items, _budgets(), _count)
+
+    result = await run_digest(
+        plan,
+        model,
+        instruction="sum",
+        budgets=_budgets(),
+        count=_count,
+        on_progress=on_progress,
+    )
+
+    assert result.coverage == "complete"
