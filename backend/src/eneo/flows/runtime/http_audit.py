@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -8,6 +9,7 @@ from uuid import UUID
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.flows.domain.flow_run_exceptions import FlowStepAttemptClosed
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.mcp_servers.domain.server_address import loggable_server_address
 
@@ -48,6 +50,15 @@ class AuditedToolCall:
 
     mcp_server_id: UUID
     tool_name: str
+
+
+def unfinished_call_message(exc: BaseException) -> str:
+    """The audited error of an outbound call that ended without a typed
+    result. The error's own text is never used: it can quote the server, its
+    address or the request."""
+    if isinstance(exc, (asyncio.CancelledError, FlowStepAttemptClosed)):
+        return "The call was stopped before it ended."
+    return "The call ended with an error that has no typed code."
 
 
 async def audit_http_outbound(

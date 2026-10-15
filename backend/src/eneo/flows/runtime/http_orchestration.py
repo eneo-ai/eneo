@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import time
@@ -28,6 +29,7 @@ from eneo.flows.http_transport import (
     url_error_message,
 )
 from eneo.flows.http_transport.validator import validate_http_url
+from eneo.flows.runtime.http_audit import unfinished_call_message
 from eneo.flows.variable_resolver import FlowVariableContext
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
@@ -197,6 +199,87 @@ async def resolve_http_input_source_text(
     json_body = effective_request.json_body
 
     start_time = time.monotonic()
+    audited = False
+
+    async def audit(
+        outcome: Outcome,
+        *,
+        error_message: str | None = None,
+        status_code: int | None = None,
+        duration_ms: float,
+    ) -> None:
+        nonlocal audited
+        audited = True
+        await deps.audit_http_outbound(
+            run=run,
+            step=step,
+            url=url,
+            method=method,
+            call_type="http_input",
+            outcome=outcome,
+            error_message=error_message,
+            status_code=status_code,
+            duration_ms=duration_ms,
+        )
+
+    # Every ending after the request is sent is one audited outbound call: a
+    # typed one with its message, a cancelled one or one with an error that
+    # has no typed code with a fixed text.
+    try:
+        return await _send_and_read_http_input(
+            step=step,
+            method=method,
+            url=url,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            body_bytes=body_bytes,
+            json_body=json_body,
+            response_format=response_format,
+            request_edges=effective_request.resolved_input_edges,
+            start_time=start_time,
+            audit=audit,
+            deps=deps,
+        )
+    except (asyncio.CancelledError, Exception) as exc:
+        if not audited:
+            await audit(
+                Outcome.FAILURE,
+                error_message=(
+                    str(exc)
+                    if isinstance(exc, TypedIOValidationException)
+                    else unfinished_call_message(exc)
+                ),
+                duration_ms=(time.monotonic() - start_time) * 1000,
+            )
+        raise
+
+
+class _AuditHttpInputFn(Protocol):
+    def __call__(
+        self,
+        outcome: Outcome,
+        *,
+        error_message: str | None = None,
+        status_code: int | None = None,
+        duration_ms: float,
+    ) -> Awaitable[None]: ...
+
+
+async def _send_and_read_http_input(
+    *,
+    step: RuntimeHttpStep,
+    method: HttpMethod,
+    url: str,
+    headers: dict[str, str],
+    timeout_seconds: float,
+    body_bytes: bytes | None,
+    json_body: dict[str, Any] | list[Any] | None,
+    response_format: str | None,
+    request_edges: tuple[FlowResolvedInputEdge, ...],
+    start_time: float,
+    audit: _AuditHttpInputFn,
+    deps: FlowHttpOrchestrationDeps,
+) -> FlowOutsideInputResolution:
     try:
         # Normalize before auditing so audit failures cannot chain raw credentials.
         try:
@@ -219,29 +302,18 @@ async def resolve_http_input_source_text(
                 code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
             ) from None
     except TypedIOValidationException as exc:
-        duration_ms = (time.monotonic() - start_time) * 1000
-        await deps.audit_http_outbound(
-            run=run,
-            step=step,
-            url=url,
-            method=method,
-            call_type="http_input",
-            outcome=Outcome.FAILURE,
+        await audit(
+            Outcome.FAILURE,
             error_message=str(exc),
-            duration_ms=duration_ms,
+            duration_ms=(time.monotonic() - start_time) * 1000,
         )
         raise
 
     duration_ms = (time.monotonic() - start_time) * 1000
     if response.status_code >= 400:
         err_msg = f"Step {step.step_order}: HTTP {method} input returned status {response.status_code}."
-        await deps.audit_http_outbound(
-            run=run,
-            step=step,
-            url=url,
-            method=method,
-            call_type="http_input",
-            outcome=Outcome.FAILURE,
+        await audit(
+            Outcome.FAILURE,
             error_message=err_msg,
             status_code=response.status_code,
             duration_ms=duration_ms,
@@ -263,13 +335,8 @@ async def resolve_http_input_source_text(
             parsed = response.json()
         except (ValueError, json.JSONDecodeError) as exc:
             err_msg = f"Step {step.step_order}: HTTP {method} input returned malformed JSON response."
-            await deps.audit_http_outbound(
-                run=run,
-                step=step,
-                url=url,
-                method=method,
-                call_type="http_input",
-                outcome=Outcome.FAILURE,
+            await audit(
+                Outcome.FAILURE,
                 error_message=err_msg,
                 status_code=response.status_code,
                 duration_ms=duration_ms,
@@ -278,13 +345,8 @@ async def resolve_http_input_source_text(
                 err_msg,
                 code=FlowApiErrorCode.TYPED_IO_HTTP_MALFORMED_RESPONSE.value,
             ) from exc
-        await deps.audit_http_outbound(
-            run=run,
-            step=step,
-            url=url,
-            method=method,
-            call_type="http_input",
-            outcome=Outcome.SUCCESS,
+        await audit(
+            Outcome.SUCCESS,
             status_code=response.status_code,
             duration_ms=duration_ms,
         )
@@ -293,18 +355,13 @@ async def resolve_http_input_source_text(
             text=json.dumps(parsed, ensure_ascii=False),
             structured=parsed,
             resolved_input_edges=merge_resolved_input_edges(
-                effective_request.resolved_input_edges,
+                request_edges,
                 (response_edge,),
             ),
         )
 
-    await deps.audit_http_outbound(
-        run=run,
-        step=step,
-        url=url,
-        method=method,
-        call_type="http_input",
-        outcome=Outcome.SUCCESS,
+    await audit(
+        Outcome.SUCCESS,
         status_code=response.status_code,
         duration_ms=duration_ms,
     )
@@ -313,7 +370,7 @@ async def resolve_http_input_source_text(
         text=response_text,
         structured=None,
         resolved_input_edges=merge_resolved_input_edges(
-            effective_request.resolved_input_edges,
+            request_edges,
             (response_edge,),
         ),
     )

@@ -16,6 +16,7 @@ then.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import re
@@ -81,7 +82,7 @@ from eneo.flows.runtime.egress.policy import (
     Resolver,
     vet_destination,
 )
-from eneo.flows.runtime.http_audit import AuditedToolCall
+from eneo.flows.runtime.http_audit import AuditedToolCall, unfinished_call_message
 from eneo.flows.runtime.http_orchestration import FlowOutsideInputResolution
 from eneo.flows.runtime.step_deadline import current_step_deadline_scope
 from eneo.flows.runtime.tool_argument_check import (
@@ -288,9 +289,10 @@ async def resolve_tool_input(
         )
 
     # From here the run reaches out for the server: its name is resolved, then
-    # it is called. Every typed ending is one audited outbound call. A read
-    # that is cancelled, or that ends with an exception that is not typed,
-    # writes no audit record, as for the HTTP input.
+    # it is called. Every ending is one audited outbound call: a typed one with
+    # its message, a stopped one or one with an error that has no typed code
+    # with a fixed text. Once the success is audited, a later failure (storing
+    # the result) is not audited again.
     sent_at: float | None = None
     try:
         await _vet_server_address(step, usable.server, deps, vet_seconds)
@@ -317,6 +319,9 @@ async def resolve_tool_input(
         await audit(Outcome.FAILURE, str(exc))
         if failed is not None:
             await record_call(start=call_start, result=failed)
+        raise
+    except (asyncio.CancelledError, Exception) as exc:
+        await audit(Outcome.FAILURE, unfinished_call_message(exc))
         raise
     # Built before the success is audited, so that hashing the answer cannot
     # fail after it.

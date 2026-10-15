@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import traceback
 from dataclasses import dataclass
@@ -319,6 +320,82 @@ async def test_resolve_http_input_source_text_malformed_json_maps_to_typed_code(
     audit_kwargs = deps.audit_http_outbound.await_args.kwargs
     assert audit_kwargs["outcome"].name == "FAILURE"
     assert audit_kwargs["status_code"] == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ending", "message"),
+    [
+        pytest.param(
+            "untyped",
+            "The call ended with an error that has no typed code.",
+            id="untyped",
+        ),
+        pytest.param(
+            "cancelled", "The call was stopped before it ended.", id="cancelled"
+        ),
+        pytest.param(
+            "too_large", "Step 4: the response is too large.", id="typed-late"
+        ),
+        pytest.param(
+            "timeout", "Step 4: HTTP GET input timed out after 5s.", id="typed-early"
+        ),
+    ],
+)
+async def test_an_http_input_read_is_audited_once_however_it_ends(
+    ending: str, message: str
+) -> None:
+    # Kills the mutants that write no audit record for an HTTP input read that
+    # was cancelled, ended by an error without a typed code, or refused as
+    # too large after its response, that audit such a read with the error's
+    # own text, and that audit a typed failure twice.
+    entered = asyncio.Event()
+    request = httpx.Request("GET", "https://example.org/data")
+
+    async def send(**_: Any) -> httpx.Response:
+        if ending == "untyped":
+            raise RuntimeError("upstream said sk-http-secret")
+        if ending == "timeout":
+            raise httpx.TimeoutException("timeout")
+        if ending == "cancelled":
+            entered.set()
+            await asyncio.Event().wait()
+        return httpx.Response(200, request=request, text="ok")
+
+    def too_large(**_: Any) -> str:
+        raise TypedIOValidationException(
+            "Step 4: the response is too large.",
+            code="typed_io_http_response_too_large",
+        )
+
+    deps = _make_deps(send_http_request=send, read_response_text=too_large)
+    read = asyncio.create_task(
+        resolve_http_input_source_text(
+            step=_Step(
+                step_order=4,
+                step_id="s4",
+                input_type="text",
+                input_source="http_get",
+                input_config={
+                    "url": "https://example.org/data",
+                    "auth": {"mode": "none"},
+                },
+            ),
+            run=_Run(id="run-4", flow_id="flow-1", tenant_id="tenant-1"),
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+    )
+    if ending == "cancelled":
+        await entered.wait()
+        read.cancel()
+    with pytest.raises(BaseException):
+        await read
+
+    deps.audit_http_outbound.assert_awaited_once()
+    audit = deps.audit_http_outbound.await_args.kwargs
+    assert (audit["outcome"].name, audit["error_message"]) == ("FAILURE", message)
+    assert "sk-http-secret" not in repr(audit)
 
 
 @pytest.mark.asyncio

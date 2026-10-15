@@ -1542,6 +1542,7 @@ async def _no_address(host: str, port: int) -> list[str]:
 
 
 _STORED_CALL = ["write", "commit", "call", "write", "commit"]
+_ANSWERED_NOTHING = MCPToolAnswer((), 0, {"rows": []}, is_error=False)
 
 
 @pytest.mark.parametrize(
@@ -1668,6 +1669,73 @@ async def test_a_call_whose_attempt_has_closed_is_not_made(user) -> None:
 
     assert caller.calls == []
     executor.session.commit.assert_not_awaited()
+
+
+_STOPPED = "The call was stopped before it ended."
+_UNTYPED = "The call ended with an error that has no typed code."
+
+
+@dataclass
+class _Hanging(_Caller):
+    """Holds the call open until the read is cancelled."""
+
+    entered: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def call(self, *args: Any, **kwargs: Any) -> MCPToolAnswer:
+        self.calls.append(kwargs)
+        self.entered.set()
+        await asyncio.Event().wait()
+        raise AssertionError("the call was not cancelled")
+
+
+@pytest.mark.parametrize(
+    ("ending", "outcome", "message", "calls"),
+    [
+        pytest.param("untyped", Outcome.FAILURE, _UNTYPED, 1, id="untyped-error"),
+        pytest.param("cancelled", Outcome.FAILURE, _STOPPED, 1, id="cancelled"),
+        pytest.param("closed", Outcome.FAILURE, _STOPPED, 0, id="attempt-closed"),
+        pytest.param("start_not_stored", Outcome.FAILURE, _UNTYPED, 0, id="no-start"),
+        pytest.param("result_not_stored", Outcome.SUCCESS, None, 1, id="no-result"),
+    ],
+)
+async def test_a_read_that_ends_without_a_typed_result_is_audited_once(
+    user, ending: str, outcome: Outcome, message: str | None, calls: int
+) -> None:
+    # Kills the mutants that write no audit record for a read that was
+    # cancelled, stopped by its closed attempt or ended by an error without a
+    # typed code, that audit such a read with the error's own text (which can
+    # quote the server or the arguments), and that audit a read twice when
+    # storing its result fails after its success was audited.
+    facts = _facts()
+    caller: _Caller = (
+        _Hanging(_ANSWERED_NOTHING)
+        if ending == "cancelled"
+        else _Caller(RuntimeError(f"server said {_SECRET_ARGUMENT}"))
+        if ending == "untyped"
+        else _answered(structured={"rows": []})
+    )
+    executor = _tool_executor(user, _Facts(facts), caller)
+    write = executor.flow_run_repo.write_attempt_tool_call_evidence
+    if ending == "closed":
+        write.return_value = "attempt_closed"
+    elif ending == "start_not_stored":
+        write.side_effect = ConnectionResetError(_SECRET_ARGUMENT)
+    elif ending == "result_not_stored":
+        write.side_effect = ["written", ConnectionResetError(_SECRET_ARGUMENT)]
+    step = _tool_step(facts, arguments={"q": _SECRET_ARGUMENT})
+
+    read = asyncio.create_task(_read(executor, step, _running(user)))
+    if isinstance(caller, _Hanging):
+        await caller.entered.wait()
+        read.cancel()
+    with pytest.raises(BaseException) as ended:
+        await read
+
+    assert not isinstance(ended.value, TypedIOValidationException)
+    assert len(caller.calls) == calls
+    (audit,) = _audits(executor)
+    assert (audit["outcome"], audit["error_message"]) == (outcome, message)
+    assert _SECRET_ARGUMENT not in repr(audit)
 
 
 def _slow(release: asyncio.Event) -> Callable[[object], Awaitable[Response]]:
