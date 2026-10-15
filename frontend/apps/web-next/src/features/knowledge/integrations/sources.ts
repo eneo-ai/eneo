@@ -1,0 +1,252 @@
+import type { IntegrationKnowledge } from "../knowledge";
+import type { Translate } from "./skip-reasons";
+import { isCredentialsError } from "./source-problems";
+import { combineSyncProgress, type ProgressById, type SyncProgressSummary } from "./sync-progress";
+import { latestTime, summarizeIntegrationSync } from "./sync-status";
+
+/**
+ * What the knowledge list shows as one row: the items imported together under
+ * a wrapper, or a single item imported on its own.
+ */
+export type IntegrationSource = {
+  kind: "wrapper" | "item";
+  /** The wrapper id, or the item id for a single item. */
+  id: string;
+  name: string;
+  integrationType: IntegrationKnowledge["integration_type"];
+  items: IntegrationKnowledge[];
+  embeddingModelId: string;
+};
+
+export type SourceTab = "content" | "problems" | "activity";
+
+export type SourceState = "syncing" | "attention" | "never" | "empty" | "ok";
+
+export type ItemState = "syncing" | "error" | "never" | "empty" | "ok";
+
+export type SourceSummary = {
+  state: SourceState;
+  documentCount: number;
+  lastSyncedAt: string | null;
+  lastSyncAttemptedAt: string | null;
+  failedItems: IntegrationKnowledge[];
+  /** Every failure is the organisation's SharePoint sign-in, which only an admin can fix. */
+  credentialsFailed: boolean;
+  progress: SyncProgressSummary | null;
+};
+
+function wrapperName(items: IntegrationKnowledge[]): string {
+  const named = items.find(
+    (item) => typeof item.wrapper_name === "string" && item.wrapper_name.trim() !== ""
+  );
+  return named?.wrapper_name ?? items[0]?.name ?? "";
+}
+
+/** SharePoint items sharing a wrapper become one source; every other item is its own. */
+export function groupIntegrationSources(
+  items: readonly IntegrationKnowledge[]
+): IntegrationSource[] {
+  const wrappers = new Map<string, IntegrationKnowledge[]>();
+  const sources: IntegrationSource[] = [];
+  for (const item of items) {
+    if (item.wrapper_id && item.integration_type === "sharepoint") {
+      const group = wrappers.get(item.wrapper_id);
+      if (group) group.push(item);
+      else wrappers.set(item.wrapper_id, [item]);
+      continue;
+    }
+    sources.push({
+      kind: "item",
+      id: item.id,
+      name: item.name,
+      integrationType: item.integration_type,
+      items: [item],
+      embeddingModelId: item.embedding_model.id
+    });
+  }
+  for (const [id, group] of wrappers) {
+    const [first] = group;
+    if (!first) continue;
+    sources.push({
+      kind: "wrapper",
+      id,
+      name: wrapperName(group),
+      integrationType: first.integration_type,
+      items: group,
+      embeddingModelId: first.embedding_model.id
+    });
+  }
+  return sources.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** The tab a link asks for; older links name "skipped", which is now part of Problems. */
+export function sourceTabParam(value: string | string[] | undefined): SourceTab | undefined {
+  if (value === "problems" || value === "skipped") return "problems";
+  if (value === "content" || value === "activity") return value;
+  return undefined;
+}
+
+export function sourceHref(
+  spaceRouteId: string,
+  source: Pick<IntegrationSource, "kind" | "id">,
+  params: { folder?: string | null; tab?: SourceTab } = {}
+): string {
+  const base =
+    source.kind === "wrapper"
+      ? `/spaces/${spaceRouteId}/knowledge/integrations/wrapper/${source.id}`
+      : `/spaces/${spaceRouteId}/knowledge/integrations/${source.id}`;
+  const query = new URLSearchParams();
+  if (params.folder) query.set("folder", params.folder);
+  if (params.tab) query.set("tab", params.tab);
+  const search = query.toString();
+  return search ? `${base}?${search}` : base;
+}
+
+export function itemState(item: IntegrationKnowledge, progress: ProgressById): ItemState {
+  if (progress[item.id]) return "syncing";
+  const state = summarizeIntegrationSync(item).state;
+  return state === "success" ? "ok" : state;
+}
+
+export function summarizeSource(
+  items: readonly IntegrationKnowledge[],
+  progress: ProgressById
+): SourceSummary {
+  let documentCount = 0;
+  let lastSyncedAt: string | null = null;
+  let lastSyncAttemptedAt: string | null = null;
+  const failedItems: IntegrationKnowledge[] = [];
+  const states: ItemState[] = [];
+  for (const item of items) {
+    const summary = summarizeIntegrationSync(item);
+    documentCount += summary.documentCount;
+    lastSyncedAt = latestTime(lastSyncedAt, summary.lastSyncedAt);
+    lastSyncAttemptedAt = latestTime(lastSyncAttemptedAt, summary.lastSyncAttemptedAt);
+    if (summary.state === "error") failedItems.push(item);
+    states.push(itemState(item, progress));
+  }
+  const syncing = items.flatMap((item) => {
+    const entry = progress[item.id];
+    return entry ? [entry] : [];
+  });
+
+  let state: SourceState;
+  if (syncing.length > 0) state = "syncing";
+  else if (failedItems.length > 0) state = "attention";
+  else if (states.every((s) => s === "never")) state = "never";
+  else if (documentCount === 0) state = "empty";
+  else state = "ok";
+
+  return {
+    state,
+    documentCount,
+    lastSyncedAt,
+    lastSyncAttemptedAt,
+    failedItems,
+    credentialsFailed:
+      failedItems.length > 0 &&
+      failedItems.every((item) => isCredentialsError(item.metadata?.last_sync_error)),
+    progress: combineSyncProgress(syncing)
+  };
+}
+
+/** "3 folders, 1 file" style description of what a source holds. */
+export function sourceContentsLabel(items: readonly IntegrationKnowledge[], t: Translate): string {
+  let files = 0;
+  let folders = 0;
+  let sites = 0;
+  for (const item of items) {
+    const type = (item.selected_item_type ?? "").toLowerCase();
+    if (type === "file") files += 1;
+    else if (type === "folder") folders += 1;
+    else if (type === "site_root" || type === "site") sites += 1;
+  }
+  const parts: string[] = [];
+  const add = (count: number, one: string, other: string) => {
+    if (count > 0) parts.push(t(count === 1 ? one : other, { count }));
+  };
+  add(sites, "sharepoint_wrapper_sites_one", "sharepoint_wrapper_sites_other");
+  add(folders, "sharepoint_wrapper_folders_one", "sharepoint_wrapper_folders_other");
+  add(files, "sharepoint_wrapper_files_one", "sharepoint_wrapper_files_other");
+  if (parts.length === 0) {
+    add(items.length, "wrapper_items_count_one", "wrapper_items_count_other");
+  }
+  return parts.join(", ");
+}
+
+/** The status filters above a list of sources. */
+export type SourceFilter = "all" | "attention" | "syncing" | "never" | "empty" | "ok";
+
+export const SOURCE_FILTERS: readonly SourceFilter[] = [
+  "all",
+  "attention",
+  "syncing",
+  "never",
+  "empty",
+  "ok"
+];
+
+/** "attention" also covers a failed source that is syncing again. */
+export function matchesSourceFilter(summary: SourceSummary, filter: SourceFilter): boolean {
+  switch (filter) {
+    case "all":
+      return true;
+    case "attention":
+      return summary.failedItems.length > 0;
+    case "syncing":
+      return summary.progress !== null;
+    default:
+      return summary.state === filter;
+  }
+}
+
+export function countSourceFilters(
+  summaries: readonly SourceSummary[]
+): Record<SourceFilter, number> {
+  const counts = { all: 0, attention: 0, syncing: 0, never: 0, empty: 0, ok: 0 };
+  for (const summary of summaries) {
+    for (const filter of SOURCE_FILTERS) {
+      if (matchesSourceFilter(summary, filter)) counts[filter] += 1;
+    }
+  }
+  return counts;
+}
+
+/** Sources per space, for a view that spans spaces; a wrapper never crosses a space. */
+export function groupSourcesBySpace<Space extends { id: string }>(
+  entries: readonly { space: Space; knowledge: IntegrationKnowledge }[]
+): { space: Space; source: IntegrationSource }[] {
+  const bySpace = new Map<string, { space: Space; items: IntegrationKnowledge[] }>();
+  for (const { space, knowledge } of entries) {
+    const entry = bySpace.get(space.id);
+    if (entry) entry.items.push(knowledge);
+    else bySpace.set(space.id, { space, items: [knowledge] });
+  }
+  return [...bySpace.values()].flatMap(({ space, items }) =>
+    groupIntegrationSources(items).map((source) => ({ space, source }))
+  );
+}
+
+export type SourceStatus = {
+  tone: "success" | "warning" | "error" | "accent" | "neutral";
+  labelKey: string;
+  isPulsing?: boolean;
+};
+
+/** How a source or item state shows: a coloured dot and a label that carries the meaning. */
+export function sourceStateStatus(state: SourceState | ItemState): SourceStatus {
+  switch (state) {
+    case "syncing":
+      return { tone: "accent", labelKey: "integration_source_state_syncing", isPulsing: true };
+    case "attention":
+      return { tone: "error", labelKey: "integration_source_state_attention" };
+    case "error":
+      return { tone: "error", labelKey: "integration_sync_status_error" };
+    case "never":
+      return { tone: "neutral", labelKey: "integration_source_state_never" };
+    case "empty":
+      return { tone: "warning", labelKey: "integration_sync_status_empty" };
+    case "ok":
+      return { tone: "success", labelKey: "integration_source_state_ok" };
+  }
+}

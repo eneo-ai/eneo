@@ -1,0 +1,167 @@
+import type { IntegrationKnowledge } from "../knowledge";
+import { describe, expect, it } from "vitest";
+import {
+  activityKind,
+  groupActivityByDay,
+  mergeActivity,
+  readSyncLogExtras,
+  skippedNotListed,
+  summarizeActivity
+} from "./sync-activity";
+import type { SyncLog } from "./queries";
+
+function log(overrides: Partial<SyncLog>): SyncLog {
+  return {
+    id: "log-1",
+    integration_knowledge_id: "k-1",
+    sync_type: "delta",
+    status: "success",
+    started_at: "2026-10-01T10:00:00Z",
+    created_at: "2026-10-01T10:00:00Z",
+    files_processed: 0,
+    files_deleted: 0,
+    pages_processed: 0,
+    folders_processed: 0,
+    skipped_items: 0,
+    skipped_details: [],
+    duration_seconds: null,
+    ...overrides
+  } as SyncLog;
+}
+
+const itemA = { id: "a", name: "A" } as IntegrationKnowledge;
+const itemB = { id: "b", name: "B" } as IntegrationKnowledge;
+
+describe("readSyncLogExtras", () => {
+  it("reads the unchanged count, the truncation flag and the reconcile warning", () => {
+    expect(
+      readSyncLogExtras(
+        log({
+          metadata: {
+            unchanged_items: 7,
+            skipped_truncated: true,
+            reconcile_warning: "Delta token reset"
+          } as SyncLog["metadata"]
+        })
+      )
+    ).toEqual({
+      unchangedItems: 7,
+      changedFiles: [],
+      changedTotal: 0,
+      skippedTruncated: true,
+      reconcileWarning: "Delta token reset"
+    });
+  });
+
+  it("defaults for syncs recorded before the fields existed", () => {
+    expect(readSyncLogExtras(log({ metadata: null }))).toEqual({
+      unchangedItems: 0,
+      changedFiles: [],
+      changedTotal: 0,
+      skippedTruncated: false,
+      reconcileWarning: null
+    });
+  });
+});
+
+describe("the changed files of a sync", () => {
+  it("keeps the well-formed entries and the total the cap leaves out", () => {
+    const extras = readSyncLogExtras(
+      log({
+        metadata: {
+          changed_details: [
+            { file: "a.pdf", change: "added" },
+            { file: "b.pdf", change: "renamed" },
+            { file: "c.pdf", change: "deleted" },
+            "garbage"
+          ],
+          changed_total: 70
+        } as SyncLog["metadata"]
+      })
+    );
+    expect(extras.changedFiles).toEqual([
+      { file: "a.pdf", change: "added" },
+      { file: "c.pdf", change: "deleted" }
+    ]);
+    expect(extras.changedTotal).toBe(70);
+  });
+});
+
+describe("skippedNotListed", () => {
+  it("is the skipped count minus the listed details, never negative", () => {
+    const details = [{ file: "a", reason: "r" }];
+    expect(skippedNotListed(log({ skipped_items: 5, skipped_details: details }))).toBe(4);
+    expect(skippedNotListed(log({ skipped_items: 1, skipped_details: details }))).toBe(0);
+  });
+});
+
+describe("activityKind", () => {
+  it.each([
+    [{ status: "error", files_processed: 3 }, "failed"],
+    [{ status: "in_progress" }, "running"],
+    [{ files_deleted: 1 }, "changed"],
+    [{ skipped_items: 2 }, "changed"],
+    [{}, "unchanged"]
+  ] as const)("%o → %s", (overrides, kind) => {
+    expect(activityKind(log(overrides))).toBe(kind);
+  });
+});
+
+describe("the activity timeline", () => {
+  const entries = mergeActivity([
+    { item: itemA, logs: [log({ id: "a1", started_at: "2026-10-13T08:00:00" })] },
+    {
+      item: itemB,
+      logs: [
+        log({ id: "b1", started_at: "2026-10-13T18:00:00", status: "error" }),
+        log({ id: "b2", started_at: "2026-10-12T09:00:00", files_processed: 4, files_deleted: 1 })
+      ]
+    }
+  ]);
+
+  it("stops where a partly loaded item runs out, so no item's syncs go missing", () => {
+    const partial = mergeActivity([
+      {
+        item: itemA,
+        logs: [log({ id: "a1", started_at: "2026-10-13T08:00:00" })],
+        total: 5
+      },
+      {
+        item: itemB,
+        logs: [
+          log({ id: "b1", started_at: "2026-10-13T18:00:00" }),
+          log({ id: "b2", started_at: "2026-10-12T09:00:00" })
+        ],
+        total: 2
+      }
+    ]);
+    expect(partial.map((entry) => entry.log.id)).toEqual(["b1", "a1"]);
+  });
+
+  it("merges every item's logs newest first", () => {
+    expect(entries.map((entry) => [entry.log.id, entry.item.id])).toEqual([
+      ["b1", "b"],
+      ["a1", "a"],
+      ["b2", "b"]
+    ]);
+  });
+
+  it("groups by local day in order", () => {
+    expect(
+      groupActivityByDay(entries).map((day) => [day.day, day.entries.map((e) => e.log.id)])
+    ).toEqual([
+      ["2026-10-13", ["b1", "a1"]],
+      ["2026-10-12", ["b2"]]
+    ]);
+  });
+
+  it("totals the syncs, failures and changes", () => {
+    expect(summarizeActivity(entries)).toEqual({
+      syncs: 3,
+      failed: 1,
+      changedFiles: 4,
+      unchanged: 0,
+      deleted: 1
+    });
+  });
+});
