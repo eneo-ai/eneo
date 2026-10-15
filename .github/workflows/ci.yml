@@ -410,6 +410,7 @@ jobs:
           FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
           FORCE_COLOR=1 bun run --filter '@eneo/eneo-js' test
           FORCE_COLOR=1 bun run --filter '@eneo/whats-new' test
+          FORCE_COLOR=1 bun run --filter '@eneo/markdown-math' test
 
       # Use the installed runner so browser revisions track the lockfile.
       - name: Install Playwright Chromium

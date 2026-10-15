@@ -3,12 +3,13 @@
 import { cn } from "@/lib/utils";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import type { ComponentProps } from "react";
 import { useTranslations } from "next-intl";
 import { memo, useCallback, useMemo } from "react";
 import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from "streamdown";
+import "katex/dist/katex.min.css";
+import { mathPlugin } from "./math";
 import {
   markdownComponents,
   rehypeCodeBlockRegions,
@@ -26,7 +27,11 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>;
  */
 export const ANSWER_TEXT_CLASS = "font-sans text-ax-text text-base leading-[1.7]";
 
-const streamdownPlugins = { cjk, code, math, mermaid };
+const streamdownPlugins = { cjk, code, math: mathPlugin, mermaid };
+
+// Streamdown closes an unfinished `$$` while text streams in; math stays as
+// written until the model closes it, the same as in the web app.
+const REMEND_OPTIONS = { katex: false };
 
 // Streamdown REPLACES its defaults when `remarkPlugins`/`rehypePlugins` are
 // passed. The defaults carry GFM (tables, strikethrough, autolinks), code meta
@@ -73,6 +78,7 @@ export const MessageResponse = memo(
       <Streamdown
         className={cn("size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0", className)}
         plugins={streamdownPlugins}
+        remend={REMEND_OPTIONS}
         controls={{ table: false }}
         remarkPlugins={remark}
         rehypePlugins={rehype}

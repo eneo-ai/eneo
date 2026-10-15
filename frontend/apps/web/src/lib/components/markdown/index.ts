@@ -1,5 +1,6 @@
 import { Marked, type TokenizerAndRendererExtension } from "marked";
 import type { EneoFileToken, EneoInrefToken, EneoMentionToken } from "./CustomComponents";
+import { mathExtensions, promoteDisplayMath } from "./math.js";
 
 export { default as Markdown } from "./Markdown.svelte";
 export { sanitizeImageSrc, sanitizeLinkHref } from "./sanitizeUrl.js";
@@ -117,7 +118,13 @@ export function eneoMarkdownLexer({
   // appended them once per Markdown component mount (marked does not
   // deduplicate), so lexing got slower with every message rendered.
   const instance = new Marked({
-    extensions: [eneoInref, eneoInrefBlock, eneoMention, ...(names.length ? [eneoFile] : [])],
+    extensions: [
+      eneoInref,
+      eneoInrefBlock,
+      eneoMention,
+      ...mathExtensions,
+      ...(names.length ? [eneoFile] : [])
+    ],
     // Chat text keeps the line breaks as typed; a document's single line
     // breaks are soft, as in the Markdown file it is.
     breaks,
@@ -126,7 +133,7 @@ export function eneoMarkdownLexer({
 
   return {
     lex(source: string) {
-      return instance.lexer(source);
+      return promoteDisplayMath(instance.lexer(source));
     }
   };
 }
