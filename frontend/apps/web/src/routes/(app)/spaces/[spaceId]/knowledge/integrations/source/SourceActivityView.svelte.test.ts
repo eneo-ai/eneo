@@ -87,6 +87,9 @@ describe("SourceActivityView", () => {
     await expect
       .element(page.getByText(m.integration_activity_totals_of_all({ total: 120 })))
       .toBeVisible();
+    await expect
+      .element(page.getByText(m.integration_activity_files_synced_one(), { exact: true }).first())
+      .toBeVisible();
 
     for (let page = 1; page < 12; page++) {
       await expect.element(showOlder()).toBeEnabled();
@@ -152,7 +155,9 @@ describe("SourceActivityView", () => {
       skip: 0,
       limit: 10
     });
-    await expect.element(page.getByText(m.file_s_synced({ count: 7 }))).toBeVisible();
+    await expect
+      .element(page.getByText(m.integration_activity_files_synced_other({ count: 7 })))
+      .toBeVisible();
     // The second page loaded before stays: 20 earlier syncs and the new one.
     await expect
       .element(page.getByText(m.integration_activity_totals_heading_other({ count: 21 })))

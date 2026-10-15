@@ -163,12 +163,39 @@
       case "changed": {
         const parts: string[] = [];
         const extras = readSyncLogExtras(log);
-        if (log.files_processed > 0) parts.push(m.file_s_synced({ count: log.files_processed }));
-        if (log.pages_processed > 0) parts.push(m.page_s_synced({ count: log.pages_processed }));
-        if (log.files_deleted > 0) parts.push(m.file_s_deleted({ count: log.files_deleted }));
-        if (log.skipped_items > 0) parts.push(m.item_s_skipped({ count: log.skipped_items }));
-        if (parts.length === 0 && extras.unchangedItems > 0) {
-          parts.push(m.item_s_unchanged({ count: extras.unchangedItems }));
+        const add = (
+          count: number,
+          one: () => string,
+          other: (inputs: { count: number }) => string
+        ) => {
+          if (count > 0) parts.push(count === 1 ? one() : other({ count }));
+        };
+        add(
+          log.files_processed,
+          m.integration_activity_files_synced_one,
+          m.integration_activity_files_synced_other
+        );
+        add(
+          log.pages_processed,
+          m.integration_activity_pages_synced_one,
+          m.integration_activity_pages_synced_other
+        );
+        add(
+          log.files_deleted,
+          m.integration_activity_files_deleted_one,
+          m.integration_activity_files_deleted_other
+        );
+        add(
+          log.skipped_items,
+          m.integration_activity_items_skipped_one,
+          m.integration_activity_items_skipped_other
+        );
+        if (parts.length === 0) {
+          add(
+            extras.unchangedItems,
+            m.integration_activity_items_unchanged_one,
+            m.integration_activity_items_unchanged_other
+          );
         }
         return parts.join(", ");
       }
