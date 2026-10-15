@@ -33,10 +33,13 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
-import { SHAREPOINT_APP_KEY, sharepointAppQueryOptions } from "./integrations";
+import {
+  SHAREPOINT_APP_KEY,
+  SHAREPOINT_OAUTH_STATE_KEY,
+  sharepointAppQueryOptions
+} from "./integrations";
 
 type AuthMethod = "service_account" | "tenant_app";
-const OAUTH_STATE_KEY = "sharepoint_service_account_oauth";
 
 export function SharePointAppConfigDialog({
   open,
@@ -168,7 +171,7 @@ export function SharePointAppConfigDialog({
         })
       ),
     onSuccess: ({ auth_url, state }) => {
-      sessionStorage.setItem(OAUTH_STATE_KEY, JSON.stringify({ state }));
+      sessionStorage.setItem(SHAREPOINT_OAUTH_STATE_KEY, JSON.stringify({ state }));
       window.location.href = auth_url;
     },
     onError: (error) => toastApiError(error, t)
