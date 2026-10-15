@@ -221,7 +221,7 @@
           },
           "body": {
             "en": "Under Admin > Integrations, a list shows every source imported into shared spaces and the organization space, with its status, documents and why it needs attention, so you can see what has stopped updating without opening each space. Sources in personal spaces are only counted.",
-            "sv": "Under Administration > Integrationer visar en lista alla källor som importerats till delade utrymmen och organisationsutrymmet, med status, antal dokument och varför en källa behöver åtgärd, så att du ser vad som slutat uppdateras utan att öppna varje utrymme. Källor i personliga utrymmen räknas bara."
+            "sv": "Under Administration > Integrationer visar en lista alla källor som importerats till delade ytor och organisationsytan, med status, antal dokument och varför en källa behöver åtgärd, så att du ser vad som slutat uppdateras utan att öppna varje yta. Källor i personliga ytor räknas bara."
           },
           "showMe": {
             "href": "/admin/integrations",
