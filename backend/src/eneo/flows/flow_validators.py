@@ -1408,7 +1408,7 @@ def _tool_reference_problem(
         step_refs=dict(step_ref_mapping),
         form_field_names=set(form_field_types),
     )[0]
-    if _names_step_by_its_name(reference, step_ref_mapping):
+    if names_step_by_its_name(reference, step_ref_mapping):
         if names_step_without_result(reference, step_order=step_order):
             return WholeReferenceProblem.STEP_NOT_EARLIER
         return WholeReferenceProblem.UNKNOWN_REFERENCE if reference.tail else None
@@ -1431,7 +1431,7 @@ def _tool_reference_problem(
     return value if isinstance(value, WholeReferenceProblem) else None
 
 
-def _names_step_by_its_name(
+def names_step_by_its_name(
     reference: TemplateReference, step_ref_mapping: Mapping[str, int]
 ) -> bool:
     """Whether a reference names a step by its name, not by its ``step_N``
@@ -1901,7 +1901,7 @@ def _validate_binding_references(
                 )
             if reference.kind is not TemplateReferenceKind.STEP:
                 continue
-            if _names_step_by_its_name(reference, step_ref_mapping) and reference.tail:
+            if names_step_by_its_name(reference, step_ref_mapping) and reference.tail:
                 raise FlowStepValidationError(
                     f"Invalid input binding reference '{reference.expression}'.",
                     code=FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE.value,

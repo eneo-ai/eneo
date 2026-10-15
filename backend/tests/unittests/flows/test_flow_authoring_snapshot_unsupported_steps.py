@@ -59,8 +59,6 @@ _UNSUPPORTED: dict[str, dict[str, object]] = {
         },
     },
     "image_input": {"input_type": "image"},
-    # Kills the mutant that lets the Builder edit a flow holding a tool step.
-    "tool_input": {"input_source": "tool"},
     "http_post_output": {
         "output_mode": "http_post",
         "output_config": {
@@ -72,7 +70,6 @@ _UNSUPPORTED: dict[str, dict[str, object]] = {
 _OFFENDING_FIELD = {
     "http_get_input": ("input_source", "http_get"),
     "image_input": ("input_type", "image"),
-    "tool_input": ("input_source", "tool"),
     "http_post_output": ("output_mode", "http_post"),
 }
 

@@ -7,6 +7,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_token_prefix,
     normalize_discovery_text,
 )
+from eneo.flows.application.flow_authoring_snapshot import edit_may_change_step_reading
 from eneo.flows.citation_sidecar import resolve_citation_mode
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_authoring_spec import (
@@ -172,12 +173,16 @@ def normalize_ai_builder_step_topology(
 def disambiguate_ai_builder_step_names(
     spec: FlowDraftSpecCore,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
-    # Saved steps are named first: a step this plan adds always takes the
-    # suffix. A saved name still changes when two saved steps share it,
-    # whether the flow already had that duplicate or this edit made it.
+    # Steps no edit may change (a tool step) are named first, then the other
+    # saved steps: a step this plan adds always takes the suffix. A saved name
+    # still changes when two changeable saved steps share it, whether the flow
+    # already had that duplicate or this edit made it.
     order = sorted(
         range(len(spec.steps)),
-        key=lambda index: spec.steps[index].existing_step_ref is None,
+        key=lambda index: (
+            spec.steps[index].existing_step_ref is None,
+            edit_may_change_step_reading(spec.steps[index].input_source.value),
+        ),
     )
     used_names: set[str] = set()
     updated_steps = list(spec.steps)

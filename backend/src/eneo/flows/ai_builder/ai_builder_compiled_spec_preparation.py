@@ -88,6 +88,18 @@ def prepare_compiled_spec_for_session(
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
     )
+    for step in (
+        mutation_scope.retargeted_reads(prepared_spec) if mutation_scope else ()
+    ):
+        validation.add_error(
+            step_ref=step.plan_step_ref,
+            code="kept_step_read_retargeted",
+            message=(
+                f"Step '{step.name}' reads an MCP tool and stays as saved, but this "
+                "edit makes one of its arguments name another step. Keep the step "
+                "it reads, under the same name, before it."
+            ),
+        )
     _enforce_terminal_output_alignment(
         validation=validation,
         spec=prepared_spec,

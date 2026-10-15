@@ -575,9 +575,12 @@
 
   const reviewCheckpointSteps = $derived(indexedSteps.filter(({ step }) => pausesForReview(step)));
 
+  // A flow that starts by fetching from a tool has nothing sent in for that step.
   const flowInputLabel = $derived.by(() => {
     const entry = steps.find((step) => step.input_source === "flow_input") ?? steps[0];
-    return entry ? simpleTypeLabel(entry.input_type ?? "text") : null;
+    if (!entry) return null;
+    if (entry.input_source === "tool") return m.flow_input_source_tool();
+    return m.ai_builder_flow_in_value({ type: simpleTypeLabel(entry.input_type ?? "text") });
   });
   const flowOutputLabel = $derived.by(() => {
     const last = steps[steps.length - 1];
@@ -1559,7 +1562,7 @@
                           {m.ai_builder_flow_in()}
                         </span>
                         <span class="text-primary text-[0.8125rem] font-semibold">
-                          {m.ai_builder_flow_in_value({ type: flowInputLabel })}
+                          {flowInputLabel}
                         </span>
                       </li>
                     {/if}

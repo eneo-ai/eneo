@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
@@ -43,6 +43,13 @@ _EDITABLE_VALUES: dict[CapabilityAxis, frozenset[str]] = {
     axis: frozenset(projection_values(CapabilityProjection.EDITABLE_EXISTING, axis))
     for axis in _AUTHORING_AXES
 }
+# A carried step whose input source the Builder cannot propose (a tool) holds
+# configuration it has no catalogue to write, so no edit may change it.
+_CHANGEABLE_VALUES: dict[CapabilityAxis, frozenset[str]] = {
+    "input_source": frozenset(
+        projection_values(CapabilityProjection.PROPOSABLE_NEW, "input_source")
+    )
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +67,8 @@ class UnsupportedSavedStep:
 
 
 class UnsupportedSavedStepsError(ValueError):
-    """Saved steps the authoring vocabulary cannot carry.
+    """Saved steps the authoring vocabulary cannot carry, or a carried one an
+    edit turn targets that no edit may change.
 
     A ``ValueError`` so callers that already tolerate an unprojectable step keep
     doing so; callers that can answer the user read ``steps`` instead.
@@ -69,7 +77,7 @@ class UnsupportedSavedStepsError(ValueError):
     def __init__(self, steps: Sequence[UnsupportedSavedStep]) -> None:
         self.steps = tuple(steps)
         super().__init__(
-            "Saved steps outside the authoring vocabulary: "
+            "Saved steps an edit cannot change: "
             + "; ".join(
                 f"{step.existing_step_ref} "
                 + ", ".join(f"{field}={value}" for field, value in step.fields)
@@ -87,6 +95,27 @@ def unsupported_saved_steps(
 ) -> tuple[UnsupportedSavedStep, ...]:
     """Every saved step outside the authoring vocabulary, in step order."""
 
+    return _steps_outside(steps, _EDITABLE_VALUES)
+
+
+def unchangeable_saved_steps(
+    steps: Sequence[FlowStep],
+) -> tuple[UnsupportedSavedStep, ...]:
+    """Every saved step an authoring spec carries but no edit may change, in
+    step order."""
+
+    return _steps_outside(steps, _CHANGEABLE_VALUES)
+
+
+def edit_may_change_step_reading(input_source: str) -> bool:
+    """Whether an edit may change a carried step that reads this source."""
+
+    return input_source in _CHANGEABLE_VALUES["input_source"]
+
+
+def _steps_outside(
+    steps: Sequence[FlowStep], allowed: Mapping[CapabilityAxis, frozenset[str]]
+) -> tuple[UnsupportedSavedStep, ...]:
     listed: list[UnsupportedSavedStep] = []
     for step in steps:
         saved: dict[CapabilityAxis, str] = {
@@ -98,7 +127,7 @@ def unsupported_saved_steps(
         fields = tuple(
             (field, value)
             for field, value in saved.items()
-            if value not in _EDITABLE_VALUES[field]
+            if field in allowed and value not in allowed[field]
         )
         if fields:
             ref = existing_step_ref_for_order(step.step_order)
@@ -220,6 +249,8 @@ __all__ = [
     "UnsupportedSavedStep",
     "UnsupportedSavedStepsError",
     "current_flow_authoring_spec",
+    "edit_may_change_step_reading",
     "flow_step_to_authoring_spec",
+    "unchangeable_saved_steps",
     "unsupported_saved_steps",
 ]

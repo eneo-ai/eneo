@@ -351,7 +351,7 @@ const stepSpecSchema = z.object({
   existing_step_ref: nullableStringSchema,
   name: z.string(),
   assistant_spec: assistantSpecSchema,
-  input_source: z.enum(["flow_input", "previous_step", "all_previous_steps"]),
+  input_source: z.enum(["flow_input", "previous_step", "all_previous_steps", "tool"]),
   input_type: z.enum(["text", "json", "audio", "document", "file", "any"]).optional(),
   output_mode: z
     .enum([

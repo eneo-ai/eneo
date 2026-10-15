@@ -91,6 +91,10 @@ describe("readsLabel", () => {
     expect(readsLabel({ input_source: "previous_step", input_bindings: null }, 1, numberOf)).toBe(
       m.ai_builder_reads_flow_input()
     );
+    // Kills: a kept tool step described as reading what is sent in.
+    expect(readsLabel({ input_source: "tool", input_bindings: null }, 2, numberOf)).toBe(
+      m.flow_input_source_tool()
+    );
   });
 });
 

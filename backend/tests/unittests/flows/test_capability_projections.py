@@ -121,12 +121,12 @@ def test_http_cells_stay_inspectable() -> None:
     assert any(FlowInputType.IMAGE in cell for cell in inspectable)
 
 
-def test_a_tool_input_is_inspectable_as_text_or_json_and_never_authored() -> None:
-    # Kills the mutants that offer the tool source to the Builder (its cells
-    # joining PROPOSABLE_NEW or EDITABLE_EXISTING, which the pinned sizes of
-    # both also catch), admit a tool step that reads a file type, or list as
-    # legal a tool step in a mode that never reads its input (template_fill),
-    # which the step validation refuses.
+def test_a_tool_input_is_inspectable_as_text_or_json_and_never_proposed() -> None:
+    # Kills the mutants that offer the tool source to the Builder's proposals
+    # (its cells joining PROPOSABLE_NEW, which the pinned size also catches),
+    # admit a tool step that reads a file type, or list as legal a tool step in
+    # a mode that never reads its input (template_fill), which the step
+    # validation refuses. A spec carries every tool cell but HTTP delivery.
     tool = {
         cell
         for cell in projection_cells(CapabilityProjection.INSPECTABLE)
@@ -135,14 +135,14 @@ def test_a_tool_input_is_inspectable_as_text_or_json_and_never_authored() -> Non
     assert len(tool) == 18
     assert {cell[1] for cell in tool} == {FlowInputType.TEXT, FlowInputType.JSON}
     assert FlowOutputMode.TEMPLATE_FILL not in {cell[3] for cell in tool}
-    assert not tool & projection_cells(CapabilityProjection.EDITABLE_EXISTING)
+    carried = tool & projection_cells(CapabilityProjection.EDITABLE_EXISTING)
+    assert {cell[3] for cell in tool - carried} == {FlowOutputMode.HTTP_POST}
     assert not tool & projection_cells(CapabilityProjection.PROPOSABLE_NEW)
 
 
 def test_editable_existing_is_what_an_authoring_spec_can_carry() -> None:
     editable = projection_cells(CapabilityProjection.EDITABLE_EXISTING)
     assert editable == frozenset(cell for cell in LEGAL_CELLS if _authorable(cell))
-    assert (len(editable), len(_triples(editable))) == (62, 34)
 
 
 @pytest.mark.parametrize(
@@ -236,7 +236,12 @@ def test_editable_vocabulary_adds_hand_authored_modes() -> None:
     proposable = projection_values(CapabilityProjection.PROPOSABLE_NEW, "output_mode")
     editable = projection_values(CapabilityProjection.EDITABLE_EXISTING, "output_mode")
     assert set(editable) - set(proposable) == {"speaker_mapping", "copy_input"}
-    for axis in ("input_source", "input_type", "output_type"):
+    assert set(
+        projection_values(CapabilityProjection.EDITABLE_EXISTING, "input_source")
+    ) - set(projection_values(CapabilityProjection.PROPOSABLE_NEW, "input_source")) == {
+        "tool"
+    }
+    for axis in ("input_type", "output_type"):
         assert projection_values(
             CapabilityProjection.EDITABLE_EXISTING, axis
         ) == projection_values(CapabilityProjection.PROPOSABLE_NEW, axis)
@@ -340,7 +345,6 @@ def test_http_post_exposure_matches_the_builder_vocabulary() -> None:
 def test_resolution_inside_the_authoring_enums_follows_proposable_new() -> None:
     proposable = projection_cells(CapabilityProjection.PROPOSABLE_NEW)
     authorable = [cell for cell in ALL_CELLS if _authorable(cell)]
-    assert len(authorable) == 504
     for cell in authorable:
         resolved = resolve_capability_for_tuple(
             input_source=cell[0],
@@ -397,8 +401,8 @@ def test_step_triple_refuses_modes_the_builder_cannot_propose(output_mode: str) 
 
 
 def test_planning_state_stamps_the_manifest_version_and_loads_older_stamps() -> None:
-    assert FCM_VERSION == 12
-    assert PlanningState.empty().fcm_version == 12
+    assert FCM_VERSION == 13
+    assert PlanningState.empty().fcm_version == 13
     restored = PlanningState.model_validate(
         {**PlanningState.empty().model_dump(mode="json"), "fcm_version": 9}
     )

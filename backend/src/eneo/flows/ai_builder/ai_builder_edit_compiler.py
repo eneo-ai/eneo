@@ -7,8 +7,9 @@ that every existing step is either represented in order or explicitly removed.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import Any, cast
 from uuid import UUID
 
@@ -70,8 +71,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 from eneo.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from eneo.flows.ai_builder.ai_builder_step_reads import (
     form_fields_read,
+    kept_step_read_producers,
+    run_step_names,
     spec_step_refs,
-    step_output_channel,
+    step_config_channel,
 )
 from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     StepNormalizationChange,
@@ -89,6 +92,7 @@ from eneo.flows.application.flow_authoring_description_semantics import (
 from eneo.flows.application.flow_authoring_snapshot import (
     current_flow_authoring_spec,
     flow_step_to_authoring_spec,
+    unchangeable_saved_steps,
 )
 from eneo.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
@@ -133,6 +137,10 @@ class _PreparedOrderedEditProposal:
     main_text_field: str | None = None
 
 
+def _nothing_kept() -> dict[str, StepSpec]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class EditMutationScope:
     """The saved steps a step-scoped edit leaves exactly as saved.
@@ -151,6 +159,14 @@ class EditMutationScope:
     protected_steps: Mapping[str, StepSpec]
     # Every saved step by ref, the baseline a compiled step is judged against.
     saved_steps: Mapping[str, StepSpec]
+    # Per step no edit may change (a tool step), its saved authoring form, and
+    # the saved flow in run order as (saved ref, name): every read of such a
+    # step that names a producer by number or by name must name that step after
+    # the edit too.
+    kept_as_saved: Mapping[str, StepSpec] = dataclass_field(
+        default_factory=_nothing_kept
+    )
+    saved_run_steps: tuple[tuple[str | None, str], ...] = ()
 
     def is_protected(self, step: StepSpec) -> bool:
         return step.existing_step_ref in self.protected_steps
@@ -173,7 +189,64 @@ class EditMutationScope:
         return EditMutationScope(
             protected_steps={**self.protected_steps, **unchanged},
             saved_steps=self.saved_steps,
+            kept_as_saved=self.kept_as_saved,
+            saved_run_steps=self.saved_run_steps,
         )
+
+    def keeping(
+        self,
+        steps: Mapping[str, StepSpec],
+        saved: FlowDraftSpecCore,
+        saved_steps: Sequence[FlowStep],
+    ) -> EditMutationScope:
+        """Also protect `steps`, each in the form given, and hold each as
+        `saved` (the saved flow's authoring spec) has it, with the saved flow
+        its reads name."""
+
+        ordered = sorted(saved_steps, key=lambda step: step.step_order)
+        return EditMutationScope(
+            protected_steps={**self.protected_steps, **steps},
+            saved_steps=self.saved_steps,
+            kept_as_saved={
+                **self.kept_as_saved,
+                **{
+                    ref: step
+                    for step in saved.steps
+                    if (ref := step.existing_step_ref) is not None and ref in steps
+                },
+            },
+            saved_run_steps=tuple(
+                (
+                    existing_step_ref_for_order(step.step_order),
+                    step.user_description or "",
+                )
+                for step in ordered
+            ),
+        )
+
+    def retargeted_reads(self, spec: FlowDraftSpecCore) -> list[StepSpec]:
+        """The kept steps of `spec` with a read, at any template site, that
+        names another saved step than it did when saved: read as the apply
+        writes it (step_N renumbered with its producer) and the run binds it."""
+
+        if not self.kept_as_saved:
+            return []
+        run_steps = tuple((step.existing_step_ref, step.name) for step in spec.steps)
+        renumbering = {
+            saved_order: order
+            for order, (ref, _) in enumerate(run_steps, 1)
+            if (saved_order := existing_step_order_from_ref(ref)) is not None
+        }
+        saved_names = run_step_names(self.saved_run_steps)
+        names = run_step_names(run_steps)
+        return [
+            step
+            for step in spec.steps
+            if (saved := self.kept_as_saved.get(step.existing_step_ref or ""))
+            is not None
+            and kept_step_read_producers(saved, run_steps, names, renumbering)
+            != kept_step_read_producers(saved, self.saved_run_steps, saved_names, {})
+        ]
 
     def restore(self, spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
         steps = [
@@ -198,7 +271,9 @@ class EditCompilationResult:
     authored_approval: FlowBuilderEditApproval
     # The published flow both approvals' diffs read against.
     base_spec: FlowDraftSpecCore
-    # Set for a saved-step revision; session preparation applies it too.
+    # The saved steps the edit leaves as saved (every step a saved-step
+    # revision does not change, and every step no edit may change); session
+    # preparation applies it too.
     mutation_scope: EditMutationScope | None = None
 
     def approval_for_prepared_spec(
@@ -281,6 +356,11 @@ def compile_edit_proposal(
             "The revision must preserve the saved step sequence.",
             code=AIBuilderErrorCode.BAD_REQUEST,
         )
+    kept_refs = frozenset(
+        step.existing_step_ref for step in unchangeable_saved_steps(current_steps)
+    )
+    _refuse_changes_to_kept_steps(proposal, kept_refs)
+    saved_step_revision = revision_spec is not None
     mutation_scope: EditMutationScope | None = None
     if revision_spec is not None:
         proposal, mutation_scope = _expand_saved_step_proposal(
@@ -301,7 +381,7 @@ def compile_edit_proposal(
         current_steps=current_steps,
         baseline_form_fields=baseline.form_fields,
         primary_runtime_input_type=primary_runtime_input_type,
-        may_restructure=mutation_scope is None,
+        may_restructure=not saved_step_revision,
     )
     compiled_spec = compile_ordered_edit_proposal(
         base_spec=baseline,
@@ -321,6 +401,12 @@ def compile_edit_proposal(
     )
     if mutation_scope is not None:
         mutation_scope = mutation_scope.protecting_unchanged(compiled_steps)
+    if kept_refs:
+        mutation_scope = (
+            mutation_scope or EditMutationScope(protected_steps={}, saved_steps={})
+        ).keeping(
+            _as_saved(baseline, compiled_steps, kept_refs), base_spec, current_steps
+        )
     inherited_template_bindings = _inherited_template_bindings(
         current_steps,
         existing_order_to_plan_ref=_existing_order_to_plan_ref(compiled_steps),
@@ -364,7 +450,7 @@ def compile_edit_proposal(
         normalized_spec,
         baseline=baseline,
         main_text_field=prepared.main_text_field,
-        scoped=mutation_scope is not None,
+        scoped=saved_step_revision,
     )
     compiled_steps = normalized_spec.steps
     final_name = normalized_spec.flow_name
@@ -475,6 +561,52 @@ def compile_edit_proposal(
         base_spec=base_spec,
         mutation_scope=mutation_scope,
     )
+
+
+def _refuse_changes_to_kept_steps(
+    proposal: OrderedEditProposal, kept_refs: frozenset[str]
+) -> None:
+    """A step no edit may change (a tool step) is only kept: the edit schema
+    never offers it for a change or a removal, and no proposal makes one."""
+
+    changed = {
+        step.existing_step_ref
+        for step in proposal.steps
+        if isinstance(step, ModifyExistingStep)
+        and step.authored_fields
+        and step.existing_step_ref in kept_refs
+    } | (proposal.removed_existing_step_refs & kept_refs)
+    if changed:
+        raise AIBuilderBadRequestException(
+            f"Steps {', '.join(sorted(changed))} read an MCP tool and stay as "
+            "saved: list each with kind=keep and nothing else.",
+            code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
+            context={"step_refs": sorted(changed)},
+        )
+
+
+def _as_saved(
+    baseline: FlowDraftSpecCore,
+    compiled_steps: list[StepSpec],
+    refs: frozenset[str],
+) -> dict[str, StepSpec]:
+    """Each saved step of `refs` as the edit baseline holds it, reading its
+    producers by the plan refs the compiled steps carry."""
+
+    plan_refs = {
+        step.existing_step_ref: step.plan_step_ref
+        for step in compiled_steps
+        if step.existing_step_ref is not None
+    }
+    order_to_plan_ref = _existing_order_to_plan_ref(compiled_steps)
+    return {
+        ref: _rewrite_runtime_aliases_for_existing_step(
+            step.model_copy(update={"plan_step_ref": plan_refs[ref]}),
+            order_to_plan_ref,
+        )
+        for step in baseline.steps
+        if (ref := step.existing_step_ref) in refs and ref in plan_refs
+    }
 
 
 def _expand_saved_step_proposal(
@@ -1619,12 +1751,24 @@ def _rewrite_runtime_aliases_for_existing_step(
         if rewritten_bindings != step.input_bindings:
             updates["input_bindings"] = rewritten_bindings
 
+    if step.input_config is not None:
+        # A tool step's bound arguments: its other keys are literal values.
+        rewritten_input_config = rewrite_config_sites(
+            step.input_config,
+            step_config_channel(step, "input_config"),
+            lambda _path, text: rewrite_step_alias_heads(
+                text, resolve_at("input_config")
+            ),
+        )
+        if rewritten_input_config != step.input_config:
+            updates["input_config"] = rewritten_input_config
+
     if step.output_config is not None:
         # Only the strings the runtime interpolates for the step's mode are
         # reads, found by the owner the platform uses; a metadata key is text.
         # A key normalization deletes reads nothing, and the template's
         # mappings are the attachment contract's when it runs.
-        channel = step_output_channel(step)
+        channel = step_config_channel(step, "output_config")
         unguarded = discarded_output_config_keys(step) | frozenset(
             ["bindings"] if guard is not None and guard.template_contract_runs else []
         )

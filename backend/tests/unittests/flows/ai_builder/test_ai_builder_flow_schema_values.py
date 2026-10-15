@@ -30,6 +30,7 @@ def test_wire_vocabulary_per_projection_is_declared_outright() -> None:
         "flow_input",
         "previous_step",
         "all_previous_steps",
+        "tool",
     )
     assert projection_values(editable, "input_type") == (
         "text",

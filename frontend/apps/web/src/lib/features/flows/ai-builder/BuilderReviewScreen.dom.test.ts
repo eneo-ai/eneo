@@ -582,6 +582,23 @@ describe("BuilderReviewScreen plan document", () => {
     expect(screen.queryByText(m.ai_builder_no_review_checkpoint_note())).toBeNull();
   });
 
+  it("says a flow that starts from a tool fetches from it, not that its input is sent in", () => {
+    // Kills: the header naming the tool step's input type as what is sent in.
+    const state = makeCreateState();
+    const [first, ...rest] = state.currentPlan.proposal.spec.steps;
+    state.currentPlan.proposal.spec.steps = [
+      { ...first, input_source: "tool", input_type: "json" },
+      ...rest
+    ];
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state
+    });
+
+    const header = screen.getByText(m.ai_builder_flow_in()).closest("li");
+    expect(header?.textContent).toContain(m.flow_input_source_tool());
+  });
+
   it("says from the compiled steps that the flow does not pause, whatever the rationale claims", async () => {
     // The planner's prose may promise a caseworker review; only the steps decide.
     const proposal = makeProposal({

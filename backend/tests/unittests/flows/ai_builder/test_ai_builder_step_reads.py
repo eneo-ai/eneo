@@ -32,7 +32,7 @@ from tests.unittests.flows.test_typed_io_executor import (
     RUN_INPUT_ALIAS,
     STEP_INPUT,
 ) = ReadChannel
-IMPLICIT, SOURCE_REF, QUESTION, INSTRUCTIONS, OUTPUT_CONFIG = ReadSite
+IMPLICIT, SOURCE_REF, QUESTION, INSTRUCTIONS, INPUT_CONFIG, OUTPUT_CONFIG = ReadSite
 STEP_REFS = {"step_a": 1, "step_b": 2, "step_c": 3, "step_1": 1, "step_2": 2}
 FORMS = {"audience", "subject", "tags"}
 

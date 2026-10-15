@@ -20,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
     build_proposal_structured_field_schema,
     build_review_mode_schema,
 )
+from eneo.flows.application.flow_authoring_snapshot import unchangeable_saved_steps
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 from eneo.flows.flow_capability_manifest import CapabilityProjection, projection_values
@@ -47,11 +48,16 @@ def build_edit_flow_tool_schema(
     permissions = permissions if permissions is not None else review_scope
 
     valid_refs = [existing_step_ref_for_order(s.step_order) for s in current_steps]
+    # A step no edit may change is offered as kind=keep only.
+    unchangeable = {
+        step.existing_step_ref for step in unchangeable_saved_steps(current_steps)
+    }
+    changeable_refs = [ref for ref in valid_refs if ref not in unchangeable]
 
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
     step_payload_schema = build_semantic_step_schema(kb_refs=kb_refs)
     if permissions is None:
-        modifiable_refs = valid_refs
+        modifiable_refs = changeable_refs
     else:
         absent = sorted(permissions.step_refs.difference(valid_refs))
         if absent:
@@ -59,7 +65,9 @@ def build_edit_flow_tool_schema(
                 "edit scope names steps the flow does not have: "
                 f"{', '.join(absent)} (flow has {', '.join(valid_refs)})"
             )
-        modifiable_refs = [ref for ref in valid_refs if ref in permissions.step_refs]
+        modifiable_refs = [
+            ref for ref in changeable_refs if ref in permissions.step_refs
+        ]
     modify_step_schema = _build_modify_step_schema(
         valid_refs=modifiable_refs,
         kb_refs=kb_refs,
@@ -74,9 +82,9 @@ def build_edit_flow_tool_schema(
         },
     }
     removable_refs = (
-        valid_refs
+        changeable_refs
         if permissions is None
-        else [ref for ref in valid_refs if ref in permissions.removable_step_refs]
+        else [ref for ref in changeable_refs if ref in permissions.removable_step_refs]
     )
 
     properties: dict[str, Any] = {
@@ -257,11 +265,12 @@ def _build_modify_step_schema(
                 "description": "New step name, or null to keep the current one.",
             },
             "assistant_spec": _build_assistant_spec_schema(kb_refs),
+            # Only a source the Builder can propose: no edit makes a tool step.
             "input_source": {
                 "type": ["string", "null"],
                 "enum": [
                     *projection_values(
-                        CapabilityProjection.EDITABLE_EXISTING, "input_source"
+                        CapabilityProjection.PROPOSABLE_NEW, "input_source"
                     ),
                     None,
                 ],

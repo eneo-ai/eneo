@@ -9,7 +9,7 @@ not.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -17,6 +17,7 @@ from typing import Any
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.enums import FlowInputSource, FlowOutputMode
 from eneo.flows.flow_authoring_spec import InputSource, InputType, OutputMode, StepSpec
+from eneo.flows.flow_authoring_variable_rewriting import renumber_step_aliases
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.flow_variable_definitions import (
     FLOW_INPUT_ALIASES,
@@ -28,7 +29,12 @@ from eneo.flows.input_binding_contract_rules import (
     source_ref_bindings,
     source_ref_step_order,
 )
-from eneo.flows.step_lineage import ConfigChannel, config_channel
+from eneo.flows.step_lineage import (
+    ConfigChannel,
+    ConfigColumn,
+    build_step_ref_mapping,
+    config_channel,
+)
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     TemplateReferenceKind,
@@ -61,6 +67,8 @@ class ReadSite(StrEnum):
     # Anywhere in input_bindings; the question is the only templated key.
     QUESTION = "question"
     INSTRUCTIONS = "instructions"
+    # A tool step's bound arguments.
+    INPUT_CONFIG = "input_config"
     OUTPUT_CONFIG = "output_config"
 
 
@@ -95,15 +103,15 @@ class StepRead:
 _RUN_INPUT_ALIASES = FLOW_INPUT_ALIASES | {FLOW_INPUT_TRANSCRIPTION_KEY}
 
 
-def step_output_channel(step: StepSpec) -> ConfigChannel | None:
-    """The strings of a step's output_config the runtime interpolates for its
-    modes, found by the owner the platform uses, None when it interpolates
+def step_config_channel(step: StepSpec, column: ConfigColumn) -> ConfigChannel | None:
+    """The strings of one config column of a step the runtime interpolates for
+    its modes, found by the owner the platform uses, None when it interpolates
     none: any other key is literal text. The authoring modes have no delivery,
     so the step's order does not matter here."""
 
     return config_channel(
-        column="output_config",
-        config=step.output_config,
+        column=column,
+        config=step.input_config if column == "input_config" else step.output_config,
         input_source=FlowInputSource(step.input_source.value),
         output_mode=FlowOutputMode(step.output_mode.value),
         step_order=1,
@@ -116,10 +124,59 @@ def step_template_sites(step: StepSpec) -> list[tuple[ReadSite, str]]:
     sites = [(ReadSite.INSTRUCTIONS, step.assistant_spec.instructions)]
     if step.input_bindings is not None:
         sites.append((ReadSite.QUESTION, _template_text(step.input_bindings)))
-    channel = step_output_channel(step)
-    if channel is not None and channel.sites is not None:
-        sites.extend((ReadSite.OUTPUT_CONFIG, text) for _, text in channel.sites)
+    for site, column in _CONFIG_SITES:
+        channel = step_config_channel(step, column)
+        if channel is not None and channel.sites is not None:
+            sites.extend((site, text) for _, text in channel.sites)
     return sites
+
+
+_CONFIG_SITES: tuple[tuple[ReadSite, ConfigColumn], ...] = (
+    (ReadSite.INPUT_CONFIG, "input_config"),
+    (ReadSite.OUTPUT_CONFIG, "output_config"),
+)
+
+
+def run_step_names(steps: Sequence[tuple[str | None, str]]) -> dict[str, int]:
+    """The step names the run binds, to their 1-based order: `steps` is the
+    flow in run order as (saved ref, name)."""
+
+    return build_step_ref_mapping(
+        {"step_order": order, "user_description": name}
+        for order, (_, name) in enumerate(steps, 1)
+    )
+
+
+def kept_step_read_producers(
+    step: StepSpec,
+    steps: Sequence[tuple[str | None, str]],
+    names: Mapping[str, int],
+    renumbering: Mapping[int, int],
+) -> tuple[str | None, ...]:
+    """Which listed step each step read at every template site of `step`
+    (step_template_sites) names when the flow runs, by that step's saved ref:
+    None for a step an edit adds or a read that names no listed step. `steps`
+    is the flow in run order as (saved ref, name), `names` its run_step_names,
+    and `renumbering` the step_N aliases the apply rewrites (saved position to
+    new).
+
+    Read as the run binds it (variable_resolver): a step_N alias by position
+    and a step's name to that step's text (a step may not be named like a
+    runtime variable or an alias). No compiler ref takes part, so a step named
+    like one is read by its name."""
+
+    return tuple(
+        steps[order - 1][0]
+        if (order := reference.step_order) is not None and 1 <= order <= len(steps)
+        else None
+        for _, text in step_template_sites(step)
+        for reference in analyze_template(
+            renumber_step_aliases(text, renumbering),
+            step_refs=dict(names),
+            form_field_names=set(),
+        )
+        if reference.kind is TemplateReferenceKind.STEP
+    )
 
 
 def spec_step_refs(steps: Sequence[StepSpec]) -> dict[str, int]:

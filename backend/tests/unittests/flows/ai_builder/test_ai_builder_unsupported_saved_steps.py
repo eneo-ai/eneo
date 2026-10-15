@@ -133,12 +133,15 @@ def _build(
     flow: Flow,
     context: ResolvedAIBuilderEditContext | None,
     planning_state: PlanningState | None = None,
+    turn: ConversationMessage | None = None,
 ) -> ProposalPrepared:
     return build_proposal_prepared(
         requirements_state=RequirementsState(),
         ui_language="en",
         slot_classification_metadata=None,
-        conversation=[ConversationMessage(role="user", content="Improve the flow.")],
+        conversation=[
+            turn or ConversationMessage(role="user", content="Improve the flow.")
+        ],
         planning_state=planning_state or PlanningState.empty(),
         attachment_context=None,
         flow_context=None,

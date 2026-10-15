@@ -374,7 +374,7 @@ class AIBuilderPlanner:
             )
         else:
             logger.info(
-                "Saved flow has steps outside the authoring vocabulary",
+                "Saved flow has steps an edit cannot change",
                 extra={
                     "steps": [
                         {"step_order": step.step_order, "fields": dict(step.fields)}

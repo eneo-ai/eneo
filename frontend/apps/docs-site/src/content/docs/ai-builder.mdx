@@ -72,6 +72,8 @@ An applied edit writes only what the approved plan lists as changed. A modified 
 
 The Builder cannot edit a saved Flow that has a step which fetches data over HTTP, takes an image as input, or sends its result over HTTP. The Builder asks its usual questions first; when it would propose the edit, it instead answers with the names of those steps and a pointer to the step editor, where they are changed by hand, and no plan is proposed. A request to edit another step of the same Flow is refused the same way and the answer says that no edits can be proposed while those steps exist.
 
+A saved Flow with steps that read an MCP tool stays editable. The Builder keeps those steps as they are saved, name and configuration included: no edit changes or removes one, another step that takes the same name gets the suffix, and a whole-Flow edit shows the model each one's arguments (as JSON, the first 220 characters). A request scoped to one of those steps, or a run failure or suggestion that names only such steps, gets the same step-editor answer as above, and so does any edit while one of them holds a tool configuration that cannot be used. A tool argument that reads an earlier step's result counts as a read of that step: an edit that removes the producer step, or the output field the argument reads, is refused or sent back to the model for a fix. An argument that names its producer by number (`step_1`) follows the producer when it moves; an edit that would make a read in such a step (an argument or its instructions) name another step, by number or by name (for example by removing the producer and giving another step its name), is sent back to the model; `föregående_steg` keeps meaning the step just before.
+
 When a modified step's patch names a review mode (`view` or `edit`), it changes the mode only: a review deadline saved on the step stays, and the approval lists the step as unchanged when the mode is the one already saved. Setting the mode to `none` removes the review step, deadline included. AI Builder cannot set or reset a review deadline; to return to the default, remove the review and add it again.
 
 When you ask to check and correct a structured (JSON) result before the flow continues, the review goes on the step whose result you named, even when later steps also produce structured results: the plan marks that step, and when only one of the plan's own steps produces a structured result, the review goes there. If the plan cannot say which step it is, AI Builder asks for a new plan instead of guessing. On a saved flow, a request to change or remove that review acts on the step that already has it. When several steps of a saved flow review structured results, AI Builder answers with their names and a pointer to the step editor before it asks the model for a proposal, so no other saved review changes.
@@ -290,9 +292,10 @@ See <a href="/docs/flows#advanced-step-input-templates-underlag-till-steget">Adv
 
 ## External data and delivery
 
-AI Builder does not advertise or configure MCP servers and tools for Flows. Use
-supported Flow inputs for required data: runtime form or file input, prior step
-output, or knowledge.
+AI Builder does not advertise or configure MCP servers and tools for Flows: it
+keeps a tool step added in the step editor, but does not propose or change one.
+Use supported Flow inputs for required data: runtime form or file input, prior
+step output, or knowledge.
 
 The Builder proposes only what it can write safely: text, JSON, audio, document,
 file, and any-type input from the run, the previous step, or all previous steps,

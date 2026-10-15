@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, cast
 
+from pydantic import ValidationError
+
 from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     FlowCapabilityProfile,
     build_flow_capability_profile,
@@ -19,6 +21,8 @@ from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringSnapshots,
 )
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
+from eneo.flows.domain.tool_input import read_tool_input_config
+from eneo.flows.enums import FlowInputSource
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputMode,
@@ -396,8 +400,32 @@ def _build_edit_mode_flow_context(
                 f"{getattr(step.output_type, 'value', step.output_type)}"
             )
             lines.append(f"{ref} | {name} | {io}")
+            if step.input_source == FlowInputSource.TOOL:
+                lines.append(f"  {_tool_step_fact(step)}")
 
     return "\n".join(lines)
+
+
+def _tool_step_fact(step: FlowStep) -> str:
+    """A tool step as a fact the edit keeps: its arguments, each a fixed value
+    or the one run value it is bound to. The tool itself goes unnamed: the
+    step holds only its ids."""
+
+    try:
+        config = read_tool_input_config(step.input_config)
+    except ValidationError:
+        # The proposal boundary answers a turn on such a step; the context
+        # only says what it holds.
+        return (
+            "Verktygssteg, ändras inte här (kind=keep): konfigurationen är ofullständig"
+        )
+    arguments = json.dumps(config.arguments, ensure_ascii=False)
+    if len(arguments) > _TOOL_ARGUMENTS_SHOWN:
+        arguments = arguments[:_TOOL_ARGUMENTS_SHOWN] + "..."
+    return f"Verktygssteg, ändras inte här (kind=keep): argument {arguments}"
+
+
+_TOOL_ARGUMENTS_SHOWN = 220
 
 
 def build_plan_summary(

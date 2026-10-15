@@ -52,7 +52,7 @@ from eneo.flows.output_modes import (
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 12
+FCM_VERSION: int = 13
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -502,8 +502,8 @@ _NOT_EXPOSED_INPUT_SOURCES: Mapping[FlowInputSource, str] = MappingProxyType(
         ),
         FlowInputSource.TOOL: (
             "A tool input names one governed MCP tool by its id: the Builder has "
-            "no catalogue of the tools a space has activated, so it neither "
-            "proposes nor edits it."
+            "no catalogue of the tools a space has activated, so it carries a "
+            "saved tool step unchanged but neither proposes nor edits one."
         ),
     }
 )

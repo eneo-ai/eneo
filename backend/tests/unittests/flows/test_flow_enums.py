@@ -93,17 +93,6 @@ def test_flow_step_round_trips_string_fields_as_shared_enums() -> None:
 
 
 def test_flow_authoring_step_spec_keeps_supported_subset_restrictions() -> None:
-    # Kills the mutant that adds the tool source to the authoring enum: specs,
-    # packages and the Builder would then carry a source they cannot configure.
-    with pytest.raises(ValidationError):
-        StepSpec(
-            plan_step_ref="step_a",
-            name="Tool input is not planner-supported",
-            assistant_spec=AssistantSpec(instructions="Do something."),
-            input_source="tool",
-            input_type="text",
-        )
-
     with pytest.raises(ValidationError):
         StepSpec(
             plan_step_ref="step_a",

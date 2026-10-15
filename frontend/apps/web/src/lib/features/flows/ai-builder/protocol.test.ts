@@ -340,6 +340,26 @@ describe("AI Builder stream protocol", () => {
     ).toThrow(AIBuilderStreamContractError);
   });
 
+  it("accepts a plan that keeps a saved tool step", () => {
+    // Kills: the stream contract refusing every edit plan of a flow with a tool step.
+    const toolStep = {
+      plan_step_ref: "step_b",
+      existing_step_ref: "existing_step_2",
+      name: "Read the view",
+      assistant_spec: { instructions: "", model_ref: null, knowledge_refs: [] },
+      input_source: "tool",
+      input_type: "json",
+      output_type: "json",
+      output_mode: "pass_through",
+      input_bindings: null,
+      input_contract: null,
+      output_contract: null,
+      input_config: { tool: { mcp_server_id: "s", tool_id: "t", arguments: { days: 7 } } },
+      output_config: null
+    };
+    expect(parseAIBuilderStreamEvent(planEventWithStep(toolStep)).event).toBe("plan");
+  });
+
   it("rejects an invalid nested plan step", () => {
     expect(() =>
       parseAIBuilderStreamEvent(

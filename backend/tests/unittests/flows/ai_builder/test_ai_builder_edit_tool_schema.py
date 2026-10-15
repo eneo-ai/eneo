@@ -455,7 +455,7 @@ class TestBuildEditFlowToolSchema:
 
         editable = CapabilityProjection.EDITABLE_EXISTING
         assert props["input_source"]["enum"] == [
-            *projection_values(editable, "input_source"),
+            *projection_values(CapabilityProjection.PROPOSABLE_NEW, "input_source"),
             None,
         ]
         assert props["input_type"]["enum"] == [

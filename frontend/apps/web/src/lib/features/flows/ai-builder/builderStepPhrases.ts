@@ -127,6 +127,7 @@ export function readsLabel(
       ? m.ai_builder_reads_own_text()
       : m.ai_builder_reads_chosen();
   }
+  if (step.input_source === "tool") return m.flow_input_source_tool();
   if (step.input_source === "previous_step" && stepNumber > 1) return m.ai_builder_reads_previous();
   if (step.input_source === "all_previous_steps" && stepNumber > 1) {
     return stepsLabel(Array.from({ length: stepNumber - 1 }, (_, index) => index + 1));

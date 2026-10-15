@@ -61,8 +61,8 @@ def _flow_capability_manifest_source() -> Path:
     )
 
 
-def test_fcm_version_is_twelve() -> None:
-    assert FCM_VERSION == 12
+def test_fcm_version_is_thirteen() -> None:
+    assert FCM_VERSION == 13
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:

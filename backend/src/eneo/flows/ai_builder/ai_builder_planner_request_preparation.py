@@ -69,6 +69,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     FlowReviewEvidence,
+    ReviewEditScope,
     fit_review_evidence,
     render_review_evidence,
 )
@@ -160,13 +161,19 @@ from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.application.flow_authoring_snapshot import (
     UnsupportedSavedStepsError,
     current_flow_authoring_spec,
+    unchangeable_saved_steps,
     unsupported_saved_steps,
 )
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from eneo.flows.domain.flow_step_validation import (
+    FlowStepValidationError,
+    flow_step_validation_view_from_flow_step,
+)
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     max_mapped_items_per_step,
 )
+from eneo.flows.domain.tool_input_validation import validate_tool_input_config
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.flows.step_lineage import existing_step_ref_for_order
 from eneo.main.logging import get_logger
@@ -180,7 +187,7 @@ if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
         ResolvedCompletionModelRoute,
     )
-    from eneo.flows.domain.flow import Flow
+    from eneo.flows.domain.flow import Flow, FlowStep
 
 logger = get_logger(__name__)
 
@@ -638,6 +645,11 @@ def build_proposal_prepared(
     # No edit of these steps is supported, and no proposal is paid for first.
     if flow is not None and (unsupported := unsupported_saved_steps(flow.steps)):
         raise UnsupportedSavedStepsError(unsupported)
+    review_scope = review_edit_scope_for_turn(conversation)
+    if flow is not None:
+        _refuse_turns_on_unchangeable_steps(
+            flow, targets=_targeted_step_refs(plan_edit_context, review_scope)
+        )
     if flow is not None:
         refuse_ambiguous_structured_review_baseline(
             flow.steps, planning_state.checkpoint_intents
@@ -733,9 +745,7 @@ def build_proposal_prepared(
         current_steps=None if flow is None else list(flow.steps),
         resource_catalog=resource_catalog,
         is_pure_audio_transcription=is_pure_audio_transcription,
-        review_scope=review_edit_scope_for_turn(conversation)
-        if saved_step_permissions is None
-        else None,
+        review_scope=review_scope if saved_step_permissions is None else None,
         permissions=saved_step_permissions,
         confirmed_runtime_inputs=(
             compile_context.confirmed_runtime_input_requirements
@@ -989,6 +999,59 @@ def build_proposal_prepared(
         obligation_projection=obligation_projection,
         request_budget=planned_request_budget,
     )
+
+
+def _targeted_step_refs(
+    plan_edit_context: ResolvedAIBuilderEditContext | None,
+    review_scope: ReviewEditScope | None,
+) -> frozenset[str]:
+    """The saved steps this turn asks to change: the step it is scoped to, or
+    the steps a review handoff (a run failure, chosen suggestions) names."""
+
+    targets: set[str] = (
+        set(review_scope.step_refs) if review_scope is not None else set()
+    )
+    if (
+        plan_edit_context is not None
+        and plan_edit_context.target_existing_step_ref is not None
+    ):
+        targets.add(plan_edit_context.target_existing_step_ref)
+    return frozenset(targets)
+
+
+def _refuse_turns_on_unchangeable_steps(
+    flow: "Flow", *, targets: frozenset[str]
+) -> None:
+    """Answer, before any proposal is paid for, a turn the Builder cannot serve
+    because of a step it carries but may not change (a tool step): the turn
+    targets only such steps, or one of them holds a tool configuration that
+    cannot be used, which only a change to that step could fix. A read of
+    another step that no longer fits is left to validation of the edited flow:
+    an edit of the producer can repair it."""
+
+    kept = unchangeable_saved_steps(flow.steps)
+    if not kept:
+        return
+    kept_refs = {step.existing_step_ref for step in kept}
+    if targets and targets <= kept_refs:
+        raise UnsupportedSavedStepsError(
+            [step for step in kept if step.existing_step_ref in targets]
+        )
+    by_order = {step.step_order: step for step in flow.steps}
+    if blocked := [
+        step
+        for step in kept
+        if not _tool_configuration_usable(by_order[step.step_order])
+    ]:
+        raise UnsupportedSavedStepsError(blocked)
+
+
+def _tool_configuration_usable(step: "FlowStep") -> bool:
+    try:
+        validate_tool_input_config(step=flow_step_validation_view_from_flow_step(step))
+    except FlowStepValidationError:
+        return False
+    return True
 
 
 def _prior_spec_for_revision(

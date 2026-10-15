@@ -16,15 +16,22 @@ import sqlalchemy as sa
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.database.tables.flow_tables import FlowSteps
+from eneo.database.tables.mcp_server_table import MCPServers, MCPServerTools
 from eneo.flows.ai_builder import ai_builder_planner as planner_module
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.domain.flow import FlowStep
 from eneo.prompts.api.prompt_models import PromptCreate
 from tests.integration.flows.test_ai_builder_session_api_regressions import (
+    _builder_event_outline,
     _classifier_reading_nothing,
     _create_ai_builder_session,
     _create_space_with_planner_model,
+    _get_latest_plan_id,
     _make_flow_step,
     _make_llm_response,
+    _make_tool_call,
+    _progress_builder_session_to_plan,
     _route,
     _send_builder_message,
     _shown_instance,
@@ -32,6 +39,7 @@ from tests.integration.flows.test_ai_builder_session_api_regressions import (
 )
 
 _CREDENTIAL = "sk-live-credential-looking-value"
+DAYS = "{{step_1.output.structured.anomaly_days}}"
 _ROUTES = {
     "hosted_gpt": "openai/gpt-5.4",
     "hosted_gemma": "hosted_vllm/gemma4-31b-it",
@@ -410,3 +418,151 @@ async def test_a_refused_session_keeps_the_reading_it_paid_for(
         metadata = by_text[follow_up].metadata or {}
         assert "slot_classification" in metadata, follow_up
         assert metadata.get("text_status") == "settled", follow_up
+
+
+async def _flow_reading_two_tools(*, db_container, space_id: str):
+    """Steps 1-2 read tools, step 2 for the days step 1 found; 3 and 4 write."""
+
+    async with db_container() as container:
+        session = container.session()
+        server = MCPServers(
+            tenant_id=container.user().tenant_id,
+            name=f"builder-tools-{uuid4()}",
+            http_url="http://127.0.0.1:9/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+        )
+        session.add(server)
+        await session.flush()
+        tools = [MCPServerTools(mcp_server_id=server.id, name=n) for n in "ab"]
+        session.add_all(tools)
+        await session.flush()
+        service = container.flow_service()
+        flow = await service.create_flow(
+            space_id=UUID(space_id), name="Avvikelser", description=None, steps=[]
+        )
+        arguments = ({"from": "2026-09-01"}, {"days": DAYS})
+        steps = []
+        for order, name in enumerate(
+            ("Läs vyn", "Läs detaljer", "Analys", "Rapport"), 1
+        ):
+            assistant, _ = await service.create_flow_assistant(
+                flow_id=flow.id, name=name
+            )
+            tool = order <= 2
+            steps.append(
+                _make_flow_step(
+                    assistant_id=assistant.id,
+                    step_order=order,
+                    user_description=name,
+                    input_source="tool" if tool else "previous_step",
+                    input_type="json" if order <= 3 else "text",
+                    output_type="json" if tool else "text",
+                    input_config={
+                        "tool": {
+                            "mcp_server_id": str(server.id),
+                            "tool_id": str(tools[order - 1].id),
+                            "arguments": arguments[order - 1],
+                        }
+                    }
+                    if tool
+                    else None,
+                )
+            )
+        days = {"anomaly_days": {"type": "array", "items": {"type": "string"}}}
+        steps[0].output_contract = {"type": "object", "properties": days}
+        return await service.update_flow(flow_id=flow.id, steps=steps)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_an_edit_beside_tool_steps_is_proposed_and_applied_keeping_them(
+    client,
+    bearer_token,  # noqa: F811
+    completion_model_factory,
+    db_container,
+) -> None:
+    # Kills: the whole-flow refusal for tool steps; an apply that rewrites them.
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="Edit beside tool steps",
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
+    )
+    flow = await _flow_reading_two_tools(db_container=db_container, space_id=space_id)
+    edit = _make_tool_call(
+        name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={
+            "plan_rationale": "Byter namn på analyssteget.",
+            "steps": [
+                *(
+                    {"kind": "keep", "existing_step_ref": f"existing_step_{order}"}
+                    for order in (1, 2)
+                ),
+                # The tool step keeps its name; this step takes the suffix.
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_3",
+                    "name": "Läs detaljer",
+                },
+                {"kind": "keep", "existing_step_ref": "existing_step_4"},
+            ],
+        },
+    )
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=AsyncMock(return_value=_make_llm_response(tool_calls=[edit])),
+        ),
+        _classifier_reading_nothing(),
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(
+                return_value=_route(
+                    model=_ROUTES["hosted_gpt"], kwargs={"api_key": "sk-test"}
+                )
+            ),
+        ),
+    ):
+        session_id = await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+            target_kind="edit",
+            flow_id=str(flow.id),
+        )
+        events = await _progress_builder_session_to_plan(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            initial_message="Döp om analyssteget till Läs detaljer.",
+            structured_answers={"primary_runtime_input": "text"},
+        )
+    assert "plan" in [e["event"] for e in events], _builder_event_outline(events)
+    plan_id = await _get_latest_plan_id(
+        client=client, bearer_token=bearer_token, session_id=session_id
+    )
+    for action, body in (
+        ("approve", None),
+        ("apply", {"expected_revision": flow.draft_revision}),
+    ):
+        response = await client.post(
+            f"/api/v1/flows/ai-builder/plans/{plan_id}/{action}",
+            json=body,
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+        assert response.status_code == 200, response.text
+
+    async with db_container() as container:
+        applied = await container.flow_service().get_flow(flow.id)
+
+    def saved(step: FlowStep) -> dict[str, object]:
+        return step.model_dump(exclude={"updated_at"})
+
+    assert [saved(step) for step in applied.steps[:2]] == [
+        saved(step) for step in flow.steps[:2]
+    ]
+    assert applied.steps[2].user_description == "Läs detaljer (2)"

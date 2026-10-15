@@ -26,9 +26,18 @@ class FlowInputSource(str, Enum):
 
 
 class FlowAuthoringInputSource(str, Enum):
+    """Input sources an authoring spec can carry.
+
+    A tool step travels with its configuration, which names the tool by the
+    ids of this instance only: the Builder carries a saved one unchanged, and
+    flow packages refuse that configuration. HTTP input stays out: its config
+    holds credentials that no spec may carry.
+    """
+
     FLOW_INPUT = FlowInputSource.FLOW_INPUT.value
     PREVIOUS_STEP = FlowInputSource.PREVIOUS_STEP.value
     ALL_PREVIOUS_STEPS = FlowInputSource.ALL_PREVIOUS_STEPS.value
+    TOOL = FlowInputSource.TOOL.value
 
 
 class FlowInputType(str, Enum):

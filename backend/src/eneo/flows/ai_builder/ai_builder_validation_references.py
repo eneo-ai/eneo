@@ -22,12 +22,17 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.flow_validators import run_input_alias_refusal, takes_runtime_files
+from eneo.flows.flow_validators import (
+    names_step_by_its_name,
+    run_input_alias_refusal,
+    takes_runtime_files,
+)
 from eneo.flows.flow_variable_definitions import (
     FlowRunInput,
     reads_unreceived_run_input,
     runtime_variables_for_step,
 )
+from eneo.flows.step_lineage import build_step_ref_mapping
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     TemplateReferenceKind,
@@ -47,6 +52,11 @@ def validate_variable_references(
         field.name.strip() for field in (spec.form_fields or []) if field.name.strip()
     }
     payload_variables = runtime_variables_for_step()
+    # The run binds each step's name to its text, as publish reads it.
+    step_names = build_step_ref_mapping(
+        {"step_order": order, "user_description": step.name}
+        for order, step in steps_by_order.items()
+    )
     declared_fields = [(field.name, field.type) for field in spec.form_fields or []]
     run_input = authoring_run_input(spec.steps, spec.form_fields)
 
@@ -68,6 +78,7 @@ def validate_variable_references(
             reference = _parse_reference_expression(
                 expression,
                 steps_by_plan_ref,
+                step_names=step_names,
                 runtime_variables=runtime_variables,
                 form_field_names=form_field_names,
             )
@@ -143,6 +154,20 @@ def validate_variable_references(
                     code="invalid_step_reference",
                     message=f"Unknown step order '{referenced_order}' in template expression.",
                 )
+                continue
+
+            if reference.head not in steps_by_plan_ref and names_step_by_its_name(
+                reference, step_names
+            ):
+                if reference.tail:
+                    result.add_error(
+                        step_ref=step.plan_step_ref,
+                        code="invalid_step_reference_path",
+                        message=(
+                            f"Variable '{expression}' reads below a step name; a "
+                            f"step name reads that step's text: {{{{ {reference.head} }}}}."
+                        ),
+                    )
                 continue
 
             if not _has_supported_step_output_path(reference):
@@ -264,12 +289,16 @@ def _parse_reference_expression(
     expression: str,
     steps_by_plan_ref: dict[str, tuple[int, StepSpec]],
     *,
+    step_names: dict[str, int],
     runtime_variables: frozenset[str],
     form_field_names: set[str],
 ) -> TemplateReference:
     return analyze_template(
         f"{{{{ {expression} }}}}",
-        step_refs={root: order for root, (order, _) in steps_by_plan_ref.items()},
+        step_refs={
+            **step_names,
+            **{root: order for root, (order, _) in steps_by_plan_ref.items()},
+        },
         form_field_names=form_field_names,
         runtime_variables=runtime_variables,
     )[0]

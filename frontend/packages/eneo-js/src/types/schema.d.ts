@@ -19402,9 +19402,15 @@ export interface components {
     };
     /**
      * FlowAuthoringInputSource
+     * @description Input sources an authoring spec can carry.
+     *
+     *     A tool step travels with its configuration, which names the tool by the
+     *     ids of this instance only: the Builder carries a saved one unchanged, and
+     *     flow packages refuse that configuration. HTTP input stays out: its config
+     *     holds credentials that no spec may carry.
      * @enum {string}
      */
-    FlowAuthoringInputSource: "flow_input" | "previous_step" | "all_previous_steps";
+    FlowAuthoringInputSource: "flow_input" | "previous_step" | "all_previous_steps" | "tool";
     /**
      * FlowAuthoringInputType
      * @enum {string}

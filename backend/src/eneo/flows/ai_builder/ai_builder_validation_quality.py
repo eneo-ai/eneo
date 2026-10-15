@@ -9,6 +9,7 @@ from eneo.flows.ai_builder.ai_builder_form_field_usage import (
     find_unused_form_fields,
 )
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from eneo.flows.application.flow_authoring_snapshot import edit_may_change_step_reading
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputMode,
@@ -51,6 +52,8 @@ def lint_json_output_without_contract(
             and has_downstream_steps
             # The runtime pins a speaker-mapping step's contract.
             and step.output_mode != OutputMode.SPEAKER_MAPPING
+            # No repair could add a contract to a step no edit may change.
+            and edit_may_change_step_reading(step.input_source.value)
         ):
             result.add_warning(
                 step_ref=step.plan_step_ref,
