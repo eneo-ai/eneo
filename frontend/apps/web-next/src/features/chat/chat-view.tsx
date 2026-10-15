@@ -4,7 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import { Button } from "@astryxdesign/core/Button";
 import { ChatLayout, ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
-import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
@@ -30,8 +30,19 @@ import type { AnswerRating, ChatPartner, EneoUIMessage } from "@/lib/chat/types"
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { rescueFocus } from "@/lib/focus-rescue";
 import { conversationFiles, deriveActivity } from "./activity";
-import { ActivityPanel, type ActivityTab } from "./activity-panel";
+import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
+import { documentDraft } from "./side-panel/document-draft";
+import { documentExport } from "./side-panel/document-export";
+import { conversationDocuments, editedPassage } from "./side-panel/document-versions";
+import { messageGeneratedFiles, messageToolCalls } from "./side-panel/message-tool-calls";
+import { conversationUploads, type PanelContents } from "./side-panel/panel-contents";
+import { composeQuotedQuestion } from "./side-panel/question-quote";
+import { SidePanel } from "./side-panel/side-panel";
+import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
+import { isExportableDocument } from "./side-panel/file-panel";
+import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mcp-apps/mcp-apps";
+import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { useAnswerFeedback } from "./answer-feedback";
 import { disabledCapabilitiesForRequest } from "./chat-capabilities";
 import { ChatMessage, PendingAnswer, type ActivityRequest } from "./chat-message";
@@ -100,30 +111,10 @@ function ConversationMessage({
     sessionId !== null && message.role === "assistant" && !isStreaming
       ? { value: rating, onChange: (value: AnswerRating) => rate(sessionId, value) }
       : null;
-  return <ChatMessage {...props} feedback={feedback} />;
+  return <ChatMessage {...props} sessionId={sessionId} feedback={feedback} />;
 }
 
-/**
- * One conversation: the start state, then the message list with the docked
- * composer. Remount it (a new `key`) for another conversation; a view that
- * unmounts while an answer streams lets the stream finish (the answer is
- * saved and the history refreshed) but no longer calls its callbacks, so it
- * never changes the conversation shown after it.
- */
-export function ChatView({
-  partner,
-  initialSessionId = null,
-  initialMessages = [],
-  focusComposerIfLost = false,
-  onSessionCreated,
-  onNewConversation,
-  onTitle,
-  onStartedChange,
-  modelSelector,
-  partnerToken,
-  activity,
-  onActivityChange
-}: {
+type ChatViewProps = {
   partner: ChatPartner;
   initialSessionId?: string | null;
   initialMessages?: EneoUIMessage[];
@@ -148,14 +139,44 @@ export function ChatView({
   partnerToken?: ReactNode;
   activity: ActivityState | null;
   onActivityChange: (next: ActivityState | null) => void;
-}) {
+};
+
+/**
+ * One conversation: the start state, then the message list with the docked
+ * composer and the side panel. Remount it (a new `key`) for another
+ * conversation; a view that unmounts while an answer streams lets the stream
+ * finish (the answer is saved and the history refreshed) but no longer calls
+ * its callbacks, so it never changes the conversation shown after it.
+ */
+export function ChatView(props: ChatViewProps) {
+  return (
+    <SidePanelProvider>
+      <ConversationView {...props} />
+    </SidePanelProvider>
+  );
+}
+
+function ConversationView({
+  partner,
+  initialSessionId = null,
+  initialMessages = [],
+  focusComposerIfLost = false,
+  onSessionCreated,
+  onNewConversation,
+  onTitle,
+  onStartedChange,
+  modelSelector,
+  partnerToken,
+  activity,
+  onActivityChange
+}: ChatViewProps) {
   const t = useTranslations();
   const { featureFlags, can } = useAppContext();
   const queryClient = useQueryClient();
   const attachments = useAttachments(partner);
+  const panel = useSidePanel()!;
   // The Felsök tab reads a saved turn's diagnostics; group chats have none.
   const debugAvailable = can("assistant_debug") && partner.type !== "group-chat";
-  const isDesktop = useMediaQuery("(min-width: 1024px)");
   // Astryx's shared polite live region (mounted empty, cleared after a moment):
   // only "Svaret är klart", errors and tool approvals go there, never tokens.
   const announce = useAnnounce();
@@ -335,6 +356,112 @@ export function ChatView({
     timings.observe(messages, busy, Date.now());
   }, [timings, messages, busy]);
 
+  // What the conversation has to show in the side panel.
+  const documents = useMemo(
+    () =>
+      conversationDocuments(
+        messages.map((message) => ({
+          files: messageGeneratedFiles(message),
+          calls: messageToolCalls(message)
+        }))
+      ),
+    [messages]
+  );
+  const uploads = useMemo(() => conversationUploads(messages), [messages]);
+  const allFiles = useMemo<PreviewFile[]>(
+    () => [...uploads, ...messages.flatMap(messageGeneratedFiles)],
+    [uploads, messages]
+  );
+  const panelContents: PanelContents = {
+    views: messages
+      .flatMap(messageAppViewCalls)
+      .filter((call) => panel.offeredViews.has(call.toolCallId))
+      .reverse()
+      .map((call) => ({
+        id: call.toolCallId,
+        title: appViewTitle(call, t),
+        subject: appViewSubject(call),
+        shown: panel.viewCallId === call.toolCallId,
+        open: () => panel.openView(call.toolCallId)
+      })),
+    documents: documents.documents,
+    uploads
+  };
+  const versionsOf = (file: PreviewFile) => documents.versionsOf(file.id);
+  // A Markdown document the assistant made here can be handed over as Word or
+  // PDF: the assistant's own document tool renders it, when it has one.
+  const exportOf = (file: PreviewFile) =>
+    sessionId && isExportableDocument(file) && documents.versionsOf(file.id).length > 0
+      ? documentExport(sessionId, file.id)
+      : null;
+
+  // The panel and an answer's activity share the side region, one at a time.
+  const panelOpen = panel.occupant.kind !== "closed";
+  useEffect(() => {
+    if (activity) panel.closeAll();
+  }, [activity, panel]);
+  useEffect(() => {
+    if (panelOpen) onActivityChange(null);
+  }, [panelOpen, onActivityChange]);
+
+  // The panel follows the answer being written: a document draft shows there
+  // while the assistant writes it, and a file created in the live turn takes
+  // it over, so an edit is seen without reopening anything. Files of a
+  // conversation loaded from history are only noted, never opened.
+  useEffect(() => {
+    if (busy) panel.beginAnswer();
+    else panel.endDraft();
+  }, [busy, panel]);
+  const last = messages.at(-1);
+  const liveCalls = useMemo(
+    () => (busy && last?.role === "assistant" ? messageToolCalls(last) : []),
+    [busy, last]
+  );
+  const liveFiles = useMemo(
+    () => (busy && last?.role === "assistant" ? messageGeneratedFiles(last) : []),
+    [busy, last]
+  );
+  useEffect(() => {
+    // The newest document being written: actual text as it arrives.
+    for (let index = liveCalls.length - 1; index >= 0; index--) {
+      const call = liveCalls[index]!;
+      const draft = documentDraft(
+        call,
+        call.input,
+        liveFiles.some((file) => file.toolCallId === call.toolCallId)
+      );
+      if (draft) {
+        panel.write(draft);
+        return;
+      }
+    }
+  }, [liveCalls, liveFiles, panel]);
+  const arrivedFiles = useRef(new Set<string>());
+  useEffect(() => {
+    for (const file of liveFiles) {
+      if (!file.id || !file.toolCallId || arrivedFiles.current.has(file.id)) continue;
+      // Files arrive with their call's id, so hidden analysis exports never
+      // replace the reader's preview: only a document the model wrote opens.
+      arrivedFiles.current.add(file.id);
+      const call = liveCalls.find((candidate) => candidate.toolCallId === file.toolCallId);
+      if (call?.purpose !== "file_creation" || !panel.canPreview(file)) continue;
+      const changed = editedPassage(call.input);
+      panel.arrive(file, changed ? { text: changed, locator: null } : null, call.toolCallId);
+    }
+  }, [liveFiles, liveCalls, panel]);
+
+  // A message an interactive view offered lands in the composer.
+  useEffect(
+    () =>
+      panel.subscribe(() => {
+        const text = panel.takeSuggestion();
+        if (text === null) return;
+        setInput((current) => (current.trim() ? `${current}\n${text}` : text));
+        dockTextareaRef.current?.focus();
+      }),
+    [panel]
+  );
+
   const preflight = usePreflight({
     question: input,
     fileIds: attachments.fileIds,
@@ -368,8 +495,11 @@ export function ChatView({
    * Sends a question; `resendFiles` repeats a failed question's attachments
    * ("Försök igen"), which leave the composer if they were put back there.
    */
-  function sendQuestion(text: string, resendFiles?: SentFiles) {
-    if (!text || busy || attachments.uploading || usage.willExceedContext) return;
+  function sendQuestion(question: string, resendFiles?: SentFiles) {
+    if (!question || busy || attachments.uploading || usage.willExceedContext) return;
+    // A quote from a file or a view opens the question; it is sent once.
+    const text = resendFiles ? question : composeQuotedQuestion(panel.quote, question);
+    if (!resendFiles) panel.clearQuote();
     // Uploaded attachments travel as file ids; the metadata renders them as
     // file tokens under the question.
     const files =
@@ -438,11 +568,15 @@ export function ChatView({
     if (hasPendingPartnerUpdates()) void awaitPartnerUpdates().then(send);
     else void send();
     // A retry leaves the composer alone unless it holds the retried question.
-    setInput((current) => (resendFiles && current.trim() !== text ? current : ""));
+    setInput((current) => (resendFiles && current.trim() !== question ? current : ""));
     setMentionId(NO_MENTION);
   }
 
   const canSubmit = input.trim().length > 0 && !attachments.uploading && !usage.willExceedContext;
+  const quote = panel.quote;
+  const composerQuote = quote
+    ? { text: quote.text, source: quote.fileName, onRemove: () => panel.clearQuote() }
+    : null;
 
   const activityMessage = activity
     ? messages.find((message) => message.id === activity.messageId)
@@ -528,6 +662,7 @@ export function ChatView({
     tools,
     mention,
     modelSelector,
+    quote: composerQuote,
     contextBar: (
       <ContextUsageBar
         usage={usage}
@@ -630,9 +765,58 @@ export function ChatView({
     );
   }
 
+  // The latest answer's activity, offered in the panel's switcher.
+  const latestAnswer = messages.findLast((message) => message.role === "assistant");
+  const latestActivity =
+    latestAnswer &&
+    deriveActivity(latestAnswer, { streaming: busy && latestAnswer === messages.at(-1) })
+      .hasActivity
+      ? {
+          detail: t("chat_activity_steps", {
+            count: deriveActivity(latestAnswer, { knowledge: partner.knowledge }).steps.length
+          }),
+          open: () => onActivityChange({ messageId: latestAnswer.id, tab: "steps", source: null })
+        }
+      : null;
+
   return (
     <>
-      <div className="flex min-h-0 flex-1">
+      <SidePanel
+        panel={panel}
+        messages={messages}
+        contents={panelContents}
+        versionsOf={versionsOf}
+        exportOf={exportOf}
+        latestActivity={latestActivity}
+        activity={
+          activity && activityMessage && activityForPanel
+            ? {
+                detail: t("chat_activity_steps", { count: activityForPanel.steps.length }),
+                onClose: closeActivity,
+                body: (
+                  <ActivityPanelBody
+                    messageId={activityMessage.id}
+                    activity={activityForPanel}
+                    durations={timings.durations(activityMessage.id)}
+                    sessionId={sessionId}
+                    tab={activity.tab}
+                    onTabChange={(tab) => onActivityChange({ ...activity, tab, source: null })}
+                    focusSource={activity.source}
+                    debug={
+                      debugAvailable && sessionId !== null
+                        ? {
+                            sessionId,
+                            onSelectTurn: (messageId) =>
+                              onActivityChange({ messageId, tab: "debug", source: null })
+                          }
+                        : null
+                    }
+                  />
+                )
+              }
+            : null
+        }
+      >
         <ChatLayout
           className="min-w-0 flex-1"
           // WCAG 2.4.11: Tab and focus() scroll the focused element above the
@@ -669,6 +853,8 @@ export function ChatView({
                     toggleActivity(message.id, trigger, request)
                   }
                   canDebug={debugAvailable && sessionId !== null}
+                  conversationFiles={allFiles}
+                  documents={documents.documents}
                 />
               );
             })}
@@ -676,29 +862,7 @@ export function ChatView({
             {errorNotice}
           </ChatMessageList>
         </ChatLayout>
-        {activity && activityMessage && activityForPanel && (
-          <ActivityPanel
-            variant={isDesktop ? "side" : "sheet"}
-            messageId={activityMessage.id}
-            activity={activityForPanel}
-            durations={timings.durations(activityMessage.id)}
-            sessionId={sessionId}
-            tab={activity.tab}
-            onTabChange={(tab) => onActivityChange({ ...activity, tab, source: null })}
-            focusSource={activity.source}
-            debug={
-              debugAvailable && sessionId !== null
-                ? {
-                    sessionId,
-                    onSelectTurn: (messageId) =>
-                      onActivityChange({ messageId, tab: "debug", source: null })
-                  }
-                : null
-            }
-            onClose={closeActivity}
-          />
-        )}
-      </div>
+      </SidePanel>
       {fileInputElement}
     </>
   );

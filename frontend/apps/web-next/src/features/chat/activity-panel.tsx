@@ -1,12 +1,8 @@
 "use client";
 
-import { BottomSheet } from "@astryxdesign/core/BottomSheet";
-import { IconButton } from "@astryxdesign/core/IconButton";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useId, useRef, type Ref } from "react";
-import { cn } from "@/lib/utils";
+import { useEffect, useRef } from "react";
 import type { Activity } from "./activity";
 import { SourceList } from "./activity-sources";
 import { StepList } from "./activity-steps";
@@ -18,42 +14,60 @@ export type ActivityTab = "steps" | "sources" | "debug";
 
 export const ACTIVITY_PANEL_ID = "chat-activity-panel";
 
-function PanelBody({
-  id,
-  messageId,
-  activity,
-  durations,
-  sessionId,
-  tab,
-  onTabChange,
-  focusSource,
-  debug,
-  onClose,
-  tabListRef
-}: {
-  /** The panel id the activity pill's aria-controls points at (sheet variant). */
-  id?: string;
+export type ActivityPanelProps = {
   messageId: string;
   activity: Activity;
   durations: TurnDurations | null;
   sessionId: string | null;
   tab: ActivityTab;
   onTabChange: (tab: ActivityTab) => void;
+  /** 0-based source to focus (opened from an inline citation). */
   focusSource: number | null;
-  debug: DebugTabConfig | null;
-  onClose: () => void;
-  tabListRef?: Ref<HTMLDivElement>;
-}) {
+  /** The Felsök tab (users with `assistant_debug`, saved conversations only). */
+  debug?: DebugTabConfig | null;
+};
+
+/**
+ * The Aktivitet panel's body: steps (timeline with tool calls, sources read,
+ * approvals, durations when known), numbered sources and, for users who may
+ * debug assistants, the Felsök tab with the saved turn's diagnostics. It is
+ * an occupant of the chat's side panel (side-panel/side-panel.tsx), which
+ * owns the aside, the sheet, the title and the close button. Focus moves to
+ * the selected tab once per opened answer; a citation that targets a source
+ * focuses that source instead.
+ */
+export function ActivityPanelBody({
+  messageId,
+  activity,
+  durations,
+  sessionId,
+  tab: requestedTab,
+  onTabChange,
+  focusSource,
+  debug = null
+}: ActivityPanelProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const tabListRef = useRef<HTMLDivElement>(null);
+  const focusedFor = useRef<string | null>(null);
+  // A debug tab asked for without the right (or for an unsaved conversation)
+  // shows the steps instead.
+  const tab = requestedTab === "debug" && !debug ? "steps" : requestedTab;
   const stepsPanelId = `${ACTIVITY_PANEL_ID}-steps`;
   const sourcesPanelId = `${ACTIVITY_PANEL_ID}-sources`;
   const debugPanelId = `${ACTIVITY_PANEL_ID}-debug`;
   const steps = activity.steps.length;
 
+  useEffect(() => {
+    if (focusedFor.current === messageId) return;
+    focusedFor.current = messageId;
+    if (tab === "sources" && focusSource !== null) return;
+    tabListRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+  }, [messageId, tab, focusSource]);
+
   return (
-    <div id={id} className="flex min-h-0 flex-1 flex-col">
-      <div className="border-ax-border flex min-h-[52px] shrink-0 items-center justify-between gap-2 border-b ps-3.5 pe-2.5">
+    <div id={ACTIVITY_PANEL_ID} className="flex min-h-0 flex-1 flex-col">
+      <div className="border-ax-border flex min-h-[44px] shrink-0 items-center justify-between gap-2 border-b ps-3.5 pe-2.5">
         <div ref={tabListRef}>
           <TabList
             value={tab}
@@ -78,13 +92,6 @@ function PanelBody({
             {debug && <Tab value="debug" label={t("chat_debug_action")} panelId={debugPanelId} />}
           </TabList>
         </div>
-        <IconButton
-          label={t("chat_activity_close")}
-          icon={<X className="size-4" />}
-          variant="ghost"
-          size="sm"
-          onClick={onClose}
-        />
       </div>
 
       <div
@@ -142,96 +149,5 @@ function PanelBody({
         </span>
       </div>
     </div>
-  );
-}
-
-export type ActivityPanelProps = {
-  messageId: string;
-  activity: Activity;
-  durations: TurnDurations | null;
-  sessionId: string | null;
-  tab: ActivityTab;
-  onTabChange: (tab: ActivityTab) => void;
-  /** 0-based source to focus (opened from an inline citation). */
-  focusSource: number | null;
-  /** The Felsök tab (users with `assistant_debug`, saved conversations only). */
-  debug?: DebugTabConfig | null;
-  onClose: () => void;
-  /** Inline side panel (≥1024px) or a modal bottom sheet (smaller screens). */
-  variant: "side" | "sheet";
-};
-
-/**
- * The Aktivitet panel: steps (timeline with tool calls, sources read,
- * approvals, durations when known), numbered sources and, for users who may
- * debug assistants, the Felsök tab with the saved turn's diagnostics. Side
- * panel on wide screens, bottom sheet on tablets and phones. Focus moves into
- * it when it opens; Escape and the close button close it (the caller returns
- * focus to the pill that opened it).
- */
-export function ActivityPanel({ variant, onClose, debug = null, ...rest }: ActivityPanelProps) {
-  const t = useTranslations();
-  const titleId = useId();
-  const asideRef = useRef<HTMLElement>(null);
-  const tabListRef = useRef<HTMLDivElement>(null);
-  const focusedFor = useRef<string | null>(null);
-  // A debug tab asked for without the right (or for an unsaved conversation)
-  // shows the steps instead.
-  const props = { ...rest, debug, tab: rest.tab === "debug" && !debug ? "steps" : rest.tab };
-  const { focusSource, tab, messageId } = props;
-
-  // Side panel: move focus in once per opened answer (the sheet's dialog does
-  // this itself). A citation that targets a source focuses that source instead.
-  useEffect(() => {
-    if (variant !== "side" || focusedFor.current === messageId) return;
-    focusedFor.current = messageId;
-    if (tab === "sources" && focusSource !== null) return;
-    tabListRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
-  }, [variant, messageId, tab, focusSource]);
-
-  // Escape closes the side panel from anywhere inside it.
-  useEffect(() => {
-    const aside = asideRef.current;
-    if (variant !== "side" || !aside) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      onClose();
-    };
-    aside.addEventListener("keydown", onKeyDown);
-    return () => aside.removeEventListener("keydown", onKeyDown);
-  }, [variant, onClose]);
-
-  if (variant === "sheet") {
-    return (
-      <BottomSheet
-        isOpen
-        onOpenChange={(open) => {
-          if (!open) onClose();
-        }}
-        label={t("chat_activity_panel_label")}
-        height="tall"
-      >
-        <PanelBody {...props} id={ACTIVITY_PANEL_ID} onClose={onClose} />
-      </BottomSheet>
-    );
-  }
-
-  return (
-    <aside
-      ref={asideRef}
-      id={ACTIVITY_PANEL_ID}
-      aria-labelledby={titleId}
-      // The diagnostics carry ids, routes and token tables: a wider panel on that tab.
-      className={cn(
-        "bg-ax-sunken border-ax-border flex shrink-0 flex-col border-s",
-        tab === "debug" ? "w-[420px]" : "w-[340px]"
-      )}
-    >
-      <h2 id={titleId} className="sr-only">
-        {t("chat_activity_panel_label")}
-      </h2>
-      <PanelBody {...props} onClose={onClose} tabListRef={tabListRef} />
-    </aside>
   );
 }

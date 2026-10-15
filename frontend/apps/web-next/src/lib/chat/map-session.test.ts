@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { loadFixtures } from "./contract-fixtures";
 import { mapSessionMessages } from "./map-session";
 import type { Schema } from "@/lib/api/models";
 
@@ -110,6 +111,58 @@ describe("mapSessionMessages", () => {
       type: "dynamic-tool",
       providerMetadata: {
         eneo: { server_name: "Image Inc", title: "Draw an image", purpose: "image_generation" }
+      }
+    });
+  });
+
+  it("gives a persisted call the same eneo metadata as the streamed one", () => {
+    const fixture = loadFixtures().find((candidate) => candidate.name === "generated-document")!;
+    const output = fixture.events.find((event) => event.type === "tool-output-available")!;
+    const streamed = (output.providerMetadata as { eneo: Record<string, unknown> }).eneo;
+
+    const messages = mapSessionMessages([
+      {
+        ...baseMessage,
+        tool_calls: [
+          {
+            server_name: "documents",
+            tool_name: "create_document",
+            title: "Create a document",
+            arguments: { title: "Plan" },
+            tool_call_id: "call-doc",
+            result_status: "succeeded",
+            is_internal: true,
+            is_bundled: true,
+            app_view: streamed.app_view as Record<string, unknown>,
+            generated_file_ids: ["bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]
+          }
+        ]
+      }
+    ]);
+
+    expect(messages[1]!.parts[0]).toMatchObject({
+      type: "dynamic-tool",
+      providerMetadata: {
+        eneo: { ...streamed, generated_file_ids: ["bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"] }
+      }
+    });
+  });
+
+  it("fills the tool metadata a row predating it lacks with null", () => {
+    const messages = mapSessionMessages([
+      { ...baseMessage, tool_calls: [{ server_name: "files", tool_name: "read_file" }] }
+    ]);
+
+    expect(messages[1]!.parts[0]).toMatchObject({
+      providerMetadata: {
+        eneo: {
+          is_internal: null,
+          is_bundled: null,
+          app_view: null,
+          approved: null,
+          result_status: null,
+          generated_file_ids: null
+        }
       }
     });
   });

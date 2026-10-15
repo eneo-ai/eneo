@@ -65,7 +65,15 @@ describes the full workflow, supported previews, revisions and exports.
    ```
 
    Set `PUBLIC_ORIGIN` to the address users open Eneo on as well. A view can
-   then be framed by that address only.
+   then be framed by that address only. While a second frontend runs beside
+   the first (the React app during its introduction), list its address too:
+
+   ```
+   MCP_APP_HOST_ORIGINS=["https://next.your-domain.com"]
+   ```
+
+   Each listed address may frame a view and is answered by the view's
+   sandbox; any other address is refused.
 
 3. Sync the MCP servers whose tools have views (**Admin > Tools**, refresh),
    and approve the pending tools. Switching the setting on changes what Eneo
@@ -79,6 +87,7 @@ Optional settings:
 
 | Setting | Default | Meaning |
 |---|---|---|
+| `MCP_APP_HOST_ORIGINS` | `[]` | Addresses besides `PUBLIC_ORIGIN` that may frame a view, as a JSON list of origins. |
 | `MCP_APP_RESOURCE_MAX_BYTES` | 2 MiB | Largest view HTML Eneo keeps. |
 | `MCP_APP_VIEW_TOKEN_EXPIRY_SECONDS` | 3600 | Lifetime of the link a view is loaded from. One hour at most. |
 

@@ -12,6 +12,37 @@ export type McpServerCreateResponse = Schema<"MCPServerCreateResponse">;
 
 export const MCP_KEY = ["admin-mcp-servers"];
 export const mcpToolsKey = (serverId: string) => ["admin-mcp-servers", serverId, "tools"];
+export const BUNDLED_KEY = ["admin-mcp-servers", "bundled"];
+
+/**
+ * The servers the bundled tool runtime offers this tenant, each with whether
+ * it was added, and the runtime's state. A backend without the runtime
+ * endpoint offers none.
+ */
+export function bundledToolsQueryOptions(api: EneoClient) {
+  return queryOptions({
+    queryKey: BUNDLED_KEY,
+    queryFn: async (): Promise<Schema<"BundledToolList">> => {
+      const { data, response } = await api.GET("/api/v1/mcp-servers/bundled/");
+      if (response.status === 404 || !data) return { items: [], count: 0, runtime: null };
+      return data;
+    }
+  });
+}
+
+/**
+ * Adds a server of the bundled tool runtime to the tenant. A capability
+ * provider is switched in as the tenant default when `activate` is set; a
+ * general server is enabled per space afterwards, like any other.
+ */
+export function createBundledMcpServer(api: EneoClient, tool: string, activate: boolean) {
+  return unwrap(
+    api.POST("/api/v1/mcp-servers/bundled/{tool}/", {
+      params: { path: { tool } },
+      body: { activate }
+    })
+  );
+}
 
 export function mcpServersQueryOptions(api: EneoClient) {
   return queryOptions({

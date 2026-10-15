@@ -38,11 +38,30 @@ const source: McpServer = {
   is_available: false
 };
 
+/** The runtime offers every function; charts is a general server too, once added. */
+const bundled = {
+  items: [
+    { tool: "file-analysis", purpose: "file_analysis", available: true, mcp_server_id: null },
+    { tool: "file-creation", purpose: "file_creation", available: true, mcp_server_id: null },
+    { tool: "charts", purpose: "charts", available: true, mcp_server_id: null },
+    { tool: "compute", purpose: "compute", available: false, mcp_server_id: null }
+  ],
+  count: 4,
+  runtime: {
+    configured: true,
+    state: "ready",
+    expected_version: "1.4.0",
+    version: "1.4.0",
+    warnings: ["confinement_unavailable"]
+  }
+};
+
 beforeEach(() => {
   get.mockReset();
   post.mockReset();
   get.mockImplementation((path?: string) => {
     if (path === "/api/v1/mcp-servers/settings/") return ok({ items: [] });
+    if (path === "/api/v1/mcp-servers/bundled/") return ok(bundled);
     if (path === "/api/v1/user-groups/") return ok({ items: [] });
     if (path === "/api/v1/security-classifications/")
       return ok({ security_enabled: false, security_classifications: [] });
@@ -120,6 +139,65 @@ describe("admin function sources", () => {
     expect(screen.getByLabelText("mcp_catalog_max_count").closest("details")?.open).toBe(true);
     expect(document.activeElement).toBe(screen.getByLabelText("mcp_catalog_max_count"));
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it("offers the runtime's functions and turns one on as the default", async () => {
+    show();
+    expect(await screen.findByRole("heading", { name: "file_analysis" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "compute" })).toBeTruthy();
+    // The runtime's state and its one warning, said once each.
+    const status = await screen.findByRole("region", { name: "tools_runtime_title" });
+    expect(status.textContent).toContain("tools_runtime_ready");
+    expect(status.textContent).toContain("tools_runtime_confinement");
+    expect(status.textContent).toContain("tools_runtime_versions");
+    // Four offers: a deployment without the runtime cannot turn compute on.
+    const turnOn = screen.getAllByRole("button", { name: "tools_builtin_turn_on" });
+    expect(turnOn).toHaveLength(4);
+    expect((turnOn[3] as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByText("tools_builtin_unavailable")).toHaveLength(1);
+    fireEvent.click(turnOn[0]!);
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith("/api/v1/mcp-servers/bundled/{tool}/", {
+        params: { path: { tool: "file-analysis" } },
+        body: { activate: true }
+      })
+    );
+    expect(await screen.findByText("tools_builtin_turned_on")).toBeTruthy();
+  });
+
+  it("names a bundled source after its function and keeps it out of the edit form", async () => {
+    get.mockImplementation((path?: string) => {
+      if (path === "/api/v1/mcp-servers/settings/")
+        return ok({
+          items: [
+            {
+              ...source,
+              id: "charts",
+              mcp_server_id: "charts",
+              name: "Charts (bundled)",
+              http_url: "http://runtime:8765/charts",
+              http_auth_type: "bundled",
+              purpose: "charts",
+              is_enabled: true
+            }
+          ]
+        });
+      if (path === "/api/v1/mcp-servers/bundled/")
+        return ok({
+          ...bundled,
+          items: bundled.items.map((item) => ({
+            ...item,
+            mcp_server_id: item.tool === "charts" ? "charts" : null
+          }))
+        });
+      return ok({ items: [] });
+    });
+    show();
+    expect(await screen.findByRole("heading", { level: 3, name: "charts" })).toBeTruthy();
+    expect(screen.getByText("tools_builtin_charts_summary")).toBeTruthy();
+    expect(screen.queryByText("Charts (bundled)")).toBeNull();
+    expect(screen.queryByRole("button", { name: "tools_change" })).toBeNull();
+    expect(screen.getByRole("button", { name: "deactivate" })).toBeTruthy();
   });
 
   it("activates an existing source through the capability endpoint", async () => {

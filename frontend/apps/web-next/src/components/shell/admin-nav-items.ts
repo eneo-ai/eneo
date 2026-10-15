@@ -12,7 +12,6 @@ import {
   Library,
   LifeBuoy,
   Plug,
-  Server,
   Settings,
   Shield,
   SlidersHorizontal,
@@ -83,12 +82,12 @@ export function adminNavGroups({
       labelKey: "admin_section_connections",
       items: [
         { href: "/admin/models", icon: Cpu, labelKey: "models" },
-        { href: "/admin/mcp-servers", icon: Server, labelKey: "mcp_servers" },
         { href: "/admin/integrations", icon: Plug, labelKey: "integrations" },
         ...(canManageModules
           ? [{ href: "/admin/modules", icon: Blocks, labelKey: "module_admin_title" }]
           : []),
-        // Capability providers (tool providers), so they stay with the connections.
+        // Functions and their sources, and the MCP servers they run on (one
+        // page with two tabs), so they stay with the connections.
         { href: "/admin/tools", icon: Wrench, labelKey: "tools" },
         { href: "/admin/api-keys", icon: KeyRound, labelKey: "api_keys" }
       ]

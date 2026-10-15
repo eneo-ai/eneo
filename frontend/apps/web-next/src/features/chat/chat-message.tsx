@@ -14,21 +14,41 @@ import { useCallback, useMemo, useRef } from "react";
 
 import {
   CitationSourcesProvider,
-  citationComponents,
   useCitationRemarkPlugins
 } from "@/components/ai-elements/citation";
 import { ANSWER_TEXT_CLASS, MessageResponse } from "@/components/ai-elements/message";
 import { iconUrl } from "@/components/composites/icon-field";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
+import { McpAppFrames } from "@/features/mcp-apps/mcp-app-frames";
+import { isChartDocumentAsset } from "@/features/mcp-apps/mcp-apps";
+import { tableLocationLabel } from "@/features/workspace/preview/table-reference";
+import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { resolveInrefs, trimPartialInref } from "@/lib/chat/inref";
 import type { AnswerRating, EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 
 import { deriveActivity, modelName } from "./activity";
 import type { ActivityTab } from "./activity-panel";
 import { ActivityPill } from "./activity-pill";
 import type { TurnDurations } from "./activity-timings";
+import {
+  answerLinkComponents,
+  documentNames,
+  DocumentLinksProvider,
+  useDocumentNameRemarkPlugins
+} from "./answer-links";
+import { DocumentLine, type DocumentLineKind } from "./document-line";
+import {
+  isDocument,
+  revisedFileId,
+  type ConversationDocument,
+  type GeneratedDocument
+} from "./side-panel/document-versions";
+import { messageGeneratedFiles, messageToolCalls } from "./side-panel/message-tool-calls";
+import { parseQuotedQuestion, quotedFileMatches } from "./side-panel/question-quote";
+import { useSidePanel } from "./side-panel/use-side-panel";
 import {
   assistantClipboardContent,
   canCopyRichText,
@@ -38,10 +58,9 @@ import {
 } from "./copy-assistant-answer";
 import {
   answeringAssistantFromParts,
-  GeneratedFile,
+  InlineImage,
   McpImageStrip,
   mcpReferencesFromParts,
-  MessageFilePart,
   MessageFiles,
   ToolApprovalCard
 } from "./message-parts";
@@ -68,35 +87,125 @@ function messageText(message: EneoUIMessage): string {
     .join("\n\n");
 }
 
-/** The user's question: a filled bubble on the right, attachments as file tokens below. */
-function UserMessage({ message }: { message: EneoUIMessage }) {
+/**
+ * A passage the question quotes from a file or an interactive view. When the
+ * file is in the conversation and can be shown, the quote opens it at the passage.
+ */
+function QuestionQuote({
+  quote,
+  conversationFiles
+}: {
+  quote: NonNullable<ReturnType<typeof parseQuotedQuestion>["quote"]>;
+  conversationFiles: readonly PreviewFile[];
+}) {
   const t = useTranslations();
-  const text = messageText(message);
-  const files = message.metadata?.files ?? [];
-  const fileParts = message.parts.filter(
-    (part): part is Extract<EneoUIMessage["parts"][number], { type: "file" }> =>
-      part.type === "file"
+  const panel = useSidePanel();
+  // New quotes carry the exact file identity. Filename matching is only for
+  // legacy quotes, and must never substitute a revision for an exact reference.
+  const file =
+    quote.fileName && panel
+      ? conversationFiles.findLast(
+          (candidate) => quotedFileMatches(quote, candidate) && panel.canPreview(candidate)
+        )
+      : undefined;
+  const location = tableLocationLabel(quote.locator, (row) => t("table_reference_row", { row }));
+  const body = (
+    <blockquote className="m-0">
+      <p className="text-ax-text-secondary m-0 line-clamp-6 text-[13.5px] whitespace-pre-wrap">
+        {quote.text}
+      </p>
+      {quote.fileName && (
+        <footer className="text-ax-text-secondary mt-1 text-xs">
+          {quote.fileName}
+          {location && <span> · {location}</span>}
+        </footer>
+      )}
+    </blockquote>
   );
+  const className =
+    "border-ax-border-strong bg-ax-surface rounded-ax-element block w-full border-s-2 px-3 py-2 text-start";
+  if (file && panel) {
+    return (
+      <button
+        type="button"
+        aria-label={t("file_quote_show", { name: file.name })}
+        onClick={(event) => panel.showPassage(file, quote, event.currentTarget)}
+        className={cn(
+          className,
+          "hover:bg-ax-hover focus-visible:outline-ring focus-visible:outline-2 focus-visible:outline-offset-2"
+        )}
+      >
+        {body}
+      </button>
+    );
+  }
+  return (
+    <div className={className}>
+      {body}
+      {quote.fileId && (
+        <p className="text-ax-text-secondary mt-1 text-xs">{t("table_reference_unavailable")}</p>
+      )}
+    </div>
+  );
+}
+
+/** The user's question: a filled bubble on the right, attachments as file tokens below. */
+function UserMessage({
+  message,
+  conversationFiles
+}: {
+  message: EneoUIMessage;
+  conversationFiles: readonly PreviewFile[];
+}) {
+  const t = useTranslations();
+  // A question may open with a passage quoted from a file preview.
+  const { quote, text } = parseQuotedQuestion(messageText(message));
+  const files = message.metadata?.files ?? [];
   return (
     <AxChatMessage
       sender="user"
       name={<span className="sr-only">{t("chat_your_message")}</span>}
       className="w-full"
     >
-      {text && (
-        <ChatMessageBubble className="bg-ax-muted rounded-ax-page max-w-[min(100%,32.5rem)] px-[15px] py-2.5 text-[14.5px] leading-normal whitespace-pre-wrap">
+      {(text || quote) && (
+        <ChatMessageBubble className="bg-ax-muted rounded-ax-page flex max-w-[min(100%,32.5rem)] flex-col gap-2 px-[15px] py-2.5 text-[14.5px] leading-normal whitespace-pre-wrap">
+          {quote && <QuestionQuote quote={quote} conversationFiles={conversationFiles} />}
           {text}
         </ChatMessageBubble>
       )}
       {files.length > 0 && <MessageFiles files={files} />}
-      {fileParts.length > 0 && (
-        <div className="flex flex-wrap justify-end gap-1.5">
-          {fileParts.map((part, index) => (
-            <MessageFilePart key={index} part={part} />
-          ))}
-        </div>
-      )}
     </AxChatMessage>
+  );
+}
+
+/**
+ * What an answer produced, under its text: images inline, and one line per
+ * document that names it and opens it in the side panel. A chart exported
+ * only as part of a report is left out.
+ */
+function GeneratedFiles({ message }: { message: EneoUIMessage }) {
+  const calls = messageToolCalls(message);
+  const hidden = new Set(
+    calls.filter(isChartDocumentAsset).flatMap((call) => call.generatedFileIds)
+  );
+  const files = messageGeneratedFiles(message).filter((file) => !hidden.has(file.id));
+  if (files.length === 0) return null;
+  const kindOf = (file: GeneratedDocument): DocumentLineKind => {
+    const call = calls.find((candidate) => candidate.generatedFileIds.includes(file.id));
+    if (call?.purpose !== "file_creation") return "exported";
+    return revisedFileId(call.input) ? "updated" : "created";
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      {files.map((file) =>
+        // An empty mimetype is the placeholder of an image still being generated.
+        !file.mimetype || file.mimetype.startsWith("image/") ? (
+          <InlineImage key={file.id} file={file} />
+        ) : isDocument(file) ? (
+          <DocumentLine key={file.id} file={file} kind={kindOf(file)} />
+        ) : null
+      )}
+    </div>
   );
 }
 
@@ -275,6 +384,8 @@ function AnswerActions({
   );
 }
 
+const NO_DOCUMENTS: ConversationDocument[] = [];
+
 function AssistantMessage({
   message,
   assistant,
@@ -286,7 +397,9 @@ function AssistantMessage({
   activityExpanded,
   onActivityToggle,
   feedback,
-  canDebug
+  canDebug,
+  sessionId,
+  documents
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -299,8 +412,36 @@ function AssistantMessage({
   onActivityToggle?: (trigger: HTMLElement, request?: ActivityRequest) => void;
   feedback: AnswerFeedback | null;
   canDebug: boolean;
+  sessionId: string | null;
+  documents: ConversationDocument[];
 }) {
+  const panel = useSidePanel();
   const text = messageText(message);
+  // The names an answer can mention a document by: each is a link to it.
+  const names = useMemo(
+    () => documentNames(documents.flatMap((document) => document.versions)),
+    [documents]
+  );
+  const documentPlugins = useDocumentNameRemarkPlugins(names);
+  const documentLinks = useMemo(
+    () => ({
+      names,
+      fileFor: (name: string) => {
+        // The file meant: the one this answer created, else the newest document of that name.
+        const own = messageGeneratedFiles(message).findLast(
+          (candidate) => isDocument(candidate) && nameMatches(candidate, name)
+        );
+        return (
+          own ??
+          documents.findLast((document) =>
+            document.versions.some((version) => nameMatches(version, name))
+          )?.latest
+        );
+      },
+      onOpen: (file: GeneratedDocument, trigger: HTMLElement) => panel?.open(file, trigger)
+    }),
+    [names, documents, message, panel]
+  );
   const answering =
     message.metadata?.answeringAssistant ??
     answeringAssistantFromParts(message.parts) ??
@@ -317,7 +458,11 @@ function AssistantMessage({
   );
   const sources = activity.sources;
   const sourceIds = sources.map((source) => source.sourceId);
-  const remarkPlugins = useCitationRemarkPlugins(sources.length, message.id);
+  const citationPlugins = useCitationRemarkPlugins(sources.length, message.id);
+  const remarkPlugins = useMemo(
+    () => [...citationPlugins, ...documentPlugins],
+    [citationPlugins, documentPlugins]
+  );
   const openSource = useCallback(
     (index: number, trigger: HTMLElement) =>
       onActivityToggle?.(trigger, { tab: "sources", source: index }),
@@ -360,32 +505,30 @@ function AssistantMessage({
                 prefix={message.id}
                 onOpenSource={openSource}
               >
-                <MessageResponse
-                  className={ANSWER_TEXT_CLASS}
-                  remarkPlugins={remarkPlugins}
-                  components={citationComponents}
-                  isAnimating={streamingThis}
-                >
-                  {resolveInrefs(
-                    streamingThis ? trimPartialInref(part.text) : part.text,
-                    sourceIds
-                  )}
-                </MessageResponse>
+                <DocumentLinksProvider value={documentLinks}>
+                  <MessageResponse
+                    className={ANSWER_TEXT_CLASS}
+                    remarkPlugins={remarkPlugins}
+                    components={answerLinkComponents}
+                    isAnimating={streamingThis}
+                  >
+                    {resolveInrefs(
+                      streamingThis ? trimPartialInref(part.text) : part.text,
+                      sourceIds
+                    )}
+                  </MessageResponse>
+                </DocumentLinksProvider>
               </CitationSourcesProvider>
             );
           }
           if (part.type === "data-tool-approval") {
             return <ToolApprovalCard key={part.id ?? index} data={part.data} />;
           }
-          if (part.type === "file") {
-            return <MessageFilePart key={index} part={part} />;
-          }
           return null;
         })}
         <McpImageStrip references={mcpReferences} />
-        {message.metadata?.generatedFiles?.map((file) => (
-          <GeneratedFile key={file.id} file={file} />
-        ))}
+        <McpAppFrames message={message} live={isStreaming} sessionId={sessionId} />
+        <GeneratedFiles message={message} />
         {hasText && !isStreaming && (
           <AnswerActions
             text={text}
@@ -424,7 +567,10 @@ export function ChatMessage({
   activityExpanded = false,
   onActivityToggle,
   feedback = null,
-  canDebug = false
+  canDebug = false,
+  sessionId = null,
+  conversationFiles = NO_FILES,
+  documents = NO_DOCUMENTS
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -439,8 +585,16 @@ export function ChatMessage({
   feedback?: AnswerFeedback | null;
   /** The viewer may debug assistants and the answer is saved: a "Felsök" action. */
   canDebug?: boolean;
+  /** The saved conversation, for the results an interactive view reads. */
+  sessionId?: string | null;
+  /** Every file of the conversation, so a quoted passage can open its file. */
+  conversationFiles?: readonly PreviewFile[];
+  /** The documents the assistant made in the conversation, so an answer can name them. */
+  documents?: ConversationDocument[];
 }) {
-  if (message.role === "user") return <UserMessage message={message} />;
+  if (message.role === "user") {
+    return <UserMessage message={message} conversationFiles={conversationFiles} />;
+  }
   return (
     <AssistantMessage
       message={message}
@@ -454,8 +608,17 @@ export function ChatMessage({
       onActivityToggle={onActivityToggle}
       feedback={feedback}
       canDebug={canDebug}
+      sessionId={sessionId}
+      documents={documents}
     />
   );
+}
+
+const NO_FILES: PreviewFile[] = [];
+
+/** Whether a document goes by `name`: its file name, or its title for a Markdown document. */
+function nameMatches(file: { name: string }, name: string): boolean {
+  return file.name === name || file.name.replace(/\.(md|markdown)$/i, "") === name;
 }
 
 /**
