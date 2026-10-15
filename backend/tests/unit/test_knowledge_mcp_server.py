@@ -1455,6 +1455,7 @@ def _patch_digest_context(
             digest_timeout_seconds=300,
             digest_max_segments=120,
             digest_concurrency=2,
+            digest_turn_model_max_tokens=None,
             mcp_tool_output_max_chars=32768,
         ),
     )

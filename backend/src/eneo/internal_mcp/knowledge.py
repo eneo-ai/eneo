@@ -61,6 +61,7 @@ from eneo.internal_mcp.digest import (
     plan_or_refuse,
     prepare_digest_model,
     progress_reporter,
+    refuse_over_turn_cap,
     run_bounded_digest,
     validate_instruction,
 )
@@ -1215,7 +1216,10 @@ async def digest_documents(
     left out.
 
     Cost: one model call per text segment plus the merges, up to several
-    minutes for a large source. The result starts with the documents read
+    minutes for a large source. Without a reader model only what fits one
+    call of the completion model is digested; a larger selection is refused
+    with the reason, which the user needs to hear. The result starts with
+    the documents read
     ([D1], [D2], ...), a coverage line and a compression line (words read
     into words answered); relay the body and its citations faithfully,
     state the coverage line when it is partial, cite the compression when
@@ -1292,6 +1296,17 @@ async def digest_documents(
                     f"{total_chars // 4} tokens exceed the limit of {ceiling} "
                     f"segments. {DIGEST_NARROW_HINT}"
                 )
+            if limit == total:
+                # The same cheap estimate, before any text is loaded.
+                try:
+                    refuse_over_turn_cap(
+                        digest_model,
+                        items=total,
+                        tokens=total_chars // 4,
+                        narrow_hint=DIGEST_NARROW_HINT,
+                    )
+                except DigestRefused as refused:
+                    return _refusal(refused.message)
             listings = await blob_repo.list_by_sources(
                 **source_ids, limit=limit, title_contains=title_contains
             )

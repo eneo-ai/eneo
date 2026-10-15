@@ -124,6 +124,8 @@ class DigestModel:
     budgets: DigestBudgets
     body_cap_chars: int
     reader: ReaderTarget | None = None
+    # Why the ask path settled on that reader, or on none (``ReaderReason``).
+    reader_reason: str | None = None
 
     @property
     def segment_count(self) -> Callable[[str], int]:
@@ -211,6 +213,7 @@ async def prepare_digest_model(
         budgets=budgets,
         body_cap_chars=body_cap_chars(),
         reader=reader,
+        reader_reason=claims.reader_reason,
     )
 
 
@@ -307,6 +310,71 @@ def compute_budgets(
 # --------------------------------------------------------------------------- #
 # Planning and refusals
 # --------------------------------------------------------------------------- #
+# The resolver's reason when the turn's model is itself the flagged reader:
+# reading on it is then the cheap option by definition, so no cap applies.
+TURN_MODEL_IS_READER = "same_as_turn"
+
+# What to tell the user when no reader took the notes, by the resolver's reason.
+_NO_READER_WHY: dict[str, str] = {
+    "no_tenant_default": (
+        "no reader model is enabled for the organisation; an administrator "
+        "can enable one under Models"
+    ),
+    "none": "this space has no reader model chosen",
+    "tenant_default_below_classification": (
+        "the organisation's reader model is below this space's security classification"
+    ),
+    "own_below_classification": (
+        "the space's reader model is below its security classification"
+    ),
+    "policy_disallows": (
+        "the personal-assistant policy does not allow the reader model"
+    ),
+}
+_NO_READER_WHY_DEFAULT = "no reader model is available for this turn"
+
+
+def turn_model_cap(digest_model: DigestModel) -> int | None:
+    """The most tokens of material a digest may read on the turn model
+    alone, or None when a reader takes the notes.
+
+    The reader is what makes a large digest cheap: without one, every
+    segment and merge would run on the turn's own model, which the user may
+    have chosen for its quality rather than its price. So without a reader
+    the digest reads at most what fits one call of the turn model (the
+    direct path, which costs the same as reading the material outright),
+    unless the ``digest_turn_model_max_tokens`` setting says otherwise.
+    """
+    if digest_model.reader is not None:
+        return None
+    if digest_model.reader_reason == TURN_MODEL_IS_READER:
+        return None
+    cap = get_settings().digest_turn_model_max_tokens
+    return digest_model.budgets.reduce_input_tokens if cap is None else cap
+
+
+def refuse_over_turn_cap(
+    digest_model: DigestModel, *, items: int, tokens: int, narrow_hint: str
+) -> None:
+    """Refuse ``tokens`` of material on the turn model alone when over the
+    cap, saying why no reader is there and what would change that."""
+    cap = turn_model_cap(digest_model)
+    if cap is None or tokens <= cap:
+        return
+    why = _NO_READER_WHY.get(digest_model.reader_reason or "", _NO_READER_WHY_DEFAULT)
+    if cap == 0:
+        raise DigestRefused(
+            f"A digest here needs a reader model, and {why}. Open the "
+            "documents one at a time instead."
+        )
+    raise DigestRefused(
+        f"Too much text for a digest without a reader model: {items} items "
+        f"with about {tokens:,} tokens, the limit on the completion model alone "
+        f"is {cap:,} tokens. A reader model would take the notes at lower "
+        f"cost, but {why}. {narrow_hint}"
+    )
+
+
 def plan_or_refuse(
     items: Sequence[DigestItem],
     digest_model: DigestModel,
@@ -327,6 +395,12 @@ def plan_or_refuse(
             f"{plan.total_segments} segments, the limit is {ceiling}. Largest: "
             f"{named}. {narrow_hint}"
         )
+    refuse_over_turn_cap(
+        digest_model,
+        items=len(items),
+        tokens=plan.total_tokens,
+        narrow_hint=narrow_hint,
+    )
     return plan
 
 
@@ -748,6 +822,8 @@ def digest_meta(
         "eneo.coverage": result.coverage,
         "eneo.items_partial": result.partial_keys,
     }
+    if digest_model.reader_reason is not None:
+        meta["eneo.reader_reason"] = digest_model.reader_reason
     if digest_model.reader is not None:
         meta["eneo.reader_model_id"] = str(digest_model.reader.model.id)
         meta["eneo.reader.model"] = digest_model.reader.model.name

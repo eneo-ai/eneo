@@ -53,6 +53,7 @@ from eneo.internal_mcp.digest import (
     prepare_digest_model,
     progress_reporter,
     run_bounded_digest,
+    turn_model_cap,
     validate_instruction,
 )
 from eneo.internal_mcp.foundation import DigestClaims
@@ -169,7 +170,9 @@ class TestBudgets:
             digest_module,
             "get_settings",
             lambda: SimpleNamespace(
-                digest_max_segments=3, mcp_tool_output_max_chars=32768
+                digest_max_segments=3,
+                digest_turn_model_max_tokens=None,
+                mcp_tool_output_max_chars=32768,
             ),
         )
         digest_model = _digest_model(window=20_000)
@@ -186,6 +189,116 @@ class TestBudgets:
         assert "limit is 3" in message
         assert "[D1] Big" in message
         assert message.endswith("Narrow it.")
+
+
+class TestTurnModelCap:
+    """Without a reader the digest reads at most what fits one call of the
+    turn model, so a large set never runs the map path on the expensive
+    model by accident; the refusal says why no reader is there."""
+
+    @pytest.fixture
+    def settings(self, monkeypatch):
+        state = SimpleNamespace(
+            digest_max_segments=120,
+            digest_turn_model_max_tokens=None,
+            mcp_tool_output_max_chars=32768,
+        )
+        monkeypatch.setattr(digest_module, "get_settings", lambda: state)
+        return state
+
+    @staticmethod
+    def _items(words: int, count: int = 2) -> list[DigestItem]:
+        return [
+            DigestItem(f"D{i + 1}", f"Doc {i + 1}", " ".join(["w"] * words))
+            for i in range(count)
+        ]
+
+    def test_without_a_reader_the_cap_is_one_call_of_the_turn_model(self, settings):
+        digest_model = _digest_model(window=20_000)
+
+        assert turn_model_cap(digest_model) == digest_model.budgets.reduce_input_tokens
+
+    def test_material_within_one_call_is_planned(self, settings):
+        digest_model = replace(
+            _digest_model(window=20_000), reader_reason="no_tenant_default"
+        )
+        budget = digest_model.budgets.reduce_input_tokens
+
+        plan = plan_or_refuse(
+            self._items(budget // 4), digest_model, narrow_hint="Narrow it."
+        )
+
+        assert plan.direct_fits
+        assert plan.total_tokens <= budget
+
+    def test_material_over_one_call_is_refused_with_the_reason(self, settings):
+        digest_model = replace(
+            _digest_model(window=20_000), reader_reason="no_tenant_default"
+        )
+        budget = digest_model.budgets.reduce_input_tokens
+
+        with pytest.raises(DigestRefused) as refused:
+            plan_or_refuse(self._items(budget), digest_model, narrow_hint="Narrow it.")
+
+        message = refused.value.message
+        assert "without a reader model" in message
+        assert f"{budget:,} tokens" in message
+        assert "no reader model is enabled for the organisation" in message
+        assert message.endswith("Narrow it.")
+
+    @pytest.mark.parametrize(
+        ("reason", "why"),
+        [
+            ("tenant_default_below_classification", "below this space's security"),
+            ("own_below_classification", "below its security classification"),
+            ("policy_disallows", "personal-assistant policy"),
+            ("none", "no reader model chosen"),
+            (None, "no reader model is available for this turn"),
+        ],
+    )
+    def test_each_resolver_reason_gets_its_own_wording(self, settings, reason, why):
+        digest_model = replace(_digest_model(window=20_000), reader_reason=reason)
+        budget = digest_model.budgets.reduce_input_tokens
+
+        with pytest.raises(DigestRefused, match=why):
+            plan_or_refuse(self._items(budget), digest_model, narrow_hint="Narrow it.")
+
+    def test_a_reader_or_the_turn_model_as_reader_lifts_the_cap(self, settings):
+        base = _digest_model(window=20_000)
+        reader = ReaderTarget(
+            model=_model(name="reader"),
+            adapter=None,
+            model_kwargs={},
+            count=_count,
+            segment_tokens=base.budgets.segment_tokens,
+        )
+        budget = base.budgets.reduce_input_tokens
+
+        with_reader = replace(base, reader=reader)
+        turn_is_reader = replace(base, reader_reason="same_as_turn")
+
+        assert turn_model_cap(with_reader) is None
+        assert turn_model_cap(turn_is_reader) is None
+        for digest_model in (with_reader, turn_is_reader):
+            plan = plan_or_refuse(
+                self._items(budget), digest_model, narrow_hint="Narrow it."
+            )
+            assert not plan.direct_fits
+
+    def test_the_setting_raises_the_cap_or_requires_a_reader(self, settings):
+        digest_model = replace(
+            _digest_model(window=20_000), reader_reason="no_tenant_default"
+        )
+        budget = digest_model.budgets.reduce_input_tokens
+
+        settings.digest_turn_model_max_tokens = budget * 4
+        plan = plan_or_refuse(self._items(budget), digest_model, narrow_hint="N.")
+        assert not plan.direct_fits
+
+        settings.digest_turn_model_max_tokens = 0
+        with pytest.raises(DigestRefused, match="needs a reader model") as refused:
+            plan_or_refuse(self._items(1), digest_model, narrow_hint="N.")
+        assert "one at a time" in refused.value.message
 
 
 # --------------------------------------------------------------------------- #

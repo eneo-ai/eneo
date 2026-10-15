@@ -133,6 +133,8 @@ class PlannedItem:
 class DigestPlan:
     items: tuple[PlannedItem, ...]
     total_segments: int
+    # Every item's text and header as the model that reads them counts it.
+    total_tokens: int
     direct_fits: bool
 
 
@@ -206,6 +208,7 @@ def plan_segments(
     return DigestPlan(
         items=tuple(planned),
         total_segments=total_segments,
+        total_tokens=total_tokens,
         direct_fits=total_tokens <= budgets.reduce_input_tokens,
     )
 

@@ -43,7 +43,8 @@ async def test_the_organisation_default_is_resolved_for_the_turn():
         space=_space(turn), effective_config=None, turn_model=turn
     )
 
-    assert resolved is default
+    assert resolved.model is default
+    assert resolved.reason == "inherited"
 
 
 async def test_the_space_choice_wins_over_the_organisation_default():
@@ -55,7 +56,8 @@ async def test_the_space_choice_wins_over_the_organisation_default():
         turn_model=turn,
     )
 
-    assert resolved is own
+    assert resolved.model is own
+    assert resolved.reason == "own"
 
 
 async def test_a_default_below_the_space_floor_leaves_the_turn_on_one_model():
@@ -65,4 +67,16 @@ async def test_a_default_below_the_space_floor_leaves_the_turn_on_one_model():
         space=_space(turn), effective_config=None, turn_model=turn
     )
 
-    assert resolved is None
+    assert resolved.model is None
+    assert resolved.reason == "tenant_default_below_classification"
+
+
+async def test_no_organisation_default_leaves_the_turn_on_one_model_and_says_so():
+    turn = _model()
+
+    resolved = await _service([turn])._resolve_reader_model(
+        space=_space(turn), effective_config=None, turn_model=turn
+    )
+
+    assert resolved.model is None
+    assert resolved.reason == "no_tenant_default"

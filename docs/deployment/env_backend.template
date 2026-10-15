@@ -450,6 +450,10 @@ EXPORT_MAX_AGE_HOURS=24
 # DIGEST_TIMEOUT_SECONDS=300
 # DIGEST_MAX_SEGMENTS=120
 # DIGEST_CONCURRENCY=8
+# Most tokens of material one digest reads on the turn's own model when no
+# reader model applies. Unset: what fits one call of that model. 0: every
+# digest needs a reader model. Larger: the map path may run on the turn model.
+# DIGEST_TURN_MODEL_MAX_TOKENS=
 
 # Internal MCP Loopback URL
 # ----------------------------------------------------------------------------

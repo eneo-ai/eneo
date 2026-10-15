@@ -45,6 +45,7 @@ from eneo.files.file_reference import (
 from eneo.files.file_service import FileService, require_requested_files
 from eneo.files.generated_documents import GeneratedDocumentRejected
 from eneo.governance_policy.domain.policy_resolver import (
+    ReaderResolution,
     resolve_reader_model,
     select_effective_completion_model,
     select_effective_inline_file_text,
@@ -585,8 +586,9 @@ class AssistantService:
         space: "Space",
         effective_config: "EffectiveConfig | None",
         turn_model: "CompletionModel",
-    ) -> "CompletionModel | None":
-        """The reader model a digest on this turn may take its notes with."""
+    ) -> "ReaderResolution":
+        """The reader model a digest on this turn may take its notes with,
+        and why it is that one or none."""
         candidates = (
             await self.completion_model_crud_service.get_available_completion_models()
         )
@@ -600,7 +602,7 @@ class AssistantService:
             tenant_default=tenant_default,
             effective_config=effective_config,
             turn_model_id=turn_model.id,
-        ).model
+        )
 
     async def _resolve_effective_config(
         self, *, space: "Space", assistant: Assistant
@@ -3569,7 +3571,7 @@ class AssistantService:
 
         # The digest tools take their per-segment notes with the tenant's
         # reader model when this turn's space and policy allow it.
-        reader_model = await self._resolve_reader_model(
+        reader = await self._resolve_reader_model(
             space=space,
             effective_config=effective_config,
             turn_model=effective_completion_model,
@@ -3591,7 +3593,8 @@ class AssistantService:
                     completion_model_id=effective_completion_model.id,
                     reasoning_effort=effective_kwargs.reasoning_effort,
                     reasoning_enforced=model_kwargs_override is not None,
-                    reader_model_id=reader_model.id if reader_model else None,
+                    reader_model_id=reader.model.id if reader.model else None,
+                    reader_reason=reader.reason,
                 )
             return scoped_token
 

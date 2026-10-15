@@ -38,6 +38,7 @@ class TestDigestClaims:
             reasoning_effort="medium",
             reasoning_enforced=True,
             reader_model_id=reader_id,
+            reader_reason="inherited",
         )
 
         claims = digest_claims_from_token(token)
@@ -46,6 +47,7 @@ class TestDigestClaims:
         assert claims.reasoning_effort == "medium"
         assert claims.reasoning_enforced is True
         assert claims.reader_model_id == reader_id
+        assert claims.reader_reason == "inherited"
 
     def test_tokens_without_the_claims_resolve_to_nothing(self):
         from eneo.authentication.auth_service import AuthService
@@ -59,3 +61,5 @@ class TestDigestClaims:
         assert claims.completion_model_id is None
         assert claims.reasoning_effort is None
         assert claims.reasoning_enforced is False
+        assert claims.reader_model_id is None
+        assert claims.reader_reason is None

@@ -436,8 +436,12 @@ class _DigestAdapter:
         )
 
 
-def _patch_digest_files(monkeypatch, files, *, user_tenant_id):
-    """Files by id, a scripted adapter, and no real token or model lookups."""
+def _patch_digest_files(monkeypatch, files, *, user_tenant_id, reader_reason=None):
+    """Files by id, a scripted adapter, and no real token or model lookups.
+
+    ``reader_reason`` is the resolver's verdict the token would carry; the
+    default leaves the digest without a reader and under the turn-model cap.
+    """
     by_id = {file.id: file for file in files}
 
     @_acm
@@ -482,6 +486,7 @@ def _patch_digest_files(monkeypatch, files, *, user_tenant_id):
             count=lambda text: len(text.split()),
             budgets=DigestBudgets(segment_tokens=50, reduce_input_tokens=120),
             body_cap_chars=9_000,
+            reader_reason=reader_reason,
         )
 
     monkeypatch.setattr("eneo.internal_mcp.files.internal_tool_context", fake_context)
@@ -501,6 +506,7 @@ def _patch_digest_files(monkeypatch, files, *, user_tenant_id):
             digest_timeout_seconds=300,
             digest_max_segments=120,
             digest_concurrency=2,
+            digest_turn_model_max_tokens=None,
             mcp_tool_output_max_chars=32768,
         ),
     )
@@ -584,16 +590,39 @@ class TestDigestFiles:
 
     async def test_one_long_file_is_a_valid_digest(self, monkeypatch):
         tenant = uuid4()
-        # Past one read_file page, under the segment ceiling.
+        # Past one read_file page, under the segment ceiling; the turn model
+        # is the flagged reader, so the map path may run on it.
         long = _file(name="long.pdf", text="word " * 5_000, tenant_id=tenant)
-        adapter = _patch_digest_files(monkeypatch, [long], user_tenant_id=tenant)
+        adapter = _patch_digest_files(
+            monkeypatch, [long], user_tenant_id=tenant, reader_reason="same_as_turn"
+        )
 
         result = await digest_files("sum", [_signed_url(long.id, tenant)], ctx=object())
 
         header = result.content[0].text
         assert header.startswith("Digest of 1 attached files with m.\n[D1] long.pdf")
         assert result.meta["eneo.segments_planned"] > 1
+        assert result.meta["eneo.reader_reason"] == "same_as_turn"
         assert adapter.calls.count("You") == result.meta["eneo.segments_planned"]
+
+    async def test_without_a_reader_a_long_file_is_refused_before_any_call(
+        self, monkeypatch
+    ):
+        tenant = uuid4()
+        long = _file(name="long.pdf", text="word " * 5_000, tenant_id=tenant)
+        adapter = _patch_digest_files(
+            monkeypatch,
+            [long],
+            user_tenant_id=tenant,
+            reader_reason="no_tenant_default",
+        )
+
+        result = await digest_files("sum", [_signed_url(long.id, tenant)], ctx=object())
+
+        text = result.content[0].text
+        assert text.startswith("Too much text for a digest without a reader model")
+        assert "enable one under Models" in text
+        assert adapter.calls == []
 
     async def test_server_registers_the_tool_with_the_attachment_suffix(self):
         server = await build_files_mcp_server(

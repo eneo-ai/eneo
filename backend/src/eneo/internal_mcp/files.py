@@ -263,7 +263,10 @@ async def digest_files(
     read in full, so give a precise instruction and call it once.
 
     Cost: one model call per text segment plus the merges, up to several
-    minutes. The result starts with the files read ([D1], [D2], ...), a
+    minutes. Without a reader model only what fits one call of the
+    completion model is digested; a larger set is refused with the reason,
+    which the user needs to hear. The result starts with the files read
+    ([D1], [D2], ...), a
     coverage line and a compression line (words read into words answered);
     relay the body faithfully, state the coverage line when it is partial,
     cite the compression when asked how complete or reliable the digest is,

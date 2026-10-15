@@ -211,9 +211,22 @@ answer. When everything fits one call, a single call answers directly.
   at or above the space's security classification, and allowed by an enforced
   models policy; the space settings show the model that applies and why,
   including a default refused by classification and a space with no
-  tool-capable model. The ask path hands the resolved id to the loopback
-  token; usage is reported under `eneo.reader.*` and in the digest log line,
-  while the question row folds only the turn model's share.
+  tool-capable model. The ask path hands the resolved id and the resolver's
+  verdict (`reader_reason`) to the loopback token; usage is reported under
+  `eneo.reader.*` and in the digest log line, while the question row folds
+  only the turn model's share.
+- **No reader, no map path.** Without a reader the digest reads at most what
+  fits one call of the turn's model (the direct path, which costs what
+  reading the material outright would), so a large set never runs every
+  segment and merge on a model the user picked for quality rather than
+  price. A larger set is refused before any model call with the size, the
+  cap and why no reader is there (none enabled for the organisation, the
+  space's choice empty, the reader below the space's classification, or the
+  personal-space policy excluding it), so the assistant can relay the fix.
+  The turn model being the flagged reader lifts the cap, since reading on
+  it is then the cheap option. `DIGEST_TURN_MODEL_MAX_TOKENS` overrides the
+  cap: `0` requires a reader outright, a larger value lets the map path run
+  on the turn model.
 - **Coverage is explicit.** The result opens with the items read (`[D1]`,
   `[D2]`, ...) and a coverage line: `complete`, or `partial` with the reason
   (deadline, failed segments, excluded at reduce, notes / merge / answer cut

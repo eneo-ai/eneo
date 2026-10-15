@@ -324,6 +324,11 @@ class Settings(BaseSettings):
     digest_max_segments: int = 120
     # Concurrent model calls one digest issues.
     digest_concurrency: int = 8
+    # Most tokens of material one digest reads on the turn's own model when
+    # no reader model is available for the turn. Unset, it is what fits one
+    # call of that model (the direct path); 0 refuses every digest without a
+    # reader; a larger value lets the map path run on the turn model.
+    digest_turn_model_max_tokens: int | None = None
     # Upper bound for one rerank call to a provider, starting with the
     # registration-time connection test.
     rerank_request_timeout_seconds: int = 10
@@ -978,6 +983,16 @@ class Settings(BaseSettings):
                 "IMAGE_GENERATION_TIMEOUT_SECONDS must be greater than zero. "
                 "Current value: %s",
                 self.image_generation_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if (
+            self.digest_turn_model_max_tokens is not None
+            and self.digest_turn_model_max_tokens < 0
+        ):
+            logging.error(
+                "DIGEST_TURN_MODEL_MAX_TOKENS must not be negative. Current value: %s",
+                self.digest_turn_model_max_tokens,
             )
             sys.exit(1)
 

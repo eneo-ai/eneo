@@ -77,6 +77,9 @@ class DigestClaims(NamedTuple):
     # The tenant's reader model, already judged against the turn's space and
     # policy by the ask path; the digest takes its per-segment notes with it.
     reader_model_id: UUID | None = None
+    # Why the ask path settled on that reader, or on none (the resolver's
+    # ``ReaderReason``); absent on tokens from older callers.
+    reader_reason: str | None = None
 
 
 def digest_claims_from_token(token: str) -> DigestClaims:
@@ -91,11 +94,13 @@ def digest_claims_from_token(token: str) -> DigestClaims:
     raw_model = claims.get("completion_model_id")
     raw_effort = claims.get("reasoning_effort")
     raw_reader = claims.get("reader_model_id")
+    raw_reason = claims.get("reader_reason")
     return DigestClaims(
         completion_model_id=UUID(str(raw_model)) if raw_model else None,
         reasoning_effort=str(raw_effort) if raw_effort else None,
         reasoning_enforced=claims.get("reasoning_enforced") is True,
         reader_model_id=UUID(str(raw_reader)) if raw_reader else None,
+        reader_reason=str(raw_reason) if raw_reason else None,
     )
 
 
