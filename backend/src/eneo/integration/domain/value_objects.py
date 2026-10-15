@@ -7,6 +7,7 @@ dependency direction).
 """
 
 from enum import Enum
+from typing import Literal
 
 from typing_extensions import TypedDict
 
@@ -37,6 +38,14 @@ class SkippedDetail(TypedDict):
     reason: str
 
 
+ChangeKind = Literal["added", "updated", "deleted"]
+
+
+class ChangedDetail(TypedDict):
+    file: str
+    change: ChangeKind
+
+
 class SyncMetadata(TypedDict, total=False):
     files_processed: int
     files_deleted: int
@@ -48,6 +57,9 @@ class SyncMetadata(TypedDict, total=False):
     skipped_total: int
     skipped_truncated: bool
     skipped_details: list[SkippedDetail]
+    changed_total: int
+    changed_truncated: bool
+    changed_details: list[ChangedDetail]
     reconcile_warning: str
     trigger: str
     recovery: str

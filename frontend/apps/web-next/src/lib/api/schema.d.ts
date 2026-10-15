@@ -12064,6 +12064,16 @@ export interface components {
        */
       enabled: boolean;
     };
+    /** ChangedDetail */
+    ChangedDetail: {
+      /** File */
+      file: string;
+      /**
+       * Change
+       * @enum {string}
+       */
+      change: "added" | "updated" | "deleted";
+    };
     /**
      * ChatTurnDiagnostics
      * @description Body-free Skill activation diagnostics for one persisted chat turn.
@@ -21893,6 +21903,12 @@ export interface components {
       skipped_truncated?: boolean;
       /** Skipped Details */
       skipped_details?: components["schemas"]["SkippedDetail"][];
+      /** Changed Total */
+      changed_total?: number;
+      /** Changed Truncated */
+      changed_truncated?: boolean;
+      /** Changed Details */
+      changed_details?: components["schemas"]["ChangedDetail"][];
       /** Reconcile Warning */
       reconcile_warning?: string;
       /** Trigger */

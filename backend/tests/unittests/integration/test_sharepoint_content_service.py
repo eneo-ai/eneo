@@ -5,6 +5,7 @@ for SharePoint integrations.
 """
 
 import asyncio
+import hashlib
 import json
 import unicodedata
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -768,6 +769,24 @@ class TestBuildSummaryStats:
         assert len(summary["skipped_details"]) == 50
         assert summary["skipped_total"] == detail_count
         assert summary["skipped_truncated"] is truncated
+
+    @pytest.mark.parametrize(
+        ("change_count", "truncated"), [(50, False), (51, True)], ids=["cap", "over"]
+    )
+    def test_caps_changed_details_but_keeps_every_change_in_the_total(
+        self, service, change_count, truncated
+    ):
+        stats = service._initialize_stats()
+        for i in range(change_count):
+            service._count_outcome(stats, "added", f"f{i}.docx")
+
+        summary = service._build_summary_stats(stats)
+
+        assert summary["changed_details"] == [
+            {"file": f"f{i}.docx", "change": "added"} for i in range(50)
+        ]
+        assert summary["changed_total"] == change_count
+        assert summary["changed_truncated"] is truncated
 
     def test_carries_reconcile_warning_only_when_present(self, service):
         stats = service._initialize_stats()
@@ -1894,7 +1913,7 @@ class TestOneDriveFolderTraversal:
         stats = service._initialize_stats()
 
         with patch.object(
-            service, "_process_info_blob", AsyncMock(return_value="embedded")
+            service, "_process_info_blob", AsyncMock(return_value="added")
         ) as mock_process:
             await service._process_folder_results(
                 site_id="site-123",
@@ -2803,7 +2822,7 @@ class TestProcessPages:
         stats = service._initialize_stats()
 
         with patch.object(
-            service, "_process_info_blob", AsyncMock(return_value="embedded")
+            service, "_process_info_blob", AsyncMock(return_value="added")
         ) as process:
             await service._process_pages(
                 pages=[self._page("p-empty"), self._page("p-real")],
@@ -2830,7 +2849,7 @@ class TestProcessPages:
         stats = service._initialize_stats()
 
         with patch.object(
-            service, "_process_info_blob", AsyncMock(return_value="embedded")
+            service, "_process_info_blob", AsyncMock(return_value="added")
         ) as process:
             await service._process_pages(
                 pages=[self._page("p-bad"), self._page("p-real")],
@@ -3785,6 +3804,136 @@ class TestSiteRootExtractionOutcomes:
         ]
 
 
+def _indexed_blob(title: str, *, text: str | None = None) -> MagicMock:
+    """An active document; with ``text`` it already holds that content."""
+    return MagicMock(
+        title=title,
+        url=f"https://x/{title}",
+        size=5,
+        source_metadata=[],
+        content_hash=(
+            hashlib.sha256(text.encode()).digest() if text is not None else b"stale"
+        ),
+    )
+
+
+class TestChangedDetails:
+    """The sync log names the documents a run added, re-indexed or removed."""
+
+    def _index(self, mock_dependencies, documents: dict[str, MagicMock]) -> AsyncMock:
+        info_blob_service = mock_dependencies["info_blob_service"]
+        info_blob_service.repo.get_by_sharepoint_item_and_integration_knowledge = (
+            AsyncMock(
+                side_effect=lambda sharepoint_item_id, integration_knowledge_id: (
+                    documents.get(sharepoint_item_id)
+                )
+            )
+        )
+        info_blob_service.publish_info_blob_without_validation.return_value = MagicMock(
+            size=10
+        )
+        _size_ledger(mock_dependencies["integration_knowledge_repo"], 100)
+        return info_blob_service.repo
+
+    async def test_delta_sync_lists_added_updated_and_deleted_but_not_unchanged(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik = _real_integration_knowledge(delta_token="token-1")
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        repo = self._index(
+            mock_dependencies,
+            {
+                "item-b": _indexed_blob("b.docx"),
+                "item-c": _indexed_blob("c.docx", text="Body"),
+            },
+        )
+        repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[_indexed_blob("d.docx")]
+        )
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(
+                    return_value=(
+                        [
+                            _delta_file("item-a", "a.docx"),
+                            _delta_file("item-b", "b.docx"),
+                            _delta_file("item-c", "c.docx"),
+                            {"id": "item-d", "name": "d.docx", "deleted": {}},
+                        ],
+                        "token-2",
+                    )
+                ),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body")
+                ),
+            )
+            await service.process_delta_changes(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.sync_type == "delta"
+        assert sync_log.metadata["unchanged_items"] == 1
+        assert sync_log.metadata["changed_details"] == [
+            {"file": "a.docx", "change": "added"},
+            {"file": "b.docx", "change": "updated"},
+            {"file": "d.docx", "change": "deleted"},
+        ]
+        assert sync_log.metadata["changed_total"] == 3
+        assert sync_log.metadata["changed_truncated"] is False
+
+    async def test_full_sync_names_a_removed_orphan_by_its_document(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik = _real_integration_knowledge()
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        repo = self._index(mock_dependencies, {"item-b": _indexed_blob("b.docx")})
+        repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), "item-b"), (uuid4(), "item-gone")]
+        )
+        repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[_indexed_blob("Budget 2025.xlsx")]
+        )
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            _mock_graph_client(
+                mock_client_class,
+                get_drive_root_children=AsyncMock(
+                    return_value=[
+                        _delta_file("item-a", "a.docx"),
+                        _delta_file("item-b", "b.docx"),
+                    ]
+                ),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body")
+                ),
+            )
+            await service.pull_content(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        repo.delete_by_sharepoint_item_and_integration_knowledge.assert_awaited_once_with(
+            sharepoint_item_id="item-gone", integration_knowledge_id=ik.id
+        )
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.sync_type == "full"
+        assert sync_log.metadata["changed_details"] == [
+            {"file": "a.docx", "change": "added"},
+            {"file": "b.docx", "change": "updated"},
+            {"file": "Budget 2025.xlsx", "change": "deleted"},
+        ]
+        assert sync_log.metadata["changed_total"] == 3
+        assert sync_log.metadata["changed_truncated"] is False
+
+
 class TestSelectedItemTypePersistence:
     """The full sync corrects selected_item_type from Graph; the correction
     must reach the row even though later steps re-read the knowledge."""
@@ -3849,7 +3998,7 @@ class TestSelectedItemTypePersistence:
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
             patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="embedded")
+                service, "_process_info_blob", AsyncMock(return_value="added")
             ),
         ):
             _mock_graph_client(
@@ -3934,9 +4083,7 @@ class TestSyncProgress:
             with patch.object(
                 progress_service,
                 "_process_info_blob",
-                AsyncMock(
-                    side_effect=["embedded", "unchanged", "embedded", "embedded"]
-                ),
+                AsyncMock(side_effect=["added", "unchanged", "added", "added"]),
             ):
                 await progress_service.pull_content(
                     token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
@@ -3991,7 +4138,7 @@ class TestSyncProgress:
             with patch.object(
                 progress_service,
                 "_process_info_blob",
-                AsyncMock(side_effect=["embedded", "unchanged"]),
+                AsyncMock(side_effect=["added", "unchanged"]),
             ):
                 await progress_service.process_delta_changes(
                     token_id=mock_oauth_token.id, integration_knowledge_id=ik.id

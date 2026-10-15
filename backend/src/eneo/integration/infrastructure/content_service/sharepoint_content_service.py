@@ -33,6 +33,7 @@ from eneo.integration.infrastructure.content_service.sharepoint_metadata import 
     source_metadata_fingerprint,
 )
 from eneo.integration.infrastructure.content_service.types import (
+    ChangeKind,
     SharePointItem,
     SharePointTokenProtocol,
     SyncMetadata,
@@ -107,8 +108,11 @@ _RECONCILE_MIN_DELETE_FLOOR = 10
 # a library full of unsupported files cannot bloat those rows. skipped_total keeps
 # the true count.
 _MAX_SKIPPED_DETAILS = 50
+# changed_details is capped while the sync runs, since a first import adds every
+# file; changed_total keeps the true count.
+_MAX_CHANGED_DETAILS = 50
 
-BlobOutcome = Literal["embedded", "unchanged", "empty"]
+BlobOutcome = Literal["added", "updated", "unchanged", "empty"]
 
 
 class SimpleSharePointToken:
@@ -151,6 +155,13 @@ def _summary_counts(stats: SyncStats) -> dict[str, Any]:
     return summary
 
 
+def _record_change(stats: SyncStats, file: str, change: ChangeKind) -> None:
+    total = stats.get("changed_total", 0) + 1
+    stats["changed_total"] = total
+    if total <= _MAX_CHANGED_DETAILS:
+        stats.setdefault("changed_details", []).append({"file": file, "change": change})
+
+
 def _delta_worth_logging(summary: SyncStats) -> bool:
     """Delta runs are frequent; only keep the ones that changed something or warned."""
     return (
@@ -183,6 +194,9 @@ def _sync_metadata(
         )
         metadata["skipped_truncated"] = stats.get("skipped_truncated", False)
         metadata["skipped_details"] = stats.get("skipped_details", [])
+        metadata["changed_total"] = stats.get("changed_total", 0)
+        metadata["changed_truncated"] = stats.get("changed_truncated", False)
+        metadata["changed_details"] = stats.get("changed_details", [])
         reconcile_warning = stats.get("reconcile_warning")
         if reconcile_warning:
             metadata["reconcile_warning"] = reconcile_warning
@@ -1422,6 +1436,8 @@ class SharePointContentService:
             )
             return "unchanged"
 
+        outcome: BlobOutcome = "added" if existing_blob is None else "updated"
+
         info_blob_add = InfoBlobAdd(
             title=title,
             user_id=self.user.id,
@@ -1445,7 +1461,7 @@ class SharePointContentService:
         await self._adjust_size(
             integration_knowledge, new_blob_size - previous_blob_size
         )
-        return "embedded"
+        return outcome
 
     async def _adjust_size(
         self, integration_knowledge: "IntegrationKnowledge", delta: int
@@ -1460,8 +1476,9 @@ class SharePointContentService:
     def _count_outcome(
         stats: SyncStats, outcome: BlobOutcome, item_name: str, *, page: bool = False
     ) -> None:
-        if outcome == "embedded":
+        if outcome == "added" or outcome == "updated":
             stats["pages_processed" if page else "files_processed"] += 1
+            _record_change(stats, item_name, outcome)
         elif outcome == "unchanged":
             stats["unchanged_items"] += 1
         else:
@@ -1497,6 +1514,10 @@ class SharePointContentService:
                     safe_int(getattr(blob, "size", 0)) for blob in valid_deleted_blobs
                 )
                 await self._adjust_size(integration_knowledge, -deleted_size)
+            for blob in valid_deleted_blobs:
+                # Orphan and subtree cleanup only know the item id; the blob
+                # still carries the document's name.
+                _record_change(stats, blob.title or item_name, "deleted")
 
             deleted_count = len(valid_deleted_blobs)
             if deleted_count:
@@ -2197,10 +2218,15 @@ class SharePointContentService:
             "unchanged_items": 0,
             "skipped_items": 0,
             "skipped_details": [],
+            "changed_details": [],
+            "changed_total": 0,
         }
 
     def _build_summary_stats(self, stats: SyncStats) -> SyncStats:
         skipped_details = stats.get("skipped_details", [])
+        all_changed_details = stats.get("changed_details", [])
+        changed_details = all_changed_details[:_MAX_CHANGED_DETAILS]
+        changed_total = stats.get("changed_total", len(all_changed_details))
         summary: SyncStats = {
             "files_processed": stats.get("files_processed", 0),
             "files_deleted": stats.get("files_deleted", 0),
@@ -2212,6 +2238,9 @@ class SharePointContentService:
             "skipped_total": stats.get("skipped_items", 0),
             "skipped_truncated": len(skipped_details) > _MAX_SKIPPED_DETAILS,
             "skipped_details": skipped_details[:_MAX_SKIPPED_DETAILS],
+            "changed_total": changed_total,
+            "changed_truncated": changed_total > len(changed_details),
+            "changed_details": changed_details,
         }
         reconcile_warning = stats.get("reconcile_warning")
         if reconcile_warning:
