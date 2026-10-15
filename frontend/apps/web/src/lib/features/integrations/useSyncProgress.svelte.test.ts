@@ -107,7 +107,7 @@ describe("useSyncProgress", () => {
     unmount();
   });
 
-  it("refreshes the space when a sync finishes and once more shortly after", async () => {
+  it("refreshes the space once when a sync finishes", async () => {
     api.getSyncProgress.mockResolvedValueOnce({ items: [entry("a")] });
     const { unmount } = render(SyncProgressTestHost);
     await vi.advanceTimersByTimeAsync(0);
@@ -115,13 +115,14 @@ describe("useSyncProgress", () => {
 
     await vi.advanceTimersByTimeAsync(2_000);
     expect(api.refreshCurrentSpace).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(3_000);
-    expect(api.refreshCurrentSpace).toHaveBeenCalledTimes(2);
     expect(api.refreshCurrentSpace).toHaveBeenCalledWith("knowledge");
+    // The progress is cleared after the sync commits, so one refresh is enough.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.refreshCurrentSpace).toHaveBeenCalledTimes(1);
     unmount();
   });
 
-  it("stops polling and drops the second refresh when unmounted", async () => {
+  it("stops polling when unmounted", async () => {
     api.getSyncProgress.mockResolvedValueOnce({ items: [entry("a")] });
     const { unmount } = render(SyncProgressTestHost);
     await vi.advanceTimersByTimeAsync(2_000);

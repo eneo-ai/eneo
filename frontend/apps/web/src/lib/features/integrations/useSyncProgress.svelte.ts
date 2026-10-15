@@ -5,8 +5,6 @@ import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
 import type { IntegrationSyncProgress } from "./syncProgress";
 import { SyncProgressTracker } from "./SyncProgressTracker.svelte";
 
-const SETTLE_REFRESH_DELAY_MS = 3_000;
-
 type Options = {
   /** Poll only while this holds, e.g. while the tab showing the progress is open. */
   active?: () => boolean;
@@ -24,24 +22,15 @@ export function useSyncProgress({ active = () => true }: Options = {}): SyncProg
     refreshCurrentSpace
   } = getSpacesManager();
   const space = fromStore(currentSpace);
-  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- timer handles, never rendered
-  const settleTimers = new Set<ReturnType<typeof setTimeout>>();
 
   const tracker = new SyncProgressTracker({
     load: () =>
       eneo.integrations.knowledge.getSyncProgress({ space: get(currentSpace) }) as Promise<{
         items: IntegrationSyncProgress[];
       }>,
-    // The worker drops the progress just before it commits the sync's results;
-    // a second refresh shortly after picks up what the first one can miss.
-    onSettled: () => {
-      void refreshCurrentSpace("knowledge");
-      const timer = setTimeout(() => {
-        settleTimers.delete(timer);
-        void refreshCurrentSpace("knowledge");
-      }, SETTLE_REFRESH_DELAY_MS);
-      settleTimers.add(timer);
-    }
+    // The worker clears a sync's progress only after its transaction commits, so
+    // the space read now already holds what the sync wrote.
+    onSettled: () => void refreshCurrentSpace("knowledge")
   });
 
   let visible = $state(true);
@@ -60,8 +49,6 @@ export function useSyncProgress({ active = () => true }: Options = {}): SyncProg
       document.removeEventListener("visibilitychange", onVisibilityChange);
       unsubscribe();
       tracker.stop();
-      for (const timer of settleTimers) clearTimeout(timer);
-      settleTimers.clear();
     };
   });
 
