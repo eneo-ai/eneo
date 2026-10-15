@@ -98,7 +98,7 @@ describe("FlowValidationBanner server issues", () => {
 
     expect(screen.getByText(m.flow_error_flow_assistant_model_provider_required())).toBeTruthy();
     await fireEvent.click(screen.getByRole("button", { name: m.flow_validation_go_to_step() }));
-    expect(onNavigateToStep).toHaveBeenCalledWith("step-3");
+    expect(onNavigateToStep).toHaveBeenCalledWith("step-3", null);
   });
 
   it("says a read of free-text run input on a form or upload flow is not received, not that a step is unusable", async () => {
