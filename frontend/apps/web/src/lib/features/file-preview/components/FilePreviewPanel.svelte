@@ -4,6 +4,7 @@
   import { setFileImageUrls } from "$lib/components/markdown/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { pickFileIcon } from "$lib/core/formatting/pickFileIcon";
+  import { fileExtension } from "$lib/core/formatting/fileExtension";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { m } from "$lib/paraglide/messages";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -54,9 +55,7 @@
   const Icon = $derived(file ? pickFileIcon(file.mimetype) : FileText);
   // The downloaded file's size; `size` counts the extracted text of a document.
   const bytes = $derived(file ? (file.original_size ?? file.size) : 0);
-  const extension = $derived(
-    file?.name.includes(".") ? (file.name.split(".").pop() ?? "").toUpperCase() : ""
-  );
+  const extension = $derived(file ? fileExtension(file.name) : "");
   // A Markdown document is read in Eneo and headed by its title, as it was
   // while it was written.
   const title = $derived.by(() => {

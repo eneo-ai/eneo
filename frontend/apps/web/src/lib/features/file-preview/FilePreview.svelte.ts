@@ -136,9 +136,50 @@ export class FilePreview {
    * cover goes; a file that takes the panel asks the cover to leave.
    */
   cover = $state.raw<PreviewCover | null>(null);
+  /**
+   * The panel's overview of everything the conversation has to show, with the
+   * section it opened on and the element to hand the focus back to. It lives
+   * here so a file bundle in a message can open it as the panel's own controls
+   * do; the layout decides how it is shown.
+   */
+  overview = $state.raw<{ section: "uploads" | null; opener: string | null } | null>(null);
 
   constructor(urls: AttachmentUrls) {
     this.#urls = urls;
+  }
+
+  /** Whether the panel shows the overview. */
+  get overviewShown() {
+    return this.overview !== null;
+  }
+
+  /**
+   * Shows the overview, open at `section`; `opener` gets the focus back when
+   * it closes. A file or view on show leaves the panel first.
+   */
+  showOverview(section: "uploads" | null = null, opener?: HTMLElement | null) {
+    this.cover?.leave();
+    if (this.shown) this.close();
+    if (opener && !opener.id) opener.id = `preview-opener-${crypto.randomUUID()}`;
+    this.overview = { section, opener: opener?.id ?? null };
+  }
+
+  /** Closes the overview; the focus returns to its opener unless told otherwise. */
+  closeOverview(restoreFocus = true) {
+    const opener = this.overview?.opener;
+    if (this.overview === null) return;
+    this.overview = null;
+    if (restoreFocus && opener && typeof document !== "undefined") {
+      document.getElementById(opener)?.focus();
+    }
+  }
+
+  /** Whether `element` is what opened the overview on show. */
+  isOverviewOpener(element: HTMLElement | null) {
+    // The overview is read first: an element without an id yet must still
+    // leave a dependency on it, or the answer never updates once it opens.
+    const opener = this.overview?.opener;
+    return !!opener && !!element && element.id === opener;
   }
 
   /** Whether a file has a renderer; without one it can only be downloaded. */

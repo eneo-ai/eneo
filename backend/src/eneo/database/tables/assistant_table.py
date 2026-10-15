@@ -6,7 +6,7 @@ from sqlalchemy import ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.ai_models_table import CompletionModels, RerankModels
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.base_class import BaseCrossReference, BasePublic
 from eneo.database.tables.capabilities_table import AssistantCapabilities
@@ -72,6 +72,13 @@ class Assistants(BasePublic):
     )
     icon_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Icons.id, ondelete="SET NULL"), nullable=True
+    )
+    # The reranker the assistant's retrieval uses; NULL = vector order only.
+    # SET NULL: a reranker can be removed while assistants point at it, they
+    # fall back to vector order (#1035). Read by the retrieval step, written
+    # by the assistant editor; both arrive in later tasks.
+    rerank_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(RerankModels.id, ondelete="SET NULL"), nullable=True, index=True
     )
 
     # relationships
