@@ -320,6 +320,8 @@ from eneo.prompts.prompt_repo import PromptRepository
 from eneo.prompts.prompt_service import PromptService
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.redis.connection import build_redis_pool_kwargs
+from eneo.rerank_models.application import RerankModelCRUDService
+from eneo.rerank_models.domain import RerankModelRepository
 from eneo.roles.roles_repo import RolesRepository
 from eneo.roles.roles_service import RolesService
 from eneo.scim.repositories.token_repository import ScimTokenRepository
@@ -717,6 +719,9 @@ class Container(containers.DeclarativeContainer):
     image_model_repo = providers.Factory(
         ImageModelRepository, session=session, user=user
     )
+    rerank_model_repo = providers.Factory(
+        RerankModelRepository, session=session, user=user
+    )
     embedding_model_repo = providers.Factory(
         AdminEmbeddingModelsService, session=session
     )
@@ -954,6 +959,12 @@ class Container(containers.DeclarativeContainer):
         ImageModelCRUDService,
         user=user,
         image_model_repo=image_model_repo,
+        security_classification_repo=security_classification_repo,
+    )
+    rerank_model_crud_service = providers.Factory(
+        RerankModelCRUDService,
+        user=user,
+        rerank_model_repo=rerank_model_repo,
         security_classification_repo=security_classification_repo,
     )
     embedding_model_crud_service = providers.Factory(

@@ -6,7 +6,11 @@
   import AttachmentUploadIconButton from "$lib/features/attachments/components/AttachmentUploadIconButton.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as PromptInput from "$lib/components/ai-elements/prompt-input/index.js";
-  import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import {
+    getAttachmentManager,
+    UploadsNotReadyError
+  } from "$lib/features/attachments/AttachmentManager";
+  import { derived } from "svelte/store";
   import MentionInput from "../mentions/MentionInput.svelte";
   import { initMentionInput } from "../mentions/MentionInput";
   import MentionButton from "../mentions/MentionButton.svelte";
@@ -55,10 +59,11 @@
   const { tenant, user } = getAppContext();
 
   const {
-    state: { attachments, isUploading, uploadError },
+    state: { attachments, uploadError },
     queueValidUploads,
-    clearUploads,
-    clearUploadError
+    clearUploadError,
+    removeUploads,
+    awaitUploads
   } = getAttachmentManager();
 
   const {
@@ -177,6 +182,9 @@
 
   function queueUploadsFromClipboard(event: ClipboardEvent) {
     if (!event.clipboardData?.files || event.clipboardData.files.length === 0) return;
+    // A message in flight owns the attachment list; files pasted now would be
+    // dropped with the sent batch.
+    if (chat.askQuestion.isLoading || sendPending) return;
     // Validation errors surface inline via the manager's uploadError store.
     queueValidUploads([...event.clipboardData.files]);
   }
@@ -203,8 +211,26 @@
     if (isAskingDisabled) return;
     sendPending = true;
     inputError = null;
-    const files = $attachments.map((file) => file?.fileRef).filter((file) => file !== undefined);
-    abortController = new AbortController();
+    // The controller is kept locally too: by the time the catch below runs a
+    // later send may have replaced the shared one.
+    const controller = new AbortController();
+    abortController = controller;
+    // Attachments still uploading do not hold the message back. It leaves the
+    // composer at once and waits in the conversation, mirroring their
+    // progress, until all of them are on the server.
+    const sentIds = $attachments.map((attachment) => attachment.id);
+    const allUploaded = $attachments.every(
+      (attachment) => attachment.status === "completed" && attachment.fileRef
+    );
+    const files = allUploaded
+      ? $attachments.map((attachment) => attachment.fileRef).filter((file) => file !== undefined)
+      : {
+          ids: sentIds,
+          subscribe: derived(attachments, (list) =>
+            list.filter((attachment) => sentIds.includes(attachment.id))
+          ).subscribe,
+          ready: () => awaitUploads(sentIds, controller.signal)
+        };
     const tools =
       $mentions.length > 0
         ? {
@@ -237,15 +263,18 @@
         files,
         tools,
         toolApprovalEnabled,
-        abortController,
+        controller,
         disabledMcpServerIds.size > 0 ? Array.from(disabledMcpServerIds) : undefined
       );
-      clearUploads();
+      removeUploads(sentIds);
     } catch (error: unknown) {
       // Put the draft back unless the user has already started a new one
       // while the request was pending; that newer input wins.
       if (isMentionInputEmpty()) restoreMentionInput(draft);
       if (filePreview && !filePreview.quote) filePreview.quote = sentQuote;
+      // A cancelled send is not an error, and a failed upload has already
+      // been reported by the attachment manager next to its list.
+      if (controller.signal.aborted || error instanceof UploadsNotReadyError) return;
       const contextError = getContextErrorInfo(error);
       if (contextError) {
         if (contextError.used !== undefined && contextError.limit !== undefined) {
@@ -501,7 +530,6 @@
     isConversationSubmitDisabled({
       isLoading: chat.askQuestion.isLoading,
       sendPending,
-      isUploading: $isUploading,
       hasContent: $question !== "" || $attachments.length > 0,
       hasCompletionModel: chat.hasCompletionModel,
       estimatedExceedsContext: chat.willExceedContext
