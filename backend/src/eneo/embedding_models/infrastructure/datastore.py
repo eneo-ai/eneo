@@ -1,6 +1,5 @@
 import asyncio
 import time
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
@@ -75,45 +74,6 @@ def autocut(y_values: list[float], cutoff: int = 2) -> int:
                 return i
 
     return len(y_values)
-
-
-@dataclass(frozen=True)
-class _SearchScope:
-    """The sources a search covers, as the chunk repository filters on them."""
-
-    group_ids: list[UUID]
-    website_ids: list[UUID]
-    integration_knowledge_ids: list[UUID]
-    info_blob_ids: Optional[list[UUID]]
-
-    @classmethod
-    def build(
-        cls,
-        collections: Optional[list["Collection"]],
-        websites: Optional[list["Website"]],
-        integration_knowledge_list: Optional[list[IntegrationKnowledge]],
-        info_blob_ids: Optional[list[UUID]],
-    ) -> "_SearchScope":
-        scope = cls(
-            group_ids=[group.id for group in (collections or [])],
-            website_ids=[website.id for website in (websites or [])],
-            integration_knowledge_ids=[
-                i.id for i in (integration_knowledge_list or [])
-            ],
-            info_blob_ids=info_blob_ids,
-        )
-        # The scope buckets are OR-ed in SQL, so combining a document with its
-        # own sources would widen the search back out to those sources instead
-        # of narrowing it to the document. On an authorization-adjacent
-        # predicate that footgun is worth making unconstructible.
-        if scope.info_blob_ids and (
-            scope.group_ids or scope.website_ids or scope.integration_knowledge_ids
-        ):
-            raise ValueError(
-                "info_blob_ids narrows a search to single documents and cannot be "
-                "combined with collection, website or integration scopes."
-            )
-        return scope
 
 
 class Datastore:
@@ -250,24 +210,45 @@ class Datastore:
     ) -> list[InfoBlobChunkInDBWithScore]:
         """Nearest chunks to ``search_string`` within the given scope.
 
-        With ``rerank`` the vector search fetches the spec's candidate count
-        instead of ``num_chunks``, the reranker scores the spec's query against
-        each candidate, and all candidates come back in reranker order with
+        With ``rerank`` the reranker scores the spec's query against the K best
+        candidates, K from the spec, and those come back in reranker order with
         reranker scores; ``autocut`` does not apply. A reranker failure yields
         the result the call would have produced without the spec.
         """
-        scope = _SearchScope.build(
-            collections, websites, integration_knowledge_list, info_blob_ids
-        )
+        group_ids = [group.id for group in (collections or [])]
+        website_ids = [website.id for website in (websites or [])]
+        integration_knowledge_ids = [i.id for i in (integration_knowledge_list or [])]
+
+        # The scope buckets are OR-ed in SQL, so combining a document with its
+        # own sources would widen the search back out to those sources instead
+        # of narrowing it to the document. On an authorization-adjacent
+        # predicate that footgun is worth making unconstructible.
+        if info_blob_ids and (group_ids or website_ids or integration_knowledge_ids):
+            raise ValueError(
+                "info_blob_ids narrows a search to single documents and cannot be "
+                "combined with collection, website or integration scopes."
+            )
+
         limit = num_chunks if num_chunks is not None else 30
-        fetch = rerank.candidate_count(limit) if rerank is not None else limit
+        # With a spec the search also covers the reranker's candidates, so the
+        # fallback on a reranker failure is the same result as without a spec.
+        candidates = rerank.candidate_count(limit) if rerank is not None else 0
 
         start = time.time()
-        embedding = await self.create_embeddings_service.get_embedding_for_query(
-            model=embedding_model, query=search_string
+        search_string_embedding = (
+            await self.create_embeddings_service.get_embedding_for_query(
+                model=embedding_model, query=search_string
+            )
         )
         step_1 = time.time()
-        semantic_results = await self._nearest(embedding, scope, fetch, min_score)
+        semantic_results = await self.chunk_repo.semantic_search(
+            search_string_embedding,
+            group_ids=group_ids,
+            website_ids=website_ids,
+            integration_knowledge_ids=integration_knowledge_ids,
+            info_blob_ids=info_blob_ids,
+            limit=max(limit, candidates),
+        )
         end = time.time()
 
         logger.debug(
@@ -275,26 +256,26 @@ class Datastore:
             f" Search step: {end - step_1}, Total: {end - start}"
         )
 
+        # Vector search returns nearest neighbors unconditionally; a relevance
+        # floor lets callers drop chunks that merely happen to be the least
+        # distant (e.g. retrieval triggered by an off-topic message). Score
+        # scales are embedding-model-dependent, so there is no global default.
+        if min_score is not None:
+            semantic_results = [
+                res for res in semantic_results if res.score >= min_score
+            ]
+
         if rerank is not None:
-            reranked = await self._rerank(rerank, semantic_results)
+            reranked = await self._rerank(rerank, semantic_results[:candidates])
             if reranked is not None:
                 logger.info(
                     f"Reranked search: Embed step: {step_1 - start},"
                     f" Search step: {end - step_1},"
                     f" Rerank step: {time.time() - end},"
-                    f" candidates: {len(semantic_results)}, model: {rerank.model_name}"
+                    f" candidates: {len(reranked)}, model: {rerank.model_name}"
                 )
                 return reranked
-            # The reranker failed: the result the call would have produced
-            # without the spec, so the user still gets an answer. The capped
-            # candidate set may be smaller than the caller asked for; then the
-            # vector search is repeated with the caller's limit.
-            if fetch < limit:
-                semantic_results = await self._nearest(
-                    embedding, scope, limit, min_score
-                )
-            else:
-                semantic_results = semantic_results[:limit]
+            semantic_results = semantic_results[:limit]
 
         scores = [res.score for res in semantic_results]
 
@@ -303,30 +284,6 @@ class Datastore:
             return semantic_results[:cut_point]
 
         return semantic_results
-
-    async def _nearest(
-        self,
-        embedding: list[float],
-        scope: _SearchScope,
-        limit: int,
-        min_score: Optional[float],
-    ) -> list[InfoBlobChunkInDBWithScore]:
-        """The ``limit`` nearest chunks in scope, above the relevance floor."""
-        results = await self.chunk_repo.semantic_search(
-            embedding,
-            group_ids=scope.group_ids,
-            website_ids=scope.website_ids,
-            integration_knowledge_ids=scope.integration_knowledge_ids,
-            info_blob_ids=scope.info_blob_ids,
-            limit=limit,
-        )
-        # Vector search returns nearest neighbors unconditionally; a relevance
-        # floor lets callers drop chunks that merely happen to be the least
-        # distant (e.g. retrieval triggered by an off-topic message). Score
-        # scales are embedding-model-dependent, so there is no global default.
-        if min_score is not None:
-            results = [res for res in results if res.score >= min_score]
-        return results
 
     @staticmethod
     async def _rerank(

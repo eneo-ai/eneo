@@ -120,7 +120,7 @@ class TestWithSpec:
             rerank=_spec(reranker),
         )
 
-        # K = min(3 * 1, 5) candidates, not the caller's n.
+        # K = min(3 * 1, 5) candidates; the search covers max(n, K) rows.
         assert datastore.chunk_repo.semantic_search.await_args.kwargs["limit"] == 3
         # The reranker sees the spec's query and the candidates' texts in order.
         assert reranker.calls == [("the question", ["a", "b", "c"])]
@@ -131,18 +131,25 @@ class TestWithSpec:
             ("a", 0.2),
         ]
 
-    async def test_candidate_count_is_capped(self):
+    async def test_the_reranker_sees_only_the_capped_candidates(self):
+        """The newer retrieval version asks for hundreds of chunks; the search
+        still covers them (for the fallback) but the reranker scores K."""
         datastore = _datastore(VECTOR_ORDER)
+        reranker = FakeReranker({"a": 1, "b": 1, "c": 1})
 
-        await datastore.semantic_search(
+        result = await datastore.semantic_search(
             "q",
             embedding_model=TEST_COLLECTION.embedding_model,
             collections=[TEST_COLLECTION],
             num_chunks=320,
-            rerank=_spec(FakeReranker({"a": 1, "b": 1, "c": 1})),
+            rerank=RerankSpec(
+                reranker=reranker, query="q", model_name="m", max_candidates=2
+            ),
         )
 
-        assert datastore.chunk_repo.semantic_search.await_args.kwargs["limit"] == 5
+        assert datastore.chunk_repo.semantic_search.await_args.kwargs["limit"] == 320
+        assert reranker.calls == [("q", ["a", "b"])]
+        assert [c.text for c in result] == ["a", "b"]
 
     async def test_autocut_is_not_applied_with_a_spec(self):
         datastore = _datastore(VECTOR_ORDER)
@@ -232,44 +239,10 @@ class TestFallback:
         ]
 
 
-class TestFallbackRefetch:
-    async def test_a_capped_candidate_set_is_refetched_with_the_callers_limit(self):
-        """num_chunks above the cap: the reranker saw K rows, the fallback must
-        not hand back fewer than the same search without a spec would."""
-        datastore = _datastore(VECTOR_ORDER[:2])
-        datastore.chunk_repo.semantic_search = AsyncMock(
-            side_effect=[VECTOR_ORDER[:2], VECTOR_ORDER]
-        )
-        reranker = MagicMock()
-        reranker.rerank = AsyncMock(side_effect=RuntimeError("down"))
-        spec = RerankSpec(
-            reranker=reranker,
-            query="q",
-            model_name="m",
-            candidate_factor=1,
-            max_candidates=2,
-        )
-
-        result = await datastore.semantic_search(
-            "q",
-            embedding_model=TEST_COLLECTION.embedding_model,
-            collections=[TEST_COLLECTION],
-            num_chunks=3,
-            rerank=spec,
-        )
-
-        limits = [
-            call.kwargs["limit"]
-            for call in datastore.chunk_repo.semantic_search.await_args_list
-        ]
-        assert limits == [2, 3]
-        assert [c.text for c in result] == ["a", "b", "c"]
-        # The embedding is reused, not recomputed.
-        assert (
-            datastore.create_embeddings_service.get_embedding_for_query.await_count == 1
-        )
-
-    async def test_no_refetch_when_the_candidate_set_covers_the_limit(self):
+class TestFallbackCoversTheCallersLimit:
+    async def test_a_capped_candidate_set_does_not_shrink_the_fallback(self):
+        """num_chunks above the cap: the reranker saw K rows, the fallback hands
+        back what the same search without a spec would, from the one query."""
         datastore = _datastore(VECTOR_ORDER)
         reranker = MagicMock()
         reranker.rerank = AsyncMock(side_effect=RuntimeError("down"))
@@ -278,9 +251,13 @@ class TestFallbackRefetch:
             "q",
             embedding_model=TEST_COLLECTION.embedding_model,
             collections=[TEST_COLLECTION],
-            num_chunks=1,
-            rerank=_spec(reranker),
+            num_chunks=3,
+            rerank=RerankSpec(
+                reranker=reranker, query="q", model_name="m", max_candidates=2
+            ),
         )
 
         assert datastore.chunk_repo.semantic_search.await_count == 1
-        assert [c.text for c in result] == ["a"]
+        assert datastore.chunk_repo.semantic_search.await_args.kwargs["limit"] == 3
+        assert reranker.rerank.await_args.args[1] == ["a", "b"]
+        assert [c.text for c in result] == ["a", "b", "c"]
