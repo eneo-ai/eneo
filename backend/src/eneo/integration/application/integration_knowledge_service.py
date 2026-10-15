@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID, uuid4
 
@@ -26,7 +27,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
-from eneo.roles.permissions import Permission
+from eneo.roles.permissions import Permission, validate_permission
 from eneo.spaces.space_repo import INTEGRATION_KNOWLEDGE_SOURCE
 
 if TYPE_CHECKING:
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
         TenantSharePointApp,
     )
     from eneo.integration.domain.repositories.integration_knowledge_repo import (
+        IntegrationKnowledgePlacement,
         IntegrationKnowledgeRepository,
     )
     from eneo.integration.domain.repositories.oauth_token_repo import (
@@ -85,6 +87,19 @@ class BatchIntegrationKnowledgeCreateResult(TypedDict):
     integration_knowledge_id: UUID | None
     job: "JobInDb | None"
     error: str | None
+
+
+@dataclass(frozen=True)
+class PlacedIntegrationKnowledge:
+    placement: "IntegrationKnowledgePlacement"
+    knowledge: IntegrationKnowledge
+
+
+@dataclass(frozen=True)
+class TenantIntegrationKnowledgeOverview:
+    items: list[PlacedIntegrationKnowledge]
+    personal_items: int
+    personal_failing: int
 
 
 class SubscriptionCleanupInfo(TypedDict):
@@ -170,6 +185,44 @@ class IntegrationKnowledgeService:
             if actor.can_read_space() and actor.can_read_integrations():
                 return
         raise NotFoundException("Integration knowledge not found")
+
+    async def tenant_overview(self) -> TenantIntegrationKnowledgeOverview:
+        """Every item of the tenant's shared and organization spaces, for admins.
+
+        Personal spaces can hold a person's own OneDrive folders, so their items
+        are only counted.
+        """
+        validate_permission(self.user, Permission.ADMIN)
+        placements = await self.integration_knowledge_repo.list_placements(
+            self.user.tenant_id
+        )
+        personal = [placement for placement in placements if placement.personal]
+        listed = [placement for placement in placements if not placement.personal]
+        knowledge = (
+            {
+                item.id: item
+                for item in await self.integration_knowledge_repo.get_by_ids(
+                    [placement.integration_knowledge_id for placement in listed]
+                )
+            }
+            if listed
+            else {}
+        )
+        return TenantIntegrationKnowledgeOverview(
+            # An item removed between the two reads is left out.
+            items=[
+                PlacedIntegrationKnowledge(
+                    placement=placement,
+                    knowledge=knowledge[placement.integration_knowledge_id],
+                )
+                for placement in listed
+                if placement.integration_knowledge_id in knowledge
+            ],
+            personal_items=len(personal),
+            personal_failing=sum(
+                1 for placement in personal if placement.last_sync_status == "error"
+            ),
+        )
 
     async def get_readable_knowledge(
         self, space_id: UUID, integration_knowledge_id: UUID

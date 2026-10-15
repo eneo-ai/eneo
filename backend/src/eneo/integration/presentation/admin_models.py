@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from eneo.integration.presentation.models import IntegrationKnowledgePublic
+
 
 def _empty_uuid_list() -> list[UUID]:
     return []
@@ -226,3 +228,38 @@ class ServiceAccountAuthCallback(BaseModel):
         ..., description="OAuth authorization code from Microsoft callback"
     )
     state: str = Field(..., description="OAuth state parameter for verification")
+
+
+class AdminIntegrationKnowledgeSpace(BaseModel):
+    id: UUID
+    name: str
+    organization: bool = Field(
+        ..., description="True for the tenant's organization space"
+    )
+
+
+class AdminIntegrationKnowledgeItem(BaseModel):
+    space: AdminIntegrationKnowledgeSpace = Field(
+        ..., description="The space that owns the item"
+    )
+    knowledge: IntegrationKnowledgePublic
+
+
+class AdminPersonalIntegrationKnowledge(BaseModel):
+    items: int = Field(..., description="Items in personal spaces")
+    failing: int = Field(
+        ..., description="Items in personal spaces whose latest sync failed"
+    )
+
+
+class AdminIntegrationKnowledgeOverview(BaseModel):
+    items: list[AdminIntegrationKnowledgeItem] = Field(
+        ...,
+        description="Every item of the shared and organization spaces, ordered by "
+        "space name and then creation",
+    )
+    personal: AdminPersonalIntegrationKnowledge = Field(
+        ...,
+        description="Personal spaces are counted, not listed: they can hold a "
+        "person's own OneDrive folders",
+    )

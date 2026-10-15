@@ -485,6 +485,21 @@ export function initIntegrations(client) {
     },
 
     admin: {
+      /**
+       * Every integration knowledge item in the tenant's shared and organization
+       * spaces, each with its space and sync status. Items in personal spaces are
+       * only counted (`personal.items`, `personal.failing`). Requires the admin
+       * permission.
+       * @returns {Promise<import("../types/schema").components["schemas"]["AdminIntegrationKnowledgeOverview"]>}
+       * @throws {EneoError}
+       * */
+      knowledgeOverview: async () => {
+        const res = await client.fetch("/api/v1/admin/integrations/knowledge/", {
+          method: "get"
+        });
+        return res;
+      },
+
       sharepoint: {
         /**
          * List all SharePoint webhook subscriptions

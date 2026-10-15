@@ -179,3 +179,29 @@ test("reading a space's sync progress reads the space-wide progress endpoint", a
     }
   ]);
 });
+
+test("the admin knowledge overview reads the tenant-wide admin endpoint", async () => {
+  const calls = [];
+  const overview = {
+    items: [
+      {
+        space: { id: "space-1", name: "Barn och utbildning", organization: false },
+        knowledge: { id: "ik-1", name: "Protokoll", metadata: { last_sync_status: "error" } }
+      }
+    ],
+    personal: { items: 4, failing: 1 }
+  };
+  const integrations = initIntegrations({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return overview;
+    }
+  });
+
+  const result = await integrations.admin.knowledgeOverview();
+
+  assert.deepEqual(result, overview);
+  assert.deepEqual(calls, [
+    { endpoint: "/api/v1/admin/integrations/knowledge/", request: { method: "get" } }
+  ]);
+});

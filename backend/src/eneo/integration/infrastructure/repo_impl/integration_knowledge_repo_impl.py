@@ -14,10 +14,12 @@ from eneo.database.tables.integration_table import (
 from eneo.database.tables.integration_table import (
     UserIntegration as UserIntegrationDBModel,
 )
+from eneo.database.tables.spaces_table import Spaces
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.integration.domain.repositories.integration_knowledge_repo import (
+    IntegrationKnowledgePlacement,
     IntegrationKnowledgeRepository,
 )
 from eneo.integration.infrastructure.mappers.integration_knowledge_mapper import (
@@ -99,12 +101,51 @@ class IntegrationKnowledgeRepoImpl(
         )
         return await self._entities_for((await self.session.scalars(query)).all())
 
+    @override
+    async def list_placements(
+        self, tenant_id: "UUID"
+    ) -> list[IntegrationKnowledgePlacement]:
+        knowledge = self._db_model
+        stmt = (
+            sa.select(
+                knowledge.id,
+                Spaces.id,
+                Spaces.name,
+                Spaces.user_id,
+                Spaces.tenant_space_id,
+                knowledge.last_sync_status,
+            )
+            .join(Spaces, Spaces.id == knowledge.space_id)
+            .where(knowledge.tenant_id == tenant_id, Spaces.tenant_id == tenant_id)
+            .order_by(Spaces.name, Spaces.id, knowledge.created_at, knowledge.id)
+        )
+        rows = await self.session.execute(stmt)
+        return [
+            IntegrationKnowledgePlacement(
+                integration_knowledge_id=knowledge_id,
+                space_id=space_id,
+                space_name=space_name,
+                personal=user_id is not None,
+                organization=user_id is None and tenant_space_id is None,
+                last_sync_status=last_sync_status,
+            )
+            for (
+                knowledge_id,
+                space_id,
+                space_name,
+                user_id,
+                tenant_space_id,
+                last_sync_status,
+            ) in rows.all()
+        ]
+
     async def _entities_for(
         self, records: Sequence[IntegrationKnowledgeDBModel]
     ) -> list[IntegrationKnowledge]:
         if not records:
             return []
-        embedding_models = await self.embedding_model_repo.all()
+        # Knowledge keeps its embedding model after the model is deprecated.
+        embedding_models = await self.embedding_model_repo.all(with_deprecated=True)
         await self._attach_document_counts(records)
         return self.mapper.to_entities(records, embedding_models=embedding_models)
 
