@@ -11,7 +11,7 @@ whether the organisation default applies), and the same pair on the
 personal-space policy.
 
 Revision ID: 202610140900
-Revises: 202610131800
+Revises: 202610141000
 Create Date: 2026-10-14
 
 """
@@ -22,7 +22,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "202610140900"
-down_revision = "202610131800"
+down_revision = "202610141000"
 branch_labels = None
 depends_on = None
 

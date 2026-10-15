@@ -23,6 +23,8 @@ import {
   columnWidth,
   copyText,
   filterRows,
+  isNumeric,
+  numberFormatter,
   pick,
   sortRows,
   toTsv,
@@ -117,9 +119,6 @@ function queryResult(result: ToolResult): QueryResult | undefined {
   return candidate as QueryResult;
 }
 
-/** A whole number too large for a JSON number arrives as its digits. */
-const isNumeric = (value: unknown) =>
-  typeof value === "number" || (typeof value === "string" && /^-?\d+$/.test(value));
 
 function QueryResultView() {
   const args = useRef<QueryArguments | undefined>(undefined);
@@ -218,14 +217,7 @@ function QueryResultView() {
     },
   });
 
-  const format = useMemo(
-    () =>
-      new Intl.NumberFormat(context.locale ?? "sv", {
-        useGrouping: false,
-        maximumFractionDigits: 6,
-      }),
-    [context.locale],
-  );
+  const format = useMemo(() => numberFormatter(context.locale), [context.locale]);
   const filtering = filter.trim() !== "";
   const visible = useMemo(() => filterRows(rows, filter).slice(0, MAX_DRAWN_ROWS), [rows, filter]);
   // A row is keyed by where its column stands, so two columns of one name stay apart.
@@ -235,8 +227,8 @@ function QueryResultView() {
   );
   const tableColumns = useMemo(() => {
     const shown = (value: unknown) =>
-      typeof value === "number"
-        ? format.format(value)
+      typeof value === "number" || typeof value === "string"
+        ? format(value)
         : typeof value === "object"
           ? JSON.stringify(value)
           : String(value);

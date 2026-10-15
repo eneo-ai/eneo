@@ -89,6 +89,11 @@ async def aembedding(**kwargs: Any) -> Any:
     return await call(**kwargs)
 
 
+async def arerank(**kwargs: Any) -> Any:
+    call = cast(Callable[..., Any], getattr(litellm, "arerank"))
+    return await call(**kwargs)
+
+
 async def atranscription(**kwargs: Any) -> Any:
     call = cast(Callable[..., Any], getattr(litellm, "atranscription"))
     return await call(**kwargs)

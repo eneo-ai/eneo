@@ -41,6 +41,7 @@ from eneo.spaces.space import SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE, Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_repo import SpaceRepository
+from eneo.spaces.space_update import SpaceUpdate
 from eneo.transcription_models.application.transcription_model_crud_service import (
     TranscriptionModelCRUDService,
 )
@@ -76,12 +77,16 @@ def _empty_mcp_server_list() -> list["MCPServer"]:
     return []
 
 
-@dataclass
+@dataclass(frozen=True)
 class SpaceSecurityClassificationImpactAnalysis:
     space: Space
     affected_completion_models: list["CompletionModel"]
     affected_embedding_models: list["EmbeddingModel"]
     affected_transcription_models: list["TranscriptionModel"]
+    affected_assistant_ids: frozenset[UUID] = frozenset()
+    affected_group_chat_ids: frozenset[UUID] = frozenset()
+    affected_app_ids: frozenset[UUID] = frozenset()
+    affected_service_ids: frozenset[UUID] = frozenset()
     affected_capabilities: list[CapabilityPurpose] = field(
         default_factory=list[CapabilityPurpose]
     )
@@ -529,7 +534,43 @@ class SpaceService:
         if mcp_tools is not None:
             mcp_tool_settings = [(tool.tool_id, tool.is_enabled) for tool in mcp_tools]
 
-        return await self.repo.update(space, mcp_tool_settings=mcp_tool_settings)
+        classification_changed = is_provided(security_classification)
+        await self.repo.update_settings(
+            id,
+            SpaceUpdate(
+                name=name if name is not None else NOT_PROVIDED,
+                description=description if description is not None else NOT_PROVIDED,
+                security_classification_id=(
+                    space.security_classification.id
+                    if space.security_classification
+                    else None
+                )
+                if classification_changed
+                else NOT_PROVIDED,
+                minimum_security_level=(
+                    space.security_classification.security_level
+                    if classification_changed
+                    and space.security_classification
+                    and space.security_classification.security_enabled
+                    else None
+                ),
+                data_retention_days=data_retention_days,
+                icon_id=icon_id,
+                reader_model_id=(
+                    (space.reader_model.id if space.reader_model is not None else None)
+                    if is_provided(reader_model)
+                    else NOT_PROVIDED
+                ),
+                reader_model_inherit=reader_model_inherit,
+                completion_model_ids=completion_model_ids,
+                embedding_model_ids=embedding_model_ids,
+                transcription_model_ids=transcription_model_ids,
+                mcp_server_ids=mcp_server_ids,
+                enabled_capabilities=enabled_capabilities,
+                mcp_tools=mcp_tool_settings,
+            ),
+        )
+        return await self.get_space(id)
 
     async def security_classification_impact_analysis(
         self, id: UUID, security_classification_id: UUID
@@ -550,14 +591,28 @@ class SpaceService:
         current_transcription_models = space.transcription_models
         current_mcp_servers = space.mcp_servers
 
-        space.update(
-            security_classification=security_classification,
-        )
-
-        remaining_completion_model_ids = [cm.id for cm in space.completion_models]
-        remaining_embedding_model_ids = [em.id for em in space.embedding_models]
-        remaining_transcription_model_ids = [tm.id for tm in space.transcription_models]
-        remaining_mcp_server_ids = [s.id for s in space.mcp_servers]
+        remaining_completion_model_ids = [
+            cm.id
+            for cm in space.completion_models
+            if not security_classification.is_greater_than(cm.security_classification)
+        ]
+        remaining_embedding_model_ids = [
+            em.id
+            for em in space.embedding_models
+            if not security_classification.is_greater_than(em.security_classification)
+        ]
+        remaining_transcription_model_ids = [
+            tm.id
+            for tm in space.transcription_models
+            if not security_classification.is_greater_than(tm.security_classification)
+        ]
+        remaining_mcp_server_ids = [
+            server.id
+            for server in space.mcp_servers
+            if not security_classification.is_greater_than(
+                server.security_classification
+            )
+        ]
 
         affected_completion_models: list["CompletionModel"] = [
             cm
@@ -589,19 +644,24 @@ class SpaceService:
                 for state in space.available_capabilities
                 if state.available
             }
-            space.available_capabilities = await capability_availability(
+            proposed_capabilities = await capability_availability(
                 self.repo.session, self.user.tenant_id, security_classification
             )
             affected_capabilities = [
                 state.purpose
-                for state in space.available_capabilities
+                for state in proposed_capabilities
                 if state.purpose in space.enabled_capabilities
                 and state.purpose in previous_available
                 and not state.available
             ]
 
         affected_assistants: list["Assistant"] = []
-        for assistant in space.assistants:
+        all_assistants = (
+            [*space.assistants, space.default_assistant]
+            if space.default_assistant is not None
+            else space.assistants
+        )
+        for assistant in all_assistants:
             if set(assistant.enabled_capabilities) & set(affected_capabilities):
                 affected_assistants.append(assistant)
             if (
@@ -656,11 +716,6 @@ class SpaceService:
                     if service not in affected_services:
                         affected_services.append(service)
 
-        space.assistants = affected_assistants
-        space.group_chats = affected_group_chats
-        space.apps = affected_apps
-        space.services = affected_services
-
         return SpaceSecurityClassificationImpactAnalysis(
             space=space,
             affected_completion_models=affected_completion_models,
@@ -668,6 +723,10 @@ class SpaceService:
             affected_transcription_models=affected_transcription_models,
             affected_mcp_servers=affected_mcp_servers,
             affected_capabilities=affected_capabilities,
+            affected_assistant_ids=frozenset(a.id for a in affected_assistants),
+            affected_group_chat_ids=frozenset(c.id for c in affected_group_chats),
+            affected_app_ids=frozenset(a.id for a in affected_apps if a.id is not None),
+            affected_service_ids=frozenset(s.id for s in affected_services),
         )
 
     async def delete_personal_space(self, user: UserInDB):
@@ -783,9 +842,9 @@ class SpaceService:
         )
 
         space.add_member(member)
-        space = await self.repo.update(space)
+        await self.repo.add_member(id, member)
 
-        return space.get_member(member.id)
+        return member
 
     async def remove_member(self, id: UUID, user_id: UUID):
         if user_id == self.user.id:
@@ -799,7 +858,7 @@ class SpaceService:
 
         space.remove_member(user_id)
 
-        await self.repo.update(space)
+        await self.repo.remove_member(id, user_id)
 
         # Revoke all API keys the removed user owns for this space and its resources
         if self.api_key_scope_revoker is not None:
@@ -862,7 +921,7 @@ class SpaceService:
             )
 
         space.change_member_role(user_id, new_role)
-        space = await self.repo.update(space)
+        await self.repo.change_member_role(id, user_id, new_role)
 
         return space.get_member(user_id)
 
@@ -894,9 +953,9 @@ class SpaceService:
         )
 
         space.add_group_member(group_member)
-        space = await self.repo.update(space)
+        await self.repo.add_group_member(space_id, group_member)
 
-        return space.get_group_member(group_id)
+        return group_member
 
     async def remove_group_member(self, space_id: UUID, group_id: UUID):
         """Remove a user group from a space.
@@ -918,7 +977,7 @@ class SpaceService:
             )
 
         space.remove_group_member(group_id)
-        await self.repo.update(space)
+        await self.repo.remove_group_member(space_id, group_id)
 
     async def change_group_member_role(
         self, space_id: UUID, group_id: UUID, new_role: SpaceRoleValue
@@ -944,7 +1003,7 @@ class SpaceService:
             raise UnauthorizedException("Only Admins can change group member roles")
 
         space.change_group_member_role(group_id, new_role)
-        space = await self.repo.update(space)
+        await self.repo.change_group_member_role(space_id, group_id, new_role)
 
         return space.get_group_member(group_id)
 
@@ -1057,9 +1116,12 @@ class SpaceService:
                     email=u.email,
                     role=SpaceRoleValue.ADMIN,
                 )
+                assert hub.id is not None
+                await self.repo.add_member(hub.id, hub.members[u.id])
                 added = True
         if added:
-            hub = await self.repo.update(hub)
+            assert hub.id is not None
+            hub = await self.repo.one(hub.id)
         return hub
 
     async def get_or_create_tenant_space(self) -> "Space":

@@ -165,6 +165,42 @@ async def test_an_assistant_selects_a_template_and_falls_back_when_it_goes(
     listed = (await client.get(f"{BASE}/", headers=auth)).json()["items"]
     assert listed[0]["selected_by"] == 1
 
+    # Omitted template settings stay intact through unrelated resource writes.
+    renamed = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        headers=auth,
+        json={"name": "Renamed writer"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["document_template"] == selected.json()["document_template"]
+    renamed_space = await client.patch(
+        f"/api/v1/spaces/{space.json()['id']}/",
+        headers=auth,
+        json={"name": "Renamed space"},
+    )
+    assert renamed_space.status_code == 200, renamed_space.text
+    reloaded = await client.get(f"/api/v1/assistants/{assistant_id}/", headers=auth)
+    assert reloaded.json()["document_template"] == selected.json()["document_template"]
+
+    # An explicit reset removes the selected row, while builtin stores a choice.
+    for mode in ("builtin", "default"):
+        reset = await client.post(
+            f"/api/v1/assistants/{assistant_id}/",
+            headers=auth,
+            json={"document_template": {"mode": mode}},
+        )
+        assert reset.status_code == 200, reset.text
+        assert reset.json()["document_template"] == {"mode": mode, "template_id": None}
+        listed = (await client.get(f"{BASE}/", headers=auth)).json()["items"]
+        assert listed[0]["selected_by"] == 0
+
+    selected_again = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        headers=auth,
+        json={"document_template": selected.json()["document_template"]},
+    )
+    assert selected_again.status_code == 200, selected_again.text
+
     unknown = await client.post(
         f"/api/v1/assistants/{assistant_id}/",
         headers=auth,

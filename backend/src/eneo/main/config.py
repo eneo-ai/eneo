@@ -324,6 +324,9 @@ class Settings(BaseSettings):
     digest_max_segments: int = 120
     # Concurrent model calls one digest issues.
     digest_concurrency: int = 8
+    # Upper bound for one rerank call to a provider, starting with the
+    # registration-time connection test.
+    rerank_request_timeout_seconds: int = 10
     mcp_tool_output_max_chars: int = 32768
     # Decoded size cap for a single MCP image content block; larger images
     # are dropped before they can be persisted as generated files.

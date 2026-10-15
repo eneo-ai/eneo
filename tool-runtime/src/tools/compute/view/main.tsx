@@ -34,6 +34,8 @@ import {
   columnWidth,
   copyText,
   filterRows,
+  isNumeric,
+  numberFormatter,
   pick,
   playIcon,
   sortRows,
@@ -162,8 +164,6 @@ function outcomeOf(result: ToolResult): Outcome | undefined {
   return candidate && typeof candidate.ok === "boolean" ? (candidate as Outcome) : undefined;
 }
 
-const isNumeric = (value: unknown) =>
-  typeof value === "number" || (typeof value === "string" && /^-?\d+$/.test(value));
 const isFlatObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" &&
   value !== null &&
@@ -215,13 +215,10 @@ function ResultView() {
   const value = outcome?.result;
   const table = useMemo(() => (kind === "table" ? asTabular(value) : undefined), [kind, value]);
 
-  const format = useMemo(
-    () => new Intl.NumberFormat(context.locale ?? "sv", { maximumFractionDigits: 10 }),
-    [context.locale],
-  );
+  const format = useMemo(() => numberFormatter(context.locale), [context.locale]);
   const shownCell = (cell: unknown) =>
-    typeof cell === "number"
-      ? format.format(cell)
+    typeof cell === "number" || typeof cell === "string"
+      ? format(cell)
       : typeof cell === "boolean"
         ? cell
           ? text.yes

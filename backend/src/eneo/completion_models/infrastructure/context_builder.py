@@ -451,6 +451,7 @@ class _Prompt:
         chunk_numbers: dict[UUID, set[int]] = {}
         header_tokens: dict[UUID, int] = {}
         estimated_tokens = 0
+        overflow_rendered = False
         for chunk in chunks:
             numbers = chunk_numbers.setdefault(chunk.info_blob_id, set())
             if chunk.info_blob_id not in header_tokens:
@@ -483,14 +484,25 @@ class _Prompt:
             if candidate_tokens > max_tokens:
                 # Summing chunk bodies is conservative when they overlap. Only
                 # render at the boundary, rather than tokenizing every prefix
-                # of a potentially very large retrieval candidate set.
+                # of a potentially very large retrieval candidate set. A chunk
+                # that does not fit is left out and the loop goes on, because
+                # a cheaper chunk further down the ranking may still fit. Once
+                # a rendering has shown an overflow, that verdict holds until
+                # the selection changes: later rejections come from the
+                # estimate alone, so the list is never rendered once per
+                # rejected chunk, and an accepted chunk reopens the boundary
+                # check, so overlap and shared headers keep being credited.
+                if overflow_rendered:
+                    continue
                 candidate = self._render_reconstructed_chunks([*selected, chunk])
                 candidate_tokens = count_tokens(candidate, self.model_name)
                 if candidate_tokens > max_tokens:
-                    break
+                    overflow_rendered = True
+                    continue
             selected.append(chunk)
             numbers.add(chunk.chunk_no)
             estimated_tokens = candidate_tokens
+            overflow_rendered = False
 
         # Tokenization at joined boundaries can differ from the running sum.
         # The stored cost and final admission always use the actual rendering.
