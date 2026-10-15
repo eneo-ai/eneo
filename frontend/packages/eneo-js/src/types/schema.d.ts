@@ -26547,6 +26547,7 @@ export interface components {
       /** @description The typed code a failed call ended the step with. */
       error_code?:
         | (
+            | "flow_assistant_model_provider_required"
             | "flow_assistant_snapshot_drift"
             | "flow_assistant_snapshot_republish_required"
             | "flow_assistant_snapshot_resource_invalid"
