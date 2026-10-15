@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
+from eneo.actors.actors.space_actor import SpaceAccessFacts
 from eneo.info_blobs.info_blob import InfoBlobInDBNoText
 from eneo.info_blobs.info_blob_repo import IntegrationDocumentsPage
 from eneo.integration.domain.entities.integration_knowledge import (
@@ -23,6 +24,7 @@ from eneo.integration.infrastructure.sharepoint_sync_progress import (
     sync_progress_key,
 )
 from eneo.main.container.container import Container
+from eneo.main.exceptions import NotFoundException
 from eneo.server.exception_handlers import add_exception_handlers
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from eneo.spaces.api.space_router import router
@@ -38,6 +40,7 @@ class DocumentsAPI:
     user: UserInDB
     space: Space
     knowledge: IntegrationKnowledge
+    space_repo: AsyncMock
     info_blobs: AsyncMock
     sync_logs: AsyncMock
     progress_redis: AsyncMock
@@ -115,6 +118,16 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
     space.integration_knowledge_list = [knowledge]
     space_repo = AsyncMock()
     space_repo.one.return_value = space
+    # The progress route reads the caller's facts and the item ids only; both
+    # follow the space as a test leaves it.
+    space_repo.get_space_access_facts.side_effect = (
+        lambda space_id: SpaceAccessFacts.from_space(space)
+    )
+    space_repo.get_visible_integration_knowledge_ids.side_effect = (
+        lambda space_id, tenant_space_id: [
+            item.id for item in space.integration_knowledge_list
+        ]
+    )
     info_blobs = AsyncMock()
     info_blobs.get_integration_knowledge_page.return_value = IntegrationDocumentsPage(
         items=[], total_count=0, total_size=0
@@ -152,7 +165,7 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
                 ):
                     app.dependency_overrides[dependency.call] = lambda: container
     return DocumentsAPI(
-        app, user, space, knowledge, info_blobs, sync_logs, progress_redis
+        app, user, space, knowledge, space_repo, info_blobs, sync_logs, progress_redis
     )
 
 
@@ -408,6 +421,12 @@ async def test_sync_progress_lists_the_space_items_that_are_syncing(documents_ap
     api.progress_redis.mget.assert_awaited_once_with(
         [sync_progress_key(api.knowledge.id), sync_progress_key(idle.id)]
     )
+    # Polled every few seconds: never the whole space aggregate.
+    api.space_repo.one.assert_not_awaited()
+    api.space_repo.get_space_access_facts.assert_awaited_once_with(api.space.id)
+    api.space_repo.get_visible_integration_knowledge_ids.assert_awaited_once_with(
+        api.space.id, api.space.tenant_space_id
+    )
 
 
 async def test_sync_progress_is_refused_to_non_members(documents_api):
@@ -417,4 +436,15 @@ async def test_sync_progress_is_refused_to_non_members(documents_api):
     response = await _get(api, api.progress_url)
 
     assert response.status_code == 403, response.text
+    api.space_repo.get_visible_integration_knowledge_ids.assert_not_awaited()
+    api.progress_redis.mget.assert_not_awaited()
+
+
+async def test_sync_progress_of_an_unknown_space_is_not_found(documents_api):
+    api = documents_api
+    api.space_repo.get_space_access_facts.side_effect = NotFoundException()
+
+    response = await _get(api, api.progress_url)
+
+    assert response.status_code == 404, response.text
     api.progress_redis.mget.assert_not_awaited()

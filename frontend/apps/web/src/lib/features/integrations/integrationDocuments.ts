@@ -62,25 +62,6 @@ export function integrationDocumentsHref(
   return tab ? `${base}?tab=${tab}` : base;
 }
 
-export type SkippedReasonGroup = { reason: string; files: string[] };
-
-/** Skipped files by reason, largest group first; equal groups keep their first appearance. */
-export function groupSkippedByReason(items: IntegrationSkippedDocument[]): SkippedReasonGroup[] {
-  const groups = new Map<string, SkippedReasonGroup>();
-  for (const item of items) {
-    const reason = item.reason.trim();
-    const group = groups.get(reason);
-    if (group) group.files.push(item.file);
-    else groups.set(reason, { reason, files: [item.file] });
-  }
-  return [...groups.values()].sort((a, b) => b.files.length - a.files.length);
-}
-
-/** How many skipped files the capped list leaves out. */
-export function skippedDocumentsNotListed(skipped: IntegrationSkippedDocuments): number {
-  return skipped.truncated ? Math.max(0, skipped.total - skipped.items.length) : 0;
-}
-
 export type PageRange = { from: number; to: number; total: number };
 
 /** The 1-based positions of the page's rows, for "Showing 1–50 of 312". */

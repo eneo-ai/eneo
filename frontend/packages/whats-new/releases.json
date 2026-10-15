@@ -162,8 +162,8 @@
             "sv": "Se hur varje SharePoint-källa mår"
           },
           "body": {
-            "en": "Each SharePoint source in a space's Knowledge list now has one status (up to date, syncing, needs attention or waiting) and a live progress bar while it syncs. A banner tells you when sources stop updating and why, and the source's Activity tab shows every sync with what changed and which files were skipped. When an answer used none of the assistant's knowledge, the chat says so.",
-            "sv": "Varje SharePoint-källa i ytans kunskapslista har nu en enda status (aktuell, synkar, behöver åtgärd eller väntar) och ett förloppsfält medan den synkar. En banner säger till när källor slutar uppdateras och varför, och källans flik Aktivitet visar varje synk med vad som ändrades och vilka filer som hoppades över. När ett svar inte använde något ur assistentens kunskap säger chatten det."
+            "en": "Each SharePoint source in a space's Knowledge list now has one status (up to date, syncing, needs attention, empty or waiting) and a live progress bar while it syncs, and you can filter the list by status. A banner tells you when sources stop updating because the SharePoint sign-in was refused, and the source's Activity tab shows its syncs with what changed and which files were skipped. When an answer used none of the assistant's knowledge, the chat says so.",
+            "sv": "Varje SharePoint-källa i ytans kunskapslista har nu en enda status (aktuell, synkar, behöver åtgärd, tom eller väntar) och ett förloppsfält medan den synkar, och du kan filtrera listan på status. En banner säger till när källor slutar uppdateras för att inloggningen till SharePoint nekats, och källans flik Aktivitet visar dess synkar med vad som ändrades och vilka filer som hoppades över. När ett svar inte använde något ur assistentens kunskap säger chatten det."
           }
         },
         {
@@ -204,6 +204,24 @@
           "body": {
             "en": "Under Admin > Integrations a health list shows whether the SharePoint sign-in, change notifications and connection still work, with Microsoft's error, guidance and the fix next to each check. A service account can be signed in again with one button, keeping the configuration and all imported knowledge.",
             "sv": "Under Administration > Integrationer visar en hälsolista om SharePoint-inloggningen, ändringsaviseringarna och anslutningen fortfarande fungerar, med Microsofts fel, en vägledning och åtgärden bredvid varje kontroll. Ett tjänstekonto kan loggas in igen med en knapp, och konfigurationen och all importerad kunskap behålls."
+          },
+          "showMe": {
+            "href": "/admin/integrations",
+            "anchor": "admin-integrations"
+          }
+        },
+        {
+          "id": "sharepoint-sources-overview",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "See every SharePoint source in the organization",
+            "sv": "Se alla SharePoint-källor i organisationen"
+          },
+          "body": {
+            "en": "Under Admin > Integrations, a list shows every source imported into shared spaces and the organization space, with its status, documents and why it needs attention, so you can see what has stopped updating without opening each space. Sources in personal spaces are only counted.",
+            "sv": "Under Administration > Integrationer visar en lista alla källor som importerats till delade utrymmen och organisationsutrymmet, med status, antal dokument och varför en källa behöver åtgärd, så att du ser vad som slutat uppdateras utan att öppna varje utrymme. Källor i personliga utrymmen räknas bara."
           },
           "showMe": {
             "href": "/admin/integrations",

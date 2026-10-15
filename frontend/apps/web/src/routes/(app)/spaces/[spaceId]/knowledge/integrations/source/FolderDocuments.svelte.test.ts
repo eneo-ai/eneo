@@ -263,6 +263,11 @@ describe("FolderDocuments", () => {
     await expect.element(feed.getByText(m.integration_live_reading())).toBeVisible();
     await expect.element(feed.getByText(m.integration_live_skipped())).toBeVisible();
     await expect.element(feed.getByText(m.integration_live_indexed())).toBeVisible();
+    // The reason is on screen, not only in a tooltip.
+    await expect
+      .element(feed.getByText(m.skip_reason_unsupported_type({ label: "image" })))
+      .toBeVisible();
+    await expectNoAxeViolations();
   });
 
   it("explains a folder that never synced", async () => {

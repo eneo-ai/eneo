@@ -50,14 +50,18 @@
           {:else}
             <TriangleAlert class="text-warning-default size-4 shrink-0" aria-hidden="true" />
           {/if}
-          <span class="min-w-0 flex-1 truncate">{file.name}</span>
+          <span class="flex min-w-0 flex-1 flex-col">
+            <span class="truncate">{file.name}</span>
+            {#if file.outcome === "skipped" && file.reason}
+              <span class="text-secondary text-xs break-words">
+                {describeSkipReason(file.reason)}
+              </span>
+            {/if}
+          </span>
           <span
             class="shrink-0 text-xs {file.outcome === 'skipped'
               ? 'text-warning-stronger'
               : 'text-secondary'}"
-            title={file.outcome === "skipped" && file.reason
-              ? describeSkipReason(file.reason)
-              : undefined}
           >
             {file.outcome === "indexed"
               ? m.integration_live_indexed()

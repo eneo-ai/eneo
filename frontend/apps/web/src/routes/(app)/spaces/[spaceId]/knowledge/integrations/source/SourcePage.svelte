@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { get, writable } from "svelte/store";
+  import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
@@ -16,6 +17,7 @@
   import type { IntegrationSkippedDocuments } from "$lib/features/integrations/integrationDocuments";
   import { buildSourceProblems } from "$lib/features/integrations/sourceProblems";
   import {
+    itemWatchState,
     sourceContentsLabel,
     sourceHref,
     summarizeSource,
@@ -75,67 +77,76 @@
 
   // --- Skipped files, for the problems and the counts ---
 
-  let skippedByItem = $state<Record<string, IntegrationSkippedDocuments | null>>({});
-  let skippedLoaded = $state(false);
-  let skippedGeneration = 0;
+  let skippedByItem = $state.raw<Record<string, IntegrationSkippedDocuments | null>>({});
+  let skippedLoaded = $derived(source.items.every((item) => item.id in skippedByItem));
+  // The latest request per item; an older answer for the item is dropped.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- request bookkeeping, never rendered
+  const skippedRequests = new Map<string, number>();
+  let skippedRequestCount = 0;
 
   async function loadSkipped(items: IntegrationKnowledge[]) {
-    const generation = ++skippedGeneration;
-    const entries = await Promise.all(
+    const results = await Promise.all(
       items.map(async (item) => {
+        const request = ++skippedRequestCount;
+        skippedRequests.set(item.id, request);
+        let skipped: IntegrationSkippedDocuments | null = null;
         try {
-          const skipped = (await eneo.integrations.knowledge.listSkippedDocuments({
+          skipped = (await eneo.integrations.knowledge.listSkippedDocuments({
             knowledge: item,
             space: $currentSpace
           })) as IntegrationSkippedDocuments;
-          return [item.id, skipped] as const;
         } catch (error) {
           console.error("Could not load the skipped files of an integration item", error);
-          return [item.id, null] as const;
         }
+        return { id: item.id, request, skipped };
       })
     );
-    if (generation !== skippedGeneration) return;
-    skippedByItem = Object.fromEntries(entries);
-    skippedLoaded = true;
+    const fresh = results.filter(({ id, request }) => skippedRequests.get(id) === request);
+    if (fresh.length === 0) return;
+    skippedByItem = {
+      ...skippedByItem,
+      ...Object.fromEntries(fresh.map(({ id, skipped }) => [id, skipped]))
+    };
   }
 
-  // A finished sync rewrites the skipped list; the timestamps say when.
-  let syncSignature = $derived(
-    source.items
-      .map(
-        (item) =>
-          `${item.id}:${item.metadata?.last_sync_attempted_at ?? ""}:${item.metadata?.last_synced_at ?? ""}`
-      )
-      .join("|")
+  // A finished sync rewrites an item's skipped list and history; its timestamps say when.
+  let syncSignatures = $derived(
+    Object.fromEntries(
+      source.items.map((item) => [
+        item.id,
+        `${item.metadata?.last_sync_attempted_at ?? ""}|${item.metadata?.last_synced_at ?? ""}`
+      ])
+    )
   );
+  let seenSignatures: Record<string, string> = {};
   $effect(() => {
-    void syncSignature;
-    untrack(() => void loadSkipped(source.items));
+    const signatures = syncSignatures;
+    untrack(() => {
+      const changed = source.items.filter(
+        (item) => seenSignatures[item.id] !== signatures[item.id]
+      );
+      seenSignatures = signatures;
+      if (changed.length > 0) void loadSkipped(changed);
+    });
   });
 
   let problems = $derived(skippedLoaded ? buildSourceProblems(source.items, skippedByItem) : null);
   // Before the skipped lists arrive, the failures alone already give the blocking causes.
   let problemCount = $derived((problems ?? buildSourceProblems(source.items, {})).causeCount);
+  // Counted over the current items: a removed folder's list stays in skippedByItem.
   let skippedTotal = $derived(
     skippedLoaded
-      ? Object.values(skippedByItem).reduce((sum, skipped) => sum + (skipped?.total ?? 0), 0)
+      ? source.items.reduce((sum, item) => sum + (skippedByItem[item.id]?.total ?? 0), 0)
       : null
   );
 
   // --- Change notifications (SharePoint subscriptions) ---
 
-  const EXPIRING_SOON_MS = 48 * 60 * 60 * 1000;
-  let watchExpiry = $derived(
-    source.items.map((item) => {
-      const expires = item.metadata?.sharepoint_subscription_expires_at;
-      return expires ? new Date(expires).getTime() - Date.now() : null;
-    })
-  );
-  let watchedCount = $derived(watchExpiry.filter((left) => left !== null && left > 0).length);
-  let expiredWatchCount = $derived(watchExpiry.filter((left) => left !== null && left <= 0).length);
-  let expiringWatchCount = $derived(
-    watchExpiry.filter((left) => left !== null && left > 0 && left <= EXPIRING_SOON_MS).length
+  let watchStates = $derived(source.items.map((item) => itemWatchState(item)));
+  let expiredWatchCount = $derived(watchStates.filter((state) => state === "expired").length);
+  let expiringWatchCount = $derived(watchStates.filter((state) => state === "expiring").length);
+  let watchedCount = $derived(
+    watchStates.filter((state) => state === "active" || state === "expiring").length
   );
   let watchLabel = $derived.by(() => {
     if (watchedCount === source.items.length) return m.integration_source_watch_on();
@@ -162,6 +173,12 @@
 
   function problemsHref(): string {
     return sourceHref($currentSpace.routeId, source, { tab: "problems" });
+  }
+
+  function showActivityOf(itemId: string | null) {
+    const href = sourceHref($currentSpace.routeId, source, { folder: itemId, tab: "activity" });
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic space route
+    void goto(href, { replaceState: true, noScroll: true, keepFocus: true });
   }
 
   let permissions = $derived.by(() => {
@@ -304,11 +321,15 @@
               {#if source.integrationType === "sharepoint"}
                 {#if expiredWatchCount > 0}
                   <span class="text-warning-stronger text-xs font-normal">
-                    {m.integration_source_watch_expired({ count: expiredWatchCount })}
+                    {expiredWatchCount === 1
+                      ? m.integration_source_watch_expired_one()
+                      : m.integration_source_watch_expired_other({ count: expiredWatchCount })}
                   </span>
                 {:else if expiringWatchCount > 0}
                   <span class="text-secondary text-xs font-normal">
-                    {m.integration_source_watch_expiring({ count: expiringWatchCount })}
+                    {expiringWatchCount === 1
+                      ? m.integration_source_watch_expiring_one()
+                      : m.integration_source_watch_expiring_other({ count: expiringWatchCount })}
                   </span>
                 {:else if watchedCount === 0}
                   <span class="text-secondary text-xs font-normal">
@@ -357,6 +378,7 @@
               skipped={skippedLoaded ? (skippedByItem[singleItem.id] ?? null) : null}
               problemsHref={problemsHref()}
               showHeader={source.kind === "wrapper"}
+              showControls={false}
             />
           {/key}
         {/if}
@@ -378,8 +400,9 @@
         {#if $tab === "activity"}
           <SourceActivityView
             items={source.items}
-            showFolders={multiple}
-            refreshKey={syncSignature}
+            selectedId={multiple ? selectedId : null}
+            signatures={syncSignatures}
+            onSelect={showActivityOf}
           />
         {/if}
       </Page.Tab>

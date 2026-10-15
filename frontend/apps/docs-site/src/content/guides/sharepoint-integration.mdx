@@ -231,6 +231,14 @@ The health is recorded every time Eneo acquires a token with the stored app – 
 
 For a service account with a credential problem, the **SharePoint connection** section also offers **Sign in again with Microsoft**; for a tenant app it offers **Update configuration**. See [Re-authenticating the Service Account](#re-authenticating-the-service-account).
 
+### Connection Checks
+
+The **SharePoint connection** section lists four checks, each with its state and the fix next to it: **App registration in Entra ID** (the tenant domain and the end of the client ID, with **Change**), **Sign-in to Microsoft** (the credential health above, with what stops while it fails), **Change notifications from SharePoint** (how many watches are active, expired or failing to renew, with **Renew expired** and **Show watches**, see [Managing Webhooks](#managing-webhooks)) and **Test the connection**. A badge in its heading sums up the worst state. Renewing or recreating watches from the watch list updates the counts in the check, and the other way around.
+
+### Sources Across the Organization
+
+Under the connection checks, **Sources across the organization** lists every source imported into a shared space or the organization space, with its space, number of documents, status and when it was last up to date. For a source that needs attention, the reason of its first failed folder is shown under the status. Sources that need attention come first, the status buttons narrow the list, and the search matches the source, its folders and the space. A summary shows how many sources there are, how many need attention and in how many spaces, and how many documents they hold. Sources in personal spaces can hold a person's own OneDrive folders, so they are only counted, with how many of them fail. The source name opens the source page when you can open its space; administrators are not automatically members of every shared space, so for the others the name is plain text.
+
 ---
 
 ## Importing Content from SharePoint
@@ -342,10 +350,10 @@ A space's **Knowledge** list has one row per SharePoint source: the items import
 
 - **Source**: the name, with what it holds, for example _5 folders_. The name opens the [source page](#imported-documents).
 - **Contents**: the number of indexed documents across the source.
-- **Status**: **Up to date**, **Syncing**, **Needs attention** (the latest sync of at least one item failed; open the source to see why), **Empty** (synced, but no document is indexed, for example because every file was skipped) or **Waiting for first sync**. While a sync runs, the status is replaced by a progress bar, see [Sync progress](#sync-progress).
+- **Status**: **Up to date**, **Syncing**, **Needs attention** (the latest sync of at least one item failed; open the source to see why), **Empty** (synced, but no document is indexed, for example because every file was skipped) or **Waiting for first sync**. When some of a source's folders have not had their first sync yet, the row adds how many are waiting. While a sync runs, the status is replaced by a progress bar, see [Sync progress](#sync-progress).
 - **Updated**: when the source was last synchronized successfully. It moves on every successful run, also when nothing had changed, so a healthy source never looks stale.
 
-Status buttons above the list (**All**, **Needs attention**, **Syncing**, **Waiting**, **Empty**, **Up to date**, each with its count) narrow it to the sources in that state. When the organization's SharePoint sign-in is refused, a banner above the list says that the affected sources have stopped updating and that an administrator needs to sign in again; existing documents can still be searched in the meantime. With several affected sources, **Show them** filters the list to them. Other failures are marked by the source's status alone.
+When a space has two or more sources, status buttons above the list (**All**, **Needs attention**, **Syncing**, **Waiting**, **Empty**, **Up to date**, each with its count) narrow it to the sources in that state; a state no source is in has no button. **Waiting** also includes sources with only some folders waiting. If the chosen state no longer matches any source, for example because a sync finished, the list says so and **Show all** brings every source back. When the organization's SharePoint sign-in is refused, a banner above the list says that the affected sources have stopped updating and that an administrator needs to sign in again; existing documents can still be searched in the meantime. With several affected sources, **Show them** filters the list to them. Other failures are marked by the source's status alone.
 
 The actions menu of a source imported together has **Resync all items**, which queues a full synchronization of every item in it; a single item has **Full Sync** in its own menu.
 
@@ -359,22 +367,22 @@ While a synchronization runs, the source's row shows a progress bar with the num
 
 Each source has a page that shows its folders, what the synchronizations indexed and what went wrong. Open it by clicking the source's name in the **Knowledge** list, or from the **Show** button in the notice that appears when an import's first sync finishes. Anyone who can see the space's integrations can open the page.
 
-The page is titled with the source's name, with a breadcrumb back to **Integrations**, and has the source's actions menu (and **Open in SharePoint** for a single item). Below the title, a summary shows **Searchable documents**, **Skipped** (the files the latest syncs skipped, including file types that are never used as knowledge), **Last up to date** and **Change notifications** (**On**, **Off**, or on for some of the folders). When the latest sync of an item failed, a notice above the summary says so and links to the problems. The page has three tabs: **Contents**, **Problems** and **Activity**.
+The page is titled with the source's name, with a breadcrumb back to **Integrations**, and has the source's actions menu (and **Open in SharePoint** for a single item). Below the title, a summary shows **Searchable documents**, **Skipped** (the files the latest syncs skipped, including file types that are never used as knowledge), **Last up to date** and **Change notifications** (**On**, **Off**, or on for some of the folders, with how many watches have expired or expire within 48 hours). When the latest sync of an item failed, a notice above the summary says so and links to the problems. The page has three tabs: **Contents**, **Problems** and **Activity**.
 
 #### The Contents tab
 
-For a source with several items, the folders are listed on the left. An item imported from a folder inside another imported folder is nested under it, whole-site imports come first and siblings are sorted by name. A source with more than eight folders gets a **Filter folders** box, and a folder with folders under it can be collapsed. Each folder shows its state (also read out to screen readers) and its number of documents, or the files done while it syncs. **All folders** shows a table of the folders with their status, number of documents, when each was last up to date, **Open in SharePoint** and the folder's actions menu. Selecting a folder shows its documents; the selected folder is part of the page address, so it can be linked to. A source imported as a single item shows its documents directly.
+For a source with several items, the folders are listed on the left. An item imported from a folder inside another imported folder is nested under it, whole-site imports come first and siblings are sorted by name. A source with more than eight folders gets a **Filter folders** box, and a folder with folders under it can be collapsed. Each folder shows its state as an icon, also read out to screen readers, and its number of documents, or the files done while it syncs. **All folders** shows a table of the folders with their status, the state of the folder's change notification (active, expiring within 48 hours, expired or none), number of documents, when each was last up to date, **Open in SharePoint** and the folder's actions menu. The same change-notification state is shown above a selected folder's documents. Selecting a folder shows its documents; the selected folder is part of the page address, so it can be linked to. A source imported as a single item shows its documents directly.
 
-Two buttons above a folder's documents switch between **Searchable (N)**, the documents the assistants can search, and **Could not be read (N)**, the files the folder's latest sync skipped with the reason for each and a link to the **Problems** tab. The searchable documents are listed 50 per page:
+Two buttons above a folder's documents switch between **Searchable**, with the number of documents the assistants can search, and **Could not be read**, with the number of files the folder's latest sync skipped with the reason for each and a link to the **Problems** tab. The searchable documents are listed 50 per page:
 
 - **Name** opens the document's card with a preview of the extracted text and the file's [document properties](#document-properties-library-columns) when the library has any. From the card you can copy the text, **Download extracted text** or **Download original**. The link icon at the end of the row opens the file in SharePoint.
 - **Path** is the folder below the imported folder; a file that sits directly in the imported folder has an empty path. The list is sorted by path by default, so files are grouped the way they are in SharePoint.
 - **Size** is the file's size and **Updated** is when Eneo last indexed the document.
 - **Status** marks the document as **Searchable**.
 
-Properties are not a column, because every library has its own. The search box matches the name, the path or the value of any property, so a case number or a document type finds its files. Each of the four column headings sorts the list, ascending on the first click and reversed on the next. Below the table, _Showing 1–50 of N_ gives the position in the list beside the **Total size** of every indexed document, with **Previous** and **Next** to page. When a synchronization of the folder finishes while the page is open, the list refreshes itself.
+Properties are not a column, because every library has its own. The search box matches the name, the path or the value of any property except yes/no columns, so a case number or a document type finds its files. Each of the four column headings sorts the list, ascending on the first click and reversed on the next. Below the table, _Showing 1–50 of N_ gives the position in the list beside the **Total size** of every indexed document, with **Previous** and **Next** to page. When a synchronization of the folder finishes while the page is open, the list refreshes itself.
 
-While the folder syncs, **Being read now** above the list shows the file the sync is reading, with a spinner, and the latest finished files marked **Searchable**, **Unchanged** or **Could not be read**. The source's progress panel names the file each syncing folder is reading.
+While the folder syncs, **Being read now** above the list shows the file the sync is reading, with a spinner, and the latest finished files marked **Searchable**, **Unchanged** or **Could not be read**, with the reason for a file that could not be read. The source's progress panel names the file each syncing folder is reading.
 
 #### The Problems tab
 
@@ -388,7 +396,7 @@ The reasons are the ones listed under [Supported File Types](#supported-file-typ
 
 #### The Activity tab
 
-**Activity** replaces the sync history: a timeline of every folder's synchronizations, newest first and grouped by day. Each entry says what happened (for example _12 files synced, 1 file deleted_, _Everything up to date, no changes_ or _The sync failed_ with the reason), which folder it concerned, whether it was a full or a delta synchronization and how long it took. Unchanged items are files Eneo had already indexed in the same version, so nothing was re-processed; they are counted separately from skipped files. **Show N files** lists the files a run changed, each marked **New**, **Changed**, **Removed** or **Skipped** (with the reason), at most 50 of each kind per run. A **Reconciliation warning** appears when a full synchronization could not safely clean up documents that no longer exist in SharePoint, either because the site could not be listed completely or because the number of missing documents was above the safety cap; the documents are kept, and the next successful full synchronization tries again. **Show older events** loads earlier synchronizations, and a summary beside the timeline totals the failed syncs, new or changed files and removed files among those shown.
+**Activity** replaces the sync history: a timeline of the folders' synchronizations, newest first and grouped by day. Each entry says what happened (for example _12 files synced, 1 file deleted_, _Everything up to date, no changes_ or _The sync failed_ with the reason), which folder it concerned, whether it was a full or a delta synchronization and how long it took. Unchanged items are files Eneo had already indexed in the same version, so nothing was re-processed; they are counted separately from skipped files. **Show N files** lists the files a run changed, each marked **New**, **Changed**, **Removed** or **Skipped** (with the reason), at most 50 of each kind per run. A run that failed lists what it changed before it stopped; those changes are kept. A **Reconciliation warning** appears when a full synchronization could not safely clean up documents that no longer exist in SharePoint, either because the site could not be listed completely or because the number of missing documents was above the safety cap; the documents are kept, and the next successful full synchronization tries again. **Show older events** loads the next ten synchronizations of each folder that has more. The timeline only goes back as far as every folder has been loaded, so the older runs of a quiet folder appear once the busier folders have been loaded back that far. For a source with several folders, choose a folder under **Folder** above the timeline to page through that folder's whole history; it is the same folder the **Contents** tab selects. A summary beside the timeline totals the failed syncs, new or changed files, unchanged files and removed files among those shown.
 
 #### After an import
 
@@ -458,12 +466,6 @@ Webhook subscriptions have a maximum lifetime of approximately 29 days according
 
 Each notification from Microsoft names the subscription it belongs to. Eneo matches it against the subscriptions it has stored and ignores notifications for unknown subscriptions or with the wrong `clientState`, so a stale subscription from an earlier installation cannot trigger synchronization.
 
-The **SharePoint connection** section lists four checks, each with its state and the fix next to it: **App registration in Entra ID** (the tenant domain and the end of the client ID, with **Change**), **Sign-in to Microsoft** (the credential health above, with what stops while it fails), **Change notifications from SharePoint** (how many watches are active, expired or failing to renew, with **Renew expired** and **Show watches**) and **Test the connection**. A badge in its heading sums up the worst state.
-
-### Sources Across the Organization
-
-Under the connection checks, **Sources across the organisation** lists every source imported into a shared space or the organization space, with its space, number of documents, status and when it was last up to date. Sources that need attention come first, the status buttons narrow the list, and the search matches the source, its folders and the space. A summary shows how many sources there are, how many need attention and in how many spaces, and how many documents they hold. Sources in personal spaces can hold a person's own OneDrive folders, so they are only counted, with how many of them fail. The source name opens the source page in its space.
-
 ### Managing Webhooks
 
 Under **Admin** → **Integrations** → **SharePoint connection** → **Show watches** you can see all subscriptions with their site, owner, expiry time and health:
@@ -474,7 +476,7 @@ Under **Admin** → **Integrations** → **SharePoint connection** → **Show wa
 
 The health column shows **Healthy**, **No webhook yet** (no notification has arrived so far) or the number of renewal failures with the last failure text. Each row has **Renew**, and the **Renew All Expired** button recreates every expired subscription at once, for example after an extended outage where the background job couldn't run.
 
-Each imported item in a space's knowledge list also shows its own webhook status next to its sync status.
+Each folder's change-notification state is also shown on its source page, in the folder table and above the folder's documents.
 
 ### When Eneo's Public Address Changes
 
@@ -510,7 +512,7 @@ If Eneo is directly accessible on a public URL without an authenticating proxy, 
 
 If changes in SharePoint aren't synchronizing:
 
-1. Check the item's webhook status in the space's knowledge list and the subscription list under **Admin** → **Integrations** → **SharePoint connection** → **Show watches**
+1. Check the folder's change-notification state on its source page and the subscription list under **Admin** → **Integrations** → **SharePoint connection** → **Show watches**
 2. Verify that Eneo's domain is reachable via HTTPS from the internet
 3. Check that the firewall allows incoming traffic from Microsoft's IP addresses
 4. If using an API gateway, verify that the webhook endpoints are accessible without authentication
@@ -556,7 +558,7 @@ If the interactive service-account sign-in fails with a Microsoft (AADSTS) error
 
 If imported files aren't updating:
 
-- Look at the source's status in the space's **Knowledge** list. **Needs attention** with **Show problems** tells you why the last run failed; **Up to date** with an old **Updated** time means no run has happened, so check **Change notifications** on the source page and under **Admin** → **Integrations** → **SharePoint connection** → **Show watches**.
+- Look at the source's status in the space's **Knowledge** list. For **Needs attention**, open the source: **Show problems** on its page tells you why the last run failed. **Up to date** with an old **Updated** time means no run has happened, so check **Change notifications** on the source page and under **Admin** → **Integrations** → **SharePoint connection** → **Show watches**.
 - Open the source's **Problems** tab to see why files are missing; a file that is missing from the knowledge is usually listed there with its cause, for example an unsupported format or a scanned PDF without a text layer. The **Activity** tab shows what the last runs did.
 - Check the credential health on the integrations page. A **Credential problem** stops every import and synchronization until the secret is updated or the service account signs in again.
 - Verify that the service account (when using service account method) still has access to the files.

@@ -66,6 +66,7 @@ SPACE_NAME = "SharePoint – storskaligt"
 NAMESPACE = uuid.UUID("5a0e5a0e-0000-4000-8000-0000000000ff")
 SUBSCRIPTION_PREFIX = "showcase-"
 TENANT_HOST = "https://contoso.sharepoint.com"
+SHOWCASE_CLIENT_ID = "00000000-0000-4000-8000-5a0e5a0e0001"
 
 CREDENTIALS_INVALID = (
     "SharePoint credentials are invalid or expired; an administrator must "
@@ -442,6 +443,56 @@ def remove_showcase(cur: psycopg2.extensions.cursor) -> None:
     cur.execute("DELETE FROM spaces WHERE id = ANY(%s::uuid[])", (spaces,))
 
 
+def remove_connection(cur: psycopg2.extensions.cursor) -> list[str]:
+    """Delete the connection rows the seed creates when a tenant has none.
+
+    Only rows with the seed's own ids go, and only while nothing else uses
+    them: knowledge someone imported through the fake connection keeps it, a
+    tenant app since given real credentials stays, and a tenant integration
+    that other connections hang off stays. Returns what was kept.
+    """
+    kept: list[str] = []
+    user_integration_id = str(sid("user-integration"))
+    cur.execute(
+        """DELETE FROM user_integrations
+           WHERE id = %(id)s
+             AND NOT EXISTS (SELECT 1 FROM integration_knowledge
+                             WHERE user_integration_id = %(id)s)
+             AND NOT EXISTS (SELECT 1 FROM sharepoint_subscriptions
+                             WHERE user_integration_id = %(id)s)""",
+        {"id": user_integration_id},
+    )
+    if not cur.rowcount and one(
+        cur, "SELECT 1 FROM user_integrations WHERE id = %s", user_integration_id
+    ):
+        kept.append("the SharePoint connection, still used by imported knowledge")
+    app_id = str(sid("tenant-app"))
+    cur.execute(
+        """DELETE FROM tenant_sharepoint_apps
+           WHERE id = %(id)s AND client_id = %(client_id)s
+             AND NOT EXISTS (SELECT 1 FROM user_integrations
+                             WHERE tenant_app_id = %(id)s)""",
+        {"id": app_id, "client_id": SHOWCASE_CLIENT_ID},
+    )
+    if not cur.rowcount and one(
+        cur, "SELECT 1 FROM tenant_sharepoint_apps WHERE id = %s", app_id
+    ):
+        kept.append("the tenant SharePoint app, changed or still in use")
+    tenant_integration_id = str(sid("tenant-integration"))
+    cur.execute(
+        """DELETE FROM tenant_integrations
+           WHERE id = %(id)s
+             AND NOT EXISTS (SELECT 1 FROM user_integrations
+                             WHERE tenant_integration_id = %(id)s)""",
+        {"id": tenant_integration_id},
+    )
+    if not cur.rowcount and one(
+        cur, "SELECT 1 FROM tenant_integrations WHERE id = %s", tenant_integration_id
+    ):
+        kept.append("the tenant SharePoint integration, still used by connections")
+    return kept
+
+
 def resolve_user_integration(
     cur: psycopg2.extensions.cursor, settings: Settings, tenant_id: str, user_id: str
 ) -> str:
@@ -479,7 +530,7 @@ def resolve_user_integration(
             (
                 app_id,
                 tenant_id,
-                "00000000-0000-4000-8000-5a0e5a0e0001",
+                SHOWCASE_CLIENT_ID,
                 secret,
                 "contoso.onmicrosoft.com",
                 user_id,
@@ -1025,7 +1076,9 @@ def main() -> None:
     )
     action = parser.add_mutually_exclusive_group()
     action.add_argument(
-        "--remove", action="store_true", help="Delete the showcase space"
+        "--remove",
+        action="store_true",
+        help="Delete the showcase spaces and the connection the seed created",
     )
     action.add_argument(
         "--simulate-sync",
@@ -1042,8 +1095,11 @@ def main() -> None:
     if args.remove:
         with connect(settings) as connection, connection.cursor() as cur:
             remove_showcase(cur)
+            kept = remove_connection(cur)
             connection.commit()
         print(f"Removed {SPACE_NAME!r}, {SECOND_SPACE_NAME!r} and the personal source.")
+        for row in kept:
+            print(f"Kept {row}.")
         return
     email = args.user or getattr(settings, "default_user_email", None)
     if not email:

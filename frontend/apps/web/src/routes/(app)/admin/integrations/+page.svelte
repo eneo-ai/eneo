@@ -19,6 +19,7 @@
   import AdminSourcesOverview from "$lib/features/integrations/components/AdminSourcesOverview.svelte";
   import SharePointAppDeleteDialog from "$lib/features/integrations/sharepoint/SharePointAppDeleteDialog.svelte";
   import SharePointSetupFixtureLauncher from "$lib/features/integrations/sharepoint/SharePointSetupFixtureLauncher.svelte";
+  import { SharePointSubscriptionList } from "$lib/features/integrations/sharepoint/SharePointSubscriptionList.svelte";
   import SharePointSubscriptions from "./SharePointSubscriptions.svelte";
 
   const { data }: PageProps = $props();
@@ -34,6 +35,7 @@
   );
   let sharePointConfig = $state<components["schemas"]["TenantSharePointAppPublic"] | null>(null);
   let showWebhookManagement = $state(false);
+  const subscriptionList = new SharePointSubscriptionList(untrack(() => data.eneo));
 
   const loadSharePointStatus = createAsyncState(async () => {
     // A reload keeps the configured view mounted, so open panels and a test result survive it.
@@ -188,6 +190,7 @@
             <SharePointConnectionHealth
               eneo={data.eneo}
               config={sharePointConfig}
+              {subscriptionList}
               subscriptionsOpen={showWebhookManagement}
               onEdit={() => ($showSharePointConfigDialog = true)}
               onToggleSubscriptions={() => (showWebhookManagement = !showWebhookManagement)}
@@ -195,7 +198,7 @@
             />
             {#if showWebhookManagement}
               <div class="border-default mt-4 rounded-lg border p-6">
-                <SharePointSubscriptions eneo={data.eneo} />
+                <SharePointSubscriptions eneo={data.eneo} {subscriptionList} />
               </div>
             {/if}
           </Settings.Row>

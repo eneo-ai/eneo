@@ -236,6 +236,12 @@ class AdminIntegrationKnowledgeSpace(BaseModel):
     organization: bool = Field(
         ..., description="True for the tenant's organization space"
     )
+    can_open: bool = Field(
+        ...,
+        description="Whether the caller may open the space: the organization "
+        "space, or a shared space they belong to directly or through a group. "
+        "The admin permission alone grants no access to a shared space",
+    )
 
 
 class AdminIntegrationKnowledgeItem(BaseModel):

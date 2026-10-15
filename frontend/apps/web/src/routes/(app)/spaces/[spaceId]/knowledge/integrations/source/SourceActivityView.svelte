@@ -12,8 +12,11 @@
   import { isCredentialsError } from "$lib/features/integrations/sourceProblems";
   import {
     activityKind,
+    appendPage,
     groupActivityByDay,
     mergeActivity,
+    itemsToPage,
+    mergeFirstPage,
     readSyncLogExtras,
     skippedNotListed,
     summarizeActivity,
@@ -24,58 +27,129 @@
 
   interface Props {
     items: IntegrationKnowledge[];
-    /** The source has more than one item, so each entry names its folder. */
-    showFolders: boolean;
-    /** Changes when a sync of the source finishes, so the timeline reloads. */
-    refreshKey: string;
+    /** The one folder whose history to show; null shows every folder's. */
+    selectedId: string | null;
+    /** Per item, changes when a sync of the item finishes, so its history reloads. */
+    signatures: Record<string, string>;
+    onSelect: (itemId: string | null) => void;
   }
 
-  let { items, showFolders, refreshKey }: Props = $props();
+  let { items, selectedId, signatures, onSelect }: Props = $props();
 
   const eneo = getEneo();
+  /** Per request; the endpoint caps a page, so a long history is read page by page. */
   const PAGE_SIZE = 10;
 
-  let limit = $state(PAGE_SIZE);
-  let loaded = $state<{ item: IntegrationKnowledge; logs: SyncLog[]; total: number }[]>([]);
-  let loading = $state(false);
-  let error = $state<string | null>(null);
-  let generation = 0;
+  type ItemLogs = { logs: SyncLog[]; total: number };
 
+  let byItem = $state.raw<Record<string, ItemLogs>>({});
+  let pending = $state(0);
+  let error = $state<string | null>(null);
+  let retry: (() => void) | null = null;
+  // The latest request per item; an older answer for the item is dropped. Not reactive:
+  // the effect that fetches what is missing must not rerun when a request starts.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- see above
+  const requests = new Map<string, number>();
+  let requestCount = 0;
+
+  let multiple = $derived(items.length > 1);
+  let shown = $derived(selectedId ? items.filter((item) => item.id === selectedId) : items);
+  let loaded = $derived(
+    shown.flatMap((item) => (byItem[item.id] ? [{ item, ...byItem[item.id] }] : []))
+  );
+  let loading = $derived(pending > 0);
   let entries = $derived(mergeActivity(loaded));
   let days = $derived(groupActivityByDay(entries));
   let totals = $derived(summarizeActivity(entries));
   let hasMore = $derived(loaded.some((entry) => entry.total > entry.logs.length));
   let syncCount = $derived(loaded.reduce((sum, entry) => sum + entry.total, 0));
 
-  async function load(nextLimit: number) {
-    const current = ++generation;
-    loading = true;
+  function folderLabel(item: IntegrationKnowledge): string {
+    const sameName = items.filter((other) => other.name === item.name).length > 1;
+    return sameName && item.folder_path ? item.folder_path : item.name;
+  }
+
+  async function fetchPage(item: IntegrationKnowledge, skip: number) {
+    const request = ++requestCount;
+    requests.set(item.id, request);
+    const response = await eneo.integrations.knowledge.getSyncLogs({
+      knowledge: item,
+      skip,
+      limit: PAGE_SIZE
+    });
+    if (requests.get(item.id) !== request) return null;
+    return { logs: response.items ?? [], total: response.total_count ?? 0 };
+  }
+
+  async function run(task: () => Promise<void>) {
+    pending += 1;
     error = null;
     try {
-      const results = await Promise.all(
-        items.map(async (item) => {
-          const response = await eneo.integrations.knowledge.getSyncLogs({
-            knowledge: item,
-            skip: 0,
-            limit: nextLimit
-          });
-          return { item, logs: response.items ?? [], total: response.total_count ?? 0 };
-        })
-      );
-      if (current !== generation) return;
-      loaded = results;
-      limit = nextLimit;
+      await task();
     } catch (err) {
-      if (current !== generation) return;
       error = getErrorMessage(err);
+      retry = () => void run(task);
     } finally {
-      if (current === generation) loading = false;
+      pending -= 1;
     }
   }
 
+  /** Each item's newest page, kept together with the older pages it reaches. */
+  function loadNewest(targets: IntegrationKnowledge[]) {
+    if (targets.length === 0) return;
+    void run(async () => {
+      const pages = await Promise.all(
+        targets.map(async (item) => ({ item, page: await fetchPage(item, 0) }))
+      );
+      const next = { ...byItem };
+      for (const { item, page } of pages) {
+        if (!page) continue;
+        next[item.id] = {
+          logs: mergeFirstPage(next[item.id]?.logs, page.logs, page.total),
+          total: page.total
+        };
+      }
+      byItem = next;
+    });
+  }
+
+  function loadOlder() {
+    const targets = itemsToPage(loaded);
+    void run(async () => {
+      const pages = await Promise.all(
+        targets.map(async ({ item, logs }) => ({ item, page: await fetchPage(item, logs.length) }))
+      );
+      const next = { ...byItem };
+      for (const { item, page } of pages) {
+        const current = next[item.id];
+        if (!page || !current) continue;
+        const logs = appendPage(current.logs, page.logs);
+        // Nothing new means the newest logs moved under the paging; stop rather than loop.
+        next[item.id] = {
+          logs,
+          total: logs.length > current.logs.length ? page.total : logs.length
+        };
+      }
+      byItem = next;
+    });
+  }
+
+  // A folder's history is first fetched when it is shown.
   $effect(() => {
-    void refreshKey;
-    untrack(() => void load(limit));
+    const missing = shown.filter((item) => !requests.has(item.id));
+    untrack(() => loadNewest(missing));
+  });
+
+  let seenSignatures = untrack(() => signatures);
+  $effect(() => {
+    const current = signatures;
+    untrack(() => {
+      const changed = items.filter(
+        (item) => item.id in byItem && current[item.id] !== seenSignatures[item.id]
+      );
+      seenSignatures = current;
+      loadNewest(changed);
+    });
   });
 
   function title(log: SyncLog, kind: ActivityKind): string {
@@ -144,19 +218,38 @@
     aria-label={m.integration_activity_events()}
     class="flex min-w-0 flex-[999_1_32rem] flex-col gap-6"
   >
+    <!-- The timeline of every folder stops where the busiest runs out; a quiet folder's
+         older syncs are reached by choosing it. -->
+    {#if multiple}
+      <div class="flex flex-wrap items-center gap-2 text-sm">
+        <label for="activity-folder" class="text-secondary">{m.integration_source_folder()}</label>
+        <select
+          id="activity-folder"
+          class="border-default bg-primary text-default rounded-md border px-2 py-1.5 text-sm"
+          value={selectedId ?? ""}
+          onchange={(event) => onSelect(event.currentTarget.value || null)}
+        >
+          <option value="">{m.integration_source_all_folders()}</option>
+          {#each items as item (item.id)}
+            <option value={item.id}>{folderLabel(item)}</option>
+          {/each}
+        </select>
+      </div>
+    {/if}
+
     {#if error}
       <div
         class="text-negative-stronger bg-negative-dimmer flex flex-wrap items-center gap-3 rounded p-4 text-sm"
         role="alert"
       >
         <span>{m.sync_history_load_failed()}: {error}</span>
-        <Button variant="outline" size="sm" onclick={() => load(limit)}>{m.retry()}</Button>
+        <Button variant="outline" size="sm" onclick={() => retry?.()}>{m.retry()}</Button>
       </div>
     {/if}
 
     {#if loading && loaded.length === 0}
       <div class="text-secondary flex items-center gap-2 text-sm" role="status">
-        <IconLoadingSpinner size="sm" class="animate-spin" />
+        <IconLoadingSpinner size="sm" class="motion-safe:animate-spin" />
         <span>{m.loading_sync_history()}</span>
       </div>
     {:else if !error && entries.length === 0}
@@ -211,7 +304,7 @@
                 {/if}
                 <p class="text-secondary text-xs">
                   {[
-                    showFolders ? item.name : null,
+                    multiple && !selectedId ? item.name : null,
                     log.sync_type === "full" ? m.full_sync() : m.delta_sync(),
                     took
                   ]
@@ -226,9 +319,11 @@
                     <summary
                       class="text-secondary focus-visible:ring-stronger w-fit cursor-pointer rounded text-xs hover:underline focus-visible:ring-2 focus-visible:outline-none"
                     >
-                      {m.integration_activity_show_files({
-                        count: extras.changedTotal + log.skipped_items
-                      })}
+                      {extras.changedTotal + log.skipped_items === 1
+                        ? m.integration_activity_show_files_one()
+                        : m.integration_activity_show_files_other({
+                            count: extras.changedTotal + log.skipped_items
+                          })}
                     </summary>
                     <ul class="mt-1 flex flex-col gap-0.5 pl-1 text-xs">
                       <!-- The same file name recurs across folders, so the key needs the position. -->
@@ -275,7 +370,7 @@
         class="w-fit"
         disabled={loading}
         aria-busy={loading}
-        onclick={() => load(limit + PAGE_SIZE)}
+        onclick={loadOlder}
       >
         {m.integration_activity_show_older()}
       </Button>
@@ -288,7 +383,9 @@
       class="border-default flex flex-[1_1_16rem] flex-col gap-3 rounded-lg border p-4 lg:max-w-xs"
     >
       <h2 id="activity-totals" class="text-sm font-semibold">
-        {m.integration_activity_totals_heading({ count: totals.syncs })}
+        {totals.syncs === 1
+          ? m.integration_activity_totals_heading_one()
+          : m.integration_activity_totals_heading_other({ count: totals.syncs })}
       </h2>
       {#if syncCount > totals.syncs}
         <p class="text-secondary -mt-2 text-xs">

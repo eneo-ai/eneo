@@ -23,7 +23,7 @@
   } from "$lib/features/integrations/integrationDocuments";
   import { previewLinkLabel } from "$lib/features/integrations/IntegrationData";
   import SourceStateBadge from "$lib/features/integrations/components/SourceStateBadge.svelte";
-  import { itemState } from "$lib/features/integrations/sources";
+  import { itemState, itemWatchState, watchStateLabel } from "$lib/features/integrations/sources";
   import type { IntegrationSyncProgress } from "$lib/features/integrations/syncProgress";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
   import { describeSkipReason } from "$lib/features/integrations/skipReasons";
@@ -41,9 +41,19 @@
     problemsHref: string;
     /** Show the folder's own heading and actions; off when the source is this one item. */
     showHeader?: boolean;
+    /** Show the folder's link and actions in its heading; off when the page header has them. */
+    showControls?: boolean;
   }
 
-  let { knowledge, space, progress, skipped, problemsHref, showHeader = true }: Props = $props();
+  let {
+    knowledge,
+    space,
+    progress,
+    skipped,
+    problemsHref,
+    showHeader = true,
+    showControls = true
+  }: Props = $props();
 
   const eneo = getEneo();
   const SEARCH_DEBOUNCE_MS = 300;
@@ -57,6 +67,7 @@
   let loadGeneration = 0;
 
   let folderState = $derived(itemState(knowledge, progress));
+  let watchState = $derived(itemWatchState(knowledge));
   let view = $state<"searchable" | "skipped">("searchable");
   let skippedTotal = $derived(skipped?.total ?? 0);
   let skippedNotListed = $derived(skipped ? Math.max(0, skipped.total - skipped.items.length) : 0);
@@ -165,26 +176,33 @@
               })}
             </span>
           {/if}
+          {#if knowledge.integration_type === "sharepoint"}
+            <span class={watchState === "expired" ? "text-warning-stronger" : undefined}>
+              {m.integration_source_watch_state_line({ state: watchStateLabel(watchState) })}
+            </span>
+          {/if}
           {#if knowledge.folder_path}
             <span class="break-all">{knowledge.folder_path}</span>
           {/if}
         </div>
       </div>
-      <div class="flex items-center gap-1">
-        {#if knowledge.url}
-          <Button
-            variant="outline"
-            size="sm"
-            href={knowledge.url}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {sourceLinkLabel}
-            <IconLinkExternal size="sm" data-icon="inline-end" />
-          </Button>
-        {/if}
-        <IntegrationActions knowledgeItem={knowledge} />
-      </div>
+      {#if showControls}
+        <div class="flex items-center gap-1">
+          {#if knowledge.url}
+            <Button
+              variant="outline"
+              size="sm"
+              href={knowledge.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {sourceLinkLabel}
+              <IconLinkExternal size="sm" data-icon="inline-end" />
+            </Button>
+          {/if}
+          <IntegrationActions knowledgeItem={knowledge} />
+        </div>
+      {/if}
     </div>
   {:else}
     <h2 id="folder-documents-{knowledge.id}" class="sr-only">{m.documents()}</h2>
@@ -281,7 +299,7 @@
 
     {#if loading}
       <div class="text-secondary flex items-center gap-2 text-sm" role="status">
-        <IconLoadingSpinner size="sm" class="animate-spin" />
+        <IconLoadingSpinner size="sm" class="motion-safe:animate-spin" />
         <span>{m.integration_documents_loading()}</span>
       </div>
     {/if}

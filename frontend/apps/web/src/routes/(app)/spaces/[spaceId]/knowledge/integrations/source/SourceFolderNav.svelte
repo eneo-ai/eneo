@@ -1,6 +1,11 @@
 <script lang="ts">
   import { SvelteSet } from "svelte/reactivity";
+  import Check from "@lucide/svelte/icons/check";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import Circle from "@lucide/svelte/icons/circle";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import X from "@lucide/svelte/icons/x";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { Input } from "$lib/components/ui/input/index.js";
   import {
@@ -41,12 +46,13 @@
     items.reduce((sum, item) => sum + (item.metadata?.document_count ?? 0), 0)
   );
 
-  const dotClass: Record<ItemState, string> = {
-    ok: "bg-positive-default",
-    error: "bg-negative-default",
-    syncing: "bg-accent-default motion-safe:animate-pulse",
-    empty: "bg-warning-default",
-    never: "border-strongest border"
+  // A shape per state, so the state does not rest on colour alone.
+  const stateIcons: Record<ItemState, { icon: typeof Check; class: string }> = {
+    ok: { icon: Check, class: "text-positive-default" },
+    error: { icon: X, class: "text-negative-default" },
+    syncing: { icon: LoaderCircle, class: "text-accent-default motion-safe:animate-spin" },
+    empty: { icon: TriangleAlert, class: "text-warning-default" },
+    never: { icon: Circle, class: "text-secondary" }
   };
 
   function stateLabel(state: ItemState): string {
@@ -114,6 +120,7 @@
     {/if}
     {#each rows as row (row.item.id)}
       {@const state = itemState(row.item, progress)}
+      {@const StateIcon = stateIcons[state].icon}
       <li class="flex items-center" style:padding-left="{row.depth * 1.25}rem">
         {#if row.hasChildren && !filtering}
           <button
@@ -126,7 +133,7 @@
             class="text-secondary hover:bg-hover-dimmer focus-visible:ring-stronger flex size-7 shrink-0 items-center justify-center rounded-md focus-visible:ring-2 focus-visible:outline-none"
           >
             <ChevronRight
-              class="size-4 transition-transform {row.expanded ? 'rotate-90' : ''}"
+              class="size-4 motion-safe:transition-transform {row.expanded ? 'rotate-90' : ''}"
               aria-hidden="true"
             />
           </button>
@@ -144,7 +151,7 @@
             ? 'bg-secondary font-medium'
             : 'hover:bg-hover-dimmer'}"
         >
-          <span class="size-2 shrink-0 rounded-full {dotClass[state]}" aria-hidden="true"></span>
+          <StateIcon class="size-3.5 shrink-0 {stateIcons[state].class}" aria-hidden="true" />
           <span class="flex-1 truncate">{row.item.name}</span>
           <span class="sr-only">, {stateLabel(state)}</span>
           <span

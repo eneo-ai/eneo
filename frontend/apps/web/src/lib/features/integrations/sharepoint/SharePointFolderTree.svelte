@@ -486,7 +486,7 @@
           class="text-muted-foreground flex items-center justify-center gap-2 px-4 py-10"
           role="status"
         >
-          <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+          <LoaderCircle class="size-4 motion-safe:animate-spin" aria-hidden="true" />
           {m.sharepoint_loading_content()}
         </div>
       {:else if rootLoadError}

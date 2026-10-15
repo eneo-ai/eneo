@@ -34,6 +34,8 @@ export type SourceSummary = {
   lastSyncedAt: string | null;
   lastSyncAttemptedAt: string | null;
   failedItems: IntegrationKnowledge[];
+  /** Items that have not finished a first sync and are not syncing now. */
+  waitingItems: number;
   /** Every failure is the organisation's SharePoint sign-in, which only an admin can fix. */
   credentialsFailed: boolean;
   progress: SyncProgressSummary | null;
@@ -81,16 +83,9 @@ export function groupIntegrationSources(items: IntegrationKnowledge[]): Integrat
   return sources.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** The source that holds an item: its wrapper when it has one. */
-export function sourceForItem(
-  item: IntegrationKnowledge,
-  allItems: IntegrationKnowledge[]
-): IntegrationSource {
-  return (
-    groupIntegrationSources(allItems).find((source) =>
-      source.items.some((candidate) => candidate.id === item.id)
-    ) ?? groupIntegrationSources([item])[0]
-  );
+/** Unique across the sources of a space: a wrapper and an item never share an id. */
+export function sourceKey(source: Pick<IntegrationSource, "kind" | "id">): string {
+  return `${source.kind}:${source.id}`;
 }
 
 export function sourceHref(
@@ -107,6 +102,34 @@ export function sourceHref(
   if (params.tab) query.set("tab", params.tab);
   const search = query.toString();
   return search ? `${base}?${search}` : base;
+}
+
+/** Whether SharePoint tells Eneo about changes to the item, from when its subscription expires. */
+export type WatchState = "active" | "expiring" | "expired" | "none";
+
+/** Subscriptions are renewed automatically from this long before they expire. */
+const WATCH_EXPIRING_MS = 48 * 60 * 60 * 1000;
+
+export function itemWatchState(item: IntegrationKnowledge, now = Date.now()): WatchState {
+  const expires = item.metadata?.sharepoint_subscription_expires_at;
+  const left = expires ? new Date(expires).getTime() - now : Number.NaN;
+  if (Number.isNaN(left)) return "none";
+  if (left <= 0) return "expired";
+  return left <= WATCH_EXPIRING_MS ? "expiring" : "active";
+}
+
+/** In the words of the source's "Change notifications" figure (On/Off). */
+export function watchStateLabel(state: WatchState): string {
+  switch (state) {
+    case "active":
+      return m.integration_source_watch_on();
+    case "expiring":
+      return m.integration_source_watch_state_expiring();
+    case "expired":
+      return m.integration_source_watch_state_expired();
+    case "none":
+      return m.integration_source_watch_off();
+  }
 }
 
 export function itemState(item: IntegrationKnowledge, progress: ProgressById): ItemState {
@@ -153,6 +176,7 @@ export function summarizeSource(
     lastSyncedAt,
     lastSyncAttemptedAt,
     failedItems,
+    waitingItems: states.filter((s) => s === "never").length,
     credentialsFailed:
       failedItems.length > 0 &&
       failedItems.every((item) => isCredentialsError(item.metadata?.last_sync_error)),
@@ -203,7 +227,10 @@ export function sourceContentsLabel(items: IntegrationKnowledge[]): string {
   return parts.join(", ");
 }
 
-/** The status filters above a list of sources; "attention" also covers a source that syncs. */
+/**
+ * The status filters above a list of sources. A source can match several: "attention"
+ * also covers one that syncs, and "never" one where only some items wait for a first sync.
+ */
 export type SourceFilter = "all" | "attention" | "syncing" | "never" | "empty" | "ok";
 
 export const SOURCE_FILTERS: SourceFilter[] = [
@@ -223,6 +250,8 @@ export function matchesSourceFilter(summary: SourceSummary, filter: SourceFilter
       return summary.failedItems.length > 0;
     case "syncing":
       return summary.progress !== null;
+    case "never":
+      return summary.waitingItems > 0;
     default:
       return summary.state === filter;
   }

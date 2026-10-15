@@ -2,39 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_INTEGRATION_DOCUMENTS_QUERY,
   documentsPageRange,
-  groupSkippedByReason,
   integrationDocumentsHref,
   lastPageOffset,
-  skippedDocumentsNotListed,
   toggleDocumentsSort
 } from "./integrationDocuments";
-
-describe("groupSkippedByReason", () => {
-  it("groups by trimmed reason, largest group first, ties by first appearance", () => {
-    const groups = groupSkippedByReason([
-      { file: "a.xyz", reason: "Unsupported format" },
-      { file: "scan1.pdf", reason: "No text layer" },
-      { file: "scan2.pdf", reason: "No text layer " },
-      { file: "b.xyz", reason: "Unsupported format" },
-      { file: "big.docx", reason: "Too large" }
-    ]);
-    expect(groups).toEqual([
-      { reason: "Unsupported format", files: ["a.xyz", "b.xyz"] },
-      { reason: "No text layer", files: ["scan1.pdf", "scan2.pdf"] },
-      { reason: "Too large", files: ["big.docx"] }
-    ]);
-  });
-});
-
-describe("skippedDocumentsNotListed", () => {
-  it.each([
-    [{ items: [{ file: "a", reason: "r" }], total: 17, truncated: true, synced_at: null }, 16],
-    [{ items: [{ file: "a", reason: "r" }], total: 17, truncated: false, synced_at: null }, 0],
-    [{ items: [{ file: "a", reason: "r" }], total: 1, truncated: true, synced_at: null }, 0]
-  ])("counts what the capped list leaves out", (skipped, expected) => {
-    expect(skippedDocumentsNotListed(skipped)).toBe(expected);
-  });
-});
 
 describe("documentsPageRange", () => {
   it("is 1-based and clamps the last page to the total", () => {

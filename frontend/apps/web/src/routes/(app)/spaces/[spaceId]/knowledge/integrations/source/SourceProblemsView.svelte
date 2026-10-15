@@ -138,7 +138,7 @@
           : m.integration_problem_files_other({ count: group.files.length })}
       </span>
       <ChevronDown
-        class="text-secondary size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180"
+        class="text-secondary size-4 shrink-0 motion-safe:transition-transform group-data-[state=open]:rotate-180"
         aria-hidden="true"
       />
     </Collapsible.Trigger>
@@ -188,7 +188,7 @@
 <div class="flex flex-col gap-6">
   {#if problems === null}
     <div class="text-secondary flex items-center gap-2 text-sm" role="status">
-      <IconLoadingSpinner size="sm" class="animate-spin" />
+      <IconLoadingSpinner size="sm" class="motion-safe:animate-spin" />
       <span>{m.loading()}</span>
     </div>
   {:else if nothingToShow}

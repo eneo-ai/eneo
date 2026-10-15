@@ -424,7 +424,8 @@
             </div>
           </div>
         {/if}
-        <IntegrationsTable></IntegrationsTable>
+        <!-- The tabs keep their content mounted; only poll sync progress on this one. -->
+        <IntegrationsTable active={$selectedTab === "integrations"}></IntegrationsTable>
       </Page.Tab>
     {/if}
   </Page.Main>

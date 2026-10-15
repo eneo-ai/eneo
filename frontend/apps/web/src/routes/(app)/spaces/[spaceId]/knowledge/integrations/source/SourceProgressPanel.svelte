@@ -14,8 +14,8 @@
     sourceName: string;
     /** No item of the source has finished a sync before. */
     firstSync: boolean;
-    /** The file each syncing folder reads right now; the folder is null for a one-folder source. */
-    nowReading?: { folder: string | null; file: string }[];
+    /** The file each syncing folder reads right now, for a source of several folders. */
+    nowReading?: { folder: string; file: string }[];
   }
 
   let { progress, sourceName, firstSync, nowReading = [] }: Props = $props();
@@ -115,9 +115,7 @@
             class="text-accent-default shrink-0 motion-safe:animate-spin"
           />
           <span class="text-secondary shrink-0">
-            {reading.folder
-              ? m.integration_progress_reading_in({ folder: reading.folder })
-              : m.integration_live_reading()}
+            {m.integration_progress_reading_in({ folder: reading.folder })}
           </span>
           <span class="min-w-0 truncate font-medium">{reading.file}</span>
         </li>

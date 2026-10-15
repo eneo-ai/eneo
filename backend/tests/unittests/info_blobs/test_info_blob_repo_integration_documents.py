@@ -24,10 +24,13 @@ BELOW_ANCHOR = (
     "ELSE info_blobs.url END"
 )
 # Each property value, also each entry of a multi-value list; never a name or
-# label, which every document of a library shares.
+# label, which every document of a library shares, nor a yes/no value, stored
+# as true/false. Postgres evaluates the path in
+# tests/integration/info_blobs/test_integration_document_property_search.py.
 PROPERTY_VALUE = (
     "EXISTS (SELECT * FROM jsonb_array_elements_text(jsonb_path_query_array("
-    "info_blobs.source_metadata, '$[*].value[*]')) AS value WHERE value"
+    "info_blobs.source_metadata, "
+    """'$[*] ? (!(@.kind == "boolean")).value[*]')) AS value WHERE value"""
 )
 
 

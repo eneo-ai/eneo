@@ -1,8 +1,10 @@
 <script lang="ts">
   import * as Table from "$lib/components/resource-table/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { tick } from "svelte";
   import { derived, writable } from "svelte/store";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { formatRelativeTime } from "$lib/core/formatting/dateTime";
   import SourceStatusFilter from "$lib/features/integrations/components/SourceStatusFilter.svelte";
   import {
@@ -11,6 +13,7 @@
     matchesSourceFilter,
     sourceContentsLabel,
     sourceHref,
+    sourceKey,
     summarizeSource,
     type IntegrationSource,
     type SourceFilter,
@@ -24,11 +27,18 @@
   import SourceNameCell from "./SourceNameCell.svelte";
   import SourceStatusCell from "./SourceStatusCell.svelte";
 
+  interface Props {
+    /** Off while another tab of the knowledge page is open: the list stays mounted there. */
+    active?: boolean;
+  }
+
+  let { active = true }: Props = $props();
+
   const {
     state: { currentSpace }
   } = getSpacesManager();
 
-  const tracker = useSyncProgress();
+  const tracker = useSyncProgress({ active: () => active });
   const progress = writable<Record<string, IntegrationSyncProgress>>({});
   $effect(() => {
     progress.set(tracker.byId);
@@ -47,6 +57,20 @@
     $rows.filter((row) => matchesSourceFilter(row.summary, $statusFilter))
   );
   let filterCounts = $derived(countSourceFilters($rows.map((row) => row.summary)));
+  // Once a filter has been chosen the bar stays, so the pressed button never vanishes under focus.
+  let filterUsed = $state(false);
+  $effect(() => {
+    if ($statusFilter !== "all") filterUsed = true;
+  });
+  let showFilterBar = $derived($rows.length > 1 || filterUsed);
+  let noMatch = $derived($rows.length > 0 && $visibleRows.length === 0);
+  let filterBar = $state<HTMLElement>();
+
+  async function showAllSources() {
+    $statusFilter = "all";
+    await tick();
+    filterBar?.querySelector<HTMLElement>('button[aria-pressed="true"]')?.focus();
+  }
 
   // The badges already mark failing sources; only a refused SharePoint sign-in, which
   // stops every source and only an admin can fix, gets a banner of its own.
@@ -103,7 +127,10 @@
     return value ? new Date(value).getTime() : 0;
   }
 
-  const table = Table.createWithStore(visibleRows);
+  // Keyed by source: filtering must not slide another source under a row's open dialog.
+  const table = Table.createWithStore(visibleRows, undefined, {
+    getRowId: (row) => sourceKey(row.source)
+  });
 
   const viewModel = table.createViewModel([
     table.column({
@@ -231,23 +258,34 @@
   </div>
 {/if}
 
-{#if $rows.length > 1}
-  <div class="pt-3 pr-3">
+{#if showFilterBar && $rows.length > 0}
+  <div class="pt-3 pr-3" bind:this={filterBar}>
     <SourceStatusFilter counts={filterCounts} bind:value={$statusFilter} />
+    <!-- Mounted with the bar, so the message is announced when it appears. -->
+    <p class="sr-only" role="status">{noMatch ? m.integration_filter_no_match() : ""}</p>
   </div>
 {/if}
 
-<Table.Root {viewModel} resourceName="integration">
-  {#if $useEmbeddingModelGroups}
-    {#each $embeddingModels as embeddingModel (embeddingModel.id)}
-      <Table.Group
-        title={embeddingModel.inSpace
-          ? embeddingModel.name
-          : embeddingModel.name + ` (${m.disabled()})`}
-        filterFn={createModelFilter(embeddingModel.id)}
-      ></Table.Group>
-    {/each}
-  {:else}
-    <Table.Group></Table.Group>
-  {/if}
-</Table.Root>
+{#if noMatch}
+  <div class="flex flex-col items-start gap-3 py-8 pr-3 text-sm">
+    <p class="text-secondary">{m.integration_filter_no_match()}</p>
+    <Button variant="outline" size="sm" onclick={showAllSources}>
+      {m.integration_filter_show_all()}
+    </Button>
+  </div>
+{:else}
+  <Table.Root {viewModel} resourceName="integration">
+    {#if $useEmbeddingModelGroups}
+      {#each $embeddingModels as embeddingModel (embeddingModel.id)}
+        <Table.Group
+          title={embeddingModel.inSpace
+            ? embeddingModel.name
+            : embeddingModel.name + ` (${m.disabled()})`}
+          filterFn={createModelFilter(embeddingModel.id)}
+        ></Table.Group>
+      {/each}
+    {:else}
+      <Table.Group></Table.Group>
+    {/if}
+  </Table.Root>
+{/if}

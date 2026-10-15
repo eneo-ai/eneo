@@ -11,6 +11,7 @@
 </script>
 
 <script lang="ts">
+  import { onMount } from "svelte";
   import Check from "@lucide/svelte/icons/check";
   import Circle from "@lucide/svelte/icons/circle";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
@@ -26,14 +27,16 @@
   import { m } from "$lib/paraglide/messages";
   import { classifyMicrosoftAuthError, getMicrosoftAuthGuidanceText } from "./microsoftAuthErrors";
   import { followServiceAccountSignIn } from "./serviceAccountAuth";
+  import type { SharePointSubscriptionList } from "./SharePointSubscriptionList.svelte";
 
   type TenantSharePointAppPublic = components["schemas"]["TenantSharePointAppPublic"];
-  type SharePointSubscription = components["schemas"]["SharePointSubscriptionPublic"];
   type TenantAppTestResult = components["schemas"]["TenantAppTestResult"];
 
   interface Props {
     eneo: Eneo;
     config: TenantSharePointAppPublic;
+    /** Shared with the subscriptions panel, so both show the same state. */
+    subscriptionList: SharePointSubscriptionList;
     subscriptionsOpen: boolean;
     onEdit: () => void;
     onToggleSubscriptions: () => void;
@@ -41,8 +44,15 @@
     onConfigChanged: () => void | Promise<void>;
   }
 
-  let { eneo, config, subscriptionsOpen, onEdit, onToggleSubscriptions, onConfigChanged }: Props =
-    $props();
+  let {
+    eneo,
+    config,
+    subscriptionList,
+    subscriptionsOpen,
+    onEdit,
+    onToggleSubscriptions,
+    onConfigChanged
+  }: Props = $props();
 
   // --- Sign-in ---
 
@@ -64,20 +74,14 @@
 
   // --- Change notifications ---
 
-  let subscriptions = $state<SharePointSubscription[] | null>(null);
+  // A failed load shows as such in the row; the panel reports its own failures.
+  const reloadSubscriptions = () => subscriptionList.load().catch(() => {});
 
-  const loadSubscriptions = createAsyncState(async () => {
-    try {
-      const response = await eneo.integrations.admin.sharepoint.listSubscriptions();
-      subscriptions = Array.isArray(response) ? response : [];
-    } catch {
-      subscriptions = null;
-    }
+  onMount(() => {
+    void reloadSubscriptions();
   });
 
-  $effect(() => {
-    loadSubscriptions();
-  });
+  let subscriptions = $derived(subscriptionList.items);
 
   let expired = $derived(subscriptions?.filter((s) => s.is_expired).length ?? 0);
   let failing = $derived(
@@ -109,7 +113,7 @@
     } catch (error) {
       toastError(error, m.sharepoint_subscriptions_renew_error());
     }
-    await loadSubscriptions();
+    await reloadSubscriptions();
   });
 
   // --- Connection test ---
@@ -251,14 +255,16 @@
       <div class="flex min-w-0 flex-[1_1_18rem] flex-col gap-0.5">
         <p class="font-medium">{m.sharepoint_health_watch_title()}</p>
         <p class="text-secondary text-sm">
-          {#if subscriptions === null && loadSubscriptions.isLoading}
+          {#if subscriptions === null && subscriptionList.loading}
             {m.loading()}
           {:else if subscriptions === null}
             {m.sharepoint_subscriptions_load_error()}
           {:else if subscriptions.length === 0}
             {m.sharepoint_health_watch_none()}
           {:else if expired + failing === 0}
-            {m.sharepoint_health_watch_ok({ count: active })}
+            {active === 1
+              ? m.sharepoint_health_watch_ok_one()
+              : m.sharepoint_health_watch_ok_other({ count: active })}
           {:else}
             {m.sharepoint_health_watch_issues({
               active,
@@ -316,7 +322,7 @@
         onclick={runTest}
       >
         {#if runTest.isLoading}
-          <IconLoadingSpinner size="sm" class="animate-spin" />
+          <IconLoadingSpinner size="sm" class="motion-safe:animate-spin" />
         {/if}
         {m.sharepoint_health_test_run()}
       </Button>
