@@ -11,8 +11,11 @@
     maximised: false,
     openedByItself: true,
     besideConversation: true,
-    cover: null
-  } as FilePreview;
+    cover: null,
+    overview: null,
+    closeOverview: () => {},
+    showOverview: () => {}
+  } as unknown as FilePreview;
   const pane = initMcpAppPane(preview);
 </script>
 

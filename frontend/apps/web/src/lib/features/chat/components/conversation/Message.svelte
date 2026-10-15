@@ -10,6 +10,7 @@
   import { getChatService } from "../../ChatService.svelte";
   import { setMessageContext } from "../../MessageContext.svelte";
   import { isBuiltinToolCall } from "../../internalToolLabels";
+  import { m } from "$lib/paraglide/messages";
 
   interface Props {
     message: ConversationMessage;
@@ -58,6 +59,18 @@
     updateHeight(isLast);
   });
 
+  // A message sent before its attachments were on the server waits here,
+  // saying how far the uploads have come; nothing has been asked of the model
+  // yet, so neither the thinking badge nor the answer tools apply.
+  const pendingUploads = $derived.by(() => {
+    const uploads = (message as { pending_uploads?: Array<{ status: string }> }).pending_uploads;
+    if (!uploads?.length) return null;
+    return {
+      done: uploads.filter((upload) => upload.status === "completed").length,
+      total: uploads.length
+    };
+  });
+
   const showSpinner = $derived.by(() => {
     const isGeneratingImage = message.generated_files.length > 0;
     const hasStartedStreaming = message.answer.trim().length > 0;
@@ -80,7 +93,8 @@
       !isGeneratingImage &&
       !hasStartedStreaming &&
       !hasReasoning &&
-      !hasBuiltinToolActivity
+      !hasBuiltinToolActivity &&
+      !pendingUploads
     );
   });
 
@@ -102,7 +116,9 @@
   <MessageFiles></MessageFiles>
   <MessageQuestion></MessageQuestion>
   <MessageAnswer></MessageAnswer>
-  {#if showSpinner}
+  {#if pendingUploads}
+    <ThinkingIndicator label={m.uploading_attachments_progress(pendingUploads)} />
+  {:else if showSpinner}
     {#if isReasoning}
       <ThinkingIndicator />
     {:else}
