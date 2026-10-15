@@ -486,6 +486,42 @@ async def test_a_map_model_takes_notes_and_item_merges_with_its_own_usage():
     assert single.map_usage == Usage()
 
 
+async def test_a_final_model_writes_the_answer_and_the_notes_model_the_rest():
+    notes, final = _ScriptedModel(usage=(3, 1)), _ScriptedModel(usage=(10, 5))
+    items = [DigestItem(f"D{i}", f"T{i}", _words(120, f"x{i}")) for i in range(1, 6)]
+    plan = plan_segments(items, _budgets(), _count)
+
+    result = await run_digest(
+        plan,
+        notes,
+        instruction="sum",
+        budgets=_budgets(),
+        count=_count,
+        complete_final=final,
+    )
+
+    assert [system[:22] for system, _, _ in final.calls] == ["Answer the instruction"]
+    assert notes.calls and not any(
+        system.startswith("Answer the instruction") for system, _, _ in notes.calls
+    )
+    assert result.coverage == "complete"
+    # Both functions are the turn model's: one usage account, no map share.
+    assert result.usage == Usage(10 + 3 * len(notes.calls), 5 + len(notes.calls))
+    assert result.map_usage == Usage()
+
+    direct_plan = plan_segments([DigestItem("D1", "T1", "short")], _budgets(), _count)
+    notes, final = _ScriptedModel(), _ScriptedModel()
+    await run_digest(
+        direct_plan,
+        notes,
+        instruction="sum",
+        budgets=_budgets(),
+        count=_count,
+        complete_final=final,
+    )
+    assert (len(notes.calls), len(final.calls)) == (0, 1)
+
+
 async def test_map_batch_bounds_concurrency():
     running = 0
     peak = 0

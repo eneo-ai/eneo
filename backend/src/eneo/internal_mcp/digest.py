@@ -214,6 +214,20 @@ async def prepare_digest_model(
     )
 
 
+def notes_kwargs(model: Any, model_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """The kwargs for the notes and merges: the given ones at temperature 0.
+
+    Notes are extraction, not prose, and a digest is many calls: sampling
+    noise in every note compounds through the merges into run-to-run
+    variance, so the stages before the answer sample as little as the model
+    allows. A model that takes no temperature keeps its kwargs as they are.
+    """
+    kwargs = dict(model_kwargs)
+    if model.get_supported_model_kwargs().temperature.accepts(0.0):
+        kwargs["temperature"] = 0.0
+    return kwargs
+
+
 async def _prepare_reader(
     container: Any, claims: DigestClaims, turn_model: Any, *, instruction: str
 ) -> ReaderTarget | None:
@@ -244,7 +258,7 @@ async def _prepare_reader(
     except DigestRefused:
         logger.warning("[digest] reader model %s window too small", model.name)
         return None
-    model_kwargs: dict[str, Any] = {}
+    model_kwargs = notes_kwargs(model, {})
     lowest = _lowest_reasoning_effort(model)
     if lowest is not None:
         model_kwargs["reasoning_effort"] = lowest
@@ -493,8 +507,21 @@ async def run_bounded_digest(
     settings = get_settings()
     total = max(1.0, settings.digest_timeout_seconds - DEADLINE_MARGIN_SECONDS)
     deadline = Deadline(total)
-    calls = ProviderCalls(
+    # The answer is written under the turn's own kwargs; every call before it
+    # (notes, item merges, batch merges) runs at temperature 0 on the same
+    # model, or on the reader when one was claimed.
+    answer_calls = ProviderCalls(
         digest_model, deadline=deadline, concurrency=settings.digest_concurrency
+    )
+    notes_calls = ProviderCalls(
+        digest_model,
+        deadline=deadline,
+        concurrency=settings.digest_concurrency,
+        target=replace(
+            digest_model,
+            model_kwargs=notes_kwargs(digest_model.model, digest_model.model_kwargs),
+        ),
+        slots=answer_calls.slots,
     )
     map_calls = None
     if digest_model.reader is not None:
@@ -503,12 +530,12 @@ async def run_bounded_digest(
             deadline=deadline,
             concurrency=settings.digest_concurrency,
             target=digest_model.reader,
-            slots=calls.slots,
+            slots=answer_calls.slots,
         )
     started = time.monotonic()
     result = await run_digest(
         plan,
-        calls,
+        notes_calls,
         instruction=instruction,
         budgets=digest_model.budgets,
         count=digest_model.count,
@@ -518,6 +545,7 @@ async def run_bounded_digest(
         should_stop=should_stop,
         map_batch=settings.digest_concurrency,
         complete_map=map_calls,
+        complete_final=answer_calls,
     )
     return result, time.monotonic() - started
 
@@ -583,6 +611,64 @@ def coverage_line(result: DigestResult, *, item_word: str) -> str:
     return f"Coverage: {result.coverage} ({reasons}). {counts}.{tail}"
 
 
+@dataclass(frozen=True)
+class Compression:
+    """How much text became how many words, read off the items and the result.
+
+    Every stage squeezes into a fixed word cap, so the ratio says how much
+    each fact competed for the answer; the merge levels and the largest
+    item say where the squeeze was steepest.
+    """
+
+    words_read: int
+    words_answered: int
+    levels: int
+    # The item split into the most segments, when any item needed splitting.
+    largest_key: str | None
+    largest_segments: int
+
+    @property
+    def ratio(self) -> int | None:
+        if not self.words_answered:
+            return None
+        return max(1, round(self.words_read / self.words_answered))
+
+
+def compression_of(items: Sequence[DigestItem], result: DigestResult) -> Compression:
+    largest_key: str | None = None
+    largest_segments = 0
+    for key, progress in result.item_progress.items():
+        if progress.planned > largest_segments:
+            largest_key, largest_segments = key, progress.planned
+    return Compression(
+        words_read=sum(len(item.text.split()) for item in items),
+        words_answered=len(result.output.split()),
+        levels=result.levels,
+        largest_key=largest_key if largest_segments > 1 else None,
+        largest_segments=largest_segments,
+    )
+
+
+def compression_line(
+    items: Sequence[DigestItem], result: DigestResult, *, item_word: str
+) -> str:
+    c = compression_of(items, result)
+    head = f"Compression: {c.words_read:,} words read into {c.words_answered:,}"
+    if c.ratio is not None:
+        head += f" ({c.ratio:,}:1)"
+    parts = [head]
+    if c.levels:
+        parts.append(f"{c.levels} merge level{'s' if c.levels != 1 else ''}")
+    else:
+        parts.append("no merges")
+    if c.largest_key is not None:
+        parts.append(
+            f"largest {item_word.rstrip('s')} [{c.largest_key}] "
+            f"{c.largest_segments} segments into one note"
+        )
+    return "; ".join(parts) + "."
+
+
 def format_digest(
     *,
     heading: str,
@@ -607,6 +693,7 @@ def format_digest(
     if omitted:
         lines.append(f"Omitted by max_documents: {omitted} {item_word}.")
     lines.append(coverage_line(result, item_word=item_word))
+    lines.append(compression_line(items, result, item_word=item_word))
     header = "\n".join(lines)
 
     stub_chars = sum(len(stub.text) for stub in stubs)
@@ -638,10 +725,13 @@ def format_digest(
     return content
 
 
-def digest_meta(result: DigestResult, digest_model: DigestModel) -> dict[str, Any]:
+def digest_meta(
+    result: DigestResult, digest_model: DigestModel, items: Sequence[DigestItem] = ()
+) -> dict[str, Any]:
     """The call's ``_meta``: the turn model's usage under the GenAI keys (what
     the question row folds), the reader model's under its own."""
     progress = result.item_progress
+    compression = compression_of(items, result)
     meta: dict[str, Any] = {
         "gen_ai.operation.name": "chat",
         "gen_ai.request.model": digest_model.model.name,
@@ -653,6 +743,8 @@ def digest_meta(result: DigestResult, digest_model: DigestModel) -> dict[str, An
         "eneo.segments_planned": sum(p.planned for p in progress.values()),
         "eneo.segments_processed": sum(p.processed for p in progress.values()),
         "eneo.levels": result.levels,
+        "eneo.words_read": compression.words_read,
+        "eneo.words_answered": compression.words_answered,
         "eneo.coverage": result.coverage,
         "eneo.items_partial": result.partial_keys,
     }
@@ -672,11 +764,13 @@ def log_digest(
     result: DigestResult,
     digest_model: DigestModel,
     seconds: float,
+    items: Sequence[DigestItem] = (),
 ) -> None:
     progress = result.item_progress
+    compression = compression_of(items, result)
     logger.info(
         "%s digest assistant=%s scope=%s model=%s items=%d segments=%d/%d "
-        "calls=%d levels=%d coverage=%s tokens_in=%d tokens_out=%d "
+        "calls=%d levels=%d words=%d/%d coverage=%s tokens_in=%d tokens_out=%d "
         "reader=%s reader_tokens_in=%d reader_tokens_out=%d seconds=%.1f",
         tag,
         assistant_id,
@@ -687,6 +781,8 @@ def log_digest(
         sum(p.planned for p in progress.values()),
         result.llm_calls,
         result.levels,
+        compression.words_read,
+        compression.words_answered,
         result.coverage,
         result.usage.input_tokens,
         result.usage.output_tokens,
@@ -701,6 +797,7 @@ __all__ = [
     "CITE_KEY_META",
     "INSTRUCTION_MAX_CHARS",
     "CitationStub",
+    "Compression",
     "Deadline",
     "DigestModel",
     "ReaderTarget",
@@ -711,6 +808,8 @@ __all__ = [
     "body_cap_chars",
     "cited_keys",
     "clip_title",
+    "compression_line",
+    "compression_of",
     "compute_budgets",
     "coverage_line",
     "digest_meta",
@@ -720,6 +819,7 @@ __all__ = [
     "progress_reporter",
     "is_retryable",
     "log_digest",
+    "notes_kwargs",
     "plan_or_refuse",
     "prepare_digest_model",
     "run_bounded_digest",

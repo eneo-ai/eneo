@@ -1216,9 +1216,11 @@ async def digest_documents(
 
     Cost: one model call per text segment plus the merges, up to several
     minutes for a large source. The result starts with the documents read
-    ([D1], [D2], ...) and a coverage line; relay the body and its citations
-    faithfully, state the coverage line when it is partial, and pass the
-    body unchanged to a document tool when a document is wanted. Spreadsheets
+    ([D1], [D2], ...), a coverage line and a compression line (words read
+    into words answered); relay the body and its citations faithfully,
+    state the coverage line when it is partial, cite the compression when
+    asked how complete or reliable the digest is, and pass the body
+    unchanged to a document tool when a document is wanted. Spreadsheets
     are not digested: they are listed with a File reference for the table
     tools. A too-large selection is refused with the counts; narrow it and
     call again. For a single fact, use search_knowledge instead.
@@ -1383,9 +1385,10 @@ async def digest_documents(
         result=result,
         digest_model=digest_model,
         seconds=seconds,
+        items=items,
     )
     return CallToolResult(
-        content=[*content, *links], _meta=digest_meta(result, digest_model)
+        content=[*content, *links], _meta=digest_meta(result, digest_model, items)
     )
 
 

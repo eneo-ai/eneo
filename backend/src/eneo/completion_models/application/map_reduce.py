@@ -359,10 +359,12 @@ class _Run:
         now: Callable[[], float],
         complete_map: CompleteFn | None,
         on_progress: ProgressFn | None = None,
+        complete_final: CompleteFn | None = None,
     ) -> None:
         self.plan = plan
         self.complete = complete
         self.complete_map = complete_map
+        self.complete_final = complete_final
         self.on_progress = on_progress
         self.segments_done = 0
         self.instruction = instruction
@@ -441,7 +443,7 @@ class _Run:
         user: str,
         max_tokens: int,
         *,
-        stage: Literal["map", "reduce"] = "reduce",
+        stage: Literal["map", "reduce", "final"] = "reduce",
     ) -> str | None:
         """One model call's text; ``None`` when it failed or time ran out."""
         reply = await self.call_full(system, user, max_tokens, stage=stage)
@@ -453,7 +455,7 @@ class _Run:
         user: str,
         max_tokens: int,
         *,
-        stage: Literal["map", "reduce"] = "reduce",
+        stage: Literal["map", "reduce", "final"] = "reduce",
     ) -> tuple[str, bool] | None:
         """One model call: ``(text, cut)``, ``cut`` True when the provider
         stopped at ``max_tokens``; ``None`` when it failed or the deadline
@@ -461,10 +463,17 @@ class _Run:
 
         A ``map`` stage call (segment notes, per-item merges) goes to the map
         model when one was given; its usage is kept apart so the caller can
-        account for two models.
+        account for two models. A ``final`` stage call (the answer) goes to
+        the final function when one was given; it shares the turn model's
+        usage with the merges.
         """
         on_map_model = stage == "map" and self.complete_map is not None
-        complete = self.complete_map if on_map_model else self.complete
+        if on_map_model:
+            complete = self.complete_map
+        elif stage == "final" and self.complete_final is not None:
+            complete = self.complete_final
+        else:
+            complete = self.complete
         assert complete is not None
         if self.out_of_time():
             self.deadline_hit = True
@@ -749,6 +758,7 @@ class _Run:
             final_prompt(self.instruction, words),
             material,
             self.budgets.final_max_tokens,
+            stage="final",
         )
         if reply is None:
             return None
@@ -759,6 +769,7 @@ class _Run:
                 final_prompt(self.instruction, words),
                 material,
                 self.budgets.final_max_tokens,
+                stage="final",
             )
             if retry is not None:
                 text, cut = retry[0].strip(), retry[1]
@@ -832,12 +843,16 @@ async def run_digest(
     now: Callable[[], float] = time.monotonic,
     complete_map: CompleteFn | None = None,
     on_progress: ProgressFn | None = None,
+    complete_final: CompleteFn | None = None,
 ) -> DigestResult:
     """Run the plan to one answer with an explicit coverage account.
 
     ``complete_map``, when given, takes the segment notes and the per-item
     merges (a fast reader model); ``complete`` keeps the batch merges and
-    the final answer. Usage is accounted per function in the result.
+    the final answer. ``complete_final``, when given, writes the answer
+    instead (the same model under other settings, say), and ``complete``
+    keeps the merges. Usage is accounted per function in the result: the
+    map function's apart, the other two together as the turn model's.
 
     ``deadline`` is a ``now()`` timestamp after which no call starts; map
     admission already stops when less than ``reduce_reserve_seconds`` remain
@@ -867,6 +882,7 @@ async def run_digest(
         now=now,
         complete_map=complete_map,
         on_progress=on_progress,
+        complete_final=complete_final,
     )
     try:
         return await _stages(run, plan)

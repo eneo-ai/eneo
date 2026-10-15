@@ -23,6 +23,7 @@ from eneo.completion_models.application.map_reduce import (
     DigestResult,
     ItemProgress,
     Usage,
+    plan_segments,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
@@ -40,14 +41,18 @@ from eneo.internal_mcp.digest import (
     ReaderTarget,
     SetAside,
     cited_keys,
+    compression_line,
+    compression_of,
     compute_budgets,
     coverage_line,
     digest_meta,
     format_digest,
     is_retryable,
+    notes_kwargs,
     plan_or_refuse,
     prepare_digest_model,
     progress_reporter,
+    run_bounded_digest,
     validate_instruction,
 )
 from eneo.internal_mcp.foundation import DigestClaims
@@ -265,9 +270,12 @@ class TestPrepareDigestModel:
         assert digest_model.reader is not None
         assert digest_model.reader.model is reader
         assert digest_model.reader.adapter.model is reader
-        # Notes never need deep thought; the assistant's own kwargs stay with
-        # the turn's model.
-        assert digest_model.reader.model_kwargs == {"reasoning_effort": "low"}
+        # Notes never need deep thought and never sample; the assistant's own
+        # kwargs stay with the turn's model.
+        assert digest_model.reader.model_kwargs == {
+            "reasoning_effort": "low",
+            "temperature": 0.0,
+        }
         assert digest_model.segment_count is digest_model.reader.count
         # Segments are sized to the reader window, the reduces to the turn's.
         turn_only = compute_budgets(
@@ -496,6 +504,107 @@ class TestProviderCalls:
 # --------------------------------------------------------------------------- #
 # Result shape
 # --------------------------------------------------------------------------- #
+class TestNotesKwargs:
+    def test_sets_temperature_zero_over_the_turn_value_when_supported(self):
+        kwargs = notes_kwargs(_model(), {"temperature": 0.7, "top_p": 0.9})
+
+        assert kwargs == {"temperature": 0.0, "top_p": 0.9}
+
+    def test_leaves_kwargs_alone_when_the_model_takes_no_temperature(self):
+        model = _model()
+        model.get_supported_model_kwargs = lambda: SupportedModelKwargs()
+
+        assert notes_kwargs(model, {"reasoning_effort": "low"}) == {
+            "reasoning_effort": "low"
+        }
+
+
+class TestRunBoundedDigest:
+    """Notes and merges run at temperature 0; the answer keeps the turn's
+    kwargs."""
+
+    @pytest.fixture(autouse=True)
+    def settings(self, monkeypatch):
+        monkeypatch.setattr(
+            digest_module,
+            "get_settings",
+            lambda: SimpleNamespace(digest_timeout_seconds=60, digest_concurrency=2),
+        )
+
+    def _digest_model(self, adapter) -> DigestModel:
+        return DigestModel(
+            model=_model(),
+            adapter=adapter,
+            model_kwargs={"temperature": 0.7},
+            count=_count,
+            budgets=DigestBudgets(segment_tokens=50, reduce_input_tokens=120),
+            body_cap_chars=9_000,
+        )
+
+    @staticmethod
+    def _by_stage(adapter) -> dict[str, set[float]]:
+        temperatures: dict[str, set[float]] = {}
+        for call in adapter.calls:
+            stage = "answer" if call["prompt"].startswith("Answer") else "notes"
+            temperatures.setdefault(stage, set()).add(call["temperature"])
+        return temperatures
+
+    async def test_mapped_digest_samples_only_in_the_answer(self):
+        adapter = _Adapter(["Date: 2026-01-01\nnote"] * 20)
+        digest_model = self._digest_model(adapter)
+        words = " ".join(f"w{i}" for i in range(150))
+        items = [DigestItem("D1", "One", words), DigestItem("D2", "Two", words)]
+        plan = plan_segments(items, digest_model.budgets, _count)
+        assert not plan.direct_fits
+
+        result, _ = await run_bounded_digest(
+            plan, digest_model, instruction="sum", should_stop=None
+        )
+
+        assert result.coverage == "complete"
+        assert self._by_stage(adapter) == {"notes": {0.0}, "answer": {0.7}}
+
+    async def test_direct_digest_is_one_answer_call_under_the_turn_kwargs(self):
+        adapter = _Adapter(["the answer"])
+        digest_model = self._digest_model(adapter)
+        plan = plan_segments(
+            [DigestItem("D1", "One", "short text")], digest_model.budgets, _count
+        )
+        assert plan.direct_fits
+
+        result, _ = await run_bounded_digest(
+            plan, digest_model, instruction="sum", should_stop=None
+        )
+
+        assert result.output == "the answer"
+        assert self._by_stage(adapter) == {"answer": {0.7}}
+
+    async def test_reader_takes_the_notes_and_the_turn_model_the_rest(self):
+        turn_adapter = _Adapter(["Date: 2026-01-01\nmerged"] * 20)
+        reader_adapter = _Adapter(["Date: 2026-01-01\nnote"] * 20)
+        reader = ReaderTarget(
+            model=_model(name="mini"),
+            adapter=reader_adapter,
+            model_kwargs={"temperature": 0.0},
+            count=_count,
+            segment_tokens=50,
+        )
+        digest_model = replace(self._digest_model(turn_adapter), reader=reader)
+        words = " ".join(f"w{i}" for i in range(150))
+        items = [DigestItem("D1", "One", words), DigestItem("D2", "Two", words)]
+        plan = plan_segments(items, digest_model.budgets, _count)
+
+        await run_bounded_digest(
+            plan, digest_model, instruction="sum", should_stop=None
+        )
+
+        assert reader_adapter.calls and all(
+            call["prompt"].startswith(("You take notes", "Merge notes taken"))
+            for call in reader_adapter.calls
+        )
+        assert self._by_stage(turn_adapter).get("answer") == {0.7}
+
+
 def _result(**overrides) -> DigestResult:
     defaults = dict(
         output="Decisions [D1] and [D2].",
@@ -562,6 +671,40 @@ class TestResultShape:
         assert "1 failed" in partial
         assert partial.endswith("Not fully covered: [D1].")
 
+    def test_compression_line_names_the_ratio_levels_and_largest_item(self):
+        items = [
+            DigestItem("D1", "Short", " ".join(["w"] * 200)),
+            DigestItem("D2", "Long", " ".join(["w"] * 1_000)),
+        ]
+        merged = _result(output="four words of answer", levels=2)
+        direct = _result(
+            output="four words of answer",
+            levels=0,
+            item_progress={"D1": ItemProgress(1, 1), "D2": ItemProgress(1, 1)},
+        )
+
+        assert compression_line(items, merged, item_word="documents") == (
+            "Compression: 1,200 words read into 4 (300:1); 2 merge levels; "
+            "largest document [D2] 3 segments into one note."
+        )
+        assert compression_line(items, direct, item_word="files") == (
+            "Compression: 1,200 words read into 4 (300:1); no merges."
+        )
+        # Nothing answered: the counts stand, no ratio is claimed.
+        empty = compression_of(items, _result(output="", levels=0))
+        assert (empty.words_answered, empty.ratio) == (0, None)
+        assert compression_line(items, _result(output=""), item_word="files") == (
+            "Compression: 1,200 words read into 0; 1 merge level; "
+            "largest file [D2] 3 segments into one note."
+        )
+
+    def test_digest_meta_carries_the_word_counts(self):
+        items = [DigestItem("D1", "A", "one two three")]
+
+        meta = digest_meta(_result(output="done"), _digest_model(), items)
+
+        assert (meta["eneo.words_read"], meta["eneo.words_answered"]) == (3, 1)
+
     def test_format_digest_builds_header_body_and_keyed_stubs(self, monkeypatch):
         monkeypatch.setattr(
             digest_module,
@@ -591,6 +734,7 @@ class TestResultShape:
         )
         assert "Omitted by max_documents: 2 documents." in text
         assert "Coverage: complete." in text
+        assert "\nCompression: 2 words read into 4 (1:1); 1 merge level; " in text
         assert text.endswith("\n\nDecisions [D1] and [D2].")
         resource = content[1].resource
         assert str(resource.uri) == "eneo://info-blob/1"
