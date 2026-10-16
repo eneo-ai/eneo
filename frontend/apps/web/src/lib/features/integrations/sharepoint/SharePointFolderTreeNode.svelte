@@ -28,6 +28,8 @@
     selectedItemKeySet: Set<string>;
     selectedPaths: string[];
     ancestorSelected?: boolean;
+    /** The one tree item in the tab order (roving tabindex); null leaves every item out. */
+    activeKey?: string | null;
     onToggleSelect: (node: SharePointTreeItem) => void;
     onToggleExpanded: (node: SharePointTreeNode) => void;
     onRetryLoad: (node: SharePointTreeNode) => void;
@@ -38,6 +40,7 @@
     selectedItemKeySet,
     selectedPaths,
     ancestorSelected = false,
+    activeKey = null,
     onToggleSelect,
     onToggleExpanded,
     onRetryLoad
@@ -78,24 +81,37 @@
     currentNode.type === "folder" &&
     hasSelectedSharePointDescendant(selectedPaths, currentNode.path)}
   {@const checkboxId = `sharepoint-item-${currentNode.id}`}
+  {@const coveredDescriptionId = `sharepoint-item-${currentNode.id}-covered`}
   {@const expanded = currentNode.expanded}
-
+  <!-- The treeitem is the accessible checkbox (aria-checked, Space); the inner
+       control is a pointer target only, so it is hidden from assistive tech
+       rather than announced a second time. ARIA 1.2 dropped aria-selected as a
+       required treeitem attribute; Svelte's check still follows 1.1. -->
+  <!-- svelte-ignore a11y_role_has_required_aria_props -->
   <li
     role="treeitem"
-    aria-selected={selected}
+    aria-label={currentNode.name}
+    aria-checked={selected ? "true" : indeterminate ? "mixed" : "false"}
+    aria-describedby={parentSelected ? coveredDescriptionId : undefined}
     aria-expanded={currentNode.type === "folder" && currentNode.has_children ? expanded : undefined}
+    tabindex={selectionKey === activeKey ? 0 : -1}
+    data-tree-key={selectionKey}
+    class="focus-visible:ring-stronger outline-none focus-visible:ring-2 focus-visible:ring-inset"
   >
+    {#if parentSelected}
+      <span id={coveredDescriptionId} class="sr-only">{m.sharepoint_selected_by_parent()}</span>
+    {/if}
     <div
       class="border-border flex min-h-11 w-full min-w-0 items-center gap-2 border-b px-3 text-left transition-colors
         {selected ? 'bg-accent-dimmer/60' : 'hover:bg-muted/50'}"
     >
       <Checkbox
         id={checkboxId}
-        aria-label={m.sharepoint_select_item({ name: currentNode.name })}
+        aria-hidden="true"
         checked={selected}
         {indeterminate}
         disabled={parentSelected}
-        title={parentSelected ? m.sharepoint_selected_by_parent() : undefined}
+        tabindex={-1}
         onCheckedChange={() => onToggleSelect(currentNode)}
       />
 
@@ -106,6 +122,7 @@
           aria-label={expanded
             ? m.sharepoint_collapse_folder_named({ name: currentNode.name })
             : m.sharepoint_expand_folder_named({ name: currentNode.name })}
+          tabindex={-1}
           onclick={() => onToggleExpanded(currentNode)}
         >
           <ChevronRight
@@ -216,6 +233,13 @@
           {#each currentNode.children ?? [] as child (buildSharePointSelectionKey(child))}
             {@render renderNode(child, selected)}
           {/each}
+        {/if}
+        {#if currentNode.childrenTruncated && !currentNode.loading && !currentNode.loadError}
+          <li role="none">
+            <p class="text-muted-foreground px-4 py-2 text-xs" role="status">
+              {m.sharepoint_tree_truncated()}
+            </p>
+          </li>
         {/if}
       </ul>
     {/if}

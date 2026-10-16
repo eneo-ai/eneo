@@ -91,26 +91,9 @@ async def get_token_for_subscription(
             tenant_app = await tenant_sharepoint_app_repo.one(
                 id=user_integration.tenant_app_id
             )
-
-            if tenant_app.is_service_account():
-                service_account_auth_service = container.service_account_auth_service()
-                token_data = await service_account_auth_service.refresh_access_token(
-                    tenant_app
-                )
-                new_refresh_token = token_data.get("refresh_token")
-                if (
-                    new_refresh_token
-                    and new_refresh_token != tenant_app.service_account_refresh_token
-                ):
-                    tenant_app.update_refresh_token(new_refresh_token)
-                    await tenant_sharepoint_app_repo.update(tenant_app)
-                access_token = token_data["access_token"]
-            else:
-                tenant_app_auth_service = container.tenant_app_auth_service()
-                access_token = await tenant_app_auth_service.get_access_token(
-                    tenant_app
-                )
-
+            access_token = await container.org_token_provider().get_access_token(
+                tenant_app
+            )
             return SimpleSharePointToken(access_token=access_token)
 
         except Exception as e:
@@ -199,6 +182,17 @@ async def renew_expiring_subscriptions(container: Container):
                 if not success:
                     raise RuntimeError(
                         f"Renewal returned false for subscription {subscription.subscription_id}"
+                    )
+                # Knowledge rows whose link was lost at import only receive
+                # webhooks once they point at the live subscription again.
+                linked = await container.sharepoint_subscription_repo().link_unreferenced_knowledge(
+                    subscription
+                )
+                if linked:
+                    logger.info(
+                        "Linked %d knowledge row(s) to SharePoint subscription %s",
+                        linked,
+                        subscription.subscription_id,
                     )
             renewed_count += 1
 

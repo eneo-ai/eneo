@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
@@ -57,6 +58,55 @@ class ConfluenceContentService:
         space_key: str,
         integration_knowledge_id: UUID,
     ):
+        started_at = datetime.now(timezone.utc)
+        try:
+            integration_knowledge = await self.integration_knowledge_repo.one(
+                id=integration_knowledge_id
+            )
+            integration_knowledge.mark_sync_started(started_at)
+            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+            await self._pull_content(
+                token_id=token_id,
+                space_key=space_key,
+                integration_knowledge_id=integration_knowledge_id,
+            )
+            integration_knowledge = await self.integration_knowledge_repo.one(
+                id=integration_knowledge_id
+            )
+            integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
+            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+        except Exception as e:
+            await self._record_sync_failure(integration_knowledge_id, str(e))
+            logger.error(f"Error in Confluence pull_content: {e}", exc_info=True)
+            raise
+
+    async def _record_sync_failure(
+        self, integration_knowledge_id: UUID, error: str
+    ) -> None:
+        """Persist the failure before re-raising; never raises itself.
+
+        The worker commits on a soft failure, so the status written here is
+        what the UI shows.
+        """
+        try:
+            integration_knowledge = await self.integration_knowledge_repo.one(
+                id=integration_knowledge_id
+            )
+            integration_knowledge.mark_sync_failed(error, datetime.now(timezone.utc))
+            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+        except Exception:
+            logger.error(
+                "Could not record sync failure on integration knowledge %s",
+                integration_knowledge_id,
+                exc_info=True,
+            )
+
+    async def _pull_content(
+        self,
+        token_id: UUID,
+        space_key: str,
+        integration_knowledge_id: UUID,
+    ) -> None:
         token = self._require_confluence_token(
             await self.oauth_token_repo.one(id=token_id)
         )

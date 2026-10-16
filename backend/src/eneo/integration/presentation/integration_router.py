@@ -25,6 +25,13 @@ from eneo.integration.presentation.models import (
     TenantIntegrationList,
     UserIntegrationList,
 )
+from eneo.integration.presentation.validation import (
+    FOLDER_PATH_MAX_LENGTH,
+    FOLDER_PATH_PATTERN,
+    GRAPH_ID_MAX_LENGTH,
+    GRAPH_ID_PATTERN,
+    validate_folder_path,
+)
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -398,10 +405,20 @@ async def search_sharepoint_library(
     ],
     container: Annotated[Container, Depends(get_container(with_user=True))],
     site_id: Annotated[
-        Optional[str], Query(description="SharePoint site ID (required for SharePoint)")
+        Optional[str],
+        Query(
+            description="SharePoint site ID (required for SharePoint)",
+            max_length=GRAPH_ID_MAX_LENGTH,
+            pattern=GRAPH_ID_PATTERN,
+        ),
     ] = None,
     drive_id: Annotated[
-        Optional[str], Query(description="Drive ID (required for OneDrive)")
+        Optional[str],
+        Query(
+            description="Drive ID (required for OneDrive)",
+            max_length=GRAPH_ID_MAX_LENGTH,
+            pattern=GRAPH_ID_PATTERN,
+        ),
     ] = None,
     q: Annotated[
         str,
@@ -457,15 +474,36 @@ async def get_sharepoint_folder_tree(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     site_id: Annotated[
         Optional[str],
-        Query(description="SharePoint site ID (required for SharePoint)"),
+        Query(
+            description="SharePoint site ID (required for SharePoint)",
+            max_length=GRAPH_ID_MAX_LENGTH,
+            pattern=GRAPH_ID_PATTERN,
+        ),
     ] = None,
     drive_id: Annotated[
-        Optional[str], Query(description="Drive ID (required for OneDrive)")
+        Optional[str],
+        Query(
+            description="Drive ID (required for OneDrive)",
+            max_length=GRAPH_ID_MAX_LENGTH,
+            pattern=GRAPH_ID_PATTERN,
+        ),
     ] = None,
     folder_id: Annotated[
-        Optional[str], Query(description="Folder ID (null for root)")
+        Optional[str],
+        Query(
+            description="Folder ID (null for root)",
+            max_length=GRAPH_ID_MAX_LENGTH,
+            pattern=GRAPH_ID_PATTERN,
+        ),
     ] = None,
-    folder_path: Annotated[str, Query(description="Current folder path")] = "",
+    folder_path: Annotated[
+        str,
+        Query(
+            description="Current folder path",
+            max_length=FOLDER_PATH_MAX_LENGTH,
+            pattern=FOLDER_PATH_PATTERN,
+        ),
+    ] = "",
 ):
     """Browse an authorized SharePoint/OneDrive connection in an importable space.
 
@@ -491,6 +529,10 @@ async def get_sharepoint_folder_tree(
     # Convert string "null" or empty string to actual None
     if folder_id == "null" or folder_id == "":
         folder_id = None
+    try:
+        validate_folder_path(folder_path)
+    except ValueError as e:
+        raise BadRequestException(str(e)) from e
 
     try:
         tree_data = await service.get_folder_tree(

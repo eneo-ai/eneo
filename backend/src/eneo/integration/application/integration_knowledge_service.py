@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID, uuid4
 
@@ -14,6 +13,7 @@ from eneo.integration.domain.entities.oauth_token import OauthToken
 from eneo.integration.infrastructure.content_service.types import (
     SharePointTokenProtocol,
 )
+from eneo.integration.infrastructure.detached_tasks import run_after_commit
 from eneo.integration.presentation.models import (
     ConfluenceContentTaskParam,
     IntegrationType,
@@ -45,6 +45,9 @@ if TYPE_CHECKING:
     )
     from eneo.integration.domain.repositories.oauth_token_repo import (
         OauthTokenRepository,
+    )
+    from eneo.integration.infrastructure.auth_service.org_token_provider import (
+        OrgTokenProvider,
     )
     from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
         ServiceAccountAuthService,
@@ -132,6 +135,7 @@ class IntegrationKnowledgeService:
         tenant_sharepoint_app_repo: TenantSharePointAppRepositoryProtocol,
         tenant_app_auth_service: "TenantAppAuthService",
         service_account_auth_service: "ServiceAccountAuthService | None" = None,
+        org_token_provider: "OrgTokenProvider | None" = None,
     ) -> None:
         super().__init__()
         self.job_service = job_service
@@ -148,6 +152,7 @@ class IntegrationKnowledgeService:
         )
         self.tenant_app_auth_service = tenant_app_auth_service
         self.service_account_auth_service = service_account_auth_service
+        self.org_token_provider = org_token_provider
 
     async def require_sync_log_access(self, integration_knowledge_id: UUID) -> None:
         """Sync history follows knowledge read access, not connection ownership."""
@@ -166,28 +171,44 @@ class IntegrationKnowledgeService:
                 return
         raise NotFoundException("Integration knowledge not found")
 
+    async def get_readable_knowledge(
+        self, space_id: UUID, integration_knowledge_id: UUID
+    ) -> IntegrationKnowledge:
+        """An item as seen from a space, for anyone who may read its integrations.
+
+        Membership is checked before the item is looked up so a non-member
+        cannot probe which items a space holds.
+        """
+        space = await self.space_repo.one(id=space_id)
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not (actor.can_read_space() and actor.can_read_integrations()):
+            raise UnauthorizedException()
+        return space.get_integration_knowledge(
+            integration_knowledge_id=integration_knowledge_id
+        )
+
     async def _get_tenant_app_access_token(
         self, tenant_app: "TenantSharePointApp"
     ) -> str:
         """Resolve tenant app access token and persist service-account token rotation."""
-        if tenant_app.is_service_account():
-            if not self.service_account_auth_service:
-                raise BadRequestException("ServiceAccountAuthService not configured")
+        if self.org_token_provider is not None:
+            return await self.org_token_provider.get_access_token(tenant_app)
+        if tenant_app.is_service_account() and not self.service_account_auth_service:
+            raise BadRequestException("ServiceAccountAuthService not configured")
+        from eneo.integration.infrastructure.auth_service.org_token_provider import (
+            OrgTokenProvider,
+        )
+        from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
+            ServiceAccountAuthService,
+        )
 
-            token_data = await self.service_account_auth_service.refresh_access_token(
-                tenant_app
-            )
-            access_token = token_data["access_token"]
-            new_refresh_token = token_data.get("refresh_token")
-            if (
-                new_refresh_token
-                and new_refresh_token != tenant_app.service_account_refresh_token
-            ):
-                tenant_app.update_refresh_token(new_refresh_token)
-                await self.tenant_sharepoint_app_repo.update(tenant_app)
-            return access_token
-
-        return await self.tenant_app_auth_service.get_access_token(tenant_app)
+        provider = OrgTokenProvider(
+            tenant_app_repo=self.tenant_sharepoint_app_repo,
+            tenant_app_auth_service=self.tenant_app_auth_service,
+            service_account_auth_service=self.service_account_auth_service
+            or ServiceAccountAuthService(),
+        )
+        return await provider.get_access_token(tenant_app)
 
     async def create_space_integration_knowledge(
         self,
@@ -548,45 +569,19 @@ class IntegrationKnowledgeService:
         # Delete from database FIRST (within transaction)
         await self.integration_knowledge_repo.remove(id=knowledge.id)
 
-        # Cleanup Microsoft Graph subscription AFTER the database transaction completes
-        # Using fire-and-forget to avoid blocking the HTTP response
+        # The Graph call runs after this transaction commits, on a session of
+        # its own: the request session is closed by then, and the reference
+        # count must see the deleted row. A failure here is retried by the
+        # daily orphan cleanup job.
         if subscription_cleanup_info:
-            asyncio.create_task(
-                self._cleanup_subscription_async(
-                    subscription_id=subscription_cleanup_info["subscription_id"],
-                    token=_as_sharepoint_token(subscription_cleanup_info["token"]),
-                )
-            )
-
-    async def _cleanup_subscription_async(
-        self,
-        subscription_id: UUID,
-        token: SharePointTokenProtocol,
-    ) -> None:
-        """Clean up Microsoft Graph subscription asynchronously.
-
-        This runs as a fire-and-forget task AFTER the database transaction
-        has completed. This prevents HTTP calls to Microsoft Graph from
-        blocking the database connection pool.
-        """
-        try:
-            await self.sharepoint_subscription_service.delete_subscription_if_unused(
-                subscription_id=subscription_id,
-                token=token,
-            )
-            logger.info(
-                "Cleaned up subscription %s (if no longer referenced)",
-                subscription_id,
-            )
-        except Exception as exc:
-            # Log but don't raise - this is fire-and-forget
-            # The subscription will be cleaned up by the orphan cleanup cron job if needed
-            logger.warning(
-                "Failed to cleanup subscription %s: %s "
-                "(will be retried by daily orphan cleanup cron job at 02:00 UTC)",
-                subscription_id,
-                exc,
-                exc_info=True,
+            cleanup_subscription_id = subscription_cleanup_info["subscription_id"]
+            cleanup_token = _as_sharepoint_token(subscription_cleanup_info["token"])
+            run_after_commit(
+                self.space_repo.session,
+                lambda: self.sharepoint_subscription_service.delete_subscription_if_unused_detached(
+                    subscription_id=cleanup_subscription_id,
+                    token=cleanup_token,
+                ),
             )
 
     async def trigger_full_sync(

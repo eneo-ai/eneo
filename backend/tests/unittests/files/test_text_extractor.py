@@ -26,31 +26,7 @@ from eneo.files.text import (
     TextSanitizer,
     UnsupportedFormatError,
 )
-
-
-def _text_pdf(path: Path, page_texts: list[str]) -> Path:
-    page_ids = [3 + 2 * index for index in range(len(page_texts))]
-    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
-    font_id = page_ids[-1] + 2
-    objects = [
-        "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
-        f"2 0 obj<</Type/Pages/Kids[{kids}]/Count {len(page_texts)}>>endobj",
-        f"{font_id} 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj",
-    ]
-    for page_id, text in zip(page_ids, page_texts):
-        stream = f"BT /F1 12 Tf 40 700 Td ({text}) Tj ET"
-        objects.append(
-            f"{page_id} 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
-            f"/Resources<</Font<</F1 {font_id} 0 R>>>>"
-            f"/Contents {page_id + 1} 0 R>>endobj"
-        )
-        objects.append(
-            f"{page_id + 1} 0 obj<</Length {len(stream)}>>stream\n"
-            f"{stream}\nendstream\nendobj"
-        )
-    body = "\n".join(objects)
-    path.write_bytes(f"%PDF-1.4\n{body}\ntrailer<</Root 1 0 R>>\n%%EOF".encode())
-    return path
+from tests.unittests.integration.sharepoint_fixtures import text_pdf
 
 
 class TestTextSanitizer:
@@ -232,7 +208,7 @@ class TestTextExtractorPDF:
 
     def test_extract_from_pdf_over_layout_budget_reads_text_layer(self, tmp_path):
         """PDFs longer than the layout budget keep their text and page markers."""
-        path = _text_pdf(tmp_path / "long.pdf", ["First page", "Second page"])
+        path = text_pdf(tmp_path / "long.pdf", ["First page", "Second page"])
 
         within_budget = TextExtractor.extract_from_pdf(path)
         over_budget = TextExtractor.extract_from_pdf(
@@ -476,6 +452,25 @@ class TestTextExtractorXLSX:
         result = TextExtractor.extract_from_xlsx(xlsx_path)
         assert isinstance(result, str)
         assert "File: empty.xlsx" in result
+
+    def test_extract_from_xlsx_header_only_sheet(self, tmp_path):
+        """A sheet holding only its first row is text; a blank sheet adds nothing."""
+        from openpyxl import Workbook
+
+        xlsx_path = tmp_path / "names.xlsx"
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Members"
+        ws["A1"] = "Name"
+        ws["C1"] = "Role\nin board"
+        wb.create_sheet("Blank")
+        wb.save(xlsx_path)
+
+        result = TextExtractor.extract_from_xlsx(xlsx_path)
+
+        assert result == (
+            "File: names.xlsx\n\nSheet: Members | headers: Name | Role in board"
+        )
 
     def test_extract_from_xlsx_with_special_characters(self, tmp_path):
         """Should handle special characters in cells."""

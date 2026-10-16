@@ -31,3 +31,12 @@ class IntegrationKnowledgeRepository(ABC):
 
     @abstractmethod
     async def update(self, obj: "IntegrationKnowledge") -> "IntegrationKnowledge": ...
+
+    @abstractmethod
+    async def adjust_size(self, id: "UUID", delta: int) -> int:
+        """Atomically add ``delta`` bytes (floored at zero) and return the new size.
+
+        Several entity copies take part in one sync; a read-modify-write on any
+        of them would overwrite the others' changes.
+        """
+        ...

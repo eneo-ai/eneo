@@ -76,6 +76,9 @@ from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import File, FileMetadata
+from eneo.integration.infrastructure.repo_impl.document_counts import (
+    active_document_counts,
+)
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -1844,7 +1847,13 @@ class SpaceRepository:
             .order_by(ik.created_at)
         )
         rows = await self.session.execute(stmt)
-        return list(rows.scalars().all())
+        records = list(rows.scalars().all())
+        counts = await active_document_counts(
+            self.session, [record.id for record in records]
+        )
+        for record in records:
+            setattr(record, "document_count", counts.get(record.id, 0))
+        return records
 
     async def get_space_by_name_and_tenant(
         self, name: str, tenant_id: UUID

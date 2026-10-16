@@ -13,6 +13,9 @@ import pytest
 from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
+from eneo.integration.domain.repositories.sharepoint_subscription_repo import (
+    SharePointSubscriptionExists,
+)
 from eneo.integration.infrastructure.sharepoint_subscription_service import (
     SharePointSubscriptionService,
 )
@@ -91,6 +94,28 @@ def service(mock_subscription_repo, mock_oauth_token_service):
         )
 
 
+@pytest.mark.parametrize(
+    "stored_url, drifted",
+    [
+        pytest.param("https://example.com/webhook/", False, id="same"),
+        pytest.param("https://example.com/webhook", False, id="no-trailing-slash"),
+        pytest.param("HTTPS://Example.COM/webhook/", False, id="scheme-host-case"),
+        pytest.param("https://example.com:443/webhook/", True, id="explicit-port"),
+        pytest.param("https://example.com/Webhook/", True, id="path-case"),
+        pytest.param("https://example.com/webhook/?v=2", True, id="query"),
+        pytest.param("http://example.com/webhook/", True, id="scheme"),
+        pytest.param("https://old-origin/webhook/", True, id="host"),
+        pytest.param(None, False, id="legacy-unknown"),
+    ],
+)
+def test_notification_url_drift_ignores_spelling_differences(
+    service, mock_subscription, stored_url, drifted
+):
+    mock_subscription.notification_url = stored_url
+
+    assert service.notification_url_drifted(mock_subscription) is drifted
+
+
 class TestEnsureSubscriptionForSite:
     """Tests for ensure_subscription_for_site method."""
 
@@ -134,6 +159,61 @@ class TestEnsureSubscriptionForSite:
 
         assert result is not None
         mock_subscription_repo.add.assert_called_once()
+        stored = mock_subscription_repo.add.call_args.args[0]
+        assert stored.notification_url == "https://example.com/webhook/"
+
+    async def test_losing_the_create_race_keeps_the_winner_and_drops_the_duplicate(
+        self, service, mock_subscription_repo, mock_token, mock_subscription
+    ):
+        user_integration_id = uuid4()
+        mock_subscription_repo.get_by_user_and_site.side_effect = [
+            None,
+            mock_subscription,
+        ]
+        mock_subscription_repo.add.side_effect = SharePointSubscriptionExists(
+            user_integration_id, mock_subscription.site_id
+        )
+
+        with (
+            patch.object(service, "_resolve_drive_id", return_value="drive-id"),
+            patch.object(
+                service, "_create_graph_subscription", return_value="duplicate-sub"
+            ),
+            patch.object(
+                service, "_delete_graph_subscription", return_value=True
+            ) as delete_graph,
+        ):
+            result = await service.ensure_subscription_for_site(
+                user_integration_id=user_integration_id,
+                site_id=mock_subscription.site_id,
+                token=mock_token,
+            )
+
+        assert result is mock_subscription
+        delete_graph.assert_awaited_once_with(
+            subscription_id="duplicate-sub", token=mock_token
+        )
+        mock_subscription_repo.update.assert_not_called()
+
+    async def test_reused_subscription_is_recreated_when_its_url_drifted(
+        self, service, mock_subscription_repo, mock_token, mock_subscription
+    ):
+        mock_subscription.notification_url = "https://old-origin/webhook/"
+        mock_subscription_repo.get_by_user_and_site.return_value = mock_subscription
+
+        with patch.object(
+            service, "recreate_expired_subscription", return_value=True
+        ) as recreate:
+            result = await service.ensure_subscription_for_site(
+                user_integration_id=mock_subscription.user_integration_id,
+                site_id=mock_subscription.site_id,
+                token=mock_token,
+            )
+
+        assert result is mock_subscription
+        recreate.assert_awaited_once_with(
+            subscription=mock_subscription, token=mock_token, is_onedrive=False
+        )
 
     async def test_recreates_expired_subscription(
         self, service, mock_subscription_repo, expired_subscription, mock_token
@@ -271,6 +351,62 @@ class TestRecreateExpiredSubscription:
         assert result is False
         mock_subscription_repo.update.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "missing, named_setting",
+        [
+            pytest.param(
+                "sharepoint_webhook_client_state",
+                "SHAREPOINT_WEBHOOK_CLIENT_STATE",
+                id="client-state",
+            ),
+            pytest.param(
+                "sharepoint_webhook_notification_url",
+                "SHAREPOINT_WEBHOOK_NOTIFICATION_URL",
+                id="notification-url",
+            ),
+        ],
+    )
+    async def test_recreate_touches_nothing_when_webhooks_are_not_configured(
+        self,
+        mock_subscription_repo,
+        mock_oauth_token_service,
+        expired_subscription,
+        mock_token,
+        missing,
+        named_setting,
+    ):
+        """A live subscription must not be dropped at Graph with no replacement."""
+        with patch(
+            "eneo.integration.infrastructure.sharepoint_subscription_service.get_settings"
+        ) as mock_settings:
+            settings = MagicMock()
+            settings.sharepoint_webhook_notification_url = (
+                "https://example.com/webhook/"
+            )
+            settings.sharepoint_webhook_client_state = "test-client-state"
+            settings.public_origin = None
+            setattr(settings, missing, None)
+            mock_settings.return_value = settings
+            service = SharePointSubscriptionService(
+                sharepoint_subscription_repo=mock_subscription_repo,
+                oauth_token_service=mock_oauth_token_service,
+            )
+        old_subscription_id = expired_subscription.subscription_id
+
+        with (
+            patch.object(service, "_delete_graph_subscription") as delete_graph,
+            patch.object(service, "_create_graph_subscription") as create_graph,
+            pytest.raises(ValueError, match=named_setting),
+        ):
+            await service.recreate_expired_subscription(
+                subscription=expired_subscription, token=mock_token
+            )
+
+        delete_graph.assert_not_called()
+        create_graph.assert_not_called()
+        mock_subscription_repo.update.assert_not_called()
+        assert expired_subscription.subscription_id == old_subscription_id
+
     async def test_recreate_continues_even_if_delete_fails(
         self, service, mock_subscription_repo, expired_subscription, mock_token
     ):
@@ -322,6 +458,46 @@ class TestRenewSubscription:
         assert updated_sub.consecutive_renewal_failures == 0
         assert updated_sub.last_renewal_failed_at is None
         assert updated_sub.last_renewal_error is None
+
+    @pytest.mark.parametrize(
+        "stored_url, recreated",
+        [
+            pytest.param("https://old-origin/webhook/", True, id="drifted"),
+            pytest.param("https://example.com/webhook/", False, id="current"),
+            pytest.param(None, False, id="legacy-unknown"),
+        ],
+    )
+    async def test_renew_recreates_only_when_the_notification_url_drifted(
+        self, service, mock_subscription, mock_token, stored_url, recreated
+    ):
+        mock_subscription.notification_url = stored_url
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch("aiohttp.ClientSession") as mock_session_class,
+            patch.object(service, "_delete_graph_subscription", return_value=True),
+            patch.object(
+                service, "_create_graph_subscription", return_value="fresh-sub"
+            ) as create_graph,
+        ):
+            mock_session = MagicMock()
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=None)
+            mock_session.patch = MagicMock(return_value=mock_response)
+            mock_session_class.return_value = mock_session
+
+            assert await service.renew_subscription(mock_subscription, mock_token)
+
+        assert create_graph.await_count == (1 if recreated else 0)
+        assert mock_session.patch.call_count == (0 if recreated else 1)
+        if recreated:
+            assert mock_subscription.subscription_id == "fresh-sub"
+            assert mock_subscription.notification_url == "https://example.com/webhook/"
+        else:
+            assert mock_subscription.notification_url == stored_url
 
     async def test_renew_recreates_on_404(
         self, service, mock_subscription_repo, mock_subscription, mock_token

@@ -1,6 +1,6 @@
 from typing import Any, Protocol
 
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 # Owned by the domain layer; re-exported here so existing infrastructure importers
 # keep working without the domain importing upward.
@@ -58,8 +58,12 @@ class SyncStats(TypedDict):
     out_of_scope_deleted: int
     folders_processed: int
     pages_processed: int
+    unchanged_items: int
     skipped_items: int
     skipped_details: list[SkippedDetail]
+    skipped_total: NotRequired[int]
+    skipped_truncated: NotRequired[bool]
+    reconcile_warning: NotRequired[str]
 
 
 class SharePointTokenProtocol(Protocol):

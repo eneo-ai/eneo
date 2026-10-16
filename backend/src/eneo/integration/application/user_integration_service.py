@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, cast
 
@@ -268,11 +267,18 @@ class UserIntegrationService:
             )
             return
 
-        # Fire-and-forget Graph API cleanup (DB rows will be cascade-deleted)
-        # token is always a SharePoint token for SharePoint subscriptions
+        # Graph cleanup after the cascade delete commits; it needs no database
+        # session, only the token already in hand.
+        from eneo.integration.infrastructure.detached_tasks import run_after_commit
+
         sp_token = cast(SharePointTokenProtocol, token)
         for graph_sub_id in graph_subscription_ids:
-            asyncio.create_task(self._delete_graph_subscription(graph_sub_id, sp_token))
+            run_after_commit(
+                self.user_integration_repo.session,  # type: ignore[attr-defined]
+                lambda graph_sub_id=graph_sub_id: self._delete_graph_subscription(
+                    graph_sub_id, sp_token
+                ),
+            )
 
     async def _delete_graph_subscription(
         self,

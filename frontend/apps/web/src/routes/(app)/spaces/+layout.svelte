@@ -6,10 +6,12 @@
 
 <script lang="ts">
   import { initSpacesManager } from "$lib/features/spaces/SpacesManager.js";
+  import ImportCompletionToasts from "$lib/features/integrations/components/ImportCompletionToasts.svelte";
 
   export let data;
 
   initSpacesManager(data);
 </script>
 
+<ImportCompletionToasts />
 <slot />

@@ -1,6 +1,6 @@
 import asyncio
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -51,16 +51,16 @@ async def test_service_account_callback_rejects_another_user_in_same_tenant(
     provider.exchange_token.assert_not_awaited()
 
 
-async def test_service_account_state_is_consumed_once_under_concurrent_callbacks(
-    monkeypatch,
-):
+async def test_service_account_state_is_consumed_once_under_concurrent_callbacks():
     payload = {"user_id": str(uuid4()), "tenant_id": str(uuid4())}
-    states = {router.OAUTH_STATE_PREFIX + "state": json.dumps(payload)}
+    states = {router.OAUTH_STATE_PREFIX + "state": "sealed"}
     redis = AsyncMock()
     redis.getdel.side_effect = lambda key: states.pop(key, None)
-    monkeypatch.setattr(router, "_get_redis_client", AsyncMock(return_value=redis))
+    encryption = MagicMock()
+    encryption.decrypt.return_value = json.dumps(payload)
     results = await asyncio.gather(
-        router._pop_oauth_state("state"), router._pop_oauth_state("state")
+        router._pop_oauth_state(redis, encryption, "state"),
+        router._pop_oauth_state(redis, encryption, "state"),
     )
     assert results.count(payload) == 1
     assert results.count(None) == 1

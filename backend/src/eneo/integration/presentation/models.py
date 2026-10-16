@@ -151,6 +151,8 @@ class SharePointFilterColumn(BaseModel):
 
 class SharePointTreeResponse(BaseModel):
     items: list[SharePointTreeItem]
+    # True when the folder holds more items than ``items``; search to narrow.
+    truncated: bool = False
     current_path: str
     parent_id: Optional[str] = None
     drive_id: str
@@ -172,8 +174,22 @@ class SharePointSearchResponse(BaseModel):
 
 class IntegrationKnowledgeMetaData(BaseModel):
     size: int
+    document_count: int = Field(
+        0, description="Number of documents currently indexed for this knowledge"
+    )
     last_sync_summary: Optional[Dict[str, Any]] = None
-    last_synced_at: Optional[datetime] = None
+    last_synced_at: Optional[datetime] = Field(
+        None, description="When the last successful sync completed"
+    )
+    last_sync_status: Literal["never", "success", "error"] = Field(
+        "never", description="Outcome of the most recent sync attempt"
+    )
+    last_sync_error: Optional[str] = Field(
+        None, description="Error message from the most recent failed sync"
+    )
+    last_sync_attempted_at: Optional[datetime] = Field(
+        None, description="When the most recent sync attempt started"
+    )
     sharepoint_subscription_expires_at: Optional[datetime] = Field(
         None,
         description="When the SharePoint webhook subscription expires (only for SharePoint integrations)",
@@ -306,6 +322,44 @@ class SyncLog(BaseModel):
 
 class SyncLogList(BaseListModel[SyncLog]):
     pass
+
+
+class IntegrationDocumentItem(BaseModel):
+    id: UUID
+    title: str
+    relative_path: str = Field(
+        description="Folders between the imported item and the document, "
+        "URL-decoded and without the file name; empty for the item itself."
+    )
+    url: Optional[str] = Field(None, description="Web URL of the source document")
+    size: int
+    updated_at: Optional[datetime] = None
+    source_metadata: list[SourceMetadataEntry] = []
+
+
+class IntegrationDocumentsPage(BaseModel):
+    items: list[IntegrationDocumentItem]
+    total_count: int = Field(description="Documents matching the query")
+    limit: int
+    offset: int
+    total_size: int = Field(description="Summed size of the matching documents")
+
+
+class IntegrationSkippedDocument(BaseModel):
+    file: str
+    reason: str
+
+
+class IntegrationSkippedDocuments(BaseModel):
+    """Files the latest sync of an item did not index."""
+
+    items: list[IntegrationSkippedDocument]
+    total: int = Field(description="Skipped files, including those not listed")
+    truncated: bool = Field(description="True when the stored list was capped")
+    synced_at: Optional[datetime] = Field(
+        default=None,
+        description="When the sync the list comes from finished or started",
+    )
 
 
 class PaginatedSyncLogList(BaseModel):

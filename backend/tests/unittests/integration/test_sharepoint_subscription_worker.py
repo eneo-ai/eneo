@@ -14,6 +14,9 @@ import pytest
 from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    OrgTokenProvider,
+)
 from eneo.integration.infrastructure.sharepoint_subscription_worker import (
     SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES,
     SHAREPOINT_SYNC_TASKS,
@@ -62,6 +65,13 @@ def mock_container():
     container.tenant_app_auth_service = MagicMock(return_value=AsyncMock())
     container.service_account_auth_service = MagicMock(return_value=AsyncMock())
     container.sharepoint_subscription_service = MagicMock(return_value=AsyncMock())
+    container.org_token_provider = MagicMock(
+        side_effect=lambda: OrgTokenProvider(
+            tenant_app_repo=container.tenant_sharepoint_app_repo(),
+            tenant_app_auth_service=container.tenant_app_auth_service(),
+            service_account_auth_service=container.service_account_auth_service(),
+        )
+    )
 
     # Mock session — begin/begin_nested return async context managers
     mock_session = AsyncMock()
@@ -145,7 +155,7 @@ class TestGetTokenForSubscription:
         assert token is not None
         assert token.access_token == "tenant-app-access-token"
         mock_container.tenant_app_auth_service().get_access_token.assert_called_once_with(
-            tenant_app
+            tenant_app, force_refresh=False
         )
 
     @pytest.mark.asyncio
@@ -383,6 +393,9 @@ class TestRenewExpiringSubscriptions:
         mock_container.sharepoint_subscription_service().renew_subscription = AsyncMock(
             return_value=True
         )
+        mock_container.sharepoint_subscription_repo().link_unreferenced_knowledge = (
+            AsyncMock(return_value=2)
+        )
 
         # Patch sessionmanager and worker._create_container
         with patch(
@@ -399,6 +412,9 @@ class TestRenewExpiringSubscriptions:
         assert result["renewed"] == 1
         assert result["failed"] == 0
         mock_container.sharepoint_subscription_service().renew_subscription.assert_called_once()
+        mock_container.sharepoint_subscription_repo().link_unreferenced_knowledge.assert_awaited_once_with(
+            subscription
+        )
 
     @pytest.mark.asyncio
     async def test_returns_early_when_no_expiring_subscriptions(self, mock_container):
@@ -525,6 +541,7 @@ class TestRenewExpiringSubscriptions:
         mock_container.sharepoint_subscription_repo().update.assert_called_once_with(
             subscription
         )
+        mock_container.sharepoint_subscription_repo().link_unreferenced_knowledge.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_refreshes_token_before_renewal_savepoint(self, mock_container):
