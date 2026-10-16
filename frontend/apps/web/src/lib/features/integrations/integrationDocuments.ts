@@ -1,25 +1,7 @@
-import type { SourceMetadataEntry } from "$lib/features/knowledge/sourceMetadata";
+import type { components } from "@eneo/eneo-js";
 
-// Response shapes of the integration document endpoints; they mirror the
-// backend's IntegrationDocumentsPage and IntegrationSkippedDocuments models.
-export type IntegrationDocument = {
-  id: string;
-  title: string;
-  /** Folder path below the imported folder; empty for the imported folder itself. */
-  relative_path: string;
-  url: string | null;
-  size: number;
-  updated_at: string | null;
-  source_metadata?: SourceMetadataEntry[] | null;
-};
-
-export type IntegrationDocumentsPage = {
-  items: IntegrationDocument[];
-  total_count: number;
-  limit: number;
-  offset: number;
-  total_size: number;
-};
+export type IntegrationDocument = components["schemas"]["IntegrationDocumentItem"];
+export type IntegrationDocumentsPage = components["schemas"]["IntegrationDocumentsPage"];
 
 export type IntegrationDocumentSort = "name" | "path" | "size" | "updated_at";
 export type IntegrationDocumentOrder = "asc" | "desc";
@@ -42,15 +24,8 @@ export const DEFAULT_INTEGRATION_DOCUMENTS_QUERY: IntegrationDocumentsQuery = {
   offset: 0
 };
 
-export type IntegrationSkippedDocument = { file: string; reason: string };
-
-export type IntegrationSkippedDocuments = {
-  items: IntegrationSkippedDocument[];
-  /** Every skipped file, also those the capped `items` list leaves out. */
-  total: number;
-  truncated: boolean;
-  synced_at: string | null;
-};
+export type IntegrationSkippedDocument = components["schemas"]["IntegrationSkippedDocument"];
+export type IntegrationSkippedDocuments = components["schemas"]["IntegrationSkippedDocuments"];
 
 export type IntegrationDocumentsTab = "documents" | "skipped";
 

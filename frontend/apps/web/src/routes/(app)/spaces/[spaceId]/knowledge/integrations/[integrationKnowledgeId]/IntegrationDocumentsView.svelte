@@ -107,11 +107,11 @@
     loading = true;
     error = null;
     try {
-      const page = (await eneo.integrations.knowledge.listDocuments({
+      const page = await eneo.integrations.knowledge.listDocuments({
         knowledge,
         space,
         ...next
-      })) as IntegrationDocumentsPage;
+      });
       if (generation !== loadGeneration) return;
       // Documents deleted while paging can leave this offset past the end.
       const lastOffset = lastPageOffset(page, next.limit);
@@ -131,10 +131,7 @@
     skippedLoading = true;
     skippedError = null;
     try {
-      skipped = (await eneo.integrations.knowledge.listSkippedDocuments({
-        knowledge,
-        space
-      })) as IntegrationSkippedDocuments;
+      skipped = await eneo.integrations.knowledge.listSkippedDocuments({ knowledge, space });
     } catch (err) {
       skippedError = getErrorMessage(err);
     } finally {

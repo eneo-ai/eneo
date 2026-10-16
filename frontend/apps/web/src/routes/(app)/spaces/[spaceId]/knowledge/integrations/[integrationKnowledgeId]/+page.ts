@@ -2,9 +2,7 @@ import { error } from "@sveltejs/kit";
 import type { IntegrationKnowledge } from "@eneo/eneo-js";
 import {
   DEFAULT_INTEGRATION_DOCUMENTS_QUERY,
-  type IntegrationDocumentsPage,
-  type IntegrationDocumentsTab,
-  type IntegrationSkippedDocuments
+  type IntegrationDocumentsTab
 } from "$lib/features/integrations/integrationDocuments";
 
 export const load = async (event) => {
@@ -25,16 +23,13 @@ export const load = async (event) => {
       knowledge,
       space: currentSpace,
       ...DEFAULT_INTEGRATION_DOCUMENTS_QUERY
-    }) as Promise<IntegrationDocumentsPage>,
-    (
-      eneo.integrations.knowledge.listSkippedDocuments({
-        knowledge,
-        space: currentSpace
-      }) as Promise<IntegrationSkippedDocuments>
-    ).catch((err: unknown) => {
-      console.error("Could not load the skipped files of an integration item", err);
-      return null;
-    })
+    }),
+    eneo.integrations.knowledge
+      .listSkippedDocuments({ knowledge, space: currentSpace })
+      .catch((err: unknown) => {
+        console.error("Could not load the skipped files of an integration item", err);
+        return null;
+      })
   ]);
 
   const initialTab: IntegrationDocumentsTab =
