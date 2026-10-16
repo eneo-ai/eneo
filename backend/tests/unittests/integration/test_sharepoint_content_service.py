@@ -1549,6 +1549,12 @@ class TestDeltaChangesProcessing:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
+            mock_client.get_file_metadata.return_value = {
+                "id": "folder-a",
+                "name": "A",
+                "folder": {},
+                "parentReference": {"path": "/drives/drive-123/root:/Documents"},
+            }
             mock_client.get_delta_changes.return_value = (
                 [
                     {
@@ -1608,21 +1614,21 @@ class TestDeltaChangesProcessing:
         with patch(
             "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
         ) as mock_client_class:
+            renamed_folder = {
+                "id": "folder-a",
+                "name": "A renamed",
+                "folder": {},
+                "parentReference": {
+                    "id": "documents-folder",
+                    "path": "/drives/drive-123/root:/Documents",
+                },
+            }
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
+            mock_client.get_file_metadata.return_value = renamed_folder
             mock_client.get_delta_changes.return_value = (
-                [
-                    {
-                        "id": "folder-a",
-                        "name": "A renamed",
-                        "folder": {},
-                        "parentReference": {
-                            "id": "documents-folder",
-                            "path": "/drives/drive-123/root:/Documents",
-                        },
-                    }
-                ],
+                [renamed_folder],
                 "new-delta-token",
             )
             mock_client_class.return_value = mock_client
@@ -3411,8 +3417,16 @@ class TestDeltaFolderScopeOrdering:
         return mock_integration_knowledge
 
     async def _run_delta(
-        self, service, mock_dependencies, mock_oauth_token, ik, changes
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        ik,
+        changes,
+        folder_metadata=None,
     ):
+        """Without ``folder_metadata`` the scope folder cannot be read from Graph,
+        so the pass has only the stored path and the folder's own delta entry."""
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
         mock_dependencies["integration_knowledge_repo"].one.return_value = ik
         mock_dependencies[
@@ -3426,6 +3440,11 @@ class TestDeltaFolderScopeOrdering:
             client = _mock_graph_client(
                 mock_client_class,
                 get_delta_changes=AsyncMock(return_value=(changes, "new-token")),
+                get_file_metadata=(
+                    AsyncMock(return_value=folder_metadata)
+                    if folder_metadata
+                    else AsyncMock(side_effect=RuntimeError("metadata unavailable"))
+                ),
                 get_file_extraction_by_id=AsyncMock(
                     return_value=ExtractionResult.ok("text", "text/plain")
                 ),
@@ -3473,6 +3492,53 @@ class TestDeltaFolderScopeOrdering:
             drive_id="drive-123", item_id="nested-1"
         )
         assert folder_scoped.folder_path == "/Documents/A renamed"
+        assert "1 file" in result
+
+    async def test_renamed_ancestor_keeps_the_scope_folder_in_scope(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        """Graph emits the renamed ancestor, never the unchanged scope folder, so
+        the current path comes from the folder's metadata, not from the changes."""
+        changes = [
+            {
+                "id": "nested-1",
+                "name": "nested.docx",
+                "webUrl": "https://x/nested.docx",
+                "parentReference": {
+                    "id": "sub-folder",
+                    "path": "/drives/drive-123/root:/Docs renamed/A/Sub",
+                },
+            }
+        ]
+        scope_folder_now = {
+            "id": "folder-a",
+            "name": "A",
+            "folder": {},
+            "parentReference": {
+                "id": "documents-folder",
+                "path": "/drives/drive-123/root:/Docs renamed",
+            },
+        }
+
+        client, result = await self._run_delta(
+            service,
+            mock_dependencies,
+            mock_oauth_token,
+            folder_scoped,
+            changes,
+            folder_metadata=scope_folder_now,
+        )
+
+        client.get_file_metadata.assert_awaited_once_with(
+            drive_id="drive-123", item_id="folder-a"
+        )
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
+        client.get_file_extraction_by_id.assert_awaited_once_with(
+            drive_id="drive-123", item_id="nested-1"
+        )
+        assert folder_scoped.folder_path == "/Docs renamed/A"
         assert "1 file" in result
 
     async def test_folder_moved_into_scope_indexes_its_unindexed_files(

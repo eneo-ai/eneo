@@ -660,44 +660,6 @@ class SharePointContentService:
                 scope_folder_path = integration_knowledge.folder_path
                 known_subfolder_ids: set[str] = set()
                 folder_scope_path_unresolved = False
-                if (
-                    integration_knowledge.selected_item_type == "folder"
-                    and integration_knowledge.folder_id
-                    and not scope_folder_path
-                ):
-                    # Legacy integrations may miss folder_path. Resolve it once so
-                    # nested delta changes in subfolders stay in scope.
-                    try:
-                        folder_metadata = await content_client.get_file_metadata(
-                            drive_id=actual_drive_id,
-                            item_id=integration_knowledge.folder_id,
-                        )
-                        resolved_folder_path = self._folder_path_from_item(
-                            cast(SharePointItem, folder_metadata)
-                        )
-
-                        if resolved_folder_path:
-                            scope_folder_path = resolved_folder_path
-                            integration_knowledge.folder_path = resolved_folder_path
-                            await self.integration_knowledge_repo.update(
-                                obj=integration_knowledge
-                            )
-                        else:
-                            logger.warning(
-                                "Could not derive folder_path for delta scope "
-                                "(integration_knowledge=%s, folder_id=%s)",
-                                resolved_integration_knowledge_id,
-                                integration_knowledge.folder_id,
-                            )
-                            folder_scope_path_unresolved = True
-                    except Exception as exc:
-                        logger.warning(
-                            "Could not resolve folder_path for delta scope (integration_knowledge=%s, folder_id=%s): %s",
-                            resolved_integration_knowledge_id,
-                            integration_knowledge.folder_id,
-                            exc,
-                        )
-                        folder_scope_path_unresolved = True
 
                 if len(changes) == 0:
                     logger.info(
@@ -731,21 +693,37 @@ class SharePointContentService:
                 change_ids = {
                     change_id for change in changes if (change_id := change.get("id"))
                 }
+                scope_folder_id = integration_knowledge.folder_id
                 if (
                     integration_knowledge.selected_item_type == "folder"
-                    and integration_knowledge.folder_id
+                    and scope_folder_id
                 ):
-                    # Graph orders delta entries arbitrarily, so a descendant can
-                    # arrive before the renamed/moved scope folder itself. Refresh
-                    # the scope path first or that descendant is classified against
-                    # the stale path and its blob deleted as out of scope.
-                    refreshed_scope_path = self._scope_folder_path_from_changes(
-                        changes, integration_knowledge.folder_id
-                    )
+                    # The stored path goes stale when an ancestor of the scope
+                    # folder is renamed or moved: Graph emits the ancestor, not
+                    # the unchanged scope folder, so nothing in the changes
+                    # carries the new path, and the next change under the folder
+                    # would be classified against the stale path and deleted as
+                    # out of scope. Read the current path from Graph each pass.
+                    # The folder's own delta entry is the second source (Graph
+                    # orders entries arbitrarily, so a descendant can precede it).
+                    refreshed_scope_path = await self._current_scope_folder_path(
+                        content_client, actual_drive_id, scope_folder_id
+                    ) or self._scope_folder_path_from_changes(changes, scope_folder_id)
                     if refreshed_scope_path:
-                        scope_folder_path = refreshed_scope_path
-                        integration_knowledge.folder_path = refreshed_scope_path
-                        folder_scope_path_unresolved = False
+                        if refreshed_scope_path != scope_folder_path:
+                            scope_folder_path = refreshed_scope_path
+                            integration_knowledge.folder_path = refreshed_scope_path
+                            await self.integration_knowledge_repo.update(
+                                obj=integration_knowledge
+                            )
+                    elif not scope_folder_path:
+                        logger.warning(
+                            "Could not derive folder_path for delta scope "
+                            "(integration_knowledge=%s, folder_id=%s)",
+                            resolved_integration_knowledge_id,
+                            scope_folder_id,
+                        )
+                        folder_scope_path_unresolved = True
 
                 for item in changes:
                     item_name = item.get("name", "")
@@ -1712,6 +1690,26 @@ class SharePointContentService:
                 stats=stats,
                 reason="out-of-scope-subtree",
             )
+
+    async def _current_scope_folder_path(
+        self,
+        content_client: SharePointContentClient,
+        drive_id: str,
+        scope_folder_id: str,
+    ) -> Optional[str]:
+        """The scope folder's path as Graph has it now; ``None`` when unavailable."""
+        try:
+            folder_metadata = await content_client.get_file_metadata(
+                drive_id=drive_id, item_id=scope_folder_id
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not resolve folder_path for delta scope (folder_id=%s): %s",
+                scope_folder_id,
+                exc,
+            )
+            return None
+        return self._folder_path_from_item(cast(SharePointItem, folder_metadata))
 
     def _scope_folder_path_from_changes(
         self, changes: list[SharePointItem], scope_folder_id: str
