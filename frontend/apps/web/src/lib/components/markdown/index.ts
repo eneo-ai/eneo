@@ -2,7 +2,7 @@ import { Marked, type TokenizerAndRendererExtension } from "marked";
 import type { EneoFileToken, EneoInrefToken, EneoMentionToken } from "./CustomComponents";
 
 export { default as Markdown } from "./Markdown.svelte";
-export { sanitizeImageSrc, sanitizeLinkHref } from "./sanitizeUrl.js";
+export { sanitizeImageSrc, sanitizeLinkHref, sanitizeWebHref } from "./sanitizeUrl.js";
 export { fileHandleId, setFileImageUrls } from "./FileImageContext.js";
 export {
   type CustomRenderers as MarkdownCustomRenderingOptions,

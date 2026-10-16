@@ -28,6 +28,30 @@ describe("message parts", () => {
     ]);
   });
 
+  it("links a source out only to an http(s) address", () => {
+    const documentPart = (sourceId: string, url: string): Part =>
+      ({
+        type: "source-document",
+        sourceId,
+        mediaType: "text/plain",
+        title: sourceId,
+        providerMetadata: { eneo: { metadata: { url } } }
+      }) as Part;
+    const sources = mergeSources(
+      [
+        documentPart("safe", "https://kommun.se/riktlinje"),
+        documentPart("planted", "javascript:alert(document.cookie)")
+      ],
+      [{ id: "web-2", title: "Planted result", url: "javascript:alert(1)" }]
+    );
+
+    expect(sources.map(({ sourceId, url }) => [sourceId, url])).toEqual([
+      ["safe", "https://kommun.se/riktlinje"],
+      ["planted", undefined],
+      ["web-2", undefined]
+    ]);
+  });
+
   it("reads the live answering assistant from data-session parts", () => {
     expect(answeringAssistantFromParts([sessionPart])).toEqual({
       id: "assistant-1",
