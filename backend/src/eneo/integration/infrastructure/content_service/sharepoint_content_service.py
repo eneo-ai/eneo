@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 from urllib.parse import unquote
 from uuid import UUID
 
+import aiohttp
 from sqlalchemy import event
 
 from eneo.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate, SourceMetadataEntry
@@ -105,7 +106,34 @@ _RECONCILE_MIN_DELETE_FLOOR = 10
 # the true count.
 _MAX_SKIPPED_DETAILS = 50
 
-BlobOutcome = Literal["embedded", "unchanged", "empty"]
+# Download failures that say something about the file itself (gone, or closed to
+# this identity) rather than about Graph or the network; a pass may move past them.
+_ITEM_LEVEL_HTTP_STATUSES = frozenset({403, 404, 410})
+
+# "failed" is an item whose failure was already counted by the delete that failed.
+BlobOutcome = Literal["embedded", "unchanged", "empty", "failed"]
+
+
+class SyncItemsFailed(Exception):
+    """A pass that reached its end but could not finish every item.
+
+    Raised after the pass persisted what it could, so the ordinary failure path
+    records it; the summary rides along so the failure record keeps the counts
+    and the skipped details that name the files.
+    """
+
+    def __init__(self, summary: SyncStats, *, changes_detected: int | None = None):
+        failed = summary.get("failed_items", 0)
+        super().__init__(
+            f"{failed} file{'s' if failed != 1 else ''} could not be processed; "
+            f"the next sync retries {'them' if failed != 1 else 'it'}"
+        )
+        self.summary = summary
+        self.changes_detected = changes_detected
+
+
+def _failure_summary(failure: Exception) -> SyncStats | None:
+    return failure.summary if isinstance(failure, SyncItemsFailed) else None
 
 
 class SimpleSharePointToken:
@@ -142,6 +170,8 @@ def _summary_counts(stats: SyncStats) -> dict[str, Any]:
         "skipped_total": stats.get("skipped_total", stats.get("skipped_items", 0)),
         "skipped_truncated": stats.get("skipped_truncated", False),
     }
+    if failed_items := stats.get("failed_items", 0):
+        summary["failed_items"] = failed_items
     reconcile_warning = stats.get("reconcile_warning")
     if reconcile_warning:
         summary["reconcile_warning"] = reconcile_warning
@@ -180,6 +210,8 @@ def _sync_metadata(
         )
         metadata["skipped_truncated"] = stats.get("skipped_truncated", False)
         metadata["skipped_details"] = stats.get("skipped_details", [])
+        if failed_items := stats.get("failed_items", 0):
+            metadata["failed_items"] = failed_items
         reconcile_warning = stats.get("reconcile_warning")
         if reconcile_warning:
             metadata["reconcile_warning"] = reconcile_warning
@@ -353,6 +385,10 @@ class SharePointContentService:
                 access_token_provider=access_token_provider,
             )
             summary_stats = self._build_summary_stats(stats)
+            if summary_stats.get("failed_items"):
+                # No delta baseline either: the next sync is a full one and
+                # retries the failed files instead of never seeing them again.
+                raise SyncItemsFailed(summary_stats)
 
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=resolved_integration_knowledge_id
@@ -413,12 +449,16 @@ class SharePointContentService:
             return self._format_summary_for_job(summary_stats)
 
         except Exception as e:
+            summary = _failure_summary(e)
             await self._record_sync_failure(
                 resolved_integration_knowledge_id,
                 e,
                 sync_type="full",
                 started_at=started_at,
-                metadata=_sync_metadata(trigger=sync_trigger, recovery=recovery),
+                summary=summary,
+                metadata=_sync_metadata(
+                    summary, trigger=sync_trigger, recovery=recovery
+                ),
             )
             logger.error(f"Error in pull_content: {e}", exc_info=True)
             raise
@@ -431,6 +471,7 @@ class SharePointContentService:
         sync_type: str,
         started_at: datetime,
         metadata: SyncMetadata,
+        summary: SyncStats | None = None,
     ) -> None:
         """Persist the failure before re-raising; never raises itself.
 
@@ -450,6 +491,8 @@ class SharePointContentService:
                 id=integration_knowledge_id
             )
             integration_knowledge.mark_sync_failed(error)
+            if summary is not None:
+                integration_knowledge.last_sync_summary = _summary_counts(summary)
             await self.integration_knowledge_repo.update(obj=integration_knowledge)
         except Exception:
             logger.error(
@@ -837,9 +880,20 @@ class SharePointContentService:
                         pending_change_keys=pending_change_keys,
                     )
 
-                integration_knowledge.delta_token = new_delta_token
-
                 summary_stats = self._build_summary_stats(stats)
+                if summary_stats.get("failed_items"):
+                    # Keep the token: Graph never re-emits an item once a pass
+                    # moved past it, so the next pass replays this one. Items
+                    # indexed now are skipped as unchanged through the
+                    # post-commit ChangeKey cache; the scope path refreshed
+                    # above is persisted so the replay classifies as this pass did.
+                    await self.integration_knowledge_repo.update(
+                        obj=integration_knowledge
+                    )
+                    self._schedule_post_commit_change_keys(pending_change_keys)
+                    raise SyncItemsFailed(summary_stats, changes_detected=len(changes))
+
+                integration_knowledge.delta_token = new_delta_token
                 integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
                 integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
 
@@ -883,12 +937,20 @@ class SharePointContentService:
             logger.error(f"Error processing delta changes: {e}", exc_info=True)
             if not record_failure:
                 raise
+            summary = _failure_summary(e)
             await self._record_sync_failure(
                 resolved_integration_knowledge_id,
                 e,
                 sync_type="delta",
                 started_at=started_at,
-                metadata=_sync_metadata(trigger=sync_trigger),
+                summary=summary,
+                metadata=_sync_metadata(
+                    summary,
+                    trigger=sync_trigger,
+                    changes_detected=(
+                        e.changes_detected if isinstance(e, SyncItemsFailed) else None
+                    ),
+                ),
             )
             raise
 
@@ -1130,42 +1192,55 @@ class SharePointContentService:
                     is_root_call=False,
                 )
             else:
-                # file
                 if not drive_id or not item_id:
                     continue
-                doc_name = document.get("name", "")
-                unsupported_reason = unsupported_file_reason(doc_name)
-                if unsupported_reason:
-                    stats["skipped_items"] += 1
-                    stats["skipped_details"].append(
-                        {"file": doc_name, "reason": unsupported_reason}
-                    )
-                    continue
-                content, skip_reason = await self._extract_file(
-                    client, drive_id, item_id, doc_name
+                await self._index_listed_file(
+                    client=client,
+                    drive_id=drive_id,
+                    item=document,
+                    integration_knowledge=integration_knowledge,
+                    stats=stats,
                 )
-                if content and not is_unextractable_content(content):
-                    outcome = await self._process_info_blob(
-                        title=doc_name,
-                        text=content,
-                        url=document.get("webUrl", ""),
-                        integration_knowledge=integration_knowledge,
-                        sharepoint_item_id=item_id,
-                        source_metadata=await self._source_metadata_for(
-                            client, drive_id, document
-                        ),
-                        stats=stats,
-                    )
-                    self._count_outcome(stats, outcome, doc_name)
-                else:
-                    await self._skip_or_remove_unextractable(
-                        item_id=item_id,
-                        item_name=doc_name,
-                        skip_reason=skip_reason,
-                        integration_knowledge=integration_knowledge,
-                        integration_knowledge_id=integration_knowledge.id,
-                        stats=stats,
-                    )
+
+    async def _index_listed_file(
+        self,
+        *,
+        client: SharePointContentClient,
+        drive_id: str,
+        item: SharePointItem,
+        integration_knowledge: "IntegrationKnowledge",
+        stats: SyncStats,
+    ) -> None:
+        """Index one file of a full-sync listing; a failure is counted, not raised."""
+        item_name = item.get("name", "")
+        item_id = item.get("id")
+        try:
+            content, skip_reason = await self._get_file_content(client, item)
+            if content and not is_unextractable_content(content):
+                outcome = await self._process_info_blob(
+                    title=item_name,
+                    text=content,
+                    url=item.get("webUrl", ""),
+                    integration_knowledge=integration_knowledge,
+                    sharepoint_item_id=item_id,
+                    source_metadata=await self._source_metadata_for(
+                        client, drive_id, item
+                    ),
+                    stats=stats,
+                )
+                self._count_outcome(stats, outcome, item_name)
+            else:
+                await self._skip_or_remove_unextractable(
+                    item_id=item_id,
+                    item_name=item_name,
+                    skip_reason=skip_reason,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=integration_knowledge.id,
+                    stats=stats,
+                )
+        except Exception as e:
+            logger.error(f"Error processing file {item_name}: {e}", exc_info=True)
+            self._count_failure(stats, item_name, error_reason(e))
 
     async def _process_pages(
         self,
@@ -1210,10 +1285,7 @@ class SharePointContentService:
                 logger.error(
                     f"Error processing site page {page_name}: {e}", exc_info=True
                 )
-                stats["skipped_items"] += 1
-                stats["skipped_details"].append(
-                    {"file": page_name, "reason": error_reason(e)}
-                )
+                self._count_failure(stats, page_name, error_reason(e))
 
     async def _column_catalog(
         self, client: SharePointContentClient, drive_id: Optional[str]
@@ -1327,7 +1399,7 @@ class SharePointContentService:
             # found no text so a previously indexed copy does not linger. The
             # caller counts the skip from the outcome.
             if sharepoint_item_id:
-                await self._delete_local_sharepoint_item(
+                deleted = await self._delete_local_sharepoint_item(
                     item_id=sharepoint_item_id,
                     item_name=title,
                     integration_knowledge=integration_knowledge,
@@ -1335,6 +1407,8 @@ class SharePointContentService:
                     stats=stats,
                     reason="unextractable",
                 )
+                if deleted is None:
+                    return "failed"
             return "empty"
 
         existing_blob = None
@@ -1433,11 +1507,20 @@ class SharePointContentService:
             stats["pages_processed" if page else "files_processed"] += 1
         elif outcome == "unchanged":
             stats["unchanged_items"] += 1
-        else:
+        elif outcome == "empty":
             stats["skipped_items"] += 1
             stats["skipped_details"].append(
                 {"file": item_name, "reason": EMPTY_CONTENT_REASON}
             )
+
+    @staticmethod
+    def _count_failure(stats: SyncStats, item_name: str, reason: str) -> None:
+        """Count an item the pass could not finish; the pass must not move past it."""
+        stats["failed_items"] = stats.get("failed_items", 0) + 1
+        stats["skipped_items"] += 1
+        stats["skipped_details"].append(
+            {"file": item_name, "reason": f"{reason} (retried by the next sync)"}
+        )
 
     async def _delete_local_sharepoint_item(
         self,
@@ -1448,8 +1531,12 @@ class SharePointContentService:
         integration_knowledge_id: UUID,
         stats: SyncStats,
         reason: str,
-    ) -> int:
-        """Remove a locally indexed SharePoint item from one integration knowledge."""
+    ) -> Optional[int]:
+        """Remove a locally indexed SharePoint item from one integration knowledge.
+
+        Returns the number of blobs removed, or ``None`` when the delete failed;
+        the failure is counted here, so callers add no entry of their own.
+        """
         try:
             deleted_blobs = await self.info_blob_service.repo.delete_by_sharepoint_item_and_integration_knowledge(
                 sharepoint_item_id=item_id,
@@ -1504,14 +1591,10 @@ class SharePointContentService:
                 item_name,
                 e,
             )
-            stats["skipped_items"] += 1
-            stats["skipped_details"].append(
-                {
-                    "file": item_name,
-                    "reason": f"Could not remove {reason}: {user_visible_error(e)}",
-                }
+            self._count_failure(
+                stats, item_name, f"Could not remove {reason}: {user_visible_error(e)}"
             )
-            return 0
+            return None
 
     async def _delete_local_blob_for_unextractable_item(
         self,
@@ -1527,9 +1610,7 @@ class SharePointContentService:
         # found nothing may remove the local copy; see NO_TEXT_REASONS.
         if reason not in NO_TEXT_REASONS:
             raise ValueError(f"Not a no-text reason: {reason}")
-        stats["skipped_items"] += 1
-        stats["skipped_details"].append({"file": item_name, "reason": reason})
-        await self._delete_local_sharepoint_item(
+        deleted = await self._delete_local_sharepoint_item(
             item_id=item_id,
             item_name=item_name,
             integration_knowledge=integration_knowledge,
@@ -1537,6 +1618,10 @@ class SharePointContentService:
             stats=stats,
             reason="unextractable",
         )
+        if deleted is None:
+            return
+        stats["skipped_items"] += 1
+        stats["skipped_details"].append({"file": item_name, "reason": reason})
 
     @staticmethod
     def _is_positive_unextractable_result(
@@ -1606,10 +1691,15 @@ class SharePointContentService:
         except Exception as exc:
             logger.warning(
                 "Failed to enumerate out-of-scope subtree for folder %s (%s): %s; "
-                "descendants will be reconciled on the next full sync",
+                "the next pass replays the folder",
                 folder_name,
                 folder_id,
                 exc,
+            )
+            self._count_failure(
+                stats,
+                folder_name,
+                "Could not list folder contents: " + user_visible_error(exc),
             )
             return
 
@@ -1643,7 +1733,7 @@ class SharePointContentService:
         stats: SyncStats,
         pending_change_keys: list[tuple[UUID, str, str]],
     ) -> None:
-        """Index one changed file; every failure is counted, none propagates."""
+        """Index one changed file; a failure is counted here and fails the pass at its end."""
         item_name = item.get("name", "")
         try:
             item_id = require_text(item.get("id"), "item id")
@@ -1692,7 +1782,7 @@ class SharePointContentService:
 
                 # Defer the ChangeKey cache write until after commit so a
                 # rolled-back sync re-processes the item instead of skipping it.
-                if self.change_key_service and change_key:
+                if self.change_key_service and change_key and outcome != "failed":
                     pending_change_keys.append(
                         (integration_knowledge_id, item_id, change_key)
                     )
@@ -1710,10 +1800,7 @@ class SharePointContentService:
             logger.error(
                 f"Error processing changed file {item_name}: {e}", exc_info=True
             )
-            stats["skipped_items"] += 1
-            stats["skipped_details"].append(
-                {"file": item_name, "reason": error_reason(e)}
-            )
+            self._count_failure(stats, item_name, error_reason(e))
 
     async def _index_folder_subtree_entering_scope(
         self,
@@ -1751,20 +1838,17 @@ class SharePointContentService:
             )
         except Exception as exc:
             logger.warning(
-                "Could not list folder %s (%s) entering scope; its files will be "
-                "picked up by the next full sync: %s",
+                "Could not list folder %s (%s) entering scope; the next pass "
+                "replays the folder: %s",
                 folder_name,
                 folder_id,
                 exc,
                 exc_info=True,
             )
-            stats["skipped_items"] += 1
-            stats["skipped_details"].append(
-                {
-                    "file": folder_name,
-                    "reason": "Could not list folder contents: "
-                    + user_visible_error(exc),
-                }
+            self._count_failure(
+                stats,
+                folder_name,
+                "Could not list folder contents: " + user_visible_error(exc),
             )
             return
 
@@ -2109,11 +2193,7 @@ class SharePointContentService:
             if item_id:
                 processed_items.add(item_id)
 
-            item_name = item.get("name", "")
-            item_type = self._get_item_type(item)
-            web_url = item.get("webUrl", "")
-
-            if item_type == "folder":
+            if self._get_item_type(item) == "folder":
                 stats["folders_processed"] += 1
                 # Always recurse into folders to get their contents
                 await self._fetch_and_process_content(
@@ -2130,30 +2210,13 @@ class SharePointContentService:
                 )
                 continue
 
-            content, skip_reason = await self._get_file_content(client, item)
-
-            if content and not is_unextractable_content(content):
-                outcome = await self._process_info_blob(
-                    title=item_name,
-                    text=content,
-                    url=web_url,
-                    integration_knowledge=integration_knowledge,
-                    sharepoint_item_id=item_id,
-                    source_metadata=await self._source_metadata_for(
-                        client, drive_id, item
-                    ),
-                    stats=stats,
-                )
-                self._count_outcome(stats, outcome, item_name)
-            else:
-                await self._skip_or_remove_unextractable(
-                    item_id=item_id,
-                    item_name=item_name,
-                    skip_reason=skip_reason,
-                    integration_knowledge=integration_knowledge,
-                    integration_knowledge_id=integration_knowledge_id,
-                    stats=stats,
-                )
+            await self._index_listed_file(
+                client=client,
+                drive_id=drive_id,
+                item=item,
+                integration_knowledge=integration_knowledge,
+                stats=stats,
+            )
 
     def _initialize_stats(self) -> SyncStats:
         return {
@@ -2164,6 +2227,7 @@ class SharePointContentService:
             "pages_processed": 0,
             "unchanged_items": 0,
             "skipped_items": 0,
+            "failed_items": 0,
             "skipped_details": [],
         }
 
@@ -2187,6 +2251,8 @@ class SharePointContentService:
                 for detail in skipped_details[:_MAX_SKIPPED_DETAILS]
             ],
         }
+        if failed_items := stats.get("failed_items", 0):
+            summary["failed_items"] = failed_items
         reconcile_warning = stats.get("reconcile_warning")
         if reconcile_warning:
             summary["reconcile_warning"] = user_visible_error(reconcile_warning)
@@ -2376,7 +2442,12 @@ class SharePointContentService:
         item_id: str,
         item_name: str,
     ) -> tuple[Optional[str], Optional[str]]:
-        """``(text, None)`` or ``(None, skip_reason)``; never raises."""
+        """``(text, None)`` or ``(None, skip_reason)`` for an outcome of the file itself.
+
+        Graph or network trouble (5xx, throttling past its retries, connection
+        and timeout errors, anything unexpected) propagates: it says nothing
+        about the file, so the caller must not move past it.
+        """
         try:
             result = await client.get_file_extraction_by_id(
                 drive_id=drive_id, item_id=item_id
@@ -2390,9 +2461,14 @@ class SharePointContentService:
                 f"Error getting file content for {item_name}: {e}", exc_info=True
             )
             return None, error_reason(e)
-        except Exception as e:
-            logger.error(
-                f"Error getting file content for {item_name}: {e}", exc_info=True
+        except aiohttp.ClientResponseError as e:
+            if e.status not in _ITEM_LEVEL_HTTP_STATUSES:
+                raise
+            logger.warning(
+                "File %s (item_id=%s) is gone or not accessible: %s",
+                item_name,
+                item_id,
+                user_visible_error(e),
             )
             return None, error_reason(e)
 

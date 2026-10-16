@@ -48,6 +48,7 @@ class SyncMetadata(TypedDict, total=False):
     skipped_total: int
     skipped_truncated: bool
     skipped_details: list[SkippedDetail]
+    failed_items: int
     reconcile_warning: str
     trigger: str
     recovery: str

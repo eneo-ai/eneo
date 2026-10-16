@@ -61,6 +61,7 @@ class SyncStats(TypedDict):
     unchanged_items: int
     skipped_items: int
     skipped_details: list[SkippedDetail]
+    failed_items: NotRequired[int]
     skipped_total: NotRequired[int]
     skipped_truncated: NotRequired[bool]
     reconcile_warning: NotRequired[str]
