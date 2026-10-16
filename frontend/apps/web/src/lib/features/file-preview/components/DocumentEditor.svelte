@@ -21,6 +21,11 @@
   type Props = {
     /** The document as Markdown. A change replaces the content unless the reader has unsaved edits. */
     markdown: string;
+    /**
+     * The reader's unsaved text of the document, left by an editor that was
+     * torn down: shown in place of `markdown`, and still unsaved.
+     */
+    edits?: string | null;
     editable?: boolean;
     /** A passage to mark and scroll to; null clears the mark. */
     highlight?: PreviewPassage | null;
@@ -29,11 +34,11 @@
     /** Called with the selected text, and where it stands, when the reader quotes it. */
     onquote?: (text: string, locator: string | null) => void;
     /**
-     * Whether the document's text now differs from `markdown`. Called when
-     * that changes either way; never for a `markdown` update, nor for the
-     * editor's own tidying of a loaded document.
+     * The document's text as the reader has it, whenever they change it, and
+     * null once it is `markdown` again. Never called for a `markdown` update,
+     * nor for the editor's own tidying of a loaded document.
      */
-    onchange?: (dirty: boolean) => void;
+    onchange?: (text: string | null) => void;
     /** The reader asked to save (Mod+S) while editing. */
     onsave?: () => void;
     /** Each `markdown` value has been laid out. */
@@ -44,6 +49,7 @@
 
   let {
     markdown,
+    edits = null,
     editable = false,
     highlight = null,
     previousMarkdown = null,
@@ -131,14 +137,28 @@
     // document that is read-only.
     created.on("update", () => {
       if (applying || !created.isEditable) return;
-      const changed = withFinalNewline(created.getMarkdown()) !== baseline;
-      if (changed === dirty) return;
+      const text = withFinalNewline(created.getMarkdown());
+      const changed = text !== baseline;
+      if (!changed && !dirty) return;
       dirty = changed;
-      onchange?.(dirty);
+      onchange?.(changed ? text : null);
     });
     editor = created;
     applied = initial;
     baseline = withFinalNewline(created.getMarkdown());
+    // Edits left by an earlier editor of this document take the place of the
+    // loaded text, compared with it as before.
+    const left = untrack(() => edits);
+    if (left !== null) {
+      applying = true;
+      try {
+        created.commands.setContent(left, CONTENT);
+      } finally {
+        applying = false;
+      }
+      dirty = withFinalNewline(created.getMarkdown()) !== baseline;
+      if (!dirty) onchange?.(null);
+    }
     let active = true;
     void tick().then(() => {
       if (!active) return;

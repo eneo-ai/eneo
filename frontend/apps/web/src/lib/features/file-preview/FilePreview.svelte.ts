@@ -145,6 +145,9 @@ export class FilePreview {
    * keystroke; what would lose them asks first.
    */
   dirty = $state(false);
+  // The edited text itself, so an editor torn down and mounted again (the
+  // layout crosses its breakpoint) shows the document as the reader left it.
+  #edits: { fileId: string; text: string } | null = null;
   /** Whether the document on show marks what it changed against the version before it. */
   showChanges = $state(true);
   /**
@@ -187,14 +190,28 @@ export class FilePreview {
     return this.dirty;
   }
 
-  /** Whether the document's text now differs from the file. */
-  setDirty(dirty: boolean) {
-    this.dirty = dirty;
+  /**
+   * The text of the document `fileId` as the reader has it now, or null once
+   * it is the file's text again.
+   */
+  setEdits(fileId: string, text: string | null) {
+    this.#edits = text === null ? null : { fileId, text };
+    this.dirty = text !== null;
+  }
+
+  /** The reader's unsaved text of `file`, for an editor that shows it afresh. */
+  editsOf(file: { id: string }): string | null {
+    return this.#edits?.fileId === file.id ? this.#edits.text : null;
+  }
+
+  #clearEdits() {
+    this.#edits = null;
+    this.dirty = false;
   }
 
   /** The reader let their edits go; a replacement that waited then shows. */
   dropEdits() {
-    this.dirty = false;
+    this.#clearEdits();
     this.#showReplacement();
   }
 
@@ -233,7 +250,7 @@ export class FilePreview {
     this.status = "ready";
     this.highlight = null;
     this.draft = null;
-    this.dirty = false;
+    this.#clearEdits();
     this.pendingDiscard = null;
   }
 
@@ -246,7 +263,7 @@ export class FilePreview {
     this.pendingDiscard = {
       proceed: () => {
         this.pendingDiscard = null;
-        this.dirty = false;
+        this.#clearEdits();
         action();
       }
     };
@@ -425,8 +442,9 @@ export class FilePreview {
     const text = tidyQuoteText(selected);
     if (this.file && text) {
       this.quote = { fileId: this.file.id, fileName: this.file.name, text, locator };
-      // On narrow screens the preview covers the composer; return to the chat.
-      if (!this.besideConversation) this.#close();
+      // On narrow screens the preview covers the composer; return to the
+      // chat. Unsaved edits would go with the panel, so that asks first.
+      if (!this.besideConversation) this.close();
     }
   }
 
