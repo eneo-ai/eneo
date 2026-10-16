@@ -380,3 +380,20 @@ it("holds a newer version back while edits are unsaved and shows it when they ar
   expect(preview.file).toEqual(newer);
   expect(preview.dirty).toBe(false);
 });
+
+it("a save settles a question about discarding edits that was still open", async () => {
+  const preview = panel();
+  const document = { ...file, name: "report.md", mimetype: "text/markdown" };
+  vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
+  preview.open(document);
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  preview.setDirty(true);
+  // Something asked to close while the save was in flight.
+  preview.close();
+  expect(preview.pendingDiscard).not.toBeNull();
+
+  preview.saved({ ...document, id: "report-2" }, "# Final\n");
+
+  expect(preview.pendingDiscard).toBeNull();
+  expect(preview.shown).toBe(true);
+});

@@ -35,6 +35,8 @@ export type PreviewCover = { leave: () => void };
 /** How a reader's edit of a document is kept: as the document's next version. */
 export type DocumentSaver = {
   save: (markdown: string) => Promise<PreviewFile>;
+  /** The panel now shows the saved version; whatever it replaced can go. */
+  saved?: (version: PreviewFile) => void;
 };
 
 /** Actual document input shown while the assistant is still writing it. */
@@ -232,6 +234,7 @@ export class FilePreview {
     this.highlight = null;
     this.draft = null;
     this.dirty = false;
+    this.pendingDiscard = null;
   }
 
   // Runs `action` at once, or once the reader has agreed to lose their edits.

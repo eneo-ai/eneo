@@ -5,6 +5,7 @@ export type PreviewKind = "docx" | "pdf" | "xlsx" | "csv" | "tsv" | "markdown" |
 export type PreviewFile = {
   /** The version a reader's saved edit was made from. */
   revises_file_id?: string | null;
+  created_at?: string | null;
   id: string;
   name: string;
   mimetype: string;

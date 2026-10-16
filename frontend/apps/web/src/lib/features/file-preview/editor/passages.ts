@@ -91,11 +91,15 @@ export function cellSelectionQuote(
   const table = selection.$anchorCell.node(-1);
   const map = TableMap.get(table);
   const rect = map.rectBetween(selection.$anchorCell.pos - start, selection.$headCell.pos - start);
-  const lines: string[] = [];
-  for (let row = rect.top; row < rect.bottom; row++) {
+  const line = (row: number) => {
     const cells = map.cellsInRect({ ...rect, top: row, bottom: row + 1 });
-    lines.push(`| ${cells.map((pos) => cellText(table.nodeAt(pos))).join(" | ")} |`);
-  }
+    return `| ${cells.map((pos) => cellText(table.nodeAt(pos))).join(" | ")} |`;
+  };
+  // The table's header row names the columns, so the quote reads as a table
+  // of its own even when the header was not selected.
+  const lines = rect.top > 0 ? [line(0)] : [];
+  for (let row = rect.top; row < rect.bottom; row++) lines.push(line(row));
+  lines.splice(1, 0, `|${" --- |".repeat(rect.right - rect.left)}`);
   const index = tables(doc).findIndex((candidate) => candidate.start === start) + 1;
   return {
     text: lines.join("\n"),

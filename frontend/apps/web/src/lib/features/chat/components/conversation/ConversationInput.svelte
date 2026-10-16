@@ -40,7 +40,8 @@
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
   import { getMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
-  import { composeQuotedQuestion } from "../../questionQuote";
+  import { Markdown } from "$lib/components/markdown/index.js";
+  import { composeQuotedQuestion, isTableQuote } from "../../questionQuote";
 
   type McpServerSummary = {
     id: string;
@@ -584,9 +585,15 @@
           >{m.file_quote_from({ name: quote.fileName })}</span
         >
         {#if location}<span class="text-secondary block text-xs">{location}</span>{/if}
-        <span class="text-default line-clamp-2 text-sm break-words whitespace-pre-line"
-          >{quote.text}</span
-        >
+        {#if isTableQuote(quote.text)}
+          <div class="text-default max-h-24 overflow-hidden text-xs">
+            <Markdown source={quote.text} />
+          </div>
+        {:else}
+          <span class="text-default line-clamp-2 text-sm break-words whitespace-pre-line"
+            >{quote.text}</span
+          >
+        {/if}
         {#if quote.fileId && !quotedFile}<span class="text-secondary block text-xs"
             >{m.table_reference_unavailable()}</span
           >{/if}

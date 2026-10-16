@@ -148,13 +148,17 @@
           fileId: file.id,
           content
         });
+        chat.addGeneratedFile(version);
+        return version;
+      },
+      saved: (version) => {
         // A save onto the reader's own version takes its place: the new
         // version then revises what the old one revised, not the old one.
+        // Only once the panel shows the new version, or the panel would
+        // close over a file the conversation no longer has.
         if (file.revises_file_id && version.revises_file_id !== file.id) {
           chat.removeGeneratedFile(file.id);
         }
-        chat.addGeneratedFile(version);
-        return version;
       }
     };
   }

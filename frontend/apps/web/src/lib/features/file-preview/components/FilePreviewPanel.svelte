@@ -2,19 +2,19 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { pickFileIcon } from "$lib/core/formatting/pickFileIcon";
   import { fileExtension } from "$lib/core/formatting/fileExtension";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { m } from "$lib/paraglide/messages";
+  import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import ChevronLeft from "@lucide/svelte/icons/chevron-left";
-  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Download from "@lucide/svelte/icons/download";
   import FileText from "@lucide/svelte/icons/file-text";
+  import History from "@lucide/svelte/icons/history";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Minimize2 from "@lucide/svelte/icons/minimize-2";
-  import Diff from "@lucide/svelte/icons/diff";
   import X from "@lucide/svelte/icons/x";
   import { toast } from "svelte-sonner";
   import type { DocumentExport, DocumentSaver, FilePreview } from "../FilePreview.svelte";
@@ -227,6 +227,7 @@
     try {
       const version = await target.save(markdown);
       preview.saved(version, markdown);
+      target.saved?.(version);
     } catch {
       toast.error(m.file_preview_save_failed());
     } finally {
@@ -250,6 +251,13 @@
     await saveAs(restorer, content.text);
   }
 
+  // Versions newest first, as the menu lists them.
+  const versionRows = $derived(
+    versions.map((version, index) => ({ version, number: index + 1 })).reverse()
+  );
+  const madeAt = (version: PreviewFile) =>
+    version.created_at ? formatDateTime(version.created_at) : null;
+
   /** The reader drops their edits: on the Cancel button, or agreeing to in the dialog. */
   function discardEdits() {
     if (file) contentOf[file.id]?.resetEditor();
@@ -258,32 +266,57 @@
   }
 </script>
 
-{#snippet versionButtons()}
-  <Button
-    variant="ghost"
-    size="icon-sm"
-    disabled={!earlier}
-    aria-label={m.file_preview_previous_version()}
-    title={m.file_preview_previous_version()}
-    onclick={() => earlier && preview.open(earlier)}
-  >
-    <ChevronLeft aria-hidden="true" />
-  </Button>
-  {#if !sheet}
-    <span class="text-muted-foreground min-w-9 text-center text-xs tabular-nums">
-      {position + 1} / {versions.length}
-    </span>
-  {/if}
-  <Button
-    variant="ghost"
-    size="icon-sm"
-    disabled={!later}
-    aria-label={m.file_preview_next_version()}
-    title={m.file_preview_next_version()}
-    onclick={() => later && preview.open(later)}
-  >
-    <ChevronRight aria-hidden="true" />
-  </Button>
+{#snippet versionMenu()}
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
+        <Button
+          {...props}
+          variant="ghost"
+          size="sm"
+          aria-label={m.file_preview_version_of({ current: position + 1, total: versions.length })}
+        >
+          <History aria-hidden="true" />
+          <span class="tabular-nums">{position + 1} / {versions.length}</span>
+          <ChevronDown class="size-3.5" aria-hidden="true" />
+        </Button>
+      {/snippet}
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="end" class="w-72">
+      <DropdownMenu.Label>{m.file_preview_versions()}</DropdownMenu.Label>
+      {#each versionRows as row (row.version.id)}
+        <DropdownMenu.Item onSelect={() => preview.open(row.version)}>
+          <span class="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
+            {#if row.version.id === file?.id}<Check class="size-4" />{/if}
+          </span>
+          <span class="min-w-0 flex-1">
+            {m.file_preview_version_number({ number: row.number })}
+            <span class="text-muted-foreground block text-xs whitespace-normal">
+              {row.version.revises_file_id
+                ? m.file_preview_edited_by_you()
+                : m.file_preview_version_by_assistant()}{madeAt(row.version)
+                ? ` · ${madeAt(row.version)}`
+                : ""}
+            </span>
+          </span>
+        </DropdownMenu.Item>
+      {/each}
+      {#if comparable || restorable}
+        <DropdownMenu.Separator />
+      {/if}
+      {#if comparable}
+        <DropdownMenu.CheckboxItem bind:checked={preview.showChanges}>
+          {m.file_preview_show_changes()}
+        </DropdownMenu.CheckboxItem>
+      {/if}
+      {#if restorable}
+        <DropdownMenu.Item onSelect={restoreVersion} disabled={saving}>
+          <span class="size-4 shrink-0" aria-hidden="true"></span>
+          {m.file_preview_restore_version()}
+        </DropdownMenu.Item>
+      {/if}
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 {/snippet}
 
 {#snippet exportMenu()}
@@ -419,14 +452,8 @@
         </p>
       {/if}
     </div>
-    {#if versions.length > 1 && !sheet}
-      <div
-        role="group"
-        aria-label={m.file_preview_versions()}
-        class="flex shrink-0 items-center gap-0.5"
-      >
-        {@render versionButtons()}
-      </div>
+    {#if versions.length > 1}
+      {@render versionMenu()}
     {/if}
     {#if preview.dirty}
       <Button variant="ghost" size="sm" disabled={saving} onclick={discardEdits}>
@@ -434,22 +461,6 @@
       </Button>
       <Button size="sm" disabled={saving} onclick={saveEdits}>
         {saving ? m.file_preview_saving() : m.save()}
-      </Button>
-    {:else if restorable}
-      <Button variant="outline" size="sm" disabled={saving} onclick={restoreVersion}>
-        {saving ? m.file_preview_saving() : m.file_preview_restore_version()}
-      </Button>
-    {/if}
-    {#if comparable}
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-pressed={preview.showChanges}
-        aria-label={m.file_preview_show_changes()}
-        title={m.file_preview_show_changes()}
-        onclick={() => (preview.showChanges = !preview.showChanges)}
-      >
-        <Diff aria-hidden="true" />
       </Button>
     {/if}
     {@render exportMenu()}
@@ -479,21 +490,6 @@
       <X aria-hidden="true" />
     </Button>
   </div>
-  {#if versions.length > 1 && sheet}
-    <!-- On a narrow screen the versions get a row of their own. -->
-    <div
-      role="group"
-      aria-label={m.file_preview_versions()}
-      class="border-border flex items-center justify-between border-t px-4 py-1.5"
-    >
-      <span class="text-muted-foreground text-xs tabular-nums">
-        {m.file_preview_version_of({ current: position + 1, total: versions.length })}
-      </span>
-      <div class="flex items-center gap-0.5">
-        {@render versionButtons()}
-      </div>
-    </div>
-  {/if}
 </header>
 
 {#if updating}
