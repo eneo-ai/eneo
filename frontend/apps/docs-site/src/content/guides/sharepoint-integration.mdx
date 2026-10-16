@@ -298,11 +298,14 @@ Everything else is skipped with a reason that the [sync history](#sync-status-an
 - **Unsupported file type (…)** – images, video, audio, archives, executables, fonts, and Office family formats without a parser. Legacy Word and PowerPoint files are named with a hint, for example _Unsupported file type (legacy Word .doc, save as .docx)_; OneNote, Outlook `.msg`, rich text `.rtf` and OpenDocument files are also unsupported. These files are not downloaded.
 - **No text layer (scanned document; OCR is not supported)** – a PDF whose pages carry no characters. Eneo does not run OCR.
 - **Empty or unreadable content** – a file or SharePoint page with nothing in it, or a workbook with no cell content.
-- **Exceeds extraction limit (…)** – more PDF pages or more text than the extraction limits allow.
+- **Exceeds extraction limit (…)** – more PDF pages or more text than the extraction limits allow, or an Office file that hits the extraction sandbox's memory, time or archive limits (_document resource limit_). SharePoint files are parsed in the same isolated process, with the same limits, as uploaded files.
 - **File too large (exceeds 50 MB limit)** – larger than `SHAREPOINT_MAX_DOWNLOAD_BYTES`.
-- **Error: …** – the download failed, or the file is corrupt or password-protected.
+- **Password-protected file**, **Corrupt or malformed file**, **Incomplete download** – the file was downloaded but could not be read.
+- **Error: HTTP 403 …**, **HTTP 404 …**, **HTTP 410 …** – SharePoint refused the download or no longer has the file; it is left out until it changes.
 
 A skipped file never produces garbage text in the knowledge. Only the two "no text" outcomes remove a previously indexed copy of the same file, because the parser read the complete file and found nothing. A failed download, a corrupt file or an extraction error keeps the copy Eneo already has, so a transient problem cannot empty an item. A SharePoint page without text is skipped the same way and does not fail the sync.
+
+A problem that is not about the file itself, such as a Microsoft Graph outage, a timeout, or a failure while storing or embedding the text, does not skip the file. The run finishes the other files, keeps everything already indexed, and ends as **Sync failed** with _N files could not be processed; the next sync retries them_. These files are listed as skipped with _(retried by the next sync)_ after the reason. A full synchronization that ends this way leaves no change baseline, so the next synchronization is a full one that retries them; a delta synchronization keeps its position and retries them on the next change notification or manual sync.
 
 ### Document Properties (Library Columns)
 
@@ -372,7 +375,7 @@ An item that has not synced yet reads _No documents yet. The first sync runs in 
 
 #### The Not indexed tab
 
-**Not indexed (N)** lists the files that the latest synchronization skipped, introduced by _From the sync on …_. The files are grouped by reason, largest group first, with each heading showing the reason and the number of files, for example _Unsupported file type (legacy Word .doc, save as .docx) (12)_. The reasons are the ones listed under [Supported File Types](#supported-file-types), shown in your language; in English they read _Unsupported file type (…)_, _No text layer (scanned document; OCR is not supported)_, _Empty or unreadable content_, _File too large (exceeds the N MB limit)_, _Exceeds the extraction limit (N bytes of text)_ or _(N PDF pages)_, _Incomplete download_, _Password-protected file_, _Corrupt or malformed file_, and _Error: …_ for anything else.
+**Not indexed (N)** lists the files that the latest synchronization skipped, introduced by _From the sync on …_. The files are grouped by reason, largest group first, with each heading showing the reason and the number of files, for example _Unsupported file type (legacy Word .doc, save as .docx) (12)_. The reasons are the ones listed under [Supported File Types](#supported-file-types), shown in your language; in English they read _Unsupported file type (…)_, _No text layer (scanned document; OCR is not supported)_, _Empty or unreadable content_, _File too large (exceeds the N MB limit)_, _Exceeds the extraction limit (N bytes of text)_, _(N PDF pages)_ or _(document resource limit)_, _Incomplete download_, _Password-protected file_, _Corrupt or malformed file_, and _Error: …_ for anything else.
 
 The number in the tab name counts every skipped file, but the list itself holds at most 50 files, the same cap as the sync history; when more were skipped it ends with _and N more_. When the latest sync skipped nothing, the tab reads _Every file in the latest sync was indexed._ The tab only reflects the latest synchronization: a file that was skipped earlier but indexed since is no longer listed. The page can also be opened straight on this tab, which is what the completion notice does when an import indexed nothing but skipped files.
 
@@ -454,7 +457,7 @@ Each imported item in a space's knowledge list also shows its own webhook status
 
 A subscription is registered with the webhook address that was current when it was created. If `PUBLIC_ORIGIN` or `SHAREPOINT_WEBHOOK_NOTIFICATION_URL` changes, for example when Eneo moves to a new domain, Eneo notices the difference at the next renewal or synchronization and recreates the subscription with the new address instead of renewing it. Until then, Microsoft keeps posting to the old address.
 
-To switch every subscription immediately, restart the backend with the new address, then open **Admin** → **Integrations** → **Manage Webhooks** and click **Recreate all subscriptions**. After confirmation, every subscription is removed at Microsoft and created again with the current address, expired or not; imported knowledge and assistants are not affected. The result shows how many subscriptions were recreated and how many failed.
+To switch every subscription immediately, restart the backend with the new address, then open **Admin** → **Integrations** → **Manage Webhooks** and click **Recreate all subscriptions**. After confirmation, every subscription is created again at Microsoft with the current address, expired or not, and the old one is removed once the replacement exists; imported knowledge and assistants are not affected. If Microsoft does not accept a replacement, for example because the new address does not answer yet, the existing subscription is kept and the failure is shown on it in **Manage Webhooks**. The result shows how many subscriptions were recreated and how many failed.
 
 A script can do the same through the admin API, using a tenant API key with admin permission (see the [API overview](/docs/api)):
 
