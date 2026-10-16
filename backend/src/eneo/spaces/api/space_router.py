@@ -117,15 +117,15 @@ async def forbid_org_space(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    logger.warning(f"forbid_org_space called with space_id={id}")
+    logger.debug(f"forbid_org_space called with space_id={id}")
     try:
         space = await container.space_service().get_space(id)
-        logger.warning(
+        logger.debug(
             f"forbid_org_space check: space_id={id}, user_id={space.user_id}, "
             f"tenant_space_id={space.tenant_space_id}, is_org={space.user_id is None and space.tenant_space_id is None}"
         )
         if space.user_id is None and space.tenant_space_id is None:
-            logger.warning(f"Blocking org space access: space_id={id}")
+            logger.debug(f"Blocking org space access: space_id={id}")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
         return True
     except Exception as e:
