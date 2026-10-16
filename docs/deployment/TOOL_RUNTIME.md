@@ -197,9 +197,8 @@ What the operator contributes:
    memory-backed `/tmp` for follow-up questions, 30 minutes idle by default.
    `TOOL_RUNTIME_TABULAR_CACHE_TTL_SECONDS` shortens that, down to 60 seconds.
 6. **Consider a sandboxed container runtime** such as gVisor (`runtime: runsc`
-   on the service) where the host offers one. It protects the host against a
-   kernel exploit from inside a confined job; it does not replace the
-   confinement above.
+   on the service) where the host offers one. It adds a layer between the
+   container and the host kernel; it does not replace the confinement above.
 
 Setting a security classification on the built-in server in **Admin > Tools**
 is the administrator's statement that this deployment may handle files of that

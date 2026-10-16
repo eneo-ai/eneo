@@ -19,8 +19,8 @@ part.
   the two kinds of approval, file references and failure behaviour. [Built-in
   Tool Servers](/docs/builtin-tool-servers) owns the loopback servers and the
   placement rule for new built-in tools. [Tool Runtime
-  Security](/docs/tool-runtime-security) owns the isolated runtime's threat
-  model and controls. Administrators work through [MCP
+  Security](/docs/tool-runtime-security) owns the isolated runtime's design
+  assumptions and controls. Administrators work through [MCP
   Servers](/guides/mcp-servers) and [Functions](/guides/capabilities).
 </Callout>
 
@@ -137,9 +137,9 @@ fit; the placement rule and its two attachment patterns are spelled out in
 Compute, tabular analysis, charts and file creation have four properties that
 knowledge search does not:
 
-1. **The input is adversarial by construction.** The model writes the
-   JavaScript and the SQL. Users supply the CSV, XLSX and DOCX files. A
-   prompt injection or a crafted file aims straight at the engine.
+1. **The input is not Eneo's own.** The model writes the JavaScript and the
+   SQL. Users supply the CSV, XLSX and DOCX files. None of it can be reviewed
+   before it runs, so it has to be contained instead.
 2. **They need engines.** DuckDB, QuickJS, an OOXML renderer, HTML-to-PDF
    layout and SVG rasterising are large native or WebAssembly dependencies
    with their own vulnerability history.
@@ -150,13 +150,13 @@ knowledge search does not:
 
 The backend process is the chat API for every tenant. Running such work there
 would mean one query competing with every other request for memory, one
-engine crash taking chat down, and a sandbox escape landing inside the process
-that holds the database connection and the signing keys. So the work moved to
-a runtime that:
+engine failure affecting chat, and the engines sharing a process with the
+database connection and the signing keys. So the work moved to a runtime
+that:
 
 - runs each job in a fresh child process with a stripped environment, a
-  private directory and Linux Landlock confinement, so a compromised engine
-  sees only the files that one job was given;
+  private directory and Linux Landlock confinement, so an engine sees only
+  the files that one job was given;
 - holds no credentials and no data, has no database, no signing key and, in
   the reference deployment, no route to PostgreSQL, Redis or the internet, so
   there is nothing to take;
@@ -298,7 +298,7 @@ are interactive HTML views attached to MCP tools.
   Interoperability](/docs/knowledge-retrieval-and-mcp).
 - The loopback servers, the placement rule and how to add one: [Built-in Tool
   Servers](/docs/builtin-tool-servers).
-- The runtime's threat model, its layers and the operator checklist: [Tool
+- The runtime's design assumptions, its layers and the operator checklist: [Tool
   Runtime Security](/docs/tool-runtime-security).
 - Registering external servers, catalog approval, identity forwarding and
   interactive views: [MCP Servers](/guides/mcp-servers).

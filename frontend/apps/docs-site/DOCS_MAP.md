@@ -60,7 +60,7 @@ bundled runtime, external), the design rationale and the state boundaries live
 in `docs/tool-architecture.mdx`. Keep that overview aligned when changing
 Skill activation, Function resolution, runtime placement, file references, MCP
 Apps or native document behaviour. `docs/tool-runtime-security.mdx` owns the
-runtime's threat model and controls; update it with any change to the
+runtime's design assumptions and controls; update it with any change to the
 runtime's ingress, sandbox, download policy, engine limits or the backend's
 result guards.
 

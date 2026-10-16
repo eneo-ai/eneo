@@ -5,9 +5,10 @@ import { Callout } from "nextra/components";
 The bundled tool runtime is the one place in Eneo where code the model wrote
 runs, where SQL the model wrote is executed, and where files users uploaded
 are parsed and rendered. It is also one container shared by every tenant and
-every conversation of a deployment. This page describes what the runtime has
-to defend against, the layers that do so, where each layer is enforced, and
-what remains for the operator to provide.
+every conversation of a deployment. This page describes the assumptions the
+runtime is built on, the layers that keep jobs, tenants and the deployment
+apart, where each layer is enforced, and what remains for the operator to
+provide.
 
 <Callout type="info">
   [Tools and MCP Architecture](/docs/tool-architecture) explains why this work
@@ -17,32 +18,34 @@ what remains for the operator to provide.
   in the repository; this page is the rationale behind its settings.
 </Callout>
 
-## Threat model
+## Design assumptions
 
-What the runtime handles:
+The runtime treats everything it is given as data to be contained, not as
+instructions to be trusted:
 
-| Input                                                | Comes from                      | Why it is untrusted                                                                                                                   |
-| ---------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| JavaScript for `run_javascript`                      | The model                       | A prompt injection, a jailbroken model or a mistaken one can write code that tries to read other data, exhaust memory or run forever. |
-| SQL for `query_table` and `assert_table`             | The model                       | The same, in a language with file, network and extension features built in.                                                           |
-| CSV, XLSX and DOCX files                             | Users, or tools acting for them | A crafted file can target the parser (zip bombs, malformed packages, formulas, external references).                                  |
-| Document content, templates and chart specifications | The model and users             | Rendering is a large dependency surface (OOXML, HTML to PDF, SVG rasterising).                                                        |
+| Input                                                | Comes from                      | Handled as                                                                             |
+| ---------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------- |
+| JavaScript for `run_javascript`                      | The model                       | A program with a fixed budget of memory, time and output, and no I/O                   |
+| SQL for `query_table` and `assert_table`             | The model                       | One read-only statement over the loaded sheets, in an engine with nothing else enabled |
+| CSV, XLSX and DOCX files                             | Users, or tools acting for them | Bounded packages parsed in a separate process, with saved values only                  |
+| Document content, templates and chart specifications | The model and users             | Validated specifications rendered by engines that are kept out of the backend          |
 
-What it protects:
+The separation it maintains:
 
 - **One conversation's files from another.** The runtime processes files for
-  every tenant. A job must not read the attachments, parsed sheets or outputs
-  of any other job, even if it fully controls one of the engines.
-- **Eneo's credentials and data.** A compromised engine must not gain a path to
-  the database, Redis, the signing key, the model providers or the internet.
-- **The host and the rest of the deployment.** Resource exhaustion in one job
-  must not take the backend or other containers down with it.
-- **The user who receives the output.** A file the runtime produced must be
-  safe to open: no macros, scripts or externally loaded content.
+  every tenant, so a job can only see the files it was given, never the
+  attachments, parsed sheets or outputs of another job.
+- **Eneo's credentials and data.** The runtime has no path to the database,
+  Redis, the signing key, the model providers or the internet.
+- **The host and the rest of the deployment.** One job's resource use stays
+  within the runtime's own limits and cannot affect the backend or other
+  containers.
+- **The user who receives the output.** A file the runtime produced is safe
+  to open: no macros, scripts or externally loaded content.
 
-What is explicitly accepted: the runtime's own code and the engines it bundles
-are trusted like any other part of an Eneo release. The defence is against what
-those engines are fed, not against the release itself.
+The runtime's own code and the engines it bundles are part of the Eneo release
+and are kept current through its normal dependency process. The layers below
+are about what those engines are fed, not about the release itself.
 
 ## The layers, from the outside in
 
@@ -124,8 +127,7 @@ narrow shape (`src/server.ts`):
   tenant, file and content accessibility on every redemption and writes an
   audit entry for it.
 - In the reference deployment it has no route to PostgreSQL, Redis or the
-  internet. A job that escaped every inner layer would find nothing to connect
-  to.
+  internet, so there is nothing on its network for a job to connect to.
 
 The disposable cache of original bytes and parsed sheets does not weaken this.
 Every call downloads through its own signed URL; a cache hit only replaces the
@@ -174,7 +176,8 @@ and every child refuses to run, unless files are confined.
 
 ### Layer 4: hardened engines
 
-The engines are configured on the assumption that their input is hostile.
+Each engine is configured with only what its job needs and nothing it does
+not.
 
 **JavaScript (`run_javascript`)** runs in QuickJS compiled to WebAssembly, so
 it is interpreted inside the child rather than by the host JavaScript engine.
@@ -225,7 +228,8 @@ capped at 200 KiB.
 
 ### Layer 5: the container
 
-The reference Compose stack limits what an escape from a child could reach:
+The reference Compose stack bounds the container itself, independently of
+the per-job confinement:
 
 | Control      | Setting                                                                                                           |
 | ------------ | ----------------------------------------------------------------------------------------------------------------- |
@@ -236,9 +240,9 @@ The reference Compose stack limits what an escape from a child could reach:
 | Supply chain | landrun built from a pinned release; Python packages installed with `--require-hashes`                            |
 
 A sandboxed container runtime such as gVisor (`runtime: runsc` on the service)
-adds protection against a kernel exploit from inside a child. It protects the
-host, not one conversation from another, so it complements the confinement
-above and does not replace it.
+adds a layer between the container and the host kernel. It protects the host,
+not one conversation from another, so it complements the confinement above
+and does not replace it.
 
 Deployments that do not use the reference stack (another orchestrator, the
 development container) must provide this layer themselves: no egress, a
@@ -311,8 +315,8 @@ URLs or tokens.
 
 ## What this does not cover
 
-- **A kernel exploit from inside a confined child.** Landlock is a kernel
-  feature; gVisor or a similar sandbox is the layer for that.
+- **The host kernel itself.** Landlock is a kernel feature; gVisor or a
+  similar sandbox is the layer between the container and the host.
 - **Residency of original bytes and parsed sheets.** They stay in the
   memory-backed `/tmp` for follow-up questions, 30 minutes idle by default.
   `TOOL_RUNTIME_TABULAR_CACHE_TTL_SECONDS` shortens that, down to 60 seconds.
