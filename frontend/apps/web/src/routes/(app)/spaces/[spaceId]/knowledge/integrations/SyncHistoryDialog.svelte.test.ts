@@ -72,7 +72,7 @@ describe("SyncHistoryDialog", () => {
     await expect.element(page.getByText("unsupported format")).toBeVisible();
     await expect.element(page.getByText(m.skipped_and_n_more({ count: 3 }))).toBeVisible();
     await expect
-      .element(page.getByText(new RegExp(m.item_s_unchanged({ count: 9 }))))
+      .element(page.getByText(new RegExp(m.item_s_unchanged_other({ count: 9 }))))
       .toBeVisible();
   });
 

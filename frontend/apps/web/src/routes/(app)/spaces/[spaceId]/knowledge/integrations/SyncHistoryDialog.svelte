@@ -138,7 +138,9 @@
     if (log.files_processed > 0) parts.push(m.file_s_synced({ count: log.files_processed }));
     if (log.files_deleted > 0) parts.push(m.file_s_deleted({ count: log.files_deleted }));
     if (log.pages_processed > 0) parts.push(m.page_s_synced({ count: log.pages_processed }));
-    if (extras.unchangedItems > 0) parts.push(m.item_s_unchanged({ count: extras.unchangedItems }));
+    if (extras.unchangedItems === 1) parts.push(m.item_s_unchanged_one({ count: 1 }));
+    else if (extras.unchangedItems > 1)
+      parts.push(m.item_s_unchanged_other({ count: extras.unchangedItems }));
     if (log.skipped_items > 0) parts.push(m.item_s_skipped({ count: log.skipped_items }));
 
     return parts.length > 0 ? parts.join(", ") : m.no_changes();
