@@ -1,6 +1,6 @@
-import { Marked, type TokenizerAndRendererExtension } from "marked";
+import { Marked, Tokenizer, type TokenizerAndRendererExtension } from "marked";
 import type { EneoFileToken, EneoInrefToken, EneoMentionToken } from "./CustomComponents";
-import { mathExtensions, promoteDisplayMath } from "./math.js";
+import { mathExtensions, promoteDisplayMath, startsMathFence } from "./math.js";
 
 export { default as Markdown } from "./Markdown.svelte";
 export { sanitizeImageSrc, sanitizeLinkHref } from "./sanitizeUrl.js";
@@ -11,6 +11,25 @@ export {
   type EneoInrefCustomComponentProps,
   type EneoMentionCustomComponentProps
 } from "./CustomComponents";
+
+const blankLine = / *(?:\n|$)/y;
+
+/**
+ * Where the next block of an extension starts, for marked to end the paragraph
+ * there. marked asks before each paragraph, with the rest of the answer, so
+ * one search serves both block extensions and ends at the first line one of
+ * them starts on, or at a blank line, where the paragraph ends anyway. A search
+ * per extension would read on past the other's starts, once per paragraph.
+ */
+function blockStart(src: string) {
+  for (let end = src.indexOf("\n"); end !== -1; end = src.indexOf("\n", end + 1)) {
+    if (src[end + 1] === "<") return end;
+    blankLine.lastIndex = end + 1;
+    if (blankLine.test(src)) return -1;
+    if (startsMathFence(src, end + 1)) return end + 1;
+  }
+  return -1;
+}
 
 export function eneoMarkdownLexer({
   breaks = true,
@@ -30,10 +49,7 @@ export function eneoMarkdownLexer({
   const eneoInref: TokenizerAndRendererExtension = {
     name: "eneoInref",
     level: "inline",
-    start(src: string) {
-      const idx = src.indexOf("<inref");
-      return idx;
-    },
+    // No `start`: marked's text already ends at every `<`.
     tokenizer(src: string): EneoInrefToken | undefined {
       const match = src.match(eneoInrefRule);
 
@@ -53,10 +69,7 @@ export function eneoMarkdownLexer({
   const eneoInrefBlock: TokenizerAndRendererExtension = {
     name: "eneoInref",
     level: "block",
-    start(src: string) {
-      const idx = src.indexOf("\n<");
-      return idx;
-    },
+    start: blockStart,
     tokenizer(src: string): EneoInrefToken | undefined {
       const match = src.match(eneoInrefBlockRule);
 
@@ -76,10 +89,7 @@ export function eneoMarkdownLexer({
   const eneoMention: TokenizerAndRendererExtension = {
     name: "eneoMention",
     level: "inline",
-    start(src: string) {
-      const idx = src.indexOf("[[@");
-      return idx;
-    },
+    // No `start`: marked's text already ends at every `[`.
     tokenizer(src: string): EneoMentionToken | undefined {
       const match = src.match(eneoMentionRule);
 
@@ -128,7 +138,16 @@ export function eneoMarkdownLexer({
     // Chat text keeps the line breaks as typed; a document's single line
     // breaks are soft, as in the Markdown file it is.
     breaks,
-    gfm: true
+    gfm: true,
+    tokenizer: {
+      // marked tries a setext heading before each paragraph and reads it on
+      // to the next blank line, past where blockStart ends the paragraph. A
+      // heading's text is a paragraph, so it ends there too.
+      lheading(src) {
+        const end = blockStart(src.slice(1));
+        return end === -1 ? false : Tokenizer.prototype.lheading.call(this, src.slice(0, end + 1));
+      }
+    }
   });
 
   return {

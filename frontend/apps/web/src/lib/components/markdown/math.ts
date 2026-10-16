@@ -6,7 +6,7 @@
  * with web-next; both apps are tested against its cases.json.
  */
 import { canCloseDollar, canOpenDollar } from "@eneo/markdown-math";
-import type { Token, TokenizerAndRendererExtension } from "marked";
+import type { Token, TokenizerAndRendererExtension, TokenizerThis } from "marked";
 import type { EneoMathToken } from "./CustomComponents";
 
 type InlineMath = { raw: string; text: string; displayDelimiter: boolean };
@@ -79,14 +79,25 @@ function matchInlineMath(src: string, prev: string | undefined): InlineMath | un
   return prev === "$" ? undefined : matchDollars(src, open);
 }
 
+// marked asks where math starts again after each text token, with the rest
+// of the paragraph. Its text ends before each of these characters anyway, and
+// at each line end when line breaks are kept, so a `$` after the first one is
+// not a cut and the search stops there.
+const textEnd = /[$\\<![`*~_]/;
+const textOrLineEnd = /[$\\<![`*~_\n]/;
+
 const inlineMath: TokenizerAndRendererExtension = {
   name: "eneoMath",
   level: "inline",
-  // Text already ends at every backslash, so only `$` needs a cut. A native
-  // search, as marked asks again after each text token.
-  start: (src: string) => src.indexOf("$"),
+  start(this: TokenizerThis, src: string) {
+    const at = src.search(this.lexer.options.breaks ? textOrLineEnd : textEnd);
+    return src[at] === "$" ? at : -1;
+  },
   tokenizer(src: string, tokens: Token[]): EneoMathToken | undefined {
-    const match = matchInlineMath(src, tokens.at(-1)?.raw.at(-1));
+    // marked builds a text token by appending, so reading its last character
+    // copies all of it: only a `$` needs that character.
+    const prev = src[0] === "$" ? tokens.at(-1)?.raw.at(-1) : undefined;
+    const match = matchInlineMath(src, prev);
     if (!match) return;
     return { type: "eneoMath", level: "inline", display: false, ...match };
   }
@@ -113,22 +124,19 @@ function matchFence(src: string): EneoMathToken | undefined {
   };
 }
 
+const fenceOpening = / {0,3}\${2,}[ \t]*\n/y;
+
+/** Whether a whole fence starts at `at`, the start of a line. */
+export function startsMathFence(src: string, at: number) {
+  fenceOpening.lastIndex = at;
+  return fenceOpening.test(src) && matchFence(src.slice(at)) !== undefined;
+}
+
+// No `start`: eneoMarkdownLexer ends a paragraph at a fence with
+// startsMathFence, in one search with its other block extension.
 const mathFence: TokenizerAndRendererExtension = {
   name: "eneoMath",
   level: "block",
-  // Ends a paragraph only where a whole fence starts. marked asks with the
-  // text from the second character on, so `src` itself is not a line start.
-  // marked asks again for each paragraph, so the search stops where this
-  // paragraph does, at the first blank line.
-  // Known limit: after each cut, marked's setext-heading rule reads on to the
-  // next blank line, so fences with no blank lines between them cost
-  // fences × lines (200 fences: ~3 ms). Override marked's lheading if needed.
-  start(src: string) {
-    for (const line of src.matchAll(/\n(?:[ \t]*$| {0,3}\${2,}[ \t]*$)/gm)) {
-      if (!line[0].includes("$")) return;
-      if (matchFence(src.slice(line.index + 1))) return line.index + 1;
-    }
-  },
   tokenizer: matchFence
 };
 

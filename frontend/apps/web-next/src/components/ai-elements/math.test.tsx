@@ -171,8 +171,9 @@ describe("math parsing time", () => {
     "many unclosed openers": "\\(a \\[b ".repeat(4000)
   };
 
+  // The limit only stops a hang; the check is the ratio, not the time.
   for (const [name, source] of Object.entries(answers)) {
-    it(`grows with the answer, as remark-math does: ${name}`, () => {
+    it(`grows with the answer, as remark-math does: ${name}`, { timeout: 30_000 }, () => {
       expect(fastest(llmMath, source)).toBeLessThan(5 * fastest(remarkMathOnly, source) + 50);
     });
   }
