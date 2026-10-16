@@ -86,6 +86,20 @@ function matchInlineMath(src: string, prev: string | undefined): InlineMath | un
 const textEnd = /[$\\<![`*~_]/;
 const textOrLineEnd = /[$\\<![`*~_\n]/;
 
+// marked builds a text token by appending, so reading its last character
+// copies all of it, once per `$` in a paragraph. marked lexes a paragraph's
+// text in one call, with one token array and the rest of the text as `src`,
+// so the character is read from the `src` of the call's last `$` instead.
+const srcAtLastDollar = new WeakMap<Token[], string>();
+
+function charBefore(src: string, tokens: Token[]) {
+  const earlier = srcAtLastDollar.get(tokens);
+  srcAtLastDollar.set(tokens, src);
+  return earlier === undefined
+    ? tokens.at(-1)?.raw.at(-1)
+    : earlier[earlier.length - src.length - 1];
+}
+
 const inlineMath: TokenizerAndRendererExtension = {
   name: "eneoMath",
   level: "inline",
@@ -94,9 +108,8 @@ const inlineMath: TokenizerAndRendererExtension = {
     return src[at] === "$" ? at : -1;
   },
   tokenizer(src: string, tokens: Token[]): EneoMathToken | undefined {
-    // marked builds a text token by appending, so reading its last character
-    // copies all of it: only a `$` needs that character.
-    const prev = src[0] === "$" ? tokens.at(-1)?.raw.at(-1) : undefined;
+    // Only a `$` needs the character before it.
+    const prev = src[0] === "$" ? charBefore(src, tokens) : undefined;
     const match = matchInlineMath(src, prev);
     if (!match) return;
     return { type: "eneoMath", level: "inline", display: false, ...match };
