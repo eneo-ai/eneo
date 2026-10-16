@@ -223,6 +223,15 @@ async def test_unauthenticated_notifications_are_acknowledged_without_a_transact
     api.subscription_repo.get_by_subscription_id.assert_not_called()
 
 
+async def test_elements_that_are_not_objects_are_skipped_without_an_error(api):
+    response = await api.client.post(
+        WEBHOOK, json={"value": [1, "x", None, [], _notification("sub-unknown")]}
+    )
+
+    assert response.status_code == 202
+    api.subscription_repo.get_by_subscription_id.assert_awaited_once_with("sub-unknown")
+
+
 async def test_unknown_subscription_is_acknowledged_but_ignored(api):
     response = await api.client.post(
         WEBHOOK, json={"value": [_notification("sub-unknown")]}

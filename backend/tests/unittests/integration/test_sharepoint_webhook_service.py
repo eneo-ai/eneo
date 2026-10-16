@@ -20,6 +20,11 @@ from eneo.integration.infrastructure.sharepoint_webhook_service import (
 from eneo.jobs.job_models import Task
 
 
+async def _handle(service: SharepointWebhookService, payload) -> None:
+    """The router's path: authenticate the body, then queue syncs for what passed."""
+    await service.handle_notifications(service.authenticated_notifications(payload))
+
+
 def _subscription(
     *,
     subscription_id: str = "sub-123",
@@ -172,7 +177,7 @@ async def test_client_state_validation_accepts_valid(setup: Setup, mock_notifica
 
     notifications = {"value": [mock_notification]}
 
-    await setup.service.handle_notifications(notifications)
+    await _handle(setup.service, notifications)
 
     setup.service._fetch_knowledge_by_subscription.assert_called_once_with(
         setup.subscription.id
@@ -197,7 +202,7 @@ async def test_client_state_validation_rejects_invalid(
 
     notifications = {"value": [mock_notification]}
 
-    await setup.service.handle_notifications(notifications)
+    await _handle(setup.service, notifications)
 
     # Verify _fetch_knowledge_by_subscription was NOT called (notification was rejected)
     setup.service._fetch_knowledge_by_subscription.assert_not_called()
@@ -211,10 +216,27 @@ async def test_client_state_validation_rejects_malformed(
     mock_notification["clientState"] = {"unexpected": "shape"}
     setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
 
-    await setup.service.handle_notifications({"value": [mock_notification]})
+    await _handle(setup.service, {"value": [mock_notification]})
 
     setup.service._fetch_knowledge_by_subscription.assert_not_called()
     setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
+
+
+async def test_rejections_are_summarised_in_one_log_line_per_call(
+    setup: Setup, mock_notification
+):
+    """The endpoint is public; a forged body must not write one line per element."""
+    forged = [{**mock_notification, "clientState": "wrong"} for _ in range(1000)]
+    payload = {"value": [*forged, 1, "x", mock_notification]}
+
+    with patch(
+        "eneo.integration.infrastructure.sharepoint_webhook_service.logger"
+    ) as log:
+        accepted = setup.service.authenticated_notifications(payload)
+
+    assert accepted == [mock_notification]
+    assert log.warning.call_count == 1
+    assert log.warning.call_args.args[1:] == (1002, 1003, 1000, 2)
 
 
 async def test_configured_client_state_is_compared_stripped_as_utf8(
@@ -250,7 +272,7 @@ async def test_rejects_all_when_client_state_not_configured(
 
     notifications = {"value": [mock_notification]}
 
-    await setup.service.handle_notifications(notifications)
+    await _handle(setup.service, notifications)
 
     setup.service._fetch_knowledge_by_subscription.assert_not_called()
     setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
@@ -262,7 +284,7 @@ async def test_valid_webhook_records_subscription_received(
     """Valid notifications update subscription webhook health."""
     setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
 
-    await setup.service.handle_notifications({"value": [mock_notification]})
+    await _handle(setup.service, {"value": [mock_notification]})
 
     setup.sharepoint_subscription_repo.get_by_subscription_id.assert_called_once_with(
         "sub-123"
@@ -278,7 +300,7 @@ async def test_unknown_subscription_is_ignored(setup: Setup, mock_notification):
     mock_notification["subscriptionId"] = "sub-from-someone-else"
     setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
 
-    await setup.service.handle_notifications({"value": [mock_notification]})
+    await _handle(setup.service, {"value": [mock_notification]})
 
     setup.service._fetch_knowledge_by_subscription.assert_not_called()
     setup.sharepoint_subscription_repo.update.assert_not_called()
@@ -291,7 +313,7 @@ async def test_notification_without_subscription_id_is_ignored(
     del mock_notification["subscriptionId"]
     setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
 
-    await setup.service.handle_notifications({"value": [mock_notification]})
+    await _handle(setup.service, {"value": [mock_notification]})
 
     setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
     setup.service._fetch_knowledge_by_subscription.assert_not_called()
@@ -327,7 +349,7 @@ async def test_changekey_dedupe_is_scoped_per_subscription(
     setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
     second = dict(mock_notification, subscriptionId="sub-999")
 
-    await setup.service.handle_notifications({"value": [mock_notification, second]})
+    await _handle(setup.service, {"value": [mock_notification, second]})
 
     assert setup.service._fetch_knowledge_by_subscription.await_args_list == [
         ((setup.subscription.id,),),
@@ -340,7 +362,7 @@ async def test_empty_notifications_handled_gracefully(setup: Setup):
     notifications = {"value": []}
 
     # Should not raise
-    await setup.service.handle_notifications(notifications)
+    await _handle(setup.service, notifications)
 
 
 async def test_missing_value_key_handled_gracefully(setup: Setup):
@@ -348,7 +370,7 @@ async def test_missing_value_key_handled_gracefully(setup: Setup):
     notifications = {}
 
     # Should not raise
-    await setup.service.handle_notifications(notifications)
+    await _handle(setup.service, notifications)
 
 
 async def test_changekey_deduplication_prevents_duplicate_processing(
@@ -387,7 +409,7 @@ async def test_changekey_deduplication_prevents_duplicate_processing(
             ]
         }
 
-        await setup.service.handle_notifications(notifications)
+        await _handle(setup.service, notifications)
 
         # Verify ChangeKey service was called twice
         assert setup.change_key_service.should_process.call_count == 2
@@ -443,7 +465,7 @@ async def test_changekey_deduplication_allows_new_changekeys(
     ):
         notifications = {"value": [notification1, notification2]}
 
-        await setup.service.handle_notifications(notifications)
+        await _handle(setup.service, notifications)
 
         # Verify update_change_key was called twice (for both unique notifications)
         assert setup.change_key_service.update_change_key.call_count == 2
@@ -557,7 +579,7 @@ async def test_tenant_app_integration_uses_tenant_app_id(
     ):
         notifications = {"value": [mock_notification]}
 
-        await setup.service.handle_notifications(notifications)
+        await _handle(setup.service, notifications)
 
         # Verify OAuth token was NOT fetched
         setup.oauth_token_repo.one_or_none.assert_not_called()
@@ -609,7 +631,7 @@ async def test_user_oauth_integration_uses_oauth_token(
     ):
         notifications = {"value": [mock_notification]}
 
-        await setup.service.handle_notifications(notifications)
+        await _handle(setup.service, notifications)
 
         # Verify OAuth token was fetched
         setup.oauth_token_repo.one_or_none.assert_called_once_with(
@@ -659,7 +681,7 @@ async def test_tenant_app_integration_uses_admin_user_for_job(
     ):
         notifications = {"value": [mock_notification]}
 
-        await setup.service.handle_notifications(notifications)
+        await _handle(setup.service, notifications)
 
         # Verify job was created with admin user
         mock_job_service.queue_job.assert_called_once()
@@ -694,7 +716,7 @@ async def test_missing_tenant_admin_skips_integration(
     ):
         notifications = {"value": [mock_notification]}
 
-        await setup.service.handle_notifications(notifications)
+        await _handle(setup.service, notifications)
 
         # Verify NO job was queued (integration skipped)
         mock_job_service.queue_job.assert_not_called()
@@ -726,7 +748,7 @@ async def test_missing_oauth_token_skips_integration(
     ):
         notifications = {"value": [mock_notification]}
 
-        await setup.service.handle_notifications(notifications)
+        await _handle(setup.service, notifications)
 
         # Verify NO job was queued
         mock_job_service.queue_job.assert_not_called()
@@ -766,7 +788,7 @@ async def test_delta_sync_when_delta_token_exists(
     ):
         notifications = {"value": [mock_notification]}
 
-        await setup.service.handle_notifications(notifications)
+        await _handle(setup.service, notifications)
 
         # Verify delta sync task was queued
         mock_job_service.queue_job.assert_called_once()
@@ -808,7 +830,7 @@ async def test_full_sync_when_no_delta_token(
     ):
         notifications = {"value": [mock_notification]}
 
-        await setup.service.handle_notifications(notifications)
+        await _handle(setup.service, notifications)
 
         # Verify full sync task was queued
         mock_job_service.queue_job.assert_called_once()
@@ -824,7 +846,7 @@ async def test_dedupe_key_is_derived_from_the_subscription(
     )
     setup.change_key_service.should_process.return_value = False
 
-    await setup.service.handle_notifications({"value": [mock_notification]})
+    await _handle(setup.service, {"value": [mock_notification]})
 
     kwargs = setup.change_key_service.should_process.await_args.kwargs
     assert kwargs["integration_knowledge_id"] == uuid5(
@@ -886,7 +908,7 @@ async def test_onedrive_queued_job_contains_drive_id(
         "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
         return_value=mock_job_service,
     ):
-        await setup.service.handle_notifications({"value": [notification]})
+        await _handle(setup.service, {"value": [notification]})
 
     call_args = mock_job_service.queue_job.call_args
     task_params = call_args.kwargs["task_params"]

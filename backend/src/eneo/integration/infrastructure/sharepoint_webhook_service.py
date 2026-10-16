@@ -91,9 +91,11 @@ class SharepointWebhookService:
         clientState is the only authentication for this endpoint (it is
         unauthenticated at the HTTP layer). Fail closed: without a configured
         secret genuine Graph notifications cannot be told from forged ones, so
-        none is accepted.
+        none is accepted. Elements that are not objects are skipped. The
+        endpoint is public, so rejections are summarised in one log line per
+        call rather than one per element.
         """
-        values = notifications.get("value")
+        values = cast(list[object], notifications.get("value") or [])
         if not values:
             logger.debug("SharePoint webhook called without notifications")
             return []
@@ -104,22 +106,35 @@ class SharepointWebhookService:
             )
             return []
         accepted: list[SharePointWebhookNotification] = []
-        for notification in values:
+        wrong_client_state = 0
+        not_objects = 0
+        for element in values:
+            if not isinstance(element, dict):
+                not_objects += 1
+                continue
+            notification = cast(SharePointWebhookNotification, element)
             if not client_state_matches(
                 self.expected_client_state, notification.get("clientState")
             ):
-                logger.warning(
-                    "Ignoring webhook notification with unexpected clientState. "
-                    "This may indicate a security issue or SHAREPOINT_WEBHOOK_CLIENT_STATE mismatch."
-                )
+                wrong_client_state += 1
                 continue
             accepted.append(notification)
+        if wrong_client_state or not_objects:
+            logger.warning(
+                "Ignoring %d of %d SharePoint webhook notification(s): %d with an "
+                "unexpected clientState (forged, or SHAREPOINT_WEBHOOK_CLIENT_STATE "
+                "differs from the subscriptions'), %d not objects",
+                wrong_client_state + not_objects,
+                len(values),
+                wrong_client_state,
+                not_objects,
+            )
         return accepted
 
     async def handle_notifications(
-        self, notifications: SharePointWebhookPayload
+        self, notifications: list[SharePointWebhookNotification]
     ) -> None:
-        """Handle incoming webhook notifications from Microsoft Graph.
+        """Queue syncs for notifications ``authenticated_notifications`` accepted.
 
         Notifications are routed by their ``subscriptionId`` to the stored
         subscription and from there to the knowledge rows referencing it, so a
@@ -128,7 +143,7 @@ class SharepointWebhookService:
         duplicate notifications.
         """
         by_subscription: dict[str, list[SharePointWebhookNotification]] = {}
-        for notification in self.authenticated_notifications(notifications):
+        for notification in notifications:
             subscription_id = notification.get("subscriptionId")
             if not isinstance(subscription_id, str) or not subscription_id:
                 logger.warning("Ignoring webhook notification without subscriptionId")

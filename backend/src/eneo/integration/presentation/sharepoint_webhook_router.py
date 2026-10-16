@@ -168,14 +168,6 @@ async def sharepoint_webhook(
     logger.info(
         "Received SharePoint webhook with %s notification(s)", len(notifications)
     )
-    if notifications:
-        first = notifications[0]
-        logger.debug(
-            "SharePoint webhook sample: subscriptionId=%s resource=%s changeType=%s",
-            first.get("subscriptionId"),
-            first.get("resource"),
-            first.get("changeType"),
-        )
 
     # The transaction opens only for notifications carrying the configured
     # clientState, so junk or forged bodies posted at the public URL cost no
@@ -184,8 +176,15 @@ async def sharepoint_webhook(
     service = container.sharepoint_webhook_service()
     accepted = service.authenticated_notifications(payload)
     if accepted:
+        first = accepted[0]
+        logger.debug(
+            "SharePoint webhook sample: subscriptionId=%s resource=%s changeType=%s",
+            first.get("subscriptionId"),
+            first.get("resource"),
+            first.get("changeType"),
+        )
         session = cast(AsyncSession, container.session())
         async with session.begin():
-            await service.handle_notifications({"value": accepted})
+            await service.handle_notifications(accepted)
 
     return JSONResponse(status_code=202, content={"status": "acknowledged"})
