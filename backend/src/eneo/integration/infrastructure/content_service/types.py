@@ -5,12 +5,16 @@ from typing_extensions import NotRequired, TypedDict
 # Owned by the domain layer; re-exported here so existing infrastructure importers
 # keep working without the domain importing upward.
 from eneo.integration.domain.value_objects import (
+    ChangedDetail,
+    ChangeKind,
     OAuthResource,
     SkippedDetail,
     SyncMetadata,
 )
 
 __all__ = [
+    "ChangedDetail",
+    "ChangeKind",
     "GraphParentReference",
     "SharePointItem",
     "OAuthResource",
@@ -63,6 +67,9 @@ class SyncStats(TypedDict):
     skipped_details: list[SkippedDetail]
     skipped_total: NotRequired[int]
     skipped_truncated: NotRequired[bool]
+    changed_details: NotRequired[list[ChangedDetail]]
+    changed_total: NotRequired[int]
+    changed_truncated: NotRequired[bool]
     reconcile_warning: NotRequired[str]
 
 

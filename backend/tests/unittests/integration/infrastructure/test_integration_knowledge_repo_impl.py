@@ -84,6 +84,8 @@ class TestDocumentCountProjection:
         assert "info_blobs.version_state = 'active'" in sql
         assert f"'{first.id}'" in sql and f"'{second.id}'" in sql
         repo.mapper.to_entities.assert_called_once()
+        # Knowledge keeps its embedding model after the model is deprecated.
+        repo.embedding_model_repo.all.assert_awaited_once_with(with_deprecated=True)
 
     async def test_one_or_none_attaches_the_count(self, repo, session):
         record = _record()

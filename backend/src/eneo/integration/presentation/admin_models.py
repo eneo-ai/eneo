@@ -2,7 +2,10 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from eneo.integration.presentation.models import IntegrationKnowledgePublic
+from eneo.observability.error_text import user_visible_error
 
 
 def _empty_uuid_list() -> list[UUID]:
@@ -155,6 +158,12 @@ class SharePointSubscriptionPublic(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    # Failures stored before renewal errors were cleaned may hold URLs or host names.
+    @field_validator("last_renewal_error")
+    @classmethod
+    def _clean_renewal_error(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else user_visible_error(value)
+
 
 class SubscriptionRenewalResult(BaseModel):
     """Result of subscription renewal operation."""
@@ -226,3 +235,44 @@ class ServiceAccountAuthCallback(BaseModel):
         ..., description="OAuth authorization code from Microsoft callback"
     )
     state: str = Field(..., description="OAuth state parameter for verification")
+
+
+class AdminIntegrationKnowledgeSpace(BaseModel):
+    id: UUID
+    name: str
+    organization: bool = Field(
+        ..., description="True for the tenant's organization space"
+    )
+    can_open: bool = Field(
+        ...,
+        description="Whether the caller may open the space: the organization "
+        "space, or a shared space they belong to directly or through a group. "
+        "The admin permission alone grants no access to a shared space",
+    )
+
+
+class AdminIntegrationKnowledgeItem(BaseModel):
+    space: AdminIntegrationKnowledgeSpace = Field(
+        ..., description="The space that owns the item"
+    )
+    knowledge: IntegrationKnowledgePublic
+
+
+class AdminPersonalIntegrationKnowledge(BaseModel):
+    items: int = Field(..., description="Items in personal spaces")
+    failing: int = Field(
+        ..., description="Items in personal spaces whose latest sync failed"
+    )
+
+
+class AdminIntegrationKnowledgeOverview(BaseModel):
+    items: list[AdminIntegrationKnowledgeItem] = Field(
+        ...,
+        description="Every item of the shared and organization spaces, ordered by "
+        "space name and then creation",
+    )
+    personal: AdminPersonalIntegrationKnowledge = Field(
+        ...,
+        description="Personal spaces are counted, not listed: they can hold a "
+        "person's own OneDrive folders",
+    )

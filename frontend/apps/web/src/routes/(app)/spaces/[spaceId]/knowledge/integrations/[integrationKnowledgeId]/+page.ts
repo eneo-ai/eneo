@@ -1,14 +1,16 @@
-import { error } from "@sveltejs/kit";
+import { error, redirect } from "@sveltejs/kit";
 import type { IntegrationKnowledge } from "@eneo/eneo-js";
-import {
-  DEFAULT_INTEGRATION_DOCUMENTS_QUERY,
-  type IntegrationDocumentsPage,
-  type IntegrationDocumentsTab,
-  type IntegrationSkippedDocuments
-} from "$lib/features/integrations/integrationDocuments";
+import { sourceHref, type SourceTab } from "$lib/features/integrations/sources";
+
+/** The wrapper page's tab for a tab of the item page; the skipped files moved to Problems. */
+function wrapperTab(tab: string | null): SourceTab | undefined {
+  if (tab === "skipped" || tab === "problems") return "problems";
+  if (tab === "activity" || tab === "content") return tab;
+  return undefined;
+}
 
 export const load = async (event) => {
-  const { eneo, currentSpace } = await event.parent();
+  const { currentSpace } = await event.parent();
   const integrationKnowledgeId = event.params.integrationKnowledgeId;
 
   const items: IntegrationKnowledge[] =
@@ -20,25 +22,24 @@ export const load = async (event) => {
     throw error(404);
   }
 
-  const [documents, skipped] = await Promise.all([
-    eneo.integrations.knowledge.listDocuments({
-      knowledge,
-      space: currentSpace,
-      ...DEFAULT_INTEGRATION_DOCUMENTS_QUERY
-    }) as Promise<IntegrationDocumentsPage>,
-    (
-      eneo.integrations.knowledge.listSkippedDocuments({
-        knowledge,
-        space: currentSpace
-      }) as Promise<IntegrationSkippedDocuments>
-    ).catch((err: unknown) => {
-      console.error("Could not load the skipped files of an integration item", err);
-      return null;
-    })
-  ]);
+  const requestedTab = event.url.searchParams.get("tab");
 
-  const initialTab: IntegrationDocumentsTab =
-    event.url.searchParams.get("tab") === "skipped" ? "skipped" : "documents";
+  // An item imported with others lives on its wrapper's page, with its folder selected.
+  if (knowledge.wrapper_id && knowledge.integration_type === "sharepoint") {
+    throw redirect(
+      307,
+      sourceHref(
+        event.params.spaceId,
+        { kind: "wrapper", id: knowledge.wrapper_id },
+        { folder: knowledge.id, tab: wrapperTab(requestedTab) }
+      )
+    );
+  }
 
-  return { knowledge, documents, skipped, initialTab };
+  // Links from before the problems tab still name the skipped-files tab.
+  if (requestedTab === "skipped") {
+    throw redirect(307, `${event.url.pathname}?tab=problems`);
+  }
+
+  return { knowledgeId: knowledge.id };
 };

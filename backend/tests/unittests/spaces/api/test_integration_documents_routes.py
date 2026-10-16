@@ -1,5 +1,7 @@
-"""Documents and skipped-file routes of a space's integration item, after authentication."""
+"""Documents, skipped-file and sync-progress routes of a space's integration items,
+after authentication."""
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -11,13 +13,21 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
+from eneo.actors.actors.space_actor import SpaceAccessFacts
 from eneo.info_blobs.info_blob import InfoBlobInDBNoText
 from eneo.info_blobs.info_blob_repo import IntegrationDocumentsPage
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.integration.domain.entities.sync_log import SyncLog
+from eneo.integration.domain.repositories.integration_knowledge_repo import (
+    IntegrationKnowledgeLocation,
+)
+from eneo.integration.infrastructure.sharepoint_sync_progress import (
+    sync_progress_key,
+)
 from eneo.main.container.container import Container
+from eneo.main.exceptions import NotFoundException
 from eneo.server.exception_handlers import add_exception_handlers
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from eneo.spaces.api.space_router import router
@@ -33,8 +43,15 @@ class DocumentsAPI:
     user: UserInDB
     space: Space
     knowledge: IntegrationKnowledge
+    space_repo: AsyncMock
     info_blobs: AsyncMock
     sync_logs: AsyncMock
+    progress_redis: AsyncMock
+    knowledge_repo: AsyncMock
+
+    @property
+    def progress_url(self) -> str:
+        return f"/spaces/{self.space.id}/knowledge/integrations/sync-progress/"
 
     def url(self, path: str = "", knowledge_id: UUID | None = None) -> str:
         return (
@@ -105,12 +122,31 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
     space.integration_knowledge_list = [knowledge]
     space_repo = AsyncMock()
     space_repo.one.return_value = space
+    # The routes read the caller's facts and the item ids only; both follow
+    # the space as a test leaves it.
+    space_repo.get_space_access_facts.side_effect = (
+        lambda space_id: SpaceAccessFacts.from_space(space)
+    )
+    space_repo.get_visible_integration_knowledge_ids.side_effect = (
+        lambda space_id, tenant_space_id: [
+            item.id for item in space.integration_knowledge_list
+        ]
+    )
+    knowledge_repo = AsyncMock()
+    knowledge_repo.get_location.side_effect = lambda id: IntegrationKnowledgeLocation(
+        id=id,
+        integration_type="sharepoint",
+        url=knowledge.url,
+        folder_path=knowledge.folder_path,
+        resource_type=knowledge.resource_type,
+    )
     info_blobs = AsyncMock()
     info_blobs.get_integration_knowledge_page.return_value = IntegrationDocumentsPage(
         items=[], total_count=0, total_size=0
     )
     sync_logs = AsyncMock()
     sync_logs.get_by_integration_knowledge.return_value = []
+    progress_redis = AsyncMock()
 
     # Production DI for the service and actor policy; only the edges are
     # replaced, so missing wiring fails here too.
@@ -123,10 +159,11 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
         tenant_integration_repo=providers.Object(AsyncMock()),
         tenant_sharepoint_app_repo=providers.Object(AsyncMock()),
         oauth_token_repo=providers.Object(AsyncMock()),
-        integration_knowledge_repo=providers.Object(AsyncMock()),
+        integration_knowledge_repo=providers.Object(knowledge_repo),
         embedding_model_repo2=providers.Object(AsyncMock()),
         job_service=providers.Object(AsyncMock()),
         sharepoint_subscription_service=providers.Object(AsyncMock()),
+        redis_client=providers.Object(progress_redis),
     )
     app = FastAPI()
     app.include_router(router, prefix="/spaces")
@@ -139,7 +176,17 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
                     == "_get_container_with_user"
                 ):
                     app.dependency_overrides[dependency.call] = lambda: container
-    return DocumentsAPI(app, user, space, knowledge, info_blobs, sync_logs)
+    return DocumentsAPI(
+        app,
+        user,
+        space,
+        knowledge,
+        space_repo,
+        info_blobs,
+        sync_logs,
+        progress_redis,
+        knowledge_repo,
+    )
 
 
 async def _get(api: DocumentsAPI, url: str, **params):
@@ -354,3 +401,172 @@ async def test_skipped_documents_without_a_sync_log_is_empty(documents_api):
         "truncated": False,
         "synced_at": None,
     }
+
+
+async def test_sync_progress_lists_the_space_items_that_are_syncing(documents_api):
+    api = documents_api
+    idle = IntegrationKnowledge(
+        id=uuid4(),
+        name="Riktlinjer",
+        user_integration=api.knowledge.user_integration,
+        embedding_model=MagicMock(),
+        tenant_id=api.user.tenant_id,
+        space_id=uuid4(),
+    )
+    api.space.integration_knowledge_list.append(idle)
+    running = {
+        "integration_knowledge_id": str(api.knowledge.id),
+        "sync_type": "full",
+        "phase": "processing",
+        "started_at": "2026-10-14T09:00:00Z",
+        "updated_at": "2026-10-14T09:02:00Z",
+        "total": 120,
+        "done": 45,
+        "indexed": 30,
+        "unchanged": 12,
+        "skipped": 3,
+        "deleted": 1,
+        "current": "Protokoll.docx",
+        "recent": [
+            {"name": "Budget.xlsm", "outcome": "skipped", "reason": "Unsupported"},
+            {"name": "Rutin.pdf", "outcome": "indexed", "reason": None},
+        ],
+    }
+    api.progress_redis.mget.return_value = [json.dumps(running).encode(), None]
+
+    response = await _get(api, api.progress_url)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"items": [running]}
+    api.progress_redis.mget.assert_awaited_once_with(
+        [sync_progress_key(api.knowledge.id), sync_progress_key(idle.id)]
+    )
+    # Polled every few seconds: never the whole space aggregate.
+    api.space_repo.one.assert_not_awaited()
+    api.space_repo.get_space_access_facts.assert_awaited_once_with(api.space.id)
+    api.space_repo.get_visible_integration_knowledge_ids.assert_awaited_once_with(
+        api.space.id, api.space.tenant_space_id
+    )
+
+
+async def test_sync_progress_is_refused_to_non_members(documents_api):
+    api = documents_api
+    api.space.members = {}
+
+    response = await _get(api, api.progress_url)
+
+    assert response.status_code == 403, response.text
+    api.space_repo.get_visible_integration_knowledge_ids.assert_not_awaited()
+    api.progress_redis.mget.assert_not_awaited()
+
+
+async def test_sync_progress_of_an_unknown_space_is_not_found(documents_api):
+    api = documents_api
+    api.space_repo.get_space_access_facts.side_effect = NotFoundException()
+
+    response = await _get(api, api.progress_url)
+
+    assert response.status_code == 404, response.text
+    api.progress_redis.mget.assert_not_awaited()
+
+
+@pytest.mark.parametrize("path", ["", "skipped/"])
+async def test_documents_routes_check_access_without_the_space_aggregate(
+    documents_api, path
+):
+    """The source page asks once per folder; the aggregate loads every member,
+    assistant and attachment of the space."""
+    api = documents_api
+
+    response = await _get(api, api.url(path))
+
+    assert response.status_code == 200, response.text
+    api.space_repo.one.assert_not_awaited()
+    api.space_repo.get_space_access_facts.assert_awaited_once_with(api.space.id)
+    api.space_repo.get_visible_integration_knowledge_ids.assert_awaited_once_with(
+        api.space.id, api.space.tenant_space_id
+    )
+
+
+@pytest.mark.parametrize("path", ["", "skipped/"])
+async def test_documents_routes_of_an_unknown_space_are_not_found(documents_api, path):
+    api = documents_api
+    api.space_repo.get_space_access_facts.side_effect = NotFoundException()
+
+    response = await _get(api, api.url(path))
+
+    assert response.status_code == 404, response.text
+    api.space_repo.get_visible_integration_knowledge_ids.assert_not_awaited()
+    api.knowledge_repo.get_location.assert_not_awaited()
+
+
+_SIGNED_URL = (
+    "https://contoso.sharepoint.com/sites/KS/_layouts/15/download.aspx"
+    "?UniqueId=abc&tempauth=v1.eyJhdWQiOiJ4In0.c2lnbmF0dXJl"
+)
+
+
+async def test_skipped_documents_written_before_the_cleanup_are_served_clean(
+    documents_api,
+):
+    api = documents_api
+    api.sync_logs.get_by_integration_knowledge.return_value = [
+        SyncLog(
+            integration_knowledge_id=api.knowledge.id,
+            sync_type="delta",
+            status="success",
+            started_at=datetime(2026, 10, 13, 7, tzinfo=timezone.utc),
+            metadata={
+                "skipped_details": [
+                    {
+                        "file": "a.docx",
+                        "reason": f"Error: 403, message='Forbidden', url='{_SIGNED_URL}'",
+                    }
+                ],
+                "skipped_total": 1,
+            },
+        )
+    ]
+
+    response = await _get(api, api.url("skipped/"))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["items"] == [
+        {"file": "a.docx", "reason": "Error: HTTP 403 Forbidden"}
+    ]
+    assert "tempauth" not in response.text
+
+
+async def test_sync_progress_written_before_the_cleanup_is_served_clean(
+    documents_api,
+):
+    api = documents_api
+    running = {
+        "integration_knowledge_id": str(api.knowledge.id),
+        "sync_type": "delta",
+        "phase": "processing",
+        "started_at": "2026-10-14T09:00:00Z",
+        "updated_at": "2026-10-14T09:02:00Z",
+        "total": None,
+        "done": 1,
+        "indexed": 0,
+        "unchanged": 0,
+        "skipped": 1,
+        "deleted": 0,
+        "current": None,
+        "recent": [
+            {
+                "name": "a.docx",
+                "outcome": "skipped",
+                "reason": f"Error: 403, message='Forbidden', url='{_SIGNED_URL}'",
+            }
+        ],
+    }
+    api.progress_redis.mget.return_value = [json.dumps(running).encode()]
+
+    response = await _get(api, api.progress_url)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["items"][0]["recent"] == [
+        {"name": "a.docx", "outcome": "skipped", "reason": "Error: HTTP 403 Forbidden"}
+    ]

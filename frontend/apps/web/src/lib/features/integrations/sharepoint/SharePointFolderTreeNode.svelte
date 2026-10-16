@@ -207,7 +207,7 @@
               class="text-muted-foreground flex min-h-11 items-center gap-2 px-4 text-sm"
               role="status"
             >
-              <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+              <LoaderCircle class="size-4 motion-safe:animate-spin" aria-hidden="true" />
               {m.sharepoint_loading_content()}
             </div>
           </li>

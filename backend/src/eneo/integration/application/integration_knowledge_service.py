@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID, uuid4
 
@@ -26,7 +27,8 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
-from eneo.roles.permissions import Permission
+from eneo.observability.error_text import user_visible_error
+from eneo.roles.permissions import Permission, validate_permission
 from eneo.spaces.space_repo import INTEGRATION_KNOWLEDGE_SOURCE
 
 if TYPE_CHECKING:
@@ -41,6 +43,8 @@ if TYPE_CHECKING:
         TenantSharePointApp,
     )
     from eneo.integration.domain.repositories.integration_knowledge_repo import (
+        IntegrationKnowledgeLocation,
+        IntegrationKnowledgePlacement,
         IntegrationKnowledgeRepository,
     )
     from eneo.integration.domain.repositories.oauth_token_repo import (
@@ -85,6 +89,20 @@ class BatchIntegrationKnowledgeCreateResult(TypedDict):
     integration_knowledge_id: UUID | None
     job: "JobInDb | None"
     error: str | None
+
+
+@dataclass(frozen=True)
+class PlacedIntegrationKnowledge:
+    placement: "IntegrationKnowledgePlacement"
+    knowledge: IntegrationKnowledge
+    can_open_space: bool
+
+
+@dataclass(frozen=True)
+class TenantIntegrationKnowledgeOverview:
+    items: list[PlacedIntegrationKnowledge]
+    personal_items: int
+    personal_failing: int
 
 
 class SubscriptionCleanupInfo(TypedDict):
@@ -171,20 +189,105 @@ class IntegrationKnowledgeService:
                 return
         raise NotFoundException("Integration knowledge not found")
 
+    async def tenant_overview(self) -> TenantIntegrationKnowledgeOverview:
+        """Every item of the tenant's shared and organization spaces, for admins.
+
+        Personal spaces can hold a person's own OneDrive folders, so their items
+        are only counted.
+        """
+        validate_permission(self.user, Permission.ADMIN)
+        placements = await self.integration_knowledge_repo.list_placements(
+            self.user.tenant_id
+        )
+        personal = [placement for placement in placements if placement.personal]
+        listed = [placement for placement in placements if not placement.personal]
+        knowledge = (
+            {
+                item.id: item
+                for item in await self.integration_knowledge_repo.get_by_ids(
+                    [placement.integration_knowledge_id for placement in listed]
+                )
+            }
+            if listed
+            else {}
+        )
+        openable = await self._openable_spaces(listed)
+        return TenantIntegrationKnowledgeOverview(
+            # An item removed between the two reads is left out.
+            items=[
+                PlacedIntegrationKnowledge(
+                    placement=placement,
+                    knowledge=knowledge[placement.integration_knowledge_id],
+                    can_open_space=placement.space_id in openable,
+                )
+                for placement in listed
+                if placement.integration_knowledge_id in knowledge
+            ],
+            personal_items=len(personal),
+            personal_failing=sum(
+                1 for placement in personal if placement.last_sync_status == "error"
+            ),
+        )
+
+    async def _openable_spaces(
+        self, placements: "list[IntegrationKnowledgePlacement]"
+    ) -> set[UUID]:
+        """Spaces of ``placements`` the caller may open.
+
+        Being an admin grants no access to a shared space, so a shared space
+        opens only through membership, direct or through a group. Opening the
+        organization space makes every tenant admin its admin
+        (``SpaceService.ensure_org_admin_members``), so it always opens.
+        """
+        openable = {
+            placement.space_id for placement in placements if placement.organization
+        }
+        shared = {placement.space_id for placement in placements} - openable
+        access = await self.space_repo.get_spaces_access_facts(list(shared))
+        openable.update(
+            space_id
+            for space_id, facts in access.items()
+            if self.actor_manager.get_space_actor(facts).can_read_space()
+        )
+        return openable
+
     async def get_readable_knowledge(
         self, space_id: UUID, integration_knowledge_id: UUID
-    ) -> IntegrationKnowledge:
-        """An item as seen from a space, for anyone who may read its integrations.
+    ) -> IntegrationKnowledgeLocation:
+        """Where an item seen from a space keeps its documents, for anyone who
+        may read the space's integrations."""
+        await self.require_readable_knowledge(space_id, integration_knowledge_id)
+        return await self.integration_knowledge_repo.get_location(
+            integration_knowledge_id
+        )
+
+    async def require_readable_knowledge(
+        self, space_id: UUID, integration_knowledge_id: UUID
+    ) -> None:
+        """Raise unless the caller may read the space's integrations (403) and
+        the space shows the item (404, as for an unknown space).
 
         Membership is checked before the item is looked up so a non-member
         cannot probe which items a space holds.
         """
-        space = await self.space_repo.one(id=space_id)
-        actor = self.actor_manager.get_space_actor_from_space(space)
+        if integration_knowledge_id not in await self.list_readable_knowledge_ids(
+            space_id
+        ):
+            raise NotFoundException()
+
+    async def list_readable_knowledge_ids(self, space_id: UUID) -> list[UUID]:
+        """Ids of the items a space shows, for anyone who may read its integrations.
+
+        Reads the caller's access facts and the ids only: the source pages
+        poll this and ask once per folder, and the space aggregate loads
+        every member, assistant and source of the space.
+        """
+        facts = await self.space_repo.get_space_access_facts(space_id)
+        actor = self.actor_manager.get_space_actor(facts)
         if not (actor.can_read_space() and actor.can_read_integrations()):
             raise UnauthorizedException()
-        return space.get_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id
+        return await self.space_repo.get_visible_integration_knowledge_ids(
+            space_id, facts.tenant_space_id
         )
 
     async def _get_tenant_app_access_token(
@@ -425,7 +528,7 @@ class IntegrationKnowledgeService:
                         knowledge=None,
                         integration_knowledge_id=None,
                         job=None,
-                        error=str(exc),
+                        error=user_visible_error(exc),
                     )
                 )
 

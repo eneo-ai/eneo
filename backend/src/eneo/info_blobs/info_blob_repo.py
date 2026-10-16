@@ -117,7 +117,32 @@ def _starts_with(column: _Column, prefix: str) -> ColumnElement[bool]:
     return column.ilike(f"{_like_literal(prefix)}%", escape=_LIKE_ESCAPE)
 
 
-def _document_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
+# Every property value except booleans'. In lax mode ``value[*]`` yields a
+# plain value as well as each entry of a multi-value list. An entry without a
+# kind is kept: ``@.kind == "boolean"`` is false when the key is missing.
+_SEARCHABLE_PROPERTY_VALUES_PATH = '$[*] ? (!(@.kind == "boolean")).value[*]'
+
+
+def _property_value_matches(q: str) -> ColumnElement[bool]:
+    """``q`` in a value of the document's ``source_metadata``.
+
+    Only values are searched: every document of a library shares the same
+    property names and labels, so matching those would match them all.
+    Booleans are left out as well: they are stored as "true" and "false" but
+    shown as yes and no, so "true" would match every document of a library
+    with a yes/no column. A date-only value is shown as the date part of its
+    stored ISO form, so it matches as shown.
+    """
+    values = sa.func.jsonb_array_elements_text(
+        sa.func.jsonb_path_query_array(
+            InfoBlobs.source_metadata,
+            sa.literal_column(f"'{_SEARCHABLE_PROPERTY_VALUES_PATH}'"),
+        )
+    ).column_valued("value", joins_implicitly=True)
+    return sa.exists().where(_contains(values, q))
+
+
+def _title_or_path_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
     """``q`` in the title, or in the URL below the item's own URL.
 
     Document URLs are percent-encoded, so the encoded form of ``q`` is tried
@@ -144,6 +169,10 @@ def _document_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
     return sa.or_(
         _contains(InfoBlobs.title, q), *(_contains(path, needle) for needle in needles)
     )
+
+
+def _document_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
+    return sa.or_(_title_or_path_matches(q, url_anchor), _property_value_matches(q))
 
 
 def _document_sort_keys(sort: IntegrationDocumentSort) -> list[_Column]:
@@ -1051,7 +1080,8 @@ class InfoBlobRepository:
         limit: int,
         offset: int = 0,
     ) -> IntegrationDocumentsPage:
-        """Active documents of one item, filtered on title or path, as one page.
+        """Active documents of one item, filtered on title, path or a property
+        value, as one page.
 
         ``url_anchor`` is the item's own URL without a trailing slash; the
         search covers the URL part after it.

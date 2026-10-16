@@ -66,6 +66,9 @@ from eneo.image_models.presentation.tenant_image_models_router import (
     router as tenant_image_models_router,
 )
 from eneo.info_blobs.info_blobs_router import router as info_blobs_router
+from eneo.integration.presentation.admin_integration_router import (
+    router as admin_integration_router,
+)
 from eneo.integration.presentation.admin_sharepoint_router import (
     router as admin_sharepoint_router,
 )
@@ -636,6 +639,12 @@ router.include_router(
 router.include_router(
     admin_sharepoint_router,
     prefix="/admin",
+    tags=["admin"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    admin_integration_router,
+    prefix="/admin/integrations",
     tags=["admin"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )

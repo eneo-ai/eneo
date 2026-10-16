@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -7,6 +8,29 @@ if TYPE_CHECKING:
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
+
+
+@dataclass(frozen=True)
+class IntegrationKnowledgePlacement:
+    """The space that owns an item, read from columns only."""
+
+    integration_knowledge_id: "UUID"
+    space_id: "UUID"
+    space_name: str
+    personal: bool
+    organization: bool
+    last_sync_status: str
+
+
+@dataclass(frozen=True)
+class IntegrationKnowledgeLocation:
+    """Where an item's documents are in its source, read from columns only."""
+
+    id: "UUID"
+    integration_type: str
+    url: str | None
+    folder_path: str | None
+    resource_type: str | None
 
 
 class IntegrationKnowledgeRepository(ABC):
@@ -25,6 +49,18 @@ class IntegrationKnowledgeRepository(ABC):
 
     @abstractmethod
     async def get_by_ids(self, ids: list["UUID"]) -> list["IntegrationKnowledge"]: ...
+
+    @abstractmethod
+    async def list_placements(
+        self, tenant_id: "UUID"
+    ) -> list[IntegrationKnowledgePlacement]:
+        """Every item of the tenant, ordered by space name and then creation."""
+        ...
+
+    @abstractmethod
+    async def get_location(self, id: "UUID") -> IntegrationKnowledgeLocation:
+        """The item's location; raises NotFoundException when it is gone."""
+        ...
 
     @abstractmethod
     async def remove(self, id: "UUID") -> None: ...

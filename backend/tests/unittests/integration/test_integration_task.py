@@ -251,3 +251,55 @@ async def test_waiter_whose_marker_was_drained_has_nothing_to_prepare(
     assert result.startswith("Skipped")
     service.process_delta_changes.assert_not_called()
     assert LOCK_KEY not in fake_redis.store
+
+
+def _signed_download_error() -> Exception:
+    return RuntimeError(
+        "403, message='Forbidden', url='https://contoso.sharepoint.com/sites/KS/"
+        "_layouts/15/download.aspx?UniqueId=abc&tempauth=v1.eyJhdWQiOiJ4In0.c2ln'"
+    )
+
+
+@pytest.mark.parametrize("task", [delta_task, full_task], ids=["delta", "full"])
+async def test_a_failed_sync_reports_no_url_to_its_job(
+    fake_redis, service, container, params, task
+):
+    failure = _signed_download_error()
+    service.pull_content.side_effect = failure
+    service.process_delta_changes.side_effect = failure
+
+    with pytest.raises(integration_task.IntegrationSyncError) as caught:
+        await task(params, container)
+
+    # The job stores str() of what the task raised.
+    assert str(caught.value) == "HTTP 403 Forbidden"
+    assert caught.value.__cause__ is failure
+    assert LOCK_KEY not in fake_redis.store
+
+
+async def test_a_failed_confluence_sync_reports_no_url_to_its_job(monkeypatch):
+    failure = _signed_download_error()
+    monkeypatch.setattr(
+        integration_task,
+        "_get_knowledge_with_retry",
+        AsyncMock(return_value=MagicMock(id=KNOWLEDGE_ID)),
+    )
+    monkeypatch.setattr(integration_task, "_validate_embedding_provider", AsyncMock())
+    container = MagicMock()
+    container.confluence_content_service.return_value.pull_content = AsyncMock(
+        side_effect=failure
+    )
+    confluence_task = integration_task.pull_confluence_content.__wrapped__
+
+    with pytest.raises(integration_task.IntegrationSyncError) as caught:
+        await confluence_task(
+            SimpleNamespace(
+                integration_knowledge_id=KNOWLEDGE_ID,
+                token_id=uuid4(),
+                space_key="DOCS",
+            ),
+            container,
+        )
+
+    assert str(caught.value) == "HTTP 403 Forbidden"
+    assert caught.value.__cause__ is failure

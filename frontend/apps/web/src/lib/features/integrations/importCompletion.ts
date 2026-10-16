@@ -65,7 +65,7 @@ export function describeImportOutcome(
     ? asCount(counts.files_processed) + asCount(counts.unchanged_items)
     : summary.documentCount;
   const skipped = hasCounts ? asCount(counts.skipped_total ?? counts.skipped_items) : 0;
-  const tab = skipped > 0 && indexed === 0 ? "skipped" : undefined;
+  const tab = skipped > 0 && indexed === 0 ? "problems" : undefined;
   return {
     name: knowledge.name,
     indexed,

@@ -5,12 +5,16 @@ import { describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 
 type TenantSharePointAppPublic = components["schemas"]["TenantSharePointAppPublic"];
+type SharePointSubscription = components["schemas"]["SharePointSubscriptionPublic"];
 
 const api = vi.hoisted(() => ({
   client: { fetch: vi.fn() },
   integrations: {
     admin: {
       sharepoint: {
+        listSubscriptions: vi.fn<() => Promise<SharePointSubscription[]>>(async () => []),
+        renewExpiredSubscriptions: vi.fn(),
+        testStoredConnection: vi.fn(async () => ({ success: true })),
         restartServiceAccountAuth: vi.fn(async () => ({
           auth_url: "https://login.microsoftonline.com/authorize",
           state: "state-123"
@@ -74,6 +78,7 @@ function show(app: TenantSharePointAppPublic | null) {
     throw new Error(`Unexpected call: ${path}`);
   });
   api.integrations.admin.sharepoint.restartServiceAccountAuth.mockClear();
+  api.integrations.admin.sharepoint.listSubscriptions.mockReset().mockResolvedValue([]);
   followServiceAccountSignIn.mockClear();
   return render(AdminIntegrationsPage, {
     data: {
@@ -153,5 +158,75 @@ describe("admin integrations page: SharePoint credential health", () => {
     expect(
       page.getByRole("button", { name: m.sharepoint_reauth_with_microsoft() }).query()
     ).toBeNull();
+  });
+
+  it("keeps a connection test result on screen while the stored config reloads", async () => {
+    show(config());
+    const appFetches = () =>
+      api.client.fetch.mock.calls.filter(([path]) => path === "/api/v1/admin/sharepoint/app")
+        .length;
+    const runTest = page.getByRole("button", { name: m.sharepoint_health_test_run() });
+    await expect.element(runTest).toBeVisible();
+    const before = appFetches();
+
+    await runTest.click();
+
+    await expect.element(page.getByText(m.sharepoint_health_test_ok())).toBeVisible();
+    // The test records credential health, so the config is fetched again.
+    expect(appFetches()).toBe(before + 1);
+  });
+
+  it("shows a renewal from the watch list in the connection health as well", async () => {
+    let renewed = false;
+    const watch = (): SharePointSubscription =>
+      ({
+        id: "sub-1",
+        site_id: "site-1",
+        drive_id: "drive-1",
+        expires_at: "2026-10-20T00:00:00Z",
+        created_at: "2026-10-01T00:00:00Z",
+        expires_in_hours: renewed ? 100 : 0,
+        is_expired: !renewed,
+        owner_type: "organization",
+        owner_email: null,
+        last_webhook_received_at: null,
+        consecutive_renewal_failures: 0
+      }) as SharePointSubscription;
+    show(config());
+    const sharepoint = api.integrations.admin.sharepoint;
+    sharepoint.listSubscriptions.mockImplementation(async () => [watch()]);
+    sharepoint.renewExpiredSubscriptions.mockImplementation(async () => {
+      renewed = true;
+      return { total_subscriptions: 1, expired_count: 1, recreated: 1, failed: 0, errors: [] };
+    });
+
+    await expect
+      .element(
+        page.getByText(
+          m.sharepoint_health_watch_issues({ active: 0, total: 1, expired: 1, failing: 0 })
+        )
+      )
+      .toBeVisible();
+    await page.getByRole("button", { name: m.sharepoint_health_watch_show() }).click();
+    await page
+      .getByRole("button", { name: m.sharepoint_subscriptions_renew_all_expired({ count: 1 }) })
+      .click();
+
+    await expect.element(page.getByText(m.sharepoint_health_watch_ok_one())).toBeVisible();
+    expect(
+      page.getByRole("button", { name: m.sharepoint_health_watch_renew() }).query()
+    ).toBeNull();
+  });
+});
+
+describe("admin integrations page: sources overview", () => {
+  it("is named by its row's heading, without a second heading", async () => {
+    show(null);
+
+    const overview = page.getByRole("region", { name: m.admin_sources_heading() });
+    await expect.element(overview).toBeVisible();
+    expect(page.getByRole("heading", { name: m.admin_sources_heading() }).elements()).toHaveLength(
+      1
+    );
   });
 });

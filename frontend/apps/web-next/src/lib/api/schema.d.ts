@@ -5051,6 +5051,26 @@ export interface paths {
     patch: operations["update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch"];
     trace?: never;
   };
+  "/api/v1/spaces/{id}/knowledge/integrations/sync-progress/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Integration Knowledge Sync Progress
+     * @description Live progress of the integration knowledge syncs running in a space. Items that are not syncing are absent.
+     */
+    get: operations["get_integration_knowledge_sync_progress_api_v1_spaces__id__knowledge_integrations_sync_progress__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/": {
     parameters: {
       query?: never;
@@ -5080,7 +5100,7 @@ export interface paths {
     };
     /**
      * Get Integration Knowledge Documents
-     * @description List the indexed documents of an integration knowledge item, with their folder relative to the imported item.
+     * @description List the indexed documents of an integration knowledge item, with their folder relative to the imported item. `q` matches the title, the path or a property value.
      */
     get: operations["get_integration_knowledge_documents_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__documents__get"];
     put?: never;
@@ -8043,6 +8063,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/integrations/knowledge/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Integration Knowledge Overview
+     * @description Every integration knowledge item in the tenant's shared and organization spaces with its sync status. Items in personal spaces are only counted. Requires the admin permission.
+     */
+    get: operations["get_integration_knowledge_overview_api_v1_admin_integrations_knowledge__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/help-assistants/roles/": {
     parameters: {
       query?: never;
@@ -9983,6 +10023,55 @@ export interface components {
       username: string | null;
       /** Email */
       email: string;
+    };
+    /** AdminIntegrationKnowledgeItem */
+    AdminIntegrationKnowledgeItem: {
+      /** @description The space that owns the item */
+      space: components["schemas"]["AdminIntegrationKnowledgeSpace"];
+      knowledge: components["schemas"]["IntegrationKnowledgePublic"];
+    };
+    /** AdminIntegrationKnowledgeOverview */
+    AdminIntegrationKnowledgeOverview: {
+      /**
+       * Items
+       * @description Every item of the shared and organization spaces, ordered by space name and then creation
+       */
+      items: components["schemas"]["AdminIntegrationKnowledgeItem"][];
+      /** @description Personal spaces are counted, not listed: they can hold a person's own OneDrive folders */
+      personal: components["schemas"]["AdminPersonalIntegrationKnowledge"];
+    };
+    /** AdminIntegrationKnowledgeSpace */
+    AdminIntegrationKnowledgeSpace: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /**
+       * Organization
+       * @description True for the tenant's organization space
+       */
+      organization: boolean;
+      /**
+       * Can Open
+       * @description Whether the caller may open the space: the organization space, or a shared space they belong to directly or through a group. The admin permission alone grants no access to a shared space
+       */
+      can_open: boolean;
+    };
+    /** AdminPersonalIntegrationKnowledge */
+    AdminPersonalIntegrationKnowledge: {
+      /**
+       * Items
+       * @description Items in personal spaces
+       */
+      items: number;
+      /**
+       * Failing
+       * @description Items in personal spaces whose latest sync failed
+       */
+      failing: number;
     };
     /** AllowedOriginCreate */
     AllowedOriginCreate: {
@@ -12130,6 +12219,16 @@ export interface components {
        * @description New enabled state
        */
       enabled: boolean;
+    };
+    /** ChangedDetail */
+    ChangedDetail: {
+      /** File */
+      file: string;
+      /**
+       * Change
+       * @enum {string}
+       */
+      change: "added" | "updated" | "deleted";
     };
     /**
      * ChatTurnDiagnostics
@@ -15517,7 +15616,7 @@ export interface components {
       relative_path: string;
       /**
        * Url
-       * @description Web URL of the source document
+       * @description Web URL of the source document; null unless an absolute https URL
        */
       url?: string | null;
       /** Size */
@@ -15602,8 +15701,11 @@ export interface components {
       name: string;
       /** Original Name */
       original_name?: string | null;
-      /** Url */
-      url: string;
+      /**
+       * Url
+       * @description Web URL of the item in its source; null unless an absolute https URL
+       */
+      url: string | null;
       /**
        * Tenant Id
        * Format: uuid
@@ -15704,6 +15806,105 @@ export interface components {
        * @description When the sync the list comes from finished or started
        */
       synced_at?: string | null;
+    };
+    /**
+     * IntegrationSyncProgress
+     * @description Live progress of a SharePoint sync that is running now.
+     *
+     *     `total` counts the files and site pages the sync has listed so far. A full
+     *     sync lists each folder when it reaches it, so `total` is null until the
+     *     first listing returns and then grows as subfolders are found; it never
+     *     drops below `done`. A delta sync cannot cheaply tell which of its changes
+     *     are files in scope, so its `total` stays null.
+     */
+    IntegrationSyncProgress: {
+      /**
+       * Integration Knowledge Id
+       * Format: uuid
+       */
+      integration_knowledge_id: string;
+      /**
+       * Sync Type
+       * @enum {string}
+       */
+      sync_type: "full" | "delta";
+      /**
+       * Phase
+       * @description discovering: resolving scope and listing changes before files are handled; processing: handling files; finishing: orphan cleanup, delta token and summary
+       * @enum {string}
+       */
+      phase: "discovering" | "processing" | "finishing";
+      /**
+       * Started At
+       * Format: date-time
+       */
+      started_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       * @description When this progress was last written
+       */
+      updated_at: string;
+      /**
+       * Total
+       * @description Files and pages listed so far; null while unknown
+       */
+      total: number | null;
+      /**
+       * Done
+       * @description Files finished: indexed + unchanged + skipped
+       */
+      done: number;
+      /**
+       * Indexed
+       * @description Files and pages embedded in this sync
+       */
+      indexed: number;
+      /** Unchanged */
+      unchanged: number;
+      /** Skipped */
+      skipped: number;
+      /**
+       * Deleted
+       * @description Local documents removed in this sync
+       */
+      deleted: number;
+      /**
+       * Current
+       * @description Name of the file or page being handled now; never a folder
+       */
+      current?: string | null;
+      /**
+       * Recent
+       * @description Files and pages finished most recently, newest first, at most 8
+       */
+      recent?: components["schemas"]["IntegrationSyncProgressFile"][];
+    };
+    /**
+     * IntegrationSyncProgressFile
+     * @description A file or page a running sync has finished with.
+     */
+    IntegrationSyncProgressFile: {
+      /** Name */
+      name: string;
+      /**
+       * Outcome
+       * @enum {string}
+       */
+      outcome: "indexed" | "unchanged" | "skipped";
+      /**
+       * Reason
+       * @description Why a skipped file was skipped, when known
+       */
+      reason?: string | null;
+    };
+    /**
+     * IntegrationSyncProgressList
+     * @description Running syncs of a space's integration knowledge; idle items are absent.
+     */
+    IntegrationSyncProgressList: {
+      /** Items */
+      items: components["schemas"]["IntegrationSyncProgress"][];
     };
     /**
      * IntegrationType
@@ -21953,6 +22154,12 @@ export interface components {
       skipped_truncated?: boolean;
       /** Skipped Details */
       skipped_details?: components["schemas"]["SkippedDetail"][];
+      /** Changed Total */
+      changed_total?: number;
+      /** Changed Truncated */
+      changed_truncated?: boolean;
+      /** Changed Details */
+      changed_details?: components["schemas"]["ChangedDetail"][];
       /** Reconcile Warning */
       reconcile_warning?: string;
       /** Trigger */
@@ -42840,6 +43047,55 @@ export interface operations {
       };
     };
   };
+  get_integration_knowledge_sync_progress_api_v1_spaces__id__knowledge_integrations_sync_progress__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IntegrationSyncProgressList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch: {
     parameters: {
       query?: never;
@@ -42906,7 +43162,7 @@ export interface operations {
   get_integration_knowledge_documents_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__documents__get: {
     parameters: {
       query?: {
-        /** @description Matches the title or the path */
+        /** @description Matches the title, the path or a property value */
         q?: string | null;
         sort?: "name" | "path" | "size" | "updated_at";
         order?: "asc" | "desc";
@@ -52049,6 +52305,35 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_integration_knowledge_overview_api_v1_admin_integrations_knowledge__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminIntegrationKnowledgeOverview"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

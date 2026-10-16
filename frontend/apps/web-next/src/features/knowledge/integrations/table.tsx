@@ -205,7 +205,7 @@ export function IntegrationItemsTable({
       header: t("link"),
       width: proportional(1),
       renderCell: ({ row }) =>
-        row.kind === "item" ? (
+        row.kind === "item" && row.item.url ? (
           <AstryxLink href={row.item.url} isExternalLink color="secondary">
             {t(VENDOR[row.item.integration_type].linkLabel)}
           </AstryxLink>

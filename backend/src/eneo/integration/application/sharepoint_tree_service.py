@@ -4,6 +4,7 @@ from uuid import UUID
 from eneo.integration.infrastructure.graph_errors import user_facing_sharepoint_error
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
     from eneo.integration.application.sharepoint_auth_router import (
@@ -87,7 +88,7 @@ class SharePointTreeService:
             raise BadRequestException(
                 user_facing_sharepoint_error(e)
                 or f"Failed to acquire SharePoint token for integration "
-                f"{user_integration_id} in {space_type} space: {str(e)}"
+                f"{user_integration_id} in {space_type} space: {user_visible_error(e)}"
             ) from e
 
         # Create a callback function for token refresh (only used for user OAuth)
@@ -201,7 +202,7 @@ class SharePointTreeService:
             )
             raise BadRequestException(
                 user_facing_sharepoint_error(e)
-                or f"Failed to fetch SharePoint folder tree: {str(e)}"
+                or f"Failed to fetch SharePoint folder tree: {user_visible_error(e)}"
             ) from e
 
     async def search_library(
@@ -246,5 +247,5 @@ class SharePointTreeService:
             )
             raise BadRequestException(
                 user_facing_sharepoint_error(e)
-                or f"Failed to search SharePoint library: {str(e)}"
+                or f"Failed to search SharePoint library: {user_visible_error(e)}"
             ) from e

@@ -1,6 +1,7 @@
 /** @typedef {import('../types/resources').Integration} Integration */
 /** @typedef {import('../types/resources').TenantIntegration} TenantIntegration */
 /** @typedef {import('../client/client').EneoError} EneoError */
+/** @typedef {import('../types/schema').components['schemas']['IntegrationSyncProgressList']} IntegrationSyncProgressList */
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
@@ -349,6 +350,29 @@ export function initIntegrations(client) {
       },
 
       /**
+       * Live progress of the integration knowledge syncs running in a space.
+       * Items that are not syncing are absent from the list.
+       * @param {Object} args
+       * @param {{id: string}} args.space Space whose integration knowledge to check
+       *
+       * @returns {Promise<IntegrationSyncProgressList>}
+       * @throws {EneoError}
+       * */
+      getSyncProgress: async ({ space }) => {
+        const { id } = space;
+        const res = await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/sync-progress/",
+          {
+            method: "get",
+            params: {
+              path: { id }
+            }
+          }
+        );
+        return res;
+      },
+
+      /**
        * Rename an integration knowledge item
        * @param {Object} args
        * @param {{id: string}} args.knowledge IntegrationKnowledge to rename
@@ -461,6 +485,21 @@ export function initIntegrations(client) {
     },
 
     admin: {
+      /**
+       * Every integration knowledge item in the tenant's shared and organization
+       * spaces, each with its space and sync status. Items in personal spaces are
+       * only counted (`personal.items`, `personal.failing`). Requires the admin
+       * permission.
+       * @returns {Promise<import("../types/schema").components["schemas"]["AdminIntegrationKnowledgeOverview"]>}
+       * @throws {EneoError}
+       * */
+      knowledgeOverview: async () => {
+        const res = await client.fetch("/api/v1/admin/integrations/knowledge/", {
+          method: "get"
+        });
+        return res;
+      },
+
       sharepoint: {
         /**
          * List all SharePoint webhook subscriptions

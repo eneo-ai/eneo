@@ -1,9 +1,12 @@
 import asyncio
+import re
 from typing import Any, Awaitable, Callable, Optional, Sequence, cast
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 from uuid import UUID
 
 import aiohttp
+from aiohttp.client_reqrep import RequestInfo
+from multidict import CIMultiDict, CIMultiDictProxy
 
 from eneo.integration.infrastructure.content_service.sharepoint_metadata import (
     LIST_ITEM_FIELDS_EXPAND,
@@ -54,6 +57,35 @@ def _strip_query_param(url: str, name: str) -> str:
 def _token_from_delta_link(delta_link: str) -> Optional[str]:
     query_params: dict[str, list[str]] = parse_qs(urlparse(delta_link).query)
     return query_params.get("token", [None])[0]
+
+
+def _without_download_credentials(
+    error: aiohttp.ClientResponseError,
+) -> aiohttp.ClientResponseError:
+    """The same error without the URL query and the request headers.
+
+    A download URL is pre-authenticated: its query holds a bearer token
+    (``tempauth``), which aiohttp puts in the error text, and the request
+    headers hold our Graph token. Status and response headers stay for the
+    throttling and token-refresh handling.
+    """
+    info = error.request_info
+    return aiohttp.ClientResponseError(
+        RequestInfo(
+            info.url.with_query(None).with_fragment(None),
+            info.method,
+            CIMultiDictProxy(CIMultiDict[str]()),
+            info.real_url.with_query(None).with_fragment(None),
+        ),
+        (),
+        status=error.status,
+        message=error.message,
+        headers=error.headers,
+    )
+
+
+def _without_query(url: str) -> str:
+    return re.split(r"[?#]", url, maxsplit=1)[0]
 
 
 class IncompleteDownloadError(Exception):
@@ -437,19 +469,29 @@ class SharePointContentClient(BaseClient):
         # limit, bypassing WrappedAiohttpClient — so throttling retry must be
         # applied here explicitly.
         async def _download() -> ExtractionResult:
-            async with self.client.client.get(
-                download_url, headers=self.headers
-            ) as response:
-                response.raise_for_status()
-                content_type = response.headers.get("Content-Type", "")
-                charset = response.charset
-                try:
-                    payload = await self._read_response_with_size_limit(
-                        response, file_name
-                    )
-                except IncompleteDownloadError as e:
-                    logger.warning(str(e))
-                    return ExtractionResult.error(str(e), content_type)
+            # The status check raises, and so does the request itself, for
+            # example after too many redirects or at an invalid redirect. from
+            # None: a traceback must not show the original either.
+            try:
+                async with self.client.client.get(
+                    download_url, headers=self.headers
+                ) as response:
+                    response.raise_for_status()
+                    content_type = response.headers.get("Content-Type", "")
+                    charset = response.charset
+                    try:
+                        payload = await self._read_response_with_size_limit(
+                            response, file_name
+                        )
+                    except IncompleteDownloadError as e:
+                        logger.warning(str(e))
+                        return ExtractionResult.error(str(e), content_type)
+            except aiohttp.ClientResponseError as e:
+                raise _without_download_credentials(e) from None
+            except aiohttp.InvalidURL as e:
+                raise aiohttp.InvalidURL(
+                    _without_query(str(e.url)), e.description
+                ) from None
 
             # Parsers are CPU-bound and synchronous; keep the event loop free
             # for the other requests of the sync.

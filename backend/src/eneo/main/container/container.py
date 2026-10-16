@@ -239,6 +239,9 @@ from eneo.integration.infrastructure.sharepoint_subscription_repo_impl import (
 from eneo.integration.infrastructure.sharepoint_subscription_service import (
     SharePointSubscriptionService,
 )
+from eneo.integration.infrastructure.sharepoint_sync_progress import (
+    SharePointSyncProgressStore,
+)
 from eneo.integration.infrastructure.sharepoint_webhook_service import (
     SharepointWebhookService,
 )
@@ -1571,6 +1574,10 @@ class Container(containers.DeclarativeContainer):
         OfficeChangeKeyService,
         redis_client=redis_client,
     )
+    sharepoint_sync_progress_store = providers.Factory(
+        SharePointSyncProgressStore,
+        redis_client=redis_client,
+    )
     sharepoint_content_service = providers.Factory(
         SharePointContentService,
         oauth_token_repo=oauth_token_repo,
@@ -1587,6 +1594,7 @@ class Container(containers.DeclarativeContainer):
         sync_log_repo=sync_log_repo,
         change_key_service=office_change_key_service,
         org_token_provider=org_token_provider,
+        sync_progress_store=sharepoint_sync_progress_store,
     )
     sharepoint_webhook_service = providers.Factory(
         SharepointWebhookService,

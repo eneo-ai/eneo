@@ -21,6 +21,7 @@ from eneo.main.models import PaginatedPermissions, ResourcePermission
 from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
     MCPServerAssembler,
 )
+from eneo.roles.permissions import Permission
 from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
 )
@@ -58,6 +59,9 @@ if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
     from eneo.completion_models.presentation import CompletionModelAssembler
     from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
+    from eneo.integration.domain.entities.integration_knowledge import (
+        IntegrationKnowledge,
+    )
 
 
 class SpaceAssembler:
@@ -172,8 +176,27 @@ class SpaceAssembler:
         for website in space.websites:
             website.permissions = actor.get_website_permissions()
 
+        integration_permissions = actor.get_integrations_permissions()
         for knowledge in space.integration_knowledge_list:
-            knowledge.permissions = actor.get_integrations_permissions()
+            knowledge.permissions = self._integration_item_permissions(
+                knowledge, integration_permissions
+            )
+
+    def _integration_item_permissions(
+        self, knowledge: "IntegrationKnowledge", permissions: list[ResourcePermission]
+    ) -> list[ResourcePermission]:
+        # The integration service lets only an admin rename, sync or delete
+        # what the organization's SharePoint app imported.
+        if (
+            knowledge.user_integration.auth_type != "tenant_app"
+            or Permission.ADMIN in self.user.permissions
+        ):
+            return permissions
+        return [
+            permission
+            for permission in permissions
+            if permission not in (ResourcePermission.EDIT, ResourcePermission.DELETE)
+        ]
 
     def _get_api_key_resource_permissions(self) -> ResourcePermissions | None:
         """Return the effective fine-grained resource permissions from the API key, if any."""

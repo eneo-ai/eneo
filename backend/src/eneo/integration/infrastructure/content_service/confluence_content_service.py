@@ -10,6 +10,7 @@ from eneo.integration.infrastructure.clients.confluence_content_client import (
     ConfluenceContentClient,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
     from eneo.info_blobs.info_blob_service import InfoBlobService
@@ -76,7 +77,9 @@ class ConfluenceContentService:
             integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
             await self.integration_knowledge_repo.update(obj=integration_knowledge)
         except Exception as e:
-            await self._record_sync_failure(integration_knowledge_id, str(e))
+            await self._record_sync_failure(
+                integration_knowledge_id, user_visible_error(e)
+            )
             logger.error(f"Error in Confluence pull_content: {e}", exc_info=True)
             raise
 
