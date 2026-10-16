@@ -286,10 +286,12 @@ class FileService:
         *,
         policy_revision: int | None = None,
         parent_file_id: UUID | None = None,
+        revises_file_id: UUID | None = None,
     ) -> _PersistedCapturedFile:
         metadata = await self._add_metadata(
             captured_file,
             parent_file_id=parent_file_id,
+            revises_file_id=revises_file_id,
         )
         references: list[FileContentReferenceRecord] = []
         for entry in captured_file.contents:
@@ -368,6 +370,7 @@ class FileService:
         captured_file: _CapturedPreparedFile,
         *,
         parent_file_id: UUID | None = None,
+        revises_file_id: UUID | None = None,
     ) -> FileMetadata:
         user = self._authenticated_user()
         prepared = captured_file.prepared
@@ -379,6 +382,7 @@ class FileService:
                 user_id=user.id,
                 tenant_id=user.tenant_id,
                 parent_file_id=parent_file_id,
+                revises_file_id=revises_file_id,
             )
         )
 
@@ -507,7 +511,12 @@ class FileService:
         )
 
     async def save_generated_document(
-        self, data: bytes, name: str, mimetype: str
+        self,
+        data: bytes,
+        name: str,
+        mimetype: str,
+        *,
+        revises_file_id: UUID | None = None,
     ) -> File:
         """Persist a tool-generated document (DOCX, XLSX, PDF) as a File.
 
@@ -516,6 +525,11 @@ class FileService:
         exactly like an uploaded one, so it keeps its exact original (signed
         references and downloads work) and gains extracted text; page images
         are not derived. Like generated images it is stored inline.
+
+        ``revises_file_id`` names the version of a conversation document the
+        bytes were edited from. The caller has reached that file through an
+        authorized conversation; this method records the link and checks
+        nothing further about it.
         """
         self._authenticated_user()
         validate_generated_document(data, mimetype)
@@ -530,13 +544,16 @@ class FileService:
         ) as prepared:
             async with self._write_transaction():
                 file_id = await self._persist_prepared_file(
-                    replace(prepared, derivatives=())
+                    replace(prepared, derivatives=()),
+                    revises_file_id=revises_file_id,
                 )
                 return await self._generated_file(file_id, data)
 
     async def _persist_prepared_file(
         self,
         prepared: PreparedFileUpload,
+        *,
+        revises_file_id: UUID | None = None,
     ) -> UUID:
         async with AsyncExitStack() as capture_stack:
             captured = await self._capture_prepared_file(
@@ -546,7 +563,9 @@ class FileService:
                 business_maximum_bytes=None,
             )
             async with self._write_transaction():
-                persisted = await self._persist_captured_file(captured)
+                persisted = await self._persist_captured_file(
+                    captured, revises_file_id=revises_file_id
+                )
         return persisted.metadata.id
 
     async def get_file_by_id(self, file_id: UUID) -> FileInfo:

@@ -14,6 +14,8 @@ import pytest
 from eneo.conversations.document_export import (
     DocumentExportFailed,
     DocumentExportUnavailable,
+    conversation_document,
+    conversation_document_turn,
     document_export_availability,
     export_compatibility,
     export_document,
@@ -421,3 +423,21 @@ async def test_identity_catalogue_controls_native_export_discovery():
             identity_headers={"X-Eneo-User-Id": str(uuid4())},
         )
     assert state.docx.reason == "tool_unavailable"
+
+
+def test_a_document_is_found_with_the_turn_whose_answer_holds_it():
+    conversation = _conversation()
+    turn = conversation.questions[0]
+    # A reader's saved version joins the same turn as the version it revises.
+    version = SimpleNamespace(
+        id=uuid4(), name="Införandeplan.md", mimetype=MARKDOWN_MIME_TYPE
+    )
+    turn.generated_files.append(version)
+
+    assert conversation_document_turn(conversation, FILE_ID) == (
+        turn,
+        turn.generated_files[0],
+    )
+    assert conversation_document_turn(conversation, version.id) == (turn, version)
+    assert conversation_document_turn(conversation, uuid4()) is None
+    assert conversation_document(conversation, version.id) == (ASSISTANT_ID, version)
