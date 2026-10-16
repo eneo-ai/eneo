@@ -80,19 +80,19 @@ describe("ComposerAttachments", () => {
     uploading
   });
 
-  it("shows up to three attachments as chips with a named remove button", async () => {
+  it("shows one or two attachments as chips with a named remove button", async () => {
     const removeAttachment = vi.fn();
     const { container } = renderInApp(
       <ComposerAttachments
         attachments={{
-          attachments: [attachment(1), attachment(2, true), attachment(3)],
+          attachments: [attachment(1), attachment(2, true)],
           removeAttachment
         }}
       />
     );
-    const list = screen.getByRole("list", { name: "3 bilagor bifogade" });
-    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
-    expect(within(list).getAllByText("PDF · 2 kB")).toHaveLength(2);
+    const list = screen.getByRole("list", { name: "2 bilagor bifogade" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(list).getByText("PDF · 2 kB")).toBeTruthy();
     expect(within(list).getByText("Laddar upp…")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Ta bort alla bilagor" })).toBeNull();
     fireEvent.click(within(list).getByRole("button", { name: "Ta bort Policy 2.pdf" }));
@@ -100,18 +100,18 @@ describe("ComposerAttachments", () => {
     await expectNoAxeViolations(container);
   });
 
-  it("folds four or more into a summary row with the progress that unfolds on request", async () => {
+  it("folds three or more into a summary row with the progress that unfolds on request", async () => {
     const removeAttachment = vi.fn();
-    const items = [attachment(1), attachment(2), attachment(3, true), attachment(4, true)];
+    const items = [attachment(1), attachment(2, true), attachment(3, true)];
     const { container } = renderInApp(
       <ComposerAttachments attachments={{ attachments: items, removeAttachment }} />
     );
-    expect(screen.getByText("4 bilagor bifogade")).toBeTruthy();
-    expect(screen.getByText("· 8 kB")).toBeTruthy();
-    expect(screen.getByText("2 av 4 klara")).toBeTruthy();
+    expect(screen.getByText("3 bilagor bifogade")).toBeTruthy();
+    expect(screen.getByText("· 6 kB")).toBeTruthy();
+    expect(screen.getByText("1 av 3 klara")).toBeTruthy();
     expect(
       screen.getByRole("progressbar", { name: "Laddar upp..." }).getAttribute("aria-valuenow")
-    ).toBe("2");
+    ).toBe("1");
     expect(screen.queryByRole("list")).toBeNull();
 
     const show = screen.getByRole("button", { name: "Visa" });
@@ -120,8 +120,8 @@ describe("ComposerAttachments", () => {
     expect(show.getAttribute("aria-expanded")).toBe("true");
     expect(show.textContent).toContain("Dölj");
     expect(
-      within(screen.getByRole("list", { name: "4 bilagor bifogade" })).getAllByRole("listitem")
-    ).toHaveLength(4);
+      within(screen.getByRole("list", { name: "3 bilagor bifogade" })).getAllByRole("listitem")
+    ).toHaveLength(3);
 
     fireEvent.click(screen.getByRole("button", { name: "Ta bort alla bilagor" }));
     expect(removeAttachment.mock.calls.map(([key]) => key)).toEqual(items.map((item) => item.key));

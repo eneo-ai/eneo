@@ -256,8 +256,11 @@ export function FileTypeTile({
   );
 }
 
-/** From this many attachments the composer folds the list into a summary row. */
-export const SUMMARY_FROM = 4;
+/**
+ * From this many attachments the composer folds the list into a summary row.
+ * Two chips split one row between them; a third would already stack.
+ */
+export const SUMMARY_FROM = 3;
 
 const SMALL_BUTTON_CLASS =
   "text-ax-text-secondary hover:text-ax-text hover:bg-ax-hover focus-visible:outline-ring rounded-ax-inner inline-flex h-6 shrink-0 items-center gap-1 px-1.5 text-xs font-medium focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:h-11";
@@ -317,10 +320,10 @@ function AttachmentChip({
 }
 
 /**
- * The attachments waiting in the composer (inside its drawer). Up to three
- * are chips; more are one summary row with the count, the total size and the
- * upload progress that unfolds to the chips on request, so a long list never
- * pushes the composer down. The side panel holds the full list once the
+ * The attachments waiting in the composer (inside its drawer). One or two are
+ * chips sharing a row; more fold into one summary row with the count, the
+ * total size and the upload progress that unfolds to the chips on request, so
+ * a long list never pushes the composer down. The side panel holds the full list once the
  * message is sent.
  */
 export function ComposerAttachments({
@@ -351,9 +354,9 @@ export function ComposerAttachments({
     <ul
       aria-label={countLabel}
       className={cn(
-        "flex flex-wrap gap-1.5",
-        summarised &&
-          "grid max-h-[146px] [scrollbar-width:thin] auto-rows-max grid-cols-1 overflow-y-auto pr-0.5 sm:grid-cols-2"
+        "gap-1.5",
+        items.length === 1 ? "flex flex-wrap" : "grid grid-cols-1 sm:grid-cols-2",
+        summarised && "max-h-[146px] [scrollbar-width:thin] auto-rows-max overflow-y-auto pr-0.5"
       )}
     >
       {items.map((item) => (
