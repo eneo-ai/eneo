@@ -94,15 +94,6 @@ def mock_tenant_app():
     return app
 
 
-@pytest.fixture
-def mock_tenant_app_service_account(mock_tenant_app):
-    """Create a mock tenant app configured for service account."""
-    mock_tenant_app.is_service_account.return_value = True
-    mock_tenant_app.service_account_refresh_token = "service-account-refresh-token"
-    mock_tenant_app.service_account_email = "service@contoso.com"
-    return mock_tenant_app
-
-
 def _size_ledger(repo: AsyncMock, initial: int) -> dict[str, int]:
     """Stand in for the atomic UPDATE: the row's size lives here, not on entities."""
     ledger = {"size": initial}
@@ -145,10 +136,20 @@ def mock_dependencies(mock_user, mock_integration_knowledge):
         "session": AsyncMock(),
         "tenant_sharepoint_app_repo": AsyncMock(),
         "tenant_app_auth_service": AsyncMock(),
+        "org_token_provider": _org_token_provider(),
         "service_account_auth_service": AsyncMock(),
         "sync_log_repo": AsyncMock(),
         "change_key_service": AsyncMock(),
     }
+
+
+def _org_token_provider(access_token: str = "tenant-app-access-token") -> AsyncMock:
+    provider = AsyncMock()
+    provider.get_access_token.return_value = access_token
+    provider.access_token_provider = MagicMock(
+        return_value=AsyncMock(return_value=access_token)
+    )
+    return provider
 
 
 @pytest.fixture
@@ -205,91 +206,6 @@ class TestTokenHandling:
             id=mock_oauth_token.id
         )
 
-    async def test_uses_tenant_app_auth_when_tenant_app_id_provided(
-        self, service, mock_dependencies, mock_tenant_app, mock_integration_knowledge
-    ):
-        """Uses tenant app auth service when tenant_app_id is provided."""
-        mock_dependencies[
-            "tenant_sharepoint_app_repo"
-        ].get_by_id.return_value = mock_tenant_app
-        mock_dependencies[
-            "tenant_app_auth_service"
-        ].get_access_token.return_value = "tenant-app-access-token"
-        mock_dependencies[
-            "integration_knowledge_repo"
-        ].one.return_value = mock_integration_knowledge
-
-        with patch(
-            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
-        ) as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client.get_default_drive_id.return_value = "drive-123"
-            mock_client.get_drive_root_children.return_value = []
-            mock_client.get_site_pages.return_value = {"value": []}
-            mock_client.initialize_delta_token.return_value = "delta-token"
-            mock_client_class.return_value = mock_client
-
-            await service.pull_content(
-                tenant_app_id=mock_tenant_app.id,
-                integration_knowledge_id=mock_integration_knowledge.id,
-                site_id="site-123",
-            )
-
-        mock_dependencies[
-            "tenant_app_auth_service"
-        ].get_access_token.assert_called_once()
-
-    async def test_uses_service_account_auth_when_configured(
-        self,
-        service,
-        mock_dependencies,
-        mock_tenant_app_service_account,
-        mock_integration_knowledge,
-    ):
-        """Uses service account auth when tenant app is configured for service account."""
-        mock_dependencies[
-            "tenant_sharepoint_app_repo"
-        ].get_by_id.return_value = mock_tenant_app_service_account
-        mock_dependencies[
-            "service_account_auth_service"
-        ].refresh_access_token.return_value = {
-            "access_token": "service-account-access-token",
-            "refresh_token": "new-refresh-token",
-        }
-        mock_dependencies[
-            "integration_knowledge_repo"
-        ].one.return_value = mock_integration_knowledge
-
-        with patch(
-            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
-        ) as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client.get_default_drive_id.return_value = "drive-123"
-            mock_client.get_drive_root_children.return_value = []
-            mock_client.get_site_pages.return_value = {"value": []}
-            mock_client.initialize_delta_token.return_value = "delta-token"
-            mock_client_class.return_value = mock_client
-
-            await service.pull_content(
-                tenant_app_id=mock_tenant_app_service_account.id,
-                integration_knowledge_id=mock_integration_knowledge.id,
-                site_id="site-123",
-            )
-
-        mock_dependencies[
-            "service_account_auth_service"
-        ].refresh_access_token.assert_called_once()
-        mock_dependencies["tenant_sharepoint_app_repo"].update.assert_called_once_with(
-            mock_tenant_app_service_account
-        )
-        mock_tenant_app_service_account.update_refresh_token.assert_called_once_with(
-            "new-refresh-token"
-        )
-
     async def test_raises_error_when_no_token_or_tenant_app_provided(
         self, service, mock_dependencies, mock_integration_knowledge
     ):
@@ -306,41 +222,13 @@ class TestTokenHandling:
                 site_id="site-123",
             )
 
-    async def test_raises_error_when_service_account_auth_not_configured(
-        self,
-        mock_dependencies,
-        mock_tenant_app_service_account,
-        mock_integration_knowledge,
-        mock_user,
-    ):
-        """Raises ValueError when service account is used but auth service not configured."""
-        # Create service without service_account_auth_service
-        deps = mock_dependencies.copy()
-        deps["service_account_auth_service"] = None
-        svc = SharePointContentService(**deps)
-
-        deps[
-            "tenant_sharepoint_app_repo"
-        ].get_by_id.return_value = mock_tenant_app_service_account
-        deps["integration_knowledge_repo"].one.return_value = mock_integration_knowledge
-
-        with pytest.raises(
-            ValueError, match="ServiceAccountAuthService not configured"
-        ):
-            await svc.pull_content(
-                tenant_app_id=mock_tenant_app_service_account.id,
-                integration_knowledge_id=mock_integration_knowledge.id,
-                site_id="site-123",
-            )
-
     async def test_org_token_provider_supplies_token_and_reacquire_callback(
         self, mock_dependencies, mock_tenant_app, mock_integration_knowledge
     ):
-        provider = AsyncMock()
-        provider.get_access_token.return_value = "provider-token"
-        reacquire = AsyncMock(return_value="fresh-token")
-        provider.access_token_provider = MagicMock(return_value=reacquire)
-        svc = SharePointContentService(**mock_dependencies, org_token_provider=provider)
+        provider = _org_token_provider("provider-token")
+        reacquire = provider.access_token_provider.return_value
+        mock_dependencies["org_token_provider"] = provider
+        svc = SharePointContentService(**mock_dependencies)
         mock_dependencies[
             "tenant_sharepoint_app_repo"
         ].get_by_id.return_value = mock_tenant_app

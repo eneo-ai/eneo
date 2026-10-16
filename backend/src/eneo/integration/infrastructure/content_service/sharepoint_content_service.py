@@ -310,10 +310,10 @@ class SharePointContentService:
         session: "AsyncSession",
         tenant_sharepoint_app_repo: "TenantSharePointAppRepository",
         tenant_app_auth_service: "TenantAppAuthService",
+        org_token_provider: "OrgTokenProvider",
         service_account_auth_service: "ServiceAccountAuthService | None" = None,
         sync_log_repo: "SyncLogRepository | None" = None,
         change_key_service: "OfficeChangeKeyService | None" = None,
-        org_token_provider: "OrgTokenProvider | None" = None,
     ) -> None:
         super().__init__()
         self.org_token_provider = org_token_provider
@@ -326,6 +326,8 @@ class SharePointContentService:
         self.oauth_token_service = oauth_token_service
         self.session = session
         self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
+        # Organisation credentials are owned by org_token_provider; these two are
+        # still wired by the container and kept only until it stops passing them.
         self.tenant_app_auth_service = tenant_app_auth_service
         self.service_account_auth_service = service_account_auth_service
         self.sync_log_repo = sync_log_repo
@@ -338,49 +340,16 @@ class SharePointContentService:
         # whose columns cannot be read is asked only once.
         self._column_catalogs: dict[str, Optional[SharePointColumnCatalog]] = {}
 
-    async def _refresh_service_account_access_token(
-        self, tenant_app: TenantSharePointApp
-    ) -> str:
-        """Refresh service account token and persist refresh-token rotation."""
-        if not self.service_account_auth_service:
-            raise ValueError("ServiceAccountAuthService not configured")
-
-        token_data = await self.service_account_auth_service.refresh_access_token(
-            tenant_app
-        )
-        access_token = token_data["access_token"]
-        new_refresh_token = token_data.get("refresh_token")
-
-        if (
-            new_refresh_token
-            and new_refresh_token != tenant_app.service_account_refresh_token
-        ):
-            tenant_app.update_refresh_token(new_refresh_token)
-            await self.tenant_sharepoint_app_repo.update(tenant_app)
-            logger.debug(
-                "Persisted rotated service account refresh token for tenant_app %s",
-                tenant_app.id,
-            )
-
-        return access_token
-
     async def _org_access_token(
         self, tenant_app: TenantSharePointApp
-    ) -> tuple[str, Optional[AccessTokenProvider]]:
+    ) -> tuple[str, AccessTokenProvider]:
         """An organisation token plus a re-acquire callback for long syncs.
 
         The provider records credential health and lets the Graph client
-        re-acquire on 401; without one (legacy wiring) the token is minted
-        once and a sync longer than its lifetime fails.
+        re-acquire on 401, so a sync longer than one token lifetime survives.
         """
-        if self.org_token_provider is not None:
-            access_token = await self.org_token_provider.get_access_token(tenant_app)
-            return access_token, self.org_token_provider.access_token_provider(
-                tenant_app
-            )
-        if tenant_app.is_service_account():
-            return await self._refresh_service_account_access_token(tenant_app), None
-        return await self.tenant_app_auth_service.get_access_token(tenant_app), None
+        access_token = await self.org_token_provider.get_access_token(tenant_app)
+        return access_token, self.org_token_provider.access_token_provider(tenant_app)
 
     async def pull_content(
         self,
