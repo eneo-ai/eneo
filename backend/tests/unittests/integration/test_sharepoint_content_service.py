@@ -3485,6 +3485,57 @@ class TestSyncStatus:
         written = mock_dependencies["integration_knowledge_repo"].update_sync_state
         assert written.await_args.kwargs["last_sync_status"] == "success"
 
+    @pytest.mark.parametrize("mode", ["full", "delta"])
+    async def test_a_partial_pass_is_a_warning_without_a_stack_trace(
+        self, service, mock_dependencies, mock_oauth_token, mode
+    ):
+        ik = _real_integration_knowledge(
+            delta_token="token-1" if mode == "delta" else None
+        )
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+        listing = [_delta_file("item-1", "a.docx")]
+
+        with (
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.logger"
+            ) as log,
+            pytest.raises(SyncItemsFailed, match=ONE_FILE_FAILED),
+        ):
+            _mock_graph_client(
+                mock_client_class,
+                get_drive_root_children=AsyncMock(return_value=listing),
+                get_delta_changes=AsyncMock(return_value=(listing, "token-2")),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=_http_error(503, "Service Unavailable")
+                ),
+            )
+            if mode == "full":
+                await service.pull_content(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+            else:
+                await service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        assert any(
+            isinstance(call.args[-1], SyncItemsFailed)
+            for call in log.warning.call_args_list
+        )
+        assert not any(
+            isinstance(call.args[-1], SyncItemsFailed)
+            for call in log.error.call_args_list
+        )
+
     async def test_reconcile_warning_reaches_summary_and_sync_log(
         self, service, mock_dependencies, mock_oauth_token
     ):

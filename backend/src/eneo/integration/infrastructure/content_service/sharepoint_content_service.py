@@ -187,6 +187,14 @@ def _failure_summary(failure: Exception) -> SyncStats | None:
     return failure.summary if isinstance(failure, SyncItemsFailed) else None
 
 
+def _log_pass_failure(context: str, failure: Exception) -> None:
+    """A pass that could not finish every item is a designed outcome, not a fault."""
+    if isinstance(failure, SyncItemsFailed):
+        logger.warning("%s: %s", context, failure)
+    else:
+        logger.error("%s: %s", context, failure, exc_info=True)
+
+
 def _sync_outcome_fields(
     knowledge: "IntegrationKnowledge", *, with_summary: bool = True
 ) -> SyncStateFields:
@@ -501,7 +509,7 @@ class SharePointContentService:
                 ),
                 clear_delta_token=isinstance(e, SyncItemsFailed),
             )
-            logger.error(f"Error in pull_content: {e}", exc_info=True)
+            _log_pass_failure("Error in pull_content", e)
             raise
 
     async def _record_sync_failure(
@@ -1015,7 +1023,7 @@ class SharePointContentService:
             if delegated_to_full_sync:
                 # The full sync recorded the failure and its sync log itself.
                 raise
-            logger.error(f"Error processing delta changes: {e}", exc_info=True)
+            _log_pass_failure("Error processing delta changes", e)
             if not record_failure:
                 raise
             summary = _failure_summary(e)
