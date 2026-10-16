@@ -258,6 +258,10 @@
   const madeAt = (version: PreviewFile) =>
     version.created_at ? formatDateTime(version.created_at) : null;
 
+  // The document row shows for a loaded file: its versions, its export, or
+  // the save bar while edits are unsaved. A draft has none of these yet.
+  const documentRow = $derived(!!file && !draft);
+
   /** The reader drops their edits: on the Cancel button, or agreeing to in the dialog. */
   function discardEdits() {
     if (file) contentOf[file.id]?.resetEditor();
@@ -414,83 +418,109 @@
   {/if}
 {/snippet}
 
-<header class="border-border flex min-h-16 shrink-0 flex-col border-b">
-  <div class="flex flex-1 items-center gap-3 px-4 py-3">
-    {#if onoverview}
-      <PanelBackButton onclick={onoverview} />
+<!-- The header holds navigation and identity, so the title keeps its width
+     whatever the document can do, and the header stays the height of the
+     overview's. The document row beneath holds what applies to the document:
+     its versions and export, or, while there are unsaved edits, the save bar
+     in their place. -->
+<header
+  class={[
+    "border-border flex min-h-16 shrink-0 items-center gap-3 px-4 py-3",
+    !documentRow && "border-b"
+  ]}
+>
+  {#if onoverview}
+    <PanelBackButton onclick={onoverview} />
+  {/if}
+  <span
+    class="bg-accent-dimmer text-accent-stronger flex size-8 shrink-0 items-center justify-center rounded-md"
+  >
+    <Icon class="size-4" aria-hidden="true" />
+  </span>
+  <div class="flex min-w-0 flex-1 flex-col leading-tight">
+    <PanelTitle {title} {detail} {preview} {contents} />
+    {#if draft}
+      <p class="text-accent-stronger flex items-center gap-1.5 text-xs" role="status">
+        <span class="bg-accent-default size-1.5 shrink-0 rounded-full" aria-hidden="true"></span>
+        {m.file_preview_writing()}
+      </p>
+    {:else if latest}
+      <p class="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
+        <span class="truncate"
+          >{file?.revises_file_id
+            ? m.file_preview_older_version_edited_by_you()
+            : m.file_preview_older_version()}</span
+        >
+        <button
+          type="button"
+          class="text-accent-stronger focus-visible:ring-accent-default shrink-0 rounded-sm font-medium underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+          onclick={() => latest && preview.open(latest)}
+        >
+          {m.file_preview_show_latest()}
+        </button>
+      </p>
     {/if}
-    <span
-      class="bg-accent-dimmer text-accent-stronger flex size-8 shrink-0 items-center justify-center rounded-md"
-    >
-      <Icon class="size-4" aria-hidden="true" />
-    </span>
-    <div class="flex min-w-0 flex-1 flex-col leading-tight">
-      <PanelTitle {title} {detail} {preview} {contents} />
-      {#if draft}
-        <p class="text-accent-stronger flex items-center gap-1.5 text-xs" role="status">
-          <span class="bg-accent-default size-1.5 shrink-0 rounded-full" aria-hidden="true"></span>
-          {m.file_preview_writing()}
-        </p>
-      {:else if preview.dirty}
-        <p class="text-muted-foreground truncate text-xs" role="status">
-          {m.file_preview_unsaved_changes()}
-        </p>
-      {:else if latest}
-        <p class="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
-          <span class="truncate"
-            >{file?.revises_file_id
-              ? m.file_preview_older_version_edited_by_you()
-              : m.file_preview_older_version()}</span
-          >
-          <button
-            type="button"
-            class="text-accent-stronger focus-visible:ring-accent-default shrink-0 rounded-sm font-medium underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
-            onclick={() => latest && preview.open(latest)}
-          >
-            {m.file_preview_show_latest()}
-          </button>
-        </p>
-      {/if}
-    </div>
-    {#if versions.length > 1}
-      {@render versionMenu()}
-    {/if}
-    {#if preview.dirty}
-      <Button variant="ghost" size="sm" disabled={saving} onclick={discardEdits}>
-        {m.cancel()}
-      </Button>
-      <Button size="sm" disabled={saving} onclick={saveEdits}>
-        {saving ? m.file_preview_saving() : m.save()}
-      </Button>
-    {/if}
-    {@render exportMenu()}
-    {#if !sheet}
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-pressed={preview.maximised}
-        aria-label={preview.maximised ? m.file_preview_restore_size() : m.file_preview_maximise()}
-        title={preview.maximised ? m.file_preview_restore_size() : m.file_preview_maximise()}
-        onclick={() => (preview.maximised = !preview.maximised)}
-      >
-        {#if preview.maximised}
-          <Minimize2 aria-hidden="true" />
-        {:else}
-          <Maximize2 aria-hidden="true" />
-        {/if}
-      </Button>
-    {/if}
+  </div>
+  {#if !sheet}
     <Button
       variant="ghost"
       size="icon-sm"
-      aria-label={m.close()}
-      title={m.close()}
-      onclick={() => preview.close()}
+      aria-pressed={preview.maximised}
+      aria-label={preview.maximised ? m.file_preview_restore_size() : m.file_preview_maximise()}
+      title={preview.maximised ? m.file_preview_restore_size() : m.file_preview_maximise()}
+      onclick={() => (preview.maximised = !preview.maximised)}
     >
-      <X aria-hidden="true" />
+      {#if preview.maximised}
+        <Minimize2 aria-hidden="true" />
+      {:else}
+        <Maximize2 aria-hidden="true" />
+      {/if}
     </Button>
-  </div>
+  {/if}
+  <Button
+    variant="ghost"
+    size="icon-sm"
+    aria-label={m.close()}
+    title={m.close()}
+    onclick={() => preview.close()}
+  >
+    <X aria-hidden="true" />
+  </Button>
 </header>
+{#if documentRow}
+  {#if preview.dirty}
+    <div
+      class="border-border bg-muted flex shrink-0 items-center justify-between gap-2 border-b py-1.5 pr-3 pl-4"
+      role="status"
+    >
+      <span class="text-muted-foreground flex min-w-0 items-center gap-2 text-sm">
+        <span class="bg-warning-default size-2 shrink-0 rounded-full" aria-hidden="true"></span>
+        <span class="truncate">{m.file_preview_unsaved_changes()}</span>
+      </span>
+      <span class="flex shrink-0 items-center gap-1">
+        <Button variant="ghost" size="sm" disabled={saving} onclick={discardEdits}>
+          {m.cancel()}
+        </Button>
+        <Button size="sm" disabled={saving} onclick={saveEdits}>
+          {saving ? m.file_preview_saving() : m.save()}
+        </Button>
+      </span>
+    </div>
+  {:else}
+    <div
+      class="border-border flex shrink-0 items-center justify-between gap-2 border-b py-1.5 pr-3 pl-3"
+    >
+      <span class="flex min-w-0 items-center">
+        {#if versions.length > 1}
+          {@render versionMenu()}
+        {/if}
+      </span>
+      <span class="flex shrink-0 items-center gap-1">
+        {@render exportMenu()}
+      </span>
+    </div>
+  {/if}
+{/if}
 
 {#if updating}
   <div class="border-border shrink-0 border-b px-4 py-2 text-sm" role="status">
