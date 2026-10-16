@@ -349,25 +349,3 @@ class ServiceAccountAuthService:
             )
 
             return token_data
-
-    async def test_refresh_token(
-        self,
-        tenant_app: "TenantSharePointApp",
-    ) -> tuple[bool, Optional[str]]:
-        """Test if the service account refresh token is valid.
-
-        Args:
-            tenant_app: TenantSharePointApp with service account configuration
-
-        Returns:
-            Tuple of (success, error_message)
-        """
-        try:
-            await self.refresh_access_token(tenant_app)
-            return True, None
-        except httpx.HTTPStatusError as e:
-            return False, f"HTTP {e.response.status_code}: {e.response.text}"
-        except ValueError as e:
-            return False, str(e)
-        except Exception as e:
-            return False, f"Unexpected error: {str(e)}"

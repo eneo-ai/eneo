@@ -21,7 +21,6 @@ from eneo.integration.infrastructure.clients.sharepoint_content_client import (
 from eneo.integration.infrastructure.content_service.types import (
     SharePointTokenProtocol,
 )
-from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.observability.error_text import user_visible_error
@@ -67,11 +66,9 @@ class SharePointSubscriptionService:
     def __init__(
         self,
         sharepoint_subscription_repo: SharePointSubscriptionRepository,
-        oauth_token_service: Optional[OauthTokenService] = None,
     ) -> None:
         super().__init__()
         self.subscription_repo = sharepoint_subscription_repo
-        self.oauth_token_service = oauth_token_service
         settings = get_settings()
         self.notification_url = settings.sharepoint_webhook_notification_url
         if not self.notification_url and settings.public_origin:

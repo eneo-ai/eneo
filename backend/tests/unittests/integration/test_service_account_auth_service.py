@@ -396,63 +396,6 @@ class TestAccessTokenCache:
         assert client.post.call_count == 2
 
 
-class TestTestRefreshToken:
-    """Tests for test_refresh_token method."""
-
-    async def test_returns_success_tuple_on_valid_token(
-        self, service, mock_tenant_app, mock_token_response
-    ):
-        """Returns (True, None) when refresh succeeds."""
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_token_response
-
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
-
-            success, error = await service.test_refresh_token(mock_tenant_app)
-
-        assert success is True
-        assert error is None
-
-    async def test_returns_error_on_http_failure(self, service, mock_tenant_app):
-        """Returns (False, error_message) on HTTP error."""
-        error_response = MagicMock(spec=httpx.Response)
-        error_response.status_code = 400
-        error_response.text = "invalid_grant"
-        error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Bad Request", request=MagicMock(), response=error_response
-        )
-
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client.post.return_value = error_response
-            mock_client_class.return_value = mock_client
-
-            success, error = await service.test_refresh_token(mock_tenant_app)
-
-        assert success is False
-        assert error is not None
-        assert "400" in error or "invalid_grant" in error
-
-    async def test_returns_error_on_value_error(
-        self, service, mock_tenant_app_not_service_account
-    ):
-        """Returns (False, error_message) for configuration errors."""
-        success, error = await service.test_refresh_token(
-            mock_tenant_app_not_service_account
-        )
-
-        assert success is False
-        assert "not configured for service account" in error
-
-
 class TestServiceAccountCredentials:
     """Tests for ServiceAccountCredentials dataclass."""
 

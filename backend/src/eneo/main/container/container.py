@@ -1521,7 +1521,6 @@ class Container(containers.DeclarativeContainer):
     sharepoint_subscription_service = providers.Factory(
         SharePointSubscriptionService,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
-        oauth_token_service=oauth_token_service,
     )
 
     user_integration_service = providers.Factory(

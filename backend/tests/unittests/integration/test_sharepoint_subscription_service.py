@@ -36,12 +36,6 @@ def mock_subscription_repo():
 
 
 @pytest.fixture
-def mock_oauth_token_service():
-    """Create a mock OAuth token service."""
-    return AsyncMock()
-
-
-@pytest.fixture
 def mock_token():
     """Create a mock SharePoint token."""
     token = MagicMock()
@@ -77,7 +71,7 @@ def expired_subscription():
 
 
 @pytest.fixture
-def service(mock_subscription_repo, mock_oauth_token_service):
+def service(mock_subscription_repo):
     """Create SharePointSubscriptionService with mocked dependencies."""
     with patch(
         "eneo.integration.infrastructure.sharepoint_subscription_service.get_settings"
@@ -90,7 +84,6 @@ def service(mock_subscription_repo, mock_oauth_token_service):
 
         return SharePointSubscriptionService(
             sharepoint_subscription_repo=mock_subscription_repo,
-            oauth_token_service=mock_oauth_token_service,
         )
 
 
@@ -234,7 +227,7 @@ class TestEnsureSubscriptionForSite:
         assert result == expired_subscription
 
     async def test_returns_none_if_notification_url_not_configured(
-        self, mock_subscription_repo, mock_oauth_token_service, mock_token
+        self, mock_subscription_repo, mock_token
     ):
         """Returns None if webhook notification URL is not configured."""
         with patch(
@@ -248,7 +241,6 @@ class TestEnsureSubscriptionForSite:
 
             svc = SharePointSubscriptionService(
                 sharepoint_subscription_repo=mock_subscription_repo,
-                oauth_token_service=mock_oauth_token_service,
             )
 
             result = await svc.ensure_subscription_for_site(
@@ -408,7 +400,6 @@ class TestRecreateExpiredSubscription:
     async def test_recreate_touches_nothing_when_webhooks_are_not_configured(
         self,
         mock_subscription_repo,
-        mock_oauth_token_service,
         expired_subscription,
         mock_token,
         missing,
@@ -428,7 +419,6 @@ class TestRecreateExpiredSubscription:
             mock_settings.return_value = settings
             service = SharePointSubscriptionService(
                 sharepoint_subscription_repo=mock_subscription_repo,
-                oauth_token_service=mock_oauth_token_service,
             )
         old_subscription_id = expired_subscription.subscription_id
 
@@ -736,7 +726,7 @@ class TestGraphApiInteractions:
         assert payload["clientState"] == "test-client-state"
 
     async def test_create_graph_subscription_raises_if_client_state_missing(
-        self, mock_subscription_repo, mock_oauth_token_service, mock_token
+        self, mock_subscription_repo, mock_token
     ):
         """Must fail fast if SHAREPOINT_WEBHOOK_CLIENT_STATE is not configured."""
         with patch(
@@ -752,7 +742,6 @@ class TestGraphApiInteractions:
 
             service_without_client_state = SharePointSubscriptionService(
                 sharepoint_subscription_repo=mock_subscription_repo,
-                oauth_token_service=mock_oauth_token_service,
             )
 
         with patch("aiohttp.ClientSession") as mock_session_class:
