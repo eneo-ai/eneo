@@ -206,9 +206,17 @@ async def test_group_chats_are_published_ones_for_viewers(
     assert await _listed_partner_ids(user, [group_chat]) == expected
 
 
-@pytest.mark.parametrize(("role", "listed"), [("editor", False), ("admin", True)])
-async def test_the_organisation_space_is_for_its_admins(role, listed):
-    user = _user()
+@pytest.mark.parametrize(
+    ("role", "is_admin", "listed"),
+    [("editor", False, False), ("admin", True, True), ("admin", False, False)],
+    ids=["editor", "admin", "former-admin"],
+)
+async def test_the_organisation_space_is_for_its_admins(role, is_admin, listed):
+    user = _user(
+        permissions=CHAT_PERMISSIONS | {Permission.ADMIN}
+        if is_admin
+        else CHAT_PERMISSIONS
+    )
     assistant = _assistant(_space(organization=True, member=(user.id, role)))
 
     expected = {assistant.id} if listed else set()

@@ -36,6 +36,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     duplicate_capability_purposes,
     is_capability_purpose,
 )
+from eneo.roles.permissions import Permission
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from eneo.spaces.space import SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE, Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
@@ -791,6 +792,10 @@ class SpaceService:
         spaces = await self.repo.get_spaces_for_member(
             include_applications=include_applications
         )
+        # The organization space belongs to the current admins (SpaceActor); a
+        # membership row can outlive the admin role that added it.
+        if Permission.ADMIN not in self.user.permissions:
+            spaces = [space for space in spaces if not self.is_org_space(space)]
 
         if include_personal:
             personal_space = await self.get_personal_space()
@@ -1086,8 +1091,16 @@ class SpaceService:
         )
 
     async def ensure_org_admin_members(self, hub: "Space") -> "Space":
+        """Make the organization space's members exactly the tenant's admins.
+
+        Access there follows the admin permission (SpaceActor), so a former
+        admin's row grants nothing; it is removed so the space's members are
+        the people who are admins now.
+        """
+        assert hub.id is not None
         admins = await self.user_repo.list_tenant_admins(self.user.tenant_id)
-        added = False
+        admin_ids = {admin.id for admin in admins}
+        changed = False
         for u in admins:
             if u.id not in hub.members:
                 hub.members[u.id] = SpaceMember(
@@ -1096,11 +1109,15 @@ class SpaceService:
                     email=u.email,
                     role=SpaceRoleValue.ADMIN,
                 )
-                assert hub.id is not None
                 await self.repo.add_member(hub.id, hub.members[u.id])
-                added = True
-        if added:
-            assert hub.id is not None
+                changed = True
+        for former_admin_id in [
+            member_id for member_id in hub.members if member_id not in admin_ids
+        ]:
+            hub.remove_member(former_admin_id)
+            await self.repo.remove_member(hub.id, former_admin_id)
+            changed = True
+        if changed:
             hub = await self.repo.one(hub.id)
         return hub
 

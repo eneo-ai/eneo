@@ -16,7 +16,8 @@ This directory contains the complete documentation for Eneo, the democratic AI p
 | **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** | Common issues and solutions | All users |
 | **[SECURITY.md](SECURITY.md)** | Security practices and reporting | Security teams, administrators |
 | **[OBSERVABILITY.md](OBSERVABILITY.md)** | Structured logs, distributed tracing, log collection setup | Operators, developers, SREs |
-| **[CAPABILITIES.md](CAPABILITIES.md)** | Web search and image generation through MCP providers: activation, audiences, permissions, image limits | Tenant administrators, operators |
+| **[CAPABILITIES.md](CAPABILITIES.md)** | Contributor contract for Functions (web search, image generation, file analysis, file creation, charts, compute): activation, audiences, permissions, generated files, extending the set | Developers, tenant administrators |
+| **[Tools and MCP Architecture](https://docs.eneo.ai/dev/docs/tool-architecture)** (docs site) | Where tools run (loopback, bundled runtime, external servers), why the design is split that way, and the runtime's [security model](https://docs.eneo.ai/dev/docs/tool-runtime-security); operators use [deployment/TOOL_RUNTIME.md](deployment/TOOL_RUNTIME.md) | Developers, architects, security teams |
 
 ---
 
