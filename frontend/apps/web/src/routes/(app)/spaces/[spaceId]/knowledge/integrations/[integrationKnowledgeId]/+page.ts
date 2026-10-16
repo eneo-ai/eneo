@@ -1,17 +1,17 @@
 import { error } from "@sveltejs/kit";
-import type { IntegrationKnowledge } from "@eneo/eneo-js";
 import {
   DEFAULT_INTEGRATION_DOCUMENTS_QUERY,
   type IntegrationDocumentsTab
 } from "$lib/features/integrations/integrationDocuments";
+import { findIntegrationItems } from "$lib/features/integrations/integrationItems";
 
 export const load = async (event) => {
   const { eneo, currentSpace } = await event.parent();
   const integrationKnowledgeId = event.params.integrationKnowledgeId;
 
-  const items: IntegrationKnowledge[] =
-    currentSpace.knowledge.integration_knowledge_list?.items ?? [];
-  const knowledge = items.find(
+  const [knowledge] = await findIntegrationItems(
+    eneo,
+    currentSpace,
     (item) => item.id === integrationKnowledgeId && item.space_id === currentSpace.id
   );
   if (!knowledge) {

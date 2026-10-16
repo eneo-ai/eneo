@@ -41,11 +41,18 @@
   let parent = $derived(parents[parents.length - 1]);
 
   // The item was deleted from its actions menu: this page has nothing left to show.
+  // The space store can still predate a fresh import, so only a disappearance counts.
+  let seenInSpaceId: string | null = null;
   $effect(() => {
     const stillInSpace = $currentSpace.knowledge.integrationKnowledge.some(
       (item: IntegrationKnowledge) => item.id === data.knowledge.id
     );
-    if (!stillInSpace && $currentSpace.id === data.knowledge.space_id) {
+    if (stillInSpace) {
+      seenInSpaceId = data.knowledge.id;
+    } else if (
+      seenInSpaceId === data.knowledge.id &&
+      $currentSpace.id === data.knowledge.space_id
+    ) {
       // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic space route
       void goto(parent.href);
     }

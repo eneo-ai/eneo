@@ -1,11 +1,13 @@
+import { findIntegrationItems } from "$lib/features/integrations/integrationItems";
+
 export const load = async (event) => {
-  const { currentSpace } = await event.parent();
+  const { eneo, currentSpace } = await event.parent();
   const wrapperId = event.params.wrapperId;
 
-  const allIntegrations = currentSpace.knowledge.integration_knowledge_list?.items ?? [];
-  const wrapperItems = allIntegrations.filter(
-    (k: { wrapper_id?: string | null; space_id: string }) =>
-      k.wrapper_id === wrapperId && k.space_id === currentSpace.id
+  const wrapperItems = await findIntegrationItems(
+    eneo,
+    currentSpace,
+    (item) => item.wrapper_id === wrapperId && item.space_id === currentSpace.id
   );
 
   const first = wrapperItems[0];
