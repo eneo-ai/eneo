@@ -61,17 +61,19 @@
       {#if crumbs.length > 0}
         <nav aria-label={m.breadcrumb()}>
           <ol class="flex items-baseline gap-2">
+            <!-- Overflowing, every crumb keeps a visible, focusable link and hides only its
+                 text: the first shows the arrow, the others an ellipsis. -->
             {#each crumbs as crumb, index (crumb.href)}
-              <li class="flex items-baseline gap-2" class:sr-only={index > 0 && isOverflowing}>
+              <li class="flex items-baseline gap-2">
                 {#if index > 0}
-                  <span class="text-muted" aria-hidden="true">/</span>
+                  <span class="text-muted" class:hidden={isOverflowing} aria-hidden="true">/</span>
                 {/if}
                 <!-- eslint-disable svelte/no-navigation-without-resolve -- href is a typed prop passed from caller -->
                 <a
                   href={crumb.href}
                   class="text-muted hover:border-dimmer hover:bg-hover-default hover:text-primary -mx-2 inline-block rounded-lg border border-transparent px-2 py-0.5 text-[1.35rem] tracking-[-0.01rem] whitespace-nowrap"
-                  >{#if index === 0}←&nbsp;{/if}{#if crumb.title}<span class:sr-only={isOverflowing}
-                      >{crumb.title}</span
+                  >{#if index === 0}←&nbsp;{:else if isOverflowing}<span aria-hidden="true">…</span
+                    >{/if}{#if crumb.title}<span class:sr-only={isOverflowing}>{crumb.title}</span
                     >{/if}</a
                 >
                 <!-- eslint-enable svelte/no-navigation-without-resolve -->
