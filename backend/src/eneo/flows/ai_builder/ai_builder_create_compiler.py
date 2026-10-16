@@ -133,31 +133,9 @@ def compile_create_intent_to_spec(
         if context is not None and context.final_output_type is not None
         else OutputType.TEXT
     )
-    # A plan whose first step reads a tool reads no run text, so the run form
-    # gets no main-text field; files or JSON the run is started with are the
-    # person's choice, and only a first step that reads them keeps it.
     reads_run_text = not intent.steps or intent.steps[0].tool_use is None
-    if not reads_run_text and runtime_input_type is not InputType.TEXT:
-        raise AIBuilderArchitectureError(
-            public_code="architecture_materialization_failed",
-            repair_disposition="model_correctable",
-            detail=(
-                f"A run of this flow is started with {runtime_input_type.value} "
-                "input, which the first step must read: put the step that reads "
-                "an MCP tool after it."
-            ),
-            log_context={
-                "failure_code": "tool_step_before_run_input",
-                "reason": "tool_step_before_run_input",
-            },
-        )
-    (
-        form_fields,
-        dropped_primary_input_field_names,
-    ) = _compile_form_fields(
-        context=context,
-        runtime_input_type=runtime_input_type if reads_run_text else None,
-        field_diagnostics=field_diagnostics,
+    form_fields, dropped_primary_input_field_names = create_run_form_fields(
+        intent, context=context, field_diagnostics=field_diagnostics
     )
     form_fields.extend(
         run_form_fields_for_tool_uses(
@@ -660,6 +638,43 @@ def _raise_flow_input_schema_form_conflict(
             "step_index": step_index,
             "field_name": field_name,
         },
+    )
+
+
+def create_run_form_fields(
+    intent: CreateFlowIntent,
+    *,
+    context: CreateCompileContext | None,
+    field_diagnostics: list[LintWarning] | None = None,
+) -> tuple[list[FormFieldSpec], list[str]]:
+    """The run form a create plan gets before its tool arguments add fields,
+    and the primary-input field names it drops. Compile and the settlement of
+    the person's tool decisions read the same form."""
+    runtime_input_type = (
+        context.effective_runtime_input_type if context is not None else InputType.TEXT
+    )
+    # A plan whose first step reads a tool reads no run text, so the run form
+    # gets no main-text field; files or JSON the run is started with are the
+    # person's choice, and only a first step that reads them keeps it.
+    reads_run_text = not intent.steps or intent.steps[0].tool_use is None
+    if not reads_run_text and runtime_input_type is not InputType.TEXT:
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            repair_disposition="model_correctable",
+            detail=(
+                f"A run of this flow is started with {runtime_input_type.value} "
+                "input, which the first step must read: put the step that reads "
+                "an MCP tool after it."
+            ),
+            log_context={
+                "failure_code": "tool_step_before_run_input",
+                "reason": "tool_step_before_run_input",
+            },
+        )
+    return _compile_form_fields(
+        context=context,
+        runtime_input_type=runtime_input_type if reads_run_text else None,
+        field_diagnostics=field_diagnostics,
     )
 
 

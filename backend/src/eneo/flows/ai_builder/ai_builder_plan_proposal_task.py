@@ -56,6 +56,9 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
     DECLINE_FLOW_CHANGE_TOOL_NAME,
     PROPOSE_FLOW_TOOL_NAME,
 )
+from eneo.flows.ai_builder.ai_builder_tool_questions import (
+    render_tool_decisions_block,
+)
 from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
     PlanningState,
@@ -279,7 +282,15 @@ def build_plan_proposal_system_prompt(
         lines.extend(["", "Requested output sections:", section_block])
     if flow_context:
         lines.extend(["", "Existing flow context:", flow_context])
-    resource_context = _resource_context_block(resource_material, tool_catalog)
+    resource_context = _resource_context_block(
+        resource_material,
+        tool_catalog,
+        decided_tools=render_tool_decisions_block(
+            planning_state.tool_decisions,
+            catalog=resource_catalog.tools,
+            listing=tool_catalog,
+        ),
+    )
     if resource_context:
         lines.extend(["", "Available resources:", resource_context])
     if plan_revision_context:
@@ -546,6 +557,8 @@ def _example_output_evidence_block(
 def _resource_context_block(
     material: AIBuilderResourceReferenceMaterial,
     tool_catalog: AIBuilderToolCatalogProjection | None,
+    *,
+    decided_tools: str,
 ) -> str:
     rendered = render_resource_reference_block(material)
     tools = "" if tool_catalog is None else render_tool_catalog_block(tool_catalog)
@@ -571,8 +584,14 @@ def _resource_context_block(
                 "with the answer. Only a tool the request needs gets a step. "
                 "When the request needs a tool listed as not usable, give that "
                 "step the tool's ref anyway: the person is told why it cannot "
-                "be used, and no other tool takes its place."
+                "be used, and no other tool takes its place. Give each use a "
+                "use_ref; when another listed tool would serve the use too, list it "
+                "in alternative_refs; for a required value the request does not "
+                "give, write the argument with source ask_user: the person is "
+                "asked."
             )
+    if decided_tools:
+        sections.append(decided_tools)
     return "\n".join(sections)
 
 

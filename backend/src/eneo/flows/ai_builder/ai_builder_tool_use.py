@@ -26,6 +26,7 @@ from pydantic import (
 
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import BuilderFormFieldType
 from eneo.flows.ai_builder.ai_builder_tool_catalog import AIBuilderToolCatalog
+from eneo.flows.ai_builder.ai_builder_tool_question_ids import TOOL_USE_REF_PATTERN
 from eneo.flows.application.flow_tool_options import FlowToolOption
 from eneo.flows.domain.tool_input import (
     TOOL_INPUT_CONFIG_KEY,
@@ -46,7 +47,9 @@ if TYPE_CHECKING:
         AIBuilderArchitectureError,
     )
 
-ToolArgumentSourceKind = Literal["fixed", "run_input", "earlier_step"]
+ToolArgumentSourceKind = Literal["fixed", "run_input", "earlier_step", "ask_user"]
+# How much of the user's words a use may cite.
+TOOL_USE_EVIDENCE_MAX_CHARS = 240
 
 
 class FixedToolArgument(BaseModel):
@@ -89,10 +92,30 @@ class EarlierStepToolArgument(BaseModel):
         return path
 
 
+class AskUserToolArgument(BaseModel):
+    """An argument whose value the planner does not know: the person is
+    asked where it comes from (``tool_argument`` question). The field it would
+    get in the run form, when that is the answer, may be suggested."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["ask_user"] = "ask_user"
+    name: str
+    field_name: str | None = None
+    field_label: str | None = None
+
+
 ToolArgument: TypeAlias = Annotated[
-    FixedToolArgument | RunInputToolArgument | EarlierStepToolArgument,
+    FixedToolArgument
+    | RunInputToolArgument
+    | EarlierStepToolArgument
+    | AskUserToolArgument,
     Field(discriminator="kind"),
 ]
+# What a compiled step's argument is: the person's question has an answer.
+SettledToolArgument: TypeAlias = (
+    FixedToolArgument | RunInputToolArgument | EarlierStepToolArgument
+)
 
 
 class _ToolArgumentWire(BaseModel):
@@ -123,7 +146,7 @@ class _ToolArgumentWire(BaseModel):
                 value = None
                 exact = False
             else:
-                exact = _holds_exact_numbers(value)
+                exact = holds_exact_numbers(value)
             if not exact:
                 raise ValueError(
                     f"Argument '{name}': value_json must be one JSON value, "
@@ -131,11 +154,17 @@ class _ToolArgumentWire(BaseModel):
                     "within ±9007199254740991 (no NaN or infinity)."
                 )
             return FixedToolArgument(name=name, value=value)
+        label = (self.field_label or "").strip() or None
+        if self.source == "ask_user":
+            return AskUserToolArgument(
+                name=name,
+                field_name=(self.field_name or "").strip() or None,
+                field_label=label,
+            )
         if self.source == "run_input":
             field_name = (self.field_name or "").strip()
             if not field_name:
                 raise ValueError(f"Argument '{name}': run_input needs field_name.")
-            label = (self.field_label or "").strip() or None
             return RunInputToolArgument(
                 name=name, field_name=field_name, field_label=label
             )
@@ -153,7 +182,19 @@ class ToolUseIntent(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    # The use's key across proposals: kept while the step reads the same
+    # tool, so the person's decisions about the use outlive a re-proposal.
+    use_ref: str = Field(pattern=TOOL_USE_REF_PATTERN)
     tool_ref: str
+    # Other listed tools that would serve the same use: with any, the person
+    # chooses (``tool_choice`` question).
+    alternative_refs: tuple[str, ...] = ()
+    # The user's words that ask for this tool, if any: shown with the
+    # question as why, when they are the user's own (``settle_tool_uses``);
+    # never a reason to skip one.
+    evidence_quote: str | None = Field(
+        default=None, max_length=TOOL_USE_EVIDENCE_MAX_CHARS
+    )
     arguments: tuple[ToolArgument, ...] = ()
 
     @field_validator("arguments", mode="before")
@@ -241,14 +282,45 @@ def tool_use_property_schema(listed_refs: Sequence[str]) -> dict[str, Any]:
     return {
         "type": ["object", "null"],
         "additionalProperties": False,
-        "required": ["tool_ref", "arguments"],
+        "required": [
+            "use_ref",
+            "tool_ref",
+            "alternative_refs",
+            "evidence_quote",
+            "arguments",
+        ],
         "description": (
             "Null for a step that reads no MCP tool. Set it only on a step whose "
             "input is the answer of one listed tool: the step's instructions then "
             "say what to do with that answer."
         ),
         "properties": {
+            "use_ref": {
+                "type": "string",
+                "pattern": TOOL_USE_REF_PATTERN,
+                "description": (
+                    "A short key for this use of a tool, unique in the plan; "
+                    "keep it in later proposals while the step reads the same "
+                    "tool, so decisions about it are kept."
+                ),
+            },
             "tool_ref": {"type": "string", "enum": list(listed_refs)},
+            "alternative_refs": {
+                "type": "array",
+                "items": {"type": "string", "enum": list(listed_refs)},
+                "description": (
+                    "Other listed tools that would serve this use as well; "
+                    "empty when only this one fits."
+                ),
+            },
+            "evidence_quote": {
+                "type": ["string", "null"],
+                "maxLength": TOOL_USE_EVIDENCE_MAX_CHARS,
+                "description": (
+                    "The user's words that ask for this tool, copied exactly; "
+                    "null when they did not name it."
+                ),
+            },
             "arguments": {
                 "type": "array",
                 "description": (
@@ -272,13 +344,16 @@ def tool_use_property_schema(listed_refs: Sequence[str]) -> dict[str, Any]:
                         "name": {"type": "string", "minLength": 1},
                         "source": {
                             "type": "string",
-                            "enum": ["fixed", "run_input", "earlier_step"],
+                            "enum": ["fixed", "run_input", "earlier_step", "ask_user"],
                             "description": (
                                 "fixed: the same value every run (value_json). "
                                 "run_input: the person enters it when starting a "
                                 "run (field_name, field_label). earlier_step: a "
                                 "field an earlier step's JSON output declares "
-                                "(from_step, field_path)."
+                                "(from_step, field_path). ask_user: a required "
+                                "value the request does not give; the person is "
+                                "asked (field_name and field_label may suggest a "
+                                "run-form field)."
                             ),
                         },
                         "value_json": {
@@ -290,7 +365,9 @@ def tool_use_property_schema(listed_refs: Sequence[str]) -> dict[str, Any]:
                         },
                         "field_name": {
                             "type": ["string", "null"],
-                            "description": "run_input only: the run-form field.",
+                            "description": (
+                                "run_input (and ask_user): the run-form field."
+                            ),
                         },
                         "field_label": {
                             "type": ["string", "null"],
@@ -374,16 +451,16 @@ _STRINGS = TypeAdapter[list[str]](list[str])
 _EXACT_INTEGER_LIMIT = 2**53 - 1
 
 
-def _holds_exact_numbers(value: JsonValue) -> bool:
+def holds_exact_numbers(value: JsonValue) -> bool:
     """Whether every number of ``value`` is one the editor shows and saves
     as written: within its exact range, which no NaN or infinity is (and
     every float beyond it is whole)."""
     if isinstance(value, int | float):
         return abs(value) <= _EXACT_INTEGER_LIMIT
     if isinstance(value, list):
-        return all(_holds_exact_numbers(item) for item in value)
+        return all(holds_exact_numbers(item) for item in value)
     if isinstance(value, dict):
-        return all(_holds_exact_numbers(item) for item in value.values())
+        return all(holds_exact_numbers(item) for item in value.values())
     return True
 
 
@@ -531,6 +608,11 @@ def compile_tool_input_config(
     (``_require_resolvable_previous_refs``)."""
     arguments: dict[str, JsonValue] = {}
     for argument in use.arguments:
+        if isinstance(argument, AskUserToolArgument):
+            raise ValueError(
+                f"Argument '{argument.name}' was compiled before the person "
+                "answered where it comes from."
+            )
         if isinstance(argument, FixedToolArgument):
             arguments[argument.name] = argument.value
         elif isinstance(argument, RunInputToolArgument):

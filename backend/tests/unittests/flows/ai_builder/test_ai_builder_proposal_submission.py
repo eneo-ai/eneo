@@ -29,6 +29,7 @@ from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
     create_compile_context_from_planning_state,
 )
+from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     LintSeverity,
@@ -41,6 +42,8 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStatus,
     AIBuilderStreamEvent,
+    StructuredQuestionOptionPayload,
+    StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_events import (
     build_status_event,
@@ -83,6 +86,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalAnswer,
     ProposalCompleted,
     ProposalMessageGroup,
+    ProposalNeedsDecision,
     ProposalReady,
     ToolRetryConfig,
 )
@@ -90,7 +94,11 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_telemetry import PLANNER_TELEMETRY_KEY
-from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_decisions import ToolDecisions
+from eneo.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
+    PROPOSE_FLOW_TOOL_NAME,
+)
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
     build_propose_flow_tool_schema,
@@ -140,6 +148,7 @@ from tests.unittests.flows.ai_builder.test_ai_builder_reference_flow_preservatio
     _saved_spec,
     _saved_step_context,
 )
+from tests.unittests.flows.ai_builder.test_ai_builder_tool_steps import _saved_flow
 
 
 def _proposal_tool_schema_double() -> ProposalToolSchema:
@@ -1170,6 +1179,80 @@ async def test_create_propose_flow_terminal_answer_is_committed_not_just_streame
         "affected": [],
         "affected_remaining": 0,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("in_edit", [False, True], ids=["create", "edit"])
+async def test_a_draft_that_needs_a_decision_asks_it_and_keeps_no_draft(
+    in_edit: bool,
+) -> None:
+    # Kills: the question left unpersisted or the draft committed with it,
+    # the question not placed in the interview like every other one, the
+    # model's pick not recommended in an edit, the turn's provider telemetry
+    # not stored, the person's decisions not handed to the draft's
+    # settlement.
+    repo = AsyncMock()
+    repo.commit_turn = AsyncMock(return_value=3)
+    submission = _make_submission(repo=repo)
+    state = _committed_text_planning_state()
+    state.tool_decisions = ToolDecisions(relevance="use")
+    question = StructuredQuestionPayload(
+        question_id="tool_choice:lookup",
+        question="Which tool?",
+        options=[
+            StructuredQuestionOptionPayload(id="tool_0a1b2c3d", label="Data · lookup"),
+            StructuredQuestionOptionPayload(id="no_tool", label="No tool"),
+        ],
+        selection_mode="single",
+        allow_custom=False,
+        recommended_option_id="tool_0a1b2c3d",
+    )
+    process_outline = AsyncMock(
+        return_value=ProposalNeedsDecision(
+            question=BackendQuestion(question_data=question, assistant_text="Pick.")
+        )
+    )
+    target = "edit" if in_edit else "create"
+
+    with patch(
+        f"eneo.flows.ai_builder.ai_builder_proposal_submission.process_{target}_"
+        + ("arguments" if in_edit else "intent_arguments"),
+        new=process_outline,
+    ):
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=_make_context(
+                planning_state=state,
+                flow=_saved_flow() if in_edit else None,
+                usage_tracker=ProposalTurnTelemetry(
+                    request_id="req-decision",
+                    model=_route().litellm_model,
+                    target_kind=TargetKind.EDIT if in_edit else TargetKind.CREATE,
+                ),
+            ),
+            tool_call=_make_tool_call(
+                PROPOSE_FLOW_TOOL_NAME,
+                {"flow_name": "F", "plan_rationale": "R.", "steps": []},
+                tool_call_id="call-decision",
+            ),
+        )
+        assert dispatched is not None
+        events = _wire_events([event async for event in dispatched])
+
+    assert [event["event"] for event in events] == ["text", "question"]
+    shown = json.loads(events[1]["data"])
+    assert shown["question_index"] == 1
+    assert shown["recommended_option_id"] == "tool_0a1b2c3d"
+    assert process_outline.await_args.kwargs[
+        "planning_state" if in_edit else "tool_decisions"
+    ] == (state if in_edit else state.tool_decisions)
+    repo.create_plan.assert_not_awaited()
+    stored = repo.commit_turn.await_args.kwargs["new_messages"]
+    assert [message.role for message in stored] == ["assistant", "tool"]
+    assert stored[0].metadata["question_id"] == "tool_choice:lookup"
+    assert PLANNER_TELEMETRY_KEY in stored[0].metadata
+    assert [call["name"] for call in stored[0].tool_calls] == [
+        ASK_STRUCTURED_QUESTION_TOOL_NAME
+    ]
 
 
 @pytest.mark.asyncio

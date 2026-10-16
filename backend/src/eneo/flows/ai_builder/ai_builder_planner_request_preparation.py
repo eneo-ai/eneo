@@ -144,11 +144,19 @@ from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderRequestBudget,
 )
 from eneo.flows.ai_builder.ai_builder_tool_catalog import (
+    AIBuilderToolCatalogNotOffered,
     AIBuilderToolCatalogProjection,
     fit_tool_catalog_projection,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
+)
+from eneo.flows.ai_builder.ai_builder_tool_question_ids import (
+    TOOL_RELEVANCE_QUESTION_ID,
+)
+from eneo.flows.ai_builder.ai_builder_tool_questions import (
+    fold_tool_decisions,
+    tool_relevance_question,
 )
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
@@ -436,6 +444,16 @@ async def prepare_planner_request(
             output_evidence=None,
             example_inference=None,
         )
+    rebuilt_planning_state.tool_decisions = fold_tool_decisions(
+        request.conversation, catalog=resource_catalog.tools
+    )
+    # Asked once in a create session, before the architecture is committed:
+    # a flow that reads tools may need no run input at all.
+    asks_tool_relevance = (
+        request.flow is None
+        and bool(resource_catalog.tools.usable_by_ref)
+        and rebuilt_planning_state.tool_decisions.relevance is None
+    )
     requirements_confirmation_required = not review_command_opens_the_session and (
         request.plan_edit_context is None or request.plan_edit_context.scope != "step"
     )
@@ -447,6 +465,17 @@ async def prepare_planner_request(
             )
         )
         if reopen is not None
+        else BuilderTurnControl(
+            decision=AskCanonicalQuestion(
+                slot_name=TOOL_RELEVANCE_QUESTION_ID,
+                question=tool_relevance_question(
+                    resource_catalog.tools,
+                    ui_language=ui_language,
+                    show_tools=rebuilt_planning_state.tool_decisions.tools_requested,
+                ),
+            )
+        )
+        if asks_tool_relevance
         else resolve_turn_control(
             session_state=rebuilt_planning_state,
             selected_discovery_question_ids=discovery_analysis.selected_question_ids,
@@ -653,6 +682,11 @@ def build_proposal_prepared(
     if flow is not None and (unsupported := unsupported_saved_steps(flow.steps)):
         raise UnsupportedSavedStepsError(unsupported)
     review_scope = review_edit_scope_for_turn(conversation)
+    # A continuation after a server decision brings a stored state, which
+    # never holds the tool decisions: read them from the answers here too.
+    planning_state.tool_decisions = fold_tool_decisions(
+        conversation, catalog=resource_catalog.tools
+    )
     if flow is not None:
         _refuse_unusable_tool_configurations(flow)
     if flow is not None:
@@ -747,6 +781,20 @@ def build_proposal_prepared(
         else structured_result_review_mode(planning_state.checkpoint_intents)
     )
 
+    # A create session offers the space's usable tools only once the person
+    # said to use them (an edit asks before each new use). A space whose tools
+    # are all refused still names them, so a request for one is answered with
+    # why it cannot be used.
+    offered_tools = (
+        resource_catalog.tools
+        if is_edit_mode
+        or planning_state.tool_decisions.relevance == "use"
+        or not resource_catalog.tools.usable_by_ref
+        else replace(
+            resource_catalog.tools, projection=AIBuilderToolCatalogNotOffered()
+        )
+    )
+
     def proposal_schema(tool_refs: tuple[str, ...]) -> ProposalToolSchema:
         return build_propose_flow_tool_schema(
             current_steps=None if flow is None else list(flow.steps),
@@ -765,7 +813,7 @@ def build_proposal_prepared(
 
     # Every tool the catalogue could list: the request is planned with the
     # largest schema, and narrowed to the fitted list below.
-    proposal_tool_schema = proposal_schema(resource_catalog.tools.listed_refs)
+    proposal_tool_schema = proposal_schema(offered_tools.listed_refs)
     # A review-backed proposal carries run excerpts: the tenant's review-evidence
     # cap bounds this whole request (prompt, attachments, conversation, tools)
     # through the one budget every later step and the provider boundary use.
@@ -965,7 +1013,7 @@ def build_proposal_prepared(
     # left: the answer reserve was planned without them, and everything above
     # is packed first; history above the configured minimum yields to them.
     fitted_tool_catalog = fit_tool_catalog_projection(
-        resource_catalog.tools.projection,
+        offered_tools.projection,
         fits=lambda projection: prompt_fits(
             fitted_attachment_text,
             replayed_requirements,
@@ -988,7 +1036,7 @@ def build_proposal_prepared(
             targets=_targeted_step_refs(plan_edit_context, review_scope),
             tools_named=bool(turn_tool_catalog.listed_refs),
         )
-    if turn_tool_catalog.listed_refs != resource_catalog.tools.listed_refs:
+    if turn_tool_catalog.listed_refs != offered_tools.listed_refs:
         # A step names only a tool the prompt shows; a ref the fit cut would
         # name a tool the model never saw.
         proposal_tool_schema = proposal_schema(turn_tool_catalog.listed_refs)

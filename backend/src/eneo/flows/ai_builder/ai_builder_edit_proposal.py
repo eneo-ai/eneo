@@ -11,6 +11,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     architecture_failure_outcome,
     log_architecture_error,
 )
+from eneo.flows.ai_builder.ai_builder_authoring_projection import form_field_specs
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     authored_knowledge_ref_repair,
     prepare_compiled_spec_for_session,
@@ -44,6 +45,9 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     validate_review_edit_effect,
     validate_review_edit_proposal,
 )
+from eneo.flows.ai_builder.ai_builder_form_fields import (
+    extract_form_fields_from_metadata,
+)
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
     non_plan_outcome,
     user_action_answer,
@@ -59,6 +63,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_capture import (
     capture_rejected_proposal_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    AddStep,
     ModifyExistingStep,
     OrderedEditProposal,
 )
@@ -84,7 +89,20 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     collect_flow_spec_resource_bindings,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
-from eneo.flows.ai_builder.ai_builder_tool_catalog import EMPTY_TOOL_CATALOG
+from eneo.flows.ai_builder.ai_builder_tool_catalog import (
+    EMPTY_TOOL_CATALOG,
+    AIBuilderToolCatalog,
+)
+from eneo.flows.ai_builder.ai_builder_tool_decisions import ToolDecisions
+from eneo.flows.ai_builder.ai_builder_tool_questions import (
+    EarlierField,
+    RunForm,
+    SettledToolUses,
+    ToolUseSite,
+    contract_field_types,
+    settle_tool_uses,
+    users_quote_check,
+)
 from eneo.flows.ai_builder.ai_builder_tool_use import ToolUseIntent
 from eneo.flows.ai_builder.ai_builder_tool_validation import tool_use_ref_outcome
 from eneo.flows.ai_builder.ai_builder_validation_common import (
@@ -100,7 +118,8 @@ from eneo.flows.application.flow_draft_materialization import (
     invalid_existing_step_ref_reason,
 )
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
-from eneo.flows.domain.flow import FlowStep
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.domain.tool_input import read_stored_tool_input_config
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.flows.input_binding_contract_rules import (
     source_ref_bindings,
@@ -173,11 +192,107 @@ def _authored_tool_uses(
     proposal: OrderedEditProposal,
 ) -> Iterator[tuple[str, ToolUseIntent]]:
     for entry in proposal.steps:
-        if isinstance(entry, ModifyExistingStep):
-            if entry.tool_use is not None:
-                yield f"step {display_value(entry.existing_step_ref)}", entry.tool_use
-        elif entry.step.tool_use is not None:
-            yield f"new step '{display_value(entry.step.name)}'", entry.step.tool_use
+        use = _entry_tool_use(entry)
+        if use is not None:
+            yield _tool_site_label(entry), use
+
+
+def _entry_tool_use(entry: ModifyExistingStep | AddStep) -> ToolUseIntent | None:
+    return (
+        entry.tool_use if isinstance(entry, ModifyExistingStep) else entry.step.tool_use
+    )
+
+
+def _tool_site_label(entry: ModifyExistingStep | AddStep) -> str:
+    if isinstance(entry, ModifyExistingStep):
+        return f"step {display_value(entry.existing_step_ref)}"
+    return f"new step '{display_value(entry.step.name)}'"
+
+
+def _edit_tool_use_sites(
+    proposal: OrderedEditProposal, *, flow: Flow, catalog: AIBuilderToolCatalog
+) -> list[ToolUseSite]:
+    """Each tool use of the edit, with the top-level fields of the steps
+    before it in the edited order. A use is confirmed by the person unless
+    it is a saved step's own tool."""
+    saved = {existing_step_ref_for_order(step.step_order): step for step in flow.steps}
+    sites: list[ToolUseSite] = []
+    earlier: list[EarlierField] = []
+    for number, entry in enumerate(proposal.steps, start=1):
+        use = _entry_tool_use(entry)
+        saved_step = (
+            saved.get(entry.existing_step_ref)
+            if isinstance(entry, ModifyExistingStep)
+            else None
+        )
+        if use is not None:
+            saved_config = (
+                read_stored_tool_input_config(saved_step.input_config)
+                if saved_step is not None
+                else None
+            )
+            saved_ref = (
+                catalog.ref_of_usable(saved_config.mcp_server_id, saved_config.tool_id)
+                if saved_config is not None
+                else None
+            )
+            sites.append(
+                ToolUseSite(
+                    label=_tool_site_label(entry),
+                    step_name=(
+                        entry.step.name
+                        if isinstance(entry, AddStep)
+                        else (saved_step.user_description if saved_step else None)
+                        or entry.existing_step_ref
+                    ),
+                    use=use,
+                    earlier_fields=tuple(earlier),
+                    needs_confirmation=saved_ref != use.tool_ref,
+                )
+            )
+        earlier.extend(_declared_fields(number, entry, saved_step))
+    return sites
+
+
+def _declared_fields(
+    number: int, entry: ModifyExistingStep | AddStep, saved_step: FlowStep | None
+) -> list[EarlierField]:
+    drafts = (
+        entry.step.output_fields
+        if isinstance(entry, AddStep)
+        else entry.output_fields
+        if "output_fields" in entry.model_fields_set
+        else None
+    )
+    if drafts is not None or saved_step is None:
+        return [
+            EarlierField(from_step=number, name=field.name, json_type=field.field_type)
+            for field in drafts or ()
+        ]
+    return [
+        EarlierField(from_step=number, name=name, json_type=json_type)
+        for name, json_type in contract_field_types(saved_step.output_contract)
+    ]
+
+
+def _with_settled_tool_uses(
+    proposal: OrderedEditProposal, settled: SettledToolUses
+) -> OrderedEditProposal:
+    steps: list[ModifyExistingStep | AddStep] = []
+    uses = iter(settled.uses)
+    for entry in proposal.steps:
+        use = next(uses) if _entry_tool_use(entry) is not None else None
+        if use is None:
+            steps.append(entry)
+        elif isinstance(entry, ModifyExistingStep):
+            steps.append(entry.model_copy(update={"tool_use": use}))
+        else:
+            steps.append(
+                entry.model_copy(
+                    update={"step": entry.step.model_copy(update={"tool_use": use})}
+                )
+            )
+    return proposal.model_copy(update={"steps": steps})
 
 
 PROPOSE_FLOW_EDIT_FORCED_TOOL_PROMPT = (
@@ -240,18 +355,47 @@ async def process_edit_arguments(
         )
     ):
         return repair
+    tool_catalog = (
+        resource_catalog.tools if resource_catalog is not None else EMPTY_TOOL_CATALOG
+    )
     if tool_outcome := tool_use_ref_outcome(
         _authored_tool_uses(authored_proposal),
-        catalog=(
-            resource_catalog.tools
-            if resource_catalog is not None
-            else EMPTY_TOOL_CATALOG
-        ),
+        catalog=tool_catalog,
         ui_language=compile_context.ui_language
         if compile_context is not None
         else None,
     ):
         return tool_outcome
+    # The run form compile reads: the model's form fields (or the saved ones)
+    # with the fields the server owns, projected once for both.
+    projected_proposal = _apply_server_owned_input_fields(
+        authored_proposal, planning_state=planning_state
+    )
+    settled = await settle_tool_uses(
+        _edit_tool_use_sites(authored_proposal, flow=flow, catalog=tool_catalog),
+        decisions=(
+            planning_state.tool_decisions
+            if planning_state is not None
+            else ToolDecisions()
+        ),
+        catalog=tool_catalog,
+        run_form=RunForm(
+            fields=tuple(
+                form_field_specs(projected_proposal.form_fields or [])
+                if "form_fields" in projected_proposal.model_fields_set
+                else extract_form_fields_from_metadata(flow.metadata_json) or []
+            ),
+            # An edit's tool arguments read the fields its run form keeps.
+            adds_fields=False,
+        ),
+        is_users_quote=users_quote_check(conversation),
+        ui_language=compile_context.ui_language
+        if compile_context is not None
+        else None,
+    )
+    if not isinstance(settled, SettledToolUses):
+        return settled
+    authored_proposal = _with_settled_tool_uses(authored_proposal, settled)
     current_step_refs = [
         existing_step_ref_for_order(step.step_order)
         for step in sorted(flow.steps, key=lambda step: step.step_order)
@@ -289,9 +433,7 @@ async def process_edit_arguments(
             kind="quality",
             producers=frozenset({"scope_guard"}),
         )
-    proposal = _apply_server_owned_input_fields(
-        authored_proposal, planning_state=planning_state
-    )
+    proposal = _with_settled_tool_uses(projected_proposal, settled)
     ui_language = compile_context.ui_language if compile_context is not None else None
 
     async def compile_and_prepare(

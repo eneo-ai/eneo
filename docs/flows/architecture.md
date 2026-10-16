@@ -295,10 +295,82 @@ through) on every tool step the turn wrote: a missing required argument, an
 argument whose name the schema refuses, or a fixed value the schema refuses is
 an error the model repairs; a schema no flow
 can check ends the turn with an answer; a checker host fault leaves a warning.
-An edit writes a saved tool step's tool use and nothing else of it; a tool step
-the edit does not write stays protected as saved. Every saved tool step's reads
-keep naming the producer they named when saved (`kept_step_read_retargeted`),
-but the tool arguments of a step whose tool use the edit writes.
+An edit writes a saved tool step's tool use and nothing else of it, or removes
+the step (a kept step that still reads it is refused by the edit's read check
+and sent back to the model); a tool step the edit does not write stays
+protected as saved. Every saved tool step's reads keep naming the producer they
+named when saved (`kept_step_read_retargeted`), but the tool arguments of a step
+whose tool use the edit writes.
+
+The person decides about tools through three question families, whose ids are
+built and read only in `ai_builder_tool_question_ids.py`: `tool_relevance`,
+`tool_choice:<use_ref>` and `tool_argument:<use_ref>:<tool_ref>:<argument>`,
+where `use_ref` is the planner's key for one use of a tool and `tool_ref` the
+tool the argument belongs to. A create turn whose space
+has usable tools asks `tool_relevance` (use the tools, build without them, show
+them first) from `prepare_planner_request` until it is answered with use or
+don't use; until a use answer the create step schema offers no `tool_use` and
+the prompt lists no tools (`AIBuilderToolCatalogNotOffered`). A create session
+whose space has only refused tools is not asked and keeps the listing of the
+refused ones, and an edit always offers the tools. A draft's tool uses are then
+settled against the decisions before compile (`settle_tool_uses` in
+`ai_builder_tool_questions.py`), in create and edit alike: more than 20 uses
+end the turn with an answer (`too_many_tool_uses`); a use_ref given twice, or a
+use that contradicts the person's choice of tool, is sent back to the model; a
+tool whose whole input schema is larger than the catalogue's schema budget, or
+a chosen tool whose schema neither the listing nor the decisions show, ends the
+turn with an answer. A use the person has not chosen a tool for is asked as
+`tool_choice` when another listed tool would serve it too, when its schema was
+not in the prompt, or, in an edit, when it is not the saved step's own tool; in
+create, the relevance answer is the consent, so a use with one fitting tool
+whose schema the prompt showed is not asked. The
+question recommends the model's pick (also in an edit: `situate_question`
+with `keeps_recommendation_in_edit`), and the use's `evidence_quote` is shown
+as why only when the slot classifier's evidence owner finds it in a message the
+user wrote unprompted; it never skips the question. An argument the planner
+wrote as `ask_user` is asked as `tool_argument`, offering the schema's allowed
+values or a typed value, the run-form fields the argument binds to (where the
+plan may add a field, a new one whose name no field of the form takes), and the
+earlier steps' declared fields of the argument's JSON type whose names a field
+path reads whole. Asking ends the turn with the question
+(`ProposalNeedsDecision`, persisted by `persist_backend_question` with the
+turn's planner telemetry); the draft is not kept. An answer is accepted only
+when it picks one option of the showing it answers (`tool_answer_is_valid`), a
+typed value only on the fixed-value option. `PlanningState.tool_decisions` is
+rebuilt every turn from the conversation (`fold_tool_decisions`) and never
+stored; `build_proposal_prepared` reads it again, so a proposal continued from
+a stored state after a server decision sees the answers. The last answer per
+question id counts against the latest showing, a choice of a tool the space no
+longer offers is dropped, an argument's answer fills only the tool its question
+named (`arguments_for`), an answer to a question about a tool other than the
+chosen one decides nothing, answers for another tool are dropped when a tool is
+chosen, an answer this build cannot read as a decision is skipped,
+and only the 20 uses and 40 arguments per use answered most recently are kept.
+A decided argument replaces the planner's only when it still fits the use's
+tool and plan, checked every round, also when the draft leaves the argument
+out (a decision for an argument the tool does not declare is not written): a
+fixed value with publish's fixed value check (a typed value read against the
+argument's schema: text, date and choice arguments as text, others as JSON;
+every fixed value, typed or picked, holds only numbers the editor keeps
+exactly, `holds_exact_numbers`, and an allowed value that does not is not
+offered; an argument no option fits, an enum without one exact value and no
+fitting run-form or earlier step's field, ends the turn with an answer,
+`tool_argument_values_not_exact`), a run-form
+field with the owner compile uses (`run_form_fields_for_tool_uses`, against the
+form `create_run_form_fields` builds, or in an edit the form compile reads: the
+proposal's or the saved fields with the fields the server owns, projected once
+for both), an earlier step's field against the fields the steps before the use
+declare. One that does not fit is asked again, never put back. A use that
+needs more than 40 decided values ends the turn with an answer
+(`too_many_tool_arguments`).
+The prompt states the decisions, each value with the tool it was given for,
+with the whole approved input schema of each
+chosen tool the tool listing does not already show, once
+(`decided_schema_refs`, the most recently chosen first within the catalogue's
+schema budget). A refusal reaches the web typed: the answer's
+text event and its stored `non_plan_outcome` carry `tool_refusal` (tool name,
+server name, kind `refused`, `input_schema_invalid` or `input_schema_too_large`,
+and the refusal code).
 
 The catalogue is optional prompt content. The request budget is planned from
 the prompt without it, so the answer reserve is the same as in a turn without

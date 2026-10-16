@@ -75,6 +75,7 @@ async def test_a_compiled_tool_step_is_applied_and_published_with_its_pin(
                         "name": "Slå upp",
                         "instructions": "Ta ut ärendets status.",
                         "tool_use": {
+                            "use_ref": "lookup",
                             "tool_ref": tool_ref(server_id, lookup_id),
                             "arguments": [
                                 {

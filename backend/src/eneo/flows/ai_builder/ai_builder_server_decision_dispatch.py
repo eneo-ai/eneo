@@ -211,7 +211,7 @@ async def _dispatch_question(
     if followup is not None:
         followup = replace(
             followup,
-            question_data=_situate_question(
+            question_data=situate_question(
                 followup.question_data,
                 conversation=request.conversation,
                 flow=request.flow,
@@ -271,7 +271,7 @@ async def _dispatch_question(
     )
 
 
-def _situate_question(
+def situate_question(
     payload: StructuredQuestionPayload,
     *,
     conversation: list[ConversationMessage],
@@ -279,12 +279,14 @@ def _situate_question(
     planned_remaining: int | None,
     locale: Locale,
     planning_state: PlanningState | None = None,
+    keeps_recommendation_in_edit: bool = False,
 ) -> StructuredQuestionPayload:
     """Place this question in the interview, and in the flow it is asked about.
 
-    Dispatch is where every question kind meets, whichever owner wrote it, and
-    the only place that both holds the flow and emits the payload, so the two
-    are stamped once here rather than in each question owner.
+    Every question kind passes here before it is persisted, whichever owner
+    wrote it: dispatch for the server's questions, the proposal submission for
+    the tool decisions a draft needs. Both hold the flow, so the two are
+    stamped once here rather than in each question owner.
 
     The payload's own id is what counts for the number, because it is the id
     persistence stamps on the assistant message, and therefore the id the next
@@ -302,7 +304,9 @@ def _situate_question(
     a user. So the recommendation survives only where it can be shown to match
     the current value, and is dropped wherever that cannot be shown — including
     a flow whose answer none of the offered options carries, where every option
-    on screen would change the flow.
+    on screen would change the flow. A question about a change the person
+    already asked for (which tool a new step uses) keeps its recommendation:
+    ``keeps_recommendation_in_edit``.
 
     The topic is the catalog's own summary label for the slot this question
     settles, taken from the owner the requirements summary reads, so a question
@@ -315,7 +319,9 @@ def _situate_question(
 
     current_option_id = _current_option_id(payload, flow=flow)
     keeps_recommendation = (
-        payload.recommended_option_id == current_option_id if flow is not None else True
+        payload.recommended_option_id == current_option_id
+        if flow is not None and not keeps_recommendation_in_edit
+        else True
     )
     question_index = question_ordinal_in_session(
         conversation, question_id=payload.question_id
@@ -568,4 +574,5 @@ __all__ = [
     "ServerDecisionProposalContinuation",
     "ServerDecisionTelemetry",
     "dispatch_server_decision",
+    "situate_question",
 ]

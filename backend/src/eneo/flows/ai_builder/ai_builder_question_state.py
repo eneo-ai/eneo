@@ -287,19 +287,31 @@ def latest_shown_question(
     """
 
     wanted = canonical_question_id(question_id)
-    latest: Mapping[str, Any] | None = None
+    latest: ConversationMessage | None = None
     for message in conversation:
         if assistant_question_id(message) == wanted:
-            latest = _structured_question_arguments(message)
+            latest = message
     if latest is None:
         return None
-    try:
-        payload = StructuredQuestionPayload.model_validate(latest)
-    except ValidationError:
-        return None
-    if canonical_question_id(payload.question_id) != wanted:
+    payload = shown_question(latest)
+    if payload is None or canonical_question_id(payload.question_id) != wanted:
         return None
     return payload
+
+
+def shown_question(
+    message: ConversationMessage | Mapping[str, Any],
+) -> StructuredQuestionPayload | None:
+    """The question an assistant message showed, as it was shown; None for a
+    message that showed none, or whose showing no longer validates."""
+
+    arguments = _structured_question_arguments(message)
+    if arguments is None:
+        return None
+    try:
+        return StructuredQuestionPayload.model_validate(arguments)
+    except ValidationError:
+        return None
 
 
 def _pending_user_requirement_question(
@@ -340,5 +352,6 @@ __all__ = [
     "pending_user_requirement_question",
     "pending_user_requirement_question_id",
     "question_ordinal_in_session",
+    "shown_question",
     "shows_instance_token",
 ]

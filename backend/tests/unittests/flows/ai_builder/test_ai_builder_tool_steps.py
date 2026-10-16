@@ -238,7 +238,10 @@ def _two_tool_flow(
             _step_payload(
                 "Hitta dagar",
                 {
+                    "use_ref": "values",
                     "tool_ref": VALUES_REF,
+                    "alternative_refs": [],
+                    "evidence_quote": None,
                     "arguments": values_arguments
                     or [
                         _argument(
@@ -261,7 +264,10 @@ def _two_tool_flow(
             _step_payload(
                 "Hämta detaljer",
                 {
+                    "use_ref": "details",
                     "tool_ref": DETAILS_REF,
+                    "alternative_refs": [],
+                    "evidence_quote": None,
                     "arguments": [
                         _argument(
                             "days", "earlier_step", from_step=1, field_path=days_path
@@ -572,6 +578,7 @@ def test_a_fixed_value_is_json_the_editor_holds_exactly(
     # Kills: a non-finite number, or an integer past the editor's exact range,
     # reaching the turn as a value (it crashed the argument check).
     intent = {
+        "use_ref": "u",
         "tool_ref": VALUES_REF,
         "arguments": [_argument("unit", "fixed", value_json=value_json)],
     }
@@ -590,14 +597,14 @@ def test_a_ref_the_space_has_no_tool_for_is_repaired_and_a_refused_one_answered(
     catalog = _catalog(VALUES, OFF).tools
 
     unknown = tool_use_ref_outcome(
-        [("step 1", ToolUseIntent(tool_ref="tool_ffffffff"))],
+        [("step 1", ToolUseIntent(use_ref="u", tool_ref="tool_ffffffff"))],
         catalog=catalog,
         ui_language="en",
     )
     refused = tool_use_ref_outcome(
         [
-            ("step 1", ToolUseIntent(tool_ref=VALUES_REF)),
-            ("step 2", ToolUseIntent(tool_ref=OFF_REF)),
+            ("step 1", ToolUseIntent(use_ref="u", tool_ref=VALUES_REF)),
+            ("step 2", ToolUseIntent(use_ref="u", tool_ref=OFF_REF)),
         ],
         catalog=catalog,
         ui_language="sv",
@@ -618,7 +625,7 @@ def test_every_refusal_is_answered_in_both_languages() -> None:
         catalog = _catalog(_option(OFF_TOOL, "archive", None, refusal=reason)).tools
         for language in ("sv", "en"):
             answer = tool_use_ref_outcome(
-                [("step 1", ToolUseIntent(tool_ref=OFF_REF))],
+                [("step 1", ToolUseIntent(use_ref="u", tool_ref=OFF_REF))],
                 catalog=catalog,
                 ui_language=language,
             )
@@ -710,7 +717,7 @@ def test_a_schema_no_flow_can_check_is_answered_and_a_failed_checker_warns(
     )
 
     assert isinstance(answered.answer, ProposalAnswer)
-    assert answered.answer.codes == frozenset({"tool_invalid_schema"})
+    assert answered.answer.codes == frozenset({"tool_input_schema_invalid"})
     assert warned.answer is None and warned.validation is not None
     assert warned.validation.errors == []
     assert [w.code for w in warned.validation.warnings] == ["tool_argument_unverified"]
@@ -779,7 +786,10 @@ def _run_input_flow(*uses: tuple[FlowToolOption, dict[str, str]]) -> dict[str, A
                 _step_payload(
                     f"Steg {index}",
                     {
+                        "use_ref": f"use{index}",
                         "tool_ref": tool_ref(SERVER, tool.tool_id),
+                        "alternative_refs": [],
+                        "evidence_quote": None,
                         "arguments": [
                             _argument(
                                 argument,
@@ -1000,6 +1010,7 @@ def test_an_edit_adds_a_tool_step_and_keeps_the_saved_ones() -> None:
                 instructions="Hämta detaljer igen.",
                 tool_use=ToolUseIntent.model_validate(
                     {
+                        "use_ref": "u",
                         "tool_ref": DETAILS_REF,
                         "arguments": [
                             _argument(
@@ -1055,6 +1066,7 @@ def test_an_edit_checks_the_tool_steps_it_writes_and_not_the_saved_ones() -> Non
                 instructions="Hämta värden.",
                 tool_use=ToolUseIntent.model_validate(
                     {
+                        "use_ref": "u",
                         "tool_ref": VALUES_REF,
                         "arguments": [
                             _argument("from_date", "fixed", value_json='"2026-10-01"')
@@ -1077,6 +1089,7 @@ def test_an_edit_changes_a_tool_steps_arguments_and_nothing_else_of_it() -> None
     flow = _saved_flow()
     new_dates = ToolUseIntent.model_validate(
         {
+            "use_ref": "u",
             "tool_ref": VALUES_REF,
             "arguments": [
                 _argument("from_date", "fixed", value_json='"2026-10-01"'),
@@ -1171,6 +1184,7 @@ def test_a_tool_steps_reads_keep_their_producer_unless_the_edit_writes_them(
     )
     days = ToolUseIntent.model_validate(
         {
+            "use_ref": "days",
             "tool_ref": DETAILS_REF,
             "arguments": [_argument("days", "fixed", value_json='["2026-10-01"]')],
         }
@@ -1203,6 +1217,7 @@ def test_an_edit_binds_a_tool_argument_only_to_a_field_its_run_form_keeps() -> N
                 existing_step_ref="existing_step_1",
                 tool_use=ToolUseIntent.model_validate(
                     {
+                        "use_ref": "u",
                         "tool_ref": VALUES_REF,
                         "arguments": _dates(source="run_input", field_name="from_date"),
                     }

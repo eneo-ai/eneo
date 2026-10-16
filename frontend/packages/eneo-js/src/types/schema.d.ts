@@ -12497,6 +12497,36 @@ export interface components {
     AIBuilderTextEventData: {
       /** Text */
       text: string;
+      /** @default null */
+      tool_refusal?: components["schemas"]["AIBuilderToolRefusal"] | null;
+    };
+    /**
+     * AIBuilderToolRefusal
+     * @description Why a step cannot read an MCP tool the request needs, for the answer
+     *     the Builder gives instead of a plan.
+     */
+    AIBuilderToolRefusal: {
+      /**
+       * Kind
+       * @description refused: the space may not use the tool now (see `refusal`). input_schema_invalid: no flow can check its arguments against the schema its server gives. input_schema_too_large: its schema is larger than the Builder can show the planner.
+       * @enum {string}
+       */
+      kind: "refused" | "input_schema_invalid" | "input_schema_too_large";
+      /**
+       * @description Why the space may not use the tool; set only for `refused`.
+       * @default null
+       */
+      refusal?: components["schemas"]["UnattendedToolRefusal"] | null;
+      /**
+       * Server Name
+       * @description The name of the tool's MCP server.
+       */
+      server_name: string;
+      /**
+       * Tool Name
+       * @description The tool's name at its server.
+       */
+      tool_name: string;
     };
     /** AIBuilderTurnLifecycleResponse */
     AIBuilderTurnLifecycleResponse: {

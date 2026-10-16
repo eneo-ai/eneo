@@ -15,9 +15,10 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterable, Mapping
 from functools import partial
-from typing import Final
+from typing import Final, Literal, TypeAlias
 
 from eneo.flows.ai_builder.ai_builder_domain_models import LintSeverity
+from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderToolRefusal
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
     non_plan_outcome,
     uses_english,
@@ -97,17 +98,29 @@ _REFUSAL_SENTENCES_SV: Final[Mapping[UnattendedToolRefusal, str]] = {
     ),
 }
 
-_INVALID_SCHEMA_SENTENCES: Final[Mapping[str, str]] = {
-    "sv": (
-        "MCP-serverns indataschema för verktyget är inget giltigt JSON Schema av "
-        "en version som Eneo stöder, så ett flöde kan inte kontrollera "
-        "verktygets argument. Schemat rättas på servern."
-    ),
-    "en": (
-        "the input schema the MCP server gives for the tool is not a valid JSON "
-        "Schema of a draft Eneo supports, so a flow cannot check the tool's "
-        "arguments. The schema is the server's to correct."
-    ),
+_SCHEMA_SENTENCES: Final[Mapping[str, Mapping[str, str]]] = {
+    "input_schema_invalid": {
+        "sv": (
+            "MCP-serverns indataschema för verktyget är inget giltigt JSON Schema "
+            "av en version som Eneo stöder, så ett flöde kan inte kontrollera "
+            "verktygets argument. Schemat rättas på servern."
+        ),
+        "en": (
+            "the input schema the MCP server gives for the tool is not a valid "
+            "JSON Schema of a draft Eneo supports, so a flow cannot check the "
+            "tool's arguments. The schema is the server's to correct."
+        ),
+    },
+    "input_schema_too_large": {
+        "sv": (
+            "verktygets indataschema är större än byggaren kan visa när den "
+            "skriver argumenten. Lägg till steget i stegredigeraren."
+        ),
+        "en": (
+            "the tool's input schema is larger than the Builder can show while it "
+            "writes the arguments. Add the step in the step editor."
+        ),
+    },
 }
 
 
@@ -127,7 +140,7 @@ def tool_use_ref_outcome(
     for label, use in uses:
         binding = bind_tool_use(use, catalog)
         if isinstance(binding, ToolUseRefUnavailable):
-            return _tool_not_usable_answer(
+            return tool_not_usable_answer(
                 binding.tool_name,
                 binding.server_name,
                 reason=binding.reason,
@@ -180,10 +193,10 @@ async def check_written_tool_steps(
         if finding is None:
             continue
         if finding.problem is ToolConfigurationProblem.INVALID_SCHEMA:
-            return _tool_not_usable_answer(
+            return tool_not_usable_answer(
                 tool.tool_name,
                 tool.mcp_server_name,
-                reason=None,
+                reason="input_schema_invalid",
                 ui_language=ui_language,
             )
         if finding.problem is ToolConfigurationProblem.UNVERIFIED:
@@ -243,22 +256,39 @@ def _unknown_ref_line(label: str, ref: str) -> str:
     return f"Unknown tool ref '{display_value(ref)}' at {label}."
 
 
-def _tool_not_usable_answer(
+# Why the Builder cannot use a tool's input schema; a refusal of the tool
+# itself is an ``UnattendedToolRefusal``.
+ToolSchemaProblem: TypeAlias = Literal["input_schema_invalid", "input_schema_too_large"]
+
+
+def tool_not_usable_answer(
     tool_name: str,
     server_name: str,
     *,
-    reason: UnattendedToolRefusal | None,
+    reason: UnattendedToolRefusal | ToolSchemaProblem,
     ui_language: str | None,
 ) -> ProposalAnswer:
+    """The turn's answer when a tool a step needs cannot be used: the reason
+    in words, and typed (``AIBuilderToolRefusal``) for the web to show."""
     english = uses_english(ui_language)
     language = "en" if english else "sv"
-    if reason is None:
-        why = _INVALID_SCHEMA_SENTENCES[language]
-    elif english:
+    if isinstance(reason, UnattendedToolRefusal):
         sentence = REFUSAL_SENTENCES[reason]
-        why = sentence[0].lower() + sentence[1:]
+        why = (
+            sentence[0].lower() + sentence[1:]
+            if english
+            else _REFUSAL_SENTENCES_SV[reason]
+        )
+        refusal = AIBuilderToolRefusal(
+            tool_name=tool_name, server_name=server_name, kind="refused", refusal=reason
+        )
+        code = reason.value
     else:
-        why = _REFUSAL_SENTENCES_SV[reason]
+        why = _SCHEMA_SENTENCES[reason][language]
+        refusal = AIBuilderToolRefusal(
+            tool_name=tool_name, server_name=server_name, kind=reason
+        )
+        code = f"tool_{reason}"
     tool, server = display_value(tool_name), display_value(server_name)
     answer = (
         f"I can't build a step that uses the tool `{tool}` on the MCP server "
@@ -272,5 +302,6 @@ def _tool_not_usable_answer(
         outcome=non_plan_outcome(
             "tool_not_usable", "make_tool_usable", affected=(tool_name,)
         ),
-        codes=frozenset({"tool_invalid_schema" if reason is None else reason.value}),
+        codes=frozenset({code}),
+        tool_refusal=refusal,
     )

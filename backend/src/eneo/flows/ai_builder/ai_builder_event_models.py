@@ -33,6 +33,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.flow_ai_builder_budget_settings import (
     AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
 )
+from eneo.mcp_servers.domain.unattended_tool_refusal import UnattendedToolRefusal
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 
@@ -193,8 +194,30 @@ class StructuredQuestionPayload(BaseModel):
             raise ValueError(f"{field_name} must name exactly one offered option")
 
 
+class AIBuilderToolRefusal(BaseModel):
+    """Why a step cannot read an MCP tool the request needs, for the answer
+    the Builder gives instead of a plan."""
+
+    tool_name: str = Field(description="The tool's name at its server.")
+    server_name: str = Field(description="The name of the tool's MCP server.")
+    kind: Literal["refused", "input_schema_invalid", "input_schema_too_large"] = Field(
+        description=(
+            "refused: the space may not use the tool now (see `refusal`). "
+            "input_schema_invalid: no flow can check its arguments against "
+            "the schema its server gives. input_schema_too_large: its schema "
+            "is larger than the Builder can show the planner."
+        )
+    )
+    refusal: UnattendedToolRefusal | None = Field(
+        default=None,
+        description="Why the space may not use the tool; set only for `refused`.",
+    )
+
+
 class AIBuilderTextEventData(BaseModel):
     text: str
+    # Set on an answer that explains why a needed tool cannot be used.
+    tool_refusal: AIBuilderToolRefusal | None = None
 
 
 class AIBuilderStatusEventData(BaseModel):

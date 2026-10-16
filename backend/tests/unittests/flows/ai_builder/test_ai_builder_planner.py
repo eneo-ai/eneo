@@ -213,6 +213,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
+from eneo.flows.application.flow_tool_options import SpaceToolOptions
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_authoring_spec import (
@@ -465,10 +466,12 @@ async def _prepare_planner_request_for_test(
     prepared_attachment_context: AIBuilderAttachmentContext | None = None,
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
     review_evidence: object = None,
+    tool_options: SpaceToolOptions | None = None,
 ):
     return await prepare_planner_request(
         PlannerRequestPreparationInput(
             review_evidence=cast(Any, review_evidence),
+            tool_options=tool_options,
             conversation=conversation,
             litellm_client=planner.litellm_client,
             completion_model_route=completion_model_route,

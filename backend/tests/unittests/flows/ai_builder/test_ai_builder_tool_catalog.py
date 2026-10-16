@@ -9,7 +9,6 @@ from uuid import uuid4
 import pytest
 
 from eneo.completion_models.domain.model_capacity import ModelCapacity
-from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     build_proposal_prepared,
 )
@@ -42,6 +41,9 @@ from eneo.tokens.token_utils import count_tool_tokens
 from tests.unittests.flows.ai_builder.test_ai_builder_planner import (
     _budget_policy,
     _document_architecture_state,
+)
+from tests.unittests.flows.ai_builder.test_ai_builder_tool_questions import (
+    conversation_using_tools,
 )
 
 
@@ -313,12 +315,15 @@ def test_the_catalogue_takes_only_the_room_a_turn_without_tools_leaves(
         )
     )
 
+    # One conversation for both turns: a showing's token differs per showing.
+    conversation = conversation_using_tools({})
+
     def prepare(tool_options: SpaceToolOptions | None):
         return build_proposal_prepared(
             requirements_state=RequirementsState(),
             ui_language="en",
             slot_classification_metadata=None,
-            conversation=[ConversationMessage(role="user", content="Build the flow.")],
+            conversation=conversation,
             planning_state=_document_architecture_state(),
             attachment_context=None,
             flow_context=None,

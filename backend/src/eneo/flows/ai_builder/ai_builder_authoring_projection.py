@@ -44,6 +44,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     AssistantSpecPatch,
+    FlowInputFieldIntent,
     ModifyExistingStep,
     OrderedEditProposal,
     SemanticStepIntent,
@@ -126,6 +127,20 @@ class MaterializedOrderedEditProposal(BaseModel):
     )
 
 
+def form_field_specs(fields: Sequence[FlowInputFieldIntent]) -> list[FormFieldSpec]:
+    """The run-form fields an edit proposal's form_fields declare."""
+    return [
+        FormFieldSpec(
+            name=field.variable_name,
+            label=field.label,
+            type=field.field_type,
+            required=field.required,
+            options=list(field.options) or None,
+        )
+        for field in fields
+    ]
+
+
 def materialize_ordered_edit_proposal(
     proposal: OrderedEditProposal,
     *,
@@ -142,16 +157,7 @@ def materialize_ordered_edit_proposal(
         payload["form_fields"] = (
             None
             if proposal.form_fields is None
-            else [
-                FormFieldSpec(
-                    name=field.variable_name,
-                    label=field.label,
-                    type=field.field_type,
-                    required=field.required,
-                    options=list(field.options) or None,
-                )
-                for field in proposal.form_fields
-            ]
+            else form_field_specs(proposal.form_fields)
         )
         payload["form_field_provenance"] = {
             field.variable_name: field.provenance

@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
 from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_intent_to_spec,
+    create_run_form_fields,
 )
 from eneo.flows.ai_builder.ai_builder_create_feedback import (
     format_create_intent_quality_feedback,
@@ -38,6 +39,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     ProposalIntentArgumentError,
     ProposalObligationProjection,
+    SemanticStepIntent,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     PROPOSAL_PARSE_MODEL_FAILURE_CODE,
@@ -57,6 +59,15 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_tool_catalog import EMPTY_TOOL_CATALOG
+from eneo.flows.ai_builder.ai_builder_tool_decisions import ToolDecisions
+from eneo.flows.ai_builder.ai_builder_tool_questions import (
+    EarlierField,
+    RunForm,
+    SettledToolUses,
+    ToolUseSite,
+    settle_tool_uses,
+    users_quote_check,
+)
 from eneo.flows.ai_builder.ai_builder_tool_validation import tool_use_ref_outcome
 from eneo.flows.ai_builder.ai_builder_tools import parse_create_flow_intent_arguments
 from eneo.flows.ai_builder.planning_state import AggregationIntent
@@ -86,7 +97,9 @@ async def process_create_intent_arguments(
     prior_spec_for_revision: FlowDraftSpecCore | None = None,
     compile_context: CreateCompileContext | None = None,
     obligation_projection: ProposalObligationProjection | None = None,
+    tool_decisions: ToolDecisions | None = None,
 ) -> PreparationOutcome:
+    tool_decisions = tool_decisions or ToolDecisions()
     try:
         intent = parse_create_flow_intent_arguments(
             arguments,
@@ -109,7 +122,7 @@ async def process_create_intent_arguments(
         )
         if tool_outcome := tool_use_ref_outcome(
             (
-                (f"step {number} '{display_value(step.name)}'", step.tool_use)
+                (_tool_site_label(number, step), step.tool_use)
                 for number, step in enumerate(intent.steps, start=1)
                 if step.tool_use is not None
             ),
@@ -119,6 +132,37 @@ async def process_create_intent_arguments(
             ),
         ):
             return tool_outcome
+        sites = _create_tool_use_sites(intent)
+        settled = await settle_tool_uses(
+            sites,
+            decisions=tool_decisions,
+            catalog=tool_catalog,
+            run_form=RunForm(
+                fields=tuple(
+                    create_run_form_fields(intent, context=compile_context)[0]
+                    if sites
+                    else ()
+                ),
+                adds_fields=True,
+            ),
+            is_users_quote=users_quote_check(conversation),
+            ui_language=(
+                compile_context.ui_language if compile_context is not None else None
+            ),
+        )
+        if not isinstance(settled, SettledToolUses):
+            return settled
+        uses = iter(settled.uses)
+        intent = intent.model_copy(
+            update={
+                "steps": [
+                    step.model_copy(update={"tool_use": next(uses)})
+                    if step.tool_use is not None
+                    else step
+                    for step in intent.steps
+                ]
+            }
+        )
         field_diagnostics: list[LintWarning] = []
         spec = compile_create_intent_to_spec(
             intent,
@@ -187,6 +231,35 @@ async def process_create_intent_arguments(
             compile_context.ui_language if compile_context is not None else None
         ),
     )
+
+
+def _tool_site_label(number: int, step: SemanticStepIntent) -> str:
+    return f"step {number} '{display_value(step.name)}'"
+
+
+def _create_tool_use_sites(intent: CreateFlowIntent) -> list[ToolUseSite]:
+    """Each step's tool use, with the top-level fields the steps before it
+    declare."""
+    return [
+        ToolUseSite(
+            label=_tool_site_label(number, step),
+            step_name=step.name,
+            use=step.tool_use,
+            earlier_fields=tuple(
+                EarlierField(
+                    from_step=earlier_number,
+                    name=field.name,
+                    json_type=field.field_type,
+                )
+                for earlier_number, earlier in enumerate(
+                    intent.steps[: number - 1], start=1
+                )
+                for field in earlier.output_fields or ()
+            ),
+        )
+        for number, step in enumerate(intent.steps, start=1)
+        if step.tool_use is not None
+    ]
 
 
 def _declared_authoring(

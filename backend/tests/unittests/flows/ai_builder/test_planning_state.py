@@ -56,9 +56,9 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_twenty_three(self) -> None:
-        # v23: the focused classifier's attempt list left the persisted shape.
-        assert BUILDER_SCHEMA_VERSION == 23
+    def test_builder_schema_version_is_twenty_four(self) -> None:
+        # v24: the person's tool decisions joined the persisted shape.
+        assert BUILDER_SCHEMA_VERSION == 24
 
     def test_payload_cap_is_512_kibibytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 512 * 1024

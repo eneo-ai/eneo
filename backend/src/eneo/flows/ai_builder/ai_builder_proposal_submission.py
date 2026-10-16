@@ -10,6 +10,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
     architecture_failure_outcome,
 )
+from eneo.flows.ai_builder.ai_builder_backend_question_persistence import (
+    persist_backend_question,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     RuntimeToolCall,
     make_provider_safe_server_tool_call_id,
@@ -64,6 +67,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalObligationProjection,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_policy import resolve_ui_language
 from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     ForcedToolAfterTextRequest,
     ForcedToolContinuation,
@@ -83,6 +87,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalFailureKind,
     ProposalRepairReason,
     ProposalTurnTelemetry,
+    assistant_metadata_with_usage,
     log_proposal_failed_turn,
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
@@ -95,6 +100,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCallBudgetExhausted,
     ProposalCompleted,
     ProposalMessageGroup,
+    ProposalNeedsDecision,
     ProposalReady,
     ProposalTurnContext,
     SubmissionOutcome,
@@ -104,12 +110,17 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import ProviderWorkGate
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from eneo.flows.ai_builder.ai_builder_requirements_disclosure import resolve_locale
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
+)
+from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
+    situate_question,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderRequestBudget
 from eneo.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
     DECLINE_FLOW_CHANGE_TOOL_NAME,
 )
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
@@ -513,6 +524,7 @@ class ProposalSubmissionOwner:
                 prior_spec_for_revision=prior_spec_for_revision,
                 compile_context=compile_context,
                 obligation_projection=obligation_projection,
+                tool_decisions=planning_state.tool_decisions,
             )
         else:
             result = await process_edit_arguments(
@@ -535,6 +547,13 @@ class ProposalSubmissionOwner:
                 invocation=invocation,
                 answer=result,
                 request_id=request_id,
+                usage_tracker=usage_tracker,
+                planning_state=planning_state,
+            )
+        if isinstance(result, ProposalNeedsDecision):
+            return await self._persist_invocation_question(
+                invocation=invocation,
+                decision=result,
                 usage_tracker=usage_tracker,
                 planning_state=planning_state,
             )
@@ -602,8 +621,55 @@ class ProposalSubmissionOwner:
             planning_state=planning_state,
             flow=invocation.flow,
             outcome=answer.outcome,
+            tool_refusal=answer.tool_refusal,
         )
         return ProposalCompleted(events=answered)
+
+    async def _persist_invocation_question(
+        self,
+        *,
+        invocation: ToolRetryInvocation,
+        decision: ProposalNeedsDecision,
+        usage_tracker: ProposalTurnTelemetry | None,
+        planning_state: PlanningState,
+    ) -> ProposalCompleted:
+        """Commit a turn that asks the person a decision the draft needs.
+
+        The draft is not kept: the next turn proposes again with the answer
+        among the decided facts."""
+
+        question = decision.question
+        asked = await persist_backend_question(
+            repo=self.repo,
+            turn=invocation.turn,
+            conversation=invocation.conversation,
+            new_messages_start=invocation.new_messages_start,
+            question=replace(
+                question,
+                question_data=situate_question(
+                    question.question_data,
+                    conversation=invocation.conversation,
+                    flow=invocation.flow,
+                    planned_remaining=None,
+                    locale=resolve_locale(resolve_ui_language(invocation.conversation)),
+                    planning_state=planning_state,
+                    # The question is about the change the person asked for, so
+                    # the model's pick stays recommended in an edit too.
+                    keeps_recommendation_in_edit=True,
+                ),
+            ),
+            # The provider calls that drafted the plan are stored like any
+            # other turn's.
+            assistant_metadata=assistant_metadata_with_usage(
+                conversation=invocation.conversation,
+                base_metadata=invocation.assistant_metadata,
+                usage_tracker=usage_tracker,
+                tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
+            ),
+            planning_state=planning_state,
+            flow=invocation.flow,
+        )
+        return ProposalCompleted(events=asked.events)
 
     async def _finalize_invocation_proposal(
         self,

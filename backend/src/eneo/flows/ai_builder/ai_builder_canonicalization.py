@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, cast
 
+from eneo.flows.ai_builder.ai_builder_tool_question_ids import parse_tool_question_id
 from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 
 QUESTION_ID_ALIASES: dict[str, str] = {
@@ -149,7 +150,11 @@ def normalize_question_answer(answer: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def is_supported_structured_question_id(question_id: str) -> bool:
-    return canonical_question_id(question_id) in SUPPORTED_STRUCTURED_QUESTION_IDS
+    canonical = canonical_question_id(question_id)
+    return (
+        canonical in SUPPORTED_STRUCTURED_QUESTION_IDS
+        or parse_tool_question_id(canonical) is not None
+    )
 
 
 def supported_structured_question_ids() -> tuple[str, ...]:

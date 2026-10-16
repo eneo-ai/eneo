@@ -25,7 +25,10 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     make_persisted_assistant_tool_call,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderStreamEvent,
+    AIBuilderToolRefusal,
+)
 from eneo.flows.ai_builder.ai_builder_events import build_text_event
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     primary_input_reserved_names,
@@ -518,6 +521,7 @@ async def persist_non_plan_turn(
     planning_state: PlanningState,
     flow: "Flow | None",
     outcome: NonPlanOutcome | None = None,
+    tool_refusal: AIBuilderToolRefusal | None = None,
 ) -> tuple[AIBuilderStreamEvent, ...]:
     """Store an answered turn the same way an accepted proposal is stored.
 
@@ -553,6 +557,13 @@ async def persist_non_plan_turn(
                             "required_action": outcome.required_action,
                             "affected": list(outcome.affected),
                             "affected_remaining": outcome.affected_remaining,
+                            **(
+                                {}
+                                if tool_refusal is None
+                                else {
+                                    "tool_refusal": tool_refusal.model_dump(mode="json")
+                                }
+                            ),
                         },
                     }
                 ),
@@ -579,4 +590,4 @@ async def persist_non_plan_turn(
         flow=flow,
         planning_state=planning_state,
     )
-    return (build_text_event(message),)
+    return (build_text_event(message, tool_refusal=tool_refusal),)

@@ -45,6 +45,8 @@ from eneo.flows.ai_builder.ai_builder_requirements_disclosure import resolve_loc
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
+from eneo.flows.ai_builder.ai_builder_tool_question_ids import parse_tool_question_id
+from eneo.flows.ai_builder.ai_builder_tool_questions import tool_answer_is_valid
 from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_FIELD_NAME_MAX_LENGTH,
     is_named_result_location_id,
@@ -525,6 +527,16 @@ def _validated_structured_question_answer(
 
     if not question_answer_has_real_payload(answer):
         _raise_invalid_question_payload("empty_question_answer")
+
+    if parse_tool_question_id(canonical_question_id(question_id)) is not None:
+        # Its options are built for the showing, so the showing is the one
+        # list of what an answer may pick.
+        if not tool_answer_is_valid(
+            answer,
+            shown=latest_shown_question(conversation, question_id=question_id),
+        ):
+            _raise_invalid_question_payload("unsupported_question_value")
+        return answer
 
     if _has_unsupported_slot_value(answer, question_id):
         _raise_invalid_question_payload("unsupported_question_value")

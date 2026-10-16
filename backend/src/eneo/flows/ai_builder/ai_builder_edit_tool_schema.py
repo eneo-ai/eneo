@@ -103,10 +103,12 @@ def build_edit_flow_tool_schema(
             "step": step_payload_schema,
         },
     }
+    # A tool step may be removed too: removing needs no catalogue, and a step
+    # that still reads it is refused or repaired by the final flow's checks.
     removable_refs = (
-        changeable_refs
+        valid_refs
         if permissions is None
-        else [ref for ref in changeable_refs if ref in permissions.removable_step_refs]
+        else [ref for ref in valid_refs if ref in permissions.removable_step_refs]
     )
 
     properties: dict[str, Any] = {

@@ -52,6 +52,7 @@ TOOL_CATALOG_UNAVAILABLE_MAX_CHARS = 2_000
 # else the space offers never changes a ref. 48 bits leave two tools of one
 # space sharing a ref (``_mint_refs``) a chance far below any real space's.
 TOOL_REF_HEX_DIGITS = 12
+TOOL_REF_PATTERN = rf"^tool_[0-9a-f]{{{TOOL_REF_HEX_DIGITS}}}$"
 
 ToolSchemaState = Literal["included", "over_budget", "none_declared"]
 
@@ -111,10 +112,20 @@ class AIBuilderToolCatalogLeftOut:
     kind: Literal["left_out"] = "left_out"
 
 
+@dataclass(frozen=True, slots=True)
+class AIBuilderToolCatalogNotOffered:
+    """A create session whose person has not said to use the space's tools,
+    or said not to: the prompt lists none and the step schema offers no
+    tool_use."""
+
+    kind: Literal["not_offered"] = "not_offered"
+
+
 AIBuilderToolCatalogProjection: TypeAlias = (
     AIBuilderToolCatalogListed
     | AIBuilderToolCatalogTooLarge
     | AIBuilderToolCatalogLeftOut
+    | AIBuilderToolCatalogNotOffered
 )
 
 
@@ -148,6 +159,18 @@ class AIBuilderToolCatalog:
             (
                 option
                 for option in self.usable_by_ref.values()
+                if (option.mcp_server_id, option.tool_id) == (server_id, tool_id)
+            ),
+            None,
+        )
+
+    def ref_of_usable(self, server_id: UUID, tool_id: UUID) -> str | None:
+        """The ref of the usable tool with these ids, None when the space has
+        none."""
+        return next(
+            (
+                ref
+                for ref, option in self.usable_by_ref.items()
                 if (option.mcp_server_id, option.tool_id) == (server_id, tool_id)
             ),
             None,
@@ -324,7 +347,9 @@ def _reductions(
 def render_tool_catalog_block(projection: AIBuilderToolCatalogProjection) -> str:
     """The planner's read-only view of the usable tools; empty when the
     space has none."""
-    if isinstance(projection, AIBuilderToolCatalogLeftOut):
+    if isinstance(
+        projection, AIBuilderToolCatalogLeftOut | AIBuilderToolCatalogNotOffered
+    ):
         return ""
     if isinstance(projection, AIBuilderToolCatalogTooLarge):
         return (

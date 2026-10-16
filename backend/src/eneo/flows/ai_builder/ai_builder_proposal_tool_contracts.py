@@ -17,6 +17,7 @@ from typing import (
 )
 from uuid import UUID
 
+from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     FlowBuilderProposalContent,
@@ -28,7 +29,10 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderKnownProviderRejectionException,
     build_ai_builder_request_budget_exhausted_error,
 )
-from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderStreamEvent,
+    AIBuilderToolRefusal,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
 )
@@ -406,6 +410,13 @@ NonPlanKind: TypeAlias = Literal[
     # The request needs an MCP tool the space may not use, or whose input
     # schema no flow can check.
     "tool_not_usable",
+    # The plan uses MCP tools more often than one flow's decisions hold.
+    "too_many_tool_uses",
+    # One use of a tool needs more values from the person than its decisions
+    # hold.
+    "too_many_tool_arguments",
+    # A tool argument allows only numbers a flow cannot save exactly.
+    "tool_argument_values_not_exact",
 ]
 RequiredAction: TypeAlias = Literal[
     "none",
@@ -513,6 +524,17 @@ class ProposalAnswer:
     outcome: NonPlanOutcome | None = None
     # The failure codes behind an answer that replaced a failed proposal.
     codes: frozenset[str] = frozenset()
+    # Why a tool the request needs cannot be used, for the web to show.
+    tool_refusal: AIBuilderToolRefusal | None = None
+
+
+@dataclass(frozen=True)
+class ProposalNeedsDecision:
+    """The draft needs a decision only the person can make (which tool, where
+    an argument comes from): the turn asks it and proposes nothing. The next
+    turn reads the answer back (``PlanningState.tool_decisions``)."""
+
+    question: BackendQuestion
 
 
 @dataclass(frozen=True)
@@ -560,7 +582,11 @@ class ProposalCompleted:
 
 
 PreparationOutcome: TypeAlias = (
-    ProposalReady | ProposalAnswer | CorrectableFailure | TerminalFailure
+    ProposalReady
+    | ProposalAnswer
+    | ProposalNeedsDecision
+    | CorrectableFailure
+    | TerminalFailure
 )
 SubmissionOutcome: TypeAlias = ProposalCompleted | CorrectableFailure | TerminalFailure
 

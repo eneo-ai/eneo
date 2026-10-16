@@ -2597,6 +2597,23 @@ def _parse_classification_evidence(
     return tuple(evidence)
 
 
+def quote_from_unprompted_user_message(
+    quote: str, *, classification_input: SlotClassificationInput
+) -> bool:
+    """Whether ``quote`` is the user's own words in a message they wrote
+    unprompted: the evidence a classification may call explicit
+    (``_validated_evidence_level``), admitted by the same parser."""
+
+    return any(
+        _parse_classification_evidence(
+            [{"source_id": source.source_id, "quote": quote}],
+            classification_input=classification_input,
+        )
+        for source in classification_input.sources
+        if source.kind == "user_message" and source.question_id is None
+    )
+
+
 def _parse_example_output_constraints(
     raw_value: object,
     *,

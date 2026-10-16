@@ -605,9 +605,9 @@ def compile_edit_proposal(
 def _refuse_changes_to_kept_steps(
     proposal: OrderedEditProposal, tool_step_refs: frozenset[str]
 ) -> None:
-    """An edit changes a tool step's tool use and nothing else of it, removes
-    none, and gives a tool use to no other step: the edit schema offers no
-    more, and no proposal makes more."""
+    """An edit changes a tool step's tool use and nothing else of it (or
+    removes it), and gives a tool use to no other step: the edit schema offers
+    no more, and no proposal makes more."""
 
     modifications = [
         step for step in proposal.steps if isinstance(step, ModifyExistingStep)
@@ -617,12 +617,12 @@ def _refuse_changes_to_kept_steps(
         for step in modifications
         if step.existing_step_ref in tool_step_refs
         and step.authored_fields - {"tool_use"}
-    } | (proposal.removed_existing_step_refs & tool_step_refs)
+    }
     if changed:
         raise AIBuilderBadRequestException(
             f"Steps {', '.join(sorted(changed))} read an MCP tool: an edit "
-            "changes only their tool_use, or lists each with kind=keep and "
-            "nothing else.",
+            "changes only their tool_use, removes them, or lists each with "
+            "kind=keep and nothing else.",
             code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
             context={"step_refs": sorted(changed)},
         )

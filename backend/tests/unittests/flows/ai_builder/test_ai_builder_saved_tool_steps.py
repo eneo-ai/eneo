@@ -376,7 +376,7 @@ def test_a_tool_read_that_no_producer_fits_is_repaired_at_the_producer() -> None
 
 
 def test_no_turn_is_offered_a_change_to_a_tool_step() -> None:
-    # Kills: a tool step offered for modify or removal; a step turned into a
+    # Kills: a tool step offered for modify; a step turned into a
     # tool step; the edit context without a tool step's arguments.
     flow = _seab()
     context = build_flow_context(flow, is_edit_mode=True)
@@ -387,33 +387,40 @@ def test_no_turn_is_offered_a_change_to_a_tool_step() -> None:
     assert modify["properties"]["existing_step_ref"]["enum"] == [S3, S4]
     assert "tool" not in modify["properties"]["input_source"]["enum"]
     assert keep["properties"]["existing_step_ref"]["enum"] == [S1, S2, S3, S4]
+    # Removing a tool step needs no catalogue (test_ai_builder_tool_steps).
     assert schema["properties"]["removed_existing_step_refs"]["items"]["enum"] == [
+        S1,
+        S2,
         S3,
         S4,
     ]
 
 
-@pytest.mark.parametrize(
-    ("steps", "removed"),
-    [
-        ([*_keep(S1, S3, S4)], frozenset({S2})),
-        (
-            [
-                *_keep(S1),
-                ModifyExistingStep(existing_step_ref=S2, name="Ny"),
-                *_keep(S3, S4),
-            ],
-            frozenset(),
-        ),
-    ],
-    ids=["remove", "modify"],
-)
-def test_a_compiled_change_to_a_tool_step_is_refused(
-    steps: list[ModifyExistingStep], removed: frozenset[str]
-) -> None:
+def test_a_compiled_change_to_a_tool_step_is_refused() -> None:
     # Kills: the keep-only rule resting on the provider's schema alone.
     with pytest.raises(AIBuilderBadRequestException, match="read an MCP tool"):
-        _apply(_seab(), *steps, removed=removed)
+        _apply(
+            _seab(),
+            *_keep(S1),
+            ModifyExistingStep(existing_step_ref=S2, name="Ny"),
+            *_keep(S3, S4),
+        )
+
+
+def test_a_tool_step_is_removed_unless_a_kept_step_still_reads_it() -> None:
+    # Kills: removing a tool step refused, a removed tool step kept as
+    # saved, a kept step left reading the tool step the edit removed.
+    flow = _seab()
+    validation, changeset = _apply(flow, *_keep(S1, S3, S4), removed=frozenset({S2}))
+    with pytest.raises(AIBuilderBadRequestException, match="still read"):
+        _apply(_seab(), *_keep(S2, S3, S4), removed=frozenset({S1}))
+
+    assert validation.errors == []
+    assert [step.input_config for step in changeset.compiled_steps] == [
+        flow.steps[0].input_config,
+        None,
+        None,
+    ]
 
 
 def test_a_name_another_step_takes_from_a_tool_step_is_suffixed_on_that_step() -> None:
