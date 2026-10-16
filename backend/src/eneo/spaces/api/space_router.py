@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
@@ -74,6 +75,9 @@ from eneo.spaces.api.space_models import (
 from eneo.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 
 if TYPE_CHECKING:
+    from eneo.integration.domain.entities.integration_knowledge import (
+        IntegrationKnowledge,
+    )
     from eneo.spaces.space import Space
 
 logger = logging.getLogger(__name__)
@@ -877,6 +881,29 @@ async def create_space_websites(
     return WebsitePublic.from_domain(created_website)
 
 
+async def _audit_integration_knowledge(
+    container: Container,
+    *,
+    action: ActionType,
+    knowledge: "IntegrationKnowledge",
+    space: "Space | None",
+    description: str,
+    extra: Mapping[str, object] | None = None,
+) -> None:
+    user = container.user()
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=action,
+        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
+        entity_id=knowledge.id,
+        description=description,
+        metadata=AuditMetadata.standard(
+            actor=user, target=knowledge, space=space, extra=extra
+        ),
+    )
+
+
 @router.post(
     "/{id}/knowledge/integrations/add/{user_integration_id}/",
     response_model=JobPublic,
@@ -896,7 +923,6 @@ async def create_space_integration_knowledge(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
-    user = container.user()
 
     knowledge, job = await service.create_space_integration_knowledge(
         user_integration_id=user_integration_id,
@@ -929,18 +955,13 @@ async def create_space_integration_knowledge(
         },
     }
 
-    # Audit logging
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        user=user,
+    await _audit_integration_knowledge(
+        container,
         action=ActionType.INTEGRATION_KNOWLEDGE_CREATED,
-        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
-        entity_id=knowledge.id,
+        knowledge=knowledge,
+        space=space,
         description=f"Added {knowledge.integration_type} knowledge '{knowledge.name}' to space '{space.name if space else 'unknown'}'",
-        metadata=AuditMetadata.standard(
-            actor=user, target=knowledge, space=space, extra=extra
-        ),
+        extra=extra,
     )
 
     # Return job for frontend to track progress (like file upload does)
@@ -967,7 +988,6 @@ async def create_space_integration_knowledge_batch(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
-    user = container.user()
 
     batch_results = await service.create_space_integration_knowledge_batch(
         user_integration_id=user_integration_id,
@@ -996,7 +1016,6 @@ async def create_space_integration_knowledge_batch(
     except Exception:
         pass
 
-    audit_service = container.audit_service()
     response_items: list[CreateSpaceIntegrationKnowledgeBatchResult] = []
     created_count = 0
     failed_count = 0
@@ -1031,19 +1050,13 @@ async def create_space_integration_knowledge_batch(
                 "batch": {"total_items": len(data.items)},
             }
 
-            await audit_service.log_async(
-                tenant_id=user.tenant_id,
-                user=user,
+            await _audit_integration_knowledge(
+                container,
                 action=ActionType.INTEGRATION_KNOWLEDGE_CREATED,
-                entity_type=EntityType.INTEGRATION_KNOWLEDGE,
-                entity_id=knowledge.id,
+                knowledge=knowledge,
+                space=space,
                 description=f"Added {knowledge.integration_type} knowledge '{knowledge.name}' to space '{space.name if space else 'unknown'}' (batch)",
-                metadata=AuditMetadata.standard(
-                    actor=user,
-                    target=knowledge,
-                    space=space,
-                    extra=extra,
-                ),
+                extra=extra,
             )
             continue
 
