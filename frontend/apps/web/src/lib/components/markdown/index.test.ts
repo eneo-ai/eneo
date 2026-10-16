@@ -58,7 +58,8 @@ describe("lexing time", () => {
     "many empty fences": "$$\n$$\n\n".repeat(8000),
     "many fences without blank lines": "a\n$$\nx\n$$\n".repeat(4000),
     "many tag lines without blank lines": "a\n<b>x</b>\n".repeat(4000),
-    "many unclosed openers": "\\(a \\[b ".repeat(8000)
+    "many unclosed openers": "\\(a \\[b ".repeat(8000),
+    "many formulas in emphasis": "*$a*b$* och **c** ~~$d~e$~~ ".repeat(8000)
   };
 
   for (const [name, source] of Object.entries(answers)) {

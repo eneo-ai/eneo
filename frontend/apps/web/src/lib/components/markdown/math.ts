@@ -6,7 +6,7 @@
  * with web-next; both apps are tested against its cases.json.
  */
 import { canCloseDollar, canOpenDollar } from "@eneo/markdown-math";
-import type { Token, TokenizerAndRendererExtension, TokenizerThis } from "marked";
+import type { Token, TokenizerAndRendererExtension, TokenizerThis, Tokens } from "marked";
 import type { EneoMathToken } from "./CustomComponents";
 
 type InlineMath = { raw: string; text: string; displayDelimiter: boolean };
@@ -32,7 +32,8 @@ function matchBracket(src: string, displayDelimiter: boolean): InlineMath | unde
 /**
  * `$$…$$` as remark-math reads it in web-next: the closing run is as long as
  * the opening one, a run of another length is part of the formula, and a
- * backslash escapes nothing.
+ * backslash escapes nothing. An empty pair is matched with an empty `text`:
+ * it is no formula, but its closing run opens none either.
  */
 function matchDollars(src: string, open: number): InlineMath | undefined {
   for (let i = open; i < src.length;) {
@@ -43,8 +44,11 @@ function matchDollars(src: string, open: number): InlineMath | undefined {
     let run = 0;
     while (src[i + run] === "$") run++;
     if (run === open) {
-      const text = src.slice(open, i).trim();
-      return text ? { raw: src.slice(0, i + run), text, displayDelimiter: true } : undefined;
+      return {
+        raw: src.slice(0, i + run),
+        text: src.slice(open, i).trim(),
+        displayDelimiter: true
+      };
     }
     i += run;
   }
@@ -107,14 +111,42 @@ const inlineMath: TokenizerAndRendererExtension = {
     const at = src.search(this.lexer.options.breaks ? textOrLineEnd : textEnd);
     return src[at] === "$" ? at : -1;
   },
-  tokenizer(src: string, tokens: Token[]): EneoMathToken | undefined {
+  tokenizer(src: string, tokens: Token[]): EneoMathToken | Tokens.Text | undefined {
     // Only a `$` needs the character before it.
     const prev = src[0] === "$" ? charBefore(src, tokens) : undefined;
     const match = matchInlineMath(src, prev);
     if (!match) return;
+    if (!match.text) return { type: "text", raw: match.raw, text: match.raw };
     return { type: "eneoMath", level: "inline", display: false, ...match };
   }
 };
+
+/**
+ * `masked` with each `*`, `_` and `~` inside a formula of `src` replaced, for
+ * marked to look for the end of emphasis and strikethrough in. A formula is
+ * read before them, as remark-math reads it in web-next, so `*$x*y$*` is one
+ * formula in italics. `masked` is marked's copy of `src`, the same length,
+ * with code spans, links and tags covered: those never hold math.
+ */
+export function hideMathDelimiters(src: string, masked = src) {
+  let out = "";
+  let from = 0;
+  for (let i = 0; i < src.length; i++) {
+    const char = src[i];
+    // marked covers an escape with `+`, and anything else with other characters.
+    if ((char !== "$" && char !== "\\") || (masked[i] !== char && masked[i] !== "+")) continue;
+    const match = matchInlineMath(src.slice(i), src[i - 1]);
+    if (!match) {
+      if (char === "\\") i++;
+      continue;
+    }
+    const end = i + match.raw.length;
+    out += masked.slice(from, i) + masked.slice(i, end).replace(/[*_~]/g, "a");
+    from = end;
+    i = end - 1;
+  }
+  return from === 0 ? masked : out + masked.slice(from);
+}
 
 // A `$$` fence, as web-next reads it: `$$` alone on its line, TeX inside
 // (blank lines allowed), and a closing line of at least as many `$`. Text

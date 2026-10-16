@@ -15,7 +15,8 @@ import {
   katexOptions
 } from "@eneo/markdown-math";
 import type { Nodes, Paragraph, Parent, Root } from "mdast";
-import type { InlineMath, Math } from "mdast-util-math";
+import { mathFromMarkdown, type InlineMath, type Math } from "mdast-util-math";
+import { math } from "micromark-extension-math";
 import { markdownLineEnding } from "micromark-util-character";
 import type {
   Code,
@@ -26,7 +27,6 @@ import type {
   TokenizeContext
 } from "micromark-util-types";
 import rehypeKatex from "rehype-katex";
-import remarkMath from "remark-math";
 import type { MathPlugin } from "streamdown";
 import type { Processor } from "unified";
 
@@ -383,15 +383,17 @@ function rewrite(parent: Parent, source: string) {
   }
 }
 
+/**
+ * remark-math, put together from the same two packages, with its `$$` fence
+ * guarded and our constructs added after its own, so they are tried first.
+ */
 function remarkLlmMath(this: Processor) {
-  remarkMath.call(this as never, { singleDollarTextMath: false });
-  const data = this.data() as { micromarkExtensions?: Extension[] };
-  const extensions = (data.micromarkExtensions ??= []);
-  const math = extensions.at(-1); // the one remark-math just added
-  const fence = math?.flow?.[DOLLAR];
-  if (math && fence && !Array.isArray(fence)) math.flow = { [DOLLAR]: guardFence(fence) };
-  // Added after remark-math, so these constructs are tried first.
-  extensions.push(llmMathSyntax);
+  const syntax = math({ singleDollarTextMath: false });
+  const fence = syntax.flow?.[DOLLAR];
+  if (fence && !Array.isArray(fence)) syntax.flow = { [DOLLAR]: guardFence(fence) };
+  const data = this.data();
+  (data.micromarkExtensions ??= []).push(syntax, llmMathSyntax);
+  (data.fromMarkdownExtensions ??= []).push(mathFromMarkdown());
   return (tree: Root, file: { value: unknown }) => rewrite(tree, String(file.value));
 }
 

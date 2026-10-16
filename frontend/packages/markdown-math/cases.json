@@ -479,6 +479,73 @@
       "input": "Formel:\n\n$$\nx^2",
       "math": [],
       "literal": ["$$", "x^2"]
+    },
+    {
+      "name": "star inside math in italics",
+      "input": "*$x*y$*",
+      "math": [
+        {
+          "display": false,
+          "tex": "x*y"
+        }
+      ]
+    },
+    {
+      "name": "stars inside math in bold",
+      "input": "**Svar: $a**b$**",
+      "math": [
+        {
+          "display": false,
+          "tex": "a**b"
+        }
+      ],
+      "literal": ["Svar:"]
+    },
+    {
+      "name": "tildes inside math in strikethrough",
+      "input": "~~$a~~b$~~",
+      "math": [
+        {
+          "display": false,
+          "tex": "a~~b"
+        }
+      ]
+    },
+    {
+      "name": "underscores inside math in italics",
+      "input": "_$x_1$ och $y_1$_",
+      "math": [
+        {
+          "display": false,
+          "tex": "x_1"
+        },
+        {
+          "display": false,
+          "tex": "y_1"
+        }
+      ],
+      "literal": ["och"]
+    },
+    {
+      "name": "star inside paren math in italics",
+      "input": "*\\(x*y\\)*",
+      "math": [
+        {
+          "display": false,
+          "tex": "x*y"
+        }
+      ]
+    },
+    {
+      "name": "empty pair before a formula",
+      "input": "$$ $$ och $$x$$",
+      "math": [
+        {
+          "display": false,
+          "tex": "x"
+        }
+      ],
+      "literal": ["$$ $$ och"]
     }
   ]
 }

@@ -1,6 +1,6 @@
-import { Marked, Tokenizer, type TokenizerAndRendererExtension } from "marked";
+import { Lexer, Marked, Tokenizer, type Token, type TokenizerAndRendererExtension } from "marked";
 import type { EneoFileToken, EneoInrefToken, EneoMentionToken } from "./CustomComponents";
-import { mathExtensions, promoteDisplayMath, startsMathFence } from "./math.js";
+import { hideMathDelimiters, mathExtensions, promoteDisplayMath, startsMathFence } from "./math.js";
 
 export { default as Markdown } from "./Markdown.svelte";
 export { sanitizeImageSrc, sanitizeLinkHref, sanitizeWebHref } from "./sanitizeUrl.js";
@@ -29,6 +29,30 @@ function blockStart(src: string) {
     if (startsMathFence(src, end + 1)) return end + 1;
   }
   return -1;
+}
+
+type InlineText = { src: string; forEmphasis?: string; forStrikethrough?: string };
+
+/**
+ * Keeps the inline text marked is lexing, so emphasis and strikethrough can
+ * look for their end with the delimiters inside formulas hidden, worked out
+ * once per text. marked 18 has a hook for this, `emStrongMask`.
+ */
+class MathAwareLexer extends Lexer {
+  inlineTexts: InlineText[] = [];
+
+  override inlineTokens(src: string, tokens?: Token[]) {
+    this.inlineTexts.push({ src });
+    try {
+      return super.inlineTokens(src, tokens);
+    } finally {
+      this.inlineTexts.pop();
+    }
+  }
+}
+
+function inlineText(tokenizer: Tokenizer) {
+  return (tokenizer.lexer as MathAwareLexer).inlineTexts.at(-1);
 }
 
 export function eneoMarkdownLexer({
@@ -146,13 +170,30 @@ export function eneoMarkdownLexer({
       lheading(src) {
         const end = blockStart(src.slice(1));
         return end === -1 ? false : Tokenizer.prototype.lheading.call(this, src.slice(0, end + 1));
+      },
+      emStrong(src, maskedSrc, prevChar) {
+        const text = inlineText(this);
+        if (!text || (src[0] !== "*" && src[0] !== "_")) return false;
+        text.forEmphasis ??= hideMathDelimiters(text.src, maskedSrc);
+        return Tokenizer.prototype.emStrong.call(this, src, text.forEmphasis, prevChar);
+      },
+      // marked's own, read where the formulas' delimiters are hidden.
+      del(src) {
+        const text = inlineText(this);
+        if (!text || src[0] !== "~") return false;
+        text.forStrikethrough ??= hideMathDelimiters(text.src);
+        const cap = this.rules.inline.del.exec(text.forStrikethrough.slice(-src.length));
+        if (!cap) return;
+        const raw = src.slice(0, cap[0].length);
+        const inner = raw.slice(cap[1].length, -cap[1].length);
+        return { type: "del", raw, text: inner, tokens: this.lexer.inlineTokens(inner) };
       }
     }
   });
 
   return {
     lex(source: string) {
-      return promoteDisplayMath(instance.lexer(source));
+      return promoteDisplayMath(new MathAwareLexer(instance.defaults).lex(source));
     }
   };
 }
