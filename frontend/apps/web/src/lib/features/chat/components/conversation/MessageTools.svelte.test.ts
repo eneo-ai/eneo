@@ -1,4 +1,4 @@
-import type { ConversationMessage } from "@eneo/eneo-js";
+import type { ConversationMessage, InfoBlob } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it, vi } from "vitest";
@@ -29,8 +29,19 @@ vi.mock("$lib/features/chat/MessageContext.svelte", () => ({
 vi.mock("$lib/features/knowledge/FaviconUrlService.svelte", () => ({
   getFaviconUrlService: () => ({ getFavicon: () => "" })
 }));
+vi.mock("$lib/core/Eneo", () => ({
+  getEneo: () => ({
+    infoBlobs: {
+      get: async (blob: InfoBlob) => ({ ...blob, text: "Dokumentets text" })
+    }
+  })
+}));
 
 import MessageTools from "./MessageTools.svelte";
+
+function reference(id: string, title: string, url: string | null): InfoBlob {
+  return { id, metadata: { url, title }, source_metadata: [] } as unknown as InfoBlob;
+}
 
 function show({
   partner,
@@ -39,7 +50,7 @@ function show({
   isLast = true
 }: {
   partner: Record<string, unknown>;
-  references?: Array<{ id: string; metadata: { url?: string; title?: string } }>;
+  references?: InfoBlob[];
   isLoading?: boolean;
   isLast?: boolean;
 }) {
@@ -89,11 +100,37 @@ describe("MessageTools knowledge notice", () => {
   it("shows the references toggle instead when the reply cites sources", async () => {
     show({
       partner: injectAssistant,
-      references: [{ id: "ref-1", metadata: { url: "https://example.test", title: "Doc" } }]
+      references: [reference("ref-1", "Doc", "https://example.test")]
     });
     await expect
       .element(page.getByRole("button", { name: new RegExp(m.references()) }))
       .toBeVisible();
     expect(page.getByText(m.chat_no_sources_found()).query()).toBeNull();
+  });
+});
+
+describe("MessageTools references", () => {
+  it("links a reference only to a stored http(s) address and previews the rest", async () => {
+    show({
+      partner: injectAssistant,
+      references: [
+        reference("a", "Riktlinje", "https://kommun.se/riktlinje"),
+        reference("b", "Planterad", "javascript:alert(document.cookie)")
+      ]
+    });
+
+    await page.getByRole("button", { name: new RegExp(m.references()) }).click();
+
+    await expect
+      .element(page.getByRole("link", { name: /Riktlinje/ }))
+      .toHaveAttribute("href", "https://kommun.se/riktlinje");
+    expect(page.getByRole("link", { name: /Planterad/ }).elements()).toHaveLength(0);
+    expect(document.body.innerHTML.toLowerCase()).not.toContain("javascript:");
+
+    // The unsafe one opens the document's preview instead.
+    await page.getByRole("button", { name: /Planterad/ }).click();
+    await expect
+      .element(page.getByRole("dialog", { name: "Planterad" }).getByText("Dokumentets text"))
+      .toBeVisible();
   });
 });

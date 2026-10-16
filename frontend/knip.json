@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignore": ["**/paraglide/**", "**/tests/**", "scripts/fixtures/**"],
+  "ignore": ["**/tests/**", "scripts/fixtures/**"],
   "ignoreDependencies": ["@eneo/icons.*", "prettier", "prettier-plugin-.*"],
   "ignoreWorkspaces": ["apps/docs-site"],
   "rules": {
@@ -19,7 +19,7 @@
     },
     "apps/web": {
       "entry": ["src/hooks.ts"],
-      "ignore": ["src/lib/paraglide/**", "plugins/fixtures/**"]
+      "ignore": ["plugins/fixtures/**"]
     },
     "apps/web-next": {
       "entry": [
@@ -32,9 +32,7 @@
       "entry": ["src/lib/index.ts"],
       "ignore": ["src/icons/Icon.svelte"]
     },
-    "packages/eneo-js": {
-      "ignoreDependencies": ["openapi-typescript"]
-    },
+    "packages/eneo-js": {},
     "packages/eslint-plugin": {}
   }
 }

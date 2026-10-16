@@ -200,6 +200,8 @@ class Completion:
     stop: bool = False
     error: Optional[str] = None
     error_code: Optional[int] = None
+    # Public reason for an ERROR event, e.g. ``provider_unreachable``.
+    error_reason: Optional[str] = None
     usage: Optional[TokenUsage] = None
     # Cumulative request-payload count when at least one provider round omitted
     # prompt usage. Provider-reported usage remains separate and authoritative.
