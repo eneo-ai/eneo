@@ -1,4 +1,4 @@
-import { isLocator } from "$lib/features/file-preview/selection";
+import { isLocator } from "$lib/features/file-preview/passageLocator";
 
 /**
  * A quote from a file, carried in the text of a question.

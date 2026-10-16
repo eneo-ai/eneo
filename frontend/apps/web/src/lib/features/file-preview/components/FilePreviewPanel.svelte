@@ -1,7 +1,6 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import { setFileImageUrls } from "$lib/components/markdown/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { pickFileIcon } from "$lib/core/formatting/pickFileIcon";
   import { fileExtension } from "$lib/core/formatting/fileExtension";
@@ -40,8 +39,6 @@
   let { preview, versionsOf, exportOf, contents, onoverview, sheet = false }: Props = $props();
 
   const attachmentUrls = getAttachmentUrlService();
-  // A document shows the images it names by file, to a reader who may open them.
-  setFileImageUrls((fileId) => attachmentUrls.getUrl({ id: fileId }));
 
   // Keep the existing renderer mounted while its replacement is prepared.
   const keepingFile = $derived(!!preview.file && !!preview.content && preview.status === "ready");

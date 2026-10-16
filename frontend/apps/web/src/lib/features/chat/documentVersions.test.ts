@@ -71,6 +71,29 @@ describe("conversation documents", () => {
     expect(versionsOf(ID.chart)).toEqual([]);
   });
 
+  it("continues a document with the version a reader saved of it", () => {
+    const saved = {
+      ...file("66666666-6666-6666-6666-666666666666", "Plan.md"),
+      revises_file_id: ID.plan3
+    };
+    const { documents, latestOf } = conversationDocuments(
+      [
+        ...messages.slice(0, 2),
+        { ...messages[2], generated_files: [file(ID.plan3, "Plan.md"), saved] }
+      ],
+      recorded
+    );
+
+    expect(documents).toHaveLength(1);
+    expect(documents[0].versions.map((version) => version.id)).toEqual([
+      ID.plan1,
+      ID.plan2,
+      ID.plan3,
+      saved.id
+    ]);
+    expect(latestOf(ID.plan1)?.id).toBe(saved.id);
+  });
+
   it("keeps the same content in another format as a document of its own", () => {
     const { documents } = conversationDocuments(
       [

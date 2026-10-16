@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { Markdown } from "$lib/components/markdown/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { tick } from "svelte";
@@ -14,6 +13,7 @@
     watchSelection,
     type SelectedPassage
   } from "../selection";
+  import DocumentEditor from "./DocumentEditor.svelte";
   import DocxPreview from "./DocxPreview.svelte";
   import PdfPreview from "./PdfPreview.svelte";
   import TablePreview from "./TablePreview.svelte";
@@ -31,8 +31,9 @@
 
   let { content, title, highlight, onquote, onready, onerror }: Props = $props();
 
+  // A Word document and the editor report readiness themselves.
   $effect(() => {
-    if (content.kind === "docx" || content.kind === "pdf") return;
+    if (content.kind === "docx" || content.kind === "pdf" || content.kind === "markdown") return;
     const ready = onready;
     let active = true;
     void tick().then(() => {
@@ -51,10 +52,11 @@
   /** A selection and where it is, measured from the preview's top left corner. */
   type Placed = { text: string; range: Range; centre: number; top: number; bottom: number };
 
-  // A Word document lives in a frame with a selection of its own; every other
-  // renderer draws into the page, whose selection counts while it lies wholly
-  // inside the preview. A PDF's text belongs to the browser's viewer and can
-  // be reached by neither.
+  // A Word document lives in a frame with a selection of its own; a plain text
+  // file draws into the page, whose selection counts while it lies wholly
+  // inside the preview. A Markdown document's editor places its own quote
+  // action; a PDF's text belongs to the browser's viewer and can be reached by
+  // none of these.
   let frameSelection = $state.raw<Placed | null>(null);
   let pageSelection = $state.raw<Placed | null>(null);
   const selection = $derived(frameSelection ?? pageSelection);
@@ -76,7 +78,7 @@
   }
 
   $effect(() => {
-    if (!body) return;
+    if (!body || content.kind !== "text") return;
     const watch = watchSelection(document, {
       within: () => body,
       report: (passage) => (pageSelection = place(passage))
@@ -120,12 +122,12 @@
     if (pageSelection) document.getSelection()?.removeAllRanges();
   }
 
-  // Marks the highlighted passage in content drawn into the page; a Word
-  // document marks its own frame.
+  // Marks the highlighted passage in text drawn into the page; a Word
+  // document marks its own frame, and the editor its document.
   $effect(() => {
     const passage = highlight;
     const root = body;
-    if (!root || content.kind === "docx" || content.kind === "pdf") return;
+    if (!root || content.kind !== "text") return;
     let current = true;
     // After the table has switched to the sheet the passage is on.
     void tick().then(() => {
@@ -167,7 +169,7 @@
   {:else}
     <div class="min-h-0 flex-1 overflow-auto">
       {#if content.kind === "markdown"}
-        <Markdown source={content.text} breaks={false} class="mx-auto max-w-[72ch] p-6 text-base" />
+        <DocumentEditor markdown={content.text} {highlight} {onquote} {onready} />
       {:else}
         <pre class="p-6 font-mono text-sm break-words whitespace-pre-wrap">{content.text}</pre>
       {/if}
@@ -202,7 +204,7 @@
 </div>
 
 <style>
-  /* The mark painted by markPassages (../selection.ts) on content in the page. */
+  /* The mark painted by markPassages (../selection.ts) on text drawn into the page. */
   :global(::highlight(file-preview-quote)) {
     background-color: var(--warning-dimmer);
   }
