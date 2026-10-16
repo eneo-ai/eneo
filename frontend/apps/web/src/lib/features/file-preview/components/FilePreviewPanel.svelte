@@ -86,9 +86,11 @@
   const latest = $derived(later ? versions[versions.length - 1] : null);
   // The type and size under the title; a draft and an older version say
   // something else there.
-  const detail = $derived(
-    draft || latest ? undefined : `${extension}${bytes > 0 ? ` · ${formatBytes(bytes)}` : ""}`
-  );
+  const detail = $derived.by(() => {
+    if (draft || latest) return undefined;
+    const size = `${extension}${bytes > 0 ? ` · ${formatBytes(bytes)}` : ""}`;
+    return file?.revises_file_id ? `${size} · ${m.file_preview_edited_by_you()}` : size;
+  });
 
   const exporting = $derived(file ? (exportOf?.(file) ?? null) : null);
   let busy = $state<"docx" | "pdf" | null>(null);
@@ -220,20 +222,32 @@
   // The content components by file, for the document text the reader has edited.
   let contentOf = $state<Record<string, FilePreviewContent>>({});
 
-  async function saveEdits() {
-    const current = file;
-    if (!current || !saver || !preview.dirty || saving) return;
-    const markdown = contentOf[current.id]?.getMarkdown();
-    if (markdown === null || markdown === undefined) return;
+  async function saveAs(target: DocumentSaver, markdown: string) {
     saving = true;
     try {
-      const version = await saver.save(markdown);
+      const version = await target.save(markdown);
       preview.saved(version, markdown);
     } catch {
       toast.error(m.file_preview_save_failed());
     } finally {
       saving = false;
     }
+  }
+
+  async function saveEdits() {
+    const current = file;
+    if (!current || !saver || !preview.dirty || saving) return;
+    const markdown = contentOf[current.id]?.getMarkdown();
+    if (markdown !== null && markdown !== undefined) await saveAs(saver, markdown);
+  }
+
+  // An older version is read, not edited; its text can be brought forward as
+  // the newest version instead, as the reader's edit of the latest one.
+  const restorer = $derived(latest ? (saverOf?.(latest) ?? null) : null);
+  const restorable = $derived(!!restorer && content?.kind === "markdown" && !draft);
+  async function restoreVersion() {
+    if (!restorer || content?.kind !== "markdown" || saving) return;
+    await saveAs(restorer, content.text);
   }
 
   /** The reader drops their edits: on the Cancel button, or agreeing to in the dialog. */
@@ -390,7 +404,11 @@
         </p>
       {:else if latest}
         <p class="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
-          <span class="truncate">{m.file_preview_older_version()}</span>
+          <span class="truncate"
+            >{file?.revises_file_id
+              ? m.file_preview_older_version_edited_by_you()
+              : m.file_preview_older_version()}</span
+          >
           <button
             type="button"
             class="text-accent-stronger focus-visible:ring-accent-default shrink-0 rounded-sm font-medium underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
@@ -416,6 +434,10 @@
       </Button>
       <Button size="sm" disabled={saving} onclick={saveEdits}>
         {saving ? m.file_preview_saving() : m.save()}
+      </Button>
+    {:else if restorable}
+      <Button variant="outline" size="sm" disabled={saving} onclick={restoreVersion}>
+        {saving ? m.file_preview_saving() : m.file_preview_restore_version()}
       </Button>
     {/if}
     {#if comparable}
