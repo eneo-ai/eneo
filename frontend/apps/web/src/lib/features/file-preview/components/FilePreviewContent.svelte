@@ -29,10 +29,12 @@
     onquote: (text: string, locator: string | null) => void;
     /** Whether a Markdown document may be edited in place. */
     editable?: boolean;
+    /** The reader's unsaved text of a Markdown document, shown in place of the file's. */
+    edits?: string | null;
     /** The version before this one, as Markdown; what changed against it is marked. */
     previousMarkdown?: string | null;
-    /** Whether the document's text now differs from the file. */
-    onchange?: (dirty: boolean) => void;
+    /** The document's text as the reader has it; null once it is the file's again. */
+    onchange?: (text: string | null) => void;
     /** The reader asked to save the document (Mod+S). */
     onsave?: () => void;
   };
@@ -45,6 +47,7 @@
     onready,
     onerror,
     editable = false,
+    edits = null,
     previousMarkdown = null,
     onchange,
     onsave
@@ -203,6 +206,7 @@
         <DocumentEditor
           bind:this={editor}
           markdown={content.text}
+          {edits}
           {editable}
           {highlight}
           {previousMarkdown}

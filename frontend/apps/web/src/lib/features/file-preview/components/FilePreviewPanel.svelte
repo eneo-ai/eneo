@@ -199,10 +199,14 @@
   );
 
   // The latest version of a Markdown document is edited in place. Edits stay
-  // in the editor; one save makes one new version.
+  // in the editor; one save makes one new version. While it is saved the
+  // document is read-only: the version saved is the text as it stood when the
+  // reader asked, and a keystroke meanwhile would be lost with the editor.
   const saver = $derived(file ? (saverOf?.(file) ?? null) : null);
-  const editable = $derived(!!saver && !!file && content?.kind === "markdown" && !draft && !later);
   let saving = $state(false);
+  const editable = $derived(
+    !!saver && !!file && content?.kind === "markdown" && !draft && !later && !saving
+  );
   // What this version changed against the one before it, when asked for.
   const comparable = $derived(!!earlier && content?.kind === "markdown" && !draft);
   let previousMarkdown = $state<string | null>(null);
@@ -572,11 +576,12 @@
           title={view.file.name}
           highlight={view.pending ? null : highlight}
           editable={!view.pending && editable}
+          edits={view.pending ? null : preview.editsOf(view.file)}
           previousMarkdown={view.pending ? null : previousMarkdown}
           onready={() => preview.finishReplacement(view.file.id)}
           onerror={() => preview.failReplacement(view.file.id)}
           onquote={(text, locator) => preview.quoteSelection(text, locator)}
-          onchange={(dirty) => preview.setDirty(dirty)}
+          onchange={(text) => preview.setEdits(view.file.id, text)}
           onsave={saveEdits}
         />
       </div>
