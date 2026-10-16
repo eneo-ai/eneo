@@ -392,7 +392,7 @@ class SharePointContentService:
                 integration_knowledge.id, **binding
             )
 
-            await self._pull_content(
+            delta_baseline = await self._pull_content(
                 token=_require_sharepoint_token(token),
                 oauth_token_id=oauth_token_id,
                 integration_knowledge_id=resolved_integration_knowledge_id,
@@ -404,44 +404,14 @@ class SharePointContentService:
             )
             summary_stats = self._build_summary_stats(stats)
             if summary_stats.get("failed_items"):
-                # No delta baseline either: the next sync is a full one and
+                # The baseline is not persisted: the next sync is a full one and
                 # retries the failed files instead of never seeing them again.
                 raise SyncItemsFailed(summary_stats)
 
             integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
             integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
-
-            if not integration_knowledge.delta_token:
-                try:
-                    base_url = _require_sharepoint_token(token).base_url
-                    async with SharePointContentClient(
-                        base_url=base_url,
-                        api_token=token.access_token,
-                        token_id=oauth_token_id,
-                        token_refresh_callback=(
-                            self.token_refresh_callback if oauth_token_id else None
-                        ),
-                        access_token_provider=access_token_provider,
-                        include_list_item_fields=True,
-                    ) as content_client:
-                        actual_drive_id = resolved_drive_id
-                        if not actual_drive_id and resolved_site_id:
-                            actual_drive_id = await content_client.get_default_drive_id(
-                                resolved_site_id
-                            )
-                        if actual_drive_id:
-                            delta_token = await content_client.initialize_delta_token(
-                                actual_drive_id
-                            )
-                            if delta_token:
-                                integration_knowledge.delta_token = delta_token
-                                logger.info(
-                                    f"Initialized delta token for integration knowledge {resolved_integration_knowledge_id}"
-                                )
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to initialize delta token for integration knowledge {resolved_integration_knowledge_id}: {e}"
-                    )
+            if delta_baseline:
+                integration_knowledge.delta_token = delta_baseline
 
             await self.integration_knowledge_repo.update_sync_state(
                 integration_knowledge.id, **_sync_outcome_fields(integration_knowledge)
@@ -969,9 +939,16 @@ class SharePointContentService:
         resource_type: str,
         stats: SyncStats,
         access_token_provider: Optional[AccessTokenProvider] = None,
-    ) -> SyncStats:
-        """
-        Process content from SharePoint site or OneDrive.
+    ) -> str | None:
+        """Enumerate and index the scope; returns the delta baseline minted for it.
+
+        The baseline is minted before the first listing: a change made while a
+        folder is being enumerated is then replayed by the first delta instead
+        of lost until the item changes again (the replay is idempotent through
+        the content hash and the ChangeKey cache). The caller persists it with
+        the success write only, so a pass that fails leaves the next sync a
+        full one. ``None`` when the knowledge already has a token or the mint
+        failed.
 
         Args:
             token: SharePoint token for authentication (SharePointToken or SimpleSharePointToken)
@@ -984,6 +961,7 @@ class SharePointContentService:
         integration_knowledge = await self.integration_knowledge_repo.one(
             id=integration_knowledge_id
         )
+        delta_baseline: str | None = None
 
         try:
             site_id_value = site_id
@@ -1010,6 +988,11 @@ class SharePointContentService:
                 if not actual_drive_id:
                     raise ValueError(
                         "Could not determine drive_id - need either drive_id or site_id"
+                    )
+
+                if not integration_knowledge.delta_token:
+                    delta_baseline = await self._mint_delta_baseline(
+                        content_client, actual_drive_id, integration_knowledge_id
                     )
 
                 if integration_knowledge.folder_id:
@@ -1070,7 +1053,7 @@ class SharePointContentService:
                             folder_id=folder_id_value,
                             stats=stats,
                         )
-                        return stats
+                        return delta_baseline
                     else:
                         logger.info(
                             f"Processing single file '{item_name}' (ID: {folder_id_value}) "
@@ -1087,7 +1070,7 @@ class SharePointContentService:
                             stats["skipped_details"].append(
                                 {"file": item_name, "reason": unsupported_reason}
                             )
-                            return stats
+                            return delta_baseline
 
                         content, skip_reason = await self._extract_file(
                             content_client, actual_drive_id, folder_id_value, item_name
@@ -1117,7 +1100,7 @@ class SharePointContentService:
                                 stats=stats,
                             )
 
-                        return stats
+                        return delta_baseline
                 else:
                     integration_knowledge.selected_item_type = "site_root"
                     await self.integration_knowledge_repo.update_sync_state(
@@ -1165,7 +1148,30 @@ class SharePointContentService:
             logger.error(f"Error processing document {site_id}: {e}", exc_info=True)
             raise
 
-        return stats
+        return delta_baseline
+
+    @staticmethod
+    async def _mint_delta_baseline(
+        content_client: SharePointContentClient,
+        drive_id: str,
+        integration_knowledge_id: UUID,
+    ) -> str | None:
+        """A delta token for the drive as it is now; ``None`` when Graph refused."""
+        try:
+            delta_token = await content_client.initialize_delta_token(drive_id)
+        except Exception as e:
+            logger.warning(
+                "Failed to initialize delta token for integration knowledge %s: %s",
+                integration_knowledge_id,
+                e,
+            )
+            return None
+        if delta_token:
+            logger.info(
+                "Initialized delta token for integration knowledge %s",
+                integration_knowledge_id,
+            )
+        return delta_token
 
     async def _process_documents(
         self,

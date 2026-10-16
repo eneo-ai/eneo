@@ -254,9 +254,12 @@ async def _drain_pending_delta(
     """Run the delta passes skipped tasks asked for, while still holding the lease.
 
     The knowledge is re-read before each pass: the sync that owned the lease
-    may have initialised the delta token, and a knowledge still without one
-    has just been fully synced, so a delta pass would only start a second
-    full sync. The marker is dropped in that case.
+    may have initialised the delta token. A full sync mints its baseline
+    before it enumerates, so a delta pass from that token sees the change the
+    marker stands for. A knowledge still without a token had a full sync that
+    failed or could not mint one; a delta pass would only start a second full
+    sync, and the next sync is a full one that covers the change anyway, so
+    the marker is dropped.
     """
     result: str | None = None
     for _ in range(_PENDING_DRAIN_MAX_PASSES):
@@ -268,7 +271,7 @@ async def _drain_pending_delta(
         if not knowledge.delta_token:
             logger.info(
                 "Dropping pending delta marker for knowledge %s: no delta token, "
-                "the full sync that just ran covers the change",
+                "the next sync is a full one and covers the change",
                 knowledge_id_str,
             )
             break

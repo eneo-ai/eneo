@@ -3358,6 +3358,69 @@ class TestSyncStatus:
         )
 
 
+class TestDeltaBaseline:
+    """The baseline precedes enumeration: a change made while the full sync is
+    listing folders is replayed by the first delta instead of lost."""
+
+    async def test_change_during_enumeration_is_seen_by_the_first_delta(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik = _real_integration_knowledge()
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+        drive_log: list[dict] = []
+
+        async def mint(drive_id):
+            return f"seq:{len(drive_log)}"
+
+        async def list_root(drive_id):
+            # An edit lands while the folder is first listed; the listing
+            # returned to the sync predates it.
+            if not drive_log:
+                drive_log.append(_delta_file("late-1", "late.docx"))
+            return []
+
+        async def delta(drive_id, delta_token):
+            since = int(delta_token.removeprefix("seq:"))
+            return drive_log[since:], f"seq:{len(drive_log)}"
+
+        with (
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+            patch.object(
+                service, "_process_info_blob", AsyncMock(return_value="embedded")
+            ),
+        ):
+            client = _mock_graph_client(
+                mock_client_class,
+                initialize_delta_token=AsyncMock(side_effect=mint),
+                get_drive_root_children=AsyncMock(side_effect=list_root),
+                get_delta_changes=AsyncMock(side_effect=delta),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body")
+                ),
+            )
+            await service.pull_content(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+            assert ik.delta_token == "seq:0"
+            result = await service.process_delta_changes(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        client.get_file_extraction_by_id.assert_awaited_once_with(
+            drive_id="drive-456", item_id="late-1"
+        )
+        assert "1 file" in result
+        assert ik.delta_token == "seq:1"
+
+
 class TestReconcileWarnings:
     @pytest.fixture
     def ik(self):
