@@ -86,12 +86,6 @@ if TYPE_CHECKING:
     from eneo.integration.infrastructure.auth_service.org_token_provider import (
         OrgTokenProvider,
     )
-    from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
-        ServiceAccountAuthService,
-    )
-    from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
-        TenantAppAuthService,
-    )
     from eneo.integration.infrastructure.oauth_token_service import (
         OauthTokenService,
     )
@@ -319,9 +313,7 @@ class SharePointContentService:
         oauth_token_service: "OauthTokenService",
         session: "AsyncSession",
         tenant_sharepoint_app_repo: "TenantSharePointAppRepository",
-        tenant_app_auth_service: "TenantAppAuthService",
         org_token_provider: "OrgTokenProvider",
-        service_account_auth_service: "ServiceAccountAuthService | None" = None,
         sync_log_repo: "SyncLogRepository | None" = None,
         change_key_service: "OfficeChangeKeyService | None" = None,
     ) -> None:
@@ -336,10 +328,6 @@ class SharePointContentService:
         self.oauth_token_service = oauth_token_service
         self.session = session
         self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
-        # Organisation credentials are owned by org_token_provider; these two are
-        # still wired by the container and kept only until it stops passing them.
-        self.tenant_app_auth_service = tenant_app_auth_service
-        self.service_account_auth_service = service_account_auth_service
         self.sync_log_repo = sync_log_repo
         self._sync_state = SyncStateRecorder(integration_knowledge_repo, sync_log_repo)
         self.change_key_service = change_key_service

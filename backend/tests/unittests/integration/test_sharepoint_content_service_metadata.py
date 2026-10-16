@@ -57,7 +57,6 @@ def deps(user):
         "oauth_token_service": AsyncMock(),
         "session": AsyncMock(),
         "tenant_sharepoint_app_repo": AsyncMock(),
-        "tenant_app_auth_service": AsyncMock(),
         "org_token_provider": AsyncMock(),
     }
 

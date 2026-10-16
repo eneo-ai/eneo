@@ -1576,8 +1576,6 @@ class Container(containers.DeclarativeContainer):
         integration_knowledge_repo=integration_knowledge_repo,
         session=session,
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
-        tenant_app_auth_service=tenant_app_auth_service,
-        service_account_auth_service=service_account_auth_service,
         sync_log_repo=sync_log_repo,
         change_key_service=office_change_key_service,
         org_token_provider=org_token_provider,

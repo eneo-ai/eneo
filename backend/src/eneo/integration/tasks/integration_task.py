@@ -10,6 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.integration.infrastructure.detached_tasks import run_detached
+from eneo.integration.infrastructure.sharepoint_sync_keys import (
+    SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+)
+from eneo.integration.infrastructure.sharepoint_sync_keys import (
+    sync_lock_key as _lock_key,
+)
+from eneo.integration.infrastructure.sharepoint_sync_keys import (
+    sync_pending_key as _pending_key,
+)
 from eneo.main.config import get_settings
 from eneo.main.exceptions import NotFoundException
 from eneo.main.logging import get_logger
@@ -121,26 +130,10 @@ async def pull_confluence_content(
         raise IntegrationSyncError(exc) from exc
 
 
-# A webhook that arrives while a sync holds the lease leaves this marker; the
-# lease holder runs one more delta pass before releasing. Without it the skipped
-# task is simply dropped, and because the webhook service has already recorded the
-# item's ChangeKey the next identical notification is treated as a duplicate.
-# The marker is deleted when drained; the TTL only guards against leaks and must
-# outlive any sync, since Graph does not notify again (the lease itself is
-# watchdog-renewed and has no upper bound).
-SHAREPOINT_SYNC_PENDING_TTL_SECONDS = 24 * 3600
 _PENDING_RETRY_DELAY_SECONDS = 1.0
 # Markers that keep arriving faster than passes complete are left for the
 # next sync rather than holding the lease indefinitely.
 _PENDING_DRAIN_MAX_PASSES = 3
-
-
-def _lock_key(knowledge_id: str) -> str:
-    return f"sharepoint_sync_lock:{knowledge_id}"
-
-
-def _pending_key(knowledge_id: str) -> str:
-    return f"sharepoint_sync_pending:{knowledge_id}"
 
 
 async def _open_redis() -> "redis.Redis":

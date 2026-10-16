@@ -135,9 +135,7 @@ def mock_dependencies(mock_user, mock_integration_knowledge):
         "oauth_token_service": AsyncMock(),
         "session": AsyncMock(),
         "tenant_sharepoint_app_repo": AsyncMock(),
-        "tenant_app_auth_service": AsyncMock(),
         "org_token_provider": _org_token_provider(),
-        "service_account_auth_service": AsyncMock(),
         "sync_log_repo": AsyncMock(),
         "change_key_service": AsyncMock(),
     }
@@ -255,12 +253,6 @@ class TestTokenHandling:
             )
 
         provider.get_access_token.assert_awaited_once_with(mock_tenant_app)
-        mock_dependencies[
-            "tenant_app_auth_service"
-        ].get_access_token.assert_not_called()
-        mock_dependencies[
-            "service_account_auth_service"
-        ].refresh_access_token.assert_not_called()
         assert mock_client_class.call_args_list
         for call in mock_client_class.call_args_list:
             assert call.kwargs["api_token"] == "provider-token"
