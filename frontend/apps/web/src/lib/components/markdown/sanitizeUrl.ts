@@ -39,6 +39,21 @@ export function sanitizeLinkHref(href: string | null | undefined): string | unde
   return SAFE_LINK_SCHEMES.has(match[1]) ? href : undefined;
 }
 
+const WEB_LINK_SCHEMES = new Set(["http", "https"]);
+
+/**
+ * Returns `href` when it is an absolute http(s) URL, otherwise `undefined`.
+ *
+ * For an address stored with content, such as a cited document's source url:
+ * it links out to the source, so unlike a Markdown link it has no reason to be
+ * relative or a mail or phone link, and whoever stored it chose the value.
+ */
+export function sanitizeWebHref(href: string | null | undefined): string | undefined {
+  if (!href) return undefined;
+  const match = SCHEME_RE.exec(normalizeForSchemeCheck(href));
+  return match && WEB_LINK_SCHEMES.has(match[1]) ? href : undefined;
+}
+
 /**
  * Returns `src` when it is safe for an `<img>`, otherwise `undefined`.
  *

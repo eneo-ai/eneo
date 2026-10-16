@@ -149,10 +149,12 @@ export function mergeSources(
     .filter((part) => part.type === "source-document")
     .map((source) => {
       const eneo = (source.providerMetadata?.eneo ?? {}) as { metadata?: { url?: string | null } };
+      const url = eneo.metadata?.url;
       return {
         key: `doc-${source.sourceId}`,
         title: source.title || source.sourceId,
-        url: eneo.metadata?.url ?? undefined,
+        // A document's stored url is whatever its editor wrote; only http(s) links out.
+        url: url && isHttpUrl(url) ? url : undefined,
         sourceId: source.sourceId
       };
     });
@@ -160,7 +162,7 @@ export function mergeSources(
     (ref) => ({
       key: `web-${ref.id}`,
       title: ref.title || ref.url,
-      url: ref.url,
+      url: isHttpUrl(ref.url) ? ref.url : undefined,
       sourceId: ref.id
     })
   );
