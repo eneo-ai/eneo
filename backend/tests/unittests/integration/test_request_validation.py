@@ -29,6 +29,7 @@ def _create(**fields):
         pytest.param(
             {"folder_id": "01ABCDEF", "selected_item_type": "folder"}, id="folder"
         ),
+        pytest.param({"folder_id": ".01ABC.DEF."}, id="folder-id-dots-inside"),
         pytest.param(
             {"key": "~712020:1f3a9c2e-5b7d", "selected_item_type": "personal"},
             id="confluence-personal-space",
@@ -55,6 +56,9 @@ def test_graph_shaped_selections_are_accepted(fields):
         pytest.param({"key": "x" * 513}, id="key-too-long"),
         pytest.param({"folder_id": "01A?$select=id"}, id="folder-id-query"),
         pytest.param({"folder_id": "01A B"}, id="folder-id-space"),
+        pytest.param({"folder_id": "."}, id="folder-id-dot"),
+        pytest.param({"folder_id": ".."}, id="folder-id-dotdot"),
+        pytest.param({"key": ".."}, id="key-dotdot"),
         pytest.param({"folder_path": "/a/../b"}, id="path-dotdot"),
         pytest.param({"folder_path": "/a/./b"}, id="path-dot"),
         pytest.param({"folder_path": "a/b"}, id="path-relative"),

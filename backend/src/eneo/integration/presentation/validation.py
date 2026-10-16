@@ -6,12 +6,14 @@ from typing import Optional
 
 # Graph site ids (host,guid,guid), drive ids (b!base64url), item and list ids
 # are URL-safe tokens; anything else would have to be a path or query injection.
-GRAPH_ID_PATTERN = r"^[A-Za-z0-9._,!=\-]*$"
+# An id of only dots would be a ``.`` or ``..`` path segment, so one non-dot
+# character is required (pydantic's regex engine has no lookahead).
+GRAPH_ID_PATTERN = r"^(\.*[A-Za-z0-9_,!=\-][A-Za-z0-9._,!=\-]*)?$"
 GRAPH_ID_MAX_LENGTH = 512
 
 # A knowledge selection key is a Graph site or drive id, or a Confluence space
 # key; personal Confluence spaces look like ``~712020:1f3a...``.
-INTEGRATION_KEY_PATTERN = r"^[A-Za-z0-9._,!=~:\-]*$"
+INTEGRATION_KEY_PATTERN = r"^(\.*[A-Za-z0-9_,!=~:\-][A-Za-z0-9._,!=~:\-]*)?$"
 
 # A display path of slash-separated segments; segments never contain slashes
 # or control characters.
