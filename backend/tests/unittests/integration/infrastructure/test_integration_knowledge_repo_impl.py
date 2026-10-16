@@ -68,36 +68,46 @@ def _rows(pairs):
     return result
 
 
+def _entity():
+    entity = MagicMock()
+    entity.id = uuid4()
+    entity.document_count = 0
+    return entity
+
+
 class TestDocumentCountProjection:
-    async def test_get_by_ids_counts_all_records_in_one_query(self, repo, session):
-        first, second = _record(), _record()
-        session.scalars.return_value = MagicMock(all=lambda: [first, second])
+    """Fetches never count; the count is attached where an item is served."""
+
+    async def test_fetches_issue_no_count_query(self, repo, session):
+        record = _record()
+        session.scalar.return_value = record
+        session.scalars.return_value = MagicMock(all=lambda: [record])
+
+        await repo.one_or_none(id=record.id)
+        await repo.get_by_ids([record.id])
+
+        session.execute.assert_not_called()
+        repo.mapper.to_entity.assert_called_once()
+        repo.mapper.to_entities.assert_called_once()
+
+    async def test_attach_document_counts_counts_all_items_in_one_query(
+        self, repo, session
+    ):
+        first, second = _entity(), _entity()
         session.execute.return_value = _rows([(first.id, 3)])
 
-        await repo.get_by_ids([first.id, second.id])
+        await repo.attach_document_counts([first, second])
 
         assert session.execute.await_count == 1
-        assert first.document_count == 3
-        assert second.document_count == 0
+        assert (first.document_count, second.document_count) == (3, 0)
         sql = _compiled(session.execute.await_args.args[0])
         assert "GROUP BY info_blobs.integration_knowledge_id" in sql
         assert "info_blobs.version_state = 'active'" in sql
         assert f"'{first.id}'" in sql and f"'{second.id}'" in sql
-        repo.mapper.to_entities.assert_called_once()
 
-    async def test_one_or_none_attaches_the_count(self, repo, session):
-        record = _record()
-        session.scalar.return_value = record
-        session.execute.return_value = _rows([(record.id, 7)])
-
-        await repo.one_or_none(id=record.id)
-
-        assert record.document_count == 7
-        repo.mapper.to_entity.assert_called_once()
-
-    async def test_no_records_means_no_count_query(self, repo, session):
-        session.scalars.return_value = MagicMock(all=lambda: [])
-
-        assert await repo.get_by_ids([uuid4()]) == []
+    async def test_attach_document_counts_without_items_issues_no_query(
+        self, repo, session
+    ):
+        await repo.attach_document_counts([])
 
         session.execute.assert_not_called()

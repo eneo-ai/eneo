@@ -78,7 +78,9 @@ class TestIntegrationKnowledgeUnion:
             _rows([(first.id, 3)]),
         ]
 
-        records = await repo._get_integration_knowledge_union([uuid4()])
+        records = await repo._get_integration_knowledge_union(
+            [uuid4()], with_document_counts=True
+        )
 
         assert records == [first, second]
         assert first.document_count == 3
@@ -89,12 +91,53 @@ class TestIntegrationKnowledgeUnion:
         assert "info_blobs.version_state = 'active'" in sql
         assert f"'{first.id}'" in sql and f"'{second.id}'" in sql
 
+    async def test_hydration_without_counts_issues_no_count_query(self, repo, session):
+        first, second = _record(), _record()
+        session.execute.side_effect = [_scalars([first, second])]
+
+        records = await repo._get_integration_knowledge_union([uuid4()])
+
+        assert records == [first, second]
+        assert session.execute.await_count == 1
+        assert "info_blobs" not in _compiled(session.execute.await_args.args[0])
+
     async def test_no_knowledge_means_no_count_query(self, repo, session):
         session.execute.side_effect = [_scalars([])]
 
-        assert await repo._get_integration_knowledge_union([uuid4()]) == []
+        assert (
+            await repo._get_integration_knowledge_union(
+                [uuid4()], with_document_counts=True
+            )
+            == []
+        )
 
         assert session.execute.await_count == 1
+
+    @pytest.mark.parametrize(
+        ("lookup", "counted"),
+        [
+            # Served to the UI as SpacePublic: the knowledge list needs counts.
+            ("one_or_none", True),
+            ("get_personal_space", True),
+            # Resource lookups on the chat and job paths never show the list.
+            ("get_space_by_assistant", False),
+            ("get_space_by_app", False),
+            ("get_space_by_service", False),
+            ("get_space_by_group_chat", False),
+            ("get_space_by_collection", False),
+            ("get_space_by_website", False),
+            ("get_space_by_integration_knowledge", False),
+        ],
+    )
+    async def test_only_space_lookups_served_to_the_ui_count_documents(
+        self, repo, lookup: str, counted: bool
+    ):
+        repo._get_from_query = AsyncMock(return_value=MagicMock())
+
+        await getattr(repo, lookup)(uuid4())
+
+        kwargs = repo._get_from_query.await_args.kwargs
+        assert kwargs.get("with_document_counts", False) is counted
 
 
 async def test_get_assistants_eager_loads_mcp_tool_settings():

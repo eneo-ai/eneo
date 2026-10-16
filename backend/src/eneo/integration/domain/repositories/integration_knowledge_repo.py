@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from uuid import UUID
 
     from eneo.integration.domain.entities.integration_knowledge import (
@@ -25,6 +26,16 @@ class IntegrationKnowledgeRepository(ABC):
 
     @abstractmethod
     async def get_by_ids(self, ids: list["UUID"]) -> list["IntegrationKnowledge"]: ...
+
+    @abstractmethod
+    async def attach_document_counts(
+        self, items: "Sequence[IntegrationKnowledge]"
+    ) -> None:
+        """Set ``document_count`` (active info_blobs) on each item in one query.
+
+        Fetches do not compute it; call this where an item is served to the UI.
+        """
+        ...
 
     @abstractmethod
     async def remove(self, id: "UUID") -> None: ...

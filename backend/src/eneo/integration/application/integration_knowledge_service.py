@@ -740,7 +740,9 @@ class IntegrationKnowledgeService:
             id=integration_knowledge_id
         )
         knowledge.name = name
-        return await self.integration_knowledge_repo.update(knowledge)
+        knowledge = await self.integration_knowledge_repo.update(knowledge)
+        await self.integration_knowledge_repo.attach_document_counts([knowledge])
+        return knowledge
 
     async def _get_owned_wrapper_knowledge(
         self,
@@ -803,6 +805,7 @@ class IntegrationKnowledgeService:
             updated_items.append(
                 await self.integration_knowledge_repo.update(knowledge)
             )
+        await self.integration_knowledge_repo.attach_document_counts(updated_items)
 
         return updated_items
 

@@ -79,16 +79,8 @@ class IntegrationKnowledgeRepoImpl(
         embedding_model = await self.embedding_model_repo.one(
             model_id=record.embedding_model_id
         )
-        await self._attach_document_counts([record])
 
         return self.mapper.to_entity(db_model=record, embedding_model=embedding_model)
-
-    @override
-    async def query(self, **filters: object) -> list[IntegrationKnowledge]:
-        if not filters:
-            return []
-        query = sa.select(self._db_model).filter_by(**filters).options(*self._options)
-        return await self._entities_for((await self.session.scalars(query)).all())
 
     @override
     async def get_by_ids(self, ids: list["UUID"]) -> list[IntegrationKnowledge]:
@@ -105,20 +97,18 @@ class IntegrationKnowledgeRepoImpl(
         if not records:
             return []
         embedding_models = await self.embedding_model_repo.all()
-        await self._attach_document_counts(records)
         return self.mapper.to_entities(records, embedding_models=embedding_models)
 
-    async def _attach_document_counts(
-        self, records: Sequence[IntegrationKnowledgeDBModel]
+    @override
+    async def attach_document_counts(
+        self, items: Sequence[IntegrationKnowledge]
     ) -> None:
-        # document_count is a projection, not a column: the factory reads it off
-        # the record so both this repo and the space loader feed the entity the
-        # same way.
-        counts = await active_document_counts(
-            self.session, [record.id for record in records]
-        )
-        for record in records:
-            setattr(record, "document_count", counts.get(record.id, 0))
+        # document_count is a projection over info_blobs, not a column. Fetches
+        # leave it at zero so sync and webhook paths never pay for it; callers
+        # that serve an item to the UI attach it here.
+        counts = await active_document_counts(self.session, [item.id for item in items])
+        for item in items:
+            item.document_count = counts.get(item.id, 0)
 
     @override
     async def remove(self, id: "UUID") -> None:

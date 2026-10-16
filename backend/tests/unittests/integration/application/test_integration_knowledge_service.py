@@ -334,7 +334,7 @@ class TestUpdateKnowledgeName:
         actor.can_edit_integrations.return_value = True
         new_name = "New Knowledge Name"
 
-        await service.update_knowledge_name(
+        updated = await service.update_knowledge_name(
             space_id=integration_knowledge.space_id,
             integration_knowledge_id=integration_knowledge.id,
             name=new_name,
@@ -345,6 +345,11 @@ class TestUpdateKnowledgeName:
         # Verify repo.update was called
         service.integration_knowledge_repo.update.assert_called_once_with(
             integration_knowledge
+        )
+        # The renamed item is served back to the UI, so it carries its count.
+        assert updated is integration_knowledge
+        service.integration_knowledge_repo.attach_document_counts.assert_awaited_once_with(
+            [integration_knowledge]
         )
 
     async def test_rename_knowledge_unauthorized_without_edit_permission(
