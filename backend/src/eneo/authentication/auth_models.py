@@ -37,6 +37,10 @@ class JWTCreds(BaseModel):
     user_id: UUID
     tenant_id: UUID
     credential_version: int = Field(ge=0, strict=True)
+    # Set only by the local password login. The password lifecycle policy
+    # (eneo.users.password) gates password sessions alone, so a federated
+    # session is never blocked by a stale local password.
+    auth_method: Optional[Literal["password"]] = None
     # Retained as descriptive claims for clients; never used to resolve a user.
     sub: EmailStr
     username: Optional[str] = None

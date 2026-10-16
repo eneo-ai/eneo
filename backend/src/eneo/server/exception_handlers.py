@@ -71,6 +71,7 @@ from eneo.skills.domain.skill import (
 from eneo.users.password import (
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
+    PasswordChangeRequiredError,
     PasswordPolicyViolationError,
     PasswordReuseError,
 )
@@ -207,6 +208,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         None,
         ErrorCodes.LOCAL_PASSWORD_CHANGE_UNAVAILABLE,
     ),
+    PasswordChangeRequiredError: (403, None, ErrorCodes.PASSWORD_CHANGE_REQUIRED),
     # --- Website crawl lifecycle ---
     WebsiteCrawlActiveError: (
         409,

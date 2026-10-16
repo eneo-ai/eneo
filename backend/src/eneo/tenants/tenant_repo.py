@@ -10,7 +10,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import InstrumentedAttribute, selectinload
 
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.module_table import Modules
@@ -167,16 +167,36 @@ class TenantRepository:
         tenant_id: UUID,
         policy_updates: dict[str, Any],
     ) -> TenantInDB:
+        return await self._merge_policy_column(
+            tenant_id, Tenants.api_key_policy, policy_updates
+        )
+
+    async def update_password_policy(
+        self,
+        tenant_id: UUID,
+        policy_updates: dict[str, Any],
+    ) -> TenantInDB:
+        return await self._merge_policy_column(
+            tenant_id, Tenants.password_policy, policy_updates
+        )
+
+    async def _merge_policy_column(
+        self,
+        tenant_id: UUID,
+        column: InstrumentedAttribute[dict[str, Any]],
+        policy_updates: dict[str, Any],
+    ) -> TenantInDB:
+        """Shallow-merge updates into one JSONB policy column."""
         tenant = await self.get(tenant_id)
         if tenant is None:
             raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
-        policy = dict(tenant.api_key_policy or {})
+        policy = dict(getattr(tenant, column.key) or {})
         policy.update(policy_updates)
 
         stmt = (
             sa.update(Tenants)
             .where(Tenants.id == tenant_id)
-            .values(api_key_policy=policy, updated_at=datetime.now(timezone.utc))
+            .values({column: policy, Tenants.updated_at: datetime.now(timezone.utc)})
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )

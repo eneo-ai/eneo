@@ -75,6 +75,7 @@ from eneo.tenants.tenant_repo import TenantRepository
 from eneo.users.password import (
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
+    PasswordLifecyclePolicy,
     PasswordReuseError,
     validate_new_local_password,
 )
@@ -432,7 +433,9 @@ class UserService:
         )
 
         return AccessToken(
-            access_token=self.auth_service.create_access_token_for_user(user=user),
+            access_token=self.auth_service.create_access_token_for_user(
+                user=user, auth_method="password"
+            ),
             token_type="bearer",
         )
 
@@ -712,16 +715,25 @@ class UserService:
         if tenant is None:
             raise BadRequestException(f"Tenant {new_user.tenant_id} does not exist")
 
+        password_changed_at: datetime | None = None
+        password_change_required = False
         if new_user.password is not None:
             validate_new_local_password(new_user.password)
             salt, hashed_pass = self.auth_service.create_salt_and_hashed_password(
                 new_user.password
             )
+            password_changed_at = datetime.now(timezone.utc)
+            if new_user.password_change_required is None:
+                password_change_required = PasswordLifecyclePolicy.from_tenant(
+                    tenant.password_policy
+                ).require_change_after_admin_set
+            else:
+                password_change_required = new_user.password_change_required
         else:
             salt = None
             hashed_pass = None
 
-        payload = new_user.model_dump(exclude={"password"})
+        payload = new_user.model_dump(exclude={"password", "password_change_required"})
 
         # Apply tenant default role when caller didn't specify any.
         # Mirrors the federated-login path so sysadmin-created users can
@@ -744,6 +756,8 @@ class UserService:
             password=hashed_pass,
             salt=salt,
             state=UserState.ACTIVE,
+            password_changed_at=password_changed_at,
+            password_change_required=password_change_required,
         )
 
         user_in_db = await self.repo.add(user_add)
@@ -777,6 +791,7 @@ class UserService:
             self.auth_service.validate_local_credential_version(
                 payload.credential_version, user
             )
+            user.session_auth_method = payload.auth_method
         return user
 
     async def _get_user_from_token(self, token: str):
@@ -2158,12 +2173,14 @@ class UserService:
         new_password: str,
         current_password: str | None,
         require_current_password: bool,
+        set_by_account: bool,
     ) -> "UserInDB":
         """Serialize and persist one local credential mutation.
 
         Both self-service changes and administrator resets use this path, so
-        hashing, password reuse protection and credential-version increments
-        cannot drift apart.
+        hashing, password reuse protection, credential-version increments and
+        the lifecycle stamp cannot drift apart. A password someone else chose
+        is one-time when the tenant policy says so.
         """
 
         validate_new_local_password(new_password)
@@ -2193,12 +2210,20 @@ class UserService:
         salt, hashed_password = self.auth_service.create_salt_and_hashed_password(
             new_password
         )
+        change_required = (
+            not set_by_account
+            and PasswordLifecyclePolicy.from_tenant(
+                user.tenant.password_policy
+            ).require_change_after_admin_set
+        )
         updated = await self.repo.update(
             UserUpdate(
                 id=user.id,
                 password=hashed_password,
                 salt=salt,
                 credential_version=user.credential_version + 1,
+                password_changed_at=datetime.now(timezone.utc),
+                password_change_required=change_required,
             )
         )
         if updated is None:
@@ -2213,16 +2238,20 @@ class UserService:
             new_password=new_password,
             current_password=current_password,
             require_current_password=True,
+            set_by_account=True,
         )
 
     async def reset_local_password(
         self, *, user_id: UUID, new_password: str
     ) -> "UserInDB":
+        """Administrator reset: the account must choose its own password next."""
+
         return await self._write_local_password(
             user_id=user_id,
             new_password=new_password,
             current_password=None,
             require_current_password=False,
+            set_by_account=False,
         )
 
     async def invalidate_sessions(self, *, user_id: UUID) -> "UserInDB":

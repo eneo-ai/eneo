@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     default_user_name: Optional[str] = None
     default_user_email: Optional[str] = None
     default_user_password: Optional[str] = None
+    # The seeded password comes from the environment, so by default the
+    # account must choose its own at its first login. Test stacks opt out.
+    default_user_password_change_required: bool = True
 
     public_origin: Optional[str] = None
 
@@ -62,7 +65,14 @@ def create_salt_and_hashed_password(plaintext_password: str):
 
 # Add tenant and user
 def add_tenant_user(
-    conn, tenant_name, quota_limit, user_name, user_email, user_password
+    conn,
+    tenant_name,
+    quota_limit,
+    user_name,
+    user_email,
+    user_password,
+    *,
+    password_change_required: bool = True,
 ):
     try:
         cur = conn.cursor()
@@ -110,11 +120,20 @@ def add_tenant_user(
                 )
             salt, hashed_pass = create_salt_and_hashed_password(user_password)
             add_user_query = sql.SQL(
-                "INSERT INTO users (username, email, password, salt, tenant_id, used_tokens, state) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id"
+                "INSERT INTO users (username, email, password, salt, tenant_id, used_tokens, state, password_changed_at, password_change_required) VALUES (%s, %s, %s, %s, %s, %s, %s, now(), %s) RETURNING id"
             )
             cur.execute(
                 add_user_query,
-                (user_name, user_email, hashed_pass, salt, tenant_id, 0, "active"),
+                (
+                    user_name,
+                    user_email,
+                    hashed_pass,
+                    salt,
+                    tenant_id,
+                    0,
+                    "active",
+                    password_change_required,
+                ),
             )
             user_id = cur.fetchone()[0]
         else:
@@ -288,6 +307,7 @@ if __name__ == "__main__":
             settings.default_user_name,
             settings.default_user_email,
             settings.default_user_password,
+            password_change_required=settings.default_user_password_change_required,
         )
 
     # Register PUBLIC_ORIGIN for CORS (idempotent; runs even when the default

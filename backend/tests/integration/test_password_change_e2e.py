@@ -27,7 +27,9 @@ async def test_baseline_seed_keeps_real_password_hashing(admin_user):
     assert AuthService.verify_password(password, hashed_password)
 
 
-async def _create_local_user(client, super_api_key: str) -> tuple[str, str]:
+async def _create_local_user(
+    client, super_api_key: str, *, password_change_required: bool | None = None
+) -> tuple[str, str]:
     suffix = uuid4().hex[:8]
     tenant_response = await client.post(
         "/api/v1/sysadmin/tenants/",
@@ -49,6 +51,11 @@ async def _create_local_user(client, super_api_key: str) -> tuple[str, str]:
             "username": f"password-change-{suffix}",
             "tenant_id": tenant_response.json()["id"],
             "password": current_password,
+            **(
+                {}
+                if password_change_required is None
+                else {"password_change_required": password_change_required}
+            ),
         },
         headers={"X-API-Key": super_api_key},
     )
@@ -238,3 +245,129 @@ async def test_concurrent_changes_with_one_current_password_only_write_once(
         assert stored_user is not None
         assert stored_user.credential_version == 1
         assert AuthService.verify_password(new_password, stored_user.password)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sysadmin_set_password_only_admits_its_own_replacement(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+):
+    email, one_time_password = await _create_local_user(client, super_admin_token)
+    new_password = "ChosenByTheAccount3!"
+
+    login = await _login(client, email=email, password=one_time_password)
+    assert login.status_code == 200, login.text
+    pending_auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    blocked = await client.get("/api/v1/users/tenant/", headers=pending_auth)
+    assert blocked.status_code == 403, blocked.text
+    assert blocked.json()["eneo_error_code"] == ErrorCodes.PASSWORD_CHANGE_REQUIRED
+    assert blocked.json()["details"] == {"reason": "admin_set"}
+
+    current_user = await client.get("/api/v1/users/me/", headers=pending_auth)
+    assert current_user.status_code == 200, current_user.text
+    status = current_user.json()["password_status"]
+    assert status["change_required"] is True
+    assert status["reason"] == "admin_set"
+    assert status["changed_at"] is not None
+
+    changed = await client.post(
+        "/api/v1/users/me/password/",
+        json={"current_password": one_time_password, "new_password": new_password},
+        headers=pending_auth,
+    )
+    assert changed.status_code == 204, changed.text
+
+    relogin = await _login(client, email=email, password=new_password)
+    assert relogin.status_code == 200, relogin.text
+    auth = {"Authorization": f"Bearer {relogin.json()['access_token']}"}
+    admitted = await client.get("/api/v1/users/tenant/", headers=auth)
+    assert admitted.status_code == 200, admitted.text
+    current_user = await client.get("/api/v1/users/me/", headers=auth)
+    assert current_user.json()["password_status"]["change_required"] is False
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sysadmin_can_hand_out_a_permanent_password(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+):
+    email, password = await _create_local_user(
+        client, super_admin_token, password_change_required=False
+    )
+    login = await _login(client, email=email, password=password)
+    assert login.status_code == 200, login.text
+    auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    admitted = await client.get("/api/v1/users/tenant/", headers=auth)
+    assert admitted.status_code == 200, admitted.text
+    current_user = await client.get("/api/v1/users/me/", headers=auth)
+    assert current_user.json()["password_status"]["change_required"] is False
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admin_password_policy_round_trip(
+    client, patch_auth_service_jwt, mock_transcription_models
+):
+    login = await _login(
+        client, email="test@example.com", password="IntegrationPass123!"
+    )
+    assert login.status_code == 200, login.text
+    auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    current = await client.get("/api/v1/admin/password-policy", headers=auth)
+    assert current.status_code == 200, current.text
+    assert current.json() == {
+        "require_change_after_admin_set": True,
+        "max_age_days": None,
+    }
+
+    updated = await client.patch(
+        "/api/v1/admin/password-policy",
+        json={"max_age_days": 30},
+        headers=auth,
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json() == {
+        "require_change_after_admin_set": True,
+        "max_age_days": 30,
+    }
+
+    unknown_field = await client.patch(
+        "/api/v1/admin/password-policy",
+        json={"rotate_every": 30},
+        headers=auth,
+    )
+    assert unknown_field.status_code == 422, unknown_field.text
+
+    reset = await client.patch(
+        "/api/v1/admin/password-policy",
+        json={"max_age_days": None, "require_change_after_admin_set": False},
+        headers=auth,
+    )
+    assert reset.status_code == 200, reset.text
+    assert reset.json() == {
+        "require_change_after_admin_set": False,
+        "max_age_days": None,
+    }
+
+    # The expiry shows up on the account once the policy carries a maximum age.
+    await client.patch(
+        "/api/v1/admin/password-policy", json={"max_age_days": 90}, headers=auth
+    )
+    me = await client.get("/api/v1/users/me/", headers=auth)
+    assert me.status_code == 200, me.text
+    assert me.json()["password_status"]["expires_at"] is not None
+    assert me.json()["password_status"]["change_required"] is False
+    await client.patch(
+        "/api/v1/admin/password-policy",
+        json={"max_age_days": None, "require_change_after_admin_set": True},
+        headers=auth,
+    )
