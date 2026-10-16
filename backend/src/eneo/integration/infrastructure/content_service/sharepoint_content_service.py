@@ -668,15 +668,13 @@ class SharePointContentService:
                     "falling back to full sync"
                 )
                 delegated_to_full_sync = True
-                return await self.pull_content(
+                return await self._recover_with_full_sync(
                     token_id=token_id,
                     tenant_app_id=tenant_app_id,
-                    integration_knowledge_id=resolved_integration_knowledge_id,
+                    integration_knowledge=integration_knowledge,
                     site_id=resolved_site_id,
                     drive_id=resolved_drive_id,
-                    resource_type=resource_type
-                    or integration_knowledge.resource_type
-                    or "site",
+                    resource_type=resource_type,
                     sync_trigger=sync_trigger,
                     recovery="missing_delta_token",
                 )
@@ -717,15 +715,13 @@ class SharePointContentService:
                         integration_knowledge.id, delta_token=None
                     )
                     delegated_to_full_sync = True
-                    return await self.pull_content(
+                    return await self._recover_with_full_sync(
                         token_id=token_id,
                         tenant_app_id=tenant_app_id,
-                        integration_knowledge_id=resolved_integration_knowledge_id,
+                        integration_knowledge=integration_knowledge,
                         site_id=resolved_site_id,
                         drive_id=resolved_drive_id,
-                        resource_type=resource_type
-                        or integration_knowledge.resource_type
-                        or "site",
+                        resource_type=resource_type,
                         sync_trigger=sync_trigger,
                         recovery="delta_token_expired",
                     )
@@ -819,6 +815,32 @@ class SharePointContentService:
                 ),
             )
             raise
+
+    async def _recover_with_full_sync(
+        self,
+        *,
+        token_id: Optional[UUID],
+        tenant_app_id: Optional[UUID],
+        integration_knowledge: "IntegrationKnowledge",
+        site_id: Optional[str],
+        drive_id: Optional[str],
+        resource_type: str,
+        sync_trigger: str,
+        recovery: str,
+    ) -> str:
+        """A full sync in place of a delta that has no usable token."""
+        return await self.pull_content(
+            token_id=token_id,
+            tenant_app_id=tenant_app_id,
+            integration_knowledge_id=integration_knowledge.id,
+            site_id=site_id,
+            drive_id=drive_id,
+            resource_type=resource_type
+            or integration_knowledge.resource_type
+            or "site",
+            sync_trigger=sync_trigger,
+            recovery=recovery,
+        )
 
     async def _refresh_scope_path(
         self,
