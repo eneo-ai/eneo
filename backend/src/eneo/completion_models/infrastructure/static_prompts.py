@@ -147,9 +147,7 @@ TOOL_DELIVERABLE_INSTRUCTION = (
     "If an available tool cannot produce the requested deliverable, explain the "
     "limitation. Correct and retry recoverable tool failures. Claim a file was created "
     "only after a successful tool result actually supplies it; an attempted call is "
-    "not a completed file. Filename links in chat open the file preview; the separate "
-    "Download button saves it. Introduce a file link as 'Open' or 'View', or simply "
-    "name the file, rather than labelling the link 'Download'. If explaining how to "
-    "save a file, refer to its Download button. Do not include null control characters "
-    "in tool arguments."
+    "not a completed file. Refer to a created file by its name; do not describe how "
+    "the reader opens, views or saves it, since that depends on the application they "
+    "read the answer in. Do not include null control characters in tool arguments."
 )
