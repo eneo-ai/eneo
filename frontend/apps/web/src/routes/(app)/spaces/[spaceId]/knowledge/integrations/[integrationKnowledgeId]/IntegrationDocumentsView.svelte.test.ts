@@ -247,6 +247,22 @@ describe("IntegrationDocumentsView", () => {
     ]);
   });
 
+  it("shows the load error it was opened with and retries the first page", async () => {
+    api.listDocuments.mockResolvedValue(pageOf([doc(1)]));
+    show({ initialDocuments: pageOf([]), initialError: "boom" });
+
+    await expect
+      .element(page.getByRole("alert"))
+      .toHaveTextContent(`${m.integration_documents_load_failed()}: boom`);
+    expect(page.getByText(m.integration_documents_empty_synced()).elements()).toHaveLength(0);
+
+    await page.getByRole("button", { name: m.retry() }).click();
+
+    expect(lastDocumentsCall()).toMatchObject({ offset: 0, limit: 50, q: "" });
+    await expect.element(page.getByText("Protokoll KS 2026-01.pdf")).toBeVisible();
+    expect(page.getByRole("alert").elements()).toHaveLength(0);
+  });
+
   it("paginates with a range label and prev/next buttons", async () => {
     const firstPage = pageOf(
       Array.from({ length: 50 }, (_, index) => doc(index + 1)),

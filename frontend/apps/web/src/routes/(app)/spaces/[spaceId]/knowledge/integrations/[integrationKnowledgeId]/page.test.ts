@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { m } from "$lib/paraglide/messages";
 import { load } from "./+page";
 
 const spaceId = "00000000-0000-4000-8000-000000000020";
@@ -44,6 +45,17 @@ describe("integration documents page load", () => {
     expect(listDocuments).toHaveBeenCalledWith(
       expect.objectContaining({ knowledge: expect.objectContaining({ id: "ik-new" }) })
     );
+  });
+
+  it("renders the page with an empty list and the error when the documents cannot be listed", async () => {
+    const { event, listDocuments } = createLoadEvent([item("ik-new")], []);
+    listDocuments.mockRejectedValue(new Error("boom"));
+
+    const result = await load(event);
+
+    expect(result.knowledge).toMatchObject({ id: "ik-new" });
+    expect(result.documents).toMatchObject({ items: [], total_count: 0 });
+    expect(result.documentsError).toBe(m.request_failed());
   });
 
   it("answers 404 only after the fresh lookup also lacks the item", async () => {

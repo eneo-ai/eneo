@@ -43,6 +43,8 @@
     knowledge: IntegrationKnowledge;
     space: { id: string };
     initialDocuments: IntegrationDocumentsPage;
+    /** Why `initialDocuments` is empty, when the first page could not be listed. */
+    initialError?: string | null;
     /** Null when the skipped list could not be loaded with the page. */
     initialSkipped: IntegrationSkippedDocuments | null;
     initialTab?: IntegrationDocumentsTab;
@@ -53,6 +55,7 @@
     knowledge,
     space,
     initialDocuments,
+    initialError = null,
     initialSkipped,
     initialTab = "documents",
     onShowSyncHistory
@@ -68,7 +71,7 @@
   let requestedQuery: IntegrationDocumentsQuery | null = null;
   let documents = $state<IntegrationDocumentsPage>(untrack(() => initialDocuments));
   let loading = $state(false);
-  let error = $state<string | null>(null);
+  let error = $state<string | null>(untrack(() => initialError));
   let searchText = $state("");
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   let loadGeneration = 0;

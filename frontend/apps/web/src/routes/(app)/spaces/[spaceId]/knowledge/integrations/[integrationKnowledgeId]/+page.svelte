@@ -90,6 +90,7 @@
         {knowledge}
         space={$currentSpace}
         initialDocuments={data.documents}
+        initialError={data.documentsError}
         initialSkipped={data.skipped}
         initialTab={data.initialTab}
         onShowSyncHistory={() => (showSyncHistoryDialog = true)}

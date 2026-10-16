@@ -26,6 +26,17 @@ export const DEFAULT_INTEGRATION_DOCUMENTS_QUERY: IntegrationDocumentsQuery = {
   offset: 0
 };
 
+/** What a documents view starts from when the first page could not be listed. */
+export function emptyDocumentsPage(): IntegrationDocumentsPage {
+  return {
+    items: [],
+    total_count: 0,
+    limit: INTEGRATION_DOCUMENTS_PAGE_SIZE,
+    offset: 0,
+    total_size: 0
+  };
+}
+
 export type IntegrationSkippedDocument = components["schemas"]["IntegrationSkippedDocument"];
 export type IntegrationSkippedDocuments = components["schemas"]["IntegrationSkippedDocuments"];
 

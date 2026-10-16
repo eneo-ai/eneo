@@ -1,6 +1,8 @@
 import { error } from "@sveltejs/kit";
+import { getErrorMessage } from "$lib/core/errors";
 import {
   DEFAULT_INTEGRATION_DOCUMENTS_QUERY,
+  emptyDocumentsPage,
   type IntegrationDocumentsTab
 } from "$lib/features/integrations/integrationDocuments";
 import { findIntegrationItems } from "$lib/features/integrations/integrationItems";
@@ -18,12 +20,19 @@ export const load = async (event) => {
     throw error(404);
   }
 
+  // A failed list keeps the page: the view shows the error in place, with a retry.
+  let documentsError: string | null = null;
   const [documents, skipped] = await Promise.all([
-    eneo.integrations.knowledge.listDocuments({
-      knowledge,
-      space: currentSpace,
-      ...DEFAULT_INTEGRATION_DOCUMENTS_QUERY
-    }),
+    eneo.integrations.knowledge
+      .listDocuments({
+        knowledge,
+        space: currentSpace,
+        ...DEFAULT_INTEGRATION_DOCUMENTS_QUERY
+      })
+      .catch((err: unknown) => {
+        documentsError = getErrorMessage(err);
+        return emptyDocumentsPage();
+      }),
     eneo.integrations.knowledge
       .listSkippedDocuments({ knowledge, space: currentSpace })
       .catch((err: unknown) => {
@@ -35,5 +44,5 @@ export const load = async (event) => {
   const initialTab: IntegrationDocumentsTab =
     event.url.searchParams.get("tab") === "skipped" ? "skipped" : "documents";
 
-  return { knowledge, documents, skipped, initialTab };
+  return { knowledge, documents, documentsError, skipped, initialTab };
 };
