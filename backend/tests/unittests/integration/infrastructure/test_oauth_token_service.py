@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -44,6 +45,7 @@ def token():
 def service(token):
     repo = AsyncMock()
     repo.one.return_value = token
+    repo.one_fresh.return_value = token
     repo.update.side_effect = lambda obj: obj
     confluence = AsyncMock()
     sharepoint = AsyncMock()
@@ -87,6 +89,32 @@ class TestRefreshAndUpdateToken:
 
         assert result.refresh_token == "new-refresh"
 
+    async def test_the_process_lock_entry_is_dropped_once_no_caller_needs_it(
+        self, service
+    ):
+        svc, confluence, token = service
+        token_id = uuid4()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_refresh(refresh_token):
+            entered.set()
+            await release.wait()
+            return {"access_token": "new-access"}
+
+        confluence.refresh_access_token.side_effect = slow_refresh
+        first = asyncio.create_task(svc.refresh_and_update_token(token_id=token_id))
+        await entered.wait()
+        second = asyncio.create_task(svc.refresh_and_update_token(token_id=token_id))
+        await asyncio.sleep(0)
+
+        lock, holders = OauthTokenService._refresh_locks[str(token_id)]
+        assert lock.locked() and holders == 2
+        release.set()
+        await asyncio.gather(first, second)
+
+        assert str(token_id) not in OauthTokenService._refresh_locks
+
 
 def _leased_service(token, *, busy_rounds: int, fresh_access: str):
     repo = AsyncMock()
@@ -111,7 +139,7 @@ class TestCrossWorkerRefreshLease:
     async def test_refresh_runs_under_a_lease_keyed_by_the_token(self, token):
         token_id = uuid4()
         svc, repo, confluence, redis, _ = _leased_service(
-            token, busy_rounds=0, fresh_access="unused"
+            token, busy_rounds=0, fresh_access="old-access"
         )
 
         with (
@@ -123,8 +151,26 @@ class TestCrossWorkerRefreshLease:
         assert result.access_token == "refreshed"
         assert redis.keys == [f"integration:oauth_token_refresh:{token_id}"]
         confluence.refresh_access_token.assert_awaited_once()
-        repo.one_fresh.assert_not_awaited()
+        repo.one_fresh.assert_awaited_once_with(token.id)
         release.assert_awaited_once()
+
+    async def test_a_holder_that_did_not_wait_still_reuses_a_token_refreshed_meanwhile(
+        self, token
+    ):
+        """The lease can be free again between this caller's read and its SET NX."""
+        svc, repo, confluence, _, fresh = _leased_service(
+            token, busy_rounds=0, fresh_access="refreshed-elsewhere"
+        )
+
+        with (
+            patch(_REFRESH, new=AsyncMock(return_value=True)),
+            patch(_RELEASE, new=AsyncMock(return_value=True)),
+        ):
+            result = await svc.refresh_and_update_token(token_id=uuid4())
+
+        assert result is fresh
+        confluence.refresh_access_token.assert_not_awaited()
+        repo.update.assert_not_awaited()
 
     async def test_queued_caller_reuses_a_token_refreshed_meanwhile(
         self, token, monkeypatch
@@ -168,7 +214,7 @@ class TestCrossWorkerRefreshLease:
         monkeypatch.setattr(module, "_REFRESH_LEASE_POLL_SECONDS", 0.001)
         monkeypatch.setattr(module, "_REFRESH_LEASE_WAIT_SECONDS", 0.0)
         svc, _, confluence, _, _ = _leased_service(
-            token, busy_rounds=10**6, fresh_access="unused"
+            token, busy_rounds=10**6, fresh_access="old-access"
         )
 
         with (
@@ -189,7 +235,7 @@ class TestCrossWorkerRefreshLease:
     )
     async def test_redis_outage_still_refreshes_exactly_once(self, token, error):
         svc, repo, confluence, redis, _ = _leased_service(
-            token, busy_rounds=0, fresh_access="unused"
+            token, busy_rounds=0, fresh_access="old-access"
         )
         redis.set = AsyncMock(side_effect=error)
 
@@ -203,6 +249,28 @@ class TestCrossWorkerRefreshLease:
         confluence.refresh_access_token.assert_awaited_once()
         repo.update.assert_awaited_once()
         release.assert_not_awaited()
+
+    @pytest.mark.parametrize("fallback", ["deadline", "redis-outage"])
+    async def test_refreshing_without_the_lease_still_reuses_a_changed_row(
+        self, token, monkeypatch, fallback
+    ):
+        monkeypatch.setattr(module, "_REFRESH_LEASE_POLL_SECONDS", 0.001)
+        monkeypatch.setattr(module, "_REFRESH_LEASE_WAIT_SECONDS", 0.0)
+        svc, repo, confluence, redis, fresh = _leased_service(
+            token, busy_rounds=10**6, fresh_access="refreshed-elsewhere"
+        )
+        if fallback == "redis-outage":
+            redis.set = AsyncMock(side_effect=RedisConnectionError("refused"))
+
+        with (
+            patch(_REFRESH, new=AsyncMock(return_value=True)),
+            patch(_RELEASE, new=AsyncMock(return_value=True)),
+        ):
+            result = await svc.refresh_and_update_token(token_id=uuid4())
+
+        assert result is fresh
+        confluence.refresh_access_token.assert_not_awaited()
+        repo.update.assert_not_awaited()
 
     def test_container_wires_the_redis_client_and_token_mapper(self):
         assert "redis_client" in Container.oauth_token_service.kwargs
@@ -301,7 +369,8 @@ class TestRefreshedTokenIsCommittedBeforeTheLeaseIsReleased:
         assert (held.access_token, held.refresh_token) == ("refreshed", "rotated")
         assert row.values == {"access_token": "refreshed", "refresh_token": "rotated"}
         holder_repo.update.assert_not_awaited()
-        holder_repo.one_fresh.assert_awaited_once_with(token.id)
+        # Once before refreshing (nobody else did), once after the own-connection write.
+        assert holder_repo.one_fresh.await_count == 2
         assert (waited.access_token, waited.refresh_token) == ("refreshed", "rotated")
         waiter_auth.refresh_access_token.assert_not_awaited()
         waiter_repo.update.assert_not_awaited()
@@ -326,4 +395,4 @@ class TestRefreshedTokenIsCommittedBeforeTheLeaseIsReleased:
         assert (result.access_token, result.refresh_token) == ("refreshed", "rotated")
         assert row.values["access_token"] == "old-access"
         repo.update.assert_awaited_once_with(obj=token)
-        repo.one_fresh.assert_not_awaited()
+        repo.one_fresh.assert_awaited_once_with(token.id)

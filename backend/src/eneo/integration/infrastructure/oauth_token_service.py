@@ -1,7 +1,7 @@
 import asyncio
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from time import monotonic
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, AsyncIterator, Optional
 
 import sqlalchemy as sa
 from redis.exceptions import RedisError
@@ -42,8 +42,10 @@ _TOKEN_WRITE_LOCK_TIMEOUT = "2s"
 
 
 class OauthTokenService:
-    # Process-wide locks to avoid concurrent refreshes for the same token.
-    _refresh_locks: dict[str, asyncio.Lock] = {}
+    # Process-wide locks to avoid concurrent refreshes for the same token. An
+    # entry lives only while a caller holds or waits for it, so the table does
+    # not grow with every token the process has ever refreshed.
+    _refresh_locks: dict[str, tuple[asyncio.Lock, int]] = {}
     _refresh_locks_guard = asyncio.Lock()
 
     def __init__(
@@ -62,14 +64,22 @@ class OauthTokenService:
         self.token_mapper = token_mapper
 
     @classmethod
-    async def _get_refresh_lock(cls, token_id: "UUID") -> asyncio.Lock:
+    @asynccontextmanager
+    async def _refresh_lock(cls, token_id: "UUID") -> AsyncIterator[None]:
         token_key = str(token_id)
         async with cls._refresh_locks_guard:
-            lock = cls._refresh_locks.get(token_key)
-            if lock is None:
-                lock = asyncio.Lock()
-                cls._refresh_locks[token_key] = lock
-            return lock
+            lock, holders = cls._refresh_locks.get(token_key, (asyncio.Lock(), 0))
+            cls._refresh_locks[token_key] = (lock, holders + 1)
+        try:
+            async with lock:
+                yield
+        finally:
+            async with cls._refresh_locks_guard:
+                lock, holders = cls._refresh_locks[token_key]
+                if holders == 1:
+                    del cls._refresh_locks[token_key]
+                else:
+                    cls._refresh_locks[token_key] = (lock, holders - 1)
 
     async def get_oauth_token_by_user_integration(
         self,
@@ -94,17 +104,17 @@ class OauthTokenService:
         """Refresh ``token_id`` once across processes and persist the result.
 
         Workers and API processes serialise on a Redis lease keyed by the token.
-        The refreshed token is committed before the lease is released, so a
-        caller that had to wait re-reads the row afterwards and reuses it
-        instead of spending a second refresh.
+        The refreshed token is committed before the lease is released, and the
+        row is re-read once the lease is held, so a caller that queued behind
+        another refresh, or that took the lease right after one was released,
+        reuses the new token instead of refreshing with a refresh token the
+        provider has already retired (Atlassian revokes the whole family).
         """
-        lock = await self._get_refresh_lock(token_id)
-        async with lock:
+        async with self._refresh_lock(token_id):
             token = await self.oauth_token_repo.one(id=token_id)
             if self.redis_client is None:
-                return await self._refresh_and_store(token)
+                return await self._refresh_unless_changed(token)
 
-            waited = False
             deadline = monotonic() + _REFRESH_LEASE_WAIT_SECONDS
             lease_key = f"{_REFRESH_LEASE_PREFIX}{token_id}"
             while True:
@@ -127,18 +137,9 @@ class OauthTokenService:
                             token_id,
                             exc,
                         )
-                        return await self._refresh_and_store(token)
+                        return await self._refresh_unless_changed(token)
                     if acquired:
-                        if waited:
-                            fresh = await self.oauth_token_repo.one_fresh(token.id)
-                            if fresh.access_token != token.access_token:
-                                logger.debug(
-                                    "Reusing OAuth token %s refreshed by another holder",
-                                    token_id,
-                                )
-                                return fresh
-                            token = fresh
-                        return await self._refresh_and_store(token)
+                        return await self._refresh_unless_changed(token)
                 if monotonic() >= deadline:
                     logger.warning(
                         "Refresh lease for OAuth token %s not acquired within %ss; "
@@ -146,9 +147,16 @@ class OauthTokenService:
                         token_id,
                         _REFRESH_LEASE_WAIT_SECONDS,
                     )
-                    return await self._refresh_and_store(token)
-                waited = True
+                    return await self._refresh_unless_changed(token)
                 await asyncio.sleep(_REFRESH_LEASE_POLL_SECONDS)
+
+    async def _refresh_unless_changed(self, token: "OauthToken") -> "OauthToken":
+        """Refresh ``token`` unless the row no longer holds the token first read."""
+        fresh = await self.oauth_token_repo.one_fresh(token.id)
+        if fresh.access_token != token.access_token:
+            logger.debug("Reusing OAuth token %s refreshed by another holder", token.id)
+            return fresh
+        return await self._refresh_and_store(token)
 
     async def _refresh_and_store(self, token: "OauthToken") -> "OauthToken":
         if token.token_type.is_confluence:
@@ -184,10 +192,14 @@ class OauthTokenService:
         again with the superseded refresh token, which revokes the family for
         providers that rotate it, and a rollback of the job would discard the
         rotation. The row is therefore written on its own connection, and the
-        caller's session re-reads it so later lookups there see it too. Without
-        a mapper, or when the row cannot be locked shortly (the caller's own
-        transaction already updated it), the write falls back to the caller's
-        transaction.
+        caller's session re-reads it so later lookups there see it too.
+
+        Without a mapper, or when the row cannot be locked shortly (the
+        caller's own transaction already updated it), the write falls back to
+        the caller's transaction. That reopens the window above until the
+        caller commits: a holder taking the lease in between sees the old row
+        and refreshes a second time. The fallback is logged so a double refresh
+        can be traced to it.
         """
         if self.token_mapper is not None:
             columns = self.token_mapper.to_db_dict(token)
@@ -209,7 +221,9 @@ class OauthTokenService:
             except Exception as exc:
                 logger.warning(
                     "Could not persist refreshed OAuth token %s on its own "
-                    "connection (%s); storing it in the current transaction instead",
+                    "connection (%s); storing it in the current transaction "
+                    "instead. Until that commits, another refresh of this token "
+                    "cannot see the rotation and will refresh again",
                     token.id,
                     type(exc).__name__,
                 )
