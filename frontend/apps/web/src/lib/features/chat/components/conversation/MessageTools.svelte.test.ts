@@ -1,5 +1,5 @@
 import type { ConversationMessage, InfoBlob } from "@eneo/eneo-js";
-import { page } from "@vitest/browser/context";
+import { page } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
