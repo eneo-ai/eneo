@@ -29,6 +29,8 @@
     onquote: (text: string, locator: string | null) => void;
     /** Whether a Markdown document may be edited in place. */
     editable?: boolean;
+    /** The version before this one, as Markdown; what changed against it is marked. */
+    previousMarkdown?: string | null;
     /** The reader changed the document's text. */
     ondirty?: () => void;
     /** The reader asked to save the document (Mod+S). */
@@ -43,6 +45,7 @@
     onready,
     onerror,
     editable = false,
+    previousMarkdown = null,
     ondirty,
     onsave
   }: Props = $props();
@@ -202,6 +205,7 @@
           markdown={content.text}
           {editable}
           {highlight}
+          {previousMarkdown}
           {onquote}
           {ondirty}
           {onsave}

@@ -3,6 +3,7 @@ import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
 import { Markdown, MarkdownManager } from "@tiptap/markdown";
 import StarterKit from "@tiptap/starter-kit";
+import { ChangeHighlight } from "./changeHighlight";
 import { DocumentCodeBlock } from "./codeBlock";
 import { EneoImage } from "./eneoImage";
 import { PageBreak } from "./pageBreak";
@@ -56,6 +57,7 @@ export function documentExtensions({
     PageBreak.configure({ label: pageBreakLabel }),
     ...RawHtml,
     PassageHighlight,
+    ChangeHighlight,
     Markdown.configure({ markedOptions: MARKED_OPTIONS })
   ];
 }

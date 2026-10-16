@@ -14,7 +14,7 @@
   import FileText from "@lucide/svelte/icons/file-text";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Minimize2 from "@lucide/svelte/icons/minimize-2";
-  import Pencil from "@lucide/svelte/icons/pencil";
+  import Diff from "@lucide/svelte/icons/diff";
   import X from "@lucide/svelte/icons/x";
   import { toast } from "svelte-sonner";
   import type { DocumentExport, DocumentSaver, FilePreview } from "../FilePreview.svelte";
@@ -196,20 +196,33 @@
     preview.highlight ?? (preview.quote?.fileId === file?.id ? preview.quote : null)
   );
 
-  // Editing: the latest version of a Markdown document, once it is on show.
-  // Edits stay in the editor; one save makes one new version.
+  // The latest version of a Markdown document is edited in place. Edits stay
+  // in the editor; one save makes one new version.
   const saver = $derived(file ? (saverOf?.(file) ?? null) : null);
-  const canEdit = $derived(
-    !!saver && !!file && content?.kind === "markdown" && !draft && !later && !updating
-  );
-  const editing = $derived(preview.editing);
+  const editable = $derived(!!saver && !!file && content?.kind === "markdown" && !draft && !later);
   let saving = $state(false);
+  // What this version changed against the one before it, when asked for.
+  const comparable = $derived(!!earlier && content?.kind === "markdown" && !draft);
+  let previousMarkdown = $state<string | null>(null);
+  $effect(() => {
+    const before = earlier;
+    const wanted = comparable && preview.showChanges;
+    previousMarkdown = null;
+    if (!wanted || !before) return;
+    let current = true;
+    void preview.loadText(before).then((text) => {
+      if (current) previousMarkdown = text;
+    });
+    return () => {
+      current = false;
+    };
+  });
   // The content components by file, for the document text the reader has edited.
   let contentOf = $state<Record<string, FilePreviewContent>>({});
 
   async function saveEdits() {
     const current = file;
-    if (!current || !saver || !preview.editing?.dirty || saving) return;
+    if (!current || !saver || !preview.dirty || saving) return;
     const markdown = contentOf[current.id]?.getMarkdown();
     if (markdown === null || markdown === undefined) return;
     saving = true;
@@ -223,9 +236,11 @@
     }
   }
 
+  /** The reader drops their edits: on the Cancel button, or agreeing to in the dialog. */
   function discardEdits() {
     if (file) contentOf[file.id]?.resetEditor();
-    preview.pendingDiscard?.proceed();
+    if (preview.pendingDiscard) preview.pendingDiscard.proceed();
+    else preview.dropEdits();
   }
 </script>
 
@@ -369,9 +384,9 @@
           <span class="bg-accent-default size-1.5 shrink-0 rounded-full" aria-hidden="true"></span>
           {m.file_preview_writing()}
         </p>
-      {:else if editing}
+      {:else if preview.dirty}
         <p class="text-muted-foreground truncate text-xs" role="status">
-          {m.file_preview_editing()}{editing.dirty ? ` · ${m.file_preview_unsaved_changes()}` : ""}
+          {m.file_preview_unsaved_changes()}
         </p>
       {:else if latest}
         <p class="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
@@ -395,22 +410,24 @@
         {@render versionButtons()}
       </div>
     {/if}
-    {#if editing}
-      <Button variant="ghost" size="sm" disabled={saving} onclick={() => preview.stopEditing()}>
+    {#if preview.dirty}
+      <Button variant="ghost" size="sm" disabled={saving} onclick={discardEdits}>
         {m.cancel()}
       </Button>
-      <Button size="sm" disabled={!editing.dirty || saving} onclick={saveEdits}>
+      <Button size="sm" disabled={saving} onclick={saveEdits}>
         {saving ? m.file_preview_saving() : m.save()}
       </Button>
-    {:else if canEdit}
+    {/if}
+    {#if comparable}
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label={m.file_preview_edit()}
-        title={m.file_preview_edit()}
-        onclick={() => preview.startEditing()}
+        aria-pressed={preview.showChanges}
+        aria-label={m.file_preview_show_changes()}
+        title={m.file_preview_show_changes()}
+        onclick={() => (preview.showChanges = !preview.showChanges)}
       >
-        <Pencil aria-hidden="true" />
+        <Diff aria-hidden="true" />
       </Button>
     {/if}
     {@render exportMenu()}
@@ -464,10 +481,10 @@
       <Button variant="outline" size="sm" class="mt-2" onclick={() => preview.retry()}
         >{m.retry()}</Button
       >
-    {:else if editing && preview.replacementContent}
+    {:else if preview.dirty && preview.replacementContent}
       <!-- The newer version waits until the reader is done with their edits. -->
       <p class="text-muted-foreground text-xs">{m.file_preview_newer_version_while_editing()}</p>
-      <Button variant="outline" size="sm" class="mt-2" onclick={() => preview.stopEditing()}>
+      <Button variant="outline" size="sm" class="mt-2" onclick={discardEdits}>
         {m.file_preview_show_latest()}
       </Button>
     {:else}
@@ -506,7 +523,8 @@
           content={view.content}
           title={view.file.name}
           highlight={view.pending ? null : highlight}
-          editable={!view.pending && !!editing}
+          editable={!view.pending && editable}
+          previousMarkdown={view.pending ? null : previousMarkdown}
           onready={() => preview.finishReplacement(view.file.id)}
           onerror={() => preview.failReplacement(view.file.id)}
           onquote={(text, locator) => preview.quoteSelection(text, locator)}

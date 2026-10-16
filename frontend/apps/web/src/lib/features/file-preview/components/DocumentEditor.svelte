@@ -9,6 +9,7 @@
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { m } from "$lib/paraglide/messages";
   import type { PreviewPassage } from "../FilePreview.svelte";
+  import { changesBetween } from "../editor/changes";
   import { documentExtensions, withFinalNewline } from "../editor/extensions";
   import {
     cellSelectionQuote,
@@ -23,6 +24,8 @@
     editable?: boolean;
     /** A passage to mark and scroll to; null clears the mark. */
     highlight?: PreviewPassage | null;
+    /** The version before this one, as Markdown; what changed against it is marked. */
+    previousMarkdown?: string | null;
     /** Called with the selected text, and where it stands, when the reader quotes it. */
     onquote?: (text: string, locator: string | null) => void;
     /** The reader changed the content; never called for a `markdown` update. */
@@ -39,6 +42,7 @@
     markdown,
     editable = false,
     highlight = null,
+    previousMarkdown = null,
     onquote,
     ondirty,
     onsave,
@@ -163,6 +167,16 @@
     if (spans.length > 0) reveal(current, spans[0].from);
   });
 
+  // What this version changed against the one before it, over the text as
+  // the file has it; the marks then follow the reader's edits.
+  $effect(() => {
+    const previous = previousMarkdown;
+    const current = markdown;
+    void rendered;
+    if (!editor) return;
+    editor.commands.showChanges(previous === null ? [] : changesBetween(previous, current));
+  });
+
   /** Scrolls whatever scrolls the editor to centre the position. */
   function reveal(current: Editor, pos: number) {
     let scroller = current.view.dom.parentElement;
@@ -233,6 +247,19 @@
 <style>
   .document-editor :global(.passage-highlight) {
     background-color: var(--warning-dimmer);
+  }
+
+  .document-editor :global(.change-added) {
+    background-color: var(--positive-dimmer);
+    border-radius: 0.15em;
+  }
+
+  .document-editor :global(.change-removed) {
+    margin-right: 0.25em;
+    background-color: var(--negative-dimmer);
+    border-radius: 0.15em;
+    color: var(--color-muted-foreground);
+    text-decoration: line-through;
   }
 
   .document-editor :global(.page-break) {

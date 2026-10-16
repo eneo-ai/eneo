@@ -126,10 +126,9 @@
     if (event.key !== "Escape" || event.defaultPrevented) return;
     if (!panel?.contains(document.activeElement)) return;
     event.preventDefault();
-    // Escape steps back: out of the maximised panel first, then out of edit
-    // mode (asking before edits are lost), then out of the panel.
+    // Escape steps back: out of the maximised panel first, then out of the
+    // panel, which asks first when edits would be lost.
     if (maximised) preview.maximised = false;
-    else if (preview.editing) preview.stopEditing();
     else close();
   }
 </script>
