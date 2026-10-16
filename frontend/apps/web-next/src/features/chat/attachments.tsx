@@ -323,8 +323,8 @@ function AttachmentChip({
  * The attachments waiting in the composer (inside its drawer). One or two are
  * chips sharing a row; more fold into one summary row with the count, the
  * total size and the upload progress that unfolds to the chips on request, so
- * a long list never pushes the composer down. The side panel holds the full list once the
- * message is sent.
+ * a long list never pushes the composer down. The side panel holds the full
+ * list once the message is sent.
  */
 export function ComposerAttachments({
   attachments
