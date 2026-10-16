@@ -1,9 +1,15 @@
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Generic, Literal, Optional, TypeVar
+from typing import Any, Dict, Generic, Literal, Optional, Self, TypeVar, cast
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import (
+    BaseModel,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
@@ -17,12 +23,73 @@ from eneo.integration.domain.value_objects import (
 from eneo.jobs.job_models import Task
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.models import ResourcePermission
+from eneo.observability.error_text import user_visible_error
 
 T = TypeVar("T", bound=BaseModel)
 
 
 def _empty_resource_permissions() -> list[ResourcePermission]:
     return []
+
+
+# What a sync wrote is cleaned again when served, so rows written before it
+# described errors for users and named unplaced items by id never show URLs,
+# SQL, host names or files from outside the imported item.
+def _visible_error(value: Optional[str]) -> Optional[str]:
+    return None if value is None else user_visible_error(value)
+
+
+# Skips of delta items never placed in the item's scope: older syncs named
+# their file, which may lie anywhere in the drive.
+_UNPLACED_SKIP_REASONS = (
+    "Folder scope path unavailable",
+    "Missing item id",
+    "Could not remove out-of-scope",
+    "Could not remove removed:",
+)
+
+
+def _visible_skip(file: str, reason: str) -> SkippedDetail:
+    reason = user_visible_error(reason)
+    return SkippedDetail(
+        file="" if reason.startswith(_UNPLACED_SKIP_REASONS) else file, reason=reason
+    )
+
+
+def _visible_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
+    # Summaries written by older syncs also hold the skipped files.
+    cleaned = dict(summary)
+    warning: object = cleaned.get("reconcile_warning")
+    if isinstance(warning, str):
+        cleaned["reconcile_warning"] = user_visible_error(warning)
+    details: object = cleaned.get("skipped_details")
+    if isinstance(details, list):
+        cleaned["skipped_details"] = [
+            _visible_detail(detail) for detail in cast(list[object], details)
+        ]
+    return cleaned
+
+
+def _visible_detail(detail: object) -> object:
+    if not isinstance(detail, dict):
+        return detail
+    entry = cast(Dict[str, object], detail)
+    file, reason = entry.get("file"), entry.get("reason")
+    if not isinstance(file, str) or not isinstance(reason, str):
+        return entry
+    return {**entry, **_visible_skip(file, reason)}
+
+
+def _visible_sync_metadata(metadata: SyncMetadata) -> SyncMetadata:
+    cleaned = metadata.copy()
+    if "skipped_details" in cleaned:
+        cleaned["skipped_details"] = [
+            _visible_skip(detail["file"], detail["reason"])
+            for detail in cleaned["skipped_details"]
+        ]
+    if "reconcile_warning" in cleaned:
+        cleaned["reconcile_warning"] = user_visible_error(cleaned["reconcile_warning"])
+    return cleaned
 
 
 class BaseListModel(BaseModel, Generic[T]):
@@ -195,6 +262,18 @@ class IntegrationKnowledgeMetaData(BaseModel):
         description="When the SharePoint webhook subscription expires (only for SharePoint integrations)",
     )
 
+    @field_validator("last_sync_error")
+    @classmethod
+    def _user_visible_sync_error(cls, value: Optional[str]) -> Optional[str]:
+        return _visible_error(value)
+
+    @field_validator("last_sync_summary")
+    @classmethod
+    def _user_visible_sync_summary(
+        cls, value: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        return None if value is None else _visible_summary(value)
+
     @property
     def subscription_status(self) -> Optional[str]:
         """Compute subscription status for SharePoint integrations.
@@ -277,6 +356,18 @@ class SyncLog(BaseModel):
     completed_at: Optional[datetime] = None
     created_at: datetime
 
+    @field_validator("metadata")
+    @classmethod
+    def _user_visible_metadata(
+        cls, value: Optional[SyncMetadata]
+    ) -> Optional[SyncMetadata]:
+        return None if value is None else _visible_sync_metadata(value)
+
+    @field_validator("error_message")
+    @classmethod
+    def _user_visible_error_message(cls, value: Optional[str]) -> Optional[str]:
+        return _visible_error(value)
+
     @computed_field
     def files_processed(self) -> int:
         """Get files_processed from metadata."""
@@ -348,6 +439,12 @@ class IntegrationDocumentsPage(BaseModel):
 class IntegrationSkippedDocument(BaseModel):
     file: str
     reason: str
+
+    @model_validator(mode="after")
+    def _user_visible(self) -> Self:
+        visible = _visible_skip(self.file, self.reason)
+        self.file, self.reason = visible["file"], visible["reason"]
+        return self
 
 
 class IntegrationSkippedDocuments(BaseModel):

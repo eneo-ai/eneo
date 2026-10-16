@@ -2,7 +2,9 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from eneo.observability.error_text import user_visible_error
 
 
 def _empty_uuid_list() -> list[UUID]:
@@ -147,6 +149,13 @@ class SharePointSubscriptionPublic(BaseModel):
     last_webhook_received_at: Optional[datetime] = Field(
         None, description="Most recent valid webhook received for this subscription"
     )
+
+    # Failures stored before renewal errors were cleaned may hold URLs or host names.
+    @field_validator("last_renewal_error")
+    @classmethod
+    def _clean_renewal_error(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else user_visible_error(value)
+
     owner_email: Optional[str] = Field(
         None,
         description="Email of subscription owner (None for organization integrations)",

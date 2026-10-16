@@ -24,6 +24,7 @@ from eneo.integration.domain.entities.tenant_sharepoint_app import (
     TenantSharePointApp,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
     from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
@@ -226,7 +227,7 @@ class OrgTokenProvider:
         except httpx.HTTPStatusError as exc:
             return False, summarize_token_endpoint_error(exc)
         except Exception as exc:
-            return False, str(exc)
+            return False, user_visible_error(exc)
         return True, None
 
     @staticmethod

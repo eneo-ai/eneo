@@ -39,6 +39,7 @@ from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import EncryptionNotConfiguredException
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.settings.encryption_service import EncryptionService
@@ -524,7 +525,7 @@ async def test_sharepoint_app_credentials(
         logger.error(f"Failed to test SharePoint app credentials: {e}")
         return TenantAppTestResult(
             success=False,
-            error_message=str(e),
+            error_message=user_visible_error(e),
             details=None,
         )
 

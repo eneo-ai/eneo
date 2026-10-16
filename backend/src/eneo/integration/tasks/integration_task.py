@@ -9,6 +9,7 @@ from eneo.main.config import get_settings
 from eneo.main.exceptions import NotFoundException
 from eneo.main.logging import get_logger
 from eneo.main.models import ChannelType
+from eneo.observability.error_text import user_visible_error
 from eneo.redis.connection import build_redis_auth_kwargs, build_redis_url
 from eneo.worker.redis import redis_lease
 from eneo.worker.worker import Worker
@@ -84,23 +85,37 @@ async def _validate_embedding_provider(
         )
 
 
+class IntegrationSyncError(Exception):
+    """A failed sync as its job reports it to the person who started it.
+
+    The job keeps this message; the cause, with its URLs and SQL, stays in
+    the logs only.
+    """
+
+    def __init__(self, cause: Exception) -> None:
+        super().__init__(user_visible_error(cause))
+
+
 @worker.task(channel_type=ChannelType.PULL_CONFLUENCE_CONTENT)
 async def pull_confluence_content(
     params: "ConfluenceContentTaskParam", container: "Container", **kw: Any
 ):
-    knowledge = await _get_knowledge_with_retry(
-        container, params.integration_knowledge_id
-    )
-    assert knowledge is not None
-    await _validate_embedding_provider(container, knowledge)
+    try:
+        knowledge = await _get_knowledge_with_retry(
+            container, params.integration_knowledge_id
+        )
+        assert knowledge is not None
+        await _validate_embedding_provider(container, knowledge)
 
-    service = container.confluence_content_service()
+        service = container.confluence_content_service()
 
-    await service.pull_content(
-        token_id=params.token_id,
-        space_key=params.space_key,
-        integration_knowledge_id=knowledge.id,
-    )
+        await service.pull_content(
+            token_id=params.token_id,
+            space_key=params.space_key,
+            integration_knowledge_id=knowledge.id,
+        )
+    except Exception as exc:
+        raise IntegrationSyncError(exc) from exc
 
 
 # A webhook that arrives while a sync holds the lease leaves this marker; the
@@ -262,7 +277,7 @@ async def pull_sharepoint_content(
             f"Error in full sync task for knowledge {knowledge_id_str}: {exc}",
             exc_info=True,
         )
-        raise
+        raise IntegrationSyncError(exc) from exc
 
 
 @worker.task(channel_type=ChannelType.SYNC_SHAREPOINT_DELTA)
@@ -325,4 +340,4 @@ async def sync_sharepoint_delta(
 
     except Exception as e:
         logger.error(f"Error in sync_sharepoint_delta: {e}", exc_info=True)
-        raise
+        raise IntegrationSyncError(e) from e

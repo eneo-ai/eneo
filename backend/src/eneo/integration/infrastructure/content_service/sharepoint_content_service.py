@@ -51,6 +51,7 @@ from eneo.integration.infrastructure.office_change_key_service import (
 )
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
@@ -414,7 +415,7 @@ class SharePointContentService:
         except Exception as e:
             await self._record_sync_failure(
                 resolved_integration_knowledge_id,
-                str(e),
+                e,
                 sync_type="full",
                 started_at=started_at,
                 metadata=_sync_metadata(trigger=sync_trigger, recovery=recovery),
@@ -425,7 +426,7 @@ class SharePointContentService:
     async def _record_sync_failure(
         self,
         integration_knowledge_id: UUID | None,
-        error: str,
+        failure: Exception,
         *,
         sync_type: str,
         started_at: datetime,
@@ -442,6 +443,7 @@ class SharePointContentService:
         """
         if integration_knowledge_id is None:
             return
+        error = user_visible_error(failure)
         failed_at = datetime.now(timezone.utc)
         try:
             integration_knowledge = await self.integration_knowledge_repo.one(
@@ -883,7 +885,7 @@ class SharePointContentService:
                 raise
             await self._record_sync_failure(
                 resolved_integration_knowledge_id,
-                str(e),
+                e,
                 sync_type="delta",
                 started_at=started_at,
                 metadata=_sync_metadata(trigger=sync_trigger),
@@ -1210,7 +1212,7 @@ class SharePointContentService:
                 )
                 stats["skipped_items"] += 1
                 stats["skipped_details"].append(
-                    {"file": page_name, "reason": f"Error: {e}"}
+                    {"file": page_name, "reason": error_reason(e)}
                 )
 
     async def _column_catalog(
@@ -1504,7 +1506,10 @@ class SharePointContentService:
             )
             stats["skipped_items"] += 1
             stats["skipped_details"].append(
-                {"file": item_name, "reason": f"Could not remove {reason}: {e}"}
+                {
+                    "file": item_name,
+                    "reason": f"Could not remove {reason}: {user_visible_error(e)}",
+                }
             )
             return 0
 
@@ -1707,7 +1712,7 @@ class SharePointContentService:
             )
             stats["skipped_items"] += 1
             stats["skipped_details"].append(
-                {"file": item_name, "reason": error_reason(str(e))}
+                {"file": item_name, "reason": error_reason(e)}
             )
 
     async def _index_folder_subtree_entering_scope(
@@ -1757,7 +1762,8 @@ class SharePointContentService:
             stats["skipped_details"].append(
                 {
                     "file": folder_name,
-                    "reason": f"Could not list folder contents: {exc}",
+                    "reason": "Could not list folder contents: "
+                    + user_visible_error(exc),
                 }
             )
             return
@@ -1972,7 +1978,8 @@ class SharePointContentService:
                 exc_info=True,
             )
             stats["reconcile_warning"] = (
-                f"Orphan cleanup skipped: could not list SharePoint items ({exc})"
+                "Orphan cleanup skipped: could not list SharePoint items "
+                f"({user_visible_error(exc)})"
             )
             return
 
@@ -2172,11 +2179,17 @@ class SharePointContentService:
             "skipped_items": stats.get("skipped_items", 0),
             "skipped_total": stats.get("skipped_items", 0),
             "skipped_truncated": len(skipped_details) > _MAX_SKIPPED_DETAILS,
-            "skipped_details": skipped_details[:_MAX_SKIPPED_DETAILS],
+            "skipped_details": [
+                {
+                    "file": detail["file"],
+                    "reason": user_visible_error(detail["reason"]),
+                }
+                for detail in skipped_details[:_MAX_SKIPPED_DETAILS]
+            ],
         }
         reconcile_warning = stats.get("reconcile_warning")
         if reconcile_warning:
-            summary["reconcile_warning"] = reconcile_warning
+            summary["reconcile_warning"] = user_visible_error(reconcile_warning)
         return summary
 
     def _format_summary_for_job(self, summary: SyncStats) -> str:
@@ -2376,12 +2389,12 @@ class SharePointContentService:
             logger.error(
                 f"Error getting file content for {item_name}: {e}", exc_info=True
             )
-            return None, error_reason(str(e))
+            return None, error_reason(e)
         except Exception as e:
             logger.error(
                 f"Error getting file content for {item_name}: {e}", exc_info=True
             )
-            return None, error_reason(str(e))
+            return None, error_reason(e)
 
         if result.text is not None:
             return result.text, None
