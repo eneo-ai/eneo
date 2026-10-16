@@ -114,27 +114,29 @@ class TestIntegrationKnowledgeUnion:
         assert session.execute.await_count == 1
 
     @pytest.mark.parametrize(
-        ("lookup", "counted"),
+        ("lookup", "arguments", "counted"),
         [
             # Served to the UI as SpacePublic: the knowledge list needs counts.
-            ("one_or_none", True),
-            ("get_personal_space", True),
+            ("one_or_none", (uuid4(),), True),
+            ("get_personal_space", (uuid4(),), True),
+            # The organization space is served through this lookup.
+            ("get_space_by_name_and_tenant", ("Organization", uuid4()), True),
             # Resource lookups on the chat and job paths never show the list.
-            ("get_space_by_assistant", False),
-            ("get_space_by_app", False),
-            ("get_space_by_service", False),
-            ("get_space_by_group_chat", False),
-            ("get_space_by_collection", False),
-            ("get_space_by_website", False),
-            ("get_space_by_integration_knowledge", False),
+            ("get_space_by_assistant", (uuid4(),), False),
+            ("get_space_by_app", (uuid4(),), False),
+            ("get_space_by_service", (uuid4(),), False),
+            ("get_space_by_group_chat", (uuid4(),), False),
+            ("get_space_by_collection", (uuid4(),), False),
+            ("get_space_by_website", (uuid4(),), False),
+            ("get_space_by_integration_knowledge", (uuid4(),), False),
         ],
     )
     async def test_only_space_lookups_served_to_the_ui_count_documents(
-        self, repo, lookup: str, counted: bool
+        self, repo, lookup: str, arguments: tuple, counted: bool
     ):
         repo._get_from_query = AsyncMock(return_value=MagicMock())
 
-        await getattr(repo, lookup)(uuid4())
+        await getattr(repo, lookup)(*arguments)
 
         kwargs = repo._get_from_query.await_args.kwargs
         assert kwargs.get("with_document_counts", False) is counted

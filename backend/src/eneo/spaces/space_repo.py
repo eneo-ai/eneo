@@ -1837,8 +1837,9 @@ class SpaceRepository:
 
         ``document_count`` is a COUNT over info_blobs per item, so it is only
         attached for lookups whose knowledge list is served to the UI (``one``,
-        ``one_or_none``, ``get_personal_space``). Assistant, app, session and
-        other resource lookups on the chat path leave it unset.
+        ``one_or_none``, ``get_personal_space``, ``get_space_by_name_and_tenant``
+        for the organization space). Assistant, app, session and other
+        resource lookups on the chat path leave it unset.
         """
         ik = IntegrationKnowledge
 
@@ -1873,7 +1874,7 @@ class SpaceRepository:
             Spaces.user_id.is_(None),
             Spaces.tenant_space_id.is_(None),
         )
-        return await self._get_from_query(q)
+        return await self._get_from_query(q, with_document_counts=True)
 
     async def create_org_space_for_tenant(
         self, name: str, description: str, tenant_id: UUID
