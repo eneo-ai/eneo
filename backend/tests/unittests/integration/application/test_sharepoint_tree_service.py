@@ -209,3 +209,30 @@ class TestSearchLibrary:
             await service.search_library(
                 user_integration_id=uuid4(), space_id=uuid4(), site_id="s1", text="x"
             )
+
+    @pytest.mark.parametrize("method", ["get_folder_tree", "search_library"])
+    async def test_fallback_detail_never_carries_the_request_url(
+        self, service, monkeypatch, method
+    ):
+        service._connect = AsyncMock(return_value=(MagicMock(), AsyncMock(), None))
+        infra = MagicMock()
+        failing = AsyncMock(
+            side_effect=ValueError(
+                "Download failed: https://contoso.sharepoint.com/d?tempauth=secret"
+            )
+        )
+        infra.get_folder_tree = infra.search_library = failing
+        monkeypatch.setattr(
+            "eneo.integration.infrastructure.preview_service.sharepoint_tree_service."
+            "SharePointTreeService",
+            MagicMock(return_value=infra),
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await getattr(service, method)(
+                user_integration_id=uuid4(), space_id=uuid4(), site_id="s1"
+            )
+
+        detail = str(exc_info.value)
+        assert detail.endswith("Download failed: https://contoso.sharepoint.com/d")
+        assert "tempauth" not in detail
