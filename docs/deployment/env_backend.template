@@ -465,6 +465,8 @@ EXPORT_MAX_AGE_HOURS=24
 # address users open Eneo on.
 # MCP_APPS_ENABLED=true
 # MCP_APP_CONTENT_BASE_URL=https://views.your-domain.com
+# A second frontend served beside PUBLIC_ORIGIN that may frame views (JSON list).
+# MCP_APP_HOST_ORIGINS=["https://next.your-domain.com"]
 
 # ============================================================================
 # FEATURE FLAGS

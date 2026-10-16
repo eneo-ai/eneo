@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes } from "./format";
+import { fileExtension, formatBytes } from "./format";
 
 describe("formatBytes", () => {
   it("writes sizes the Swedish way", () => {
@@ -23,5 +23,18 @@ describe("formatBytes", () => {
   it("shows nothing stored for sizes that are not a positive number", () => {
     expect(formatBytes(-1, "sv")).toBe("0 B");
     expect(formatBytes(Number.NaN, "sv")).toBe("0 B");
+  });
+});
+
+describe("fileExtension", () => {
+  it("gives the extension in upper case", () => {
+    expect(fileExtension("Policy.pdf")).toBe("PDF");
+    expect(fileExtension("rapport.final.DOCX")).toBe("DOCX");
+  });
+
+  it("gives nothing for a name without one", () => {
+    expect(fileExtension("README")).toBe("");
+    expect(fileExtension(".env")).toBe("");
+    expect(fileExtension("trailing.")).toBe("");
   });
 });

@@ -11,7 +11,9 @@ import {
   Globe,
   Plus,
   ShieldCheck,
-  Square
+  Square,
+  TextQuote,
+  X
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
@@ -228,9 +230,44 @@ export type ComposerProps = {
   partnerToken?: ReactNode;
   /** Context-usage bar, shown under the composer. */
   contextBar?: ReactNode;
+  /** A passage quoted from a file or a view, sent as the opening lines of the question. */
+  quote?: ComposerQuote | null;
   variant?: "docked" | "start";
   textareaRef?: Ref<HTMLTextAreaElement>;
 };
+
+export type ComposerQuote = {
+  text: string;
+  /** Where the text is from: the file, or what the view shows. */
+  source: string;
+  onRemove: () => void;
+};
+
+/** The quote waiting in the composer's drawer, with where it is from and a way to drop it. */
+function ComposerQuoteCard({ quote }: { quote: ComposerQuote }) {
+  const t = useTranslations();
+  return (
+    <div
+      role="group"
+      aria-label={t("chat_quote_label")}
+      className="border-ax-accent bg-ax-surface rounded-ax-element flex items-start gap-2.5 border-s-2 py-2 ps-3 pe-1"
+    >
+      <TextQuote aria-hidden="true" className="text-ax-text-secondary mt-0.5 size-4 shrink-0" />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="line-clamp-3 text-[13.5px] leading-snug whitespace-pre-wrap">{quote.text}</p>
+        <p className="text-ax-text-secondary truncate text-xs">{quote.source}</p>
+      </div>
+      <button
+        type="button"
+        aria-label={t("chat_quote_remove")}
+        onClick={quote.onRemove}
+        className="text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text focus-visible:outline-ring rounded-ax-element flex size-7 shrink-0 items-center justify-center focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:size-11"
+      >
+        <X className="size-3.5" aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
 
 /**
  * The chat composer (Astryx ChatComposer): drawer with attachment cards,
@@ -256,6 +293,7 @@ export function Composer({
   modelSelector,
   partnerToken,
   contextBar,
+  quote = null,
   variant = "docked",
   textareaRef
 }: ComposerProps) {
@@ -292,9 +330,12 @@ export function Composer({
             variant === "start" && "[&>div:has(textarea)]:rounded-[1.375rem]"
           )}
           drawer={
-            hasAttachments ? (
+            hasAttachments || quote ? (
               <ChatComposerDrawer label={t("attachments")}>
-                <ComposerAttachments attachments={attachments} />
+                <div className="flex w-full flex-col gap-2">
+                  {quote && <ComposerQuoteCard quote={quote} />}
+                  {hasAttachments && <ComposerAttachments attachments={attachments} />}
+                </div>
               </ChatComposerDrawer>
             ) : undefined
           }

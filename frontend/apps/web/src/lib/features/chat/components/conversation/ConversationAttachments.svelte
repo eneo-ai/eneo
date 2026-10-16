@@ -1,8 +1,8 @@
 <!--
-  The attachments waiting in the composer. Up to three are chips; more are
-  one summary row with the upload progress that unfolds on request, so a
-  long list never pushes the composer down. The panel holds the full list
-  once the message is sent.
+  The attachments waiting in the composer. One or two are chips sharing a row;
+  more fold into one summary row with the upload progress that unfolds on
+  request, so a long list never pushes the composer down. The panel holds the
+  full list once the message is sent.
 -->
 <script lang="ts">
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
@@ -23,8 +23,9 @@
   // backend accepts it.
   const chat = getChatService();
 
-  // From this many attachments the list folds into a summary row.
-  const SUMMARY_FROM = 4;
+  // From this many attachments the list folds into a summary row. Two chips
+  // split one row between them; a third would already stack.
+  const SUMMARY_FROM = 3;
   let expanded = $state(false);
 
   const summary = $derived.by(() => {
@@ -169,7 +170,13 @@
         </div>
       {/if}
     {:else}
-      <div class="flex flex-wrap gap-1.5" role="list" aria-label={countLabel}>
+      <div
+        class="grid gap-1.5 {summary.count === 1
+          ? 'grid-cols-1 justify-items-start'
+          : 'grid-cols-1 sm:grid-cols-2'}"
+        role="list"
+        aria-label={countLabel}
+      >
         {#each $attachments as attachment (attachment.id)}
           {@render chip(attachment)}
         {/each}

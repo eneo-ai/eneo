@@ -392,6 +392,13 @@ production build shows these violations. Never loosen the policy.
 
 - The Eneo theme is pre-built, so `Theme` injects nothing. Never pass a runtime
   `defineTheme()` object to `<Theme>`; runtime themes inject `<style>` tags.
+- `frame-src` allows `blob:` (file previews) and the one origin interactive
+  tool views (MCP Apps) are served from, `MCP_APP_CONTENT_ORIGIN` (the
+  backend's `MCP_APP_CONTENT_BASE_URL`); the backend in turn frames a view
+  only for its `PUBLIC_ORIGIN` and the origins in `MCP_APP_HOST_ORIGINS`, so
+  list this app's origin there when testing views here. The Word preview
+  builds a same-origin `srcdoc` frame and stamps the nonce on every `<style>`
+  it adds (`src/features/workspace/preview/docx-preview.tsx`).
 - Astryx parts that still inject `<style>` at runtime and are blocked in
   production: `CodeBlock`/`CodeEditor` syntax colours (don't use them; code
   fences render through Streamdown's `@streamdown/code`) and `DateInput`'s

@@ -1220,7 +1220,7 @@
   "start_full_sync": "Start Full Sync",
   "resync_all_wrapper": "Resync all items",
   "confirm_resync_all_wrapper": "This will run a full resync of all {count} items in \"{wrapperName}\". All content will be reprocessed, which may take a while. Are you sure?",
-  "resync_all_wrapper_partial_failure": "{failed} of {total} items could not be queued",
+  "resync_all_wrapper_partial_failure": "{failed} of {total} items could not be queued: {names}",
   "resync_all_wrapper_queued": "Resync queued for {count} items",
   "sync_now": "Sync now",
   "not_synced": "Not synced yet",
@@ -6487,5 +6487,11 @@
   "select_additional_knowledge": "Select additional knowledge sources that this assistant will be able to search for relevant answers.",
   "organization_knowledge_description": "Select additional sources from your organization's space that this assistant will be able to search for relevant answers.",
   "skill_used_in_reply": "Skill “{name}” used in this reply",
-  "overall_statistics": "Overall Statistics"
+  "overall_statistics": "Overall Statistics",
+  "workspace_preview_row_label": "row {row}",
+  "workspace_preview_table_hint": "Select rows with the checkboxes to ask about them, or select text to quote it. Hold Shift to select a range.",
+  "workspace_preview_selection_actions": "Actions for selected rows",
+  "side_panel_latest_answer": "Latest answer",
+  "chat_quote_label": "Quote",
+  "chat_quote_remove": "Remove the quote"
 }

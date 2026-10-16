@@ -37,7 +37,10 @@ function createNonce(): string {
 
 export function buildContentSecurityPolicy(
   nonce: string,
-  nodeEnv: string | undefined = process.env.NODE_ENV
+  nodeEnv: string | undefined = process.env.NODE_ENV,
+  // Origins the chat may frame besides blob: documents: the content origin
+  // interactive tool views (MCP Apps) are served from.
+  frameOrigins: readonly string[] = env.MCP_APP_CONTENT_ORIGIN ? [env.MCP_APP_CONTENT_ORIGIN] : []
 ): string {
   const isDevelopment = nodeEnv === "development";
   const directives = [
@@ -52,8 +55,9 @@ export function buildContentSecurityPolicy(
     "font-src 'self' data:",
     "media-src 'self' blob: data:",
     // Signed file previews are fetched through our API proxy and framed from
-    // an in-memory blob. Other frame origins remain blocked.
-    "frame-src blob:",
+    // an in-memory blob; interactive tool views come from their own origin.
+    // Other frame origins remain blocked.
+    ["frame-src blob:", ...frameOrigins].join(" "),
     `connect-src 'self'${isDevelopment ? " ws: http: https:" : ""}`,
     "object-src 'none'",
     "base-uri 'self'",

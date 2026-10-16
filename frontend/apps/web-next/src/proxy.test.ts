@@ -129,6 +129,14 @@ it("builds a strict production script policy with a request nonce", () => {
   expect(csp).toContain("upgrade-insecure-requests");
 });
 
+it("frames interactive tool views from their content origin only", () => {
+  const csp = buildContentSecurityPolicy("test-nonce", "production", ["https://views.eneo.test"]);
+  expect(directive(csp, "frame-src")).toBe("frame-src blob: https://views.eneo.test");
+  expect(directive(buildContentSecurityPolicy("n", "production", []), "frame-src")).toBe(
+    "frame-src blob:"
+  );
+});
+
 it("allows React dev eval and the dev tools' inline styles without weakening production", () => {
   const csp = buildContentSecurityPolicy("dev-nonce", "development");
 
