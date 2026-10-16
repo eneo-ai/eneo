@@ -179,6 +179,38 @@ export function buildStructuredQuestionSelection(
   };
 }
 
+/** The option a typed value answers (a tool argument's fixed value, as the
+ *  server names it on the showing), or null when a typed value is an answer
+ *  of its own. */
+export function fixedValueOption(question: StructuredQuestion): FixedValueOption | null {
+  const optionId = question.tool_question?.fixed_value_option_id;
+  if (!optionId || question.selection_mode !== "single") return null;
+  return (
+    question.options.find((option): option is FixedValueOption => option.id === optionId) ?? null
+  );
+}
+
+type FixedValueOption = StructuredQuestionOption & { id: string };
+
+/** A typed value given as `option` (from `fixedValueOption`). */
+export function buildStructuredQuestionFixedValueAnswer(
+  question: StructuredQuestion,
+  option: FixedValueOption,
+  value: string
+): StructuredQuestionAnswerPayload {
+  return {
+    text: `${option.label}: ${value}`,
+    questionAnswer: {
+      kind: "structured_question_answer",
+      question_id: question.question_id,
+      ...shownInstance(question.instance_token),
+      selected_option_ids: [option.id],
+      selected_values: option.value === undefined ? [] : [option.value],
+      custom_value: value
+    }
+  };
+}
+
 export function buildStructuredQuestionCustomAnswer(
   question: StructuredQuestion,
   customValue: string

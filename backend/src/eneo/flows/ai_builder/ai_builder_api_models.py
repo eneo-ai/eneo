@@ -43,6 +43,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderPublicError,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderToolRefusal,
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
 )
@@ -344,6 +345,14 @@ class AIBuilderConversationMessage(BaseModel):
     question_answer: StructuredQuestionAnswerMetadata | None = None
     requirements_confirmation: RequirementsConfirmationMetadata | None = None
     named_content_fields_edit: NamedContentFieldsEditRequest | None = None
+    tool_refusal: AIBuilderToolRefusal | None = Field(
+        default=None,
+        description=(
+            "On an assistant answer that explains why a needed MCP tool cannot "
+            "be used: the tool, its server and the typed reason, as the answer's "
+            "text event carried it."
+        ),
+    )
 
 
 def _no_producers() -> list[FailureProducer]:

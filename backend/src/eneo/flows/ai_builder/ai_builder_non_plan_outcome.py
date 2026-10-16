@@ -16,6 +16,8 @@ import unicodedata
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Final, Literal, cast, get_args
 
+from pydantic import ValidationError
+
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
@@ -505,6 +507,27 @@ def unsettled_text_answer(
     ]
 
 
+_NON_PLAN_OUTCOME_KEY: Final = "non_plan_outcome"
+_TOOL_REFUSAL_KEY: Final = "tool_refusal"
+
+
+def tool_refusal_from_metadata(
+    metadata: dict[str, Any] | None,
+) -> AIBuilderToolRefusal | None:
+    """The tool refusal an answered turn stored, so a reloaded session shows
+    the same guidance; None when there is none or it no longer reads whole."""
+    outcome = (metadata or {}).get(_NON_PLAN_OUTCOME_KEY)
+    if not isinstance(outcome, dict):
+        return None
+    stored = cast(dict[str, Any], outcome).get(_TOOL_REFUSAL_KEY)
+    if stored is None:
+        return None
+    try:
+        return AIBuilderToolRefusal.model_validate(stored)
+    except ValidationError:
+        return None
+
+
 async def persist_non_plan_turn(
     *,
     repo: AIBuilderRepository,
@@ -552,7 +575,7 @@ async def persist_non_plan_turn(
                     if outcome is None
                     else {
                         **(base_assistant_metadata or {}),
-                        "non_plan_outcome": {
+                        _NON_PLAN_OUTCOME_KEY: {
                             "kind": outcome.kind,
                             "required_action": outcome.required_action,
                             "affected": list(outcome.affected),
@@ -561,7 +584,9 @@ async def persist_non_plan_turn(
                                 {}
                                 if tool_refusal is None
                                 else {
-                                    "tool_refusal": tool_refusal.model_dump(mode="json")
+                                    _TOOL_REFUSAL_KEY: tool_refusal.model_dump(
+                                        mode="json"
+                                    )
                                 }
                             ),
                         },

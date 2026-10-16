@@ -1,13 +1,10 @@
 <script lang="ts">
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import ExternalLink from "@lucide/svelte/icons/external-link";
-  import Plug from "@lucide/svelte/icons/plug";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import { Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
-  import * as Empty from "$lib/components/ui/empty/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import { Spinner } from "$lib/components/ui/spinner/index.js";
   import type { VariablePickerContext } from "$lib/features/flows/components/VariablePicker.svelte";
@@ -17,13 +14,12 @@
   } from "$lib/features/flows/flowClassificationNames";
   import { toolRefusalSentence } from "$lib/features/flows/flowToolRefusal";
   import type { JsonObject } from "$lib/features/flows/jsonObject";
-  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
-  import { localizeHref } from "$lib/paraglide/runtime";
   import ToolArgumentRow from "./ToolArgumentRow.svelte";
   import ToolArgumentsJson from "./ToolArgumentsJson.svelte";
   import ToolOtherArguments from "./ToolOtherArguments.svelte";
   import ToolPicker from "./ToolPicker.svelte";
+  import ToolsUnavailable from "./ToolsUnavailable.svelte";
   import {
     draftPlace,
     findToolOption,
@@ -70,14 +66,6 @@
     onArgumentsDraftChange?: (place: string, draft: ToolArgumentsDraft | null) => void;
     onReloadOptions?: () => void;
   } = $props();
-
-  const {
-    state: { currentSpace }
-  } = getSpacesManager();
-  // The permission the space menu asks for its Settings entry.
-  const mayEditSpace = $derived(
-    !$currentSpace.personal && $currentSpace.hasPermission("edit", "space")
-  );
 
   const options = $derived(listedToolOptions(toolOptions));
   const refreshing = $derived(toolOptions.status === "loaded" && toolOptions.refreshing);
@@ -219,47 +207,11 @@
         </Alert.Root>
       {/if}
       {#if options.length === 0}
-        <Empty.Root class="border">
-          <Empty.Header>
-            <Empty.Media variant="icon"><Plug aria-hidden="true" /></Empty.Media>
-            <Empty.Title>{m.flow_tool_options_empty()}</Empty.Title>
-            <Empty.Description>
-              {$currentSpace.personal
-                ? toolRefusalSentence("space_is_personal")
-                : m.flow_tool_options_empty_lead()}
-            </Empty.Description>
-          </Empty.Header>
-          <Empty.Content>
-            {#if !$currentSpace.personal}
-              <ol
-                class="text-muted-foreground flex list-decimal flex-col gap-1.5 self-stretch pl-5 text-left text-sm/relaxed"
-              >
-                <li>{m.flow_tool_options_empty_step_server()}</li>
-                <li>
-                  {mayEditSpace
-                    ? m.flow_tool_options_empty_editor()
-                    : m.flow_tool_options_empty_admin()}
-                </li>
-                <li>{m.flow_tool_options_empty_step_listed()}</li>
-              </ol>
-            {/if}
-            {#if mayEditSpace}
-              <!-- A new tab: leaving the editor saves the flow first, which a
-                   tool step without a tool cannot be. -->
-              <Button
-                variant="outline"
-                size="sm"
-                href={localizeHref(`/spaces/${$currentSpace.routeId}/settings`)}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {m.flow_tool_options_open_settings()}
-                <ExternalLink data-icon="inline-end" aria-hidden="true" />
-              </Button>
-            {/if}
+        <ToolsUnavailable surface="step_editor">
+          {#snippet actions()}
             {@render refreshButton()}
-          </Empty.Content>
-        </Empty.Root>
+          {/snippet}
+        </ToolsUnavailable>
       {:else}
         <div class="flex flex-wrap items-center gap-2">
           <div class="min-w-0 flex-1">

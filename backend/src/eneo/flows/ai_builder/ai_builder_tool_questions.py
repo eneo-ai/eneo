@@ -84,12 +84,12 @@ from eneo.flows.ai_builder.ai_builder_tool_decisions import (
 )
 from eneo.flows.ai_builder.ai_builder_tool_question_ids import (
     QUESTION_ID_MAX_LENGTH,
-    TOOL_RELEVANCE_QUESTION_ID,
     ToolArgumentQuestion,
     ToolChoiceQuestion,
     ToolQuestion,
     ToolRelevanceQuestion,
     parse_tool_question_id,
+    tool_question_facts,
     tool_question_id,
 )
 from eneo.flows.ai_builder.ai_builder_tool_use import (
@@ -221,7 +221,7 @@ def tool_relevance_question(
         )
     )
     return _question(
-        TOOL_RELEVANCE_QUESTION_ID,
+        ToolRelevanceQuestion(),
         question,
         options,
         assistant_text=assistant_text,
@@ -757,7 +757,7 @@ def _tool_choice_question(
         else f'The step "{step}" can read data with one of the space\'s tools.'
     )
     return _question(
-        tool_question_id(ToolChoiceQuestion(site.use.use_ref)),
+        ToolChoiceQuestion(site.use.use_ref),
         question,
         options,
         assistant_text=assistant_text,
@@ -890,14 +890,12 @@ def _tool_argument_question(
         if misfit.typed is not None:
             assistant_text += f' ("{display_value(misfit.typed)}")'
     return _question(
-        tool_question_id(
-            ToolArgumentQuestion(site.use.use_ref, site.use.tool_ref, argument.name)
-        ),
+        ToolArgumentQuestion(site.use.use_ref, site.use.tool_ref, argument.name),
         question,
         options,
         assistant_text=assistant_text,
         recommended=None,
-        allow_custom=not allowed,
+        fixed_value_option_id=None if allowed else ARGUMENT_FIXED,
     )
 
 
@@ -950,24 +948,29 @@ def _run_field_candidates(
 
 
 def _question(
-    question_id: str,
+    tool_question: ToolQuestion,
     question: str,
     options: list[StructuredQuestionOptionPayload],
     *,
     assistant_text: str,
     recommended: str | None,
     evidence: str | None = None,
-    allow_custom: bool = False,
+    fixed_value_option_id: str | None = None,
 ) -> BackendQuestion:
+    """A tool question's showing; a typed value is taken only as the option
+    ``fixed_value_option_id`` names."""
     return BackendQuestion(
         question_data=StructuredQuestionPayload(
-            question_id=question_id,
+            question_id=tool_question_id(tool_question),
             question=question,
             options=options,
             selection_mode="single",
-            allow_custom=allow_custom,
+            allow_custom=fixed_value_option_id is not None,
             recommended_option_id=recommended,
             recommended_option_evidence=evidence,
+            tool_question=tool_question_facts(
+                tool_question, fixed_value_option_id=fixed_value_option_id
+            ),
         ),
         assistant_text=assistant_text,
     )

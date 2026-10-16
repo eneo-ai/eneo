@@ -599,6 +599,80 @@ describe("BuilderReviewScreen plan document", () => {
     expect(header?.textContent).toContain(m.flow_input_source_tool());
   });
 
+  // Kills: a proposed tool step's row without its server and tool, or with an
+  // argument's source misnamed; a tool the space no longer lists given a name.
+  it.each([
+    { listed: true, toolLine: /Records\s*·\s*lookup/ },
+    { listed: false, toolLine: new RegExp(m.ai_builder_tool_step_unknown()) }
+  ])(
+    "shows what a tool step calls and where its arguments come from (listed $listed)",
+    async ({ listed, toolLine }) => {
+      const state = makeCreateState();
+      const spec = state.currentPlan.proposal.spec;
+      const [first, second] = spec.steps;
+      spec.form_fields = [{ name: "from_date", label: "Från datum", type: "date" }];
+      spec.steps = [
+        first,
+        {
+          ...second,
+          input_source: "tool",
+          input_config: {
+            tool: {
+              mcp_server_id: "server-1",
+              tool_id: "tool-1",
+              arguments: {
+                limit: 5,
+                from: "{{ flow_input.from_date }}",
+                days: "{{ step_a.output.structured.days }}"
+              }
+            }
+          }
+        }
+      ];
+      render(BuilderReviewScreenHarness, {
+        currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+        state: {
+          ...state,
+          sessionTools: listed
+            ? [
+                {
+                  ref: "tool_a",
+                  mcp_server_id: "server-1",
+                  mcp_server_name: "Records",
+                  mcp_server_security_level: null,
+                  tool_id: "tool-1",
+                  tool_name: "lookup",
+                  tool_description: null,
+                  refusal: null
+                }
+              ]
+            : []
+        }
+      });
+
+      const row = within(document.querySelector<HTMLElement>("[data-diagram-step='2']")!);
+      const tool = row.getByTestId("builder-tool-step");
+      expect(tool.textContent).toMatch(toolLine);
+      expect(tool.textContent).toContain(m.flow_graph_tool_badge());
+      const values = [...tool.querySelectorAll("dt")].map((name) => [
+        name.textContent?.trim(),
+        name.nextElementSibling?.textContent?.trim()
+      ]);
+      expect(values).toEqual([
+        ["limit", "5"],
+        ["from", m.ai_builder_tool_step_run_input({ label: "Från datum" })],
+        ["days", `←${m.flow_graph_tool_argument_from_step_field({ order: "1", field: "days" })}`]
+      ]);
+      expect(row.getByText(m.ai_builder_tool_step_once())).toBeTruthy();
+
+      // The step's details say the same.
+      await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_details() }));
+      const details = document.querySelector<HTMLElement>("[data-plan-step-ref='step_b']")!;
+      await fireEvent.click(within(details).getByRole("button", { name: /Rendera PDF/ }));
+      expect(within(details).getByTestId("builder-tool-step").textContent).toMatch(toolLine);
+    }
+  );
+
   it("says from the compiled steps that the flow does not pause, whatever the rationale claims", async () => {
     // The planner's prose may promise a caseworker review; only the steps decide.
     const proposal = makeProposal({
@@ -1590,6 +1664,31 @@ describe("BuilderReviewScreen change requests", () => {
         screen.queryByText("Jag kan inte byta modell åt dig — det gör du i stegredigeraren.")
       ).toBeNull()
     );
+  });
+
+  // Kills: a review reply about an unusable tool shown without its
+  // guidance, or the guidance left behind once the reply is dismissed.
+  it("shows how a tool becomes available beside a reply that says it cannot be used", async () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: { ...makeCreateState(), reviewNote: "Jag kan inte använda verktyget." },
+      screenProps: {
+        toolRefusal: {
+          tool_name: "lookup",
+          server_name: "Records",
+          kind: "input_schema_invalid",
+          refusal: null
+        }
+      }
+    });
+    const title = m.flow_tool_unavailable_title({ tool: "lookup", server: "Records" });
+
+    expect(screen.getByText(title)).toBeTruthy();
+    expect(screen.getByText(m.flow_tool_unusable_input_schema_invalid())).toBeTruthy();
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_review_note_acknowledge() })
+    );
+    await waitFor(() => expect(screen.queryByText(title)).toBeNull());
   });
 
   it("marks the steps a replacement plan changed", async () => {

@@ -332,12 +332,20 @@ work or to add the step in the step editor.
 When the request needs a tool that the space may not use (for example switched
 off in the space or waiting for review), or a tool whose input schema is too
 large for the Builder to show while it writes the arguments, the Builder says
-why instead of proposing a step with another tool. In an edit, the Builder asks
+why instead of proposing a step with another tool. With that answer it shows
+the reason and how a tool becomes available in the space, with a link to the
+space settings (in a new tab) when you may edit the space; a session reopened
+before it has a plan shows them again. In an edit, the Builder asks
 before every step that would use a tool the step does not already use. It may
 add a step that reads a tool, change the arguments of a saved tool step, or
 remove a saved tool step; nothing else of a saved tool step changes, a tool step
 the edit does not name stays as saved, and an edit that removes a tool step
 another kept step still reads is sent back to the model.
+Where you describe the Flow, a note names the space's MCP servers and how many
+of their tools a Flow may use; opening it lists each tool with its approved
+description. In the proposal, a step that reads a tool shows its server and
+tool, and for each argument the fixed value, the run-form field it asks for, or
+the earlier step and field it reads.
 A plan that fills a DOCX template or only transcribes audio has no tool step.
 Otherwise use supported Flow inputs for required data: runtime form or file
 input, prior step output, or knowledge.

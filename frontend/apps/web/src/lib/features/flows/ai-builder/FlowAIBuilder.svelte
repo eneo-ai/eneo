@@ -298,6 +298,35 @@
     }
     return null;
   });
+  // The task screen and the proposal name the space's MCP tools; each session
+  // reads them once, and every screen reads them again when the window regains
+  // focus because the space's settings may change them in another tab.
+  $effect(() => {
+    if (service.session?.session_id) void service.loadSessionTools();
+  });
+  // Why a tool the request needs cannot be used, when Eneo's reply says so.
+  const lastAssistantToolRefusal = $derived.by(() => {
+    for (let i = service.messages.length - 1; i >= 0; i -= 1) {
+      const message = service.messages[i];
+      if (message?.role === "user") return null;
+      if (message?.toolRefusal) return message.toolRefusal;
+    }
+    return null;
+  });
+  // After the confirmation Eneo can answer instead of planning (a tool the
+  // request needs cannot be used): that answer is read and replied to, not
+  // waited on as if a plan were still coming. A failed turn keeps its own
+  // failure surface.
+  const answeredWithoutPlan = $derived(
+    !service.isStreaming &&
+      service.streamState !== "failed" &&
+      service.error === null &&
+      service.currentPlan === null &&
+      lastMessage?.role === "assistant" &&
+      lastMessage.content.trim() !== "" &&
+      service.latestTurnState !== "open" &&
+      service.latestTurnState !== "processing"
+  );
 
   type Screen =
     "task" | "question" | "reply" | "confirm" | "build" | "review" | "conversation" | "findings";
@@ -314,6 +343,7 @@
       )
         return "findings";
       if (viewingPhase === 2) return "review";
+      if (viewingPhase === 1 && peekPhase === null && answeredWithoutPlan) return "reply";
       if (viewingPhase === 1) return "build";
       // Changing an earlier answer happens on the confirmation, above the card
       // it rewrites. Before any summary exists there is no card, so the
@@ -897,6 +927,8 @@
   }
 </script>
 
+<svelte:window onfocus={() => void service.refreshSessionTools()} />
+
 {#if service.isInitializing || (!service.hasSession && failedAttempt === null)}
   <div class="flex flex-1 flex-col gap-8 p-6" aria-hidden="true">
     <Skeleton class="h-10 w-full rounded-lg" />
@@ -1066,6 +1098,7 @@
           stepNow={service.savedFlowStepScope?.current ?? null}
           stepNumber={service.activeStepScope?.stepNumber ?? null}
           flowSteps={stepChoices}
+          tools={service.sessionTools}
         />
       {:else if screen === "question" && questionMessage}
         <BuilderQuestionScreen
@@ -1146,6 +1179,7 @@
         <div class="bg-primary flex min-h-0 flex-1 flex-col">
           <BuilderReviewScreen
             showGenerationFailure={generationFailedWithoutPlan}
+            toolRefusal={lastAssistantToolRefusal}
             onapplied={(detail) => onapplied?.(detail)}
             {flowIsPublished}
             onshowconversation={() => (service.conversationOpen = true)}
@@ -1160,6 +1194,7 @@
             service.latestTurnState === "processing"}
           status={service.statusMessage}
           assistantText={lastAssistantText}
+          toolRefusal={lastAssistantToolRefusal}
           editContext={activeEditContext}
           editContextLabel={savedFlowStepScopeLabel}
           editContextLocked={service.activeStepScopeLocked}

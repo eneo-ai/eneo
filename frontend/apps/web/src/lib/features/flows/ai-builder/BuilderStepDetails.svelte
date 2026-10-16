@@ -24,6 +24,8 @@
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import BuilderStepChangeSummary from "./BuilderStepChangeSummary.svelte";
+  import BuilderToolStepSummary from "./BuilderToolStepSummary.svelte";
+  import type { BuilderToolStep } from "./builderToolStep";
   import { getLocale } from "$lib/paraglide/runtime";
   import { contractFields, fieldLabel, readsLabel } from "./builderStepPhrases";
   import type { AIBuilderDiagnosticReport } from "./aiBuilderDiagnosticReport";
@@ -59,6 +61,8 @@
     /** The 1-based position of a planned step, for "Läser steg 1 och 2". */
     resolveStepNumber?: (ref: string) => number | null;
     onrequestchange?: () => void;
+    /** A step that reads an MCP tool: what it calls and with which arguments. */
+    toolStep?: BuilderToolStep | null;
   }
 
   let {
@@ -79,7 +83,8 @@
     buildDiagnosticReport,
     resolveInputStepLabel,
     resolveStepNumber = () => null,
-    onrequestchange
+    onrequestchange,
+    toolStep = null
   }: Props = $props();
 
   let wholeStepOpen = $state(false);
@@ -201,6 +206,13 @@
       </div>
     {/if}
   </div>
+
+  {#if toolStep}
+    <div class="mt-3.5">
+      <h4 class="text-secondary mb-1 text-xs font-bold">{m.flow_input_source_tool()}</h4>
+      <BuilderToolStepSummary {toolStep} />
+    </div>
+  {/if}
 
   {#if hasBindings}
     <div class="mt-3.5">

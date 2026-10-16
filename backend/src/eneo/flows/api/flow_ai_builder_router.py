@@ -130,6 +130,9 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import FlowReviewSample
 from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     FlowReviewSuggestions,
 )
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
+    tool_refusal_from_metadata,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     DeclaredAuthoring,
     FailureProducer,
@@ -720,6 +723,7 @@ def _to_public_assistant_message(
         timestamp=message.timestamp,
         question=_structured_question_from_assistant_message(message),
         requirements_summary=_requirements_summary_for_assistant_message(message),
+        tool_refusal=tool_refusal_from_metadata(message.metadata),
     )
 
 

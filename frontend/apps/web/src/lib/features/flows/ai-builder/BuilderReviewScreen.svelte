@@ -19,6 +19,9 @@
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
   import BuilderStepDetails, { type StepFieldChangeDisplay } from "./BuilderStepDetails.svelte";
   import BuilderStepNode from "./BuilderStepNode.svelte";
+  import ToolsUnavailable from "$lib/features/flows/components/tool/ToolsUnavailable.svelte";
+  import type { UnusableTool } from "$lib/features/flows/flowToolRefusal";
+  import { describeBuilderToolStep, type BuilderToolStep } from "./builderToolStep";
   import { answerPhrase, contractFieldCount, inSentence, readsLabel } from "./builderStepPhrases";
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
@@ -82,6 +85,8 @@
     onattachtemplate?: () => void;
     /** Narrow layouts: bring the conversation back into view. */
     onshowconversation?: () => void;
+    /** The tool Eneo's latest reply says cannot be used, with why. */
+    toolRefusal?: UnusableTool | null;
   }
 
   let {
@@ -90,7 +95,8 @@
     showGenerationFailure = false,
     onshowconversation,
     onclarify,
-    onattachtemplate
+    onattachtemplate,
+    toolRefusal = null
   }: Props = $props();
 
   const service = getAIBuilderService();
@@ -586,6 +592,14 @@
     const last = steps[steps.length - 1];
     return last ? simpleTypeLabel(last.output_type ?? "text") : null;
   });
+
+  function toolStepOf(step: StepSpec): BuilderToolStep | null {
+    return describeBuilderToolStep(step, {
+      tools: service.sessionTools,
+      formFields: spec?.form_fields ?? [],
+      stepNumberOf: planStepNumber
+    });
+  }
 
   function resolveExecutionStepLabel(planStepRef: string): string | null {
     const stepIndex = steps.findIndex((step) => step.plan_step_ref === planStepRef);
@@ -1227,6 +1241,11 @@
               {m.ai_builder_review_note_acknowledge()}
             </Button>
           </div>
+          {#if toolRefusal}
+            <div class="mb-3">
+              <ToolsUnavailable surface="builder" unusable={toolRefusal} />
+            </div>
+          {/if}
         {/if}
 
         {#if service.conflict}
@@ -1374,6 +1393,7 @@
                       canRequestChange={plan.status === "proposed"}
                       resolveInputStepLabel={resolveExecutionStepLabel}
                       resolveStepNumber={planStepNumber}
+                      toolStep={toolStepOf(scopedTargetStep)}
                       onrequestchange={() =>
                         scopeChangeToStep(scopedTargetStep, scopedTargetIndex + 1)}
                     />
@@ -1612,6 +1632,7 @@
                             perFile={perFileStepRefs.has(step.plan_step_ref)}
                             changeBadge={changeBadge(step)}
                             quiet={!isCreateMode && changeBadge(step) === null}
+                            toolStep={toolStepOf(step)}
                           />
                         </li>
                       {/if}
@@ -1711,6 +1732,7 @@
                                 canRequestChange={plan.status === "proposed"}
                                 resolveInputStepLabel={resolveExecutionStepLabel}
                                 resolveStepNumber={planStepNumber}
+                                toolStep={toolStepOf(step)}
                                 onrequestchange={() => scopeChangeToStep(step, index + 1)}
                                 buildDiagnosticReport={() =>
                                   buildAIBuilderDiagnosticReport({

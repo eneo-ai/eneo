@@ -25,10 +25,13 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as NativeSelect from "$lib/components/ui/native-select/index.js";
+  import { holdsVariable } from "$lib/features/flows/components/tool/toolInputConfig";
   import {
     buildStructuredQuestionCustomAnswer,
+    buildStructuredQuestionFixedValueAnswer,
     buildStructuredQuestionInputFieldsAnswer,
     buildStructuredQuestionSelection,
+    fixedValueOption,
     getStructuredQuestionOptionKey,
     isStructuredInputFieldPurpose,
     toggleStructuredQuestionOption,
@@ -110,6 +113,15 @@
   let customSelected = $state(false);
   let customText = $state("");
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
+  // A tool argument's fixed value is typed under its option rather than as
+  // an answer of its own; the editor's rule for a fixed value holds here too.
+  const fixedOption = $derived(fixedValueOption(question));
+  const fixedKey = $derived(fixedOption ? getStructuredQuestionOptionKey(fixedOption) : null);
+  let fixedText = $state("");
+  const fixedChosen = $derived(fixedKey !== null && selectedOptionKeys.has(fixedKey));
+  const fixedTextIssue = $derived(
+    holdsVariable(fixedText) ? m.ai_builder_question_fixed_value_has_variable() : null
+  );
   // The technical name follows the label the way the flow's own field editor
   // suggests it — same helper, so a field named here and a field named there
   // end up with the same key — until the user types one themselves.
@@ -263,6 +275,11 @@
     if (preselectedQuestionId === question.question_id) return;
     preselectedQuestionId = question.question_id;
     if (selectedOptionKeys.size !== 0) return;
+    if (answeredCustomValue && fixedKey !== null) {
+      selectedOptionKeys.add(fixedKey);
+      fixedText = answeredCustomValue;
+      return;
+    }
     if (answeredCustomValue) {
       customSelected = true;
       customText = answeredCustomValue;
@@ -290,8 +307,10 @@
   // is one click, and it is the only thing a delegation can produce — without
   // one there is nothing to hand back.
   // Editing: the value in use is the one that starts selected, and it wears
-  // "Används i dag" rather than a recommendation — the server guarantees a
-  // recommendation here equals it or is absent.
+  // "Används i dag" rather than a recommendation. The server sends a
+  // recommendation in an edit only when it keeps what the flow does or answers
+  // a change the person already asked for, so it is shown and can be delegated
+  // as in a new flow.
   const currentKey = $derived.by(() => {
     const id = isEdit ? question.current_option_id : null;
     if (!id) return null;
@@ -301,7 +320,7 @@
     return option ? getStructuredQuestionOptionKey(option) : null;
   });
   const recommendedKey = $derived.by(() => {
-    const id = isEdit ? null : question.recommended_option_id;
+    const id = question.recommended_option_id;
     if (!id) return null;
     const option = question.options.find(
       (candidate) => getStructuredQuestionOptionKey(candidate) === id
@@ -409,6 +428,7 @@
       );
     }
     if (customSelected) return customText.trim().length > 0;
+    if (fixedChosen) return fixedText.trim().length > 0 && fixedTextIssue === null;
     return selectedOptionKeys.size > 0;
   });
 
@@ -470,6 +490,10 @@
       const trimmed = customText.trim();
       if (!trimmed) return;
       onanswer?.(buildStructuredQuestionCustomAnswer(question, trimmed));
+      return;
+    }
+    if (fixedChosen && fixedOption) {
+      onanswer?.(buildStructuredQuestionFixedValueAnswer(question, fixedOption, fixedText.trim()));
       return;
     }
     const selectedOptions = question.options.filter((option) =>
@@ -916,6 +940,35 @@
         </span>
       {/snippet}
 
+      {#snippet fixedInput()}
+        <div
+          class="custom-input-wrap flex flex-col gap-1"
+          transition:slide={{ duration: reducedMotion ? 0 : 180, easing: cubicOut }}
+        >
+          <Input
+            bind:value={fixedText}
+            maxlength={500}
+            aria-label={m.ai_builder_question_fixed_value()}
+            aria-invalid={fixedTextIssue !== null}
+            aria-describedby={fixedTextIssue !== null
+              ? `${questionLabelId}-fixed-issue`
+              : undefined}
+            onkeydown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                handleConfirm();
+              }
+            }}
+            {disabled}
+          />
+          {#if fixedTextIssue !== null}
+            <p id="{questionLabelId}-fixed-issue" class="text-warning-stronger text-xs">
+              {fixedTextIssue}
+            </p>
+          {/if}
+        </div>
+      {/snippet}
+
       {#snippet customInput()}
         {#if customSelected}
           <div
@@ -960,8 +1013,11 @@
               {@render presetBody(option, optionKey, ids)}
             {/snippet}
             {@render optionRow(optionKey, radio, body)}
+            {#if optionKey === fixedKey && fixedChosen}
+              {@render fixedInput()}
+            {/if}
           {/each}
-          {#if question.allow_custom}
+          {#if question.allow_custom && fixedOption === null}
             {#snippet customRadio(ids: { id: string; labelledby: string; describedby: string })}
               <RadioGroup.Item
                 value={CUSTOM_RADIO_KEY}

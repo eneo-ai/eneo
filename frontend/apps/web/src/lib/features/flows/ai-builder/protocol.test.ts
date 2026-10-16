@@ -334,6 +334,50 @@ describe("AI Builder stream protocol", () => {
     expect(() => parseAIBuilderStreamEvent(rawEvent)).toThrow(AIBuilderStreamContractError);
   });
 
+  // Kills: a refusal value this client cannot read failing the whole answer,
+  // and a readable refusal dropped.
+  it("keeps the answer's words when its tool refusal cannot be read", () => {
+    const refusal = { tool_name: "lookup", server_name: "Records", kind: "refused" };
+    const parse = (tool_refusal: unknown) =>
+      parseAIBuilderStreamEvent({
+        event: "text",
+        data: JSON.stringify({ text: "Nej.", tool_refusal })
+      });
+
+    expect(parse({ ...refusal, refusal: "server_disabled" })).toEqual({
+      event: "text",
+      data: { text: "Nej.", tool_refusal: { ...refusal, refusal: "server_disabled" } }
+    });
+    expect(parse({ ...refusal, refusal: "a_level_added_later" })).toEqual({
+      event: "text",
+      data: { text: "Nej.", tool_refusal: null }
+    });
+  });
+
+  // Kills: the typed tool question dropped by the parser, leaving the web
+  // nothing but the id to read it from.
+  it("keeps a tool question's typed family and its typed-value option", () => {
+    const tool_question = {
+      family: "argument",
+      use_ref: "rows",
+      argument_name: "from",
+      fixed_value_option_id: "fixed"
+    };
+    const parsed = parseAIBuilderStreamEvent({
+      event: "question",
+      data: JSON.stringify({
+        question_id: "tool_argument:rows:from",
+        question: "?",
+        options: [{ id: "fixed", label: "Fixed value" }],
+        selection_mode: "single",
+        allow_custom: true,
+        tool_question
+      })
+    });
+
+    expect(parsed.event === "question" && parsed.data.tool_question).toEqual(tool_question);
+  });
+
   it("rejects a syntactically valid non-object payload", () => {
     expect(() =>
       parseAIBuilderStreamEvent({ event: "text", data: JSON.stringify("text") })

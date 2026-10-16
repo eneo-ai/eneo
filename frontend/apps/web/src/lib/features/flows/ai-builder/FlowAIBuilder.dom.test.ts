@@ -319,6 +319,8 @@ interface FetchOptions {
   telemetryDown?: boolean;
   /** Session ids whose Nth GET (1-based) rejects. */
   failRead?: Record<string, number>;
+  /** The space's MCP tools; the read rejects when none are given. */
+  tools?: Record<string, unknown>[];
 }
 
 function makeFetch(options: FetchOptions = {}) {
@@ -342,6 +344,8 @@ function makeFetch(options: FetchOptions = {}) {
       }
     ) => {
       if (path.endsWith("/models")) return DEFAULT_MODEL_RESPONSE;
+      if (path.endsWith("/tools") && options.tools)
+        return { tools: [...options.tools], over_bound: false };
       if (path.endsWith("/review-packet")) return REVIEW_PACKET;
       if (path.includes("/run-failures/")) return RUN_FAILURE_LAUNCH;
       if (path === SESSIONS_ROUTE && init?.method === "get") return { sessions: [] };
@@ -577,6 +581,49 @@ describe("FlowAIBuilder bootstrap", () => {
     await fireEvent.input(textbox(), { target: { value: "Sammanfatta rapporter" } });
     await waitFor(() => expect(send.disabled).toBe(false));
     expect(posts).toHaveLength(1);
+  });
+
+  // Kills: the space's tools never read for the session, or the chip left off
+  // the task screen.
+  it("names the space's MCP tools on the task screen", async () => {
+    const tool = {
+      ref: "tool_a",
+      mcp_server_id: "11111111-1111-4111-8111-111111111111",
+      mcp_server_name: "Records",
+      mcp_server_security_level: null,
+      tool_id: "22222222-2222-4222-8222-222222222221",
+      tool_name: "lookup",
+      tool_description: null,
+      refusal: null
+    };
+    const tools = [tool];
+    const { fetch } = makeFetch({ tools });
+    renderShell({ fetch, stream: makeStream().stream });
+
+    expect(
+      await screen.findByRole("button", {
+        name: m.ai_builder_tools_chip_one({ servers: "Records" })
+      })
+    ).toBeTruthy();
+  });
+
+  // Kills: the focus refresh living in the task screen's chip, so a list changed
+  // in the space's settings stays stale on every other screen.
+  it("reads the tools again on focus while a question is shown", async () => {
+    const { fetch } = makeFetch({ tools: [] });
+    const { stream, calls } = makeStream(() => "hold");
+    renderShell({ fetch, stream });
+    await sendTask();
+    await waitFor(() => expect(calls).toHaveLength(1));
+    calls[0]!.emit([questionEvent(FORMAT_QUESTION)]);
+    await screen.findByRole("heading", { name: FORMAT_QUESTION.question });
+    const toolReads = () => fetch.mock.calls.filter(([path]) => path.endsWith("/tools")).length;
+    const before = toolReads();
+
+    await fireEvent.focus(window);
+
+    await waitFor(() => expect(toolReads()).toBe(before + 1));
+    calls[0]!.finish();
   });
 
   it("sizes the task screen's composer by the column its heading sets", async () => {
@@ -2091,6 +2138,44 @@ async function driveToConfirm(afterConfirm: () => StreamEvent[] | "hold") {
 }
 
 describe("FlowAIBuilder confirm, build and review", () => {
+  // Kills: the refusal dropped by the stream parser or by the transcript
+  // read, and an answer after the confirmation left behind the build
+  // screen's placeholders.
+  it.each(["streamed", "resumed"])(
+    "says why a tool the request needs cannot be used, after the confirmation (%s)",
+    async (arrival) => {
+      const answer = "Jag kan inte bygga ett steg som använder verktyget `lookup`.";
+      const toolRefusal = {
+        tool_name: "lookup",
+        server_name: "Records",
+        kind: "refused",
+        refusal: "tool_switched_off_in_space"
+      };
+      if (arrival === "streamed") {
+        const { calls } = await driveToConfirm(() => [
+          { event: "text", data: JSON.stringify({ text: answer, tool_refusal: toolRefusal }) }
+        ]);
+        await fireEvent.click(button(m.ai_builder_confirm_action()));
+        await waitFor(() => expect(calls).toHaveLength(2));
+      } else {
+        const session = planSession();
+        session.status = "chatting";
+        session.latest_plan_id = null;
+        session.conversation.push(assistantMessage("a2", answer, { tool_refusal: toolRefusal }));
+        const { fetch } = makeFetch({ sessions: [session] });
+        renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+      }
+
+      expect(
+        await screen.findByText(
+          m.flow_tool_unavailable_title({ tool: "lookup", server: "Records" })
+        )
+      ).toBeTruthy();
+      expect(screen.getByText(m.flow_tool_refusal_tool_switched_off_in_space())).toBeTruthy();
+      expect(screen.getByText(m.ai_builder_reply_from_eneo())).toBeTruthy();
+    }
+  );
+
   it("shows the confirm screen on a summary and confirms with an empty message", async () => {
     const { calls } = await driveToConfirm(() => "hold");
 
@@ -3578,7 +3663,9 @@ describe("FlowAIBuilder confirm, build and review", () => {
   async function driveGenerationFailure(
     error: Record<string, unknown> | Error,
     latestTurn: "committed" | "processing" | "provider_outcome_unknown",
-    fetchOptions: Partial<FetchOptions> = {}
+    fetchOptions: Partial<FetchOptions> = {},
+    /** What the turn streamed before it failed. */
+    streamedFirst: StreamEvent[] = []
   ) {
     // The authoritative refresh after the failure returns the real
     // transcript (task, summary, confirmation) and the turn's final state,
@@ -3614,7 +3701,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
     await fireEvent.click(button(m.ai_builder_confirm_action()));
     await waitFor(() => expect(calls).toHaveLength(2));
 
-    calls[1]!.emit([statusEvent("architecture_committed")]);
+    calls[1]!.emit([statusEvent("architecture_committed"), ...streamedFirst]);
     if (error instanceof Error) {
       calls[1]!.fail(error);
     } else {
@@ -3634,6 +3721,22 @@ describe("FlowAIBuilder confirm, build and review", () => {
     }
     return { reports, calls };
   }
+
+  // Kills: words a failed turn wrote before it failed, still on screen
+  // because the reload failed too, shown as Eneo's answer instead of the failure.
+  it("keeps the failure card when a failed turn wrote words and the reload failed", async () => {
+    await driveGenerationFailure(
+      { code: "planner_stream_failed", category: "upstream", message: "Modellen svarade inte." },
+      "committed",
+      { failRead: { "s-1": 2 } },
+      [textEvent("Jag börjar med steg ett.")]
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: m.ai_builder_failure_heading_other_generation() })
+    ).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_reply_from_eneo())).toBeNull();
+  });
 
   it("names the model beside a failed generation whose retry runs it", async () => {
     await driveGenerationFailure(

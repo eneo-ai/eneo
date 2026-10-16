@@ -4,8 +4,14 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { getLocale } from "$lib/paraglide/runtime";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
+  import BuilderToolsChip from "./BuilderToolsChip.svelte";
   import { inSentence } from "./builderStepPhrases";
-  import type { AIBuilderEditContext, AIBuilderStepChoice, AIBuilderStepIntent } from "./protocol";
+  import type {
+    AIBuilderEditContext,
+    AIBuilderSessionTool,
+    AIBuilderStepChoice,
+    AIBuilderStepIntent
+  } from "./protocol";
 
   interface Props {
     targetKind: "create" | "edit";
@@ -27,6 +33,8 @@
     stepNumber?: number | null;
     /** The flow's steps, for the quick picks of what a step can read. */
     flowSteps?: AIBuilderStepChoice[] | null;
+    /** The space's MCP tools, so a request can name one. */
+    tools?: AIBuilderSessionTool[];
   }
 
   let {
@@ -45,7 +53,8 @@
     stepIntent = null,
     stepNow = null,
     stepNumber = null,
-    flowSteps = null
+    flowSteps = null,
+    tools = []
   }: Props = $props();
 
   const locale = $derived(getLocale());
@@ -146,7 +155,8 @@
         {isEdit ? m.ai_builder_task_intro_edit() : m.ai_builder_task_intro()}
       </p>
 
-      <div class="mt-5">
+      <div class="mt-5 flex flex-col gap-2">
+        <BuilderToolsChip {tools} />
         <FlowAIBuilderInput
           bind:this={inputRef}
           {editContext}

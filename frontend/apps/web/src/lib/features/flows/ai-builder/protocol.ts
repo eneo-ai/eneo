@@ -14,6 +14,11 @@ import type {
   operations
 } from "@eneo/eneo-js";
 import { z } from "zod";
+import {
+  isUnattendedToolRefusal,
+  type UnattendedToolRefusal,
+  type UnusableTool
+} from "$lib/features/flows/flowToolRefusal";
 import type {
   PersistedStructuredQuestionAnswerMetadata,
   StructuredQuestion
@@ -192,6 +197,8 @@ export type StepSpec = GeneratedAIBuilderStepSpec;
 
 export type FlowDraftSpecCore = GeneratedAIBuilderFlowDraftSpecCore;
 
+export type FormFieldSpec = components["schemas"]["FormFieldSpec"];
+
 export type LintWarning = GeneratedAIBuilderLintWarning;
 
 export type FlowBuilderProposalContent = components["schemas"]["FlowBuilderProposalContent"];
@@ -287,6 +294,8 @@ export interface ChatMessage {
   plan?: ProposedPlan;
   question?: StructuredQuestion;
   requirementsSummary?: RequirementsSummary;
+  /** An answer explaining why a tool the request needs cannot be used. */
+  toolRefusal?: UnusableTool;
   /** Typed structured-question answer carried by a user message; set at the
    *  hydration/optimistic boundary so views never parse metadata dicts. */
   questionAnswer?: PersistedStructuredQuestionAnswerMetadata;
@@ -296,6 +305,10 @@ export interface ChatMessage {
 
 export type AIBuilderModel = GeneratedAIBuilderModel;
 export type AIBuilderModelsResponse = components["schemas"]["SessionModelsResponse"];
+
+/** One MCP tool of the session's space, by the names the Builder shows. */
+export type AIBuilderSessionTool = components["schemas"]["SessionToolOption"];
+export type AIBuilderSessionToolsResponse = components["schemas"]["SessionToolsResponse"];
 
 export type AIBuilderTextEventData = Extract<AIBuilderParsedStreamEvent, { event: "text" }>["data"];
 
@@ -494,8 +507,18 @@ const flowBuilderProposalSchema = z.strictObject({
   execution_shape: executionShapeSchema
 });
 
+const unusableToolSchema = z.strictObject({
+  tool_name: z.string(),
+  server_name: z.string(),
+  kind: z.enum(["refused", "input_schema_invalid", "input_schema_too_large"]),
+  refusal: z.custom<UnattendedToolRefusal>(isUnattendedToolRefusal).nullable().optional()
+}) satisfies z.ZodType<UnusableTool>;
+
 const textEventDataSchema = z.object({
-  text: z.string()
+  text: z.string(),
+  // The answer's words already say why; a refusal this client cannot read
+  // only loses the guidance beside them, never the answer.
+  tool_refusal: unusableToolSchema.nullable().catch(null).optional()
 }) satisfies z.ZodType<AIBuilderTextEventData>;
 
 const statusEventDataSchema = z.object({
@@ -564,7 +587,18 @@ const questionEventDataSchema = z.object({
     .optional(),
   // This showing of the question. The answer sends it back, and the server
   // refuses an answer naming a showing that is no longer on offer.
-  instance_token: z.uuid().nullable().optional()
+  instance_token: z.uuid().nullable().optional(),
+  // A question about the space's MCP tools: which family it is, and the
+  // option a typed value answers, read from these fields and never the id.
+  tool_question: z
+    .object({
+      family: z.enum(["relevance", "choice", "argument"]),
+      use_ref: z.string().nullable().optional(),
+      argument_name: z.string().nullable().optional(),
+      fixed_value_option_id: z.string().nullable().optional()
+    })
+    .nullable()
+    .optional()
 }) satisfies z.ZodType<AIBuilderQuestionEventData>;
 
 const requirementsSummaryEventDataSchema = z.object({

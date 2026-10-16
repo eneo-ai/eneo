@@ -6,6 +6,8 @@
   import type { AIBuilderStatus } from "./protocol";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
   import type { AIBuilderEditContext } from "./protocol";
+  import type { UnusableTool } from "$lib/features/flows/flowToolRefusal";
+  import ToolsUnavailable from "$lib/features/flows/components/tool/ToolsUnavailable.svelte";
 
   /**
    * Discovery turns that carry neither a question nor a summary: Eneo is
@@ -16,6 +18,8 @@
     /** The phase the server reported for this turn, when it named one. */
     status?: AIBuilderStatus | null;
     assistantText: string | null;
+    /** The tool Eneo's reply says cannot be used, with why. */
+    toolRefusal?: UnusableTool | null;
     editContext?: AIBuilderEditContext | null;
     editContextLabel?: string | null;
     editContextLocked?: boolean;
@@ -26,6 +30,7 @@
     waiting,
     status = null,
     assistantText,
+    toolRefusal = null,
     editContext = null,
     editContextLabel = null,
     editContextLocked = false,
@@ -60,6 +65,12 @@
               <Markdown source={assistantText} />
             </div>
           {/if}
+        </div>
+      {/if}
+
+      {#if !waiting && toolRefusal}
+        <div class="mt-3">
+          <ToolsUnavailable surface="builder" unusable={toolRefusal} />
         </div>
       {/if}
 

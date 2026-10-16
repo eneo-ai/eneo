@@ -24,6 +24,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
 )
+from eneo.flows.ai_builder.ai_builder_tool_question_ids import AIBuilderToolQuestion
 from eneo.flows.ai_builder.planning_state import (
     AttachmentCoverage,
     FileRole,
@@ -161,9 +162,25 @@ class StructuredQuestionPayload(BaseModel):
             "before tokens existed."
         ),
     )
+    tool_question: AIBuilderToolQuestion | None = Field(
+        default=None,
+        description=(
+            "Set on a question about the space's MCP tools: which one it is. "
+            "Null on every other question."
+        ),
+    )
 
     @model_validator(mode="after")
     def _named_options_are_offered_and_agree(self) -> "StructuredQuestionPayload":
+        tool_question = self.tool_question
+        fixed = tool_question.fixed_value_option_id if tool_question else None
+        if tool_question is not None and fixed is not None:
+            if tool_question.family != "argument" or not self.allow_custom:
+                raise ValueError(
+                    "fixed_value_option_id belongs to an argument question that "
+                    "takes a typed value"
+                )
+            self._require_one_offered_option("fixed_value_option_id", fixed)
         if self.current_option_id is not None:
             self._require_one_offered_option(
                 "current_option_id", self.current_option_id

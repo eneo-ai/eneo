@@ -66,6 +66,7 @@ from eneo.flows.ai_builder.ai_builder_tool_decisions import (
     ToolUseDecision,
 )
 from eneo.flows.ai_builder.ai_builder_tool_question_ids import (
+    AIBuilderToolQuestion,
     ToolArgumentQuestion,
     ToolChoiceQuestion,
     ToolRelevanceQuestion,
@@ -99,6 +100,7 @@ from eneo.flows.ai_builder.planning_state import (
     ConfirmedRuntimeMetadataField,
     PlanningState,
 )
+from eneo.flows.api.flow_ai_builder_router import _to_public_conversation
 from eneo.flows.application.flow_tool_options import FlowToolOption, FlowToolOptions
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from eneo.flows.flow_authoring_spec import FormFieldSpec
@@ -287,9 +289,50 @@ def test_question_ids_round_trip_and_other_ids_are_not_tool_questions() -> None:
         assert parse_tool_question_id(other) is None
 
 
+@pytest.mark.parametrize(
+    ("tool_question", "allow_custom"),
+    [
+        (AIBuilderToolQuestion(family="choice", fixed_value_option_id="a"), True),
+        (
+            AIBuilderToolQuestion(
+                family="argument",
+                use_ref="r",
+                argument_name="x",
+                fixed_value_option_id="z",
+            ),
+            True,
+        ),
+        (
+            AIBuilderToolQuestion(
+                family="argument",
+                use_ref="r",
+                argument_name="x",
+                fixed_value_option_id="a",
+            ),
+            False,
+        ),
+    ],
+)
+def test_a_typed_value_option_is_one_offered_on_an_argument_question(
+    tool_question: AIBuilderToolQuestion, allow_custom: bool
+) -> None:
+    # Kills: a showing that names a typed-value option the web cannot find,
+    # one on a question that takes no typed value, or on another family.
+    with pytest.raises(ValueError):
+        StructuredQuestionPayload(
+            question_id="tool_argument:r:x",
+            question="?",
+            options=[StructuredQuestionOptionPayload(id="a", label="A", value="a")],
+            selection_mode="single",
+            allow_custom=allow_custom,
+            tool_question=tool_question,
+        )
+
+
 def test_an_answer_is_read_against_the_question_as_it_was_shown() -> None:
     # Kills: an option of an earlier showing accepted, a fixed value with
-    # nothing typed, a typed value on an option that takes none.
+    # nothing typed, a typed value on an option that takes none, the typed
+    # family facts lost from a persisted showing.
     catalog = _catalog(VALUES, DETAILS).tools
     conversation = [ConversationMessage(role="user", content="Build a report.")]
     first = _show(
@@ -319,6 +362,14 @@ def test_an_answer_is_read_against_the_question_as_it_was_shown() -> None:
     _answer(conversation, asked, "fixed", "north")
 
     assert [option.id for option in listed.options] == ["use", "dont_use"]
+    # The family travels typed on the showing, through persistence.
+    assert first.tool_question == AIBuilderToolQuestion(family="relevance")
+    assert asked.tool_question == AIBuilderToolQuestion(
+        family="argument",
+        use_ref="rows",
+        argument_name="label",
+        fixed_value_option_id="fixed",
+    )
     listing = next(m.content for m in conversation if shown_question(m) == listed)
     assert "values_by_day" in listing and "details_for_days" in listing
     assert fold_tool_decisions(conversation, catalog=catalog).tools_requested is True
@@ -997,6 +1048,7 @@ def test_a_use_is_asked_when_other_tools_fit_with_the_users_words_as_why() -> No
     repeated = _settle(_site(only), _site(only), conversation=conversation)
 
     assert asked.question_id == "tool_choice:rows"
+    assert asked.tool_question == AIBuilderToolQuestion(family="choice", use_ref="rows")
     assert [option.id for option in asked.options] == [ROWS_REF, VALUES_REF, "no_tool"]
     assert asked.recommended_option_id == ROWS_REF
     assert asked.recommended_option_evidence == "med rows"
@@ -1023,7 +1075,8 @@ def test_a_draft_that_contradicts_the_persons_choice_is_repaired() -> None:
 def test_an_open_argument_is_asked_with_the_sources_its_type_fits() -> None:
     # Kills: an earlier step's field of another JSON type offered, or one
     # whose name a field path cannot read whole ("e.g."), a typed value
-    # offered for an argument that has allowed values.
+    # offered for an argument that has allowed values, the typed value's
+    # option not named to the web (or named where no value can be typed).
     decided = ToolDecisions(uses={"rows": ToolUseDecision(tool_ref=ROWS_REF)})
     earlier = (
         EarlierField(1, "first_day", "string"),
@@ -1063,6 +1116,10 @@ def test_an_open_argument_is_asked_with_the_sources_its_type_fits() -> None:
         "earlier_step:1:first_day",
     ]
     assert unit.allow_custom is False
+    # Only an argument that takes a typed value names the option it answers.
+    assert start.tool_question is not None and unit.tool_question is not None
+    assert start.tool_question.fixed_value_option_id == "fixed"
+    assert unit.tool_question.fixed_value_option_id is None
 
 
 def test_a_decided_argument_replaces_the_planners_and_a_refused_value_is_asked_again() -> (
@@ -1359,8 +1416,9 @@ def test_an_edit_asks_before_each_new_use_of_a_tool() -> None:
 
 
 def test_a_tool_refusal_reaches_the_web_typed() -> None:
-    # Kills: the refusal left out of the answer, of the text event or of the
-    # stored message.
+    # Kills: the refusal left out of the answer, of the text event, of the
+    # stored message or of the message API that a reloaded session reads; a
+    # stored refusal that no longer reads whole shown instead of dropped.
     answer = tool_not_usable_answer(
         "archive",
         "Data",
@@ -1397,7 +1455,9 @@ def test_a_tool_refusal_reaches_the_web_typed() -> None:
     )
     assert answer.tool_refusal == refusal
     assert isinstance(event, AIBuilderTextEvent) and event.data.tool_refusal == refusal
+    (public,) = _to_public_conversation(conversation)
+    assert public.tool_refusal == refusal
     metadata = cast(dict[str, Any], conversation[0].metadata)
-    assert metadata["non_plan_outcome"]["tool_refusal"] == refusal.model_dump(
-        mode="json"
-    )
+    metadata["non_plan_outcome"]["tool_refusal"]["kind"] = "renamed"
+    (garbled,) = _to_public_conversation(conversation)
+    assert garbled.tool_refusal is None

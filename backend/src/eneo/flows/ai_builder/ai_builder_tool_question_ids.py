@@ -1,5 +1,5 @@
 """The ids of the questions the Builder asks about MCP tools: the one place
-they are built and read.
+they are built and read, with the typed facts a showing carries for the web.
 
 ``tool_relevance`` is asked once per create session; ``tool_choice:<use_ref>``
 and ``tool_argument:<use_ref>:<tool_ref>:<argument>`` once per use of a tool
@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import Literal, TypeAlias
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.flows.ai_builder.ai_builder_tool_catalog import TOOL_REF_PATTERN
 
@@ -73,3 +75,50 @@ def parse_tool_question_id(question_id: str) -> ToolQuestion | None:
         if argument and _USE_REF.fullmatch(use_ref) and _TOOL_REF.fullmatch(tool_ref):
             return ToolArgumentQuestion(use_ref, tool_ref, argument)
     return None
+
+
+class AIBuilderToolQuestion(BaseModel):
+    """Which MCP tool question a showing is, so a client reads it from typed
+    fields rather than from the question's id."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    family: Literal["relevance", "choice", "argument"] = Field(
+        description=(
+            "relevance: whether the flow reads data with the space's tools. "
+            "choice: which tool one use reads. argument: where one argument's "
+            "value comes from."
+        )
+    )
+    use_ref: str | None = Field(
+        default=None,
+        description="The use of a tool the question is about; null for relevance.",
+    )
+    argument_name: str | None = Field(
+        default=None,
+        description="The argument the question is about; set only for argument.",
+    )
+    fixed_value_option_id: str | None = Field(
+        default=None,
+        description=(
+            "The option a typed value answers: the answer names it with the "
+            "value in custom_value. Set only on an argument question that "
+            "takes a typed value."
+        ),
+    )
+
+
+def tool_question_facts(
+    question: ToolQuestion, *, fixed_value_option_id: str | None = None
+) -> AIBuilderToolQuestion:
+    """The typed facts of ``question`` for its showing."""
+    if isinstance(question, ToolRelevanceQuestion):
+        return AIBuilderToolQuestion(family="relevance")
+    if isinstance(question, ToolChoiceQuestion):
+        return AIBuilderToolQuestion(family="choice", use_ref=question.use_ref)
+    return AIBuilderToolQuestion(
+        family="argument",
+        use_ref=question.use_ref,
+        argument_name=question.argument,
+        fixed_value_option_id=fixed_value_option_id,
+    )

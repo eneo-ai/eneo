@@ -1,4 +1,5 @@
 import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
+import type { UnusableTool } from "$lib/features/flows/flowToolRefusal";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
 import type { EneoFetchFunction, EneoStreamFunction } from "@eneo/eneo-js";
@@ -45,6 +46,8 @@ import type {
   AIBuilderStepIntent,
   AIBuilderSendMessageRequest,
   AIBuilderSession,
+  AIBuilderSessionTool,
+  AIBuilderSessionToolsResponse,
   AIBuilderStatus,
   AIBuilderStreamEvent,
   AIBuilderTurnState,
@@ -77,6 +80,7 @@ const FLOW_AI_BUILDER_ROUTES = {
   sessionCancel: "/api/v1/flows/ai-builder/sessions/{session_id}/cancel",
   sessionMessages: "/api/v1/flows/ai-builder/sessions/{session_id}/messages",
   sessionModels: "/api/v1/flows/ai-builder/sessions/{session_id}/models",
+  sessionTools: "/api/v1/flows/ai-builder/sessions/{session_id}/tools",
   plan: "/api/v1/flows/ai-builder/plans/{plan_id}",
   planApply: "/api/v1/flows/ai-builder/plans/{plan_id}/apply",
   planApprove: "/api/v1/flows/ai-builder/plans/{plan_id}/approve",
@@ -175,6 +179,9 @@ export interface FlowAIBuilderState {
    *  a typed decline ("I cannot swap the model for you") or a plain answer.
    *  The plan stays; the review screen renders this as a dismissible notice. */
   reviewNote: string | null;
+  /** The MCP tools of the session's space, usable or not; empty until read,
+   *  and when the read fails, since nothing a turn does depends on them. */
+  sessionTools: AIBuilderSessionTool[];
 }
 
 export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
@@ -197,7 +204,8 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     draftSessions: [],
     pendingOperation: null,
     createFailureOutcome: null,
-    reviewNote: null
+    reviewNote: null,
+    sessionTools: []
   };
 }
 
@@ -1188,7 +1196,13 @@ export class FlowAIBuilderDriver {
                 if (event.data.text.trim()) {
                   receivedDurableStreamEvent = true;
                 }
-                this.#updateOrAddAssistantMessage(assistantText);
+                this.#updateOrAddAssistantMessage(
+                  assistantText,
+                  undefined,
+                  undefined,
+                  undefined,
+                  event.data.tool_refusal ?? undefined
+                );
                 return;
               }
               case "plan": {
@@ -1937,6 +1951,47 @@ export class FlowAIBuilderDriver {
     if (owner) await this.#fetchModels(owner);
   }
 
+  /** Which tools read is current: a read for an older session, or one
+   *  overtaken by a refresh, installs nothing. */
+  #sessionToolsSequence = 0;
+  /** The session whose tools were read, so each session reads them once. */
+  #sessionToolsReadFor: string | null = null;
+
+  /** Read the space's tools once for the current session; the screens that
+   *  name them ask for them, so a session no screen shows them for reads none. */
+  async loadSessionTools(): Promise<void> {
+    const owner = this.#currentSessionOwner();
+    if (!owner || this.#sessionToolsReadFor === owner.sessionId) return;
+    this.#sessionToolsReadFor = owner.sessionId;
+    this.#state.sessionTools = [];
+    await this.#fetchSessionTools(owner);
+  }
+
+  /** Read the space's tools again: settings may have changed them in
+   *  another tab. */
+  async refreshSessionTools(): Promise<void> {
+    const owner = this.#currentSessionOwner();
+    if (owner) await this.#fetchSessionTools(owner);
+  }
+
+  async #fetchSessionTools(owner: SessionOperationOwner): Promise<void> {
+    if (!this.#ownsSessionIdentity(owner)) return;
+    const sequence = ++this.#sessionToolsSequence;
+    let tools: AIBuilderSessionTool[] = [];
+    try {
+      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionTools, {
+        method: "get",
+        params: { path: { session_id: owner.sessionId } }
+      })) as AIBuilderSessionToolsResponse;
+      tools = result.tools;
+    } catch {
+      // The list only names tools; a failed read shows none and blocks nothing.
+    }
+    if (!this.#ownsSessionIdentity(owner) || sequence !== this.#sessionToolsSequence) return;
+    this.#state.sessionTools = tools;
+    this.#notify();
+  }
+
   async #fetchModels(owner: SessionOperationOwner): Promise<void> {
     if (!this.#state.session) return;
     if (!this.#ownsSessionIdentity(owner)) return;
@@ -1990,7 +2045,8 @@ export class FlowAIBuilderDriver {
     text: string,
     plan?: ProposedPlan,
     question?: StructuredQuestion,
-    requirementsSummary?: RequirementsSummary
+    requirementsSummary?: RequirementsSummary,
+    toolRefusal?: UnusableTool
   ): void {
     const lastMsg = this.#state.messages[this.#state.messages.length - 1];
     if (lastMsg?.role === "assistant") {
@@ -2001,7 +2057,8 @@ export class FlowAIBuilderDriver {
           content: text,
           plan: plan ?? lastMsg.plan,
           question: question ?? lastMsg.question,
-          requirementsSummary: requirementsSummary ?? lastMsg.requirementsSummary
+          requirementsSummary: requirementsSummary ?? lastMsg.requirementsSummary,
+          toolRefusal: toolRefusal ?? lastMsg.toolRefusal
         }
       ];
     } else {
@@ -2013,6 +2070,7 @@ export class FlowAIBuilderDriver {
           plan,
           question,
           requirementsSummary,
+          toolRefusal,
           timestamp: Date.now()
         }
       ];
@@ -2028,6 +2086,7 @@ export class FlowAIBuilderDriver {
     this.#isRecoveringLatestTurn = false;
     this.#turnObservation = null;
     this.#lastListedSelection = null;
+    this.#sessionToolsReadFor = null;
     this.#state = createInitialFlowAIBuilderState();
   }
 
@@ -2076,6 +2135,10 @@ export class FlowAIBuilderDriver {
 
       if (message.question) {
         assistantMessage.question = message.question;
+      }
+
+      if (message.tool_refusal) {
+        assistantMessage.toolRefusal = message.tool_refusal;
       }
 
       hydrated.push(assistantMessage);

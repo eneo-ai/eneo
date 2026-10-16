@@ -12035,6 +12035,8 @@ export interface components {
       role: "user" | "assistant";
       /** Timestamp */
       timestamp?: string | null;
+      /** @description On an assistant answer that explains why a needed MCP tool cannot be used: the tool, its server and the typed reason, as the answer's text event carried it. */
+      tool_refusal?: components["schemas"]["AIBuilderToolRefusal"] | null;
     };
     /** AIBuilderDiagnosticContext */
     AIBuilderDiagnosticContext: {
@@ -12501,6 +12503,34 @@ export interface components {
       tool_refusal?: components["schemas"]["AIBuilderToolRefusal"] | null;
     };
     /**
+     * AIBuilderToolQuestion
+     * @description Which MCP tool question a showing is, so a client reads it from typed
+     *     fields rather than from the question's id.
+     */
+    AIBuilderToolQuestion: {
+      /**
+       * Argument Name
+       * @description The argument the question is about; set only for argument.
+       */
+      argument_name?: string | null;
+      /**
+       * Family
+       * @description relevance: whether the flow reads data with the space's tools. choice: which tool one use reads. argument: where one argument's value comes from.
+       * @enum {string}
+       */
+      family: "relevance" | "choice" | "argument";
+      /**
+       * Fixed Value Option Id
+       * @description The option a typed value answers: the answer names it with the value in custom_value. Set only on an argument question that takes a typed value.
+       */
+      fixed_value_option_id?: string | null;
+      /**
+       * Use Ref
+       * @description The use of a tool the question is about; null for relevance.
+       */
+      use_ref?: string | null;
+    };
+    /**
      * AIBuilderToolRefusal
      * @description Why a step cannot read an MCP tool the request needs, for the answer
      *     the Builder gives instead of a plan.
@@ -12512,10 +12542,7 @@ export interface components {
        * @enum {string}
        */
       kind: "refused" | "input_schema_invalid" | "input_schema_too_large";
-      /**
-       * @description Why the space may not use the tool; set only for `refused`.
-       * @default null
-       */
+      /** @description Why the space may not use the tool; set only for `refused`. */
       refusal?: components["schemas"]["UnattendedToolRefusal"] | null;
       /**
        * Server Name
@@ -38346,6 +38373,8 @@ export interface components {
        * @enum {string}
        */
       selection_mode: "single" | "multi";
+      /** @description Set on a question about the space's MCP tools: which one it is. Null on every other question. */
+      tool_question?: components["schemas"]["AIBuilderToolQuestion"] | null;
       /** Topic */
       topic?: string | null;
       understanding?: components["schemas"]["UnderstandingPayload"] | null;

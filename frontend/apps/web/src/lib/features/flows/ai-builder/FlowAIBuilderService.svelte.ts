@@ -40,6 +40,7 @@ import type {
   AIBuilderError,
   AIBuilderLatestTurn,
   AIBuilderModel,
+  AIBuilderSessionTool,
   AIBuilderEditContext,
   AIBuilderPhase,
   AIBuilderSavedFlowStepScope,
@@ -343,6 +344,19 @@ export class FlowAIBuilderService {
 
   get statusMessage(): AIBuilderStatus | null {
     return this.#state.statusMessage;
+  }
+
+  /** The MCP tools of the session's space; empty until read or when the read fails. */
+  get sessionTools(): AIBuilderSessionTool[] {
+    return this.#state.sessionTools;
+  }
+
+  async loadSessionTools(): Promise<void> {
+    await this.#driver.loadSessionTools();
+  }
+
+  async refreshSessionTools(): Promise<void> {
+    await this.#driver.refreshSessionTools();
   }
 
   get availableModels(): AIBuilderModel[] {

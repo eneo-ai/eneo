@@ -1,5 +1,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import type { BuilderToolStep } from "./builderToolStep";
+  import BuilderToolStepSummary from "./BuilderToolStepSummary.svelte";
 
   interface Props {
     stepNumber: number;
@@ -15,6 +17,8 @@
     /** The step runs once per uploaded file or per item. */
     perFile?: boolean;
     changeBadge?: "new" | "updated" | "changes" | null;
+    /** A step that reads an MCP tool: what it calls and with which arguments. */
+    toolStep?: BuilderToolStep | null;
   }
 
   let {
@@ -25,7 +29,8 @@
     quiet = false,
     pausesForReview = false,
     perFile = false,
-    changeBadge = null
+    changeBadge = null,
+    toolStep = null
   }: Props = $props();
 
   const highlighted = $derived(changeBadge === "new" || changeBadge === "changes");
@@ -95,6 +100,11 @@
       {/if}
     </div>
     <p class="text-secondary mt-0.5 text-xs leading-relaxed text-pretty">{detail}</p>
+    {#if toolStep}
+      <div class="mt-2">
+        <BuilderToolStepSummary {toolStep} />
+      </div>
+    {/if}
   </div>
   {#if modeLabel}
     <span

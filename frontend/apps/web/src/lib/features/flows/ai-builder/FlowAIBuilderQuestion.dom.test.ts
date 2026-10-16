@@ -10,6 +10,13 @@ afterEach(() => {
   cleanup();
 });
 
+// jsdom has no Web Animations API; a revealed input slides in through it.
+Element.prototype.animate ??= (() => ({
+  cancel() {},
+  finished: Promise.resolve(),
+  onfinish: null
+})) as never;
+
 function schemaDirectionQuestion(count = 2): StructuredQuestion {
   const candidates = Array.from({ length: count }, (_, index) => ({
     fingerprint: String(index + 1).padStart(64, "0"),
@@ -433,5 +440,153 @@ describe("FlowAIBuilderQuestion understanding", () => {
     };
     render(FlowAIBuilderQuestion, { question, onanswer: vi.fn() });
     expect(screen.queryByTestId("question-understanding")).toBeNull();
+  });
+});
+
+// The three tool question families as the server builds them
+// (ai_builder_tool_questions.py), with neutral names.
+const TOOL_RELEVANCE: StructuredQuestion = {
+  question_id: "tool_relevance",
+  question: 'This space has the MCP server "Records". Should the flow read data with its tools?',
+  selection_mode: "single",
+  allow_custom: false,
+  tool_question: { family: "relevance" },
+  options: [
+    { id: "use", value: "use", label: "Yes, use the tools", description: "Steps read data." },
+    { id: "dont_use", value: "dont_use", label: "No, build without tools" },
+    { id: "show_tools", value: "show_tools", label: "Show the tools first" }
+  ]
+};
+const TOOL_CHOICE: StructuredQuestion = {
+  question_id: "tool_choice:rows",
+  question: 'Which tool should the step "Fetch" read data with?',
+  selection_mode: "single",
+  allow_custom: false,
+  recommended_option_id: "tool_a",
+  recommended_option_evidence: "the daily rows",
+  tool_question: { family: "choice", use_ref: "rows" },
+  options: [
+    { id: "tool_a", value: "tool_a", label: "Records · lookup", description: "Finds a row." },
+    { id: "no_tool", value: "no_tool", label: "No tool" }
+  ]
+};
+const TOOL_ARGUMENT: StructuredQuestion = {
+  question_id: "tool_argument:rows:from_date",
+  question: 'Where should the value of "from_date" for the tool lookup come from?',
+  selection_mode: "single",
+  allow_custom: true,
+  tool_question: {
+    family: "argument",
+    use_ref: "rows",
+    argument_name: "from_date",
+    fixed_value_option_id: "fixed"
+  },
+  options: [
+    { id: "fixed", value: "fixed", label: "Fixed value", description: "The same every run." },
+    { id: "run_input", value: "from_date", label: "Ask at run time" },
+    { id: "earlier_step:1:day", value: "1:day", label: "From step 1: day" }
+  ]
+};
+
+describe("FlowAIBuilderQuestion tool questions", () => {
+  // Kills: a tool question that cannot be answered by its option ids, or
+  // whose typed answer names a value other than the option's.
+  it.each([
+    {
+      question: TOOL_RELEVANCE,
+      pick: "No, build without tools",
+      id: "dont_use",
+      value: "dont_use"
+    },
+    { question: TOOL_CHOICE, pick: "Records · lookup", id: "tool_a", value: "tool_a" },
+    { question: TOOL_ARGUMENT, pick: "Ask at run time", id: "run_input", value: "from_date" }
+  ])(
+    "answers $question.question_id with the chosen option",
+    async ({ question, pick, id, value }) => {
+      const onanswer = vi.fn();
+      render(FlowAIBuilderQuestion, { question, onanswer });
+
+      await fireEvent.click(screen.getByRole("radio", { name: new RegExp(`^${pick}`) }));
+      await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_question_confirm() }));
+
+      expect(onanswer.mock.calls[0]?.[0].questionAnswer).toEqual({
+        kind: "structured_question_answer",
+        question_id: question.question_id,
+        selected_option_ids: [id],
+        selected_values: [value]
+      });
+    }
+  );
+
+  // Kills: the recommendation or the user's own words behind it left off a
+  // tool choice.
+  it("marks the recommended tool and quotes the words it rests on", () => {
+    render(FlowAIBuilderQuestion, { question: TOOL_CHOICE });
+
+    const recommended = screen.getByRole("radio", { name: /^Records · lookup/ });
+    expect(recommended.getAttribute("aria-checked")).toBe("true");
+    expect(recommended.getAttribute("aria-label") ?? "").toBe("");
+    expect(screen.getByText(m.ai_builder_question_recommended())).toBeTruthy();
+    expect(
+      screen.getByText(m.ai_builder_question_evidence({ quote: "the daily rows" }))
+    ).toBeTruthy();
+  });
+
+  // Kills: a recommendation the server keeps in an edit (a tool for a change the
+  // person already asked for) hidden, which made "let Eneo decide" impossible.
+  it("shows the recommended tool of an edit and hands the question back", async () => {
+    const ondelegate = vi.fn();
+    render(FlowAIBuilderQuestion, { question: TOOL_CHOICE, isEdit: true, ondelegate });
+
+    const recommended = screen.getByRole("radio", { name: /^Records · lookup/ });
+    expect(recommended.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText(m.ai_builder_question_recommended())).toBeTruthy();
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_question_delegate() }));
+
+    expect(ondelegate).toHaveBeenCalledOnce();
+  });
+
+  // Kills: a fixed value sent as an answer of its own (the server refuses a
+  // typed value on any option but the one it names), a value holding a
+  // variable sent, the generic "something else" row offered beside the
+  // fixed value, the fixed value found from the question's id instead of
+  // its typed tool_question.
+  it("takes a fixed value under its option and refuses one that holds a variable", async () => {
+    const onanswer = vi.fn();
+    render(FlowAIBuilderQuestion, { question: TOOL_ARGUMENT, onanswer });
+    const confirm = screen.getByRole("button", { name: m.ai_builder_question_confirm() });
+
+    expect(
+      screen.queryByRole("radio", { name: new RegExp(m.ai_builder_question_custom()) })
+    ).toBeNull();
+    await fireEvent.click(screen.getByRole("radio", { name: /^Fixed value/ }));
+    const value = screen.getByRole("textbox", { name: m.ai_builder_question_fixed_value() });
+    await fireEvent.input(value, { target: { value: "{{ flow_input.day }}" } });
+    expect(screen.getByText(m.ai_builder_question_fixed_value_has_variable())).toBeTruthy();
+    await fireEvent.click(confirm);
+    expect(onanswer).not.toHaveBeenCalled();
+
+    await fireEvent.input(value, { target: { value: " 2026-01-31 " } });
+    await fireEvent.click(confirm);
+
+    expect(onanswer).toHaveBeenCalledOnce();
+    expect(onanswer.mock.calls[0]?.[0]).toEqual({
+      text: "Fixed value: 2026-01-31",
+      questionAnswer: {
+        kind: "structured_question_answer",
+        question_id: TOOL_ARGUMENT.question_id,
+        selected_option_ids: ["fixed"],
+        selected_values: ["fixed"],
+        custom_value: "2026-01-31"
+      }
+    });
+    cleanup();
+
+    render(FlowAIBuilderQuestion, { question: { ...TOOL_ARGUMENT, tool_question: null } });
+    await fireEvent.click(screen.getByRole("radio", { name: /^Fixed value/ }));
+    expect(screen.queryByRole("textbox", { name: m.ai_builder_question_fixed_value() })).toBeNull();
+    expect(
+      screen.getByRole("radio", { name: new RegExp(m.ai_builder_question_custom()) })
+    ).toBeTruthy();
   });
 });
