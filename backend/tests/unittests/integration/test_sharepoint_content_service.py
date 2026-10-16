@@ -4082,8 +4082,10 @@ class TestDeltaExtractionOutcomes:
 class TestSiteRootExtractionOutcomes:
     """Root-level documents of a full sync follow the same ExtractionResult rules."""
 
-    async def _run(self, service, mock_dependencies, mock_oauth_token, outcome):
-        ik = _real_integration_knowledge()
+    async def _run(
+        self, service, mock_dependencies, mock_oauth_token, outcome, delta_token=None
+    ):
+        ik = _real_integration_knowledge(delta_token=delta_token)
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
         mock_dependencies["integration_knowledge_repo"].one.return_value = ik
         _size_ledger(mock_dependencies["integration_knowledge_repo"], 100)
@@ -4161,22 +4163,27 @@ class TestSiteRootExtractionOutcomes:
             {"file": "photo", "reason": EMPTY_CONTENT_REASON}
         ]
 
-    async def test_a_download_failure_fails_the_sync_without_a_delta_baseline(
-        self, service, mock_dependencies, mock_oauth_token
+    @pytest.mark.parametrize("delta_token", [None, "token-1"], ids=["first", "tokened"])
+    async def test_a_download_failure_fails_the_sync_without_a_delta_token(
+        self, service, mock_dependencies, mock_oauth_token, delta_token
     ):
-        """No baseline means the next sync is a full one that retries the file,
-        instead of a delta that never sees it again."""
+        """No token means the next sync is a full one that retries the file,
+        instead of a delta that never sees it again; a token the knowledge
+        already had goes the same way."""
         ik, delete, process, failure = await self._run(
             service,
             mock_dependencies,
             mock_oauth_token,
             _http_error(503, "Service Unavailable"),
+            delta_token=delta_token,
         )
 
         assert str(failure) == ONE_FILE_FAILED
         process.assert_not_called()
         delete.assert_not_called()
         assert ik.delta_token is None
+        written = mock_dependencies["integration_knowledge_repo"].update_sync_state
+        assert written.await_args.kwargs["delta_token"] is None
         assert ik.last_sync_status == "error"
         assert ik.last_sync_error == ONE_FILE_FAILED
         assert ik.last_synced_at is None

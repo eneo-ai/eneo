@@ -404,8 +404,9 @@ class SharePointContentService:
             )
             summary_stats = self._build_summary_stats(stats)
             if summary_stats.get("failed_items"):
-                # The baseline is not persisted: the next sync is a full one and
-                # retries the failed files instead of never seeing them again.
+                # The baseline is not persisted and an existing token is cleared
+                # by the failure record: the next sync is a full one and retries
+                # the failed files instead of a delta never seeing them again.
                 raise SyncItemsFailed(summary_stats)
 
             integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
@@ -445,6 +446,7 @@ class SharePointContentService:
                 metadata=_sync_metadata(
                     summary, trigger=sync_trigger, recovery=recovery
                 ),
+                clear_delta_token=isinstance(e, SyncItemsFailed),
             )
             logger.error(f"Error in pull_content: {e}", exc_info=True)
             raise
@@ -458,6 +460,7 @@ class SharePointContentService:
         started_at: datetime,
         metadata: SyncMetadata,
         summary: SyncStats | None = None,
+        clear_delta_token: bool = False,
     ) -> None:
         """Persist the failure before re-raising; never raises itself.
 
@@ -466,7 +469,9 @@ class SharePointContentService:
         the UI shows. Only the status columns are written, so a rename committed
         during the sync survives. Each write is attempted on its own so a broken
         status row still leaves a sync log, and neither can replace the
-        exception being recorded.
+        exception being recorded. ``clear_delta_token`` drops the token when a
+        full sync could not finish every item: a delta from it would never
+        re-emit those items, so the next sync must be a full one.
         """
         if integration_knowledge_id is None:
             return
@@ -484,6 +489,9 @@ class SharePointContentService:
             if summary is not None:
                 integration_knowledge.last_sync_summary = _summary_counts(summary)
                 fields["last_sync_summary"] = integration_knowledge.last_sync_summary
+            if clear_delta_token:
+                integration_knowledge.delta_token = None
+                fields["delta_token"] = None
             await self.integration_knowledge_repo.update_sync_state(
                 integration_knowledge_id, **fields
             )
