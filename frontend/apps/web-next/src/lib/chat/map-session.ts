@@ -1,5 +1,5 @@
 import type { Schema } from "@/lib/api/models";
-import type { EneoUIMessage } from "./types";
+import type { EneoToolMetadata, EneoUIMessage, ToolAppView } from "./types";
 
 type PersistedMessage = Schema<"Message">;
 
@@ -58,9 +58,14 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
             purpose: tool.purpose ?? null,
             // Eneo's own server or not, by the backend's routing (null before the flag existed).
             is_internal: tool.is_internal ?? null,
+            is_bundled: tool.is_bundled ?? null,
+            app_view: (tool.app_view as ToolAppView | null | undefined) ?? null,
             // Approval record for MCP tools that needed approval (null: none needed).
-            approved: tool.approved ?? null
-          }
+            approved: tool.approved ?? null,
+            result_status: tool.result_status ?? null,
+            // The files the call produced (live streams carry the call id on the file part).
+            generated_file_ids: tool.generated_file_ids ?? null
+          } satisfies EneoToolMetadata
         },
         state:
           tool.result_status && tool.result_status !== "succeeded"

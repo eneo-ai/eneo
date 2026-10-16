@@ -41,6 +41,12 @@ const envSchema = z
     HELP_CENTER_URL: optionalLinkUrl,
     LEGACY_APP_URL: optionalLinkUrl,
     REQUEST_INTEGRATION_FORM_URL: optionalLinkUrl,
+    // The separate origin the backend serves interactive tool views (MCP
+    // Apps) from, the backend's MCP_APP_CONTENT_BASE_URL. Framed by the chat,
+    // so the CSP's frame-src allows it; unset, views cannot be shown.
+    MCP_APP_CONTENT_ORIGIN: optionalLinkUrl.transform((value) =>
+      value ? new URL(value).origin : undefined
+    ),
     // The deploying organisation's accessibility statement
     // (tillgänglighetsredogörelse, DOS-lagen). Linked from every public page
     // (login, activation, deactivated, login failed) and the profile menu

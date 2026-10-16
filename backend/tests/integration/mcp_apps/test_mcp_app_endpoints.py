@@ -126,7 +126,8 @@ async def test_mint_and_content_round_trip(
     )
     assert on_app_host.status_code == 404
     assert content.headers["content-security-policy"] == build_app_csp(
-        UI_META["csp"], frame_ancestors=settings.public_origin or None
+        UI_META["csp"],
+        frame_ancestors=" ".join(settings.mcp_app_view_host_origins()) or None,
     )
     assert content.headers["x-content-type-options"] == "nosniff"
     assert content.headers["referrer-policy"] == "no-referrer"

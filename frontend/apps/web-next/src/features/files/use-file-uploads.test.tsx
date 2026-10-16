@@ -2,7 +2,7 @@
 import { act, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderHookInApp } from "@/test/render";
-import { useFileUploads, releasePreviews } from "./use-file-uploads";
+import { releasePreviews, UploadsNotReadyError, useFileUploads } from "./use-file-uploads";
 
 const api = vi.hoisted(() => ({ POST: vi.fn(), DELETE: vi.fn() }));
 const errors = vi.hoisted(() => vi.fn());
@@ -93,4 +93,73 @@ it("surfaces backend deletion errors, including resolved HTTP errors", async () 
   await act(() => result.current.add([file()]));
   await act(() => result.current.discard());
   expect(errors).toHaveBeenCalledTimes(1);
+});
+
+it("keeps a reused server file when it is removed or abandoned", async () => {
+  const { result, unmount } = renderHookInApp(() => useFileUploads({ previews: true }));
+  act(() => {
+    result.current.reuse(file(), { id: "earlier-1" });
+    result.current.reuse(file(), { id: "earlier-2" });
+  });
+  expect(
+    result.current.files.map((upload) => [upload.fileId, upload.uploading, upload.reused])
+  ).toEqual([
+    ["earlier-1", false, true],
+    ["earlier-2", false, true]
+  ]);
+  act(() => result.current.remove(result.current.files[0]!.key));
+  unmount();
+  expect(api.DELETE).not.toHaveBeenCalled();
+  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
+});
+
+it("remembers when a picked file was last changed", async () => {
+  const { result } = renderHookInApp(() => useFileUploads());
+  const picked = new File(["contents"], "notes.txt", { type: "text/plain", lastModified: 1234 });
+  await act(() => result.current.add([picked]));
+  expect(result.current.files[0]?.lastModified).toBe(1234);
+});
+
+it("resolves awaited uploads once they are all done, and rejects when one leaves", async () => {
+  let finish!: (response: ReturnType<typeof ok>) => void;
+  api.POST.mockReturnValueOnce(
+    new Promise<ReturnType<typeof ok>>((resolve) => {
+      finish = resolve;
+    })
+  );
+  const { result } = renderHookInApp(() => useFileUploads());
+  let pending!: Promise<void>;
+  act(() => {
+    pending = result.current.add([file()]);
+    result.current.reuse(file(), { id: "earlier-1" });
+  });
+  const keys = result.current.files.map((upload) => upload.key);
+  const awaited = result.current.awaitUploads(keys);
+  let settled = false;
+  void awaited.then(() => {
+    settled = true;
+  });
+  await Promise.resolve();
+  expect(settled).toBe(false);
+  await act(async () => {
+    finish(ok());
+    await pending;
+  });
+  expect((await awaited).map((upload) => upload.fileId)).toEqual(["uploaded-1", "earlier-1"]);
+
+  const gone = result.current.awaitUploads(["missing"]);
+  await expect(gone).rejects.toBeInstanceOf(UploadsNotReadyError);
+  await expect(gone).rejects.toMatchObject({ reason: "failed" });
+});
+
+it("rejects awaited uploads when the caller gives up", async () => {
+  api.POST.mockReturnValue(new Promise(() => {}));
+  const { result } = renderHookInApp(() => useFileUploads());
+  act(() => {
+    void result.current.add([file()]);
+  });
+  const controller = new AbortController();
+  const awaited = result.current.awaitUploads([result.current.files[0]!.key], controller.signal);
+  controller.abort();
+  await expect(awaited).rejects.toMatchObject({ reason: "aborted" });
 });
