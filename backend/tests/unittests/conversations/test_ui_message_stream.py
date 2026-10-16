@@ -14,6 +14,7 @@ import pytest
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModelPublic,
+    GeneratedFile,
     McpToolReference,
     ResponseType,
     TokenUsage,
@@ -62,6 +63,10 @@ def test_tool_chunks_preserve_display_metadata_for_capability_and_skill_calls():
         "title": "Draw an image",
         "purpose": "image_generation",
         "is_internal": None,
+        "is_bundled": None,
+        "app_view": None,
+        "approved": None,
+        "result_status": None,
     }
     assert chunks[1]["providerMetadata"]["eneo"]["title"] == "Planning Skill"
 
@@ -259,24 +264,99 @@ async def test_reasoning_precedes_text():
     ]
 
 
+def _announced(tool_call_id: str = "call-1") -> ToolCallMetadata:
+    """A call as the adapter announces it, before its arguments are written."""
+    return ToolCallMetadata(
+        server_name="files",
+        tool_name="read_file",
+        arguments=None,
+        tool_call_id=tool_call_id,
+        result_status="pending",
+        is_internal=True,
+    )
+
+
+def _delta(piece: str, tool_call_id: str = "call-1") -> Completion:
+    return Completion(
+        response_type=ResponseType.TOOL_CALL_DELTA,
+        tool_call_id=tool_call_id,
+        arguments_delta=piece,
+    )
+
+
+def _snapshot(*tools: ToolCallMetadata) -> Completion:
+    return Completion(
+        response_type=ResponseType.TOOL_CALL, tool_calls_metadata=list(tools)
+    )
+
+
 @pytest.mark.asyncio
-async def test_tool_call_argument_deltas_are_silently_skipped(caplog):
-    """The call is rendered from its TOOL_CALL snapshot, which carries the
-    complete arguments; the deltas written before it produce no part and no
-    warning about an unsupported response type."""
+async def test_announced_call_streams_its_input_before_it_is_available(caplog):
     completions = [
-        Completion(response_type=ResponseType.TOOL_CALL_DELTA, text='{"pa'),
-        Completion(response_type=ResponseType.TOOL_CALL_DELTA, text='th": "a.txt"}'),
-        Completion(
-            response_type=ResponseType.TOOL_CALL, tool_calls_metadata=[_tool("pending")]
-        ),
+        _snapshot(_announced()),
+        _delta('{"pa'),
+        _delta('th": "a.txt"}'),
+        _snapshot(_tool("pending")),
+        _snapshot(_tool("succeeded")),
         Completion(response_type=ResponseType.TEXT, text="Done"),
     ]
 
     chunks = await _collect(_response(completions))
-    types = [chunk["type"] for chunk in chunks]
+    tool_chunks = [c for c in chunks if c["type"].startswith("tool-")]
 
-    assert types == [
+    assert [c["type"] for c in tool_chunks] == [
+        "tool-input-start",
+        "tool-input-delta",
+        "tool-input-delta",
+        "tool-input-available",
+        "tool-output-available",
+    ]
+    start = tool_chunks[0]
+    assert start["toolCallId"] == "call-1"
+    assert start["toolName"] == "read_file"
+    assert start["dynamic"] is True
+    assert "input" not in start
+    assert start["providerMetadata"]["eneo"]["result_status"] == "pending"
+    assert [c["inputTextDelta"] for c in tool_chunks[1:3]] == ['{"pa', 'th": "a.txt"}']
+    assert all(c["toolCallId"] == "call-1" for c in tool_chunks[1:3])
+    assert tool_chunks[3]["input"] == {"path": "a.txt"}
+    assert "Unsupported response type" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_deltas_after_the_input_is_available_are_dropped():
+    completions = [
+        _snapshot(_announced()),
+        _delta('{"path": "a.txt"}'),
+        _snapshot(_tool("pending")),
+        _delta(" "),
+        # A repeated announcement never sends a known input back to streaming.
+        _snapshot(_announced()),
+        _snapshot(_tool("succeeded")),
+    ]
+
+    chunks = await _collect(_response(completions))
+
+    assert [c["type"] for c in chunks if c["type"].startswith("tool-")] == [
+        "tool-input-start",
+        "tool-input-delta",
+        "tool-input-available",
+        "tool-output-available",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_deltas_for_a_call_never_announced_are_dropped():
+    completions = [
+        _delta('{"pa', tool_call_id="call-unknown"),
+        _snapshot(_tool("pending")),
+        _delta('th"}', tool_call_id="call-1"),
+        Completion(response_type=ResponseType.TEXT, text="Done"),
+    ]
+
+    chunks = await _collect(_response(completions))
+
+    assert [c["type"] for c in chunks] == [
         "start",
         "data-session",
         "tool-input-available",
@@ -285,7 +365,21 @@ async def test_tool_call_argument_deltas_are_silently_skipped(caplog):
         "text-end",
         "finish",
     ]
-    assert "Unsupported response type" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_announced_call_that_fails_unwritten_still_gets_its_input_first():
+    failed = _announced()
+    failed.result_status = "failed"
+
+    chunks = await _collect(_response([_snapshot(_announced()), _snapshot(failed)]))
+
+    assert [c["type"] for c in chunks if c["type"].startswith("tool-")] == [
+        "tool-input-start",
+        "tool-input-available",
+        "tool-output-error",
+    ]
+    assert chunks[3]["input"] == {}
 
 
 @pytest.mark.asyncio
@@ -484,6 +578,10 @@ async def test_tool_calls_and_approval_pause_resume():
         "title": None,
         "purpose": None,
         "is_internal": True,
+        "is_bundled": None,
+        "app_view": None,
+        "approved": True,
+        "result_status": "approved",
     }
 
     tool_output = next(c for c in chunks if c["type"] == "tool-output-available")
@@ -605,6 +703,62 @@ async def test_tool_metadata_carries_is_internal_from_the_routed_server():
     )
 
 
+def test_tool_metadata_carries_bundling_view_and_status_on_every_chunk():
+    app_view = {
+        "view_id": "view-1",
+        "mcp_server_id": "server-1",
+        "ui": {"prefersBorder": True},
+    }
+    call = ToolCallMetadata(
+        server_name="documents",
+        tool_name="create_document",
+        title="Create a document",
+        arguments={"title": "Plan"},
+        tool_call_id="call-doc",
+        approved=True,
+        result_status="succeeded",
+        is_internal=True,
+        is_bundled=True,
+        app_view=app_view,
+    )
+
+    chunks = _tool_chunks([call], {})
+
+    assert [c["type"] for c in chunks] == [
+        "tool-input-available",
+        "tool-output-available",
+    ]
+    for chunk in chunks:
+        eneo = chunk["providerMetadata"]["eneo"]
+        assert list(eneo) == [
+            "server_name",
+            "title",
+            "purpose",
+            "is_internal",
+            "is_bundled",
+            "app_view",
+            "approved",
+            "result_status",
+        ]
+        assert eneo["is_bundled"] is True
+        assert eneo["app_view"] == app_view
+        assert eneo["approved"] is True
+        assert eneo["result_status"] == "succeeded"
+
+    announced = ToolCallMetadata(
+        server_name="documents",
+        tool_name="create_document",
+        tool_call_id="call-doc",
+        result_status="pending",
+        is_bundled=True,
+        app_view=app_view,
+    )
+    start = _tool_chunks([announced], {})[0]
+    assert start["type"] == "tool-input-start"
+    # The view is known before the arguments are.
+    assert start["providerMetadata"]["eneo"]["app_view"] == app_view
+
+
 @pytest.mark.asyncio
 async def test_approval_timeout_updates_part_in_place():
     completions = [
@@ -664,6 +818,30 @@ async def test_generated_image():
     assert file_chunk["filename"] == "generated.png"
     assert file_chunk["url"].startswith("http://backend:8123/api/v1/files/")
     assert "/download/?token=" in file_chunk["url"]
+    # No producing call is known for a file that arrives without one.
+    assert file_chunk["providerMetadata"]["eneo"]["tool_call_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_file_chunk_names_the_tool_call_that_produced_it():
+    generated = _generated_file()
+    completions = [
+        Completion(
+            response_type=ResponseType.FILES,
+            image=GeneratedFile(
+                data=b"\x89PNG", mime_type="image/png", tool_call_id="call-7"
+            ),
+            generated_file=generated,
+        ),
+    ]
+
+    chunks = await _collect(_response(completions))
+    eneo = chunks[2]["providerMetadata"]["eneo"]
+
+    assert eneo["tool_call_id"] == "call-7"
+    assert eneo["id"] == str(generated.id)
+    # The FilePublic keys come first, the producing call last.
+    assert list(eneo)[-1] == "tool_call_id"
 
 
 @pytest.mark.asyncio

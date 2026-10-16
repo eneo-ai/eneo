@@ -18,7 +18,6 @@ from eneo.main.container.container import Container
 from eneo.main.models import CursorPaginatedResponse, PaginatedResponse
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses, to_paginated_response
-from eneo.spaces.api.space_models import TransferRequest
 from eneo.websites.presentation.website_models import (
     BulkCrawlRequest,
     BulkCrawlResponse,
@@ -497,55 +496,6 @@ async def get_latest_crawl_run(
 ) -> CrawlRunPublic | None:
     run = await container.website_crud_service().get_latest_crawl_run(id)
     return CrawlRunPublic.from_domain(run) if run is not None else None
-
-
-@router.post(
-    "/{id}/transfer/",
-    status_code=204,
-    responses=responses.get_responses([403, 404]),
-    description="Transfer a website to another space by id.",
-)
-@endpoint_access(
-    authentication=Authentication.USER,
-    authorization=Authorization.AUTHENTICATED,
-    reason="ResourceMoverService checks source and target space access before transfer.",
-)
-async def transfer_website_to_space(
-    transfer_req: TransferRequest,
-    id: Annotated[
-        UUID, Path(description="Unique identifier of the website to transfer")
-    ],
-    container: ContainerDep,
-):
-    # Transfer website (do this FIRST to avoid DI issues)
-    service = container.resource_mover_service()
-    await service.link_website_to_space(
-        website_id=id, space_id=transfer_req.target_space_id
-    )
-
-    # Get user and website info AFTER transfer for audit logging
-    user = container.user()
-    website_service = container.website_crud_service()
-    website = await website_service.get_website(id)
-
-    # Audit logging
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        user=user,
-        action=ActionType.WEBSITE_TRANSFERRED,
-        entity_type=EntityType.WEBSITE,
-        entity_id=id,
-        description=f"Transferred website '{website.url}' to new space",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=website,
-            extra={
-                "url": website.url,
-                "target_space_id": str(transfer_req.target_space_id),
-            },
-        ),
-    )
 
 
 @router.get(

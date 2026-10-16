@@ -40,6 +40,27 @@ export function sanitizeLinkHref(href: string | null | undefined): string | unde
 }
 
 /**
+ * Returns `href` when it is an absolute http(s) URL, otherwise `undefined`.
+ *
+ * For an address stored with content, such as a cited document's source url:
+ * it links out to the source, so unlike a Markdown link it has no reason to be
+ * relative or a mail or phone link, and whoever stored it chose the value.
+ */
+export function sanitizeWebHref(href: string | null | undefined): string | undefined {
+  // Require an authority in the original string: `https:settings` and
+  // `https:/settings` otherwise resolve relative to the current HTTPS page.
+  // Removing spaces/control characters here could also approve a different URL.
+  if (!href || !/^https?:\/\//i.test(href)) return undefined;
+  try {
+    // The prefix alone does not reject a missing/invalid host or an invalid port.
+    new URL(href);
+    return href;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Returns `src` when it is safe for an `<img>`, otherwise `undefined`.
  *
  * Allows http(s) and image-only `data:` URIs; blocks `javascript:`, non-image

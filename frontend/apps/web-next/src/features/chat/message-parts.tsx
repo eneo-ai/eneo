@@ -17,8 +17,8 @@ import { toastApiError } from "@/lib/api/toast";
 import { asString, hostOf } from "@/lib/chat/metadata";
 import type { EneoUIMessage, SessionData, ToolApprovalData, ToolCallInfo } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
-import { AttachmentPreviewDialog, FileTypeTile, useSignedUrl } from "./attachments";
-import { formatBytes } from "@/lib/format";
+import { FileTypeTile, useSignedUrl } from "./attachments";
+import { fileExtension, formatBytes } from "@/lib/format";
 
 type Part = EneoUIMessage["parts"][number];
 type McpToolReference = Schema<"McpToolReferencePublic">;
@@ -149,10 +149,12 @@ export function mergeSources(
     .filter((part) => part.type === "source-document")
     .map((source) => {
       const eneo = (source.providerMetadata?.eneo ?? {}) as { metadata?: { url?: string | null } };
+      const url = eneo.metadata?.url;
       return {
         key: `doc-${source.sourceId}`,
         title: source.title || source.sourceId,
-        url: eneo.metadata?.url ?? undefined,
+        // A document's stored url is whatever its editor wrote; only http(s) links out.
+        url: url && isHttpUrl(url) ? url : undefined,
         sourceId: source.sourceId
       };
     });
@@ -160,7 +162,7 @@ export function mergeSources(
     (ref) => ({
       key: `web-${ref.id}`,
       title: ref.title || ref.url,
-      url: ref.url,
+      url: isHttpUrl(ref.url) ? ref.url : undefined,
       sourceId: ref.id
     })
   );
@@ -480,8 +482,8 @@ export function InlineImage({ file }: { file: Schema<"FilePublic"> }) {
   );
 }
 
-/** A file as a compact token: coloured type tile, name, size. */
-function FileTokenBody({
+/** A file as a compact token: coloured type tile, name, type and size. */
+export function FileTokenBody({
   name,
   mimetype,
   size
@@ -491,19 +493,24 @@ function FileTokenBody({
   size?: number | null;
 }) {
   const locale = useLocale();
+  const detail = [fileExtension(name), size ? formatBytes(size, locale) : ""]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <>
       <FileTypeTile mimetype={mimetype} size="sm" />
       <span className="min-w-0 truncate font-semibold">{name}</span>
-      {size ? (
-        <span className="text-ax-text-secondary shrink-0">{formatBytes(size, locale)}</span>
-      ) : null}
+      {detail && <span className="text-ax-text-secondary shrink-0 tabular-nums">{detail}</span>}
     </>
   );
 }
 
-const FILE_TOKEN_CLASS =
-  "border-ax-border focus-visible:outline-ring flex h-8 max-w-full items-center gap-2 rounded-ax-element border py-0 ps-1 pe-2.5 text-[12.5px] transition-colors hover:bg-ax-hover focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:h-11";
+/** The 32 px chip a file is shown as, beside a message or in the composer. */
+export const FILE_CHIP_CLASS =
+  "border-ax-border bg-ax-surface flex h-8 max-w-full min-w-0 items-center gap-2 rounded-ax-element border py-0 ps-1 pe-2.5 text-[12.5px] pointer-coarse:h-11";
+
+/** A file chip that does something when pressed: opens, downloads. */
+export const FILE_TOKEN_CLASS = `${FILE_CHIP_CLASS} focus-visible:outline-ring transition-colors hover:bg-ax-hover focus-visible:outline-2 focus-visible:outline-offset-2`;
 
 function providerFile(part: Extract<Part, { type: "file" }>): Partial<Schema<"FilePublic">> {
   return ((part.providerMetadata?.eneo ?? {}) as Partial<Schema<"FilePublic">>) ?? {};
@@ -555,73 +562,6 @@ export function MessageFilePart({ part }: { part: Extract<Part, { type: "file" }
       size={providerFile(part).size}
       url={part.url}
     />
-  );
-}
-
-/** Opens a message attachment in the shared preview dialog (signs the URL on open). */
-function MessageFilePreview({
-  file,
-  onClose
-}: {
-  file: Schema<"FilePublic">;
-  onClose: () => void;
-}) {
-  const { url, error } = useSignedUrl(file.id);
-  return (
-    <AttachmentPreviewDialog
-      open
-      onOpenChange={(next) => !next && onClose()}
-      name={file.name}
-      mimetype={file.mimetype}
-      url={url}
-      error={error}
-    />
-  );
-}
-
-/**
- * Files attached to a user message: images as thumbnails, documents as file
- * tokens (type tile, name, size). Each opens the preview.
- */
-export function MessageFiles({ files }: { files: Schema<"FilePublic">[] }) {
-  const t = useTranslations();
-  const [preview, setPreview] = useState<Schema<"FilePublic"> | null>(null);
-  if (files.length === 0) return null;
-  const images = files.filter((file) => file.mimetype.startsWith("image/"));
-  const docs = files.filter((file) => !file.mimetype.startsWith("image/"));
-
-  return (
-    <div className="flex max-w-full flex-col items-end gap-1.5">
-      {images.length > 0 && (
-        <ul className="flex flex-wrap justify-end gap-1.5" aria-label={t("attachments")}>
-          {images.map((file) => (
-            <li key={file.id}>
-              <button
-                type="button"
-                aria-label={t("chat_preview_file", { name: file.name })}
-                onClick={() => setPreview(file)}
-                className="focus-visible:outline-ring rounded-ax-container block focus-visible:outline-2 focus-visible:outline-offset-2"
-              >
-                <InlineImage file={file} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {docs.length > 0 && (
-        <ul className="flex flex-wrap justify-end gap-1.5" aria-label={t("attachments")}>
-          {docs.map((file) => (
-            <li key={file.id} className="max-w-full">
-              <button type="button" onClick={() => setPreview(file)} className={FILE_TOKEN_CLASS}>
-                <span className="sr-only">{t("preview")}: </span>
-                <FileTokenBody name={file.name} mimetype={file.mimetype} size={file.size} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {preview && <MessageFilePreview file={preview} onClose={() => setPreview(null)} />}
-    </div>
   );
 }
 

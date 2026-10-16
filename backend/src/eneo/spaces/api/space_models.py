@@ -69,10 +69,6 @@ class TransferRequest(BaseModel):
     target_space_id: UUID
 
 
-class TransferApplicationRequest(TransferRequest):
-    move_resources: bool = False
-
-
 def _empty_mcp_server_public_dict_list() -> list[MCPServerPublicDict]:
     return []
 

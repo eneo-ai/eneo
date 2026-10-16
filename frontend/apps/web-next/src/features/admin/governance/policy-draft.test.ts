@@ -99,7 +99,11 @@ describe("capability governance", () => {
     expect(prepared.map((server) => server.id)).toEqual([
       "s1",
       "capability:web_search",
-      "capability:image_generation"
+      "capability:image_generation",
+      "capability:file_analysis",
+      "capability:file_creation",
+      "capability:charts",
+      "capability:compute"
     ]);
     expect(prepared.find((server) => server.id === "capability:web_search")?.is_available).toBe(
       true

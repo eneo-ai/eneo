@@ -295,10 +295,10 @@ it("opens the overview over a file and remembers what opened it", () => {
   const preview = panel();
   const opener = { id: "" } as HTMLElement;
   preview.open(file);
-  preview.showOverview("uploads", opener);
+  preview.showOverview("uploads", opener, "question-2");
   expect(preview.shown).toBe(false);
   expect(opener.id).not.toBe("");
-  expect(preview.overview).toEqual({ section: "uploads", opener: opener.id });
+  expect(preview.overview).toEqual({ section: "uploads", group: "question-2", opener: opener.id });
   expect(preview.isOverviewOpener(opener)).toBe(true);
   expect(preview.isOverviewOpener({ id: "other" } as HTMLElement)).toBe(false);
   preview.closeOverview();
@@ -309,7 +309,7 @@ it("opens the overview over a file and remembers what opened it", () => {
 it("opens the overview without a section from the panel's own controls", () => {
   const preview = panel();
   preview.showOverview();
-  expect(preview.overview).toEqual({ section: null, opener: null });
+  expect(preview.overview).toEqual({ section: null, group: null, opener: null });
   preview.closeOverview(false);
   expect(preview.overview).toBeNull();
 });

@@ -12,6 +12,7 @@
     mergeAdjacentCitations
   } from "../../mcpReferenceDocs";
   import { m } from "$lib/paraglide/messages";
+  import { sanitizeWebHref } from "$lib/components/markdown/index.js";
   import SourceMetadataList from "$lib/features/knowledge/components/SourceMetadataList.svelte";
   import { hasSourceMetadata } from "$lib/features/knowledge/sourceMetadata";
 
@@ -106,18 +107,15 @@
 {/snippet}
 
 {#if reference}
-  {#if reference.metadata.url}
+  <!-- A stored url is whatever its editor wrote: only http(s) links out, anything
+       else opens the document's preview. -->
+  {@const href = sanitizeWebHref(reference.metadata.url)}
+  {#if href}
     <Tooltip.Root>
       <Tooltip.Trigger>
         {#snippet child({ props })}
           <!-- eslint-disable svelte/no-navigation-without-resolve -- external reference URL from message metadata -->
-          <a
-            {...props}
-            href={reference.metadata.url}
-            target="_blank"
-            rel="noreferrer"
-            class={["reference", token.level]}
-          >
+          <a {...props} {href} target="_blank" rel="noreferrer" class={["reference", token.level]}>
             {@render label(reference.number, reference.metadata.title)}
           </a>
           <!-- eslint-enable svelte/no-navigation-without-resolve -->

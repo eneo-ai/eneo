@@ -91,7 +91,46 @@ export type ToolCallInfo = {
    * the flag existed carry none and fall back to the name.
    */
   is_internal?: boolean | null;
+  /** Whether the call ran on a server built into Eneo (the bundled tool runtime). */
+  is_bundled?: boolean | null;
+  /** The tool's approved MCP App view, when it has one. */
+  app_view?: ToolAppView | null;
 };
+
+/**
+ * An approved MCP App view of a tool: the stored view to show for a call, the
+ * server it belongs to and its render policy (`ui`, the view's `_meta.ui`).
+ */
+export type ToolAppView = {
+  view_id: string;
+  mcp_server_id: string;
+  ui?: Record<string, unknown> | null;
+};
+
+/**
+ * `providerMetadata.eneo` on a `dynamic-tool` part (`callProviderMetadata`
+ * from the input chunks, `resultProviderMetadata` from the output chunk), the
+ * same keys live and in history (CONTRACT.md → Tool calls). All optional: an
+ * older backend or row may lack any of them.
+ */
+export type EneoToolMetadata = {
+  server_name?: string | null;
+  title?: string | null;
+  purpose?: string | null;
+  is_internal?: boolean | null;
+  is_bundled?: boolean | null;
+  app_view?: ToolAppView | null;
+  approved?: boolean | null;
+  result_status?: string | null;
+  /** History only: the files the call produced (live: the `file` parts' `tool_call_id`). */
+  generated_file_ids?: string[] | null;
+};
+
+/**
+ * `providerMetadata.eneo` on a `file` part: the generated file, plus the
+ * tool call that produced it (null when unknown).
+ */
+export type EneoFileMetadata = Schema<"FilePublic"> & { tool_call_id?: string | null };
 
 /**
  * The `data-tool-approval` part (CONTRACT.md → Tool approval). One part per

@@ -956,18 +956,31 @@ class UserService:
         assert self._session is not None
         return await self._session.scalar(query)
 
-    async def _is_space_member(self, space_id: UUID, user_id: UUID) -> bool:
-        """Check if user is a member of space (index-only, no user context)."""
-        from eneo.database.tables.spaces_table import SpacesUsers
+    async def _owner_belongs_to_space(self, space_id: UUID, user: "UserInDB") -> bool:
+        """Whether a key's owner still belongs to its space (no user context).
 
-        query = (
-            sa.select(sa.literal(1))
-            .select_from(SpacesUsers)
-            .where(SpacesUsers.space_id == space_id, SpacesUsers.user_id == user_id)
-            .limit(1)
-        )
+        A member row decides, except in the organization space, which belongs to
+        the tenant's admins: there the admin permission held now decides, as in
+        SpaceActor, since a row outlives the role and a new admin may lack one.
+        """
+        from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+
+        query = sa.select(
+            (Spaces.user_id.is_(None) & Spaces.tenant_space_id.is_(None)).label(
+                "organization"
+            ),
+            sa.exists()
+            .where(SpacesUsers.space_id == space_id, SpacesUsers.user_id == user.id)
+            .label("member"),
+        ).where(Spaces.id == space_id, Spaces.tenant_id == user.tenant_id)
         assert self._session is not None
-        return await self._session.scalar(query) is not None
+        row = (await self._session.execute(query)).one_or_none()
+        if row is None:
+            return False
+        is_organization, is_member = row
+        if is_organization:
+            return Permission.ADMIN in user.permissions
+        return bool(is_member)
 
     async def _build_service_user(self, key: ApiKeyV2InDB) -> "UserInDB":
         """Build a synthetic UserInDB for service keys — no DB user lookup.
@@ -1093,8 +1106,8 @@ class UserService:
                     scope_type=resolved.key.scope_type,
                     scope_id=resolved.key.scope_id,
                 )
-                if space_id is not None and not await self._is_space_member(
-                    space_id=space_id, user_id=user.id
+                if space_id is not None and not await self._owner_belongs_to_space(
+                    space_id=space_id, user=user
                 ):
                     raise ApiKeyValidationError(
                         status_code=403,

@@ -9,7 +9,7 @@
   import { m } from "$lib/paraglide/messages";
   import type { Snippet } from "svelte";
   import type { DocumentExport, FilePreview } from "../FilePreview.svelte";
-  import type { PanelContents } from "../panelContents";
+  import { panelContentsCount, type PanelContents } from "../panelContents";
   import type { PreviewFile } from "../previewKind";
   import FilePreviewPanel from "./FilePreviewPanel.svelte";
 
@@ -42,9 +42,7 @@
   // open it as the panel's own controls do.
   const overview = $derived(preview.overview !== null);
   let trigger = $state<HTMLButtonElement | null>(null);
-  const hasContents = $derived(
-    !!contents && contents.views.length + contents.documents.length + contents.uploads.length > 0
-  );
+  const hasContents = $derived(panelContentsCount(contents) > 0);
 
   const occupied = $derived(occupant?.shown ?? false);
   const shown = $derived(preview.shown || occupied || (overview && hasContents));
@@ -154,6 +152,7 @@
         {...contents}
         fullHeight
         focusSection={preview.overview?.section ?? null}
+        focusGroup={preview.overview?.group ?? null}
         onfile={(file) => choose(() => preview.open(file, trigger))}
         onview={(view) => choose(view.open)}
       />
