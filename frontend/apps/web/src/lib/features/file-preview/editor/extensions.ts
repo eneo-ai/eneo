@@ -7,6 +7,7 @@ import { ChangeHighlight } from "./changeHighlight";
 import { DocumentCodeBlock } from "./codeBlock";
 import { EneoImage } from "./eneoImage";
 import { PageBreak } from "./pageBreak";
+import { DocumentParagraph } from "./paragraph";
 import { PassageHighlight } from "./passageHighlight";
 import { RawHtml } from "./rawHtml";
 
@@ -46,9 +47,11 @@ export function documentExtensions({
         isAllowedUri: (url, context) => context.defaultValidate(url) && isAllowedHref(url),
         shouldAutoLink: () => false
       },
-      // Replaced by the highlighted code block below.
-      codeBlock: false
+      // Replaced by the highlighted code block and the paragraph below.
+      codeBlock: false,
+      paragraph: false
     }),
+    DocumentParagraph,
     DocumentCodeBlock,
     TableKit.configure({ table: { resizable: false } }),
     TaskList,

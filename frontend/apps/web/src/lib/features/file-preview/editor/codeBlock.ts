@@ -29,7 +29,17 @@ const lowlight = createLowlight({
  * block paints (its colour theme is global). The fence's language tag is kept
  * in the document; an untagged block is detected among the known languages.
  */
-export const DocumentCodeBlock = CodeBlockLowlight.configure({
+export const DocumentCodeBlock = CodeBlockLowlight.extend({
+  // The fence must outrun any backtick run in the code, or a block that shows
+  // a fence (a Markdown example) ends at its own first fence when read back.
+  renderMarkdown(node, helpers) {
+    const language = (node.attrs as { language?: string | null } | undefined)?.language ?? "";
+    const code = node.content ? helpers.renderChildren(node.content) : "";
+    const longest = Math.max(2, ...Array.from(code.matchAll(/`+/g), (run) => run[0].length));
+    const fence = "`".repeat(longest + 1);
+    return `${fence}${language}\n${code}\n${fence}`;
+  }
+}).configure({
   lowlight,
   HTMLAttributes: { class: "bg-overlay-stronger rounded-lg px-8 py-7 overflow-auto" }
 });
