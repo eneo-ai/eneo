@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hmac
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import sqlalchemy as sa
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.integration_table import (
@@ -27,6 +28,11 @@ from eneo.integration.infrastructure.content_service.types import (
 from eneo.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
 )
+from eneo.integration.infrastructure.sharepoint_sync_keys import (
+    SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+    sync_lock_key,
+    sync_pending_key,
+)
 from eneo.integration.presentation.models import SharepointContentTaskParam
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_repo import JobRepository
@@ -35,6 +41,9 @@ from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.users.user import UserInDB
 from eneo.users.user_repo import UsersRepository
+
+if TYPE_CHECKING:
+    import redis.asyncio as aioredis
 
 logger = get_logger(__name__)
 
@@ -67,6 +76,7 @@ class SharepointWebhookService:
         user_repo: UsersRepository,
         change_key_service: OfficeChangeKeyService,
         sharepoint_subscription_repo: SharePointSubscriptionRepository,
+        redis_client: "aioredis.Redis",
     ) -> None:
         super().__init__()
         self.session = session
@@ -75,6 +85,7 @@ class SharepointWebhookService:
         self.user_repo = user_repo
         self.change_key_service = change_key_service
         self.sharepoint_subscription_repo = sharepoint_subscription_repo
+        self.redis_client = redis_client
         settings = get_settings()
         # Stripped once, as the subscription service sends it to Graph; a
         # trailing newline in the environment must not drop every notification.
@@ -292,6 +303,10 @@ class SharepointWebhookService:
                 )
                 continue
 
+            if await self._deferred_to_running_sync(knowledge_id_str):
+                queued_knowledge.add(knowledge_id_str)
+                continue
+
             # Validate that user_integration_db.id is not None before proceeding
             # (id is always populated from DB; this guards against unexpected None)
             ui_id = user_integration_db.id
@@ -442,6 +457,37 @@ class SharepointWebhookService:
                 f"Queued {task_type.value} task for integration knowledge {knowledge_id_str} "
                 f"({resource_type}_id={resource_id})"
             )
+
+    async def _deferred_to_running_sync(self, knowledge_id: str) -> bool:
+        """Leave the pending marker instead of a job while a sync holds the lease.
+
+        Graph sends several notifications per change and most carry no item
+        id, so each would otherwise queue a job that finds the lease taken and
+        ends as skipped. The marker makes the lease holder run one more delta
+        pass before releasing, which is what the skipped job would have asked
+        for. Without Redis the job is queued as before.
+        """
+        try:
+            if not await self.redis_client.exists(sync_lock_key(knowledge_id)):
+                return False
+            await self.redis_client.set(
+                sync_pending_key(knowledge_id),
+                "1",
+                ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+            )
+        except (RedisError, OSError) as exc:
+            logger.warning(
+                "Could not check the sync lease for knowledge %s (%s); queuing a job",
+                knowledge_id,
+                type(exc).__name__,
+            )
+            return False
+        logger.info(
+            "Knowledge %s is being synced; left a pending marker for the lease "
+            "holder instead of queuing a job",
+            knowledge_id,
+        )
+        return True
 
     async def _get_tenant_admin(self, tenant_id: UUID) -> UserInDB:
         """Get a tenant admin user for creating jobs for tenant_app integrations.

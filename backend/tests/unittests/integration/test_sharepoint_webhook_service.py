@@ -10,13 +10,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
+from eneo.integration.infrastructure.sharepoint_sync_keys import (
+    SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+    sync_lock_key,
+    sync_pending_key,
+)
 from eneo.integration.infrastructure.sharepoint_webhook_service import (
     SharepointWebhookService,
 )
+from eneo.integration.tasks import integration_task
 from eneo.jobs.job_models import Task
 
 
@@ -53,6 +60,7 @@ class Setup:
     change_key_service: AsyncMock
     sharepoint_subscription_repo: AsyncMock
     subscription: SharePointSubscription
+    redis: AsyncMock
 
 
 @pytest.fixture
@@ -64,6 +72,8 @@ def setup():
     user_repo = AsyncMock()
     change_key_service = AsyncMock()
     sharepoint_subscription_repo = AsyncMock()
+    redis = AsyncMock()
+    redis.exists.return_value = 0
     subscription = _subscription()
     sharepoint_subscription_repo.get_by_subscription_id.side_effect = (
         lambda subscription_id: subscription
@@ -78,6 +88,7 @@ def setup():
         user_repo=user_repo,
         change_key_service=change_key_service,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
+        redis_client=redis,
     )
 
     # Set expected client state for testing
@@ -92,6 +103,7 @@ def setup():
         change_key_service=change_key_service,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
         subscription=subscription,
+        redis=redis,
     )
 
 
@@ -255,6 +267,7 @@ async def test_configured_client_state_is_compared_stripped_as_utf8(
             user_repo=setup.user_repo,
             change_key_service=setup.change_key_service,
             sharepoint_subscription_repo=setup.sharepoint_subscription_repo,
+            redis_client=setup.redis,
         )
     mock_notification["clientState"] = "sécret"
 
@@ -547,6 +560,74 @@ def test_folder_integration_queues_for_sync_service_filtering(
 
     # Should queue (True) and let sync service do full filtering
     assert result is True
+
+
+def _running_sync_setup(setup: Setup, knowledge_db, integration_db, user) -> None:
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
+        return_value=[(knowledge_db, integration_db)]
+    )
+    setup.user_repo.list_tenant_admins.return_value = [user]
+    setup.change_key_service.should_process.return_value = True
+
+
+async def test_a_notification_during_a_running_sync_leaves_a_marker_not_a_job(
+    setup: Setup,
+    mock_notification,
+    mock_knowledge_db,
+    mock_tenant_app_integration_db,
+    mock_user,
+):
+    """A job queued now would only find the lease taken; the holder reruns instead."""
+    _running_sync_setup(
+        setup, mock_knowledge_db, mock_tenant_app_integration_db, mock_user
+    )
+    setup.redis.exists.return_value = 1
+    job_service = AsyncMock()
+
+    with patch(
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
+        return_value=job_service,
+    ):
+        await _handle(setup.service, {"value": [mock_notification]})
+
+    job_service.queue_job.assert_not_awaited()
+    knowledge_id = str(mock_knowledge_db.id)
+    setup.redis.exists.assert_awaited_once_with(sync_lock_key(knowledge_id))
+    setup.redis.set.assert_awaited_once_with(
+        sync_pending_key(knowledge_id), "1", ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS
+    )
+
+
+async def test_a_redis_outage_falls_back_to_queuing_the_job(
+    setup: Setup,
+    mock_notification,
+    mock_knowledge_db,
+    mock_tenant_app_integration_db,
+    mock_user,
+):
+    _running_sync_setup(
+        setup, mock_knowledge_db, mock_tenant_app_integration_db, mock_user
+    )
+    setup.redis.exists.side_effect = RedisConnectionError("refused")
+    job_service = AsyncMock()
+
+    with patch(
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
+        return_value=job_service,
+    ):
+        await _handle(setup.service, {"value": [mock_notification]})
+
+    job_service.queue_job.assert_awaited_once()
+    setup.redis.set.assert_not_awaited()
+
+
+def test_the_webhook_uses_the_sync_tasks_lease_and_marker_keys():
+    assert sync_lock_key("k") == integration_task._lock_key("k")  # pyright: ignore[reportPrivateUsage]
+    assert sync_pending_key("k") == integration_task._pending_key("k")  # pyright: ignore[reportPrivateUsage]
+    assert (
+        SHAREPOINT_SYNC_PENDING_TTL_SECONDS
+        == integration_task.SHAREPOINT_SYNC_PENDING_TTL_SECONDS
+    )
 
 
 async def test_tenant_app_integration_uses_tenant_app_id(

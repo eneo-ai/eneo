@@ -1595,6 +1595,7 @@ class Container(containers.DeclarativeContainer):
         user_repo=user_repo,
         change_key_service=office_change_key_service,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
+        redis_client=redis_client,
     )
     confluence_preview_service = providers.Factory(
         ConfluencePreviewService,

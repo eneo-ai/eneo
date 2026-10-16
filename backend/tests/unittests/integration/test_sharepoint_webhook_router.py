@@ -34,6 +34,7 @@ class WebhookApi:
     subscription_repo: AsyncMock
     subscription: SharePointSubscription
     job_service: AsyncMock
+    redis: AsyncMock
 
 
 @pytest.fixture
@@ -54,6 +55,8 @@ async def api():
     )
     change_keys = AsyncMock()
     change_keys.should_process.return_value = True
+    redis = AsyncMock()
+    redis.exists.return_value = 0
     settings = MagicMock(sharepoint_webhook_client_state=CLIENT_STATE)
     with patch(
         "eneo.integration.infrastructure.sharepoint_webhook_service.get_settings",
@@ -66,6 +69,7 @@ async def api():
             user_repo=AsyncMock(),
             change_key_service=change_keys,
             sharepoint_subscription_repo=subscription_repo,
+            redis_client=redis,
         )
 
     container = MagicMock()
@@ -88,7 +92,13 @@ async def api():
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             yield WebhookApi(
-                client, service, session, subscription_repo, subscription, job_service
+                client,
+                service,
+                session,
+                subscription_repo,
+                subscription,
+                job_service,
+                redis,
             )
 
 
