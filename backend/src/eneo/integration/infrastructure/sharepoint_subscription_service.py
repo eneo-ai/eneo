@@ -315,11 +315,6 @@ class SharePointSubscriptionService:
                 )
             return False
 
-        # The old subscription may already be gone; the result is not checked.
-        await self._delete_graph_subscription(
-            subscription_id=old_subscription_id, token=token
-        )
-
         new_expiration = datetime.now(timezone.utc) + timedelta(
             minutes=self.subscription_lifetime_minutes
         )
@@ -327,7 +322,20 @@ class SharePointSubscriptionService:
         subscription.expires_at = new_expiration
         subscription.notification_url = self.notification_url
         subscription.mark_renewal_success()
+        # The row is written before the old subscription is deleted: a failed
+        # write must not leave the row pointing at a subscription Graph no
+        # longer has. The old one may already be gone; a delete that fails
+        # leaves an orphan that expires at Graph on its own.
         await self.subscription_repo.update(subscription)
+        if not await self._delete_graph_subscription(
+            subscription_id=old_subscription_id, token=token
+        ):
+            logger.warning(
+                "Replaced subscription %s but could not delete the old Graph "
+                "subscription %s; it expires at Graph on its own",
+                subscription.id,
+                old_subscription_id[:20],
+            )
 
         logger.info(
             f"Successfully recreated subscription {subscription.id}: "
