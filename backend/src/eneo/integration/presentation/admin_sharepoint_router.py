@@ -1,11 +1,9 @@
-import json
 import secrets
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Optional, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
-from redis.asyncio import Redis
 
 from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.integration.application.tenant_sharepoint_app_service import (
@@ -24,6 +22,7 @@ from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import
 from eneo.integration.infrastructure.content_service.types import (
     SharePointTokenProtocol,
 )
+from eneo.integration.infrastructure.oauth_state_store import OauthStateStore
 from eneo.integration.presentation.admin_models import (
     ServiceAccountAuthCallback,
     ServiceAccountAuthStart,
@@ -37,7 +36,6 @@ from eneo.integration.presentation.admin_models import (
 )
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
-from eneo.main.exceptions import EncryptionNotConfiguredException
 from eneo.main.logging import get_logger
 from eneo.observability.error_text import user_visible_error
 from eneo.roles.permissions import Permission
@@ -53,8 +51,17 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 router = APIRouter()
 
-OAUTH_STATE_TTL_SECONDS = 600  # 10 minutes
 OAUTH_STATE_PREFIX = "sharepoint:oauth_state:"
+
+
+def _oauth_state_store(container: Container) -> OauthStateStore:
+    # The blob may carry the Entra client secret for the first sign-in, so it
+    # never sits in Redis as plaintext.
+    return OauthStateStore(
+        container.redis_client(),
+        prefix=OAUTH_STATE_PREFIX,
+        encryption_service=container.encryption_service(),
+    )
 
 
 def _require_sharepoint_webhook_client_state() -> str:
@@ -142,41 +149,6 @@ class _SimpleGraphToken:
         super().__init__()
         self.access_token = access_token
         self.base_url = "https://graph.microsoft.com"
-
-
-async def _store_oauth_state(
-    redis_client: Redis,
-    encryption_service: EncryptionService,
-    state: str,
-    data: dict[str, str],
-) -> None:
-    # The blob may carry the Entra client secret for the first sign-in, so it
-    # never sits in Redis as plaintext.
-    sealed = encryption_service.encrypt(json.dumps(data))
-    await redis_client.set(
-        f"{OAUTH_STATE_PREFIX}{state}", sealed, ex=OAUTH_STATE_TTL_SECONDS
-    )
-
-
-async def _pop_oauth_state(
-    redis_client: Redis,
-    encryption_service: EncryptionService,
-    state: str,
-) -> Optional[dict[str, str]]:
-    # GETDEL makes the state single-use even under concurrent callbacks.
-    raw = await redis_client.getdel(f"{OAUTH_STATE_PREFIX}{state}")
-    if raw is None:
-        return None
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8")
-    try:
-        data = json.loads(encryption_service.decrypt(str(raw)))
-    except (ValueError, TypeError, EncryptionNotConfiguredException):
-        logger.warning("Discarding undecryptable or corrupt SharePoint OAuth state")
-        return None
-    if not isinstance(data, dict):
-        return None
-    return cast(dict[str, str], data)
 
 
 def _is_onedrive_subscription(subscription: SharePointSubscription) -> bool:
@@ -1111,9 +1083,7 @@ async def start_service_account_auth(
         state = secrets.token_urlsafe(32)
 
         # Store state with credentials in Redis for callback verification
-        await _store_oauth_state(
-            container.redis_client(),
-            container.encryption_service(),
+        await _oauth_state_store(container).store(
             state,
             {
                 "client_id": app_config.client_id,
@@ -1202,9 +1172,7 @@ async def restart_service_account_auth(
 
     state = secrets.token_urlsafe(32)
     # The callback reloads the stored app, so the secret never leaves the database.
-    await _store_oauth_state(
-        container.redis_client(),
-        container.encryption_service(),
+    await _oauth_state_store(container).store(
         state,
         {
             "reauth": "1",
@@ -1261,9 +1229,7 @@ async def service_account_auth_callback(
         _require_sharepoint_webhook_client_state()
 
         encryption_service: EncryptionService = container.encryption_service()
-        stored_state = await _pop_oauth_state(
-            container.redis_client(), encryption_service, callback.state
-        )
+        stored_state = await _oauth_state_store(container).pop(callback.state)
         if stored_state is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

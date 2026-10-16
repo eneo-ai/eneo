@@ -23,9 +23,7 @@ from eneo.integration.presentation.admin_models import TenantSharePointAppPublic
 from eneo.integration.presentation.admin_sharepoint_router import (
     OAUTH_STATE_PREFIX,
     _get_sharepoint_token_for_user_integration,
-    _pop_oauth_state,
     _require_sharepoint_webhook_client_state,
-    _store_oauth_state,
     _to_app_public,
     get_sharepoint_app,
     list_sharepoint_subscriptions,
@@ -190,29 +188,6 @@ async def test_token_helper_persists_rotated_service_account_refresh_token():
     assert token.access_token == "service-account-access-token"
     tenant_app.update_refresh_token.assert_called_once_with("new-refresh-token")
     tenant_app_repo.update.assert_called_once_with(tenant_app)
-
-
-@pytest.mark.asyncio
-async def test_oauth_state_is_encrypted_at_rest_and_single_use():
-    redis = _FakeRedis()
-    encryption = _encryption_service()
-    data = {"client_secret": "super-secret", "tenant_id": "t", "user_id": "u"}
-
-    await _store_oauth_state(redis, encryption, "state-1", data)
-
-    stored = redis.store[f"{OAUTH_STATE_PREFIX}state-1"]
-    assert "super-secret" not in stored
-    assert encryption.decrypt(stored) == json.dumps(data)
-    assert await _pop_oauth_state(redis, encryption, "state-1") == data
-    assert await _pop_oauth_state(redis, encryption, "state-1") is None
-
-
-@pytest.mark.asyncio
-async def test_pop_oauth_state_discards_blob_sealed_with_another_key():
-    redis = _FakeRedis()
-    await _store_oauth_state(redis, _encryption_service(), "state-1", {"a": "b"})
-
-    assert await _pop_oauth_state(redis, _encryption_service(), "state-1") is None
 
 
 def _callback_container(stored: dict[str, str], user_id, tenant_id):
