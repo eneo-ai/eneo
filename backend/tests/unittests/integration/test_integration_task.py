@@ -115,7 +115,10 @@ async def test_delta_blocked_by_a_running_sync_leaves_a_pending_marker(
     assert result.startswith("Skipped")
     service.process_delta_changes.assert_not_called()
     assert fake_redis.store[PENDING_KEY] == "1"
-    assert fake_redis.ttls[PENDING_KEY] == 3600
+    assert (
+        fake_redis.ttls[PENDING_KEY]
+        == integration_task.SHAREPOINT_SYNC_PENDING_TTL_SECONDS
+    )
     assert fake_redis.store[LOCK_KEY] == "someone-else"
     assert fake_redis.closed
 
@@ -189,7 +192,10 @@ async def test_failing_pending_pass_keeps_the_marker_for_the_next_sync(
     service.process_delta_changes.assert_awaited_once()
     assert service.process_delta_changes.await_args.kwargs["record_failure"] is False
     assert fake_redis.store[PENDING_KEY] == "1"
-    assert fake_redis.ttls[PENDING_KEY] == 3600
+    assert (
+        fake_redis.ttls[PENDING_KEY]
+        == integration_task.SHAREPOINT_SYNC_PENDING_TTL_SECONDS
+    )
     assert LOCK_KEY not in fake_redis.store
 
 

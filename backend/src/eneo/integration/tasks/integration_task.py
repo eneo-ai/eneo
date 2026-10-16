@@ -122,7 +122,10 @@ async def pull_confluence_content(
 # lease holder runs one more delta pass before releasing. Without it the skipped
 # task is simply dropped, and because the webhook service has already recorded the
 # item's ChangeKey the next identical notification is treated as a duplicate.
-SHAREPOINT_SYNC_PENDING_TTL_SECONDS = 3600
+# The marker is deleted when drained; the TTL only guards against leaks and must
+# outlive any sync, since Graph does not notify again (the lease itself is
+# watchdog-renewed and has no upper bound).
+SHAREPOINT_SYNC_PENDING_TTL_SECONDS = 24 * 3600
 _PENDING_RETRY_DELAY_SECONDS = 1.0
 # Markers that keep arriving faster than passes complete are left for the
 # next sync rather than holding the lease indefinitely.
