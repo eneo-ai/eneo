@@ -226,6 +226,15 @@ def admin_user():
 
 
 @pytest.fixture
+def non_admin_viewer():
+    return MockUser(
+        id=5,
+        role=MockSpaceRole.VIEWER,
+        permissions=ALL_PERMISSIONS - {Permission.ADMIN},
+    )
+
+
+@pytest.fixture
 def organization_space():
     return MockSpace(user_id=None, personal=False, tenant_space_id=None, id="org-1")
 
@@ -1048,10 +1057,10 @@ def test_admin_can_delete_integration_knowledge_in_shared_space(
 
 
 def test_viewer_cannot_create_integration_knowledge_in_org_space(
-    viewer_user: MockUser, organization_space: MockSpace
+    non_admin_viewer: MockUser, organization_space: MockSpace
 ):
-    organization_space.members = {viewer_user.id: viewer_user}
-    actor = _actor(viewer_user, organization_space)
+    organization_space.members = {non_admin_viewer.id: non_admin_viewer}
+    actor = _actor(non_admin_viewer, organization_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.CREATE,
@@ -1062,10 +1071,10 @@ def test_viewer_cannot_create_integration_knowledge_in_org_space(
 
 
 def test_viewer_cannot_delete_integration_knowledge_in_org_space(
-    viewer_user: MockUser, organization_space: MockSpace
+    non_admin_viewer: MockUser, organization_space: MockSpace
 ):
-    organization_space.members = {viewer_user.id: viewer_user}
-    actor = _actor(viewer_user, organization_space)
+    organization_space.members = {non_admin_viewer.id: non_admin_viewer}
+    actor = _actor(non_admin_viewer, organization_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.DELETE,
@@ -1076,11 +1085,11 @@ def test_viewer_cannot_delete_integration_knowledge_in_org_space(
 
 
 def test_viewer_cannot_read_integration_knowledge_in_org_space(
-    viewer_user: MockUser, organization_space: MockSpace
+    non_admin_viewer: MockUser, organization_space: MockSpace
 ):
     """Org spaces only grant permissions to admins, not viewers."""
-    organization_space.members = {viewer_user.id: viewer_user}
-    actor = _actor(viewer_user, organization_space)
+    organization_space.members = {non_admin_viewer.id: non_admin_viewer}
+    actor = _actor(non_admin_viewer, organization_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.READ,
@@ -1216,11 +1225,12 @@ def test_admin_without_shared_spaces_retains_org_space_access(
 def test_viewer_without_shared_spaces_has_no_org_space_access(
     organization_space: MockSpace,
 ):
-    """Viewer role has no org-space permissions regardless of shared_spaces."""
+    """A member who is not a tenant admin has no org-space permissions,
+    regardless of shared_spaces."""
     viewer = MockUser(
         id=100,
         role=MockSpaceRole.VIEWER,
-        permissions=_permissions_without_shared_spaces(),
+        permissions=_permissions_without_shared_spaces() - {Permission.ADMIN},
     )
     organization_space.members = {viewer.id: viewer}
     actor = _actor(viewer, organization_space)
@@ -1434,14 +1444,21 @@ def _skill_actions(actor: SpaceActor) -> tuple[bool, bool, bool, bool]:
         (
             "organization",
             MockSpaceRole.ADMIN,
-            {Permission.SKILLS},
+            {Permission.ADMIN, Permission.SKILLS},
             _READ_ONLY_SKILL_ACTIONS,
         ),
         (
             "organization",
             MockSpaceRole.ADMIN,
-            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            {Permission.ADMIN, Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
             _ALL_SKILL_ACTIONS,
+        ),
+        # A former admin keeps the membership row but no longer the role.
+        (
+            "organization",
+            MockSpaceRole.ADMIN,
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _NO_SKILL_ACTIONS,
         ),
     ],
 )
@@ -1571,3 +1588,83 @@ def test_key_denies_when_facts_carry_no_tenant():
     space = MockSpace(user_id=None, tenant_space_id="org-1", id="s1", tenant_id=None)
     actor = _actor(user, space)
     assert actor._get_role() is None
+
+
+# Organization space: the role follows the tenant admin permission held now.
+# Membership rows are added for admins and outlive a revoked admin role.
+
+
+@pytest.mark.parametrize(
+    ("member_role", "is_admin", "has_access"),
+    [
+        (MockSpaceRole.ADMIN, False, False),
+        (None, True, True),
+        (MockSpaceRole.VIEWER, True, True),
+        (None, False, False),
+    ],
+    ids=["former-admin", "admin-without-row", "admin-with-any-row", "outsider"],
+)
+def test_org_space_role_follows_the_admin_permission_not_the_membership_row(
+    organization_space: MockSpace, member_role, is_admin, has_access
+):
+    permissions = ALL_PERMISSIONS if is_admin else ALL_PERMISSIONS - {Permission.ADMIN}
+    user = MockUser(id=200, role=member_role, permissions=permissions)
+    if member_role is not None:
+        organization_space.members = {user.id: user}
+    actor = _actor(user, organization_space)
+
+    checks = [
+        actor.can_read_space(),
+        actor.can_edit_space(),
+        actor.can_delete_space(),
+        actor.can_read_members(),
+        actor.can_create_assistants(),
+        actor.can_perform_action(
+            action=SpaceAction.DELETE,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        ),
+        actor.can_perform_action(
+            action=SpaceAction.CREATE, resource_type=SpaceResourceType.COLLECTION
+        ),
+    ]
+    assert checks == [has_access] * len(checks)
+
+
+def test_org_space_ignores_an_admin_group_role_of_a_non_admin(
+    organization_space: MockSpace,
+):
+    group_id = uuid4()
+    user = MockUser(
+        id=201,
+        permissions=ALL_PERMISSIONS - {Permission.ADMIN},
+        user_groups_ids={group_id},
+    )
+    organization_space.group_members = {
+        group_id: MockGroupMember(id=group_id, role=MockSpaceRole.ADMIN)
+    }
+    actor = _actor(user, organization_space)
+
+    assert not actor.can_read_space()
+    assert not actor.can_create_assistants()
+
+
+@pytest.mark.parametrize(
+    ("is_admin", "can_read", "can_create"),
+    [(True, True, False), (False, False, False)],
+    ids=["admin", "former-admin"],
+)
+def test_a_user_key_for_the_org_space_needs_its_owner_to_be_an_admin(
+    organization_space: MockSpace, is_admin, can_read, can_create
+):
+    key = MockServiceKey("space", organization_space.id, "read", ownership="user")
+    permissions = ALL_PERMISSIONS if is_admin else ALL_PERMISSIONS - {Permission.ADMIN}
+    user = MockServiceUser(
+        id=202, active_api_key=key, role=MockSpaceRole.ADMIN, permissions=permissions
+    )
+    organization_space.members = {user.id: user}
+    actor = _actor(user, organization_space)
+
+    assert actor.can_read_space() is can_read
+    assert actor.can_read_assistants() is can_read
+    # A read-only key never creates, whoever owns it.
+    assert actor.can_create_assistants() is can_create
