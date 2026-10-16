@@ -74,6 +74,7 @@ from eneo.users.password import (
     PasswordPolicyViolationError,
     PasswordReuseError,
 )
+from eneo.users.password_lifecycle import PasswordChangeRequiredError
 from eneo.websites.domain.crawl_run_repo import (
     WebsiteCrawlActiveError,
     WebsiteCrawlCleanupPendingError,
@@ -207,6 +208,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         None,
         ErrorCodes.LOCAL_PASSWORD_CHANGE_UNAVAILABLE,
     ),
+    PasswordChangeRequiredError: (403, None, ErrorCodes.PASSWORD_CHANGE_REQUIRED),
     # --- Website crawl lifecycle ---
     WebsiteCrawlActiveError: (
         409,

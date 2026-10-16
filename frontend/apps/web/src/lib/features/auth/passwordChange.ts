@@ -204,10 +204,10 @@ export function firstInvalidPasswordField(errors: PasswordFieldErrors): Password
   );
 }
 
-export function isCurrentPasswordChangeDialogSubmission(
-  dialogIsOpen: boolean,
-  currentDialogEpoch: number,
-  submittedInDialogEpoch: number
+export function isCurrentPasswordChangeSubmission(
+  hostIsActive: boolean,
+  currentEpoch: number,
+  submittedInEpoch: number
 ): boolean {
-  return dialogIsOpen && currentDialogEpoch === submittedInDialogEpoch;
+  return hostIsActive && currentEpoch === submittedInEpoch;
 }

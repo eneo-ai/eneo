@@ -69,6 +69,7 @@ Eneo-issued browser, internal MCP and module tokens share one identity contract:
 | `user_id` | Immutable UUID of the authenticated Eneo account |
 | `tenant_id` | UUID of the account's organization when the token was issued |
 | `credential_version` | Required integer matching the account's current credential version |
+| `auth_method` | `password` when the session started with the local password login; absent for federated and exchanged sessions |
 | `iss`, `aud`, `iat`, `exp` | Required issuer, audience, issue time and expiry |
 | `sub`, `username` | Email and optional display name; never used to select the account |
 
@@ -94,6 +95,52 @@ by username and must not remain in a rolling deployment. No account rename,
 account merge or database migration is needed for this change. A recovery build
 must retain the identity validation; rolling back to username-based
 authentication reintroduces the vulnerability.
+
+### Local Password Lifecycle
+
+Accounts that sign in with a password stored in Eneo follow the tenant's
+password lifecycle policy. The decision is owned by one module,
+`eneo/users/password_lifecycle.py`; the admission gate in
+`authentication/endpoint_access.py` and the `password_status` field of
+`GET /api/v1/users/me/` both call it, so they cannot disagree.
+
+Only a session whose `auth_method` claim is `password` is ever affected.
+A session that signed in through an identity provider, a module token, an
+internal MCP token or an API key carries no such claim and is never blocked,
+even when the account also keeps an older local password. Accounts
+provisioned through OIDC or SCIM have no local password at all.
+
+| Rule | Default | Effect |
+|------|---------|--------|
+| `require_change_after_admin_set` | on | A password chosen by someone other than the account (an administrator in **Admin → Users**, the sysadmin API, or the `DEFAULT_USER_PASSWORD` seed) is a one-time password. The account must choose its own at its next password sign-in. |
+| `max_age_days` | unset | A local password must be replaced after this many days. The age counts from the last change; passwords that existed before the lifecycle was introduced count from that upgrade. |
+
+Administrators edit the policy under **Admin → Users → Password policy**
+(`GET`/`PATCH /api/v1/admin/password-policy`). The sysadmin API may create an
+account with `password_change_required: false` when the password is meant to
+be permanent, for example for a service account.
+
+A password session that must replace its password still signs in, so the
+account can do exactly that. Every other endpoint answers `403` with error
+code `9070` (`password_change_required`) until the password has been replaced
+through `POST /api/v1/users/me/password/`, which stays reachable together with
+`GET /api/v1/users/me/`, the password policy and session invalidation.
+`GET /api/v1/users/me/` reports the state as `password_status`:
+`change_required` (true only when the current session is blocked), the
+`reason` (`admin_set` or `expired`), `changed_at` and `expires_at`. The web
+app sends such a session to `/password-change`, where the user enters the
+one-time or expired password as the current password. The change bumps the
+credential version, so the user signs in again with the new password.
+
+Two deliberate exceptions: an administrator who sets a new password on their
+own row in **Admin → Users** keeps it, because the account chose it; and the
+deployment administrator's `POST /api/v1/sysadmin/users/{id}/access-token/`
+mints a session without the claim, so support access is never blocked by a
+pending change. Upgrading to this version switches `require_change_after_admin_set`
+on for every tenant: the seeded administrator and every password an
+administrator sets from then on are one-time until a tenant turns the rule
+off. Existing sessions and deployments that still issue tokens without the
+claim keep working during a rolling upgrade.
 
 ### Signed State Token
 

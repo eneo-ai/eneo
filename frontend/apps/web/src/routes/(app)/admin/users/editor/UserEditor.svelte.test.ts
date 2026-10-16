@@ -26,6 +26,7 @@ vi.mock("../ctx", () => ({
   getAdminUserCtx: () => ({
     roles: [],
     userGroups: [],
+    passwordLifecyclePolicy: { require_change_after_admin_set: true, max_age_days: null },
     passwordCapability: {
       source: "eneo",
       policy: {

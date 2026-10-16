@@ -4866,5 +4866,21 @@
   "audit_action_document_template_deleted": "Dokumentmall borttagen",
   "audit_action_document_template_deleted_description": "En dokumentmall togs bort ur organisationens bibliotek",
   "audit_action_document_template_default_set": "Standardmall vald",
-  "audit_action_document_template_default_set_description": "En dokumentmall gjordes till organisationens standard"
+  "audit_action_document_template_default_set_description": "En dokumentmall gjordes till organisationens standard",
+  "password_change_required_title": "Välj ett nytt lösenord",
+  "password_change_required_admin_set": "Lösenordet du loggade in med sattes av en administratör och kan bara användas en gång. Välj ett eget lösenord för att fortsätta.",
+  "password_change_required_expired": "Ditt lösenord har gått ut enligt organisationens lösenordspolicy. Välj ett nytt lösenord för att fortsätta.",
+  "password_change_required_current_hint": "Ange lösenordet du nyss loggade in med som nuvarande lösenord.",
+  "admin_password_change_required_badge": "Engångslösenord",
+  "admin_password_one_time_hint": "Användaren måste välja ett eget lösenord vid sin första inloggning.",
+  "admin_password_policy_title": "Lösenordspolicy",
+  "admin_password_policy_description": "Gäller lösenord som lagras i Eneo. Konton som loggar in via er identitetsleverantör påverkas inte.",
+  "admin_password_policy_require_change": "Lösenord satta av administratör är engångslösenord",
+  "admin_password_policy_require_change_desc": "Ett lösenord som en administratör sätter måste bytas av användaren vid första inloggningen.",
+  "admin_password_policy_max_age": "Längsta giltighetstid",
+  "admin_password_policy_max_age_desc": "Användare måste välja ett nytt lösenord efter så här många dagar. Lämna tomt så går lösenord aldrig ut.",
+  "admin_password_policy_max_age_invalid": "Ange ett heltal mellan 1 och 3650 dagar, eller lämna fältet tomt.",
+  "admin_password_policy_days": "dagar",
+  "admin_password_policy_never": "Aldrig",
+  "admin_password_policy_updated": "Lösenordspolicyn är sparad."
 }
