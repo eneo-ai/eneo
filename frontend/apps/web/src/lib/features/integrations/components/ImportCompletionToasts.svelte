@@ -41,7 +41,8 @@
     const local = settled.filter((pending) => pending.spaceRouteId === get(currentSpace).routeId);
     if (local.length === 0) return;
 
-    await refreshCurrentSpace("knowledge");
+    // A stale store would read a not-yet-listed item as deleted: wait for the next run instead.
+    if (!(await refreshCurrentSpace("knowledge"))) return;
     const space = get(currentSpace);
     const reported: string[] = [];
     for (const pending of local) {
@@ -88,10 +89,17 @@
   }
 
   // Runs are serialised: a space change and a job event close together must
-  // not both read the same pending list and report an import twice.
+  // not both read the same pending list and report an import twice. A failed
+  // run is logged so the chain never rejects.
   let queue = Promise.resolve();
   function enqueueReport() {
-    queue = queue.then(report, report);
+    queue = queue.then(async () => {
+      try {
+        await report();
+      } catch (error) {
+        console.error("Could not report the result of an import", error);
+      }
+    });
   }
 
   $effect(() => {

@@ -32,7 +32,7 @@ const api = vi.hoisted(() => ({
   goto: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
-  refreshCurrentSpace: vi.fn(async () => {}),
+  refreshCurrentSpace: vi.fn(async () => true),
   jobs: [] as Pick<Job, "id" | "status">[],
   jobsLoaded: (() => {
     let value = true;
@@ -129,7 +129,7 @@ describe("ImportCompletionToasts", () => {
     api.goto.mockClear();
     api.toastSuccess.mockClear();
     api.toastError.mockClear();
-    api.refreshCurrentSpace.mockReset().mockImplementation(async () => {});
+    api.refreshCurrentSpace.mockReset().mockImplementation(async () => true);
     api.jobs = [];
     api.jobsLoaded.set(true);
     spaces.currentSpace.set(space("space-1"));
@@ -230,6 +230,7 @@ describe("ImportCompletionToasts", () => {
     // The real refresh publishes a new space object with the same id.
     api.refreshCurrentSpace.mockImplementation(async () => {
       spaces.currentSpace.set({ ...get(spaces.currentSpace) });
+      return true;
     });
     render(ImportCompletionToasts);
 
@@ -278,6 +279,70 @@ describe("ImportCompletionToasts", () => {
     events.set({ timestamp: Date.now() + 1, jobId: "any" });
     await settle();
     expect(api.refreshCurrentSpace).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an import pending when the space could not be refreshed", async () => {
+    const item = pending("job-1", "ik-1", "Arkiv");
+    pendingImports.set([item]);
+    api.jobs = [{ id: "job-1", status: "complete" }];
+    // The store still predates the import: without a refresh the item looks deleted.
+    spaces.currentSpace.set(space("space-1"));
+    api.refreshCurrentSpace.mockImplementation(async () => false);
+    render(ImportCompletionToasts);
+
+    events.set({ timestamp: Date.now(), jobId: "any" });
+    await vi.waitFor(() => expect(api.refreshCurrentSpace).toHaveBeenCalled());
+    await settle();
+    expect(get(pendingImports)).toEqual([item]);
+    expect(api.toastSuccess).not.toHaveBeenCalled();
+
+    api.refreshCurrentSpace.mockImplementation(async () => {
+      spaces.currentSpace.set(
+        space("space-1", [
+          knowledge("ik-1", "Arkiv", {
+            last_sync_status: "success",
+            document_count: 2,
+            last_sync_summary: { files_processed: 2, unchanged_items: 0, skipped_total: 0 }
+          })
+        ])
+      );
+      return true;
+    });
+    events.set({ timestamp: Date.now() + 1, jobId: "any" });
+
+    await vi.waitFor(() => expect(api.toastSuccess).toHaveBeenCalledTimes(1));
+    expect(get(pendingImports)).toEqual([]);
+  });
+
+  it("goes on reporting after a run that threw", async () => {
+    pendingImports.set([pending("job-1", "ik-1", "Arkiv")]);
+    api.jobs = [{ id: "job-1", status: "complete" }];
+    spaces.currentSpace.set(
+      space("space-1", [
+        knowledge("ik-1", "Arkiv", {
+          last_sync_status: "success",
+          document_count: 1,
+          last_sync_summary: { files_processed: 1, unchanged_items: 0, skipped_total: 0 }
+        })
+      ])
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    api.refreshCurrentSpace.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      throw new Error("boom");
+    });
+    render(ImportCompletionToasts);
+
+    events.set({ timestamp: Date.now(), jobId: "any" });
+    await vi.waitFor(() => expect(consoleError).toHaveBeenCalled());
+    await settle();
+    expect(api.toastSuccess).not.toHaveBeenCalled();
+
+    // The chain is intact: the next run goes through once the refresh works again.
+    api.refreshCurrentSpace.mockImplementation(async () => true);
+    events.set({ timestamp: Date.now() + 1, jobId: "any" });
+    await vi.waitFor(() => expect(api.toastSuccess).toHaveBeenCalledTimes(1));
+    consoleError.mockRestore();
   });
 
   it("judges an import kept from an earlier page load by the first job list", async () => {
