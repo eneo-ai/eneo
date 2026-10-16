@@ -18764,6 +18764,9 @@ export interface components {
     /**
      * PasswordStatusPublic
      * @description Where a local password stands against the tenant lifecycle policy.
+     *
+     *     ``change_required`` is true only when the current session is blocked
+     *     until the password is replaced; the dates are reported regardless.
      */
     PasswordStatusPublic: {
       /** Change Required */

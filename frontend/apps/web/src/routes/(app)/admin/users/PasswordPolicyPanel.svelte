@@ -27,13 +27,17 @@
   let successMessage = $state<string | null>(null);
   let submitted = $state(false);
 
-  /** Empty means "never"; anything else must be a whole number of days within the backend's range. */
+  // Mirrors PasswordLifecyclePolicy.max_age_days bounds (backend
+  // eneo/users/password_lifecycle.py) so the field explains itself before a 422.
+  const MAX_AGE_DAYS_LIMIT = 3650;
+
+  /** Empty means "never"; anything else must be a whole number of days within the bounds. */
   function parseMaxAge(value: string): number | null | undefined {
     const trimmed = value.trim();
     if (trimmed === "") return null;
     if (!/^\d+$/.test(trimmed)) return undefined;
     const days = Number(trimmed);
-    return days >= 1 && days <= 3650 ? days : undefined;
+    return days >= 1 && days <= MAX_AGE_DAYS_LIMIT ? days : undefined;
   }
 
   const parsedMaxAge = $derived(parseMaxAge(maxAgeDays));

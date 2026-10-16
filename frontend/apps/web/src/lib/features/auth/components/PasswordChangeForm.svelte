@@ -7,7 +7,7 @@
   import { Input } from "$lib/components/ui/input";
   import {
     firstInvalidPasswordField,
-    isCurrentPasswordChangeDialogSubmission,
+    isCurrentPasswordChangeSubmission,
     validatePasswordChange,
     type PasswordChangeActionFailure,
     type AvailablePasswordChangeCapability,
@@ -197,7 +197,7 @@
         return;
       }
 
-      if (!isCurrentPasswordChangeDialogSubmission(isActive(), epoch, submittedInEpoch)) {
+      if (!isCurrentPasswordChangeSubmission(isActive(), epoch, submittedInEpoch)) {
         return;
       }
 

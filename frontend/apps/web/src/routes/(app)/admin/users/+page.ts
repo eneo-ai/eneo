@@ -22,7 +22,9 @@ export const load: PageLoad = async (event) => {
       page: query.page
     }),
     eneo.users.passwordPolicy(),
-    eneo.users.getPasswordLifecyclePolicy()
+    // Non-essential: the panel is hidden rather than blocking user management
+    // (older backend during a rolling deploy, or a failure on this one call).
+    eneo.users.getPasswordLifecyclePolicy().catch(() => null)
   ]);
   const passwordCapability = normalizeLocalPasswordCapability(passwordPolicy);
   if (passwordCapability.source !== "eneo") {

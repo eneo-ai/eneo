@@ -52,7 +52,7 @@
   const userGroups = $derived(admin.userGroups);
   const capability = $derived(admin.passwordCapability);
   const oneTimePassword = $derived(
-    admin.passwordLifecyclePolicy.require_change_after_admin_set !== false
+    admin.passwordLifecyclePolicy?.require_change_after_admin_set === true
   );
   const id = $props.id();
   const userId = $derived(user.id);

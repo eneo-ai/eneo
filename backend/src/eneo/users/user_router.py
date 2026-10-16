@@ -61,9 +61,8 @@ from eneo.users.password import (
     LOCAL_PASSWORD_POLICY,
     LocalPasswordPolicy,
     PasswordChangeError,
-    PasswordLifecyclePolicy,
-    evaluate_password_status,
 )
+from eneo.users.password_lifecycle import password_status_for
 from eneo.users.user import (
     EneoPasswordChangeCapabilityPublic,
     ExternalPasswordChangeCapabilityPublic,
@@ -864,7 +863,7 @@ async def get_tenant_users(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
-    allowed_pending_password_change=True,
+    reachable_before_password_change=True,
 )
 async def get_local_password_policy() -> LocalPasswordPolicy:
     return LOCAL_PASSWORD_POLICY
@@ -880,7 +879,7 @@ async def get_local_password_policy() -> LocalPasswordPolicy:
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
-    allowed_pending_password_change=True,
+    reachable_before_password_change=True,
 )
 async def get_currently_authenticated_user(
     current_user: Annotated[
@@ -899,22 +898,11 @@ async def get_currently_authenticated_user(
         if current_user.password is not None
         else ExternalPasswordChangeCapabilityPublic()
     )
-    password_status = (
-        evaluate_password_status(
-            change_required=current_user.password_change_required,
-            changed_at=current_user.password_changed_at,
-            policy=PasswordLifecyclePolicy.from_tenant(
-                current_user.tenant.password_policy
-            ),
-        )
-        if current_user.password is not None
-        else None
-    )
     return UserPublic(
         **current_user.model_dump(),
         truncated_api_key=truncated_key,
         password_change=password_change,
-        password_status=password_status,
+        password_status=password_status_for(current_user),
     )
 
 
@@ -966,7 +954,7 @@ async def _audit_password_change(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
     reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
-    allowed_pending_password_change=True,
+    reachable_before_password_change=True,
 )
 async def change_current_user_password(
     password_change: PasswordChangeRequest,
@@ -1051,7 +1039,7 @@ async def change_current_user_password(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
     reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
-    allowed_pending_password_change=True,
+    reachable_before_password_change=True,
 )
 async def invalidate_current_user_sessions(
     container: Annotated[

@@ -12,6 +12,7 @@
       ? m.password_change_required_expired()
       : m.password_change_required_admin_set()
   );
+  // A relative action replaces the page's query string, so `next` has to ride along.
   const action = $derived(
     data.next ? `?/changePassword&next=${encodeURIComponent(data.next)}` : "?/changePassword"
   );
@@ -22,7 +23,7 @@
 </svelte:head>
 
 <AuthPageShell title={m.password_change_required_title()} {description} tone="warning" size="md">
-  {#if data.capability.source === "eneo" || data.capability.source === "zitadel"}
+  {#if data.capability.source === "eneo"}
     <PasswordChangeForm
       capability={data.capability}
       username={data.username}

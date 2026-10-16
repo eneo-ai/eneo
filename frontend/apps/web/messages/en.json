@@ -4871,7 +4871,7 @@
   "password_change_required_admin_set": "The password you signed in with was set by an administrator and can only be used once. Choose your own password to continue.",
   "password_change_required_expired": "Your password has expired under your organisation's password policy. Choose a new password to continue.",
   "password_change_required_current_hint": "Enter the password you just signed in with as the current password.",
-  "admin_password_change_required_badge": "Password change pending",
+  "admin_password_change_required_badge": "One-time password",
   "admin_password_one_time_hint": "The user must choose their own password at their first sign-in.",
   "admin_password_policy_title": "Password policy",
   "admin_password_policy_description": "Applies to passwords stored in Eneo. Accounts that sign in through your identity provider are not affected.",

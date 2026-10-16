@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -17,13 +18,15 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
 )
 from eneo.main.exceptions import ErrorCodes
+from eneo.server.endpoint_routes import endpoint_routes
 from eneo.server.exception_handlers import DOMAIN_EXCEPTION_MAP
 from eneo.users import user_router
-from eneo.users.password import (
+from eneo.users.password_lifecycle import (
     PasswordChangeRequiredError,
     PasswordLifecyclePolicy,
     PasswordLifecyclePolicyUpdate,
     evaluate_password_status,
+    password_status_for,
 )
 from eneo.users.user import UserAddSuperAdmin, UserUpdatePublic
 from eneo.users.user_service import UserService
@@ -130,6 +133,18 @@ def test_password_expires_exactly_at_max_age():
     assert fresh.reason is None
 
 
+def test_a_naive_change_time_is_read_as_utc():
+    naive = datetime(2026, 1, 1, 12, 0)
+    status = evaluate_password_status(
+        change_required=False,
+        changed_at=naive,
+        policy=PasswordLifecyclePolicy(max_age_days=1),
+        now=NOW,
+    )
+    assert status.change_required is True
+    assert status.expires_at == naive.replace(tzinfo=timezone.utc) + timedelta(days=1)
+
+
 def test_without_max_age_or_change_time_nothing_expires():
     no_rotation = evaluate_password_status(
         change_required=False,
@@ -188,11 +203,33 @@ async def test_admin_reset_follows_the_tenant_policy(
         "hashed-value",
     )
 
-    await service.update_user(user.id, UserUpdatePublic(password=VALID_PASSWORD))
+    await service.update_user(
+        user.id, UserUpdatePublic(password=VALID_PASSWORD), actor_id=uuid4()
+    )
 
     update = service.repo.update.await_args.args[0]
     assert update.password_change_required is expected
     assert update.password_changed_at is not None
+
+
+async def test_an_admin_editing_their_own_row_keeps_the_password(
+    service: UserService,
+):
+    user = password_user(change_required=True)
+    service.repo.get_user_by_id_for_update.return_value = user
+    service.repo.update.return_value = user
+    service.auth_service.verify_password.return_value = False
+    service.auth_service.create_salt_and_hashed_password.return_value = (
+        "salt",
+        "hashed-value",
+    )
+
+    await service.update_user(
+        user.id, UserUpdatePublic(password=VALID_PASSWORD), actor_id=user.id
+    )
+
+    update = service.repo.update.await_args.args[0]
+    assert update.password_change_required is False
 
 
 async def test_session_invalidation_leaves_the_lifecycle_alone(service: UserService):
@@ -327,7 +364,7 @@ def gated_endpoint(*, allowed: bool = False):
         authentication=Authentication.USER,
         authorization=Authorization.AUTHENTICATED,
         reason="Unit test",
-        allowed_pending_password_change=allowed,
+        reachable_before_password_change=allowed,
     )
     async def endpoint() -> None: ...
 
@@ -357,15 +394,34 @@ def test_the_password_change_endpoints_stay_reachable():
     authorize_user(connection_for(gated_endpoint(allowed=True)), user)
 
 
-@pytest.mark.parametrize("session_auth_method", [None])
-def test_federated_sessions_ignore_the_local_password_lifecycle(session_auth_method):
+def test_federated_sessions_ignore_the_local_password_lifecycle():
     user = password_user(
         change_required=True,
         changed_at=NOW - timedelta(days=400),
-        session_auth_method=session_auth_method,
+        session_auth_method=None,
         max_age_days=30,
     )
     authorize_user(connection_for(gated_endpoint()), user)
+
+
+def test_the_gate_and_the_status_report_agree_on_federated_sessions():
+    blocked_state = dict(change_required=True, max_age_days=30)
+    password_session = password_user(**blocked_state)
+    federated_session = password_user(session_auth_method=None, **blocked_state)
+
+    assert password_status_for(password_session, now=NOW).change_required is True
+    status = password_status_for(federated_session, now=NOW)
+    assert status is not None
+    assert status.change_required is False
+    assert status.reason is None
+    assert status.expires_at == NOW + timedelta(days=30)
+
+
+def test_websocket_connections_are_gated_too():
+    user = password_user(change_required=True)
+    websocket = SimpleNamespace(scope={"endpoint": gated_endpoint()})
+    with pytest.raises(PasswordChangeRequiredError):
+        authorize_user(websocket, user)
 
 
 def test_compliant_password_sessions_pass():
@@ -374,17 +430,19 @@ def test_compliant_password_sessions_pass():
 
 
 def test_only_the_password_change_routes_are_exempt_from_the_gate():
+    from eneo.server.main import app
+
     exempt = {
         route.path
-        for route in user_router.router.routes
-        if (policy := access_for(getattr(route, "endpoint", None))) is not None
-        and policy.allowed_pending_password_change
+        for route in endpoint_routes(app.routes)
+        if (policy := access_for(route.endpoint)) is not None
+        and policy.reachable_before_password_change
     }
     assert exempt == {
-        "/me/",
-        "/me/password/",
-        "/me/sessions/invalidate/",
-        "/password-policy/",
+        "/api/v1/users/me/",
+        "/api/v1/users/me/password/",
+        "/api/v1/users/me/sessions/invalidate/",
+        "/api/v1/users/password-policy/",
     }
 
 
@@ -417,3 +475,10 @@ async def test_current_user_reports_the_password_status():
         current_user=password_user(password=None), container=container
     )
     assert external.password_status is None
+
+    federated = await user_router.get_currently_authenticated_user(
+        current_user=password_user(change_required=True, session_auth_method=None),
+        container=container,
+    )
+    assert federated.password_status is not None
+    assert federated.password_status.change_required is False

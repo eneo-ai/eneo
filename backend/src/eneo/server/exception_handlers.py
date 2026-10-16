@@ -71,10 +71,10 @@ from eneo.skills.domain.skill import (
 from eneo.users.password import (
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
-    PasswordChangeRequiredError,
     PasswordPolicyViolationError,
     PasswordReuseError,
 )
+from eneo.users.password_lifecycle import PasswordChangeRequiredError
 from eneo.websites.domain.crawl_run_repo import (
     WebsiteCrawlActiveError,
     WebsiteCrawlCleanupPendingError,

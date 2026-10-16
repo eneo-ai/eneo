@@ -38,5 +38,9 @@ export const load: PageServerLoad = async (event) => {
 };
 
 export const actions: Actions = {
-  changePassword: (event) => runPasswordChangeAction(event, requestedDestination(event.url))
+  changePassword: (event) =>
+    runPasswordChangeAction(event, {
+      nextDestination: requestedDestination(event.url),
+      resolveCapability: async (context) => (await discoverLocalPasswordState(context)).capability
+    })
 };

@@ -371,3 +371,67 @@ async def test_admin_password_policy_round_trip(
         json={"max_age_days": None, "require_change_after_admin_set": True},
         headers=auth,
     )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_expired_password_only_admits_its_own_replacement(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+):
+    from datetime import datetime, timedelta, timezone
+
+    import sqlalchemy as sa
+
+    from eneo.database.database import sessionmanager
+
+    email, old_password = await _create_local_user(
+        client, super_admin_token, password_change_required=False
+    )
+    # The tenant rotates after 30 days and this password is 31 days old.
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.text(
+                "UPDATE tenants SET password_policy = password_policy || "
+                "'{\"max_age_days\": 30}'::jsonb "
+                "WHERE id = (SELECT tenant_id FROM users WHERE email = :email)"
+            ),
+            {"email": email},
+        )
+        await session.execute(
+            sa.text(
+                "UPDATE users SET password_changed_at = :changed_at WHERE email = :email"
+            ),
+            {
+                "email": email,
+                "changed_at": datetime.now(timezone.utc) - timedelta(days=31),
+            },
+        )
+
+    login = await _login(client, email=email, password=old_password)
+    assert login.status_code == 200, login.text
+    expired_auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    blocked = await client.get("/api/v1/users/tenant/", headers=expired_auth)
+    assert blocked.status_code == 403, blocked.text
+    assert blocked.json()["details"] == {"reason": "expired"}
+    me = await client.get("/api/v1/users/me/", headers=expired_auth)
+    assert me.json()["password_status"]["reason"] == "expired"
+
+    changed = await client.post(
+        "/api/v1/users/me/password/",
+        json={"current_password": old_password, "new_password": "FreshPassword4!xx"},
+        headers=expired_auth,
+    )
+    assert changed.status_code == 204, changed.text
+    relogin = await _login(client, email=email, password="FreshPassword4!xx")
+    auth = {"Authorization": f"Bearer {relogin.json()['access_token']}"}
+    admitted = await client.get("/api/v1/users/tenant/", headers=auth)
+    assert admitted.status_code == 200, admitted.text
+    status = (await client.get("/api/v1/users/me/", headers=auth)).json()[
+        "password_status"
+    ]
+    assert status["change_required"] is False
+    assert status["expires_at"] is not None

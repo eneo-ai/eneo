@@ -106,7 +106,9 @@
           </nav>
         {/if}
       </div>
-      <PasswordPolicyPanel policy={data.passwordLifecyclePolicy} />
+      {#if data.passwordLifecyclePolicy}
+        <PasswordPolicyPanel policy={data.passwordLifecyclePolicy} />
+      {/if}
     </div>
   </Page.Main>
 </Page.Root>

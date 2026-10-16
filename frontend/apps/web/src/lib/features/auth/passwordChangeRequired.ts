@@ -1,6 +1,13 @@
-import type { PasswordStatus } from "@eneo/eneo-js";
+import { EneoError, type PasswordStatus } from "@eneo/eneo-js";
 
 export const PASSWORD_CHANGE_PATH = "/password-change";
+
+/** Backend ErrorCodes.PASSWORD_CHANGE_REQUIRED: the session may only replace its password. */
+export const PASSWORD_CHANGE_REQUIRED_CODE = 9070;
+
+export function isPasswordChangeRequiredError(error: unknown): boolean {
+  return error instanceof EneoError && error.code === PASSWORD_CHANGE_REQUIRED_CODE;
+}
 
 /** Where a signed-in user goes to replace a one-time or expired password. */
 export function passwordChangeUrl(current?: URL): string {
@@ -14,7 +21,11 @@ export function passwordChangeUrl(current?: URL): string {
 
 export type PasswordChangeReason = NonNullable<PasswordStatus["reason"]>;
 
-/** Narrow the backend status to what the forced-change page needs; unknown shapes mean "not required". */
+/**
+ * Narrow the backend status to what the forced-change page needs. Unknown
+ * shapes mean "not required"; an unknown reason on a required change is shown
+ * as an administrator-set password, the generic case.
+ */
 export function readPasswordChangeReason(value: unknown): PasswordChangeReason | null {
   if (typeof value !== "object" || value === null) return null;
   const status = value as Record<string, unknown>;

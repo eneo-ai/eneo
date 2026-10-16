@@ -68,7 +68,7 @@ from eneo.roles.role import RolePublic
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenants.tenant import ModelPricingVisibility, TenantPublic
-from eneo.users.password import (
+from eneo.users.password_lifecycle import (
     PasswordLifecyclePolicy,
     PasswordLifecyclePolicyUpdate,
 )

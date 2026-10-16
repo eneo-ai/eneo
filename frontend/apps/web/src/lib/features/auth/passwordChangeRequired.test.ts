@@ -16,7 +16,7 @@ describe("forced password change helpers", () => {
     expect(passwordChangeUrl()).toBe("/password-change");
   });
 
-  test("only a change_required status with a known reason forces the page", () => {
+  test("only a change_required status forces the page; an unknown reason reads as admin-set", () => {
     expect(readPasswordChangeReason({ change_required: true, reason: "admin_set" })).toBe(
       "admin_set"
     );

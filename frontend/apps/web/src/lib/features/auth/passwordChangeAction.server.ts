@@ -8,8 +8,11 @@ import {
 import {
   validatePasswordChange,
   type PasswordChangeActionFailure,
+  type PasswordChangeCapability,
   type PasswordFieldErrors
 } from "./passwordChange";
+
+type RequestContext = ReturnType<typeof passwordRequestContext>;
 
 export function passwordRequestContext(event: RequestEvent) {
   return {
@@ -49,11 +52,20 @@ function actionFailureFor(error: PasswordChangeRequestError): PasswordChangeActi
 /**
  * Change the signed-in user's password from a posted form, then sign this
  * browser out so the new credential version takes effect everywhere.
- * `nextDestination`, when given, is carried to the login page.
+ *
+ * `resolveCapability` decides which credential is changed: the account page
+ * follows the login provider, the forced-change page always targets the local
+ * Eneo password. `nextDestination`, when given, is carried to the login page.
  */
 export async function runPasswordChangeAction(
   event: RequestEvent,
-  nextDestination: string | null = null
+  {
+    nextDestination = null,
+    resolveCapability = discoverPasswordChangeCapability
+  }: {
+    nextDestination?: string | null;
+    resolveCapability?: (context: RequestContext) => Promise<PasswordChangeCapability>;
+  } = {}
 ) {
   const data = await event.request.formData();
   const values = {
@@ -62,7 +74,7 @@ export async function runPasswordChangeAction(
     confirmPassword: formString(data, "confirmPassword")
   };
   const context = passwordRequestContext(event);
-  const capability = await discoverPasswordChangeCapability(context);
+  const capability = await resolveCapability(context);
 
   if (capability.source === "external" || capability.source === "unavailable") {
     return fail(409, {

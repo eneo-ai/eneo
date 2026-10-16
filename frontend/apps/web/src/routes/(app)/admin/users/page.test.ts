@@ -60,6 +60,26 @@ describe("admin password policy loading", () => {
   test("fails instead of displaying guessed rules when the policy is missing", async () => {
     await expect(load(eventWithPolicy(null) as never)).rejects.toMatchObject({ status: 503 });
   });
+
+  test("still lists users when the lifecycle policy cannot be loaded", async () => {
+    const base = eventWithPolicy(policy);
+    const { eneo } = await base.parent();
+    const event = {
+      ...base,
+      parent: async () => ({
+        eneo: {
+          users: {
+            ...eneo.users,
+            getPasswordLifecyclePolicy: async () => {
+              throw new Error("older backend");
+            }
+          }
+        }
+      })
+    };
+    const result = await load(event as never);
+    expect(result).toMatchObject({ passwordLifecyclePolicy: null });
+  });
 });
 
 const policy = {

@@ -4871,7 +4871,7 @@
   "password_change_required_admin_set": "Lösenordet du loggade in med sattes av en administratör och kan bara användas en gång. Välj ett eget lösenord för att fortsätta.",
   "password_change_required_expired": "Ditt lösenord har gått ut enligt organisationens lösenordspolicy. Välj ett nytt lösenord för att fortsätta.",
   "password_change_required_current_hint": "Ange lösenordet du nyss loggade in med som nuvarande lösenord.",
-  "admin_password_change_required_badge": "Lösenordsbyte väntar",
+  "admin_password_change_required_badge": "Engångslösenord",
   "admin_password_one_time_hint": "Användaren måste välja ett eget lösenord vid sin första inloggning.",
   "admin_password_policy_title": "Lösenordspolicy",
   "admin_password_policy_description": "Gäller lösenord som lagras i Eneo. Konton som loggar in via er identitetsleverantör påverkas inte.",

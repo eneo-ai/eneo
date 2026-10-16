@@ -139,6 +139,29 @@ describe("forced password change page", () => {
     expect(redirect.location).toBe("/login?message=password_changed&next=%2Fspaces");
   });
 
+  test("the change targets the local password even when a provider token is present", async () => {
+    mocks.discoverPasswordChangeCapability.mockResolvedValue({
+      source: "zitadel",
+      policy: capability.policy
+    });
+    const form = new FormData();
+    form.set("currentPassword", "one-time password");
+    form.set("newPassword", "a sufficiently long new secret");
+    form.set("confirmPassword", "a sufficiently long new secret");
+    await redirectFrom(
+      actions.changePassword(
+        event("https://eneo.example/password-change?/changePassword", "t", form) as never
+      )
+    );
+    expect(mocks.discoverPasswordChangeCapability).not.toHaveBeenCalled();
+    expect(mocks.changePassword).toHaveBeenCalledWith(
+      expect.anything(),
+      capability,
+      "one-time password",
+      "a sufficiently long new secret"
+    );
+  });
+
   test("a wrong one-time password is reported on the current-password field", async () => {
     mocks.changePassword.mockRejectedValue(
       new mocks.RequestError("current_password_incorrect", 400)

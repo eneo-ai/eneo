@@ -21,11 +21,8 @@ from eneo.main.models import BaseModel, InDB, ModelId, partial_model
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB, RolePublic
 from eneo.tenants.tenant import TenantInDB, TenantPublic
-from eneo.users.password import (
-    LOCAL_PASSWORD_POLICY,
-    LocalPasswordPolicy,
-    PasswordStatusPublic,
-)
+from eneo.users.password import LOCAL_PASSWORD_POLICY, LocalPasswordPolicy
+from eneo.users.password_lifecycle import PasswordStatusPublic
 
 
 class UserState(str, Enum):
@@ -301,11 +298,9 @@ class UserInDB(UserInDBBase):
     user_groups: list[UserGroupInDBRead] = []
     tenant: TenantInDB
     active_api_key: Optional[ApiKeyV2InDB] = None
-    # How the current session authenticated, taken from the token claims.
+    # The session's ``auth_method`` claim (eneo.users.password_lifecycle).
     # Request-scoped like active_api_key; never persisted or returned.
-    session_auth_method: Optional[Literal["password"]] = Field(
-        default=None, exclude=True, repr=False
-    )
+    session_auth_method: Optional[str] = Field(default=None, exclude=True, repr=False)
     roles: list[RoleInDB] = []
     quota_used: int = 0
     deleted_at: Optional[datetime] = Field(

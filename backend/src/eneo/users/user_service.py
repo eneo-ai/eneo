@@ -75,9 +75,12 @@ from eneo.tenants.tenant_repo import TenantRepository
 from eneo.users.password import (
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
-    PasswordLifecyclePolicy,
     PasswordReuseError,
     validate_new_local_password,
+)
+from eneo.users.password_lifecycle import (
+    PASSWORD_AUTH_METHOD,
+    PasswordLifecyclePolicy,
 )
 from eneo.users.user import (
     PropUserInvite,
@@ -434,7 +437,7 @@ class UserService:
 
         return AccessToken(
             access_token=self.auth_service.create_access_token_for_user(
-                user=user, auth_method="password"
+                user=user, auth_method=PASSWORD_AUTH_METHOD
             ),
             token_type="bearer",
         )
@@ -2241,19 +2244,6 @@ class UserService:
             set_by_account=True,
         )
 
-    async def reset_local_password(
-        self, *, user_id: UUID, new_password: str
-    ) -> "UserInDB":
-        """Administrator reset: the account must choose its own password next."""
-
-        return await self._write_local_password(
-            user_id=user_id,
-            new_password=new_password,
-            current_password=None,
-            require_current_password=False,
-            set_by_account=False,
-        )
-
     async def invalidate_sessions(self, *, user_id: UUID) -> "UserInDB":
         """Invalidate all Eneo JWTs previously minted for one user."""
 
@@ -2270,7 +2260,20 @@ class UserService:
             raise NotFoundException("No such user")
         return updated
 
-    async def update_user(self, user_id: UUID, user_update_public: UserUpdatePublic):
+    async def update_user(
+        self,
+        user_id: UUID,
+        user_update_public: UserUpdatePublic,
+        *,
+        actor_id: UUID | None = None,
+    ):
+        """Apply an administrative update.
+
+        ``actor_id`` is who performs it. A password in the update is one-time
+        unless the actor is the account itself (an administrator editing their
+        own row), which counts as a self-service change.
+        """
+
         await self._validate_email(user_update_public.email)
         await self._validate_username(user_update_public.username)
 
@@ -2340,8 +2343,12 @@ class UserService:
 
         password_updated_user: UserInDB | None = None
         if user_update_public.password is not None:
-            password_updated_user = await self.reset_local_password(
-                user_id=user_id, new_password=user_update_public.password
+            password_updated_user = await self._write_local_password(
+                user_id=user_id,
+                new_password=user_update_public.password,
+                current_password=None,
+                require_current_password=False,
+                set_by_account=actor_id == user_id,
             )
 
         non_password_update = user_update_public.model_dump(

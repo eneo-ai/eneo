@@ -4,7 +4,7 @@ import {
   getPasswordPolicyChecks,
   normalizeLocalPasswordCapability,
   newPasswordsMatch,
-  isCurrentPasswordChangeDialogSubmission,
+  isCurrentPasswordChangeSubmission,
   validateNewPassword,
   validateNewPasswordPair,
   validatePasswordChange,
@@ -219,9 +219,9 @@ describe("password change validation", () => {
   });
 
   test("rejects a result from a closed or subsequently reopened dialog", () => {
-    expect(isCurrentPasswordChangeDialogSubmission(true, 3, 3)).toBe(true);
-    expect(isCurrentPasswordChangeDialogSubmission(false, 4, 3)).toBe(false);
-    expect(isCurrentPasswordChangeDialogSubmission(true, 4, 3)).toBe(false);
+    expect(isCurrentPasswordChangeSubmission(true, 3, 3)).toBe(true);
+    expect(isCurrentPasswordChangeSubmission(false, 4, 3)).toBe(false);
+    expect(isCurrentPasswordChangeSubmission(true, 4, 3)).toBe(false);
   });
 
   test("rejects a mistyped confirmation", () => {
