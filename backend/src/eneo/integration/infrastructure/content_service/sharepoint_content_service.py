@@ -534,9 +534,12 @@ class SharePointContentService:
     ) -> str:
         """Apply the changes since the stored delta token.
 
-        With ``record_failure`` false a failure is only raised, not written to
-        the knowledge row: a pending pass that follows a successful sync must
-        not turn that sync's status into an error.
+        With ``record_failure`` false a failure of the delta pass itself is only
+        raised, not written to the knowledge row: a pending pass that follows a
+        successful sync must not turn that sync's status into an error. A full
+        sync run as recovery (missing or expired token) is recorded regardless:
+        it was attempted, the token it replaces is gone, and the next sync is
+        a full one, so its failure is the knowledge's current state.
         """
         started_at = datetime.now(timezone.utc)
         resolved_integration_knowledge_id: UUID | None = integration_knowledge_id

@@ -3166,10 +3166,23 @@ class TestSyncStatus:
         mock_dependencies["sync_log_repo"].add.assert_not_awaited()
 
     @pytest.mark.parametrize(
-        ("delta_token", "delta_outcome", "recovery"),
+        ("delta_token", "delta_outcome", "recovery", "record_failure"),
         [
-            (None, None, "missing_delta_token"),
-            ("token-1", DeltaTokenExpiredException("410"), "delta_token_expired"),
+            (None, None, "missing_delta_token", True),
+            (
+                "token-1",
+                DeltaTokenExpiredException("410"),
+                "delta_token_expired",
+                True,
+            ),
+            # A pending pass does not record its own failure, but the recovery
+            # full sync it delegated to was attempted and cleared the token.
+            (
+                "token-1",
+                DeltaTokenExpiredException("410"),
+                "delta_token_expired",
+                False,
+            ),
         ],
     )
     async def test_a_failed_full_sync_fallback_is_recorded_once(
@@ -3180,8 +3193,11 @@ class TestSyncStatus:
         delta_token,
         delta_outcome,
         recovery,
+        record_failure,
     ):
-        ik = _real_integration_knowledge(delta_token=delta_token)
+        ik = _real_integration_knowledge(
+            delta_token=delta_token, last_sync_status="success"
+        )
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
         mock_dependencies["integration_knowledge_repo"].one.return_value = ik
 
@@ -3201,9 +3217,12 @@ class TestSyncStatus:
             )
             with pytest.raises(RuntimeError, match="Graph 503"):
                 await service.process_delta_changes(
-                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                    token_id=mock_oauth_token.id,
+                    integration_knowledge_id=ik.id,
+                    record_failure=record_failure,
                 )
 
+        assert ik.delta_token is None
         assert ik.last_sync_status == "error"
         assert ik.last_sync_error == "Graph 503"
         add = mock_dependencies["sync_log_repo"].add
