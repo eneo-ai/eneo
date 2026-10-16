@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 from uuid import UUID
 
@@ -143,6 +143,10 @@ from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderPlannedRequestBudget,
     AIBuilderRequestBudget,
 )
+from eneo.flows.ai_builder.ai_builder_tool_catalog import (
+    AIBuilderToolCatalogProjection,
+    fit_tool_catalog_projection,
+)
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
@@ -164,6 +168,7 @@ from eneo.flows.application.flow_authoring_snapshot import (
     unchangeable_saved_steps,
     unsupported_saved_steps,
 )
+from eneo.flows.application.flow_tool_options import SpaceToolOptions
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationError,
@@ -219,6 +224,7 @@ class PlannerRequestPreparationInput:
     prepared_attachment_context: AIBuilderAttachmentContext | None = None
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None
     review_evidence: FlowReviewEvidence | None = None
+    tool_options: SpaceToolOptions | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -422,6 +428,7 @@ async def prepare_planner_request(
         available_models=request.available_models,
         available_kbs=request.available_kbs,
         prior_bindings=prior_resource_bindings,
+        tool_options=request.tool_options,
     )
     if schema_direction_pending:
         rebuilt_planning_state.replace_schema_resolution(
@@ -786,6 +793,7 @@ def build_proposal_prepared(
         attachment_text: str | None,
         replayed_requirements: RequirementsSummaryPayload | None,
         review_evidence: FlowReviewEvidence | None = None,
+        tool_catalog: AIBuilderToolCatalogProjection | None = None,
     ) -> str:
         return build_plan_proposal_system_prompt(
             planning_state=planning_state,
@@ -809,6 +817,7 @@ def build_proposal_prepared(
             ),
             can_decline=decline_tool_schema is not None,
             structured_review_mode=structured_review_mode,
+            tool_catalog=tool_catalog,
         )
 
     turn_tool_schemas = proposal_turn_tool_schemas(
@@ -871,6 +880,7 @@ def build_proposal_prepared(
         attachment_text: str | None,
         replayed_requirements: RequirementsSummaryPayload | None,
         review_evidence: FlowReviewEvidence | None = None,
+        tool_catalog: AIBuilderToolCatalogProjection | None = None,
     ) -> bool:
         return (
             measure_provider_input_reserve(
@@ -878,7 +888,10 @@ def build_proposal_prepared(
                     {
                         "role": "system",
                         "content": build_proposal_prompt(
-                            attachment_text, replayed_requirements, review_evidence
+                            attachment_text,
+                            replayed_requirements,
+                            review_evidence,
+                            tool_catalog,
                         ),
                     }
                 ],
@@ -938,14 +951,28 @@ def build_proposal_prepared(
         if attachment_context is not None
         else None
     )
-    proposal_system_prompt = build_proposal_prompt(
-        (
-            fitted_attachment_context.context
-            if fitted_attachment_context is not None
-            else None
+    fitted_attachment_text = (
+        fitted_attachment_context.context
+        if fitted_attachment_context is not None
+        else None
+    )
+    # The space's tools are fitted last, into the room the system prompt has
+    # left: the answer reserve was planned without them, and everything above
+    # is packed first; history above the configured minimum yields to them.
+    fitted_tool_catalog = fit_tool_catalog_projection(
+        resource_catalog.tools.projection,
+        fits=lambda projection: prompt_fits(
+            fitted_attachment_text,
+            replayed_requirements,
+            fitted_review_evidence,
+            projection,
         ),
+    )
+    proposal_system_prompt = build_proposal_prompt(
+        fitted_attachment_text,
         replayed_requirements,
         fitted_review_evidence,
+        fitted_tool_catalog,
     )
     prepared_prompt = _prepare_prompt_messages(
         conversation=conversation,
@@ -991,7 +1018,13 @@ def build_proposal_prepared(
         system_prompt_hash=prepared_prompt.system_prompt_hash,
         plan_edit_context=plan_edit_context,
         prior_spec_for_revision=prior_spec_for_revision,
-        resource_catalog=resource_catalog,
+        resource_catalog=replace(
+            resource_catalog,
+            tools=replace(
+                resource_catalog.tools,
+                projection=fitted_tool_catalog,
+            ),
+        ),
         planning_state=planning_state,
         compile_context=compile_context,
         proposal_tool_schema=proposal_tool_schema,

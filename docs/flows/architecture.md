@@ -246,6 +246,37 @@ Upload byte limits protect storage and file processing. Message, collection,
 schema, and archive inspection bounds protect their respective API, persistence,
 and parsing boundaries. Those limits remain independent of model context size.
 
+### AI Builder MCP tool catalogue
+
+Every prepared Builder message turn, in create and edit sessions alike, reads
+the MCP tools of the session's space through the step editor's reader
+(`read_space_tool_options` in `flows/application/flow_tool_options.py`), so the
+Builder and the editor apply one grant chain. The proposal prompt can carry a
+read-only projection of it (`ai_builder_tool_catalog.py`): the usable tools
+ordered by server name, then tool name, each with its approved description cut
+to the resource description bound and, while classifications are on, the
+server's level. A tool is listed when its lines fit what is left of a
+6,000-character overview budget; a tool that does not fit is skipped and
+counted, and the number left out is stated. Approved input schemas share a
+separate 12,000-character budget; a tool whose schema does not fit is listed
+with its schema marked as not shown. When the space has usable tools but none
+is listed, or the space's list exceeds the editor's list bounds, the prompt says
+the catalogue is not shown. Refused tools are not offered; the turn keeps them
+with their refusal code for guidance. The projection holds no server address or
+credential: the reader does not read them. Proposed steps cannot call a tool
+yet.
+
+The catalogue is optional prompt content. The request budget is planned from
+the prompt without it, so the answer reserve is the same as in a turn without
+tools, and it is fitted last, after the replayed requirements, review evidence
+and attachments, into the room left for the system prompt; conversation history
+above the configured minimum yields to it, as it does to attachments. Its
+reductions are tried in order and the first that fits is sent: schemas are
+dropped first (the last listed first), then tools (the last first), then the
+list gives way to the "not shown" sentence; when not even that fits, the block
+is left out and the turn records the typed `left_out` outcome. The projection
+recorded on the prepared turn is the one sent.
+
 Every Builder provider call goes through one owner
 (`ai_builder_provider_call.complete_with_silence_deadline`). The answer is
 streamed and rebuilt into the complete completion, so a slow model is

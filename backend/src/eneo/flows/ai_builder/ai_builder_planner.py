@@ -130,6 +130,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.application.flow_authoring_snapshot import (
     UnsupportedSavedStepsError,
 )
+from eneo.flows.application.flow_tool_options import SpaceToolOptions
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.mapped_execution_policy import (
@@ -438,6 +439,7 @@ class AIBuilderPlanner:
         completion_model_route: ResolvedCompletionModelRoute,
         available_models: list[AIBuilderAvailableModelResource] | None = None,
         available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
+        tool_options: SpaceToolOptions | None = None,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         attachment_files: list[File] | None = None,
@@ -731,6 +733,7 @@ class AIBuilderPlanner:
                         completion_model_route=completion_model_route,
                         available_models=available_models,
                         available_kbs=available_kbs,
+                        tool_options=tool_options,
                         flow=flow,
                         assistant_snapshots=assistant_snapshots,
                         attachment_files=attachment_files or [],

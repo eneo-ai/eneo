@@ -15,7 +15,9 @@ from eneo.assistants.assistant_update import (
 from eneo.files.file_models import File
 from eneo.flows.application.flow_tool_options import (
     FlowToolOptions,
+    SpaceToolOptions,
     read_flow_tool_options,
+    read_space_tool_options,
 )
 from eneo.flows.application.flow_tool_publication import (
     pin_tool_steps,
@@ -949,6 +951,18 @@ class FlowService:
             tool_facts_reader=self._require_tool_facts_reader,
             tenant_id=self.user.tenant_id,
             space_id=flow.space_id,
+        )
+
+    async def list_space_tool_options(self, *, space_id: UUID) -> SpaceToolOptions:
+        """The tools of the general servers ``space_id`` has activated, each
+        with what the decision says about it now, or that they exceed the
+        list's bounds (``read_space_tool_options``); writes nothing. The
+        caller has decided that the user may edit flows in the space."""
+        return await read_space_tool_options(
+            self._require_tool_facts_reader(),
+            tenant_id=self.user.tenant_id,
+            space_id=space_id,
+            security_enabled=self.user.tenant.security_enabled,
         )
 
     async def list_tool_options(self, *, flow_id: UUID) -> FlowToolOptions:

@@ -133,6 +133,7 @@ from eneo.flows.application.flow_draft_materialization import (
 from eneo.flows.application.flow_template_attachment_materialization import (
     require_template_placeholder_contract,
 )
+from eneo.flows.application.flow_tool_options import FlowToolOptions
 from eneo.flows.flow_access_policy import (
     FlowAccessFilterMode,
     FlowApiAction,
@@ -705,6 +706,9 @@ def _make_container(
         assistant_snapshots=None,
         attachment_files=[],
         session_attachment_file_ids=(),
+        tool_options=FlowToolOptions(
+            options=[], security_classifications_enabled=False
+        ),
     )
 
     async def preflight_message_turn(**_: object) -> SessionTurnPreflight:
@@ -3140,6 +3144,9 @@ class TestSendMessageEndpoint:
             assistant_snapshots={},
             attachment_files=[],
             session_attachment_file_ids=(),
+            tool_options=FlowToolOptions(
+                options=[], security_classifications_enabled=False
+            ),
         )
 
         async def mock_events(*args, **kwargs):
@@ -3768,6 +3775,9 @@ class TestSendMessageEndpoint:
             assistant_snapshots=None,
             attachment_files=[],
             session_attachment_file_ids=(),
+            tool_options=FlowToolOptions(
+                options=[], security_classifications_enabled=False
+            ),
         )
 
         captured: dict = {}

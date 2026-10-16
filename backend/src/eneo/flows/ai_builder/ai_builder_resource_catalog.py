@@ -5,6 +5,12 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Literal, TypedDict
 
+from eneo.flows.ai_builder.ai_builder_tool_catalog import (
+    EMPTY_TOOL_CATALOG,
+    AIBuilderToolCatalog,
+    build_ai_builder_tool_catalog,
+)
+from eneo.flows.application.flow_tool_options import SpaceToolOptions
 from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
@@ -122,6 +128,9 @@ class AIBuilderResourceCatalog:
     _kb_alias_index: dict[str, tuple[AIBuilderResourceCatalogEntry, ...]]
     _model_local_ref_index: dict[str, AIBuilderResourceCatalogEntry]
     _kb_local_ref_index: dict[str, AIBuilderResourceCatalogEntry]
+    # The space's MCP tools for this turn; read again every turn, since the
+    # grants they depend on change between turns.
+    tools: AIBuilderToolCatalog = EMPTY_TOOL_CATALOG
 
     @property
     def model_refs(self) -> set[str]:
@@ -300,6 +309,7 @@ def build_ai_builder_resource_catalog(
     available_models: Sequence[AIBuilderAvailableModelResource] | None,
     available_kbs: Sequence[AIBuilderAvailableKnowledgeBaseResource] | None,
     prior_bindings: Iterable[LocalResourceBinding] = (),
+    tool_options: SpaceToolOptions | None = None,
 ) -> AIBuilderResourceCatalog:
     allocator = ResourceSlotAllocator(prior_bindings=prior_bindings)
     models = tuple(_build_model_entries(available_models or [], allocator=allocator))
@@ -313,6 +323,13 @@ def build_ai_builder_resource_catalog(
         _kb_alias_index=_build_alias_index(knowledge_bases),
         _model_local_ref_index=_build_local_ref_index(models),
         _kb_local_ref_index=_build_local_ref_index(knowledge_bases),
+        tools=(
+            EMPTY_TOOL_CATALOG
+            if tool_options is None
+            else build_ai_builder_tool_catalog(
+                tool_options, cut_description=_bounded_description
+            )
+        ),
     )
 
 

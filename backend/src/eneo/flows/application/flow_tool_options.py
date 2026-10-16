@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypeAlias
 from uuid import UUID
 
 from eneo.flows.domain.tool_facts import SpaceToolFactsSource
@@ -69,17 +70,25 @@ def flow_tool_option(
     )
 
 
-async def read_flow_tool_options(
+@dataclass(frozen=True, slots=True)
+class FlowToolOptionsOverBound:
+    """The space's tools exceed a list bound, so none of them are listed."""
+
+
+SpaceToolOptions: TypeAlias = FlowToolOptions | FlowToolOptionsOverBound
+
+
+async def read_space_tool_options(
     reader: SpaceToolFactsSource,
     *,
     tenant_id: UUID,
     space_id: UUID,
     security_enabled: bool,
-) -> FlowToolOptions:
+) -> SpaceToolOptions:
     """The options for every tool of the general servers ``space_id`` has
-    activated, in the reader's order, or a refusal when they exceed a bound.
+    activated, in the reader's order, or that they exceed a bound.
 
-    The reader returns at most one tool past a bound, so a refusal is
+    The reader returns at most one tool past a bound, so the outcome is
     decided on what it returned: more tools than the count bound, or more
     bytes than the byte bound, means the whole list is over it.
     """
@@ -93,6 +102,32 @@ async def read_flow_tool_options(
         len(listed.facts) > FLOW_TOOL_OPTIONS_MAX_COUNT
         or listed.text_bytes > FLOW_TOOL_OPTIONS_MAX_TEXT_BYTES
     ):
+        return FlowToolOptionsOverBound()
+    return FlowToolOptions(
+        options=[
+            flow_tool_option(fact, security_enabled=security_enabled)
+            for fact in listed.facts
+        ],
+        security_classifications_enabled=security_enabled,
+    )
+
+
+async def read_flow_tool_options(
+    reader: SpaceToolFactsSource,
+    *,
+    tenant_id: UUID,
+    space_id: UUID,
+    security_enabled: bool,
+) -> FlowToolOptions:
+    """``read_space_tool_options`` for the editor's list, refused when the
+    tools exceed a bound."""
+    options = await read_space_tool_options(
+        reader,
+        tenant_id=tenant_id,
+        space_id=space_id,
+        security_enabled=security_enabled,
+    )
+    if isinstance(options, FlowToolOptionsOverBound):
         raise FileTooLargeException(
             TOOL_OPTIONS_TOO_LARGE_MESSAGE,
             code=FlowApiErrorCode.TOOL_OPTIONS_TOO_LARGE.value,
@@ -101,10 +136,4 @@ async def read_flow_tool_options(
                 "max_text_bytes": FLOW_TOOL_OPTIONS_MAX_TEXT_BYTES,
             },
         )
-    return FlowToolOptions(
-        options=[
-            flow_tool_option(fact, security_enabled=security_enabled)
-            for fact in listed.facts
-        ],
-        security_classifications_enabled=security_enabled,
-    )
+    return options

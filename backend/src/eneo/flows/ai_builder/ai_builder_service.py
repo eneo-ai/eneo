@@ -115,6 +115,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionTurnPreflight
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.application.flow_tool_options import SpaceToolOptions
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
@@ -201,6 +202,10 @@ class PreparedMessageContext:
     assistant_snapshots: AssistantAuthoringSnapshots | None
     attachment_files: list[File]
     session_attachment_file_ids: tuple[UUID, ...]
+    # The space's MCP tools, read for create and edit sessions alike: a
+    # create session has no flow, and an edit session's flow is in the same
+    # space, so the space is the key.
+    tool_options: SpaceToolOptions
     review_context: AIBuilderReviewReference | None = None
     review_evidence: FlowReviewEvidence | None = None
     evidence_floor: int = 0
@@ -625,8 +630,13 @@ class AIBuilderService:
             merged_files[file.id] = file
         attachment_files = list(merged_files.values())
 
+        tool_options = await self.flow_service.list_space_tool_options(
+            space_id=session.space_id
+        )
+
         return PreparedMessageContext(
             planner_context=planner_context,
+            tool_options=tool_options,
             completion_model_route=route,
             flow=flow,
             assistant_snapshots=assistant_snapshots,
@@ -759,6 +769,7 @@ class AIBuilderService:
         completion_model_route: ResolvedCompletionModelRoute,
         available_models: list[AIBuilderAvailableModelResource] | None = None,
         available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
+        tool_options: SpaceToolOptions | None = None,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         attachment_files: list[File] | None = None,
@@ -796,6 +807,7 @@ class AIBuilderService:
             completion_model_route=completion_model_route,
             available_models=available_models,
             available_kbs=available_kbs,
+            tool_options=tool_options,
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             attachment_files=attachment_files or [],
