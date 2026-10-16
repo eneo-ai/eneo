@@ -748,6 +748,8 @@ class SharePointContentService:
                     change_id for change in changes if (change_id := change.get("id"))
                 }
                 scope_folder_id = integration_knowledge.folder_id
+                # Indexed item ids, read once per pass for folders entering scope.
+                indexed_ids: set[str] | None = None
                 if (
                     integration_knowledge.selected_item_type == "folder"
                     and scope_folder_id
@@ -800,6 +802,12 @@ class SharePointContentService:
                         )
                         continue
 
+                    # Graph emits the drive root itself; it carries no parent
+                    # path, is never indexed, and for a folder scope would be
+                    # classified out of scope and have the whole drive walked.
+                    if has_graph_facet(item, "root"):
+                        continue
+
                     # Skip scope check for deleted items — they may lack
                     # parentReference data.  The DB delete queries already
                     # filter by integration_knowledge_id so they are safe.
@@ -847,8 +855,13 @@ class SharePointContentService:
                         # A folder that left scope still exists in SharePoint, but Graph
                         # does not re-emit its (unchanged) children — deleting only the
                         # folder id would orphan every descendant blob. Enumerate the
-                        # folder's current descendants and remove them too.
-                        if is_folder:
+                        # folder's current descendants and remove them too. Only a
+                        # folder scope ever indexes descendants; a file scope has
+                        # nothing under any folder.
+                        if (
+                            is_folder
+                            and integration_knowledge.selected_item_type == "folder"
+                        ):
                             await self._delete_out_of_scope_folder_subtree(
                                 content_client=content_client,
                                 resource_type=integration_knowledge.resource_type
@@ -887,7 +900,7 @@ class SharePointContentService:
                             integration_knowledge.selected_item_type == "folder"
                             and item_id != integration_knowledge.folder_id
                         ):
-                            await self._index_folder_subtree_entering_scope(
+                            indexed_ids = await self._index_folder_subtree_entering_scope(
                                 content_client=content_client,
                                 resource_type=integration_knowledge.resource_type
                                 or "site",
@@ -900,6 +913,7 @@ class SharePointContentService:
                                 stats=stats,
                                 pending_change_keys=pending_change_keys,
                                 change_ids=change_ids,
+                                indexed_ids=indexed_ids,
                             )
                         continue
 
@@ -1925,14 +1939,18 @@ class SharePointContentService:
         stats: SyncStats,
         pending_change_keys: list[tuple[UUID, str, str]],
         change_ids: set[str],
-    ) -> None:
-        """Index the files of a folder that entered the selected scope.
+        indexed_ids: set[str] | None,
+    ) -> set[str] | None:
+        """Index the files of a folder entry that may have entered the selected scope.
 
         Graph re-emits only the moved folder, not its unchanged children, so a
         folder dragged into scope would otherwise never get its files indexed.
-        Children that are already indexed (a rename inside scope) or that arrive
-        as their own entries in this change set (a freshly created folder) are
-        left to the ordinary path.
+        Every in-scope folder entry (a rename, a move inside scope, a new folder)
+        takes this path because the entry does not say which it was; children
+        that are already indexed or that arrive as their own entries in this
+        change set are left alone. ``indexed_ids`` is read once per pass and
+        returned so later folders of the same pass reuse it; files indexed here
+        are added so a nested folder entering scope does not download them again.
         """
         try:
             descendants = await self._enumerate_authoritative_items(
@@ -1942,9 +1960,11 @@ class SharePointContentService:
                 drive_id=drive_id,
                 folder_id=folder_id,
             )
-            indexed = await self.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge(
-                integration_knowledge_id=integration_knowledge_id
-            )
+            if indexed_ids is None:
+                indexed = await self.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge(
+                    integration_knowledge_id=integration_knowledge_id
+                )
+                indexed_ids = {item_id for _, item_id in indexed}
         except Exception as exc:
             logger.warning(
                 "Could not list folder %s (%s) entering scope; the next pass "
@@ -1959,9 +1979,8 @@ class SharePointContentService:
                 folder_name,
                 "Could not list folder contents: " + user_visible_error(exc),
             )
-            return
+            return indexed_ids
 
-        indexed_ids = {item_id for _, item_id in indexed}
         for descendant in descendants:
             descendant_id = descendant.get("id")
             if (
@@ -1979,6 +1998,8 @@ class SharePointContentService:
                 stats=stats,
                 pending_change_keys=pending_change_keys,
             )
+            indexed_ids.add(descendant_id)
+        return indexed_ids
 
     def _schedule_post_commit_change_keys(
         self, pending: list[tuple[UUID, str, str]]

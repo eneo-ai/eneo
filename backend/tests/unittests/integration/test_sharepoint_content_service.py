@@ -2507,6 +2507,49 @@ class TestOutOfScopeFolderSubtreeCleanup:
         mock_enum.assert_awaited_once()
         assert repo.delete_by_sharepoint_item_and_integration_knowledge.await_count == 1
 
+    async def test_a_file_scope_never_walks_an_out_of_scope_folder(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        """Nothing under any folder is indexed for a file scope, so a changed
+        folder elsewhere in the drive costs one no-op delete, not a subtree walk."""
+        ik = _real_integration_knowledge(
+            delta_token="token-1", selected_item_type="file", folder_id="file-1"
+        )
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        delete = mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+
+        with (
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+            patch.object(
+                service, "_enumerate_authoritative_item_ids", AsyncMock()
+            ) as enumerate_ids,
+        ):
+            _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(
+                    return_value=(
+                        [{"id": "folder-z", "name": "Z", "folder": {}}],
+                        "token-2",
+                    )
+                ),
+            )
+            await service.process_delta_changes(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        enumerate_ids.assert_not_called()
+        delete.assert_awaited_once_with(
+            sharepoint_item_id="folder-z", integration_knowledge_id=ik.id
+        )
+        assert ik.delta_token == "token-2"
+
     async def test_degrades_safely_without_drive_id(self, service, mock_dependencies):
         ik = MagicMock()
         ik.id = uuid4()
@@ -3789,6 +3832,75 @@ class TestDeltaFolderScopeOrdering:
         assert sorted(fetched) == ["x-1", "x-new"]
         assert "2 files" in result
         assert "1 folder scanned" in result
+
+    async def test_nested_folders_entering_scope_read_the_index_once(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        """X and its subfolder X/Y both arrive as entries; Y's files were already
+        indexed by X's walk and the indexed-id set is read once for the pass."""
+        changes = [
+            {
+                "id": "folder-x",
+                "name": "X",
+                "folder": {},
+                "parentReference": {"id": "folder-a"},
+            },
+            {
+                "id": "folder-y",
+                "name": "Y",
+                "folder": {},
+                "parentReference": {"id": "folder-x"},
+            },
+        ]
+        subtree = {
+            "folder-x": [
+                {"id": "x-1", "name": "one.docx"},
+                {"id": "y-1", "name": "deep.docx"},
+            ],
+            "folder-y": [{"id": "y-1", "name": "deep.docx"}],
+        }
+        indexed = mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+
+        with patch.object(
+            service,
+            "_enumerate_authoritative_items",
+            AsyncMock(side_effect=lambda **kw: subtree[kw["folder_id"]]),
+        ):
+            client, result = await self._run_delta(
+                service, mock_dependencies, mock_oauth_token, folder_scoped, changes
+            )
+
+        indexed.assert_awaited_once()
+        fetched = [
+            call.kwargs["item_id"]
+            for call in client.get_file_extraction_by_id.await_args_list
+        ]
+        assert sorted(fetched) == ["x-1", "y-1"]
+        assert "2 files" in result
+
+    async def test_the_drive_root_entry_is_never_classified(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        """Graph emits the root with no parent path; for a folder scope it would
+        be out of scope and have the whole drive enumerated for deletion."""
+        changes = [{"id": "root-1", "name": "root", "root": {}, "folder": {}}]
+
+        with patch.object(
+            service, "_enumerate_authoritative_item_ids", AsyncMock()
+        ) as enumerate_ids:
+            _, result = await self._run_delta(
+                service, mock_dependencies, mock_oauth_token, folder_scoped, changes
+            )
+
+        enumerate_ids.assert_not_called()
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
+        assert result == "Imported 0 files"
 
     async def test_unlistable_folder_entering_scope_fails_the_pass_and_keeps_the_token(
         self, service, mock_dependencies, mock_oauth_token, folder_scoped
