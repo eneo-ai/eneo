@@ -1194,7 +1194,7 @@ class SharePointContentService:
                 if not content or not page_text.strip():
                     stats["skipped_items"] += 1
                     stats["skipped_details"].append(
-                        {"file": page_name, "reason": "Empty or unreadable content"}
+                        {"file": page_name, "reason": EMPTY_CONTENT_REASON}
                     )
                     continue
                 outcome = await self._process_info_blob(
@@ -1436,7 +1436,7 @@ class SharePointContentService:
         else:
             stats["skipped_items"] += 1
             stats["skipped_details"].append(
-                {"file": item_name, "reason": "Empty or unreadable content"}
+                {"file": item_name, "reason": EMPTY_CONTENT_REASON}
             )
 
     async def _delete_local_sharepoint_item(
