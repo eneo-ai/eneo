@@ -1592,5 +1592,7 @@
   "beta_return_to_legacy": "Tillbaka till gamla appen",
   "select_additional_knowledge": "Välj ytterligare kunskapskällor som denna assistent kommer att kunna söka i för relevanta svar.",
   "organization_knowledge_description": "Välj ytterligare källor från din organisations utrymme som den här assistenten kan söka i för att hitta relevanta svar.",
-  "skill_used_in_reply": "Skill ”{name}” användes i svaret"
+  "skill_used_in_reply": "Skill ”{name}” användes i svaret",
+  "add_knowledge_personal": "Lägg till kunskap (Personlig)",
+  "no_personal_sources": "Inga personliga källor tillgängliga."
 }

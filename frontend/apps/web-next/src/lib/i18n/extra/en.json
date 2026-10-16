@@ -1592,5 +1592,7 @@
   "beta_return_to_legacy": "Return to the previous app",
   "select_additional_knowledge": "Select additional knowledge sources that this assistant will be able to search for relevant answers.",
   "organization_knowledge_description": "Select additional sources from your organization's space that this assistant will be able to search for relevant answers.",
-  "skill_used_in_reply": "Skill “{name}” used in this reply"
+  "skill_used_in_reply": "Skill “{name}” used in this reply",
+  "add_knowledge_personal": "Add knowledge (Personal)",
+  "no_personal_sources": "No Personal sources available."
 }
