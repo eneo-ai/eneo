@@ -31,7 +31,9 @@ describe("a rectangle of table cells", () => {
 
     const quoted = cellSelectionQuote(doc, selection);
 
-    expect(quoted.text).toBe("| Förberedelse | Kartlägga |\n| Design | Utforma |");
+    expect(quoted.text).toBe(
+      "| Fas | Innehåll |\n| --- | --- |\n| Förberedelse | Kartlägga |\n| Design | Utforma |"
+    );
     expect(quoted.locator).toBe("table 1, rows 2-3, columns 1-2");
     expect(isLocator(quoted.locator)).toBe(true);
   });
@@ -56,7 +58,10 @@ describe("a rectangle of table cells", () => {
     const doc = parse(TABLE);
     const at = cells(doc);
     const quoted = cellSelectionQuote(doc, CellSelection.create(doc, at(3, 2), at(3, 2)));
-    expect(quoted).toEqual({ text: "| Månad 3 |", locator: "table 1, row 4, column 3" });
+    expect(quoted).toEqual({
+      text: "| Start |\n| --- |\n| Månad 3 |",
+      locator: "table 1, row 4, column 3"
+    });
   });
 
   it("points at nothing when the table or cells are gone", () => {

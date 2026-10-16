@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EneoUIMessage } from "@/lib/chat/types";
-import { addGeneratedFile, messageGeneratedFiles } from "./message-tool-calls";
+import { addGeneratedFile, messageGeneratedFiles, removeGeneratedFile } from "./message-tool-calls";
 
 const md = "text/markdown";
 const plan1 = {
@@ -45,5 +45,19 @@ describe("a version the reader saved", () => {
   it("changes nothing when the answer has it already", () => {
     const messages = [question, answer("a1", [plan1, plan2])];
     expect(addGeneratedFile(messages, { ...plan2, revises_file_id: plan1.id })).toBe(messages);
+  });
+});
+
+describe("a version a newer save replaced", () => {
+  it("leaves the answer that held it", () => {
+    const messages = [question, answer("a1", [plan1, plan2])];
+    const updated = removeGeneratedFile(messages, plan2.id);
+    expect(messageGeneratedFiles(updated[1]!).map((file) => file.id)).toEqual([plan1.id]);
+    expect(updated[0]).toBe(messages[0]);
+  });
+
+  it("changes nothing when no answer holds it", () => {
+    const messages = [question, answer("a1", [plan1])];
+    expect(removeGeneratedFile(messages, plan2.id)).toBe(messages);
   });
 });

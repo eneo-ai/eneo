@@ -54,3 +54,30 @@ it("takes new Markdown once laid out, and shows the file's text again on reset",
   await act(async () => ref.current?.reset());
   expect(ref.current?.getMarkdown()).toBe("Andra.\n");
 });
+
+it("does not count the editor's own tidying of a loaded document as an edit", async () => {
+  // A table's columns come back padded, so the file's Markdown is not what
+  // the editor serialises; the text still says the same.
+  const table = "| a | bb |\n| --- | --- |\n| 1 | 2 |\n";
+  const ref = createRef<DocumentEditorHandle>();
+  const onChange = vi.fn();
+  const onRender = vi.fn();
+  const view = renderInApp(
+    <DocumentEditor ref={ref} markdown={table} editable onChange={onChange} onRender={onRender} />
+  );
+  await vi.waitFor(() => expect(onRender).toHaveBeenCalledTimes(1));
+  expect(ref.current?.getMarkdown()).not.toBe(table);
+
+  view.rerender(
+    <DocumentEditor
+      ref={ref}
+      markdown={`${table}\nSlut.\n`}
+      editable
+      onChange={onChange}
+      onRender={onRender}
+    />
+  );
+  await vi.waitFor(() => expect(onRender).toHaveBeenCalledTimes(2));
+
+  expect(onChange).not.toHaveBeenCalled();
+});

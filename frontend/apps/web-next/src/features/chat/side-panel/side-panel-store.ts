@@ -441,10 +441,10 @@ export class SidePanelStore {
   // Editing
   // ---------------------------------------------------------------------
 
-  /** The reader changed the document's text. */
-  markEdited() {
-    if (this.dirty) return;
-    this.dirty = true;
+  /** Whether the document's text now differs from the file. */
+  setDirty(dirty: boolean) {
+    if (this.dirty === dirty) return;
+    this.dirty = dirty;
     this.#emit();
   }
 
@@ -484,6 +484,9 @@ export class SidePanelStore {
     this.highlight = null;
     this.draft = null;
     this.dirty = false;
+    // A question about discarding the edits, asked while the save was in
+    // flight, is settled: they are saved.
+    this.pendingDiscard = null;
     this.#emit();
   }
 

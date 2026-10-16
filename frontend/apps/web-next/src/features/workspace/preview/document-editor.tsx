@@ -41,8 +41,12 @@ export type DocumentEditorProps = {
   previousMarkdown?: string | null;
   /** Called with the selected text, and where it stands, when the reader quotes it. */
   onQuote?: (text: string, locator: string | null) => void;
-  /** The reader changed the content; never called for a `markdown` update. */
-  onDirty?: () => void;
+  /**
+   * Whether the document's text now differs from `markdown`. Called when
+   * that changes either way; never for a `markdown` update, nor for the
+   * editor's own tidying of a loaded document.
+   */
+  onChange?: (dirty: boolean) => void;
   /** The reader asked to save (Mod+S) while editing. */
   onSave?: () => void;
   /** Each `markdown` value has been laid out. */
@@ -97,7 +101,7 @@ export function DocumentEditor({
   highlight = null,
   previousMarkdown = null,
   onQuote,
-  onDirty,
+  onChange,
   onSave,
   onRender,
   onReady,
@@ -108,12 +112,30 @@ export function DocumentEditor({
   const dirty = useRef(false);
   // The Markdown the editor last took, so the same text is not parsed again.
   const applied = useRef(markdown);
+  // The document as loaded, serialised: what the reader's text is compared
+  // with. The file's own Markdown does not serve, since a document does not
+  // come back byte for byte (a table's columns are padded, for one).
+  const baseline = useRef<string | null>(null);
+  // Content is being put in place; the editor's own tidying of it is no edit.
+  const applying = useRef(false);
   // Bumped when the document changed under the decorations, so they are placed again.
   const [rendered, setRendered] = useState(0);
-  const callbacks = useRef({ onDirty, onSave, onRender, onReady });
+  const callbacks = useRef({ onChange, onSave, onRender, onReady });
   useLayoutEffect(() => {
-    callbacks.current = { onDirty, onSave, onRender, onReady };
+    callbacks.current = { onChange, onSave, onRender, onReady };
   });
+
+  /** Puts `next` in `current` as the document the reader's text is compared with. */
+  function apply(current: Editor, next: string) {
+    applying.current = true;
+    try {
+      current.commands.setContent(next, CONTENT);
+    } finally {
+      applying.current = false;
+    }
+    applied.current = next;
+    baseline.current = withFinalNewline(current.getMarkdown());
+  }
 
   const editor = useEditor(
     {
@@ -142,18 +164,28 @@ export function DocumentEditor({
           return false;
         }
       },
-      // A keystroke only marks the document edited; nothing is saved here.
-      onUpdate: () => {
-        dirty.current = true;
-        callbacks.current.onDirty?.();
+      // A keystroke only marks the document edited; nothing is saved here. The
+      // mark compares text with the document as loaded, since the editor also
+      // tidies a loaded document (a paragraph to type in after a final code
+      // block) without changing what it says, and a reader cannot edit a
+      // document that is read-only.
+      onUpdate: ({ editor: current }) => {
+        if (applying.current || baseline.current === null || !current.isEditable) return;
+        const changed = withFinalNewline(current.getMarkdown()) !== baseline.current;
+        if (changed === dirty.current) return;
+        dirty.current = changed;
+        callbacks.current.onChange?.(changed);
       }
     },
     []
   );
 
-  // The first content is in the page once the editor exists.
+  // The first content is in the page once the editor exists. The baseline is
+  // taken here rather than on the editor's own create event, which comes a
+  // tick later than the first updates the mounted view sends.
   useEffect(() => {
     if (!editor) return;
+    baseline.current ??= withFinalNewline(editor.getMarkdown());
     callbacks.current.onRender?.();
     callbacks.current.onReady?.();
   }, [editor]);
@@ -168,8 +200,7 @@ export function DocumentEditor({
     if (!editor || markdown === applied.current || dirty.current) return;
     const frame = requestAnimationFrame(() => {
       if (editor.isDestroyed || dirty.current) return;
-      editor.commands.setContent(markdown, CONTENT);
-      applied.current = markdown;
+      apply(editor, markdown);
       setRendered((count) => count + 1);
       callbacks.current.onRender?.();
     });
@@ -201,8 +232,7 @@ export function DocumentEditor({
       reset: () => {
         dirty.current = false;
         if (!editor) return;
-        editor.commands.setContent(markdown, CONTENT);
-        applied.current = markdown;
+        apply(editor, markdown);
         setRendered((count) => count + 1);
       }
     }),

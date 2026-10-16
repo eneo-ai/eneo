@@ -35,8 +35,8 @@ type FilePreviewContentProps = {
   editable?: boolean;
   /** The version before this one, as Markdown; what changed against it is marked. */
   previousMarkdown?: string | null;
-  /** The reader changed the document's text. */
-  onDirty?: () => void;
+  /** Whether the document's text now differs from the file. */
+  onChange?: (dirty: boolean) => void;
   /** The reader asked to save the document (Mod+S). */
   onSave?: () => void;
   ref?: Ref<FilePreviewContentHandle>;
@@ -87,7 +87,7 @@ export function FilePreviewContent({
   onError,
   editable = false,
   previousMarkdown = null,
-  onDirty,
+  onChange,
   onSave,
   ref
 }: FilePreviewContentProps) {
@@ -245,7 +245,7 @@ export function FilePreviewContent({
               highlight={highlight}
               previousMarkdown={previousMarkdown}
               onQuote={onQuote}
-              onDirty={onDirty}
+              onChange={onChange}
               onSave={onSave}
               onReady={onReady}
             />
