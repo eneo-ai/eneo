@@ -14,7 +14,8 @@ vi.mock("../loadPreview", () => ({
   PreviewTooLargeError: class extends Error {}
 }));
 const file = { id: "report", name: "Report.txt", mimetype: "text/plain", size: 20 };
-const contents: PanelContents = { documents: [], uploads: [file], views: [] };
+const group = (...files: (typeof file)[]) => ({ key: "q1", ordinal: 1, files });
+const contents: PanelContents = { documents: [], uploads: [group(file)], views: [] };
 const launcher = () =>
   page.getByRole("button", { name: m.conversation_panel_open(), includeHidden: true });
 
@@ -70,7 +71,7 @@ it("makes a conversation with only interactive views reachable", async () => {
 
 it("opens a narrow-screen sheet and keeps download-only files accessible", async () => {
   const archive = { ...file, name: "Archive.zip", mimetype: "application/zip" };
-  await setup({ documents: [], uploads: [archive], views: [] }, 390);
+  await setup({ documents: [], uploads: [group(archive)], views: [] }, 390);
   await launcher().click();
   await expect
     .element(page.getByRole("dialog", { name: m.conversation_panel_title() }))
