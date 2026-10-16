@@ -542,6 +542,19 @@ class SpaceActor:
                 return SpaceRole.OWNER
             return None
 
+        # The organization space belongs to the tenant's admins: its role
+        # follows the admin permission held now, never a membership row, which
+        # outlives the admin role that added it.
+        if self.space.is_organization():
+            if (
+                self.space.tenant_id is None
+                or self.space.tenant_id != self.user.tenant_id
+            ):
+                return None
+            return (
+                SpaceRole.ADMIN if Permission.ADMIN in self.user.permissions else None
+            )
+
         direct_role = self._get_direct_role()
         group_role = self._get_highest_group_role()
         return self._get_highest_role(direct_role, group_role)
