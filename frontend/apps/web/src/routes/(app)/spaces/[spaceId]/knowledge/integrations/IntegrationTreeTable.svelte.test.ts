@@ -131,4 +131,25 @@ describe("IntegrationTreeTable", () => {
     await userEvent.fill(page.getByRole("searchbox", { name: m.ui_filter() }), "zzz");
     await expect.element(page.getByText(m.no_results_found())).toBeVisible();
   });
+
+  it("offers no collapse toggle while filtering and brings it back with its state", async () => {
+    render(IntegrationTreeTable, { items, spaceRouteId: "space-1" });
+    const collapse = page.getByRole("button", {
+      name: m.sharepoint_collapse_folder_named({ name: "Protokoll" })
+    });
+    const expand = page.getByRole("button", {
+      name: m.sharepoint_expand_folder_named({ name: "Protokoll" })
+    });
+    await collapse.click();
+    await expect.poll(rowNames).toEqual(["Protokoll", "Rutiner"]);
+
+    await userEvent.fill(page.getByRole("searchbox", { name: m.ui_filter() }), "bil");
+    await expect.poll(rowNames).toEqual(["Protokoll", "Bilagor"]);
+    expect(collapse.elements()).toHaveLength(0);
+    expect(expand.elements()).toHaveLength(0);
+
+    await userEvent.fill(page.getByRole("searchbox", { name: m.ui_filter() }), "");
+    await expect.element(expand).toHaveAttribute("aria-expanded", "false");
+    expect(rowNames()).toEqual(["Protokoll", "Rutiner"]);
+  });
 });

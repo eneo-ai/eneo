@@ -72,7 +72,9 @@
           <Table.Row>
             <Table.Cell class="max-w-[28rem]">
               <div class="flex items-center gap-1" style="padding-left: {row.depth * 1.5}rem">
-                {#if row.hasChildren}
+                <!-- A filter shows every match regardless of what is collapsed, so the toggle
+                     would do nothing visible: it comes back with the state when the filter clears. -->
+                {#if row.hasChildren && !filtering}
                   <Button
                     variant="ghost"
                     size="icon-xs"
