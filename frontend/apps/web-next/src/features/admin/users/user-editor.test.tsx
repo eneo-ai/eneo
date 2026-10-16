@@ -43,10 +43,12 @@ async function renderEditor(
   api.GET.mockImplementation((path: string) =>
     path === "/api/v1/users/password-policy/"
       ? policyResponse
-      : ok({
-          predefined_roles: { items: [{ id: "role-user", name: "Användare", permissions: [] }] },
-          roles: { items: [] }
-        })
+      : path === "/api/v1/admin/password-policy"
+        ? ok({ require_change_after_admin_set: true, max_age_days: null })
+        : ok({
+            predefined_roles: { items: [{ id: "role-user", name: "Användare", permissions: [] }] },
+            roles: { items: [] }
+          })
   );
   renderInApp(<UserEditorDialog open onOpenChange={() => {}} user={user} />);
   const dialog = screen.getByRole("dialog", {
@@ -212,8 +214,9 @@ describe("UserEditorDialog", () => {
     const password = field(dialog, /^Lösenord/);
 
     expect(password.getAttribute("aria-required")).toBeNull();
+    // The one-time sentence follows when the tenant rule is on (mocked on above).
     const hint = within(dialog).getByText(
-      "Lämna båda fälten tomma för att behålla lösenordet. För att byta anger du ett nytt lösenord i båda fälten. Nuvarande lösenord behövs inte."
+      /^Lämna båda fälten tomma för att behålla lösenordet\. .* Användaren måste välja ett eget lösenord vid sin första inloggning\.$/
     );
     expect(password.getAttribute("aria-describedby")?.split(" ")).toContain(hint.id);
 

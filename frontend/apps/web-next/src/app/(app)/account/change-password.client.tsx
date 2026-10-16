@@ -26,7 +26,16 @@ type Field = "current" | "next" | "confirm";
 /** What the backend refused, said at the field it concerns. */
 type ServerErrors = Partial<Record<"current" | "next", string>>;
 
-function ChangePasswordForm({ policy, email }: { policy: PasswordPolicy; email: string }) {
+export function ChangePasswordForm({
+  policy,
+  email,
+  currentPasswordHint
+}: {
+  policy: PasswordPolicy;
+  email: string;
+  /** Under the current-password field, e.g. "enter the one-time password". */
+  currentPasswordHint?: string;
+}) {
   const t = useTranslations();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -135,6 +144,7 @@ function ChangePasswordForm({ policy, email }: { policy: PasswordPolicy; email: 
           setServerErrors((refused) => ({ ...refused, current: undefined }));
         }}
         autoComplete="current-password"
+        description={currentPasswordHint}
         isRequired
         status={currentError ? { type: "error", message: currentError } : undefined}
       />

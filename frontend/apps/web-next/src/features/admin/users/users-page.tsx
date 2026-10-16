@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
 import { rescueFocus } from "@/lib/focus-rescue";
+import { PasswordPolicyPanel } from "./password-policy-panel";
 import { UserEditorDialog } from "./user-editor";
 import { UserTable } from "./user-table";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH, type StateFilter } from "./users";
@@ -251,6 +252,8 @@ export function AdminUsersPage() {
           />
         )}
       </div>
+
+      <PasswordPolicyPanel />
 
       <UserEditorDialog open={showCreate} onOpenChange={setShowCreate} />
     </div>

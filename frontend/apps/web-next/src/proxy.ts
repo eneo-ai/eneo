@@ -22,6 +22,7 @@ const PUBLIC_PREFIXES = [
   "/logout",
   "/healthz",
   "/deactivated",
+  "/password-change",
   "/activate",
   // The invitation notice (links to /login; Zitadel registration is not ported).
   "/invite",
@@ -121,7 +122,7 @@ export async function proxy(request: NextRequest) {
   const apiRequest = pathname.startsWith("/api/");
   const publicPage = isPublic(pathname);
   // These public pages can consume an existing session during RSC rendering.
-  const sessionPage = ["/deactivated", "/activate", "/module-login"].some(
+  const sessionPage = ["/deactivated", "/activate", "/module-login", "/password-change"].some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
   const pass = () => authenticatedResponse(securityRequestHeaders, csp);

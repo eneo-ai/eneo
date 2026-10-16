@@ -25,7 +25,7 @@ import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { rolesQueryOptions, type Role } from "@/features/admin/roles/roles";
-import { type AdminUser } from "./users";
+import { adminPasswordPolicyQueryOptions, type AdminUser } from "./users";
 
 function RolePicker({
   selected,
@@ -89,6 +89,16 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
   const mode = user ? "update" : "create";
   const policyQuery = useQuery(passwordPolicyQueryOptions(browserApi));
   const policy = policyQuery.data ?? null;
+  // Whether the password set here is one-time; unknown (not loaded) says nothing.
+  const oneTimePassword =
+    useQuery(adminPasswordPolicyQueryOptions(browserApi)).data?.require_change_after_admin_set ===
+    true;
+  const passwordHint = [
+    mode === "update" ? t("admin_password_optional_hint") : t("admin_password_create_hint"),
+    oneTimePassword ? t("admin_password_one_time_hint") : null
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const [email, setEmail] = useState(user?.email ?? "");
   const [username, setUsername] = useState(user?.username ?? "");
@@ -276,7 +286,7 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
             <ConfirmedSecretInput
               label={t("password")}
               confirmLabel={t("confirm_password")}
-              description={mode === "update" ? t("admin_password_optional_hint") : undefined}
+              description={passwordHint}
               describedBy={checklistId}
               value={password}
               confirmation={passwordConfirmation}
