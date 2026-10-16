@@ -63,6 +63,12 @@
   let dirty = false;
   // The Markdown the editor last took, so the same text is not parsed again.
   let applied: string | null = null;
+  // The document as loaded, serialised: what the reader's text is compared
+  // with. The file's own Markdown does not serve, since a document does not
+  // come back byte for byte (a table's columns are padded, for one).
+  let baseline = "";
+  // Content is being put in place; the editor's own tidying of it is no edit.
+  let applying = false;
   let frame = 0;
   // Bumped when the document changed under the highlight, so it is placed again.
   let rendered = $state(0);
@@ -119,17 +125,20 @@
       }
     });
     // A keystroke only marks the document edited; nothing is saved here. The
-    // mark compares text, since the editor also tidies a loaded document (a
-    // paragraph to type in after a final code block) without changing it.
+    // mark compares text with the document as loaded, since the editor also
+    // tidies a loaded document (a paragraph to type in after a final code
+    // block) without changing what it says, and a reader cannot edit a
+    // document that is read-only.
     created.on("update", () => {
-      const changed =
-        applied !== null && withFinalNewline(created.getMarkdown()) !== withFinalNewline(applied);
+      if (applying || !created.isEditable) return;
+      const changed = withFinalNewline(created.getMarkdown()) !== baseline;
       if (changed === dirty) return;
       dirty = changed;
       onchange?.(dirty);
     });
     editor = created;
     applied = initial;
+    baseline = withFinalNewline(created.getMarkdown());
     let active = true;
     void tick().then(() => {
       if (!active) return;
@@ -159,8 +168,7 @@
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => {
       if (!editor || editor.isDestroyed || dirty) return;
-      editor.commands.setContent(next, CONTENT);
-      applied = next;
+      apply(editor, next);
       rendered++;
       onrender?.();
     });
@@ -224,12 +232,23 @@
     return editor ? withFinalNewline(editor.getMarkdown()) : markdown;
   }
 
+  /** Puts `next` in the editor as the document the reader's text is compared with. */
+  function apply(current: Editor, next: string) {
+    applying = true;
+    try {
+      current.commands.setContent(next, CONTENT);
+    } finally {
+      applying = false;
+    }
+    applied = next;
+    baseline = withFinalNewline(current.getMarkdown());
+  }
+
   /** Drops the reader's edits and shows the file's text again. */
   export function reset() {
     dirty = false;
     if (!editor) return;
-    editor.commands.setContent(markdown, CONTENT);
-    applied = markdown;
+    apply(editor, markdown);
     rendered++;
   }
 </script>
