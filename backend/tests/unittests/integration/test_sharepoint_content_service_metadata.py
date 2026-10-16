@@ -15,6 +15,9 @@ from eneo.integration.infrastructure.content_service.sharepoint_metadata import 
     SharePointColumnCatalog,
     source_metadata_fingerprint,
 )
+from eneo.integration.infrastructure.content_service.utils import (
+    ExtractionResult,
+)
 
 COLUMNS = [{"name": "Dokumenttyp", "displayName": "Dokumenttyp", "choice": {}}]
 ITEM = {"id": "i1", "listItem": {"fields": {"Dokumenttyp": "Rutin"}}}
@@ -54,7 +57,7 @@ def deps(user):
         "oauth_token_service": AsyncMock(),
         "session": AsyncMock(),
         "tenant_sharepoint_app_repo": AsyncMock(),
-        "tenant_app_auth_service": AsyncMock(),
+        "org_token_provider": AsyncMock(),
     }
 
 
@@ -237,6 +240,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=service._initialize_stats(),
             source_metadata=ENTRIES,
         )
 
@@ -267,6 +271,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=service._initialize_stats(),
             source_metadata=ENTRIES,
         )
 
@@ -292,6 +297,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=service._initialize_stats(),
             source_metadata=list(ENTRIES),
         )
 
@@ -321,6 +327,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=service._initialize_stats(),
             source_metadata=metadata,
         )
 
@@ -346,6 +353,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=service._initialize_stats(),
             source_metadata=[],
         )
 
@@ -367,6 +375,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=service._initialize_stats(),
             source_metadata=None,
         )
 
@@ -391,6 +400,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=service._initialize_stats(),
             source_metadata=ENTRIES,
         )
 
@@ -412,6 +422,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
+            stats=service._initialize_stats(),
             source_metadata=[],
         )
 
@@ -472,7 +483,9 @@ class TestDeltaMetadata:
                 "new-token",
             )
         )
-        client.get_file_content_by_id = AsyncMock(return_value=("Body", None))
+        client.get_file_extraction_by_id = AsyncMock(
+            return_value=ExtractionResult.ok("Body")
+        )
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
 
@@ -494,7 +507,7 @@ class TestDeltaMetadata:
             assert publish.await_args.args[0].source_metadata == ENTRIES
         else:
             publish.assert_not_awaited()
-        assert client.get_file_content_by_id.await_count == int(
+        assert client.get_file_extraction_by_id.await_count == int(
             not metadata_available or title == "Renamed.docx"
         )
         assert integration_knowledge.delta_token == "new-token"

@@ -104,7 +104,7 @@ export type BatchImportItem = {
   folder_id?: string | null;
   folder_path?: string | null;
   selected_item_type?: string | null;
-  resource_type?: string | null;
+  resource_type?: "site" | "onedrive" | null;
 };
 
 /** Request items for the batch import endpoint; site_root rows import the whole site. */

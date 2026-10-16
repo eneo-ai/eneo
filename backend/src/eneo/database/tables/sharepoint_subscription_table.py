@@ -72,6 +72,11 @@ class SharePointSubscription(BasePublic):
         nullable=True,
         comment="Most recent valid webhook received for this subscription",
     )
+    notification_url: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Notification URL registered with Graph; recreated when it drifts",
+    )
 
     # Relationships
     user_integration: Mapped["UserIntegration"] = relationship()

@@ -1,9 +1,15 @@
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Generic, Literal, Optional, TypeVar
+from typing import Any, Dict, Generic, Literal, Optional, Self, TypeVar, cast
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import (
+    BaseModel,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
@@ -14,15 +20,68 @@ from eneo.integration.domain.value_objects import (
     SkippedDetail,
     SyncMetadata,
 )
+from eneo.integration.presentation.validation import https_url_or_none
 from eneo.jobs.job_models import Task
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.models import ResourcePermission
+from eneo.observability.error_text import user_visible_error
 
 T = TypeVar("T", bound=BaseModel)
 
 
 def _empty_resource_permissions() -> list[ResourcePermission]:
     return []
+
+
+# What a sync wrote is cleaned again when served, so rows written before it
+# described errors for users and named unplaced items by id never show URLs,
+# SQL, host names or files from outside the imported item.
+def _visible_error(value: Optional[str]) -> Optional[str]:
+    return None if value is None else user_visible_error(value)
+
+
+# Skips of delta items never placed in the item's scope: older syncs named
+# their file, which may lie anywhere in the drive.
+_UNPLACED_SKIP_REASONS = (
+    "Folder scope path unavailable",
+    "Missing item id",
+    "Could not remove out-of-scope",
+    "Could not remove removed:",
+)
+
+
+def _visible_skip(file: str, reason: str) -> SkippedDetail:
+    reason = user_visible_error(reason)
+    return SkippedDetail(
+        file="" if reason.startswith(_UNPLACED_SKIP_REASONS) else file, reason=reason
+    )
+
+
+def _visible_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
+    # Summaries written by older syncs also hold the skipped files.
+    cleaned = dict(summary)
+    warning: object = cleaned.get("reconcile_warning")
+    if isinstance(warning, str):
+        cleaned["reconcile_warning"] = user_visible_error(warning)
+    details: object = cleaned.get("skipped_details")
+    if isinstance(details, list):
+        cleaned["skipped_details"] = [
+            _visible_detail(detail) for detail in cast(list[object], details)
+        ]
+    return cleaned
+
+
+def _visible_detail(detail: object) -> object:
+    if not isinstance(detail, dict):
+        return detail
+    entry = cast(Dict[str, object], detail)
+    file, reason = entry.get("file"), entry.get("reason")
+    # A sync names an item Graph returned without a name as a null file.
+    if file is None:
+        file = ""
+    if not isinstance(file, str) or not isinstance(reason, str):
+        return entry
+    return {**entry, **_visible_skip(file, reason)}
 
 
 class BaseListModel(BaseModel, Generic[T]):
@@ -151,6 +210,8 @@ class SharePointFilterColumn(BaseModel):
 
 class SharePointTreeResponse(BaseModel):
     items: list[SharePointTreeItem]
+    # True when the folder holds more items than ``items``; search to narrow.
+    truncated: bool = False
     current_path: str
     parent_id: Optional[str] = None
     drive_id: str
@@ -172,12 +233,38 @@ class SharePointSearchResponse(BaseModel):
 
 class IntegrationKnowledgeMetaData(BaseModel):
     size: int
+    document_count: int = Field(
+        0, description="Number of documents currently indexed for this knowledge"
+    )
     last_sync_summary: Optional[Dict[str, Any]] = None
-    last_synced_at: Optional[datetime] = None
+    last_synced_at: Optional[datetime] = Field(
+        None, description="When the last successful sync completed"
+    )
+    last_sync_status: Literal["never", "success", "error"] = Field(
+        "never", description="Outcome of the most recent sync attempt"
+    )
+    last_sync_error: Optional[str] = Field(
+        None, description="Error message from the most recent failed sync"
+    )
+    last_sync_attempted_at: Optional[datetime] = Field(
+        None, description="When the most recent sync attempt started"
+    )
     sharepoint_subscription_expires_at: Optional[datetime] = Field(
         None,
         description="When the SharePoint webhook subscription expires (only for SharePoint integrations)",
     )
+
+    @field_validator("last_sync_error")
+    @classmethod
+    def _user_visible_sync_error(cls, value: Optional[str]) -> Optional[str]:
+        return _visible_error(value)
+
+    @field_validator("last_sync_summary")
+    @classmethod
+    def _user_visible_sync_summary(
+        cls, value: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        return None if value is None else _visible_summary(value)
 
     @property
     def subscription_status(self) -> Optional[str]:
@@ -222,7 +309,10 @@ class IntegrationKnowledgePublic(BaseModel):
     id: UUID
     name: str
     original_name: Optional[str] = None
-    url: str
+    url: Optional[str] = Field(
+        description="Web URL of the item in its source; null unless an absolute "
+        "https URL"
+    )
     tenant_id: UUID
     space_id: UUID
     user_integration_id: UUID
@@ -247,6 +337,11 @@ class IntegrationKnowledgePublic(BaseModel):
     # the OpenAPI spec; the assembler always sets a Task member.
     task: Task
 
+    @field_validator("url")
+    @classmethod
+    def _https_only(cls, value: Optional[str]) -> Optional[str]:
+        return https_url_or_none(value)
+
 
 class SyncLog(BaseModel):
     """Detailed sync operation log."""
@@ -260,6 +355,20 @@ class SyncLog(BaseModel):
     started_at: datetime
     completed_at: Optional[datetime] = None
     created_at: datetime
+
+    # Cleaned before validation: a stored detail with a null file would not
+    # pass the SkippedDetail shape otherwise.
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _user_visible_metadata(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        return _visible_summary(cast(Dict[str, Any], value))
+
+    @field_validator("error_message")
+    @classmethod
+    def _user_visible_error_message(cls, value: Optional[str]) -> Optional[str]:
+        return _visible_error(value)
 
     @computed_field
     def files_processed(self) -> int:
@@ -306,6 +415,58 @@ class SyncLog(BaseModel):
 
 class SyncLogList(BaseListModel[SyncLog]):
     pass
+
+
+class IntegrationDocumentItem(BaseModel):
+    id: UUID
+    title: str
+    relative_path: str = Field(
+        description="Folders between the imported item and the document, "
+        "URL-decoded and without the file name; empty for the item itself."
+    )
+    url: Optional[str] = Field(
+        None,
+        description="Web URL of the source document; null unless an absolute https URL",
+    )
+    size: int
+    updated_at: Optional[datetime] = None
+    source_metadata: list[SourceMetadataEntry] = []
+
+    @field_validator("url")
+    @classmethod
+    def _https_only(cls, value: Optional[str]) -> Optional[str]:
+        return https_url_or_none(value)
+
+
+class IntegrationDocumentsPage(BaseModel):
+    items: list[IntegrationDocumentItem]
+    total_count: int = Field(description="Documents matching the query")
+    limit: int
+    offset: int
+    total_size: int = Field(description="Summed size of the matching documents")
+
+
+class IntegrationSkippedDocument(BaseModel):
+    file: str
+    reason: str
+
+    @model_validator(mode="after")
+    def _user_visible(self) -> Self:
+        visible = _visible_skip(self.file, self.reason)
+        self.file, self.reason = visible["file"], visible["reason"]
+        return self
+
+
+class IntegrationSkippedDocuments(BaseModel):
+    """Files the latest sync of an item did not index."""
+
+    items: list[IntegrationSkippedDocument]
+    total: int = Field(description="Skipped files, including those not listed")
+    truncated: bool = Field(description="True when the stored list was capped")
+    synced_at: Optional[datetime] = Field(
+        default=None,
+        description="When the sync the list comes from finished or started",
+    )
 
 
 class PaginatedSyncLogList(BaseModel):

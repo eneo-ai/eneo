@@ -163,6 +163,9 @@ from eneo.integration.application.user_integration_service import (
 from eneo.integration.infrastructure.auth_service.confluence_auth_service import (
     ConfluenceAuthService,
 )
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    OrgTokenProvider,
+)
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
 )
@@ -1468,6 +1471,7 @@ class Container(containers.DeclarativeContainer):
     tenant_sharepoint_app_service = providers.Factory(
         TenantSharePointAppService,
         tenant_app_repo=tenant_sharepoint_app_repo,
+        tenant_app_auth_service=tenant_app_auth_service,
     )
 
     # SharePoint auth service with tenant app support
@@ -1477,8 +1481,14 @@ class Container(containers.DeclarativeContainer):
     )
 
     # Service account auth service for delegated permissions via service account
-    service_account_auth_service = providers.Factory(
-        ServiceAccountAuthService,
+    # Singleton: it holds the per-process access-token cache.
+    service_account_auth_service = providers.Singleton(ServiceAccountAuthService)
+    org_token_provider = providers.Factory(
+        OrgTokenProvider,
+        tenant_app_repo=tenant_sharepoint_app_repo,
+        tenant_app_auth_service=tenant_app_auth_service,
+        service_account_auth_service=service_account_auth_service,
+        encryption_service=encryption_service,
     )
 
     oauth2_service = providers.Factory(
@@ -1497,21 +1507,20 @@ class Container(containers.DeclarativeContainer):
         oauth_token_repo=oauth_token_repo,
         confluence_auth_service=confluence_auth_service,
         sharepoint_auth_service=sharepoint_auth_service,
+        redis_client=redis_client,
+        token_mapper=confluence_token_mapper,
     )
 
     # SharePoint auth router (after oauth_token_service)
     sharepoint_auth_router = providers.Factory(
         SharePointAuthRouter,
-        tenant_app_service=tenant_sharepoint_app_service,
-        tenant_app_auth_service=tenant_app_auth_service,
         oauth_token_service=oauth_token_service,
-        service_account_auth_service=service_account_auth_service,
+        org_token_provider=org_token_provider,
     )
 
     sharepoint_subscription_service = providers.Factory(
         SharePointSubscriptionService,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
-        oauth_token_service=oauth_token_service,
     )
 
     user_integration_service = providers.Factory(
@@ -1539,6 +1548,7 @@ class Container(containers.DeclarativeContainer):
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
         tenant_app_auth_service=tenant_app_auth_service,
         service_account_auth_service=service_account_auth_service,
+        org_token_provider=org_token_provider,
     )
 
     confluence_content_service = providers.Factory(
@@ -1566,10 +1576,9 @@ class Container(containers.DeclarativeContainer):
         integration_knowledge_repo=integration_knowledge_repo,
         session=session,
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
-        tenant_app_auth_service=tenant_app_auth_service,
-        service_account_auth_service=service_account_auth_service,
         sync_log_repo=sync_log_repo,
         change_key_service=office_change_key_service,
+        org_token_provider=org_token_provider,
     )
     sharepoint_webhook_service = providers.Factory(
         SharepointWebhookService,
@@ -1579,6 +1588,7 @@ class Container(containers.DeclarativeContainer):
         user_repo=user_repo,
         change_key_service=office_change_key_service,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
+        redis_client=redis_client,
     )
     confluence_preview_service = providers.Factory(
         ConfluencePreviewService,
@@ -1587,9 +1597,7 @@ class Container(containers.DeclarativeContainer):
     sharepoint_preview_service = providers.Factory(
         SharePointPreviewService,
         oauth_token_service=oauth_token_service,
-        tenant_app_auth_service=tenant_app_auth_service,
-        service_account_auth_service=service_account_auth_service,
-        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+        org_token_provider=org_token_provider,
     )
     integration_preview_service = providers.Factory(
         IntegrationPreviewService,

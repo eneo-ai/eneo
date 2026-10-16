@@ -1,15 +1,17 @@
 import asyncio
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from dependency_injector import providers
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
 )
+from eneo.integration.infrastructure.oauth_state_store import OauthStateStore
 from eneo.integration.presentation import admin_sharepoint_router as router
 from eneo.integration.presentation.admin_models import ServiceAccountAuthCallback
 from eneo.main.config import set_settings
@@ -27,20 +29,18 @@ async def test_service_account_callback_rejects_another_user_in_same_tenant(
     )
     provider = AsyncMock(spec=ServiceAccountAuthService)
     monkeypatch.setattr(router, "ServiceAccountAuthService", lambda: provider)
-    monkeypatch.setattr(
-        router,
-        "_pop_oauth_state",
-        AsyncMock(
-            return_value={
-                "tenant_id": str(user.tenant_id),
-                "user_id": str(uuid4()),
-                "client_id": "test-client",
-                "client_secret": "test-secret",
-                "tenant_domain": "example.onmicrosoft.com",
-                "redirect_uri": "https://beta.example/integrations/callback/token/",
-            }
-        ),
+    state_store = MagicMock()
+    state_store.pop = AsyncMock(
+        return_value={
+            "tenant_id": str(user.tenant_id),
+            "user_id": str(uuid4()),
+            "client_id": "test-client",
+            "client_secret": "test-secret",
+            "tenant_domain": "example.onmicrosoft.com",
+            "redirect_uri": "https://beta.example/integrations/callback/token/",
+        }
     )
+    monkeypatch.setattr(router, "_oauth_state_store", lambda container: state_store)
     container = Container(user=providers.Object(user))
     with pytest.raises(HTTPException) as error:
         await router.service_account_auth_callback(
@@ -51,17 +51,23 @@ async def test_service_account_callback_rejects_another_user_in_same_tenant(
     provider.exchange_token.assert_not_awaited()
 
 
-async def test_service_account_state_is_consumed_once_under_concurrent_callbacks(
-    monkeypatch,
-):
+async def test_service_account_state_is_consumed_once_under_concurrent_callbacks():
     payload = {"user_id": str(uuid4()), "tenant_id": str(uuid4())}
-    states = {router.OAUTH_STATE_PREFIX + "state": json.dumps(payload)}
+    states = {router.OAUTH_STATE_PREFIX + "state": "sealed"}
     redis = AsyncMock()
     redis.getdel.side_effect = lambda key: states.pop(key, None)
-    monkeypatch.setattr(router, "_get_redis_client", AsyncMock(return_value=redis))
-    results = await asyncio.gather(
-        router._pop_oauth_state("state"), router._pop_oauth_state("state")
+    encryption = MagicMock()
+    encryption.decrypt.return_value = json.dumps(payload)
+    store = OauthStateStore(
+        redis, prefix=router.OAUTH_STATE_PREFIX, encryption_service=encryption
     )
+    results = await asyncio.gather(store.pop("state"), store.pop("state"))
     assert results.count(payload) == 1
     assert results.count(None) == 1
     assert states == {}
+
+
+def test_service_account_callback_state_is_bounded():
+    with pytest.raises(ValidationError):
+        ServiceAccountAuthCallback(auth_code="code", state="s" * 257)
+    assert ServiceAccountAuthCallback(auth_code="code", state="s" * 43)

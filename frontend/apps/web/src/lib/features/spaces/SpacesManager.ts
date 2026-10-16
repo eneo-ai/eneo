@@ -64,7 +64,8 @@ function SpacesManager(data: SpacesManagerParams) {
     }
   }
 
-  async function refreshCurrentSpace(type?: "applications" | "knowledge") {
+  /** Re-reads the current space, or one part of it; false when the request failed. */
+  async function refreshCurrentSpace(type?: "applications" | "knowledge"): Promise<boolean> {
     let $currentSpace = get(currentSpace);
     try {
       if (type) {
@@ -84,8 +85,10 @@ function SpacesManager(data: SpacesManagerParams) {
         $currentSpace = await eneo.spaces.get($currentSpace);
       }
       currentSpace.set($currentSpace);
+      return true;
     } catch (e) {
       console.error("Error updating current space", e);
+      return false;
     }
   }
 

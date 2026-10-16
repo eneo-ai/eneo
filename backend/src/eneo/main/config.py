@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from pydantic import (
     Field,
     ValidationError,
+    ValidationInfo,
     computed_field,
     field_validator,
     model_validator,
@@ -651,6 +652,8 @@ class Settings(BaseSettings):
     # Max SharePoint/OneDrive file size to download and process (bytes)
     # Default: 50 MB
     sharepoint_max_download_bytes: int = 50 * 1024 * 1024
+    # Most items the import picker lists for one folder before asking to narrow
+    sharepoint_browse_max_items: int = 2000
 
     # Generic encryption key for sensitive data (HTTP auth, tenant API keys, etc.)
     # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_ENABLED=true
@@ -728,11 +731,11 @@ class Settings(BaseSettings):
             )
         return v
 
-    @field_validator("sharepoint_max_download_bytes")
+    @field_validator("sharepoint_max_download_bytes", "sharepoint_browse_max_items")
     @classmethod
-    def validate_sharepoint_max_download_bytes(cls, v: int):
+    def validate_sharepoint_positive_limits(cls, v: int, info: ValidationInfo):
         if v <= 0:
-            raise ValueError("sharepoint_max_download_bytes must be greater than 0")
+            raise ValueError(f"{info.field_name} must be greater than 0")
         return v
 
     @model_validator(mode="after")

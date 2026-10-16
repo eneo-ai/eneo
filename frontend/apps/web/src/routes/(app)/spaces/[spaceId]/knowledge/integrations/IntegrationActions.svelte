@@ -12,7 +12,11 @@
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
 
-  export let knowledgeItem: IntegrationKnowledge;
+  interface Props {
+    knowledgeItem: IntegrationKnowledge;
+  }
+
+  let { knowledgeItem }: Props = $props();
 
   const eneo = getEneo();
   const {
@@ -45,9 +49,9 @@
     refreshCurrentSpace();
   }
 
-  let showDeleteDialog = false;
-  let showRenameDialog = false;
-  let showSyncDialog = false;
+  let showDeleteDialog = $state(false);
+  let showRenameDialog = $state(false);
+  let showSyncDialog = $state(false);
 </script>
 
 <DropdownMenu.Root>

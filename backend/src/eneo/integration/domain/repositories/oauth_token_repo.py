@@ -19,6 +19,11 @@ class OauthTokenRepository(ABC):
     ) -> "OauthToken": ...
 
     @abstractmethod
+    async def one_fresh(self, id: "UUID") -> "OauthToken":
+        """The row as currently committed, bypassing anything cached in the session."""
+        ...
+
+    @abstractmethod
     async def add(self, obj: "OauthToken") -> "OauthToken": ...
 
     @abstractmethod
