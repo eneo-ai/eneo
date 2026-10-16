@@ -451,14 +451,8 @@ class SharePointContentClient(BaseClient):
                     logger.warning(str(e))
                     return ExtractionResult.error(str(e), content_type)
 
-            # Parsers are CPU-bound and synchronous; keep the event loop free
-            # for the other requests of the sync.
-            return await asyncio.to_thread(
-                extract_sharepoint_content,
-                payload,
-                content_type,
-                file_name,
-                charset=charset,
+            return await extract_sharepoint_content(
+                payload, content_type, file_name, charset=charset
             )
 
         return await retry_on_throttle(

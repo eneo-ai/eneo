@@ -1883,8 +1883,10 @@ class TestOneDriveFolderTraversal:
         )
 
         mock_client = AsyncMock()
-        mock_client.get_file_extraction_by_id.return_value = extract_sharepoint_content(
-            header_only_xlsx_bytes(), XLSX_MIME, "names.xlsx"
+        mock_client.get_file_extraction_by_id.return_value = (
+            await extract_sharepoint_content(
+                header_only_xlsx_bytes(), XLSX_MIME, "names.xlsx"
+            )
         )
         stats = service._initialize_stats()
 

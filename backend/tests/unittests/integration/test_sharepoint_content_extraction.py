@@ -3,12 +3,19 @@
 import json
 from collections.abc import Callable
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from eneo.files.extraction_limits import FileExtractionLimits
-from eneo.files.text import EncryptedFileError, TextExtractor
+from eneo.files.text import (
+    CorruptFileError,
+    EncryptedFileError,
+    ExtractionError,
+    ExtractionLimitError,
+    PdfPageLimitError,
+    UnsupportedFormatError,
+)
 from eneo.integration.infrastructure.content_service.parsing import (
     unsupported_file_reason,
 )
@@ -40,6 +47,8 @@ from tests.unittests.integration.sharepoint_fixtures import (
     pptx_bytes,
     xlsx_bytes,
 )
+
+SANDBOX = "eneo.integration.infrastructure.content_service.utils.extract_in_process"
 
 
 class TestSupportedFormats:
@@ -89,7 +98,7 @@ class TestSupportedFormats:
             ),
         ],
     )
-    def test_extracts_text_with_the_upload_parsers(
+    async def test_extracts_text_with_the_upload_parsers(
         self,
         tmp_path: Path,
         filename: str,
@@ -97,7 +106,9 @@ class TestSupportedFormats:
         build: Callable[[Path], bytes],
         expected: str,
     ):
-        result = extract_sharepoint_content(build(tmp_path), content_type, filename)
+        result = await extract_sharepoint_content(
+            build(tmp_path), content_type, filename
+        )
 
         assert result.failed is False
         assert result.skip_reason is None
@@ -114,23 +125,82 @@ class TestSupportedFormats:
         ],
         ids=["utf8", "cp1252-fallback", "declared-latin1", "utf16-bom"],
     )
-    def test_decodes_text_by_charset_then_utf8_then_cp1252(
+    async def test_decodes_text_by_charset_then_utf8_then_cp1252(
         self, payload: bytes, charset: str | None, expected: str
     ):
-        result = extract_sharepoint_content(
+        result = await extract_sharepoint_content(
             payload, "text/plain", "notes.txt", charset=charset
         )
         assert result.text == expected
 
-    def test_null_bytes_are_stripped_before_storage(self):
-        with patch.object(TextExtractor, "extract_from_docx", return_value="Hel\x00lo"):
-            result = extract_sharepoint_content(b"PK", DOCX_MIME, "a.docx")
+    async def test_null_bytes_are_stripped_before_storage(self):
+        with patch(SANDBOX, AsyncMock(return_value="Hel\x00lo")):
+            result = await extract_sharepoint_content(b"PK", DOCX_MIME, "a.docx")
         assert result.text == "Hello"
 
 
+class TestParsersRunInTheUploadSandbox:
+    @pytest.mark.parametrize(
+        ("filename", "content_type", "mimetype"),
+        [
+            ("report.docx", "text/html", DOCX_MIME),
+            ("book.xls", OCTET, XLSX_MIME),
+            ("macro.xlsm", OCTET, XLSX_MIME),
+            ("deck.pptx", "", PPTX_MIME),
+            ("download", "application/pdf; charset=binary", "application/pdf"),
+        ],
+    )
+    async def test_office_and_pdf_bytes_are_handed_to_extract_in_process(
+        self, filename: str, content_type: str, mimetype: str
+    ):
+        """The kind decides the worker's mimetype; the header never does."""
+        limits = FileExtractionLimits(max_output_bytes=123)
+        seen: dict[str, object] = {}
+
+        async def fake(path: Path, worker_mimetype, worker_filename, *, limits):
+            seen.update(
+                suffix=path.suffix,
+                payload=path.read_bytes(),
+                mimetype=worker_mimetype,
+                filename=worker_filename,
+                limits=limits,
+            )
+            return "Sandboxed text"
+
+        with patch(SANDBOX, fake):
+            result = await extract_sharepoint_content(
+                b"PK\x03\x04 body", content_type, filename, limits=limits
+            )
+
+        assert result.text == "Sandboxed text"
+        assert seen == {
+            "suffix": Path(filename).suffix,
+            "payload": b"PK\x03\x04 body",
+            "mimetype": mimetype,
+            "filename": filename,
+            "limits": limits,
+        }
+
+    @pytest.mark.parametrize(
+        ("filename", "content_type", "payload"),
+        [
+            ("notes.txt", "text/plain", b"Plain text"),
+            ("blob", OCTET, b"Sniffed as text"),
+        ],
+    )
+    async def test_text_kinds_are_decoded_inline(
+        self, filename: str, content_type: str, payload: bytes
+    ):
+        with patch(SANDBOX, AsyncMock()) as sandbox:
+            result = await extract_sharepoint_content(payload, content_type, filename)
+
+        assert result.text == payload.decode()
+        sandbox.assert_not_awaited()
+
+
 class TestNoTextIsNotAFailure:
-    def test_scanned_pdf_reports_missing_text_layer(self):
-        result = extract_sharepoint_content(
+    async def test_scanned_pdf_reports_missing_text_layer(self):
+        result = await extract_sharepoint_content(
             pdf_bytes(["", ""]), "application/pdf", "scan.pdf"
         )
 
@@ -150,10 +220,10 @@ class TestNoTextIsNotAFailure:
             ("zero-bytes.pdf", "application/pdf", b""),
         ],
     )
-    def test_empty_documents_report_empty_content(
+    async def test_empty_documents_report_empty_content(
         self, filename: str, content_type: str, payload: bytes
     ):
-        result = extract_sharepoint_content(payload, content_type, filename)
+        result = await extract_sharepoint_content(payload, content_type, filename)
 
         assert result.skip_reason == EMPTY_CONTENT_REASON
         assert result.failed is False
@@ -210,10 +280,10 @@ class TestUnsupportedFormatsNeverProduceGarbage:
             ("looks-like-text.txt", "text/plain", ".txt"),
         ],
     )
-    def test_reports_a_precise_unsupported_reason(
+    async def test_reports_a_precise_unsupported_reason(
         self, filename: str, content_type: str, label: str
     ):
-        result = extract_sharepoint_content(self.GARBAGE, content_type, filename)
+        result = await extract_sharepoint_content(self.GARBAGE, content_type, filename)
 
         assert result.skip_reason == f"Unsupported file type ({label})"
         assert result.text is None
@@ -231,10 +301,10 @@ class TestFailuresAreNotNoText:
             ("corrupt.pdf", "application/pdf", b"%PDF-1.4 garbage without xref"),
         ],
     )
-    def test_corrupt_files_fail_with_an_error_reason(
+    async def test_corrupt_files_fail_with_an_error_reason(
         self, filename: str, content_type: str, payload: bytes
     ):
-        result = extract_sharepoint_content(payload, content_type, filename)
+        result = await extract_sharepoint_content(payload, content_type, filename)
 
         assert result.failed is True
         assert result.text is None
@@ -242,37 +312,71 @@ class TestFailuresAreNotNoText:
         assert result.skip_reason.startswith("Error: ")
         assert result.is_no_text is False
 
-    def test_encrypted_pdf_fails(self):
-        with patch.object(
-            TextExtractor,
-            "extract_from_pdf",
-            side_effect=EncryptedFileError("locked.pdf"),
-        ):
-            result = extract_sharepoint_content(
-                b"%PDF", "application/pdf", "locked.pdf"
-            )
+    @pytest.mark.parametrize(
+        ("error", "expected"),
+        [
+            (
+                EncryptedFileError("a.docx"),
+                ExtractionResult.error("Password-protected file", DOCX_MIME),
+            ),
+            (
+                CorruptFileError("a.docx"),
+                ExtractionResult.error("Corrupt or malformed file", DOCX_MIME),
+            ),
+            (
+                ExtractionError("Extraction failed for 'a.docx'"),
+                ExtractionResult.error("Extraction failed for 'a.docx'", DOCX_MIME),
+            ),
+            (
+                RuntimeError("boom"),
+                ExtractionResult.error("RuntimeError while extracting docx", DOCX_MIME),
+            ),
+            (
+                UnsupportedFormatError("a.docx", "application/x-thing"),
+                ExtractionResult.skipped("Unsupported file type (.docx)", DOCX_MIME),
+            ),
+            (
+                PdfPageLimitError("a.docx", 1000),
+                ExtractionResult.skipped(
+                    "Exceeds extraction limit (1000 PDF pages)", DOCX_MIME
+                ),
+            ),
+            (
+                ExtractionLimitError("a.docx", "text output limit"),
+                ExtractionResult.skipped(
+                    "Exceeds extraction limit (text output limit)", DOCX_MIME
+                ),
+            ),
+            (
+                ExtractionLimitError("a.docx", "document resource limit"),
+                ExtractionResult.skipped(
+                    "Exceeds extraction limit (document resource limit)", DOCX_MIME
+                ),
+            ),
+            (
+                ExtractionLimitError("a.docx", "extraction deadline"),
+                ExtractionResult.skipped(
+                    "Exceeds extraction limit (extraction deadline)", DOCX_MIME
+                ),
+            ),
+        ],
+        ids=lambda value: type(value).__name__ if isinstance(value, Exception) else "",
+    )
+    async def test_sandbox_outcomes_map_to_results(
+        self, error: Exception, expected: ExtractionResult
+    ):
+        """Only parser failures are ``failed``; limits and formats are skips."""
+        with patch(SANDBOX, AsyncMock(side_effect=error)):
+            result = await extract_sharepoint_content(b"PK", DOCX_MIME, "a.docx")
 
-        assert result == ExtractionResult(
-            skip_reason="Error: Password-protected file",
-            failed=True,
-            content_type="application/pdf",
-        )
-
-    def test_unexpected_parser_exception_fails(self):
-        with patch.object(
-            TextExtractor, "extract_from_docx", side_effect=RuntimeError("boom")
-        ):
-            result = extract_sharepoint_content(b"PK", DOCX_MIME, "a.docx")
-
-        assert result.failed is True
-        assert result.skip_reason == "Error: RuntimeError while extracting docx"
+        assert result == expected
 
 
 class TestExtractionLimits:
-    def test_pdf_over_page_limit_is_skipped_not_chunked(self):
+    async def test_pdf_over_page_limit_is_skipped_not_chunked(self):
         limits = FileExtractionLimits(max_pdf_pages=2)
 
-        result = extract_sharepoint_content(
+        result = await extract_sharepoint_content(
             pdf_bytes(["one", "two", "three"]),
             "application/pdf",
             "long.pdf",
@@ -284,23 +388,38 @@ class TestExtractionLimits:
         assert result.is_no_text is False
 
     @pytest.mark.parametrize(
-        ("filename", "content_type", "payload"),
+        ("filename", "content_type", "payload", "limit"),
         [
-            ("big.docx", DOCX_MIME, docx_bytes("x" * 200)),
-            ("big.txt", "text/plain", b"x" * 200),
+            # The sandbox reports every cap it enforces with one exit status.
+            ("big.docx", DOCX_MIME, docx_bytes("x" * 200), "document resource limit"),
+            ("big.txt", "text/plain", b"x" * 200, "100 bytes of text"),
         ],
     )
-    def test_oversized_output_is_skipped(
-        self, filename: str, content_type: str, payload: bytes
+    async def test_oversized_output_is_skipped(
+        self, filename: str, content_type: str, payload: bytes, limit: str
     ):
         limits = FileExtractionLimits(max_output_bytes=100)
 
-        result = extract_sharepoint_content(
+        result = await extract_sharepoint_content(
             payload, content_type, filename, limits=limits
         )
 
-        assert result.skip_reason == "Exceeds extraction limit (100 bytes of text)"
+        assert result.skip_reason == f"Exceeds extraction limit ({limit})"
         assert result.failed is False
+
+    async def test_archive_entry_limit_stops_a_docx_before_it_is_parsed(self):
+        """A zip bomb within the download cap is refused by the sandbox."""
+        limits = FileExtractionLimits(max_archive_entries=1)
+
+        result = await extract_sharepoint_content(
+            docx_bytes("Many parts"), DOCX_MIME, "bomb.docx", limits=limits
+        )
+
+        assert result.skip_reason == (
+            "Exceeds extraction limit (document resource limit)"
+        )
+        assert result.failed is False
+        assert result.is_no_text is False
 
 
 class TestDispatch:

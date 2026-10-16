@@ -46,6 +46,7 @@ class NoExtractableTextError(ExtractionError):
 
 class ExtractionLimitError(ExtractionError):
     def __init__(self, filename: str, limit: str):
+        self.limit = limit
         super().__init__(f"File '{filename}' exceeded the {limit}", "EXTRACTION_LIMIT")
 
 
