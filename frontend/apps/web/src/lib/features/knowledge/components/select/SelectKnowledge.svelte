@@ -39,11 +39,10 @@
   const allIntegration = $derived($currentSpace?.knowledge?.integrationKnowledge ?? []);
   const integrationList = $derived(selectedIntegrationKnowledge ?? []);
 
-  const allOrigins: KnowledgeOrigin[] = ["space", "organization", "shared"];
+  const allOrigins: KnowledgeOrigin[] = ["space", "organization"];
   const originLabels = $derived({
     space: m.knowledge(),
-    organization: m.organization_knowledge(),
-    shared: m.shared_knowledge()
+    organization: m.organization_knowledge()
   });
   const collectionsByOrigin = $derived(
     partitionByOrigin(selectedCollections ?? [], currentSpaceId, orgSpaceId)

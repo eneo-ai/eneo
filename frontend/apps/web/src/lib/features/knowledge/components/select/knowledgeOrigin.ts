@@ -1,6 +1,7 @@
 /**
  * Knowledge origin is determined by ownership, independently of the user's space membership.
- * The available options and selected sources use the same exhaustive classification.
+ * The available options and selected sources use the same exhaustive classification, so a
+ * source the space can see always has exactly one section and stays removable.
  */
 
 type SpaceOwned = {
@@ -22,7 +23,7 @@ export function ownerSpaceId(item: SpaceOwned | null | undefined): string | unde
   );
 }
 
-export type KnowledgeOrigin = "space" | "organization" | "shared";
+export type KnowledgeOrigin = "space" | "organization";
 
 export function classifyKnowledgeOrigin(
   item: SpaceOwned,
@@ -30,10 +31,10 @@ export function classifyKnowledgeOrigin(
   organizationSpaceId: string | undefined
 ): KnowledgeOrigin {
   const sid = ownerSpaceId(item);
-  // Keep sources without recorded ownership visible and removable in the current-space section.
-  if (!sid || sid === currentSpaceId) return "space";
-  if (sid === organizationSpaceId) return "organization";
-  return "shared";
+  // Anything the organization space does not own, including legacy links from another space,
+  // belongs to the current space's section.
+  if (sid && sid !== currentSpaceId && sid === organizationSpaceId) return "organization";
+  return "space";
 }
 
 export function partitionByOrigin<T extends SpaceOwned>(
@@ -41,7 +42,7 @@ export function partitionByOrigin<T extends SpaceOwned>(
   currentSpaceId: string | undefined,
   organizationSpaceId: string | undefined
 ): Record<KnowledgeOrigin, T[]> {
-  const partitions: Record<KnowledgeOrigin, T[]> = { space: [], organization: [], shared: [] };
+  const partitions: Record<KnowledgeOrigin, T[]> = { space: [], organization: [] };
   for (const item of items) {
     partitions[classifyKnowledgeOrigin(item, currentSpaceId, organizationSpaceId)].push(item);
   }

@@ -117,15 +117,13 @@
   const triggerLabel = $derived(
     {
       space: m.add_knowledge_space(),
-      organization: m.add_knowledge_organization(),
-      shared: m.add_knowledge_shared()
+      organization: m.add_knowledge_organization()
     }[origin]
   );
   const emptyLabel = $derived(
     {
       space: m.no_space_sources(),
-      organization: m.no_organization_sources(),
-      shared: m.no_shared_sources()
+      organization: m.no_organization_sources()
     }[origin]
   );
 

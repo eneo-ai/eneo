@@ -71,27 +71,27 @@ function space(organizationSpaceId: string | null = "org"): Space {
 
 describe("SelectKnowledge", () => {
   it.each(["org", null])(
-    "keeps a third-space source visible and removable after adding it (org ID %s)",
+    "lists a source linked from another space under this space and keeps it removable (org ID %s)",
     async (orgId) => {
       render(SelectKnowledgeTestHost, { space: space(orgId) });
 
-      await page.getByRole("button", { name: m.add_knowledge_shared() }).click();
+      await page.getByRole("button", { name: m.add_knowledge_space() }).click();
       await page.getByRole("option", { name: /Collection other/ }).click();
-      const shared = page.getByRole("region", { name: m.shared_knowledge(), exact: true });
-      await expect.element(shared.getByText("Collection other", { exact: true })).toBeVisible();
+      const current = page.getByRole("region", { name: m.knowledge(), exact: true });
+      await expect.element(current.getByText("Collection other", { exact: true })).toBeVisible();
       await expect
         .element(page.getByTestId("knowledge-selection"))
         .toHaveTextContent('"collections":["collection-other"]');
 
-      await shared.getByRole("button", { name: m.remove(), exact: true }).click();
+      await current.getByRole("button", { name: m.remove(), exact: true }).click();
       await expect
-        .element(shared.getByText("Collection other", { exact: true }))
+        .element(current.getByText("Collection other", { exact: true }))
         .not.toBeInTheDocument();
       await expect
         .element(page.getByTestId("knowledge-selection"))
         .toHaveTextContent('"collections":[]');
 
-      await page.getByRole("button", { name: m.add_knowledge_shared() }).click();
+      await page.getByRole("button", { name: m.add_knowledge_space() }).click();
       await expect.element(page.getByRole("option", { name: /Collection other/ })).toBeVisible();
     }
   );
@@ -113,12 +113,7 @@ describe("SelectKnowledge", () => {
       });
 
       for (const owner of owners) {
-        const label =
-          owner === "current"
-            ? m.knowledge()
-            : owner === orgId
-              ? m.organization_knowledge()
-              : m.shared_knowledge();
+        const label = owner === orgId ? m.organization_knowledge() : m.knowledge();
         const region = page.getByRole("region", { name: label, exact: true });
         for (const name of [
           `Collection ${owner}`,
@@ -129,7 +124,7 @@ describe("SelectKnowledge", () => {
           expect(page.getByText(name, { exact: true }).elements()).toHaveLength(1);
         }
       }
-      for (const label of [m.knowledge(), m.organization_knowledge(), m.shared_knowledge()]) {
+      for (const label of [m.knowledge(), m.organization_knowledge()]) {
         const removeButtons = page
           .getByRole("region", { name: label, exact: true })
           .getByRole("button", { name: m.remove(), exact: true });
@@ -155,26 +150,26 @@ describe("SelectKnowledge", () => {
       initialWebsites: [websites[2]],
       initialIntegrationKnowledge: [integrations[2]]
     });
-    const shared = page.getByRole("region", { name: m.shared_knowledge(), exact: true });
-    await expect.element(shared.getByText("Collection other", { exact: true })).toBeVisible();
-    await expect.element(shared.getByText("Website other", { exact: true })).toBeVisible();
+    const current = page.getByRole("region", { name: m.knowledge(), exact: true });
+    await expect.element(current.getByText("Collection other", { exact: true })).toBeVisible();
+    await expect.element(current.getByText("Website other", { exact: true })).toBeVisible();
     await expect
-      .element(shared.getByText("Integration integration-other", { exact: true }))
+      .element(current.getByText("Integration integration-other", { exact: true }))
       .toBeVisible();
     for (let index = 0; index < 3; index++)
-      await shared.getByRole("button", { name: m.remove(), exact: true }).first().click();
+      await current.getByRole("button", { name: m.remove(), exact: true }).first().click();
     await expect
       .element(page.getByTestId("knowledge-selection"))
       .toHaveTextContent('{"collections":[],"websites":[],"integrations":[]}');
   });
 
   it.each([false, true])(
-    "removes every saved item in a shared wrapper (partially available %s)",
+    "removes every saved item in a linked wrapper (partially available %s)",
     async (partiallyAvailable) => {
       const wrapped = ["first", "second"].map((id) => ({
         ...integration("other", id),
         wrapper_id: "wrapper",
-        wrapper_name: "Shared site"
+        wrapper_name: "Linked site"
       }));
       const currentSpace = space();
       const available = partiallyAvailable ? [wrapped[0]] : wrapped;
@@ -186,14 +181,14 @@ describe("SelectKnowledge", () => {
         space: currentSpace,
         initialIntegrationKnowledge: wrapped
       });
-      const shared = page.getByRole("region", { name: m.shared_knowledge(), exact: true });
-      await expect.element(shared.getByText("Shared site", { exact: true })).toBeVisible();
-      await shared.getByRole("button", { name: "Shared site", exact: true }).click();
-      await expect.element(shared.getByText("Integration first", { exact: true })).toBeVisible();
-      await expect.element(shared.getByText("Integration second", { exact: true })).toBeVisible();
-      await shared.getByRole("button", { name: m.remove(), exact: true }).click();
+      const current = page.getByRole("region", { name: m.knowledge(), exact: true });
+      await expect.element(current.getByText("Linked site", { exact: true })).toBeVisible();
+      await current.getByRole("button", { name: "Linked site", exact: true }).click();
+      await expect.element(current.getByText("Integration first", { exact: true })).toBeVisible();
+      await expect.element(current.getByText("Integration second", { exact: true })).toBeVisible();
+      await current.getByRole("button", { name: m.remove(), exact: true }).click();
       await expect
-        .element(shared.getByText("Shared site", { exact: true }))
+        .element(current.getByText("Linked site", { exact: true }))
         .not.toBeInTheDocument();
       await expect
         .element(page.getByTestId("knowledge-selection"))
@@ -205,12 +200,12 @@ describe("SelectKnowledge", () => {
     const available = {
       ...integration("other", "available"),
       wrapper_id: "wrapper",
-      wrapper_name: "Shared site"
+      wrapper_name: "Linked site"
     };
     const selected = {
       ...integration("other", "saved"),
       wrapper_id: "wrapper",
-      wrapper_name: "Shared site"
+      wrapper_name: "Linked site"
     };
     const currentSpace = space();
     currentSpace.knowledge.integration_knowledge_list = { items: [available], count: 1 };
@@ -218,10 +213,10 @@ describe("SelectKnowledge", () => {
       space: currentSpace,
       initialIntegrationKnowledge: [selected]
     });
-    const shared = page.getByRole("region", { name: m.shared_knowledge(), exact: true });
-    await expect.element(shared.getByText("Integration saved", { exact: true })).toBeVisible();
-    expect(shared.getByText("Integration available", { exact: true }).elements()).toHaveLength(0);
-    await shared.getByRole("button", { name: m.remove(), exact: true }).click();
+    const current = page.getByRole("region", { name: m.knowledge(), exact: true });
+    await expect.element(current.getByText("Integration saved", { exact: true })).toBeVisible();
+    expect(current.getByText("Integration available", { exact: true }).elements()).toHaveLength(0);
+    await current.getByRole("button", { name: m.remove(), exact: true }).click();
     await expect
       .element(page.getByTestId("knowledge-selection"))
       .toHaveTextContent('"integrations":[]');
