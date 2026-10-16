@@ -59,3 +59,10 @@ condition = "AND"
 paths = ['''^backend/tests/unittests/integration/test_sharepoint_content_service\.py$''']
 regexTarget = "secret"
 regexes = ['''^integration_knowledge_id=(?:ik\.id|knowledge_id)$''']
+
+[[rules.allowlists]]
+description = "Fake pre-authenticated download token the error-text tests must redact"
+condition = "AND"
+paths = ['''^backend/tests/unittests/observability/test_error_text\.py$''']
+regexTarget = "secret"
+regexes = ['''^v1\.eyJhdWQiOiJ4In0\.c2lnbmF0dXJl$''']
