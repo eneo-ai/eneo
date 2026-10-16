@@ -248,12 +248,24 @@
     align-items: flex-start;
   }
 
+  /* The box sits on the first line of its text; the text block drops the
+     block margins the prose styles give a div. */
   .document-editor :global(ul[data-type="taskList"] > li > label) {
+    display: flex;
     flex: none;
+    align-items: center;
+    height: 1lh;
   }
 
   .document-editor :global(ul[data-type="taskList"] > li > div) {
     flex: 1;
+    margin: 0;
+  }
+
+  /* Code keeps the chat's dark block, so its text must be light in both themes. */
+  .document-editor :global(pre) {
+    color: var(--text-color-on-fill);
+    color-scheme: dark;
   }
 
   .document-editor :global(.eneo-figure) {
