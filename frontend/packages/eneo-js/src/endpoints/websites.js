@@ -62,26 +62,6 @@ export function initWebsites(client) {
     },
 
     /**
-     * Transfer a website into a different space. Needs matching embedding model to be available.
-     * Throws error on failure
-     * @param {{website: {id: string}, targetSpace: {id: string}}} params
-     * @throws {EneoError}
-     * */
-    transfer: async ({ website, targetSpace }) => {
-      const { id } = website;
-      await client.fetch("/api/v1/websites/{id}/transfer/", {
-        method: "post",
-        params: { path: { id } },
-        requestBody: {
-          "application/json": {
-            target_space_id: targetSpace.id
-          }
-        }
-      });
-      return true;
-    },
-
-    /**
      * Get a website by its id.
      * @param {{id: string} | Website} website Website to get
      * @returns {Promise<Website>}

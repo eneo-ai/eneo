@@ -1594,6 +1594,8 @@
   "organization_knowledge_description": "Välj ytterligare källor från din organisations utrymme som den här assistenten kan söka i för att hitta relevanta svar.",
   "skill_used_in_reply": "Skill ”{name}” användes i svaret",
   "overall_statistics": "Övergripande statistik",
+  "add_knowledge_personal": "Lägg till kunskap (Personlig)",
+  "no_personal_sources": "Inga personliga källor tillgängliga.",
   "workspace_preview_row_label": "rad {row}",
   "workspace_preview_table_hint": "Markera rader med kryssrutorna för att fråga om dem, eller markera text för att citera den. Håll ned Skift för att markera ett intervall.",
   "workspace_preview_selection_actions": "Åtgärder för markerade rader",
