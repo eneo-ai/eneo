@@ -68,11 +68,11 @@ class IntegrationKnowledgeRepoImpl(
     async def one_or_none(
         self, id: Optional["UUID"] = None, **filters: object
     ) -> IntegrationKnowledge | None:
-        query = (
-            sa.select(self._db_model)
-            .where(self._db_model.id == id)
-            .options(*self._options)
-        )
+        if id is not None:
+            filters = {**filters, "id": id}
+        if not filters:
+            raise ValueError("No filter is specified")
+        query = sa.select(self._db_model).filter_by(**filters).options(*self._options)
         record = await self.session.scalar(query)
 
         if not record:

@@ -75,6 +75,26 @@ def _entity():
     return entity
 
 
+class TestOneOrNone:
+    """The filters the interface accepts reach the query; none at all is refused."""
+
+    async def test_filters_reach_the_query(self, repo, session):
+        space_id = uuid4()
+        session.scalar.return_value = None
+
+        assert await repo.one_or_none(space_id=space_id, name="Docs") is None
+
+        sql = _compiled(session.scalar.await_args.args[0])
+        assert f"integration_knowledge.space_id = '{space_id}'" in sql
+        assert "integration_knowledge.name = 'Docs'" in sql
+
+    async def test_without_any_filter_is_refused(self, repo, session):
+        with pytest.raises(ValueError, match="No filter"):
+            await repo.one_or_none()
+
+        session.scalar.assert_not_called()
+
+
 class TestDocumentCountProjection:
     """Fetches never count; the count is attached where an item is served."""
 
