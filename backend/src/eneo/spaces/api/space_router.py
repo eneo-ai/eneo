@@ -41,6 +41,7 @@ from eneo.integration.presentation.models import (
 )
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
+from eneo.main.exceptions import UnauthorizedException
 from eneo.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
 from eneo.roles.permissions import Permission
 from eneo.server import protocol
@@ -1096,37 +1097,28 @@ async def delete_space_integration_knowledge(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
-    user = container.user()
 
-    # Get integration knowledge info BEFORE deletion (for audit log context)
-    space_repo = container.space_repo()
-    space = await space_repo.one(id=id)
+    # Membership before the item, so a non-member learns nothing about the
+    # space's items. Snapshotted before deletion for the audit log.
+    space = await container.space_repo().one(id=id)
+    actor = container.actor_manager().get_space_actor_from_space(space)
+    if not actor.can_delete_integrations():
+        raise UnauthorizedException()
     knowledge = space.get_integration_knowledge(
         integration_knowledge_id=integration_knowledge_id
     )
 
-    # Delete integration knowledge
     await service.remove_knowledge(
         space_id=id, integration_knowledge_id=integration_knowledge_id
     )
 
-    # Build extra context with integration-specific information
-    extra = {
-        "integration_type": knowledge.integration_type,
-    }
-
-    # Audit logging
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        user=user,
+    await _audit_integration_knowledge(
+        container,
         action=ActionType.INTEGRATION_KNOWLEDGE_DELETED,
-        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
-        entity_id=integration_knowledge_id,
+        knowledge=knowledge,
+        space=space,
         description=f"Removed {knowledge.integration_type} knowledge '{knowledge.name}' from space '{space.name}'",
-        metadata=AuditMetadata.standard(
-            actor=user, target=knowledge, space=space, extra=extra
-        ),
+        extra={"integration_type": knowledge.integration_type},
     )
 
 
@@ -1304,29 +1296,28 @@ async def trigger_integration_full_sync(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
-    user = container.user()
+
+    # Membership before the item, so a non-member learns nothing about the
+    # space's items. The same snapshot serves the audit log.
+    space = await container.space_repo().one(id=id)
+    actor = container.actor_manager().get_space_actor_from_space(space)
+    if not actor.can_edit_integrations():
+        raise UnauthorizedException()
+    knowledge = space.get_integration_knowledge(
+        integration_knowledge_id=integration_knowledge_id
+    )
 
     job = await service.trigger_full_sync(
         space_id=id,
         integration_knowledge_id=integration_knowledge_id,
     )
 
-    # Audit logging
-    space_repo = container.space_repo()
-    space = await space_repo.one(id=id)
-    knowledge = space.get_integration_knowledge(
-        integration_knowledge_id=integration_knowledge_id
-    )
-
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        user=user,
+    await _audit_integration_knowledge(
+        container,
         action=ActionType.INTEGRATION_KNOWLEDGE_SYNCED,
-        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
-        entity_id=integration_knowledge_id,
+        knowledge=knowledge,
+        space=space,
         description=f"Triggered full sync for {knowledge.integration_type} knowledge '{knowledge.name}' in space '{space.name}'",
-        metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space),
     )
 
     return job
