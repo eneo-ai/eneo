@@ -75,21 +75,12 @@ def _visible_detail(detail: object) -> object:
         return detail
     entry = cast(Dict[str, object], detail)
     file, reason = entry.get("file"), entry.get("reason")
+    # A sync names an item Graph returned without a name as a null file.
+    if file is None:
+        file = ""
     if not isinstance(file, str) or not isinstance(reason, str):
         return entry
     return {**entry, **_visible_skip(file, reason)}
-
-
-def _visible_sync_metadata(metadata: SyncMetadata) -> SyncMetadata:
-    cleaned = metadata.copy()
-    if "skipped_details" in cleaned:
-        cleaned["skipped_details"] = [
-            _visible_skip(detail["file"], detail["reason"])
-            for detail in cleaned["skipped_details"]
-        ]
-    if "reconcile_warning" in cleaned:
-        cleaned["reconcile_warning"] = user_visible_error(cleaned["reconcile_warning"])
-    return cleaned
 
 
 class BaseListModel(BaseModel, Generic[T]):
@@ -356,12 +347,14 @@ class SyncLog(BaseModel):
     completed_at: Optional[datetime] = None
     created_at: datetime
 
-    @field_validator("metadata")
+    # Cleaned before validation: a stored detail with a null file would not
+    # pass the SkippedDetail shape otherwise.
+    @field_validator("metadata", mode="before")
     @classmethod
-    def _user_visible_metadata(
-        cls, value: Optional[SyncMetadata]
-    ) -> Optional[SyncMetadata]:
-        return None if value is None else _visible_sync_metadata(value)
+    def _user_visible_metadata(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        return _visible_summary(cast(Dict[str, Any], value))
 
     @field_validator("error_message")
     @classmethod
