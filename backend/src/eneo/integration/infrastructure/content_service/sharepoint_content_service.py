@@ -21,6 +21,7 @@ from eneo.integration.domain.repositories.integration_knowledge_repo import (
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     AccessTokenProvider,
     DeltaTokenExpiredException,
+    MissingDownloadUrlError,
     SharePointContentClient,
 )
 from eneo.integration.infrastructure.content_service.parsing import (
@@ -2510,13 +2511,16 @@ class SharePointContentService:
         """``(text, None)`` or ``(None, skip_reason)`` for an outcome of the file itself.
 
         Graph or network trouble (5xx, throttling past its retries, connection
-        and timeout errors, anything unexpected) propagates: it says nothing
-        about the file, so the caller must not move past it.
+        and timeout errors, an item served without a download URL, anything
+        unexpected) propagates: it says nothing about the file, so the caller
+        must not move past it.
         """
         try:
             result = await client.get_file_extraction_by_id(
                 drive_id=drive_id, item_id=item_id
             )
+        except MissingDownloadUrlError:
+            raise
         except ValueError as e:
             if "exceeds max download size" in str(e):
                 return None, file_too_large_reason(

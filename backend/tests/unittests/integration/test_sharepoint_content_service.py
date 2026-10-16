@@ -18,6 +18,7 @@ from eneo.integration.domain.entities.integration_knowledge import (
 )
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     DeltaTokenExpiredException,
+    MissingDownloadUrlError,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
     ScopeFolderUnavailable,
@@ -3953,6 +3954,10 @@ class TestDeltaExtractionOutcomes:
             (aiohttp.ClientConnectionError("reset"), "Error: Connection error"),
             (TimeoutError(), "Error: Request timed out"),
             (RuntimeError("Graph timeout"), "Error: Graph timeout"),
+            (
+                MissingDownloadUrlError("No download URL available for file 'x'"),
+                "Error: No download URL available for file 'x'",
+            ),
         ],
     )
     async def test_infrastructure_failures_keep_the_local_copy_and_the_token(

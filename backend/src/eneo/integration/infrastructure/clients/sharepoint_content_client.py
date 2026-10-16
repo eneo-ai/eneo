@@ -64,6 +64,14 @@ class IncompleteDownloadError(Exception):
     """
 
 
+class MissingDownloadUrlError(ValueError):
+    """Graph returned the item without a download URL.
+
+    Transient (a file being uploaded or processed), so callers must not treat
+    it as a verdict about the file.
+    """
+
+
 class DeltaTokenExpiredException(Exception):
     """Raised when Microsoft Graph returns 410 Gone for an expired delta token."""
 
@@ -821,7 +829,7 @@ class SharePointContentClient(BaseClient):
         download_url = file_info.get("@microsoft.graph.downloadUrl")
         if not download_url:
             suffix = " after token refresh" if after_token_refresh else ""
-            raise ValueError(
+            raise MissingDownloadUrlError(
                 f"No download URL available for file '{file_name}' "
                 f"(item_id={item_id}){suffix}"
             )
