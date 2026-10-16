@@ -149,6 +149,9 @@ class TestNoTextIsNotAFailure:
             ("empty.txt", "text/plain", b"   \n"),
             ("zero-bytes.pdf", "application/pdf", b""),
         ],
+        # Office payloads are generated at collection time and differ per
+        # xdist worker (zip timestamps); the filename keeps ids stable.
+        ids=["docx", "xlsx", "pptx", "txt", "pdf"],
     )
     def test_empty_documents_report_empty_content(
         self, filename: str, content_type: str, payload: bytes
@@ -289,6 +292,7 @@ class TestExtractionLimits:
             ("big.docx", DOCX_MIME, docx_bytes("x" * 200)),
             ("big.txt", "text/plain", b"x" * 200),
         ],
+        ids=["docx", "txt"],
     )
     def test_oversized_output_is_skipped(
         self, filename: str, content_type: str, payload: bytes
