@@ -6,7 +6,7 @@ including ChangeKey deduplication, scope filtering, and job queuing.
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
@@ -570,18 +570,22 @@ def _running_sync_setup(setup: Setup, knowledge_db, integration_db, user) -> Non
     setup.change_key_service.should_process.return_value = True
 
 
+@pytest.mark.parametrize("released_meanwhile", [False, True])
 async def test_a_notification_during_a_running_sync_leaves_a_marker_not_a_job(
     setup: Setup,
     mock_notification,
     mock_knowledge_db,
     mock_tenant_app_integration_db,
     mock_user,
+    released_meanwhile,
 ):
-    """A job queued now would only find the lease taken; the holder reruns instead."""
+    """A job queued now would only find the lease taken; the holder reruns
+    instead. If the holder released between the check and the marker, a job
+    is queued after all so the marker is drained."""
     _running_sync_setup(
         setup, mock_knowledge_db, mock_tenant_app_integration_db, mock_user
     )
-    setup.redis.exists.return_value = 1
+    setup.redis.exists.side_effect = [1, 0 if released_meanwhile else 1]
     job_service = AsyncMock()
 
     with patch(
@@ -590,12 +594,18 @@ async def test_a_notification_during_a_running_sync_leaves_a_marker_not_a_job(
     ):
         await _handle(setup.service, {"value": [mock_notification]})
 
-    job_service.queue_job.assert_not_awaited()
     knowledge_id = str(mock_knowledge_db.id)
-    setup.redis.exists.assert_awaited_once_with(sync_lock_key(knowledge_id))
+    assert setup.redis.exists.await_args_list == [
+        call(sync_lock_key(knowledge_id)),
+        call(sync_lock_key(knowledge_id)),
+    ]
     setup.redis.set.assert_awaited_once_with(
         sync_pending_key(knowledge_id), "1", ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS
     )
+    if released_meanwhile:
+        job_service.queue_job.assert_awaited_once()
+    else:
+        job_service.queue_job.assert_not_awaited()
 
 
 async def test_a_redis_outage_falls_back_to_queuing_the_job(

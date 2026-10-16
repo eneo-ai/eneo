@@ -466,6 +466,11 @@ class SharepointWebhookService:
         ends as skipped. The marker makes the lease holder run one more delta
         pass before releasing, which is what the skipped job would have asked
         for. Without Redis the job is queued as before.
+
+        The lease is checked again after the marker is set: a holder that had
+        already drained the markers and was releasing would otherwise leave
+        this one unread until the next notification. A job queued then takes
+        the lease and drains it.
         """
         try:
             if not await self.redis_client.exists(sync_lock_key(knowledge_id)):
@@ -475,6 +480,13 @@ class SharepointWebhookService:
                 "1",
                 ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
             )
+            if not await self.redis_client.exists(sync_lock_key(knowledge_id)):
+                logger.info(
+                    "Sync lease for knowledge %s was released while the pending "
+                    "marker was left; queuing a job to drain it",
+                    knowledge_id,
+                )
+                return False
         except (RedisError, OSError) as exc:
             logger.warning(
                 "Could not check the sync lease for knowledge %s (%s); queuing a job",
