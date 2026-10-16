@@ -1777,6 +1777,7 @@
   "integration_documents_updated": "Updated",
   "integration_documents_properties": "Properties",
   "integration_documents_table_label": "Documents in {name}",
+  "integration_items_table_label": "Items in {name}",
   "integration_documents_showing_range": "Showing {from}–{to} of {total}",
   "integration_documents_total_size": "Total size {size}",
   "integration_documents_loading": "Loading documents...",

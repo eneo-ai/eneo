@@ -1810,6 +1810,7 @@
   "integration_documents_updated": "Uppdaterad",
   "integration_documents_properties": "Egenskaper",
   "integration_documents_table_label": "Dokument i {name}",
+  "integration_items_table_label": "Innehåll i {name}",
   "integration_documents_showing_range": "Visar {from}–{to} av {total}",
   "integration_documents_total_size": "Total storlek {size}",
   "integration_documents_loading": "Läser in dokument...",

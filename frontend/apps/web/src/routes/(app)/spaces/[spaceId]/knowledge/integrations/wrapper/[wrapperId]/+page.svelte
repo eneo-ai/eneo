@@ -90,6 +90,7 @@
   <Page.Main>
     <IntegrationTreeTable
       items={$wrapperItems}
+      name={$wrapperName}
       spaceRouteId={$currentSpace.routeId}
       onShowSyncHistory={handleSelectIntegration}
     />

@@ -64,9 +64,16 @@ function rowNames() {
 
 describe("IntegrationTreeTable", () => {
   it("nests child folders under their parent, indented, with every row linked and actionable", async () => {
-    render(IntegrationTreeTable, { items, spaceRouteId: "space-1" });
+    render(IntegrationTreeTable, { items, name: "Kommunstyrelsen", spaceRouteId: "space-1" });
 
     expect(rowNames()).toEqual(["Protokoll", "Bilagor", "Rutiner"]);
+    await expect
+      .element(
+        page.getByRole("table", {
+          name: m.integration_items_table_label({ name: "Kommunstyrelsen" })
+        })
+      )
+      .toBeVisible();
     const childLink = page.getByRole("link", { name: "Bilagor" });
     await expect
       .element(childLink)
@@ -86,6 +93,7 @@ describe("IntegrationTreeTable", () => {
         { ...item("skript", "Skript", "/Documents/Skript"), url: "javascript:alert(1)" },
         item("rutiner", "Rutiner", "/Documents/Rutiner")
       ],
+      name: "Kommunstyrelsen",
       spaceRouteId: "space-1"
     });
 
@@ -98,7 +106,7 @@ describe("IntegrationTreeTable", () => {
   });
 
   it("collapses and expands a parent from the keyboard", async () => {
-    render(IntegrationTreeTable, { items, spaceRouteId: "space-1" });
+    render(IntegrationTreeTable, { items, name: "Kommunstyrelsen", spaceRouteId: "space-1" });
     const toggle = page.getByRole("button", {
       name: m.sharepoint_collapse_folder_named({ name: "Protokoll" })
     });
@@ -119,7 +127,7 @@ describe("IntegrationTreeTable", () => {
   });
 
   it("filters by name and keeps the parent of a matching child, collapsed or not", async () => {
-    render(IntegrationTreeTable, { items, spaceRouteId: "space-1" });
+    render(IntegrationTreeTable, { items, name: "Kommunstyrelsen", spaceRouteId: "space-1" });
     await page
       .getByRole("button", { name: m.sharepoint_collapse_folder_named({ name: "Protokoll" }) })
       .click();
@@ -133,7 +141,7 @@ describe("IntegrationTreeTable", () => {
   });
 
   it("offers no collapse toggle while filtering and brings it back with its state", async () => {
-    render(IntegrationTreeTable, { items, spaceRouteId: "space-1" });
+    render(IntegrationTreeTable, { items, name: "Kommunstyrelsen", spaceRouteId: "space-1" });
     const collapse = page.getByRole("button", {
       name: m.sharepoint_collapse_folder_named({ name: "Protokoll" })
     });

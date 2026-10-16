@@ -21,11 +21,13 @@
 
   interface Props {
     items: IntegrationKnowledge[];
+    /** What the items belong to, for the table's accessible name. */
+    name: string;
     spaceRouteId: string;
     onShowSyncHistory?: ((knowledge: IntegrationKnowledge) => void) | undefined;
   }
 
-  let { items, spaceRouteId, onShowSyncHistory }: Props = $props();
+  let { items, name, spaceRouteId, onShowSyncHistory }: Props = $props();
 
   let filterText = $state("");
   // Parents start open so the structure is visible; the set holds the ones a person closed.
@@ -57,7 +59,7 @@
   />
 
   {#if rows.length > 0}
-    <Table.Root>
+    <Table.Root aria-label={m.integration_items_table_label({ name })}>
       <Table.Header>
         <Table.Row>
           <Table.Head>{m.name()}</Table.Head>
