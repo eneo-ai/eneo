@@ -3,7 +3,7 @@ import type { EneoFileToken, EneoInrefToken, EneoMentionToken } from "./CustomCo
 import { mathExtensions, promoteDisplayMath, startsMathFence } from "./math.js";
 
 export { default as Markdown } from "./Markdown.svelte";
-export { sanitizeImageSrc, sanitizeLinkHref } from "./sanitizeUrl.js";
+export { sanitizeImageSrc, sanitizeLinkHref, sanitizeWebHref } from "./sanitizeUrl.js";
 export { fileHandleId, setFileImageUrls } from "./FileImageContext.js";
 export {
   type CustomRenderers as MarkdownCustomRenderingOptions,

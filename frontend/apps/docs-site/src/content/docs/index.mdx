@@ -44,6 +44,15 @@ How optional module applications reuse the Eneo session:
 - Credential lifetimes, refresh, and failure modes
 - Registration and binding model
 
+### [Tools and MCP Architecture](/docs/tool-architecture)
+
+The map of everything a model can call:
+
+- Loopback servers, the bundled tool runtime and external MCP servers
+- What the three tiers share: one proxy, one file transport, one result pipeline
+- Why heavy and untrusted work runs outside the backend
+- Trust decisions at each boundary
+
 ### [Knowledge Retrieval and MCP Interoperability](/docs/knowledge-retrieval-and-mcp)
 
 Understand how knowledge and tools reach a model:
@@ -52,6 +61,22 @@ Understand how knowledge and tools reach a model:
 - Built-in loopback knowledge and attachment MCP servers
 - Internal and external MCP interoperability through one proxy
 - Authentication, approval, session, citation, and failure boundaries
+
+### [Built-in Tool Servers](/docs/builtin-tool-servers)
+
+The servers Eneo hosts in its own backend:
+
+- The two attachment patterns and the shared tool contract
+- The placement rule: what belongs inside the backend and what does not
+- Adding a new built-in server
+
+### [Tool Runtime Security](/docs/tool-runtime-security)
+
+How the isolated runtime contains model-written code and untrusted files:
+
+- Design assumptions and the six layers of separation
+- Per-job process confinement, engine hardening and the container
+- What is not covered, and the checklist before raising a classification
 
 ### [Object Content Architecture](/docs/object-content-architecture)
 

@@ -3,6 +3,7 @@
   import { IconLinkExternal } from "@eneo/icons/link-external";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import { sanitizeWebHref } from "$lib/components/markdown/index.js";
   import SourceMetadataList from "./SourceMetadataList.svelte";
   import { hasSourceMetadata } from "../sourceMetadata";
 
@@ -12,7 +13,7 @@
 {#snippet chip(props: Record<string, unknown> = {})}
   <Button
     {...props}
-    href={blob.metadata.url ?? ""}
+    href={sanitizeWebHref(blob.metadata.url)}
     target="_blank"
     variant="ghost"
     class="bg-primary border-default max-w-[30ch] shadow-sm"

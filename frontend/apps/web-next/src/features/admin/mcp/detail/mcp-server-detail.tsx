@@ -38,6 +38,7 @@ import { CredentialsTab } from "./credentials-tab";
 import { OverviewTab } from "./overview-tab";
 import { SecurityTab } from "./security-tab";
 import { ToolsTab } from "./tools-tab";
+import { TOOLS_TAB_HREF } from "@/features/admin/tools/tools-tabs";
 
 const TABS = ["overview", "tools", "security", "credentials"] as const;
 type Tab = (typeof TABS)[number];
@@ -67,7 +68,7 @@ export function McpServerDetail({
 
   // The server can vanish if deleted in another tab; bounce back to the list.
   useEffect(() => {
-    if (!server) router.replace("/admin/mcp-servers");
+    if (!server) router.replace(TOOLS_TAB_HREF["mcp-servers"]);
   }, [server, router]);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: MCP_KEY });
@@ -90,7 +91,9 @@ export function McpServerDetail({
     onSuccess: () => {
       invalidate();
       router.push(
-        server?.purpose && server.purpose !== "general" ? "/admin/tools" : "/admin/mcp-servers"
+        server?.purpose && server.purpose !== "general"
+          ? TOOLS_TAB_HREF.functions
+          : TOOLS_TAB_HREF["mcp-servers"]
       );
     },
     onError: (error) => toastApiError(error, t)
@@ -98,7 +101,9 @@ export function McpServerDetail({
 
   if (!server) return null;
   const listHref =
-    server.purpose && server.purpose !== "general" ? "/admin/tools" : "/admin/mcp-servers";
+    server.purpose && server.purpose !== "general"
+      ? TOOLS_TAB_HREF.functions
+      : TOOLS_TAB_HREF["mcp-servers"];
 
   const { blocked } = activationState(server);
   // The security tab only exists when classifications are enforced; a deep link

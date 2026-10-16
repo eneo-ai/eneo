@@ -1,11 +1,12 @@
 <!--
   The files a message was sent with. Images keep their thumbnails. Up to
   three documents are shown as chips; more are one bundle that opens the
-  panel's full list of uploads, so a long upload list never stretches the
-  chat. A message still waiting for its uploads shows their progress here.
+  panel's full list of uploads at this message's own group, so a long upload
+  list never stretches the chat. A message still waiting for its uploads shows their progress here.
 -->
 <script lang="ts">
   import { getMessageContext } from "../../MessageContext.svelte";
+  import { uploadGroupKey } from "../../conversationUploads";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -98,7 +99,7 @@
     } else if (bundleShown) {
       preview.closeOverview();
     } else {
-      preview.showOverview("uploads", event.currentTarget);
+      preview.showOverview("uploads", event.currentTarget, uploadGroupKey(current()));
     }
   }
 
