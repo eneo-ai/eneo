@@ -18,7 +18,8 @@ it needs more room.
   access unless its server declared the hosts it calls.
 
 For the complete responsibility map and design rationale, see
-[Skills, Functions, tools and views](../../frontend/apps/docs-site/src/content/docs/architecture.mdx#skills-functions-tools-and-views).
+[Tools and MCP Architecture](../../frontend/apps/docs-site/src/content/docs/tool-architecture.mdx)
+(published at https://docs.eneo.ai/dev/docs/tool-architecture).
 MCP Apps here means interactive tool views, distinct from Eneo Apps configured
 in Spaces.
 
