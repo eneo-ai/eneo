@@ -3271,6 +3271,57 @@ class TestSyncStatus:
         assert ik.last_sync_error is None
         mock_dependencies["sync_log_repo"].add.assert_not_awaited()
 
+    @pytest.mark.parametrize("processed_something", [False, True])
+    async def test_a_quiet_pending_pass_keeps_the_owning_syncs_summary(
+        self, service, mock_dependencies, mock_oauth_token, processed_something
+    ):
+        """The pending pass follows the full sync the person is looking at; its
+        empty summary must not replace "300 files imported". A pending pass that
+        did process something reports it."""
+        owning_summary = {"files_processed": 300, "skipped_total": 0}
+        ik = _real_integration_knowledge(
+            delta_token="token-1",
+            last_sync_status="success",
+            last_sync_summary=owning_summary,
+        )
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        changes = [_delta_file("item-1", "a.docx")] if processed_something else []
+
+        with (
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+            patch.object(
+                service, "_process_info_blob", AsyncMock(return_value="embedded")
+            ),
+        ):
+            _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body")
+                ),
+            )
+            await service.process_delta_changes(
+                token_id=mock_oauth_token.id,
+                integration_knowledge_id=ik.id,
+                record_failure=False,
+            )
+
+        written = mock_dependencies["integration_knowledge_repo"].update_sync_state
+        assert ik.delta_token == "token-2"
+        assert ik.last_sync_status == "success"
+        assert ik.last_sync_attempted_at is not None
+        if processed_something:
+            assert ik.last_sync_summary["files_processed"] == 1
+            assert (
+                written.await_args.kwargs["last_sync_summary"] == ik.last_sync_summary
+            )
+        else:
+            assert ik.last_sync_summary == owning_summary
+            assert "last_sync_summary" not in written.await_args.kwargs
+
     @pytest.mark.parametrize(
         ("delta_token", "delta_outcome", "recovery", "record_failure"),
         [

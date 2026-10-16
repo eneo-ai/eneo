@@ -187,15 +187,19 @@ def _failure_summary(failure: Exception) -> SyncStats | None:
     return failure.summary if isinstance(failure, SyncItemsFailed) else None
 
 
-def _sync_outcome_fields(knowledge: "IntegrationKnowledge") -> SyncStateFields:
+def _sync_outcome_fields(
+    knowledge: "IntegrationKnowledge", *, with_summary: bool = True
+) -> SyncStateFields:
     """The columns a finished pass writes; the entity copy carries the values."""
-    return {
+    fields: SyncStateFields = {
         "last_sync_status": knowledge.last_sync_status,
         "last_sync_error": knowledge.last_sync_error,
         "last_synced_at": knowledge.last_synced_at,
-        "last_sync_summary": knowledge.last_sync_summary,
         "delta_token": knowledge.delta_token,
     }
+    if with_summary:
+        fields["last_sync_summary"] = knowledge.last_sync_summary
+    return fields
 
 
 class SimpleSharePointToken:
@@ -585,12 +589,17 @@ class SharePointContentService:
     ) -> str:
         """Apply the changes since the stored delta token.
 
-        With ``record_failure`` false a failure of the delta pass itself is only
-        raised, not written to the knowledge row: a pending pass that follows a
-        successful sync must not turn that sync's status into an error. A full
-        sync run as recovery (missing or expired token) is recorded regardless:
-        it was attempted, the token it replaces is gone, and the next sync is
-        a full one, so its failure is the knowledge's current state.
+        With ``record_failure`` false the pass is a pending one, run by the
+        holder of the sync lease for a webhook that arrived during its sync. A
+        failure of such a pass is only raised, not written to the knowledge
+        row: it must not turn the owning sync's status into an error. When it
+        succeeds without having processed anything it also keeps the owning
+        sync's summary, which is what the person who started that sync is
+        looking at. ``last_sync_attempted_at`` moves on every pass, pending or
+        not: it tells a failing integration from an idle one. A full sync run
+        as recovery (missing or expired token) is recorded regardless: it was
+        attempted, the token it replaces is gone, and the next sync is a full
+        one, so its failure is the knowledge's current state.
         """
         started_at = datetime.now(timezone.utc)
         resolved_integration_knowledge_id: UUID | None = integration_knowledge_id
@@ -725,15 +734,18 @@ class SharePointContentService:
 
                     summary_stats = self._build_summary_stats(stats)
 
-                    integration_knowledge.last_sync_summary = _summary_counts(
-                        summary_stats
-                    )
+                    if record_failure:
+                        integration_knowledge.last_sync_summary = _summary_counts(
+                            summary_stats
+                        )
                     integration_knowledge.mark_sync_succeeded(
                         datetime.now(timezone.utc)
                     )
                     await self.integration_knowledge_repo.update_sync_state(
                         integration_knowledge.id,
-                        **_sync_outcome_fields(integration_knowledge),
+                        **_sync_outcome_fields(
+                            integration_knowledge, with_summary=record_failure
+                        ),
                     )
 
                     logger.info("Delta sync completed: no changes detected")
@@ -944,14 +956,20 @@ class SharePointContentService:
                     raise SyncItemsFailed(summary_stats, changes_detected=len(changes))
 
                 integration_knowledge.delta_token = new_delta_token
-                integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
+                replace_summary = record_failure or _delta_worth_logging(summary_stats)
+                if replace_summary:
+                    integration_knowledge.last_sync_summary = _summary_counts(
+                        summary_stats
+                    )
                 integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
 
                 logger.info(f"Delta sync completed: {summary_stats}")
 
                 await self.integration_knowledge_repo.update_sync_state(
                     integration_knowledge.id,
-                    **_sync_outcome_fields(integration_knowledge),
+                    **_sync_outcome_fields(
+                        integration_knowledge, with_summary=replace_summary
+                    ),
                 )
 
                 self._schedule_post_commit_change_keys(pending_change_keys)
