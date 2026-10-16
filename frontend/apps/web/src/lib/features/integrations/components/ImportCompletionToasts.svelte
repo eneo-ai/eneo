@@ -19,36 +19,46 @@
   // person is back in that space.
 
   const {
-    state: { jobs }
+    state: { jobs, jobsLoaded }
   } = getJobManager();
   const {
     state: { currentSpace },
     refreshCurrentSpace
   } = getSpacesManager();
 
+  // Long enough to reach the toast's action; the close button ends it sooner.
+  const RESULT_TOAST_DURATION_MS = 15_000;
+
   function reportFailure(name: string, error: string | null) {
     const message = m.integration_import_failed_toast({ name });
-    toast.error(error ? `${message}: ${error}` : message);
+    toast.error(error ? `${message}: ${error}` : message, { duration: RESULT_TOAST_DURATION_MS });
   }
 
   async function report() {
     const jobList = get(jobs);
-    const settled = settledImports(get(pendingImports), jobList);
-    if (settled.length === 0) return;
+    const settled = settledImports(get(pendingImports), jobList, get(jobsLoaded));
+    // Only the current space's items can be looked up; the rest wait for a return.
+    const local = settled.filter((pending) => pending.spaceRouteId === get(currentSpace).routeId);
+    if (local.length === 0) return;
 
     await refreshCurrentSpace("knowledge");
     const space = get(currentSpace);
     const reported: string[] = [];
-    for (const pending of settled) {
+    for (const pending of local) {
       const knowledge = space.knowledge.integrationKnowledge.find(
         (item) => item.id === pending.knowledgeId && item.space_id === space.id
       );
-      if (!knowledge) continue;
+      if (!knowledge) {
+        // Deleted before its first sync was reported: nothing left to tell.
+        reported.push(pending.jobId);
+        continue;
+      }
       const outcome = describeImportOutcome(knowledge, pending.spaceRouteId);
       if (!outcome.synced) {
-        // The job failed before the sync wrote any status; nothing more will come.
         const job = jobList.find((candidate) => candidate.id === pending.jobId);
-        if (job?.status !== "failed") continue;
+        // A job that ended without the sync writing a status failed before it
+        // got that far; one still listed as complete may yet have one written.
+        if (job?.status === "complete") continue;
         reportFailure(outcome.name, null);
         reported.push(pending.jobId);
         continue;
@@ -65,6 +75,7 @@
           skipped: outcome.skipped
         }),
         {
+          duration: RESULT_TOAST_DURATION_MS,
           action: {
             label: m.show(),
             // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic space route
@@ -87,6 +98,15 @@
     const event = $jobCompletionEvents;
     if (!event) return;
     untrack(enqueueReport);
+  });
+
+  // Imports persisted from an earlier page load are judged by the first job
+  // list, which arrives without a completion event.
+  $effect(() => {
+    if (!$jobsLoaded) return;
+    untrack(() => {
+      if (get(pendingImports).length > 0) enqueueReport();
+    });
   });
 
   // A report refreshes the space, which publishes a new space object with

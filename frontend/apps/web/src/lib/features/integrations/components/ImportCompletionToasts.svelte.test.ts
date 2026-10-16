@@ -6,7 +6,11 @@ import { m } from "$lib/paraglide/messages";
 import { pendingImports, type PendingImport } from "../importCompletion";
 
 type CompletionEvent = { timestamp: number; jobId: string } | null;
-type Space = { id: string; knowledge: { integrationKnowledge: IntegrationKnowledge[] } };
+type Space = {
+  id: string;
+  routeId: string;
+  knowledge: { integrationKnowledge: IntegrationKnowledge[] };
+};
 
 function store<T>(initial: T) {
   let value = initial;
@@ -29,7 +33,22 @@ const api = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   refreshCurrentSpace: vi.fn(async () => {}),
-  jobs: [] as Pick<Job, "id" | "status">[]
+  jobs: [] as Pick<Job, "id" | "status">[],
+  jobsLoaded: (() => {
+    let value = true;
+    const subscribers = new Set<(loaded: boolean) => void>();
+    return {
+      subscribe(run: (loaded: boolean) => void) {
+        subscribers.add(run);
+        run(value);
+        return () => subscribers.delete(run);
+      },
+      set(next: boolean) {
+        value = next;
+        subscribers.forEach((run) => run(value));
+      }
+    };
+  })()
 }));
 
 vi.mock("$app/navigation", () => ({ goto: api.goto }));
@@ -58,7 +77,8 @@ vi.mock("$lib/features/jobs/JobManager", () => {
             run(api.jobs);
             return () => undefined;
           }
-        }
+        },
+        jobsLoaded: api.jobsLoaded
       }
     })
   };
@@ -90,7 +110,7 @@ function knowledge(
 }
 
 function space(id: string, items: IntegrationKnowledge[] = []): Space {
-  return { id, knowledge: { integrationKnowledge: items } };
+  return { id, routeId: id, knowledge: { integrationKnowledge: items } };
 }
 
 function pending(jobId: string, knowledgeId: string, name: string): PendingImport {
@@ -111,6 +131,7 @@ describe("ImportCompletionToasts", () => {
     api.toastError.mockClear();
     api.refreshCurrentSpace.mockReset().mockImplementation(async () => {});
     api.jobs = [];
+    api.jobsLoaded.set(true);
     spaces.currentSpace.set(space("space-1"));
     pendingImports.set([]);
     events.set(null);
@@ -143,6 +164,7 @@ describe("ImportCompletionToasts", () => {
     expect(message).toBe(
       m.integration_import_result_toast({ name: "Protokoll 2026", indexed: 12, skipped: 2 })
     );
+    expect(options.duration).toBe(15_000);
     expect(options.action.label).toBe(m.show());
     options.action.onClick();
     expect(api.goto).toHaveBeenCalledWith("/spaces/space-1/knowledge/integrations/ik-1");
@@ -169,7 +191,8 @@ describe("ImportCompletionToasts", () => {
 
     await vi.waitFor(() => expect(api.toastError).toHaveBeenCalledTimes(1));
     expect(api.toastError).toHaveBeenCalledWith(
-      `${m.integration_import_failed_toast({ name: "Arkiv" })}: 403 Forbidden`
+      `${m.integration_import_failed_toast({ name: "Arkiv" })}: 403 Forbidden`,
+      { duration: 15_000 }
     );
     expect(api.toastSuccess).not.toHaveBeenCalled();
     expect(get(pendingImports)).toEqual([]);
@@ -191,7 +214,10 @@ describe("ImportCompletionToasts", () => {
 
     await vi.waitFor(() => expect(api.toastError).toHaveBeenCalledTimes(1));
     expect(api.toastError).toHaveBeenCalledWith(
-      m.integration_import_failed_toast({ name: "Arkiv" })
+      m.integration_import_failed_toast({ name: "Arkiv" }),
+      {
+        duration: 15_000
+      }
     );
     expect(get(pendingImports)).toEqual([]);
   });
@@ -210,8 +236,8 @@ describe("ImportCompletionToasts", () => {
     events.set({ timestamp: Date.now(), jobId: "any" });
     await settle();
 
-    // Once on mount and once for the event; the refreshes themselves queue nothing.
-    expect(api.refreshCurrentSpace).toHaveBeenCalledTimes(2);
+    // The item cannot be looked up from here, so the other space is left alone.
+    expect(api.refreshCurrentSpace).not.toHaveBeenCalled();
     expect(api.toastSuccess).not.toHaveBeenCalled();
     expect(api.toastError).not.toHaveBeenCalled();
     expect(get(pendingImports)).toEqual([item]);
@@ -232,6 +258,55 @@ describe("ImportCompletionToasts", () => {
     );
     expect(get(pendingImports)).toEqual([]);
     await settle();
-    expect(api.refreshCurrentSpace).toHaveBeenCalledTimes(3);
+    expect(api.refreshCurrentSpace).toHaveBeenCalledTimes(1);
+  });
+
+  it("forgets an import whose item was deleted from its space", async () => {
+    pendingImports.set([pending("job-1", "ik-1", "Arkiv")]);
+    api.jobs = [];
+    spaces.currentSpace.set(space("space-1", [knowledge("ik-2", "Annat", {})]));
+    render(ImportCompletionToasts);
+
+    events.set({ timestamp: Date.now(), jobId: "any" });
+
+    await vi.waitFor(() => expect(get(pendingImports)).toEqual([]));
+    expect(api.refreshCurrentSpace).toHaveBeenCalledTimes(1);
+    expect(api.toastSuccess).not.toHaveBeenCalled();
+    expect(api.toastError).not.toHaveBeenCalled();
+
+    // Nothing is left to refresh for on the next event.
+    events.set({ timestamp: Date.now() + 1, jobId: "any" });
+    await settle();
+    expect(api.refreshCurrentSpace).toHaveBeenCalledTimes(1);
+  });
+
+  it("judges an import kept from an earlier page load by the first job list", async () => {
+    pendingImports.set([pending("job-1", "ik-1", "Protokoll 2026")]);
+    api.jobsLoaded.set(false);
+    api.jobs = [];
+    spaces.currentSpace.set(
+      space("space-1", [
+        knowledge("ik-1", "Protokoll 2026", {
+          last_sync_status: "success",
+          document_count: 4,
+          last_sync_summary: { files_processed: 4, unchanged_items: 0, skipped_total: 0 }
+        })
+      ])
+    );
+    render(ImportCompletionToasts);
+    await settle();
+
+    // A job missing from a list that has not arrived yet has not finished.
+    expect(api.refreshCurrentSpace).not.toHaveBeenCalled();
+    expect(api.toastSuccess).not.toHaveBeenCalled();
+
+    api.jobs = [{ id: "job-1", status: "complete" }];
+    api.jobsLoaded.set(true);
+
+    await vi.waitFor(() => expect(api.toastSuccess).toHaveBeenCalledTimes(1));
+    expect(api.toastSuccess.mock.calls[0][0]).toBe(
+      m.integration_import_result_toast({ name: "Protokoll 2026", indexed: 4, skipped: 0 })
+    );
+    expect(get(pendingImports)).toEqual([]);
   });
 });
