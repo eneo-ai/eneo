@@ -21947,6 +21947,8 @@ export interface components {
       skipped_truncated?: boolean;
       /** Skipped Details */
       skipped_details?: components["schemas"]["SkippedDetail"][];
+      /** Failed Items */
+      failed_items?: number;
       /** Reconcile Warning */
       reconcile_warning?: string;
       /** Trigger */
