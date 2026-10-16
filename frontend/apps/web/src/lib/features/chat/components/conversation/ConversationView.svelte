@@ -153,9 +153,13 @@
       }
     };
   }
-  // Leaving the page would lose unsaved edits to a document.
+  // Leaving the conversation would lose unsaved edits to a document. On a
+  // reload or a closed tab the browser asks with its own dialog.
   beforeNavigate((navigation) => {
-    if (filePreview.unsaved && !confirm(m.unsaved_changes_warning())) navigation.cancel();
+    if (!filePreview.unsaved) return;
+    if (navigation.type === "leave" || !confirm(m.unsaved_changes_warning())) {
+      navigation.cancel();
+    }
   });
 
   // A tool call of the answer being written.
