@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from dependency_injector import providers
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
@@ -65,3 +66,9 @@ async def test_service_account_state_is_consumed_once_under_concurrent_callbacks
     assert results.count(payload) == 1
     assert results.count(None) == 1
     assert states == {}
+
+
+def test_service_account_callback_state_is_bounded():
+    with pytest.raises(ValidationError):
+        ServiceAccountAuthCallback(auth_code="code", state="s" * 257)
+    assert ServiceAccountAuthCallback(auth_code="code", state="s" * 43)

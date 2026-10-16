@@ -234,4 +234,7 @@ class ServiceAccountAuthCallback(BaseModel):
     auth_code: str = Field(
         ..., description="OAuth authorization code from Microsoft callback"
     )
-    state: str = Field(..., description="OAuth state parameter for verification")
+    # The issued state is token_urlsafe(32), 43 characters.
+    state: str = Field(
+        ..., max_length=256, description="OAuth state parameter for verification"
+    )
