@@ -6,6 +6,9 @@ from typing import Optional
 import httpx
 
 from eneo.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    summarize_token_endpoint_error,
+)
 from eneo.observability.error_text import user_visible_error
 
 logger = logging.getLogger(__name__)
@@ -143,12 +146,17 @@ class TenantAppAuthService:
                         credentials_fingerprint=credentials_fingerprint(app),
                     )
                 else:
-                    logger.error(
-                        f"Failed to acquire token for app {app.id}: "
-                        f"status={response.status_code}, body={response.text}"
-                    )
                     response.raise_for_status()
 
+            except httpx.HTTPStatusError as e:
+                # The body carries Microsoft's trace and correlation ids and
+                # can echo request parameters; the summary names the reason.
+                logger.error(
+                    "Failed to acquire token for app %s: %s",
+                    app.id,
+                    summarize_token_endpoint_error(e),
+                )
+                raise
             except httpx.HTTPError as e:
                 logger.error(f"HTTP error acquiring token for app {app.id}: {e}")
                 raise
@@ -169,10 +177,6 @@ class TenantAppAuthService:
             logger.info(f"Credentials test successful for app {app.id}")
             return (True, None)
         except httpx.HTTPStatusError as e:
-            from eneo.integration.infrastructure.auth_service.org_token_provider import (
-                summarize_token_endpoint_error,
-            )
-
             error_msg = summarize_token_endpoint_error(e)
             logger.error(f"Credentials test failed for app {app.id}: {error_msg}")
             return (False, error_msg)

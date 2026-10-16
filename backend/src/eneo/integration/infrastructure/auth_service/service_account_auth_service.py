@@ -18,6 +18,9 @@ from eneo.integration.infrastructure.auth_service.base_auth_service import (
     DEFAULT_AUTH_TIMEOUT,
     TokenResponse,
 )
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    summarize_token_endpoint_error,
+)
 from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
     TenantAppToken,
 )
@@ -214,8 +217,14 @@ class ServiceAccountAuthService:
             )
 
             if response.status_code != 200:
-                logger.error(f"Token exchange failed: {response.text}")
-                response.raise_for_status()
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    logger.error(
+                        "Service account token exchange failed: %s",
+                        summarize_token_endpoint_error(exc),
+                    )
+                    raise
 
             token_data = response.json()
 
@@ -324,11 +333,15 @@ class ServiceAccountAuthService:
             )
 
             if response.status_code != 200:
-                logger.error(
-                    f"Service account token refresh failed for tenant {tenant_app.tenant_id}: "
-                    f"{response.text}"
-                )
-                response.raise_for_status()
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    logger.error(
+                        "Service account token refresh failed for tenant %s: %s",
+                        tenant_app.tenant_id,
+                        summarize_token_endpoint_error(exc),
+                    )
+                    raise
 
             token_data = response.json()
             logger.debug(

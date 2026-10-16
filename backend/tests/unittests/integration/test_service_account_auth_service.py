@@ -307,6 +307,36 @@ class TestRefreshAccessToken:
         assert posted_data["grant_type"] == "refresh_token"
 
 
+async def test_refresh_refusals_are_logged_without_the_body(service, mock_tenant_app):
+    error_response = MagicMock(spec=httpx.Response)
+    error_response.status_code = 400
+    error_response.text = (
+        '{"error_description": "... Trace ID: abc Correlation ID: def"}'
+    )
+    error_response.json.return_value = {
+        "error": "invalid_client",
+        "error_description": "AADSTS7000215: Invalid client secret provided. Trace ID: abc\r\nCorrelation ID: def",
+    }
+    error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Bad Request", request=MagicMock(), response=error_response
+    )
+
+    with (
+        patch("httpx.AsyncClient", return_value=_posting_client([error_response])),
+        patch(
+            "eneo.integration.infrastructure.auth_service.service_account_auth_service.logger"
+        ) as log,
+    ):
+        with pytest.raises(httpx.HTTPStatusError):
+            await service.refresh_access_token(mock_tenant_app)
+
+    logged = [str(call.args[0]) % call.args[1:] for call in log.error.call_args_list]
+    assert logged == [
+        f"Service account token refresh failed for tenant {mock_tenant_app.tenant_id}: "
+        "AADSTS7000215: Invalid client secret provided."
+    ]
+
+
 def _posting_client(responses: list[MagicMock]) -> AsyncMock:
     client = AsyncMock()
     client.__aenter__.return_value = client
