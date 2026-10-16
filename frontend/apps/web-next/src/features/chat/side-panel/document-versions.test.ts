@@ -52,6 +52,22 @@ describe("conversation documents", () => {
     expect(versionsOf(plan2.id)).toEqual([plan1, plan2]);
   });
 
+  it("continues a document with a version the reader saved of it", () => {
+    const saved = {
+      ...plan2,
+      id: "55555555-5555-5555-5555-555555555555",
+      revises_file_id: plan1.id
+    };
+    const { documents, versionsOf } = conversationDocuments([
+      {
+        files: [plan1, saved],
+        calls: [{ toolCallId: "c1", input: {}, generatedFileIds: [plan1.id] }]
+      }
+    ]);
+    expect(documents).toEqual([{ latest: saved, versions: [plan1, saved] }]);
+    expect(versionsOf(saved.id)).toEqual([plan1, saved]);
+  });
+
   it("keeps the same content in another format as a document of its own", () => {
     const { documents } = conversationDocuments([
       { files: [plan1], calls: [] },

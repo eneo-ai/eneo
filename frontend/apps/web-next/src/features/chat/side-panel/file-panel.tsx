@@ -2,18 +2,25 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
-import { ChevronLeft, ChevronRight, Download, FileText } from "lucide-react";
+import { ToggleButton } from "@astryxdesign/core/ToggleButton";
+import { useQuery } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight, Diff, Download, FileText } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { FileKindIcon } from "@/features/chat/attachments";
 import { signedOriginalUrl } from "@/features/files/signed-original-url";
-import { FilePreviewContent } from "@/features/workspace/preview/file-preview-content";
+import {
+  FilePreviewContent,
+  type FilePreviewContentHandle
+} from "@/features/workspace/preview/file-preview-content";
 import { previewKindOf, type PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { DocumentExport } from "./document-export";
+import type { DocumentSaver } from "./document-saver";
 import { DraftPreview } from "./draft-preview";
 import { ExportMenu } from "./export-menu";
 import { displayFileName } from "./panel-contents-list";
@@ -35,6 +42,7 @@ export function FilePanel({
   panel,
   versionsOf,
   exportOf,
+  saverOf,
   switcher,
   maximise,
   narrow
@@ -44,6 +52,8 @@ export function FilePanel({
   versionsOf: (file: PreviewFile) => PreviewFile[];
   /** How a file is exported, for a document that can be; null for any other file. */
   exportOf: (file: PreviewFile) => DocumentExport | null;
+  /** How a reader's edit of a file is saved, for a document that can be edited; null for any other file. */
+  saverOf: (file: PreviewFile) => DocumentSaver | null;
   switcher: PanelSwitcher | null;
   maximise: PanelMaximise | null;
   /** Shown as a sheet over the conversation, where there is less room. */
@@ -52,6 +62,9 @@ export function FilePanel({
   const t = useTranslations();
   const locale = useLocale();
   const [downloading, setDownloading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  // The content components by file, for the document text the reader has edited.
+  const [contents] = useState(() => new Map<string, FilePreviewContentHandle>());
 
   // Keep the existing renderer mounted while its replacement is prepared.
   const keepingFile = !!panel.file && !!panel.content && panel.status === "ready";
@@ -82,6 +95,44 @@ export function FilePanel({
 
   const exporting = file ? exportOf(file) : null;
   const content = panel.content;
+  // The latest version of a Markdown document is edited in place. Edits stay
+  // in the editor; one save makes one new version.
+  const saver = file ? saverOf(file) : null;
+  const editable = !!saver && !!file && content?.kind === "markdown" && !draft && !later;
+  // What this version changed against the one before it, when asked for.
+  const comparable = !!earlier && content?.kind === "markdown" && !draft;
+  const comparing = comparable && panel.showChanges;
+  const previous = useQuery({
+    queryKey: ["document-text", earlier?.id],
+    queryFn: () => panel.loadText(earlier!),
+    enabled: comparing && !!earlier,
+    // Files never change; a version's text is read once.
+    staleTime: Infinity
+  });
+  const previousMarkdown = comparing ? (previous.data ?? null) : null;
+
+  async function saveEdits() {
+    const current = file;
+    if (!current || !saver || !panel.dirty || saving) return;
+    const markdown = contents.get(current.id)?.getMarkdown();
+    if (markdown === null || markdown === undefined) return;
+    setSaving(true);
+    try {
+      const version = await saver.save(markdown);
+      panel.saved(version, markdown);
+    } catch {
+      toast.error(t("file_preview_save_failed"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** The reader drops their edits: on the Cancel button, or agreeing to in the dialog. */
+  function discardEdits() {
+    if (file) contents.get(file.id)?.resetEditor();
+    if (panel.pendingDiscard) panel.pendingDiscard.proceed();
+    else panel.dropEdits();
+  }
   const namesImages =
     content?.kind === "markdown" && /!\[[^\]\n]*\]\(eneo-file:[0-9a-f]{32}/.test(content.text);
 
@@ -156,6 +207,10 @@ export function FilePanel({
             <span aria-hidden="true" className="bg-ax-accent size-1.5 shrink-0 rounded-full" />
             {t("file_preview_writing")}
           </p>
+        ) : panel.dirty ? (
+          <p className="text-ax-text-secondary truncate text-xs">
+            {t("file_preview_unsaved_changes")}
+          </p>
         ) : latest ? (
           <p className="text-ax-text-secondary flex min-w-0 items-center gap-1.5 text-xs">
             <span className="truncate">{t("file_preview_older_version")}</span>
@@ -179,6 +234,36 @@ export function FilePanel({
             >
               {versionButtons}
             </div>
+          )}
+          {panel.dirty && (
+            <>
+              <Button
+                label={t("cancel")}
+                variant="ghost"
+                size="sm"
+                isDisabled={saving}
+                onClick={discardEdits}
+              />
+              <Button
+                label={saving ? t("file_preview_saving") : t("save")}
+                variant="primary"
+                size="sm"
+                isLoading={saving}
+                isInterruptible
+                onClick={() => void saveEdits()}
+              />
+            </>
+          )}
+          {comparable && (
+            <ToggleButton
+              label={t("file_preview_show_changes")}
+              tooltip={t("file_preview_show_changes")}
+              icon={<Diff className="size-4" />}
+              isIconOnly
+              size="sm"
+              isPressed={panel.showChanges}
+              onPressedChange={(on) => panel.setShowChanges(on)}
+            />
           )}
           {file && exporting ? (
             <ExportMenu
@@ -232,6 +317,20 @@ export function FilePanel({
                 onClick={() => panel.retry()}
               />
             </>
+          ) : panel.dirty && panel.replacementContent ? (
+            // The newer version waits until the reader is done with their edits.
+            <>
+              <p className="text-ax-text-secondary text-xs">
+                {t("file_preview_newer_version_while_editing")}
+              </p>
+              <Button
+                label={t("file_preview_show_latest")}
+                variant="secondary"
+                size="sm"
+                className="mt-2"
+                onClick={discardEdits}
+              />
+            </>
           ) : (
             <>
               <p className="text-ax-text-accent font-medium">
@@ -268,17 +367,37 @@ export function FilePanel({
               aria-hidden={view.pending ? "true" : undefined}
             >
               <FilePreviewContent
+                ref={(handle) => {
+                  contents.set(view.file.id, handle);
+                  return () => {
+                    contents.delete(view.file.id);
+                  };
+                }}
                 content={view.content}
                 title={view.file.name}
                 highlight={view.pending ? null : highlight}
+                editable={!view.pending && editable}
+                previousMarkdown={view.pending ? null : previousMarkdown}
                 onReady={() => panel.finishReplacement(view.file.id)}
                 onError={() => panel.failReplacement(view.file.id)}
                 onQuote={(text, locator) => panel.quoteSelection(text, locator)}
+                onDirty={() => panel.markEdited()}
+                onSave={() => void saveEdits()}
               />
             </div>
           ))
         )}
       </div>
+      <ConfirmDialogControlled
+        open={panel.pendingDiscard !== null}
+        onOpenChange={(open) => {
+          if (!open) panel.keepEditing();
+        }}
+        title={t("file_preview_discard_edits_title")}
+        description={t("file_preview_discard_edits_description")}
+        confirmLabel={t("file_preview_discard_edits")}
+        onConfirm={discardEdits}
+      />
     </PanelFrame>
   );
 }

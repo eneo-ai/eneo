@@ -7,6 +7,8 @@ export type GeneratedDocument = {
   mimetype: string;
   size: number;
   original_size?: number | null;
+  /** The version a reader's saved edit was made from. */
+  revises_file_id?: string | null;
 };
 
 type DocumentCall = {
@@ -76,9 +78,10 @@ const extension = (name: string) => name.slice(name.lastIndexOf(".") + 1).toLowe
 /**
  * The documents of a conversation, each with its versions in order.
  *
- * A call that revises an earlier file continues that file's document. The same
- * content in another format (a plan handed over as Word) is a document of its
- * own, since both are kept and used.
+ * A call that revises an earlier file continues that file's document, and so
+ * does a version a reader saved of one. The same content in another format (a
+ * plan handed over as Word) is a document of its own, since both are kept and
+ * used.
  */
 export function conversationDocuments(
   messages: readonly { files: GeneratedDocument[]; calls: DocumentCall[] }[]
@@ -111,6 +114,15 @@ export function conversationDocuments(
         laterOf.set(earlier.id, id);
       }
     }
+  }
+  for (const file of files.values()) {
+    const earlier = files.get(file.revises_file_id ?? "");
+    if (!earlier || earlier.id === file.id || extension(file.name) !== extension(earlier.name)) {
+      continue;
+    }
+    if (earlierOf.has(file.id) || laterOf.has(earlier.id)) continue;
+    earlierOf.set(file.id, earlier.id);
+    laterOf.set(earlier.id, file.id);
   }
 
   const documents: ConversationDocument[] = [];

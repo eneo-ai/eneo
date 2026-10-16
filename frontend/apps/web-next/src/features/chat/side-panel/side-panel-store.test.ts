@@ -231,3 +231,48 @@ it("notifies its subscribers once per change", () => {
   expect(listener).toHaveBeenCalledTimes(1);
   expect(store.getVersion()).toBe(before + 1);
 });
+
+it("keeps a replacement waiting while the reader edits, and shows it once the edits are dropped", async () => {
+  const store = panel();
+  store.open(file);
+  await vi.waitFor(() => expect(store.status).toBe("ready"));
+  store.markEdited();
+  expect(store.dirty).toBe(true);
+  store.arrive(revision);
+  await vi.waitFor(() => expect(store.replacementContent).not.toBeNull());
+  store.finishReplacement(revision.id);
+  expect(store.file).toEqual(file);
+  store.dropEdits();
+  expect(store.dirty).toBe(false);
+  expect(store.file).toEqual(revision);
+});
+
+it("asks before edits are lost, and goes on once the reader agrees", async () => {
+  const store = panel();
+  store.open(file);
+  await vi.waitFor(() => expect(store.status).toBe("ready"));
+  store.markEdited();
+  store.open(revision);
+  expect(store.pendingDiscard).not.toBeNull();
+  expect(store.file).toEqual(file);
+  store.keepEditing();
+  expect(store.pendingDiscard).toBeNull();
+  expect(store.dirty).toBe(true);
+  store.close();
+  store.pendingDiscard!.proceed();
+  expect(store.dirty).toBe(false);
+  expect(store.shown).toBe(false);
+});
+
+it("shows the saved version in place of the edited one", async () => {
+  const store = panel();
+  store.open(file);
+  await vi.waitFor(() => expect(store.status).toBe("ready"));
+  store.markEdited();
+  store.saved(revision, "# Edited\n");
+  expect(store.dirty).toBe(false);
+  expect(store.file).toEqual(revision);
+  expect(store.content).toEqual({ kind: "markdown", text: "# Edited\n", truncated: false });
+  // The text is kept for comparing versions without another download.
+  await expect(store.loadText(revision)).resolves.toBe("# Edited\n");
+});
