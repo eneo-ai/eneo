@@ -42,7 +42,7 @@
     };
   });
 
-  // Sync history state
+  // Sync history state; the selection stays while the dialog closes so its title does not flash empty.
   let selectedIntegrationForSyncHistory: IntegrationKnowledge | null = $state(null);
   let showSyncHistoryDialog = $state(false);
 
@@ -50,12 +50,6 @@
     selectedIntegrationForSyncHistory = integration;
     showSyncHistoryDialog = true;
   }
-
-  $effect(() => {
-    if (!showSyncHistoryDialog) {
-      selectedIntegrationForSyncHistory = null;
-    }
-  });
 </script>
 
 <svelte:head>
