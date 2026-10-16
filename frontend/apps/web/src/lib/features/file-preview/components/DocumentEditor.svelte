@@ -9,6 +9,7 @@
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { m } from "$lib/paraglide/messages";
   import type { PreviewPassage } from "../FilePreview.svelte";
+  import { changesBetween } from "../editor/changes";
   import { documentExtensions, withFinalNewline } from "../editor/extensions";
   import {
     cellSelectionQuote,
@@ -23,10 +24,16 @@
     editable?: boolean;
     /** A passage to mark and scroll to; null clears the mark. */
     highlight?: PreviewPassage | null;
+    /** The version before this one, as Markdown; what changed against it is marked. */
+    previousMarkdown?: string | null;
     /** Called with the selected text, and where it stands, when the reader quotes it. */
     onquote?: (text: string, locator: string | null) => void;
-    /** The reader changed the content; never called for a `markdown` update. */
-    ondirty?: () => void;
+    /**
+     * Whether the document's text now differs from `markdown`. Called when
+     * that changes either way; never for a `markdown` update, nor for the
+     * editor's own tidying of a loaded document.
+     */
+    onchange?: (dirty: boolean) => void;
     /** The reader asked to save (Mod+S) while editing. */
     onsave?: () => void;
     /** Each `markdown` value has been laid out. */
@@ -39,8 +46,9 @@
     markdown,
     editable = false,
     highlight = null,
+    previousMarkdown = null,
     onquote,
-    ondirty,
+    onchange,
     onsave,
     onrender,
     onready
@@ -55,6 +63,12 @@
   let dirty = false;
   // The Markdown the editor last took, so the same text is not parsed again.
   let applied: string | null = null;
+  // The document as loaded, serialised: what the reader's text is compared
+  // with. The file's own Markdown does not serve, since a document does not
+  // come back byte for byte (a table's columns are padded, for one).
+  let baseline = "";
+  // Content is being put in place; the editor's own tidying of it is no edit.
+  let applying = false;
   let frame = 0;
   // Bumped when the document changed under the highlight, so it is placed again.
   let rendered = $state(0);
@@ -110,13 +124,21 @@
         }
       }
     });
-    // A keystroke only marks the document edited; nothing is saved here.
+    // A keystroke only marks the document edited; nothing is saved here. The
+    // mark compares text with the document as loaded, since the editor also
+    // tidies a loaded document (a paragraph to type in after a final code
+    // block) without changing what it says, and a reader cannot edit a
+    // document that is read-only.
     created.on("update", () => {
-      dirty = true;
-      ondirty?.();
+      if (applying || !created.isEditable) return;
+      const changed = withFinalNewline(created.getMarkdown()) !== baseline;
+      if (changed === dirty) return;
+      dirty = changed;
+      onchange?.(dirty);
     });
     editor = created;
     applied = initial;
+    baseline = withFinalNewline(created.getMarkdown());
     let active = true;
     void tick().then(() => {
       if (!active) return;
@@ -146,8 +168,7 @@
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => {
       if (!editor || editor.isDestroyed || dirty) return;
-      editor.commands.setContent(next, CONTENT);
-      applied = next;
+      apply(editor, next);
       rendered++;
       onrender?.();
     });
@@ -161,6 +182,16 @@
     const spans = passage ? findPassageSpans(current.state.doc, passage.text, passage.locator) : [];
     current.commands.highlightPassage(spans);
     if (spans.length > 0) reveal(current, spans[0].from);
+  });
+
+  // What this version changed against the one before it, over the text as
+  // the file has it; the marks then follow the reader's edits.
+  $effect(() => {
+    const previous = previousMarkdown;
+    const current = markdown;
+    void rendered;
+    if (!editor) return;
+    editor.commands.showChanges(previous === null ? [] : changesBetween(previous, current));
   });
 
   /** Scrolls whatever scrolls the editor to centre the position. */
@@ -201,12 +232,23 @@
     return editor ? withFinalNewline(editor.getMarkdown()) : markdown;
   }
 
+  /** Puts `next` in the editor as the document the reader's text is compared with. */
+  function apply(current: Editor, next: string) {
+    applying = true;
+    try {
+      current.commands.setContent(next, CONTENT);
+    } finally {
+      applying = false;
+    }
+    applied = next;
+    baseline = withFinalNewline(current.getMarkdown());
+  }
+
   /** Drops the reader's edits and shows the file's text again. */
   export function reset() {
     dirty = false;
     if (!editor) return;
-    editor.commands.setContent(markdown, CONTENT);
-    applied = markdown;
+    apply(editor, markdown);
     rendered++;
   }
 </script>
@@ -233,6 +275,26 @@
 <style>
   .document-editor :global(.passage-highlight) {
     background-color: var(--warning-dimmer);
+  }
+
+  /* The dimmer tokens are too faint for a mark inside running text; the
+     default tones mixed down read in both themes. Added text is also
+     underlined, so the change shows without its colour. */
+  .document-editor :global(.change-added) {
+    background-color: color-mix(in oklab, var(--positive-default) 28%, transparent);
+    border-radius: 0.15em;
+    text-decoration: underline;
+    text-decoration-color: var(--positive-default);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 0.15em;
+  }
+
+  .document-editor :global(.change-removed) {
+    margin-right: 0.25em;
+    background-color: color-mix(in oklab, var(--negative-default) 22%, transparent);
+    border-radius: 0.15em;
+    color: var(--color-muted-foreground);
+    text-decoration: line-through;
   }
 
   .document-editor :global(.page-break) {

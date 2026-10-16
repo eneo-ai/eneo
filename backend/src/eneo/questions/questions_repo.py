@@ -154,6 +154,17 @@ class QuestionRepository:
             question_id=question_id, files=[file], file_type="assistant"
         )
 
+    async def remove_generated_file(self, *, question_id: UUID, file_id: UUID) -> None:
+        """Take a file out of a turn's answer: a reader's version that a newer
+        save of theirs replaces."""
+        await self.session.execute(
+            sa.delete(QuestionsFiles).where(
+                QuestionsFiles.question_id == question_id,
+                QuestionsFiles.file_id == file_id,
+                QuestionsFiles.type == "assistant",
+            )
+        )
+
     async def _add_files(
         self, question_id: UUID, files: list[File], file_type: str = "user"
     ):

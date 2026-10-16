@@ -3,6 +3,7 @@ import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
 import { Markdown, MarkdownManager } from "@tiptap/markdown";
 import StarterKit from "@tiptap/starter-kit";
+import { ChangeHighlight } from "./changeHighlight";
 import { DocumentCodeBlock } from "./codeBlock";
 import { EneoImage } from "./eneoImage";
 import { PageBreak } from "./pageBreak";
@@ -56,13 +57,13 @@ export function documentExtensions({
     PageBreak.configure({ label: pageBreakLabel }),
     ...RawHtml,
     PassageHighlight,
+    ChangeHighlight,
     Markdown.configure({ markedOptions: MARKED_OPTIONS })
   ];
 }
 
-/** Markdown as the document tools write it: ending in a newline. */
-export const withFinalNewline = (markdown: string) =>
-  markdown.endsWith("\n") ? markdown : `${markdown}\n`;
+/** Markdown as the document tools write it: ending in one newline, with no blank lines after the text. */
+export const withFinalNewline = (markdown: string) => `${markdown.replace(/\s+$/, "")}\n`;
 
 /** Converts between Markdown and the document model without an editor. */
 export function documentMarkdown(options: DocumentExtensionOptions = {}) {

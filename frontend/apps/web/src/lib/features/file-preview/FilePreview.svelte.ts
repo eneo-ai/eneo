@@ -35,6 +35,8 @@ export type PreviewCover = { leave: () => void };
 /** How a reader's edit of a document is kept: as the document's next version. */
 export type DocumentSaver = {
   save: (markdown: string) => Promise<PreviewFile>;
+  /** The panel now shows the saved version; whatever it replaced can go. */
+  saved?: (version: PreviewFile) => void;
 };
 
 /** Actual document input shown while the assistant is still writing it. */
@@ -114,7 +116,7 @@ export class FilePreview {
    * who is editing keeps the text in front of them; the replacement waits.
    */
   finishReplacement(id: string) {
-    if (this.editing) return;
+    if (this.dirty) return;
     if (this.replacementFile?.id !== id || !this.replacementContent) return;
     this.file = this.replacementFile;
     this.content = this.replacementContent;
@@ -138,11 +140,13 @@ export class FilePreview {
   /** A passage to point out in the open file: a quote the user asked to see in place. */
   highlight = $state.raw<PreviewPassage | null>(null);
   /**
-   * The reader is editing the open document; `dirty` once its text differs
-   * from the file. Edits live in the editor until the reader saves them as a
-   * new version, so nothing is written on a keystroke.
+   * The reader has changed the open document's text. Edits live in the editor
+   * until the reader saves them as a new version, so nothing is written on a
+   * keystroke; what would lose them asks first.
    */
-  editing = $state.raw<{ dirty: boolean } | null>(null);
+  dirty = $state(false);
+  /** Whether the document on show marks what it changed against the version before it. */
+  showChanges = $state(true);
   /**
    * Something would take the editor away (another file, the panel closing)
    * while edits are unsaved; it waits for the reader to decide.
@@ -180,24 +184,33 @@ export class FilePreview {
 
   /** Whether the reader has edits that are not saved. */
   get unsaved() {
-    return !!this.editing?.dirty;
+    return this.dirty;
   }
 
-  /** Lets the reader edit the open document. */
-  startEditing() {
-    if (this.file && this.status === "ready" && this.content?.kind === "markdown") {
-      this.editing = { dirty: false };
+  /** Whether the document's text now differs from the file. */
+  setDirty(dirty: boolean) {
+    this.dirty = dirty;
+  }
+
+  /** The reader let their edits go; a replacement that waited then shows. */
+  dropEdits() {
+    this.dirty = false;
+    this.#showReplacement();
+  }
+
+  /** The text of a Markdown document, for comparing versions; null when it cannot be read. */
+  async loadText(file: PreviewFile): Promise<string | null> {
+    let content = this.#cache.get(file.id);
+    if (!content) {
+      try {
+        const url = await this.#urls.resolveOriginalUrl(file);
+        content = await loadPreview(file, "markdown", url, new AbortController().signal);
+        this.#remember(file.id, content);
+      } catch {
+        return null;
+      }
     }
-  }
-
-  /** The reader changed the document's text. */
-  markEdited() {
-    if (this.editing && !this.editing.dirty) this.editing = { dirty: true };
-  }
-
-  /** Leaves edit mode, asking first when edits would be lost; a replacement that waited then shows. */
-  stopEditing() {
-    this.#guarded(() => this.#showReplacement());
+    return content.kind === "markdown" ? content.text : null;
   }
 
   /** The reader keeps editing after all. */
@@ -220,20 +233,20 @@ export class FilePreview {
     this.status = "ready";
     this.highlight = null;
     this.draft = null;
-    this.editing = null;
+    this.dirty = false;
+    this.pendingDiscard = null;
   }
 
   // Runs `action` at once, or once the reader has agreed to lose their edits.
   #guarded(action: () => void) {
     if (!this.unsaved) {
-      this.editing = null;
       action();
       return;
     }
     this.pendingDiscard = {
       proceed: () => {
         this.pendingDiscard = null;
-        this.editing = null;
+        this.dirty = false;
         action();
       }
     };

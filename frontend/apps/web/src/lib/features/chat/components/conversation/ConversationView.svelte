@@ -150,12 +150,25 @@
         });
         chat.addGeneratedFile(version);
         return version;
+      },
+      saved: (version) => {
+        // A save onto the reader's own version takes its place: the new
+        // version then revises what the old one revised, not the old one.
+        // Only once the panel shows the new version, or the panel would
+        // close over a file the conversation no longer has.
+        if (file.revises_file_id && version.revises_file_id !== file.id) {
+          chat.removeGeneratedFile(file.id);
+        }
       }
     };
   }
-  // Leaving the page would lose unsaved edits to a document.
+  // Leaving the conversation would lose unsaved edits to a document. On a
+  // reload or a closed tab the browser asks with its own dialog.
   beforeNavigate((navigation) => {
-    if (filePreview.unsaved && !confirm(m.unsaved_changes_warning())) navigation.cancel();
+    if (!filePreview.unsaved) return;
+    if (navigation.type === "leave" || !confirm(m.unsaved_changes_warning())) {
+      navigation.cancel();
+    }
   });
 
   // A tool call of the answer being written.

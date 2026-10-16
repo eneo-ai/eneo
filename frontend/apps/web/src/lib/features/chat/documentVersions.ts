@@ -9,6 +9,7 @@ export type GeneratedDocument = {
   original_size?: number | null;
   /** The version a reader's saved edit was made from. */
   revises_file_id?: string | null;
+  created_at?: string | null;
 };
 
 type ToolCall = {

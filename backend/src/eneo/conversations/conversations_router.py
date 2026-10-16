@@ -1179,6 +1179,7 @@ async def save_conversation_document_version(
             conversation=session,
             file_id=file_id,
             content=request.content,
+            user_id=current_user.id,
             file_service=container.file_service(),
             question_repo=container.question_repo(),
         )
@@ -1209,7 +1210,11 @@ async def save_conversation_document_version(
             extra={
                 "session_id": str(session_id),
                 "file_id": str(saved.file.id),
-                "revises_file_id": str(file_id),
+                "revises_file_id": str(saved.file.revises_file_id),
+                "edited_from_file_id": str(file_id),
+                "replaced_file_id": (
+                    str(saved.replaced_file_id) if saved.replaced_file_id else None
+                ),
                 "question_id": str(saved.question_id),
                 "bytes": len(request.content.encode("utf-8")),
             },
