@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, type MutationKey } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { createContext, use, type RefObject } from "react";
 import { toastApiError } from "@/lib/api/toast";
@@ -38,12 +38,15 @@ export function RemovalFocusScope({
  * unless `onError` is given.
  */
 export function useRemovalMutation<TData = unknown, TVariables = void>({
+  mutationKey,
   mutationFn,
   refresh,
   onRemoved,
   onError,
   focusTarget
 }: {
+  /** For a page that must tell its own removal from the item vanishing otherwise. */
+  mutationKey?: MutationKey;
   mutationFn: (variables: TVariables) => Promise<TData>;
   refresh: () => Promise<unknown>;
   onRemoved?: (data: TData, variables: TVariables) => void;
@@ -55,6 +58,7 @@ export function useRemovalMutation<TData = unknown, TVariables = void>({
   const scopeTarget = use(RemovalFocusContext);
   const target = focusTarget ?? scopeTarget;
   return useMutation({
+    mutationKey,
     mutationFn,
     onSuccess: async (data, variables) => {
       await refresh();

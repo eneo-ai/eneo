@@ -26,18 +26,11 @@ import {
   sharepointSubscriptionsQueryOptions
 } from "./integrations";
 
-export function SharePointSubscriptions() {
+/** Renews every expired subscription and toasts the outcome; the list refetches either way. */
+export function useRenewExpiredSubscriptions() {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: SHAREPOINT_SUBSCRIPTIONS_KEY });
-
-  const { data: subscriptions, isPending } = useQuery(
-    sharepointSubscriptionsQueryOptions(browserApi)
-  );
-  const [renewingId, setRenewingId] = useState<string | null>(null);
-
-  const renewAll = useMutation({
+  return useMutation({
     mutationFn: () =>
       unwrap(browserApi.POST("/api/v1/admin/sharepoint/subscriptions/renew-expired")),
     onSuccess: (result) => {
@@ -53,10 +46,24 @@ export function SharePointSubscriptions() {
           t("sharepoint_subscriptions_renewed_success", { count: result.recreated ?? 0 })
         );
       }
-      void invalidate();
     },
-    onError: (error) => toastApiError(error, t)
+    onError: (error) => toastApiError(error, t),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: SHAREPOINT_SUBSCRIPTIONS_KEY })
   });
+}
+
+export function SharePointSubscriptions() {
+  const t = useTranslations();
+  const queryClient = useQueryClient();
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: SHAREPOINT_SUBSCRIPTIONS_KEY });
+
+  const { data: subscriptions, isPending } = useQuery(
+    sharepointSubscriptionsQueryOptions(browserApi)
+  );
+  const [renewingId, setRenewingId] = useState<string | null>(null);
+
+  const renewAll = useRenewExpiredSubscriptions();
 
   const recreate = useMutation({
     mutationFn: (id: string) => {

@@ -496,6 +496,20 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
+    test("admin integrations", async ({ page }) => {
+      await scan(page, "/admin/integrations", async () => {
+        await expect(
+          page.getByRole("heading", { level: 1, name: /^(Integrationer|Integrations)$/ })
+        ).toBeVisible();
+        // The sources overview has loaded: its summary or the empty text.
+        await expect(
+          page.getByRole("heading", {
+            name: /^(Källor i organisationen|Sources across the organisation)$/
+          })
+        ).toBeVisible();
+      });
+    });
+
     test("admin crawler", async ({ page }) => {
       await scan(page, "/admin/crawler", async () => {
         await expect(page.getByRole("heading", { level: 1, name: /^Crawler$/ })).toBeVisible();

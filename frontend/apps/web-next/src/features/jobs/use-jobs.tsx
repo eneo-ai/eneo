@@ -77,10 +77,11 @@ function createUploadStore(): UploadStore {
 type JobsContextValue = {
   /**
    * Register a backend job: switches to fast polling for quick feedback.
-   * Pass the job the call returned so its completion is caught even when the
-   * first poll already reports it finished (see job-transitions.ts).
+   * Pass the job the call returned (or every job, for calls made together) so
+   * its completion is caught even when the first poll already reports it
+   * finished (see job-transitions.ts).
    */
-  trackJob: (job?: Job) => void;
+  trackJob: (job?: Job | Job[]) => void;
   /** Queue files for upload into a collection. */
   queueUploads: (collectionId: string, files: File[]) => void;
   clearFinishedUploads: () => void;
@@ -210,10 +211,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   }, [handleSnapshot, jobs]);
 
   const trackJob = useCallback(
-    (job?: Job) => {
-      if (job) {
-        ledger.current = rememberActiveJob(ledger.current, job);
-        // The cached list may already show this job finished. Judge it now:
+    (job?: Job | Job[]) => {
+      const jobs = job === undefined ? [] : Array.isArray(job) ? job : [job];
+      if (jobs.length > 0) {
+        for (const started of jobs) ledger.current = rememberActiveJob(ledger.current, started);
+        // The cached list may already show these jobs finished. Judge it now:
         // a refetch that returns identical data does not re-run the effect.
         handleSnapshot(queryClient.getQueryData<Job[]>(JOBS_KEY) ?? NO_JOBS);
       }
