@@ -15477,7 +15477,7 @@ export interface components {
       relative_path: string;
       /**
        * Url
-       * @description Web URL of the source document
+       * @description Web URL of the source document; null unless an absolute https URL
        */
       url?: string | null;
       /** Size */
@@ -15562,8 +15562,11 @@ export interface components {
       name: string;
       /** Original Name */
       original_name?: string | null;
-      /** Url */
-      url: string;
+      /**
+       * Url
+       * @description Web URL of the item in its source; null unless an absolute https URL
+       */
+      url: string | null;
       /**
        * Tenant Id
        * Format: uuid
