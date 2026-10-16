@@ -1623,13 +1623,11 @@ class TestOneDriveFolderTraversal:
             site_id=None,
             drive_id="drive-123",
             resource_type="onedrive",
-            token=mock_oauth_token,
-            integration_knowledge_id=uuid4(),
+            integration_knowledge=MagicMock(id=uuid4()),
             client=mock_client,
             stats=service._initialize_stats(),
             folder_id="folder-456",
             processed_items=set(),
-            is_root_call=True,
         )
 
         mock_client.get_drive_folder_items.assert_called_once_with(
@@ -1681,8 +1679,7 @@ class TestOneDriveFolderTraversal:
                         "parentReference": {"driveId": "drive-123"},
                     }
                 ],
-                integration_knowledge_id=mock_integration_knowledge.id,
-                token=mock_oauth_token,
+                integration_knowledge=mock_integration_knowledge,
                 processed_items=set(),
                 stats=stats,
             )
@@ -1776,8 +1773,7 @@ class TestOneDriveFolderTraversal:
                         "parentReference": {"driveId": "drive-123"},
                     }
                 ],
-                integration_knowledge_id=mock_integration_knowledge.id,
-                token=mock_oauth_token,
+                integration_knowledge=mock_integration_knowledge,
                 processed_items=set(),
                 stats=stats,
             )
@@ -1834,8 +1830,7 @@ class TestOneDriveFolderTraversal:
                         "parentReference": {"driveId": "drive-123"},
                     }
                 ],
-                integration_knowledge_id=mock_integration_knowledge.id,
-                token=mock_oauth_token,
+                integration_knowledge=mock_integration_knowledge,
                 processed_items=set(),
                 stats=stats,
             )
@@ -1853,8 +1848,8 @@ class TestOneDriveFolderTraversal:
         assert stats["skipped_details"] == []
 
 
-class TestGetFileContent:
-    """``_get_file_content`` keeps its ``(content, skip_reason)`` shape and the
+class TestFileExtraction:
+    """``_extract_file`` keeps its ``(content, skip_reason)`` shape and the
     delete guard only accepts a completed parse that found nothing."""
 
     ITEM = {
@@ -1868,8 +1863,8 @@ class TestGetFileContent:
         client = AsyncMock()
         client.get_file_extraction_by_id.return_value = ExtractionResult.ok("Body")
 
-        assert await service._get_file_content(
-            client, self.ITEM, service._initialize_stats()
+        assert await service._extract_file(
+            client, "drive-1", "item-1", "Report.PDF", service._initialize_stats()
         ) == ("Body", None)
         client.get_file_extraction_by_id.assert_awaited_once_with(
             drive_id="drive-1", item_id="item-1"
@@ -1920,55 +1915,53 @@ class TestGetFileContent:
         else:
             client.get_file_extraction_by_id.return_value = outcome
 
-        content, skip_reason = await service._get_file_content(
-            client, self.ITEM, service._initialize_stats()
+        content, skip_reason = await service._extract_file(
+            client, "drive-1", "item-1", "Report.PDF", service._initialize_stats()
         )
 
         assert (content, skip_reason) == (None, expected_reason)
-        assert (
-            service._is_positive_unextractable_result(content, skip_reason) is positive
+        assert (skip_reason in NO_TEXT_REASONS) is positive
+
+    async def test_an_item_without_an_id_is_skipped_before_download(
+        self, service, mock_integration_knowledge
+    ):
+        client = AsyncMock()
+        stats = service._initialize_stats()
+
+        await service._index_file(
+            client=client,
+            drive_id="drive-1",
+            item={"name": "a.pdf", "file": {}},
+            integration_knowledge=mock_integration_knowledge,
+            stats=stats,
         )
 
-    def test_real_text_is_never_a_positive_unextractable_result(self, service):
-        assert service._is_positive_unextractable_result("Body", None) is False
-        assert (
-            service._is_positive_unextractable_result("Body", EMPTY_CONTENT_REASON)
-            is False
-        )
-        assert service._is_positive_unextractable_result(None, None) is False
+        client.get_file_extraction_by_id.assert_not_called()
+        assert stats["skipped_details"] == [
+            {"file": "a.pdf", "reason": "Missing item id"}
+        ]
 
-    @pytest.mark.parametrize(
-        "item",
-        [
+    async def test_unsupported_extension_is_decided_before_download(
+        self, service, mock_integration_knowledge
+    ):
+        client = AsyncMock()
+        stats = service._initialize_stats()
+
+        await service._index_file(
+            client=client,
+            drive_id="drive-1",
+            item={**self.ITEM, "name": "Old.DOC"},
+            integration_knowledge=mock_integration_knowledge,
+            stats=stats,
+        )
+
+        client.get_file_extraction_by_id.assert_not_called()
+        assert stats["skipped_details"] == [
             {
-                "id": "f",
-                "name": "Folder",
-                "folder": {"childCount": 0},
-                "parentReference": {"driveId": "d"},
-            },
-            {"id": "x", "name": "a.pdf", "file": {}, "parentReference": {}},
-            {"name": "a.pdf", "file": {}, "parentReference": {"driveId": "d"}},
-        ],
-    )
-    async def test_items_without_content_are_skipped_silently(self, service, item):
-        client = AsyncMock()
-
-        assert await service._get_file_content(
-            client, item, service._initialize_stats()
-        ) == (None, None)
-        client.get_file_extraction_by_id.assert_not_called()
-
-    async def test_unsupported_extension_is_decided_before_download(self, service):
-        client = AsyncMock()
-        item = {**self.ITEM, "name": "Old.DOC"}
-
-        content, skip_reason = await service._get_file_content(
-            client, item, service._initialize_stats()
-        )
-
-        assert content is None
-        assert skip_reason == "Unsupported file type (legacy Word .doc, save as .docx)"
-        client.get_file_extraction_by_id.assert_not_called()
+                "file": "Old.DOC",
+                "reason": "Unsupported file type (legacy Word .doc, save as .docx)",
+            }
+        ]
 
     async def test_delete_helper_refuses_non_positive_reasons(
         self, service, mock_integration_knowledge

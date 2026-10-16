@@ -916,12 +916,11 @@ class SharePointContentService:
                             )
                         continue
 
-                    await self._sync_changed_file(
-                        content_client=content_client,
+                    await self._index_file(
+                        client=content_client,
                         drive_id=actual_drive_id,
                         item=item,
                         integration_knowledge=integration_knowledge,
-                        integration_knowledge_id=resolved_integration_knowledge_id,
                         stats=stats,
                         pending_change_keys=pending_change_keys,
                     )
@@ -1120,12 +1119,10 @@ class SharePointContentService:
                             drive_id=actual_drive_id,
                             resource_type=resource_type,
                             client=content_client,
-                            token=token,
-                            integration_knowledge_id=integration_knowledge_id,
+                            integration_knowledge=integration_knowledge,
                             folder_id=folder_id_value,
                             processed_items=processed_items,
                             stats=stats,
-                            is_root_call=True,
                         )
                         await self._reconcile_indexed_blobs(
                             client=content_client,
@@ -1147,46 +1144,15 @@ class SharePointContentService:
                             integration_knowledge.id, selected_item_type="file"
                         )
 
-                        unsupported_reason = unsupported_file_reason(item_name)
-                        if unsupported_reason:
-                            stats["skipped_items"] += 1
-                            stats["skipped_details"].append(
-                                {"file": item_name, "reason": unsupported_reason}
-                            )
-                            return delta_baseline
-
-                        content, skip_reason = await self._extract_file(
-                            content_client,
-                            actual_drive_id,
-                            folder_id_value,
-                            item_name,
-                            stats,
+                        await self._index_file(
+                            client=content_client,
+                            drive_id=actual_drive_id,
+                            item=cast(
+                                SharePointItem, {**item_info, "id": folder_id_value}
+                            ),
+                            integration_knowledge=integration_knowledge,
+                            stats=stats,
                         )
-                        if content and not is_unextractable_content(content):
-                            outcome = await self._process_info_blob(
-                                title=item_name,
-                                text=content,
-                                url=item_info.get("webUrl", ""),
-                                integration_knowledge=integration_knowledge,
-                                sharepoint_item_id=folder_id_value,
-                                source_metadata=await self._source_metadata_for(
-                                    content_client,
-                                    actual_drive_id,
-                                    cast(SharePointItem, item_info),
-                                ),
-                                stats=stats,
-                            )
-                            self._count_outcome(stats, outcome, item_name)
-                        else:
-                            await self._skip_or_remove_unextractable(
-                                item_id=folder_id_value,
-                                item_name=item_name,
-                                skip_reason=skip_reason,
-                                integration_knowledge=integration_knowledge,
-                                integration_knowledge_id=integration_knowledge_id,
-                                stats=stats,
-                            )
-
                         return delta_baseline
                 else:
                     integration_knowledge.selected_item_type = "site_root"
@@ -1204,7 +1170,6 @@ class SharePointContentService:
                             documents=data,
                             client=content_client,
                             integration_knowledge=integration_knowledge,
-                            token=token,
                             resource_type=resource_type,
                             stats=stats,
                         )
@@ -1265,7 +1230,6 @@ class SharePointContentService:
         documents: list[SharePointItem],
         client: SharePointContentClient,
         integration_knowledge: "IntegrationKnowledge",
-        token: SharePointTokenProtocol,
         resource_type: str,
         stats: SyncStats,
     ):
@@ -1273,9 +1237,9 @@ class SharePointContentService:
             drive_id = document.get("parentReference", {}).get("driveId")
             site_id = document.get("parentReference", {}).get("siteId")
             item_id = document.get("id")
+            if not drive_id or not item_id:
+                continue
             if document.get("folder", {}):
-                if not drive_id or not item_id:
-                    continue
                 stats["folders_processed"] += 1
                 # Recursively process all items in the folder
                 processed_items: set[str] = set()
@@ -1284,63 +1248,19 @@ class SharePointContentService:
                     drive_id=drive_id,
                     resource_type=resource_type,
                     client=client,
-                    token=token,
-                    integration_knowledge_id=integration_knowledge.id,
+                    integration_knowledge=integration_knowledge,
                     folder_id=item_id,
                     processed_items=processed_items,
                     stats=stats,
-                    is_root_call=False,
                 )
             else:
-                if not drive_id or not item_id:
-                    continue
-                await self._index_listed_file(
+                await self._index_file(
                     client=client,
                     drive_id=drive_id,
                     item=document,
                     integration_knowledge=integration_knowledge,
                     stats=stats,
                 )
-
-    async def _index_listed_file(
-        self,
-        *,
-        client: SharePointContentClient,
-        drive_id: str,
-        item: SharePointItem,
-        integration_knowledge: "IntegrationKnowledge",
-        stats: SyncStats,
-    ) -> None:
-        """Index one file of a full-sync listing; a failure is counted, not raised."""
-        item_name = item.get("name", "")
-        item_id = item.get("id")
-        try:
-            content, skip_reason = await self._get_file_content(client, item, stats)
-            if content and not is_unextractable_content(content):
-                outcome = await self._process_info_blob(
-                    title=item_name,
-                    text=content,
-                    url=item.get("webUrl", ""),
-                    integration_knowledge=integration_knowledge,
-                    sharepoint_item_id=item_id,
-                    source_metadata=await self._source_metadata_for(
-                        client, drive_id, item
-                    ),
-                    stats=stats,
-                )
-                self._count_outcome(stats, outcome, item_name)
-            else:
-                await self._skip_or_remove_unextractable(
-                    item_id=item_id,
-                    item_name=item_name,
-                    skip_reason=skip_reason,
-                    integration_knowledge=integration_knowledge,
-                    integration_knowledge_id=integration_knowledge.id,
-                    stats=stats,
-                )
-        except Exception as e:
-            logger.error(f"Error processing file {item_name}: {e}", exc_info=True)
-            self._count_failure(stats, item_name, error_reason(e))
 
     async def _process_pages(
         self,
@@ -1723,12 +1643,6 @@ class SharePointContentService:
         stats["skipped_items"] += 1
         stats["skipped_details"].append({"file": item_name, "reason": reason})
 
-    @staticmethod
-    def _is_positive_unextractable_result(
-        content: Optional[str], skip_reason: Optional[str]
-    ) -> bool:
-        return content is None and skip_reason in NO_TEXT_REASONS
-
     async def _skip_or_remove_unextractable(
         self,
         *,
@@ -1740,7 +1654,7 @@ class SharePointContentService:
         stats: SyncStats,
     ) -> None:
         """Count a file that yielded no text; drop the local copy only for a positive no-text result."""
-        if item_id and self._is_positive_unextractable_result(None, skip_reason):
+        if item_id and skip_reason in NO_TEXT_REASONS:
             await self._delete_local_blob_for_unextractable_item(
                 item_id=item_id,
                 item_name=item_name,
@@ -1850,35 +1764,45 @@ class SharePointContentService:
             return self._folder_path_from_item(item)
         return None
 
-    async def _sync_changed_file(
+    async def _index_file(
         self,
         *,
-        content_client: SharePointContentClient,
+        client: SharePointContentClient,
         drive_id: str,
         item: SharePointItem,
         integration_knowledge: "IntegrationKnowledge",
-        integration_knowledge_id: UUID,
         stats: SyncStats,
-        pending_change_keys: list[tuple[UUID, str, str]],
+        pending_change_keys: list[tuple[UUID, str, str]] | None = None,
     ) -> None:
-        """Index one changed file; a failure is counted here and fails the pass at its end."""
-        item_name = item.get("name", "")
-        try:
-            item_id = require_text(item.get("id"), "item id")
-            source_metadata = await self._source_metadata_for(
-                content_client, drive_id, item
-            )
-            change_key = self._change_key_with_metadata(
-                item.get("cTag"), source_metadata, title=item_name
-            )
+        """Download, extract and index one file; a failure is counted, not raised.
 
-            if self.change_key_service and change_key:
-                should_process = await self.change_key_service.should_process(
+        The counted failure fails the pass at its end. With ``pending_change_keys``
+        (a delta pass) an item whose ChangeKey was processed before is skipped as
+        unchanged, and the key of an indexed item is queued for the post-commit
+        cache write. A full sync passes none: it re-verifies every file and
+        relies on the content hash alone.
+        """
+        item_name = item.get("name", "")
+        item_id = item.get("id")
+        if not item_id:
+            stats["skipped_items"] += 1
+            stats["skipped_details"].append(
+                {"file": item_name or "unknown", "reason": "Missing item id"}
+            )
+            return
+        integration_knowledge_id = integration_knowledge.id
+        try:
+            source_metadata = await self._source_metadata_for(client, drive_id, item)
+            change_key = None
+            if pending_change_keys is not None and self.change_key_service:
+                change_key = self._change_key_with_metadata(
+                    item.get("cTag"), source_metadata, title=item_name
+                )
+                if change_key and not await self.change_key_service.should_process(
                     integration_knowledge_id=integration_knowledge_id,
                     item_id=item_id,
                     change_key=change_key,
-                )
-                if not should_process:
+                ):
                     logger.info(
                         f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
                     )
@@ -1894,27 +1818,9 @@ class SharePointContentService:
                 return
 
             content, skip_reason = await self._extract_file(
-                content_client, drive_id, item_id, item_name, stats
+                client, drive_id, item_id, item_name, stats
             )
-            if content and not is_unextractable_content(content):
-                outcome = await self._process_info_blob(
-                    title=item_name,
-                    text=content,
-                    url=item.get("webUrl", ""),
-                    integration_knowledge=integration_knowledge,
-                    sharepoint_item_id=item_id,
-                    source_metadata=source_metadata,
-                    stats=stats,
-                )
-                self._count_outcome(stats, outcome, item_name)
-
-                # Defer the ChangeKey cache write until after commit so a
-                # rolled-back sync re-processes the item instead of skipping it.
-                if self.change_key_service and change_key and outcome != "failed":
-                    pending_change_keys.append(
-                        (integration_knowledge_id, item_id, change_key)
-                    )
-            else:
+            if not content or is_unextractable_content(content):
                 await self._skip_or_remove_unextractable(
                     item_id=item_id,
                     item_name=item_name,
@@ -1923,11 +1829,26 @@ class SharePointContentService:
                     integration_knowledge_id=integration_knowledge_id,
                     stats=stats,
                 )
+                return
 
-        except Exception as e:
-            logger.error(
-                f"Error processing changed file {item_name}: {e}", exc_info=True
+            outcome = await self._process_info_blob(
+                title=item_name,
+                text=content,
+                url=item.get("webUrl", ""),
+                integration_knowledge=integration_knowledge,
+                sharepoint_item_id=item_id,
+                source_metadata=source_metadata,
+                stats=stats,
             )
+            self._count_outcome(stats, outcome, item_name)
+            # Defer the ChangeKey cache write until after commit so a
+            # rolled-back sync re-processes the item instead of skipping it.
+            if pending_change_keys is not None and change_key and outcome != "failed":
+                pending_change_keys.append(
+                    (integration_knowledge_id, item_id, change_key)
+                )
+        except Exception as e:
+            logger.error(f"Error processing file {item_name}: {e}", exc_info=True)
             self._count_failure(stats, item_name, error_reason(e))
 
     async def _index_folder_subtree_entering_scope(
@@ -1994,12 +1915,11 @@ class SharePointContentService:
                 or descendant_id in change_ids
             ):
                 continue
-            await self._sync_changed_file(
-                content_client=content_client,
+            await self._index_file(
+                client=content_client,
                 drive_id=drive_id,
                 item=descendant,
                 integration_knowledge=integration_knowledge,
-                integration_knowledge_id=integration_knowledge_id,
                 stats=stats,
                 pending_change_keys=pending_change_keys,
             )
@@ -2244,13 +2164,11 @@ class SharePointContentService:
         site_id: Optional[str],
         drive_id: Optional[str],
         resource_type: str,
-        token: SharePointTokenProtocol,
-        integration_knowledge_id: UUID,
+        integration_knowledge: "IntegrationKnowledge",
         client: SharePointContentClient,
         stats: SyncStats,
         folder_id: Optional[str] = None,
         processed_items: set[str] | None = None,
-        is_root_call: bool = True,
     ):
         if processed_items is None:
             processed_items = set()
@@ -2258,7 +2176,7 @@ class SharePointContentService:
         if not drive_id:
             logger.warning(
                 "Missing drive_id for SharePoint content fetch (integration_knowledge_id=%s)",
-                integration_knowledge_id,
+                integration_knowledge.id,
             )
             return
 
@@ -2295,11 +2213,9 @@ class SharePointContentService:
             resource_type=resource_type,
             client=client,
             results=results,
-            integration_knowledge_id=integration_knowledge_id,
-            token=token,
+            integration_knowledge=integration_knowledge,
             processed_items=processed_items,
             stats=stats,
-            is_root_call=is_root_call,
         )
 
     async def _process_folder_results(
@@ -2309,16 +2225,10 @@ class SharePointContentService:
         resource_type: str,
         client: SharePointContentClient,
         results: list[SharePointItem],
-        integration_knowledge_id: UUID,
-        token: SharePointTokenProtocol,
+        integration_knowledge: "IntegrationKnowledge",
         processed_items: set[str],
         stats: SyncStats,
-        is_root_call: bool = True,
     ) -> None:
-        integration_knowledge = await self.integration_knowledge_repo.one(
-            id=integration_knowledge_id
-        )
-
         for item in results:
             item_id = item.get("id")
 
@@ -2336,16 +2246,14 @@ class SharePointContentService:
                     drive_id=drive_id,
                     resource_type=resource_type,
                     client=client,
-                    token=token,
-                    integration_knowledge_id=integration_knowledge_id,
+                    integration_knowledge=integration_knowledge,
                     folder_id=item_id,
                     processed_items=processed_items,
                     stats=stats,
-                    is_root_call=False,
                 )
                 continue
 
-            await self._index_listed_file(
+            await self._index_file(
                 client=client,
                 drive_id=drive_id,
                 item=item,
@@ -2565,23 +2473,6 @@ class SharePointContentService:
             return "folder"
 
         return file_extension_to_type(item.get("name", ""))
-
-    async def _get_file_content(
-        self, client: SharePointContentClient, item: SharePointItem, stats: SyncStats
-    ) -> tuple[Optional[str], Optional[str]]:
-        item_id = item.get("id")
-        item_name = item.get("name", "").lower()
-        item_type = self._get_item_type(item)
-        drive_id = item.get("parentReference", {}).get("driveId")
-
-        if not item_id or item_type == "folder" or not drive_id:
-            return None, None
-
-        skip_reason = unsupported_file_reason(item_name)
-        if skip_reason:
-            return None, skip_reason
-
-        return await self._extract_file(client, drive_id, item_id, item_name, stats)
 
     async def _extract_file(
         self,
