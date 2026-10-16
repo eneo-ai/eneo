@@ -91,6 +91,30 @@ class TestIntegrationKnowledgeUnion:
         assert "info_blobs.version_state = 'active'" in sql
         assert f"'{first.id}'" in sql and f"'{second.id}'" in sql
 
+    async def test_the_count_query_matches_its_partial_index(self, repo, session):
+        from eneo.database.tables.info_blobs_table import InfoBlobs
+
+        record = _record()
+        session.execute.side_effect = [_scalars([record]), _rows([])]
+
+        await repo._get_integration_knowledge_union(
+            [uuid4()], with_document_counts=True
+        )
+
+        index = next(
+            index
+            for index in InfoBlobs.__table__.indexes
+            if index.name == "ix_info_blobs_active_integration_knowledge"
+        )
+        assert [column.name for column in index.columns] == ["integration_knowledge_id"]
+        predicate = str(index.dialect_options["postgresql"]["where"])
+        assert predicate == "version_state = 'active'"
+        sql = _compiled(session.execute.await_args_list[1].args[0])
+        assert (
+            f"WHERE info_blobs.integration_knowledge_id IN ('{record.id}') AND info_blobs.{predicate}"
+            in sql
+        )
+
     async def test_hydration_without_counts_issues_no_count_query(self, repo, session):
         first, second = _record(), _record()
         session.execute.side_effect = [_scalars([first, second])]
