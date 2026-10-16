@@ -51,10 +51,19 @@
         eneo.integrations.knowledge.triggerFullSync({ knowledge, space: $currentSpace })
       )
     );
-    refreshCurrentSpace();
-    const failed = results.filter((result) => result.status === "rejected").length;
-    if (failed > 0) {
-      toast.error(m.resync_all_wrapper_partial_failure({ failed, total }));
+    // Awaited so the dialog closes on statuses that already show the queued syncs.
+    await refreshCurrentSpace();
+    const failedNames = resyncableItems
+      .filter((_, index) => results[index].status === "rejected")
+      .map((item) => item.name);
+    if (failedNames.length > 0) {
+      toast.error(
+        m.resync_all_wrapper_partial_failure({
+          failed: failedNames.length,
+          total,
+          names: failedNames.join(", ")
+        })
+      );
     } else {
       toast.success(m.resync_all_wrapper_queued({ count: total }));
     }

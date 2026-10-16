@@ -1201,7 +1201,7 @@
   "start_full_sync": "Starta fullständig synk",
   "resync_all_wrapper": "Synka om alla objekt",
   "confirm_resync_all_wrapper": "Detta startar en fullständig omsynkning av alla {count} objekt i \"{wrapperName}\". Allt innehåll bearbetas om, vilket kan ta en stund. Är du säker?",
-  "resync_all_wrapper_partial_failure": "{failed} av {total} objekt kunde inte köas",
+  "resync_all_wrapper_partial_failure": "{failed} av {total} objekt kunde inte köas: {names}",
   "resync_all_wrapper_queued": "Omsynkning köad för {count} objekt",
   "sync_now": "Synkronisera nu",
   "not_synced": "Inte synkroniserad än",

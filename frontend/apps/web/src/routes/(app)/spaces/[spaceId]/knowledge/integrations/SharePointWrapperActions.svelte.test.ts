@@ -58,6 +58,7 @@ async function confirmResync() {
 describe("SharePointWrapperActions resync all", () => {
   beforeEach(() => {
     api.triggerFullSync.mockReset();
+    api.refreshCurrentSpace.mockClear();
     api.toastSuccess.mockClear();
     api.toastError.mockClear();
     render(SharePointWrapperActions, {
@@ -93,8 +94,13 @@ describe("SharePointWrapperActions resync all", () => {
 
     expect(api.triggerFullSync).toHaveBeenCalledTimes(items.length);
     expect(api.toastError).toHaveBeenCalledWith(
-      m.resync_all_wrapper_partial_failure({ failed: 2, total: items.length })
+      m.resync_all_wrapper_partial_failure({
+        failed: 2,
+        total: items.length,
+        names: "Item b, Item d"
+      })
     );
+    expect(api.refreshCurrentSpace).toHaveBeenCalledOnce();
     expect(api.toastSuccess).not.toHaveBeenCalled();
 
     await openResyncDialog();
