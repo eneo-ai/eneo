@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import unicodedata
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 from urllib.parse import unquote
@@ -297,6 +298,27 @@ def _sync_metadata(
     return metadata
 
 
+@dataclass
+class _DeltaPass:
+    """What one delta pass carries from entry to entry."""
+
+    content_client: SharePointContentClient
+    integration_knowledge: "IntegrationKnowledge"
+    site_id: Optional[str]
+    drive_id: str
+    stats: SyncStats
+    change_ids: set[str]
+    scope_folder_path: Optional[str]
+    folder_scope_path_unresolved: bool
+    known_subfolder_ids: set[str]
+    # Processed (knowledge, item, change_key) triples, written to the Redis
+    # ChangeKey cache only after the DB transaction commits; see
+    # _schedule_post_commit_change_keys.
+    pending_change_keys: list[tuple[UUID, str, str]]
+    # Indexed item ids, read once per pass for folders entering scope.
+    indexed_ids: set[str] | None = None
+
+
 class SharePointContentService:
     def __init__(
         self,
@@ -351,6 +373,57 @@ class SharePointContentService:
         access_token = await self.org_token_provider.get_access_token(tenant_app)
         return access_token, self.org_token_provider.access_token_provider(tenant_app)
 
+    async def _graph_access(
+        self,
+        token_id: Optional[UUID],
+        tenant_app_id: Optional[UUID],
+        *,
+        purpose: str,
+    ) -> tuple[SharePointTokenProtocol, Optional[UUID], Optional[AccessTokenProvider]]:
+        """The token Graph is called with, its OAuth row id and a re-acquire callback.
+
+        A tenant app gets an organisation token from the provider; a personal
+        integration uses the person's OAuth token and refreshes it by row id.
+        """
+        if tenant_app_id:
+            tenant_app = await self.tenant_sharepoint_app_repo.get_by_id(
+                app_id=tenant_app_id
+            )
+            if not tenant_app:
+                raise ValueError(f"Tenant app {tenant_app_id} not found")
+            access_token, access_token_provider = await self._org_access_token(
+                tenant_app
+            )
+            logger.info(
+                "Using %s auth for %s tenant_app %s",
+                tenant_app.auth_method,
+                purpose,
+                tenant_app_id,
+            )
+            token = SimpleSharePointToken(access_token=access_token)
+            return token, None, access_token_provider
+        if token_id:
+            token = await self.oauth_token_repo.one(id=token_id)
+            return _require_sharepoint_token(token), token.id, None
+        raise ValueError("Either token_id or tenant_app_id must be provided")
+
+    def _graph_client(
+        self,
+        token: SharePointTokenProtocol,
+        oauth_token_id: Optional[UUID],
+        access_token_provider: Optional[AccessTokenProvider],
+    ) -> SharePointContentClient:
+        return SharePointContentClient(
+            base_url=token.base_url,
+            api_token=token.access_token,
+            token_id=oauth_token_id,
+            token_refresh_callback=(
+                self.token_refresh_callback if oauth_token_id else None
+            ),
+            access_token_provider=access_token_provider,
+            include_list_item_fields=True,
+        )
+
     async def pull_content(
         self,
         token_id: Optional[UUID] = None,
@@ -368,28 +441,9 @@ class SharePointContentService:
         resolved_integration_knowledge_id: UUID | None = integration_knowledge_id
 
         try:
-            if tenant_app_id:
-                tenant_app = await self.tenant_sharepoint_app_repo.get_by_id(
-                    app_id=tenant_app_id
-                )
-                if not tenant_app:
-                    raise ValueError(f"Tenant app {tenant_app_id} not found")
-                access_token, access_token_provider = await self._org_access_token(
-                    tenant_app
-                )
-                logger.info(
-                    "Using %s auth for tenant_app %s",
-                    tenant_app.auth_method,
-                    tenant_app_id,
-                )
-                token = SimpleSharePointToken(access_token=access_token)
-                oauth_token_id = None
-            elif token_id:
-                token = await self.oauth_token_repo.one(id=token_id)
-                oauth_token_id = token.id
-                access_token_provider = None
-            else:
-                raise ValueError("Either token_id or tenant_app_id must be provided")
+            token, oauth_token_id, access_token_provider = await self._graph_access(
+                token_id, tenant_app_id, purpose="full sync"
+            )
 
             stats = self._initialize_stats()
 
@@ -421,7 +475,7 @@ class SharePointContentService:
             )
 
             delta_baseline = await self._pull_content(
-                token=_require_sharepoint_token(token),
+                token=token,
                 oauth_token_id=oauth_token_id,
                 integration_knowledge_id=resolved_integration_knowledge_id,
                 site_id=resolved_site_id,
@@ -593,28 +647,9 @@ class SharePointContentService:
         delegated_to_full_sync = False
 
         try:
-            if tenant_app_id:
-                tenant_app = await self.tenant_sharepoint_app_repo.get_by_id(
-                    app_id=tenant_app_id
-                )
-                if not tenant_app:
-                    raise ValueError(f"Tenant app {tenant_app_id} not found")
-                access_token, access_token_provider = await self._org_access_token(
-                    tenant_app
-                )
-                logger.info(
-                    "Using %s auth for delta sync tenant_app %s",
-                    tenant_app.auth_method,
-                    tenant_app_id,
-                )
-                token = SimpleSharePointToken(access_token=access_token)
-                oauth_token_id = None
-            elif token_id:
-                token = await self.oauth_token_repo.one(id=token_id)
-                oauth_token_id = token.id
-                access_token_provider = None
-            else:
-                raise ValueError("Either token_id or tenant_app_id must be provided")
+            token, oauth_token_id, access_token_provider = await self._graph_access(
+                token_id, tenant_app_id, purpose="delta sync"
+            )
 
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
@@ -648,16 +683,8 @@ class SharePointContentService:
 
             stats = self._initialize_stats()
 
-            base_url = _require_sharepoint_token(token).base_url
-            async with SharePointContentClient(
-                base_url=base_url,
-                api_token=token.access_token,
-                token_id=oauth_token_id,
-                token_refresh_callback=(
-                    self.token_refresh_callback if oauth_token_id else None
-                ),
-                access_token_provider=access_token_provider,
-                include_list_item_fields=True,
+            async with self._graph_client(
+                token, oauth_token_id, access_token_provider
             ) as content_client:
                 actual_drive_id = resolved_drive_id
                 if not actual_drive_id and resolved_site_id:
@@ -706,10 +733,6 @@ class SharePointContentService:
                     f"Delta query returned {len(changes)} items. New token: {new_delta_token[:20] if new_delta_token else 'None'}..."
                 )
 
-                scope_folder_path = integration_knowledge.folder_path
-                known_subfolder_ids: set[str] = set()
-                folder_scope_path_unresolved = False
-
                 if len(changes) == 0:
                     logger.info(
                         f"Delta query returned 0 changes for integration knowledge {integration_knowledge_id}. "
@@ -739,253 +762,39 @@ class SharePointContentService:
                     return self._format_summary_for_job(summary_stats)
 
                 logger.info(f"Processing {len(changes)} changed items from delta query")
-                # Accumulate processed (item_id, change_key) pairs and write them to
-                # the Redis ChangeKey cache only after the DB transaction commits.
-                # See _schedule_post_commit_change_keys for why.
-                pending_change_keys: list[tuple[UUID, str, str]] = []
-                change_ids = {
-                    change_id for change in changes if (change_id := change.get("id"))
-                }
-                scope_folder_id = integration_knowledge.folder_id
-                # Indexed item ids, read once per pass for folders entering scope.
-                indexed_ids: set[str] | None = None
-                if (
-                    integration_knowledge.selected_item_type == "folder"
-                    and scope_folder_id
-                ):
-                    # The stored path goes stale when an ancestor of the scope
-                    # folder is renamed or moved: Graph emits the ancestor, not
-                    # the unchanged scope folder, so nothing in the changes
-                    # carries the new path, and the next change under the folder
-                    # would be classified against the stale path and deleted as
-                    # out of scope. Read the current path from Graph each pass.
-                    # The folder's own delta entry is the second source (Graph
-                    # orders entries arbitrarily, so a descendant can precede it).
-                    refreshed_scope_path = await self._current_scope_folder_path(
-                        content_client, actual_drive_id, scope_folder_id
-                    ) or self._scope_folder_path_from_changes(changes, scope_folder_id)
-                    if refreshed_scope_path:
-                        if refreshed_scope_path != scope_folder_path:
-                            scope_folder_path = refreshed_scope_path
-                            integration_knowledge.folder_path = refreshed_scope_path
-                            await self.integration_knowledge_repo.update_sync_state(
-                                integration_knowledge.id,
-                                folder_path=refreshed_scope_path,
-                            )
-                    elif not scope_folder_path:
-                        logger.warning(
-                            "Could not derive folder_path for delta scope "
-                            "(integration_knowledge=%s, folder_id=%s)",
-                            resolved_integration_knowledge_id,
-                            scope_folder_id,
-                        )
-                        folder_scope_path_unresolved = True
-
+                (
+                    scope_folder_path,
+                    folder_scope_path_unresolved,
+                ) = await self._refresh_scope_path(
+                    content_client, actual_drive_id, changes, integration_knowledge
+                )
+                delta_pass = _DeltaPass(
+                    content_client=content_client,
+                    integration_knowledge=integration_knowledge,
+                    site_id=resolved_site_id,
+                    drive_id=actual_drive_id,
+                    stats=stats,
+                    change_ids={
+                        change_id
+                        for change in changes
+                        if (change_id := change.get("id"))
+                    },
+                    scope_folder_path=scope_folder_path,
+                    folder_scope_path_unresolved=folder_scope_path_unresolved,
+                    known_subfolder_ids=set(),
+                    pending_change_keys=[],
+                )
                 for item in changes:
-                    item_name = item.get("name", "")
-                    item_id = item.get("id")
-                    is_deleted = has_graph_facet(item, "deleted")
-                    is_folder = has_graph_facet(item, "folder")
+                    await self._apply_delta_change(delta_pass, item)
 
-                    logger.debug(
-                        f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder})"
-                    )
-
-                    if not item_id:
-                        stats["skipped_items"] += 1
-                        stats["skipped_details"].append(
-                            {
-                                "file": item_name or "unknown",
-                                "reason": "Missing item id",
-                            }
-                        )
-                        continue
-
-                    # Graph emits the drive root itself; it carries no parent
-                    # path, is never indexed, and for a folder scope would be
-                    # classified out of scope and have the whole drive walked.
-                    if has_graph_facet(item, "root"):
-                        continue
-
-                    # Skip scope check for deleted items — they may lack
-                    # parentReference data.  The DB delete queries already
-                    # filter by integration_knowledge_id so they are safe.
-                    if not is_deleted and not self._is_item_in_folder_scope(
-                        item,
-                        integration_knowledge.folder_id,
-                        scope_folder_path=scope_folder_path,
-                        known_subfolder_ids=known_subfolder_ids,
-                        selected_item_type=integration_knowledge.selected_item_type,
-                    ):
-                        if (
-                            folder_scope_path_unresolved
-                            and integration_knowledge.selected_item_type == "folder"
-                            and integration_knowledge.folder_id
-                            and not scope_folder_path
-                        ):
-                            logger.warning(
-                                "Skipping destructive out-of-scope cleanup for %s "
-                                "(item_id=%s) because folder_path could not be resolved "
-                                "for integration_knowledge %s",
-                                item_name,
-                                item_id,
-                                resolved_integration_knowledge_id,
-                            )
-                            stats["skipped_items"] += 1
-                            stats["skipped_details"].append(
-                                {
-                                    "file": item_name or item_id,
-                                    "reason": "Folder scope path unavailable",
-                                }
-                            )
-                            continue
-
-                        logger.debug(
-                            f"  - Skipping item {item_name}: not in folder scope"
-                        )
-                        await self._delete_local_sharepoint_item(
-                            item_id=item_id,
-                            item_name=item_name,
-                            integration_knowledge=integration_knowledge,
-                            integration_knowledge_id=resolved_integration_knowledge_id,
-                            stats=stats,
-                            reason="out-of-scope",
-                        )
-                        # A folder that left scope still exists in SharePoint, but Graph
-                        # does not re-emit its (unchanged) children — deleting only the
-                        # folder id would orphan every descendant blob. Enumerate the
-                        # folder's current descendants and remove them too. Only a
-                        # folder scope ever indexes descendants; a file scope has
-                        # nothing under any folder.
-                        if (
-                            is_folder
-                            and integration_knowledge.selected_item_type == "folder"
-                        ):
-                            await self._delete_out_of_scope_folder_subtree(
-                                content_client=content_client,
-                                resource_type=integration_knowledge.resource_type
-                                or "site",
-                                site_id=resolved_site_id,
-                                drive_id=actual_drive_id,
-                                folder_id=item_id,
-                                folder_name=item_name,
-                                integration_knowledge=integration_knowledge,
-                                integration_knowledge_id=resolved_integration_knowledge_id,
-                                stats=stats,
-                            )
-                        continue
-
-                    if (
-                        is_folder
-                        and integration_knowledge.selected_item_type == "folder"
-                    ):
-                        known_subfolder_ids.add(item_id)
-
-                    if is_deleted:
-                        # Delete the corresponding info_blob if it exists
-                        await self._delete_local_sharepoint_item(
-                            item_id=item_id,
-                            item_name=item_name,
-                            integration_knowledge=integration_knowledge,
-                            integration_knowledge_id=resolved_integration_knowledge_id,
-                            stats=stats,
-                            reason="removed",
-                        )
-                        continue
-
-                    if is_folder:
-                        stats["folders_processed"] += 1
-                        if (
-                            integration_knowledge.selected_item_type == "folder"
-                            and item_id != integration_knowledge.folder_id
-                        ):
-                            indexed_ids = await self._index_folder_subtree_entering_scope(
-                                content_client=content_client,
-                                resource_type=integration_knowledge.resource_type
-                                or "site",
-                                site_id=resolved_site_id,
-                                drive_id=actual_drive_id,
-                                folder_id=item_id,
-                                folder_name=item_name,
-                                integration_knowledge=integration_knowledge,
-                                integration_knowledge_id=resolved_integration_knowledge_id,
-                                stats=stats,
-                                pending_change_keys=pending_change_keys,
-                                change_ids=change_ids,
-                                indexed_ids=indexed_ids,
-                            )
-                        continue
-
-                    await self._index_file(
-                        client=content_client,
-                        drive_id=actual_drive_id,
-                        item=item,
-                        integration_knowledge=integration_knowledge,
-                        stats=stats,
-                        pending_change_keys=pending_change_keys,
-                    )
-
-                summary_stats, forbidden = self._summarize_pass(stats)
-                if forbidden or summary_stats.get("failed_items"):
-                    # Keep the token: Graph never re-emits an item once a pass
-                    # moved past it, so the next pass replays this one. Items
-                    # indexed now are skipped as unchanged through the
-                    # post-commit ChangeKey cache; the scope path refreshed
-                    # above was persisted so the replay classifies as this pass did.
-                    self._schedule_post_commit_change_keys(pending_change_keys)
-                    if forbidden:
-                        raise SyncAccessDenied(
-                            summary_stats,
-                            forbidden=forbidden,
-                            changes_detected=len(changes),
-                        )
-                    raise SyncItemsFailed(summary_stats, changes_detected=len(changes))
-
-                integration_knowledge.delta_token = new_delta_token
-                replace_summary = record_failure or _delta_worth_logging(summary_stats)
-                if replace_summary:
-                    integration_knowledge.last_sync_summary = _summary_counts(
-                        summary_stats
-                    )
-                integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
-
-                logger.info(f"Delta sync completed: {summary_stats}")
-
-                await self.integration_knowledge_repo.update_sync_state(
-                    integration_knowledge.id,
-                    **_sync_outcome_fields(
-                        integration_knowledge, with_summary=replace_summary
-                    ),
+                return await self._finish_delta_pass(
+                    delta_pass,
+                    new_delta_token=new_delta_token,
+                    changes_detected=len(changes),
+                    record_failure=record_failure,
+                    started_at=started_at,
+                    sync_trigger=sync_trigger,
                 )
-
-                self._schedule_post_commit_change_keys(pending_change_keys)
-
-                logger.info(
-                    f"Processed {len(changes)} delta changes for integration knowledge {resolved_integration_knowledge_id}"
-                )
-
-                if _delta_worth_logging(summary_stats):
-                    await self._add_sync_log(
-                        SyncLog(
-                            integration_knowledge_id=resolved_integration_knowledge_id,
-                            sync_type="delta",
-                            status="success",
-                            started_at=started_at,
-                            completed_at=datetime.now(timezone.utc),
-                            metadata=_sync_metadata(
-                                summary_stats,
-                                trigger=sync_trigger,
-                                changes_detected=len(changes),
-                            ),
-                        )
-                    )
-                else:
-                    logger.info(
-                        f"Skipping sync log creation for integration knowledge {integration_knowledge_id}: "
-                        "no files processed or deleted"
-                    )
-
-                return self._format_summary_for_job(summary_stats)
 
         except Exception as e:
             if delegated_to_full_sync:
@@ -1010,6 +819,277 @@ class SharePointContentService:
                 ),
             )
             raise
+
+    async def _refresh_scope_path(
+        self,
+        content_client: SharePointContentClient,
+        drive_id: str,
+        changes: list[SharePointItem],
+        integration_knowledge: "IntegrationKnowledge",
+    ) -> tuple[Optional[str], bool]:
+        """The scope folder path this pass classifies against, and whether it is missing.
+
+        Only a folder scope has one; the second value is true when neither Graph
+        nor the change set could say where the folder is and nothing is stored.
+        """
+        scope_folder_path = integration_knowledge.folder_path
+        folder_scope_path_unresolved = False
+        scope_folder_id = integration_knowledge.folder_id
+        if integration_knowledge.selected_item_type == "folder" and scope_folder_id:
+            # The stored path goes stale when an ancestor of the scope
+            # folder is renamed or moved: Graph emits the ancestor, not
+            # the unchanged scope folder, so nothing in the changes
+            # carries the new path, and the next change under the folder
+            # would be classified against the stale path and deleted as
+            # out of scope. Read the current path from Graph each pass.
+            # The folder's own delta entry is the second source (Graph
+            # orders entries arbitrarily, so a descendant can precede it).
+            refreshed_scope_path = await self._current_scope_folder_path(
+                content_client, drive_id, scope_folder_id
+            ) or self._scope_folder_path_from_changes(changes, scope_folder_id)
+            if refreshed_scope_path:
+                if refreshed_scope_path != scope_folder_path:
+                    scope_folder_path = refreshed_scope_path
+                    integration_knowledge.folder_path = refreshed_scope_path
+                    await self.integration_knowledge_repo.update_sync_state(
+                        integration_knowledge.id,
+                        folder_path=refreshed_scope_path,
+                    )
+            elif not scope_folder_path:
+                logger.warning(
+                    "Could not derive folder_path for delta scope "
+                    "(integration_knowledge=%s, folder_id=%s)",
+                    integration_knowledge.id,
+                    scope_folder_id,
+                )
+                folder_scope_path_unresolved = True
+
+        return scope_folder_path, folder_scope_path_unresolved
+
+    async def _apply_delta_change(
+        self, delta_pass: "_DeltaPass", item: SharePointItem
+    ) -> None:
+        """Classify one delta entry and apply it: delete, walk a folder or index a file."""
+        content_client = delta_pass.content_client
+        integration_knowledge = delta_pass.integration_knowledge
+        resolved_integration_knowledge_id = integration_knowledge.id
+        resolved_site_id = delta_pass.site_id
+        actual_drive_id = delta_pass.drive_id
+        stats = delta_pass.stats
+        change_ids = delta_pass.change_ids
+        scope_folder_path = delta_pass.scope_folder_path
+        folder_scope_path_unresolved = delta_pass.folder_scope_path_unresolved
+        known_subfolder_ids = delta_pass.known_subfolder_ids
+        pending_change_keys = delta_pass.pending_change_keys
+
+        item_name = item.get("name", "")
+        item_id = item.get("id")
+        is_deleted = has_graph_facet(item, "deleted")
+        is_folder = has_graph_facet(item, "folder")
+
+        logger.debug(
+            f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder})"
+        )
+
+        if not item_id:
+            stats["skipped_items"] += 1
+            stats["skipped_details"].append(
+                {
+                    "file": item_name or "unknown",
+                    "reason": "Missing item id",
+                }
+            )
+            return
+
+        # Graph emits the drive root itself; it carries no parent
+        # path, is never indexed, and for a folder scope would be
+        # classified out of scope and have the whole drive walked.
+        if has_graph_facet(item, "root"):
+            return
+
+        # Skip scope check for deleted items — they may lack
+        # parentReference data.  The DB delete queries already
+        # filter by integration_knowledge_id so they are safe.
+        if not is_deleted and not self._is_item_in_folder_scope(
+            item,
+            integration_knowledge.folder_id,
+            scope_folder_path=scope_folder_path,
+            known_subfolder_ids=known_subfolder_ids,
+            selected_item_type=integration_knowledge.selected_item_type,
+        ):
+            if (
+                folder_scope_path_unresolved
+                and integration_knowledge.selected_item_type == "folder"
+                and integration_knowledge.folder_id
+                and not scope_folder_path
+            ):
+                logger.warning(
+                    "Skipping destructive out-of-scope cleanup for %s "
+                    "(item_id=%s) because folder_path could not be resolved "
+                    "for integration_knowledge %s",
+                    item_name,
+                    item_id,
+                    resolved_integration_knowledge_id,
+                )
+                stats["skipped_items"] += 1
+                stats["skipped_details"].append(
+                    {
+                        "file": item_name or item_id,
+                        "reason": "Folder scope path unavailable",
+                    }
+                )
+                return
+
+            logger.debug(f"  - Skipping item {item_name}: not in folder scope")
+            await self._delete_local_sharepoint_item(
+                item_id=item_id,
+                item_name=item_name,
+                integration_knowledge=integration_knowledge,
+                integration_knowledge_id=resolved_integration_knowledge_id,
+                stats=stats,
+                reason="out-of-scope",
+            )
+            # A folder that left scope still exists in SharePoint, but Graph
+            # does not re-emit its (unchanged) children — deleting only the
+            # folder id would orphan every descendant blob. Enumerate the
+            # folder's current descendants and remove them too. Only a
+            # folder scope ever indexes descendants; a file scope has
+            # nothing under any folder.
+            if is_folder and integration_knowledge.selected_item_type == "folder":
+                await self._delete_out_of_scope_folder_subtree(
+                    content_client=content_client,
+                    resource_type=integration_knowledge.resource_type or "site",
+                    site_id=resolved_site_id,
+                    drive_id=actual_drive_id,
+                    folder_id=item_id,
+                    folder_name=item_name,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=resolved_integration_knowledge_id,
+                    stats=stats,
+                )
+            return
+
+        if is_folder and integration_knowledge.selected_item_type == "folder":
+            known_subfolder_ids.add(item_id)
+
+        if is_deleted:
+            # Delete the corresponding info_blob if it exists
+            await self._delete_local_sharepoint_item(
+                item_id=item_id,
+                item_name=item_name,
+                integration_knowledge=integration_knowledge,
+                integration_knowledge_id=resolved_integration_knowledge_id,
+                stats=stats,
+                reason="removed",
+            )
+            return
+
+        if is_folder:
+            stats["folders_processed"] += 1
+            if (
+                integration_knowledge.selected_item_type == "folder"
+                and item_id != integration_knowledge.folder_id
+            ):
+                delta_pass.indexed_ids = (
+                    await self._index_folder_subtree_entering_scope(
+                        content_client=content_client,
+                        resource_type=integration_knowledge.resource_type or "site",
+                        site_id=resolved_site_id,
+                        drive_id=actual_drive_id,
+                        folder_id=item_id,
+                        folder_name=item_name,
+                        integration_knowledge=integration_knowledge,
+                        integration_knowledge_id=resolved_integration_knowledge_id,
+                        stats=stats,
+                        pending_change_keys=pending_change_keys,
+                        change_ids=change_ids,
+                        indexed_ids=delta_pass.indexed_ids,
+                    )
+                )
+            return
+
+        await self._index_file(
+            client=content_client,
+            drive_id=actual_drive_id,
+            item=item,
+            integration_knowledge=integration_knowledge,
+            stats=stats,
+            pending_change_keys=pending_change_keys,
+        )
+
+    async def _finish_delta_pass(
+        self,
+        delta_pass: "_DeltaPass",
+        *,
+        new_delta_token: Optional[str],
+        changes_detected: int,
+        record_failure: bool,
+        started_at: datetime,
+        sync_trigger: str,
+    ) -> str:
+        """Decide the pass's outcome, persist it and write its sync log."""
+        integration_knowledge = delta_pass.integration_knowledge
+        resolved_integration_knowledge_id = integration_knowledge.id
+        stats = delta_pass.stats
+        pending_change_keys = delta_pass.pending_change_keys
+
+        summary_stats, forbidden = self._summarize_pass(stats)
+        if forbidden or summary_stats.get("failed_items"):
+            # Keep the token: Graph never re-emits an item once a pass
+            # moved past it, so the next pass replays this one. Items
+            # indexed now are skipped as unchanged through the
+            # post-commit ChangeKey cache; the scope path refreshed
+            # above was persisted so the replay classifies as this pass did.
+            self._schedule_post_commit_change_keys(pending_change_keys)
+            if forbidden:
+                raise SyncAccessDenied(
+                    summary_stats,
+                    forbidden=forbidden,
+                    changes_detected=changes_detected,
+                )
+            raise SyncItemsFailed(summary_stats, changes_detected=changes_detected)
+
+        integration_knowledge.delta_token = new_delta_token
+        replace_summary = record_failure or _delta_worth_logging(summary_stats)
+        if replace_summary:
+            integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
+        integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
+
+        logger.info(f"Delta sync completed: {summary_stats}")
+
+        await self.integration_knowledge_repo.update_sync_state(
+            integration_knowledge.id,
+            **_sync_outcome_fields(integration_knowledge, with_summary=replace_summary),
+        )
+
+        self._schedule_post_commit_change_keys(pending_change_keys)
+
+        logger.info(
+            f"Processed {changes_detected} delta changes for integration knowledge {resolved_integration_knowledge_id}"
+        )
+
+        if _delta_worth_logging(summary_stats):
+            await self._add_sync_log(
+                SyncLog(
+                    integration_knowledge_id=resolved_integration_knowledge_id,
+                    sync_type="delta",
+                    status="success",
+                    started_at=started_at,
+                    completed_at=datetime.now(timezone.utc),
+                    metadata=_sync_metadata(
+                        summary_stats,
+                        trigger=sync_trigger,
+                        changes_detected=changes_detected,
+                    ),
+                )
+            )
+        else:
+            logger.info(
+                f"Skipping sync log creation for integration knowledge {integration_knowledge.id}: "
+                "no files processed or deleted"
+            )
+
+        return self._format_summary_for_job(summary_stats)
 
     async def _pull_content(
         self,
@@ -1050,16 +1130,8 @@ class SharePointContentService:
             if resource_type != "onedrive":
                 site_id_value = require_text(site_id_value, "site_id")
 
-            base_url = token.base_url
-            async with SharePointContentClient(
-                base_url=base_url,
-                api_token=token.access_token,
-                token_id=oauth_token_id,
-                token_refresh_callback=(
-                    self.token_refresh_callback if oauth_token_id else None
-                ),
-                access_token_provider=access_token_provider,
-                include_list_item_fields=True,
+            async with self._graph_client(
+                token, oauth_token_id, access_token_provider
             ) as content_client:
                 actual_drive_id = drive_id
                 if not actual_drive_id and site_id_value:
@@ -1078,121 +1150,21 @@ class SharePointContentService:
                     )
 
                 if integration_knowledge.folder_id:
-                    folder_id_value = require_text(
-                        integration_knowledge.folder_id, "folder_id"
-                    )
-                    item_info = await content_client.get_file_metadata(
+                    await self._pull_selected_item(
+                        content_client=content_client,
                         drive_id=actual_drive_id,
-                        item_id=folder_id_value,
-                    )
-
-                    is_folder = item_info.get("folder") is not None
-                    item_name = item_info.get("name", "")
-
-                    if is_folder:
-                        logger.info(
-                            f"Processing folder '{item_name}' (ID: {folder_id_value}) "
-                            f"for integration knowledge {integration_knowledge_id}"
-                        )
-                        integration_knowledge.selected_item_type = "folder"
-                        # A full sync runs on delta recovery (expired/missing
-                        # token). If the selected folder was renamed or moved
-                        # while the token was invalid, the stored folder_path is
-                        # now stale and is never re-emitted as a delta change.
-                        # The next delta would then misclassify valid nested
-                        # descendants as out-of-scope and delete their blobs.
-                        # Refresh the scope path from the freshly fetched folder
-                        # metadata, mirroring the delta-path refresh.
-                        refreshed_folder_path = self._folder_path_from_item(
-                            cast(SharePointItem, item_info)
-                        )
-                        scope: SyncStateFields = {"selected_item_type": "folder"}
-                        if refreshed_folder_path:
-                            integration_knowledge.folder_path = refreshed_folder_path
-                            scope["folder_path"] = refreshed_folder_path
-                        await self.integration_knowledge_repo.update_sync_state(
-                            integration_knowledge.id, **scope
-                        )
-                        processed_items: set[str] = set()
-                        await self._fetch_and_process_content(
-                            site_id=site_id_value,
-                            drive_id=actual_drive_id,
-                            resource_type=resource_type,
-                            client=content_client,
-                            integration_knowledge=integration_knowledge,
-                            folder_id=folder_id_value,
-                            processed_items=processed_items,
-                            stats=stats,
-                        )
-                        await self._reconcile_indexed_blobs(
-                            client=content_client,
-                            integration_knowledge=integration_knowledge,
-                            resource_type=resource_type,
-                            site_id=site_id_value,
-                            drive_id=actual_drive_id,
-                            folder_id=folder_id_value,
-                            stats=stats,
-                        )
-                        return delta_baseline
-                    else:
-                        logger.info(
-                            f"Processing single file '{item_name}' (ID: {folder_id_value}) "
-                            f"for integration knowledge {integration_knowledge_id}"
-                        )
-                        integration_knowledge.selected_item_type = "file"
-                        await self.integration_knowledge_repo.update_sync_state(
-                            integration_knowledge.id, selected_item_type="file"
-                        )
-
-                        await self._index_file(
-                            client=content_client,
-                            drive_id=actual_drive_id,
-                            item=cast(
-                                SharePointItem, {**item_info, "id": folder_id_value}
-                            ),
-                            integration_knowledge=integration_knowledge,
-                            stats=stats,
-                        )
-                        return delta_baseline
-                else:
-                    integration_knowledge.selected_item_type = "site_root"
-                    await self.integration_knowledge_repo.update_sync_state(
-                        integration_knowledge.id, selected_item_type="site_root"
-                    )
-
-                    # Enumerate the drive the knowledge is bound to; asking Graph for
-                    # the site's default drive again would silently diverge from the
-                    # drive the delta token and reconciliation operate on.
-                    data = await content_client.get_drive_root_children(actual_drive_id)
-
-                    if data:
-                        await self._process_documents(
-                            documents=data,
-                            client=content_client,
-                            integration_knowledge=integration_knowledge,
-                            resource_type=resource_type,
-                            stats=stats,
-                        )
-
-                    if resource_type != "onedrive" and site_id_value:
-                        pages = await content_client.get_site_pages(
-                            site_id=require_text(site_id_value, "site_id")
-                        )
-                        if data := pages.get("value", []):
-                            await self._process_pages(
-                                pages=data,
-                                client=content_client,
-                                integration_knowledge=integration_knowledge,
-                                stats=stats,
-                            )
-
-                    await self._reconcile_indexed_blobs(
-                        client=content_client,
-                        integration_knowledge=integration_knowledge,
-                        resource_type=resource_type,
                         site_id=site_id_value,
+                        resource_type=resource_type,
+                        integration_knowledge=integration_knowledge,
+                        stats=stats,
+                    )
+                else:
+                    await self._pull_site_root(
+                        content_client=content_client,
                         drive_id=actual_drive_id,
-                        folder_id=None,
+                        site_id=site_id_value,
+                        resource_type=resource_type,
+                        integration_knowledge=integration_knowledge,
                         stats=stats,
                     )
 
@@ -1201,6 +1173,141 @@ class SharePointContentService:
             raise
 
         return delta_baseline
+
+    async def _pull_selected_item(
+        self,
+        *,
+        content_client: SharePointContentClient,
+        drive_id: str,
+        site_id: Optional[str],
+        resource_type: str,
+        integration_knowledge: "IntegrationKnowledge",
+        stats: SyncStats,
+    ) -> None:
+        """Full sync of a selected folder (with reconciliation) or a single file."""
+        folder_id_value = require_text(integration_knowledge.folder_id, "folder_id")
+        item_info = await content_client.get_file_metadata(
+            drive_id=drive_id,
+            item_id=folder_id_value,
+        )
+        is_folder = item_info.get("folder") is not None
+        item_name = item_info.get("name", "")
+
+        if is_folder:
+            logger.info(
+                f"Processing folder '{item_name}' (ID: {folder_id_value}) "
+                f"for integration knowledge {integration_knowledge.id}"
+            )
+            integration_knowledge.selected_item_type = "folder"
+            # A full sync runs on delta recovery (expired/missing
+            # token). If the selected folder was renamed or moved
+            # while the token was invalid, the stored folder_path is
+            # now stale and is never re-emitted as a delta change.
+            # The next delta would then misclassify valid nested
+            # descendants as out-of-scope and delete their blobs.
+            # Refresh the scope path from the freshly fetched folder
+            # metadata, mirroring the delta-path refresh.
+            refreshed_folder_path = self._folder_path_from_item(
+                cast(SharePointItem, item_info)
+            )
+            scope: SyncStateFields = {"selected_item_type": "folder"}
+            if refreshed_folder_path:
+                integration_knowledge.folder_path = refreshed_folder_path
+                scope["folder_path"] = refreshed_folder_path
+            await self.integration_knowledge_repo.update_sync_state(
+                integration_knowledge.id, **scope
+            )
+            processed_items: set[str] = set()
+            await self._fetch_and_process_content(
+                site_id=site_id,
+                drive_id=drive_id,
+                resource_type=resource_type,
+                client=content_client,
+                integration_knowledge=integration_knowledge,
+                folder_id=folder_id_value,
+                processed_items=processed_items,
+                stats=stats,
+            )
+            await self._reconcile_indexed_blobs(
+                client=content_client,
+                integration_knowledge=integration_knowledge,
+                resource_type=resource_type,
+                site_id=site_id,
+                drive_id=drive_id,
+                folder_id=folder_id_value,
+                stats=stats,
+            )
+            return
+        else:
+            logger.info(
+                f"Processing single file '{item_name}' (ID: {folder_id_value}) "
+                f"for integration knowledge {integration_knowledge.id}"
+            )
+            integration_knowledge.selected_item_type = "file"
+            await self.integration_knowledge_repo.update_sync_state(
+                integration_knowledge.id, selected_item_type="file"
+            )
+
+            await self._index_file(
+                client=content_client,
+                drive_id=drive_id,
+                item=cast(SharePointItem, {**item_info, "id": folder_id_value}),
+                integration_knowledge=integration_knowledge,
+                stats=stats,
+            )
+            return
+
+    async def _pull_site_root(
+        self,
+        *,
+        content_client: SharePointContentClient,
+        drive_id: str,
+        site_id: Optional[str],
+        resource_type: str,
+        integration_knowledge: "IntegrationKnowledge",
+        stats: SyncStats,
+    ) -> None:
+        """Full sync of a whole drive, plus the site pages of a SharePoint site."""
+        integration_knowledge.selected_item_type = "site_root"
+        await self.integration_knowledge_repo.update_sync_state(
+            integration_knowledge.id, selected_item_type="site_root"
+        )
+
+        # Enumerate the drive the knowledge is bound to; asking Graph for
+        # the site's default drive again would silently diverge from the
+        # drive the delta token and reconciliation operate on.
+        data = await content_client.get_drive_root_children(drive_id)
+
+        if data:
+            await self._process_documents(
+                documents=data,
+                client=content_client,
+                integration_knowledge=integration_knowledge,
+                resource_type=resource_type,
+                stats=stats,
+            )
+
+        if resource_type != "onedrive" and site_id:
+            pages = await content_client.get_site_pages(
+                site_id=require_text(site_id, "site_id")
+            )
+            if data := pages.get("value", []):
+                await self._process_pages(
+                    pages=data,
+                    client=content_client,
+                    integration_knowledge=integration_knowledge,
+                    stats=stats,
+                )
+
+        await self._reconcile_indexed_blobs(
+            client=content_client,
+            integration_knowledge=integration_knowledge,
+            resource_type=resource_type,
+            site_id=site_id,
+            drive_id=drive_id,
+            folder_id=None,
+            stats=stats,
+        )
 
     @staticmethod
     async def _mint_delta_baseline(
