@@ -1,20 +1,11 @@
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from eneo.integration.application.tenant_sharepoint_app_service import (
-    TenantSharePointAppService,
-)
 from eneo.integration.domain.entities.oauth_token import SharePointToken
 from eneo.integration.infrastructure.auth_service.org_token_provider import (
     AccessTokenProvider,
     OrgTokenProvider,
     SharePointCredentialsInvalidError,
-)
-from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
-    ServiceAccountAuthService,
-)
-from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
-    TenantAppAuthService,
 )
 from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
 from eneo.integration.presentation.models import IntegrationType
@@ -36,24 +27,12 @@ class SharePointAuthRouter:
 
     def __init__(
         self,
-        tenant_app_service: TenantSharePointAppService,
-        tenant_app_auth_service: TenantAppAuthService,
         oauth_token_service: OauthTokenService,
-        service_account_auth_service: Optional[ServiceAccountAuthService] = None,
-        org_token_provider: Optional[OrgTokenProvider] = None,
+        org_token_provider: OrgTokenProvider,
     ) -> None:
         super().__init__()
-        self.tenant_app_service = tenant_app_service
-        self.tenant_app_auth_service = tenant_app_auth_service
         self.oauth_token_service = oauth_token_service
-        self.service_account_auth_service = (
-            service_account_auth_service or ServiceAccountAuthService()
-        )
-        self.org_token_provider = org_token_provider or OrgTokenProvider(
-            tenant_app_repo=tenant_app_service.tenant_app_repo,
-            tenant_app_auth_service=tenant_app_auth_service,
-            service_account_auth_service=self.service_account_auth_service,
-        )
+        self.org_token_provider = org_token_provider
 
     def access_token_provider_for(
         self, connection: "AuthorizedIntegration"

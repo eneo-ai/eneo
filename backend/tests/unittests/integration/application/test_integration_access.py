@@ -229,6 +229,7 @@ async def test_new_import_cannot_bypass_connection_owner(integration_access):
         sharepoint_subscription_service=AsyncMock(),
         tenant_sharepoint_app_repo=case.app_repo,
         tenant_app_auth_service=AsyncMock(),
+        org_token_provider=AsyncMock(),
     )
     with pytest.raises(NotFoundException):
         await service.create_space_integration_knowledge(

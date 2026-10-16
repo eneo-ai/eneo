@@ -24,6 +24,9 @@ from eneo.integration.application.user_integration_service import UserIntegratio
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    OrgTokenProvider,
+)
 from eneo.integration.infrastructure.detached_tasks import pending_detached_tasks
 from eneo.integration.infrastructure.sharepoint_subscription_service import (
     SharePointSubscriptionService,
@@ -105,6 +108,11 @@ def service(actor: MagicMock, space: MagicMock, integration_knowledge: MagicMock
         sharepoint_subscription_service=AsyncMock(),
         tenant_sharepoint_app_repo=AsyncMock(),
         tenant_app_auth_service=AsyncMock(),
+        org_token_provider=OrgTokenProvider(
+            tenant_app_repo=AsyncMock(),
+            tenant_app_auth_service=AsyncMock(),
+            service_account_auth_service=AsyncMock(),
+        ),
     )
 
     return service
@@ -239,6 +247,11 @@ class TestTenantAppAdminPermission:
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
     # --- remove_knowledge ---
@@ -529,6 +542,11 @@ class TestWrapperOperations:
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         result = await service.update_wrapper_name(
@@ -590,6 +608,11 @@ class TestWrapperOperations:
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
         service.remove_knowledge = AsyncMock()
 
@@ -740,6 +763,11 @@ class TestRemoveKnowledge:
             tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
             tenant_app_auth_service=tenant_app_auth_service,
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=tenant_sharepoint_app_repo,
+                tenant_app_auth_service=tenant_app_auth_service,
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         with patch("eneo.database.database.sessionmanager", sessions):
@@ -794,6 +822,11 @@ class TestRemoveKnowledge:
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         await service.remove_knowledge(
@@ -849,6 +882,11 @@ class TestRemoveKnowledge:
             tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
             tenant_app_auth_service=tenant_app_auth_service,
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=tenant_sharepoint_app_repo,
+                tenant_app_auth_service=tenant_app_auth_service,
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         await service.remove_knowledge(
@@ -903,6 +941,11 @@ class TestRemoveKnowledge:
             tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=service_account_auth_service,
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=tenant_sharepoint_app_repo,
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=service_account_auth_service,
+            ),
         )
 
         await service.remove_knowledge(
@@ -919,61 +962,6 @@ class TestRemoveKnowledge:
         )
         tenant_sharepoint_app_repo.update.assert_called_once_with(
             tenant_app_service_account
-        )
-
-    async def test_remove_knowledge_service_account_without_auth_service_logs_warning(
-        self, actor, space, sharepoint_knowledge_tenant_app, tenant_app_service_account
-    ):
-        """Test that service account without auth service logs warning but completes.
-
-        The subscription cleanup failure is caught and logged, but does not
-        prevent the knowledge from being deleted.
-        """
-        actor.can_delete_integrations.return_value = True
-        space.get_integration_knowledge.return_value = sharepoint_knowledge_tenant_app
-        space.tenant_space_id = uuid4()  # Not an org space
-
-        actor_manager = MagicMock()
-        actor_manager.get_space_actor_from_space.return_value = actor
-
-        space_repo = AsyncMock()
-        space_repo.one.return_value = space
-
-        tenant_sharepoint_app_repo = AsyncMock()
-        tenant_sharepoint_app_repo.one.return_value = tenant_app_service_account
-
-        integration_knowledge_repo = AsyncMock()
-
-        service = IntegrationKnowledgeService(
-            job_service=AsyncMock(),
-            user=TEST_USER,
-            oauth_token_repo=AsyncMock(),
-            space_repo=space_repo,
-            integration_knowledge_repo=integration_knowledge_repo,
-            embedding_model_repo=AsyncMock(),
-            user_integration_service=UserIntegrationService(
-                user_integration_repo=AsyncMock(),
-                tenant_integration_repo=AsyncMock(),
-                user=TEST_USER,
-                actor_manager=actor_manager,
-                tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
-            ),
-            actor_manager=actor_manager,
-            sharepoint_subscription_service=AsyncMock(),
-            tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
-            tenant_app_auth_service=AsyncMock(),
-            service_account_auth_service=None,  # No service account auth configured
-        )
-
-        # Should complete without raising (error is caught and logged)
-        await service.remove_knowledge(
-            space_id=space.id,
-            integration_knowledge_id=sharepoint_knowledge_tenant_app.id,
-        )
-
-        # Verify the knowledge was still removed despite subscription cleanup failure
-        integration_knowledge_repo.remove.assert_called_once_with(
-            id=sharepoint_knowledge_tenant_app.id
         )
 
 
@@ -1120,6 +1108,11 @@ class TestCreateSpaceIntegrationKnowledge:
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         result, result_job = await service.create_space_integration_knowledge(
@@ -1194,6 +1187,11 @@ class TestCreateSpaceIntegrationKnowledge:
             tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
             tenant_app_auth_service=tenant_app_auth_service,
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=tenant_sharepoint_app_repo,
+                tenant_app_auth_service=tenant_app_auth_service,
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         result, result_job = await service.create_space_integration_knowledge(
@@ -1274,6 +1272,11 @@ class TestCreateSpaceIntegrationKnowledge:
             tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=service_account_auth_service,
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=tenant_sharepoint_app_repo,
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=service_account_auth_service,
+            ),
         )
 
         result, result_job = await service.create_space_integration_knowledge(
@@ -1339,6 +1342,11 @@ class TestCreateSpaceIntegrationKnowledge:
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         with pytest.raises(UnauthorizedException) as exc_info:
@@ -1388,6 +1396,11 @@ class TestCreateSpaceIntegrationKnowledge:
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         with pytest.raises(UnauthorizedException):
@@ -1454,6 +1467,11 @@ class TestCreateSpaceIntegrationKnowledge:
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         with pytest.raises(UnauthorizedException) as exc_info:
@@ -1532,6 +1550,11 @@ class TestCreateSpaceIntegrationKnowledge:
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         await service.create_space_integration_knowledge(
@@ -1610,6 +1633,11 @@ class TestCreateSpaceIntegrationKnowledge:
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         await service.create_space_integration_knowledge(
@@ -1690,6 +1718,11 @@ class TestCreateSpaceIntegrationKnowledge:
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         await service.create_space_integration_knowledge(
@@ -1954,6 +1987,11 @@ class TestTriggerFullSync:
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         result = await service.trigger_full_sync(
@@ -2026,6 +2064,11 @@ class TestTriggerFullSync:
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         result = await service.trigger_full_sync(
@@ -2076,6 +2119,11 @@ class TestTriggerFullSync:
             tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=tenant_sharepoint_app_repo,
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         with pytest.raises(UnauthorizedException) as exc_info:
@@ -2126,6 +2174,11 @@ class TestTriggerFullSync:
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
             service_account_auth_service=AsyncMock(),
+            org_token_provider=OrgTokenProvider(
+                tenant_app_repo=AsyncMock(),
+                tenant_app_auth_service=AsyncMock(),
+                service_account_auth_service=AsyncMock(),
+            ),
         )
 
         with pytest.raises(BadRequestException):
@@ -2149,6 +2202,7 @@ class TestOrgTokenProviderWiring:
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),
             tenant_app_auth_service=AsyncMock(),
+            org_token_provider=AsyncMock(),
         )
         fields.update(overrides)
         return IntegrationKnowledgeService(**fields)

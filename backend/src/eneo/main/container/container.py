@@ -1514,10 +1514,7 @@ class Container(containers.DeclarativeContainer):
     # SharePoint auth router (after oauth_token_service)
     sharepoint_auth_router = providers.Factory(
         SharePointAuthRouter,
-        tenant_app_service=tenant_sharepoint_app_service,
-        tenant_app_auth_service=tenant_app_auth_service,
         oauth_token_service=oauth_token_service,
-        service_account_auth_service=service_account_auth_service,
         org_token_provider=org_token_provider,
     )
 
@@ -1603,9 +1600,6 @@ class Container(containers.DeclarativeContainer):
     sharepoint_preview_service = providers.Factory(
         SharePointPreviewService,
         oauth_token_service=oauth_token_service,
-        tenant_app_auth_service=tenant_app_auth_service,
-        service_account_auth_service=service_account_auth_service,
-        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
         org_token_provider=org_token_provider,
     )
     integration_preview_service = providers.Factory(
