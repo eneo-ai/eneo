@@ -1,14 +1,16 @@
 "use client";
 
 import { IconButton } from "@astryxdesign/core/IconButton";
-import { Activity, AppWindow, Check, Download } from "lucide-react";
+import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
+import { Activity, AppWindow, Check, Download, Search } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
+import { TextInput } from "@/components/astryx/text-input";
 import { FileTypeTile } from "@/features/chat/attachments";
 import { signedOriginalUrl } from "@/features/files/signed-original-url";
 import { previewKindOf, type PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { browserApi } from "@/lib/api/browser";
-import { formatBytes } from "@/lib/format";
+import { fileExtension, formatBytes } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { PanelContents, PanelView } from "./panel-contents";
@@ -38,11 +40,11 @@ export function displayFileName(file: { name: string; mimetype: string }): strin
     : file.name;
 }
 
-const extensionOf = (name: string) => {
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot + 1).toUpperCase() : "";
-};
 const bytesOf = (file: PreviewFile) => file.original_size ?? file.size;
+
+/** A long upload list gets a filter: text on the name, and one type at a time. */
+export const FILTER_FROM = 8;
+const ALL_TYPES = "__all__";
 
 const ROW_CLASS =
   "focus-visible:outline-ring hover:bg-ax-hover flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-ax-inner px-2 text-start focus-visible:outline-2 focus-visible:-outline-offset-2";
@@ -91,6 +93,8 @@ function Heading({
  * What a conversation has to show in the panel, as one list: interactive tool
  * views, documents created in the chat, uploaded files and the latest answer's
  * activity. The panel's overview and the switcher in its title both show it.
+ * It is the one full list of uploads; a message and the composer only
+ * summarise them and open this.
  */
 export function PanelContentsList({
   panel,
@@ -104,6 +108,8 @@ export function PanelContentsList({
   const locale = useLocale();
   const uploadsHeading = useRef<HTMLHeadingElement>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [selectedType, setSelectedType] = useState<string | null>(null);
 
   // Opened on the uploads: the list scrolls there and the heading takes the focus.
   useEffect(() => {
@@ -127,7 +133,7 @@ export function PanelContentsList({
 
   const description = (latest: PreviewFile, versionCount: number) =>
     [
-      extensionOf(latest.name),
+      fileExtension(latest.name),
       bytesOf(latest) > 0 ? formatBytes(bytesOf(latest), locale) : "",
       versionCount > 1 ? t("conversation_document_versions", { count: versionCount }) : ""
     ]
@@ -178,6 +184,23 @@ export function PanelContentsList({
   };
 
   const uploadsBytes = contents.uploads.reduce((sum, file) => sum + bytesOf(file), 0);
+  const filterable = contents.uploads.length > FILTER_FROM;
+  const typeOf = (file: PreviewFile) => fileExtension(file.name) || t("unknown");
+  const typeCounts = new Map<string, number>();
+  for (const file of contents.uploads) {
+    typeCounts.set(typeOf(file), (typeCounts.get(typeOf(file)) ?? 0) + 1);
+  }
+  const types = [...typeCounts]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  const needle = query.trim().toLowerCase();
+  const shownUploads = filterable
+    ? contents.uploads.filter(
+        (file) =>
+          (selectedType === null || typeOf(file) === selectedType) &&
+          (!needle || displayFileName(file).toLowerCase().includes(needle))
+      )
+    : contents.uploads;
 
   return (
     <div className="flex flex-col p-1">
@@ -230,7 +253,49 @@ export function PanelContentsList({
               uploadsBytes > 0 ? ` · ${formatBytes(uploadsBytes, locale)}` : ""
             }`}
           />
-          <ul className="flex flex-col">{contents.uploads.map((file) => entry(file, [file]))}</ul>
+          {filterable && (
+            <div className="flex flex-col gap-1.5 px-1 pb-1.5">
+              <TextInput
+                label={t("conversation_uploads_filter")}
+                isLabelHidden
+                placeholder={t("conversation_uploads_filter")}
+                value={query}
+                onChange={setQuery}
+                startIcon={<Search aria-hidden="true" className="size-4" />}
+                size="sm"
+                hasClear
+                autoComplete="off"
+              />
+              {/* One type at a time; the "all" pill stands for no type filter. */}
+              <ToggleButtonGroup
+                label={t("conversation_uploads_filter")}
+                size="sm"
+                value={selectedType ?? ALL_TYPES}
+                onChange={(next) =>
+                  setSelectedType(next === null || next === ALL_TYPES ? null : next)
+                }
+              >
+                <ToggleButton
+                  value={ALL_TYPES}
+                  label={t("conversation_uploads_filter_all", { count: contents.uploads.length })}
+                />
+                {types.map((type) => (
+                  <ToggleButton
+                    key={type.name}
+                    value={type.name}
+                    label={`${type.name} ${type.count}`}
+                  />
+                ))}
+              </ToggleButtonGroup>
+            </div>
+          )}
+          {shownUploads.length > 0 ? (
+            <ul className="flex flex-col">{shownUploads.map((file) => entry(file, [file]))}</ul>
+          ) : (
+            <p className="text-ax-text-secondary px-2 py-1.5 text-xs">
+              {t("conversation_uploads_filter_empty")}
+            </p>
+          )}
         </section>
       )}
       {activity && (

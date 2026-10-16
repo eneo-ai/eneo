@@ -37,6 +37,7 @@ import { documentExport } from "./side-panel/document-export";
 import { conversationDocuments, editedPassage } from "./side-panel/document-versions";
 import { messageGeneratedFiles, messageToolCalls } from "./side-panel/message-tool-calls";
 import { conversationUploads, type PanelContents } from "./side-panel/panel-contents";
+import type { PreviewQuote } from "./side-panel/side-panel-store";
 import { composeQuotedQuestion } from "./side-panel/question-quote";
 import { SidePanel } from "./side-panel/side-panel";
 import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
@@ -45,10 +46,12 @@ import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mc
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { useAnswerFeedback } from "./answer-feedback";
 import { disabledCapabilitiesForRequest } from "./chat-capabilities";
-import { ChatMessage, PendingAnswer, type ActivityRequest } from "./chat-message";
+import { matchesUpload } from "./chat-attachment-plan";
+import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } from "./chat-message";
 import { Composer } from "./composer";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools, mcpConversationOptions } from "./mcp-controls";
+import type { PendingUpload } from "./message-files";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 import { historyQueryKey } from "./session-actions";
 import { StartState } from "./start-state";
@@ -62,6 +65,26 @@ function isoNow(): string {
 }
 
 type SentFiles = NonNullable<NonNullable<EneoUIMessage["metadata"]>["files"]>;
+
+/** The request options of a question as they stood when it left the composer. */
+type SendRequest = Omit<ChatSendOptions, "files" | "session_id" | "assistant_id" | "group_chat_id">;
+
+/**
+ * A question sent before its attachments were on the server. It waits in the
+ * conversation, mirroring their progress, and the request is issued once all
+ * of them are uploaded; an upload that fails, or a stop, takes it back out
+ * and returns the draft to the composer.
+ */
+type PendingQuestionState = {
+  /** The text as sent, quote included. */
+  text: string;
+  /** What the user typed, for the composer should the send be cancelled. */
+  question: string;
+  quote: PreviewQuote | null;
+  /** The composer attachments it was sent with. */
+  keys: string[];
+  request: SendRequest;
+};
 
 /** Which answer's activity is shown, on which tab, and which source to focus. */
 export type ActivityState = { messageId: string; tab: ActivityTab; source: number | null };
@@ -173,7 +196,12 @@ function ConversationView({
   const t = useTranslations();
   const { featureFlags, can } = useAppContext();
   const queryClient = useQueryClient();
-  const attachments = useAttachments(partner);
+  // A file sent earlier in this conversation is attached again as it is,
+  // without another upload. The uploads come from the messages, set up below.
+  const uploadsRef = useRef<PreviewFile[]>([]);
+  const attachments = useAttachments(partner, {
+    findExisting: (file) => uploadsRef.current.find((uploaded) => matchesUpload(file, uploaded))
+  });
   const panel = useSidePanel()!;
   // The Felsök tab reads a saved turn's diagnostics; group chats have none.
   const debugAvailable = can("assistant_debug") && partner.type !== "group-chat";
@@ -198,6 +226,9 @@ function ConversationView({
   // The question on its way: its text and the attachments it took from the
   // composer, put back if it fails before the answer starts.
   const pendingSendRef = useRef<{ text: string; attachments: Attachment[] } | null>(null);
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestionState | null>(null);
+  // Ends the wait for the pending question's uploads (a stop while it waits).
+  const pendingAbort = useRef<AbortController | null>(null);
   // The last question and its files, for "Försök igen" after an error.
   const [lastQuestion, setLastQuestion] = useState<{ text: string; files: SentFiles } | null>(null);
   const isNewSession = useRef(initialSessionId === null);
@@ -350,6 +381,8 @@ function ConversationView({
     });
 
   const busy = status === "submitted" || status === "streaming";
+  // The composer is taken from the moment a question leaves it, uploads included.
+  const sending = busy || pendingQuestion !== null;
 
   // Record client-side step timings for the answer being streamed.
   useEffect(() => {
@@ -368,6 +401,9 @@ function ConversationView({
     [messages]
   );
   const uploads = useMemo(() => conversationUploads(messages), [messages]);
+  useEffect(() => {
+    uploadsRef.current = uploads;
+  }, [uploads]);
   const allFiles = useMemo<PreviewFile[]>(
     () => [...uploads, ...messages.flatMap(messageGeneratedFiles)],
     [uploads, messages]
@@ -481,7 +517,7 @@ function ConversationView({
     fileInput.current?.click();
   }, []);
 
-  const started = messages.length > 0;
+  const started = messages.length > 0 || pendingQuestion !== null;
   const reportStarted = useEffectEvent((value: boolean) => onStartedChange?.(value));
   useEffect(() => {
     reportStarted(started);
@@ -491,67 +527,34 @@ function ConversationView({
     }
   }, [started]);
 
-  /**
-   * Sends a question; `resendFiles` repeats a failed question's attachments
-   * ("Försök igen"), which leave the composer if they were put back there.
-   */
-  function sendQuestion(question: string, resendFiles?: SentFiles) {
-    if (!question || busy || attachments.uploading || usage.willExceedContext) return;
-    // A quote from a file or a view opens the question; it is sent once.
-    const text = resendFiles ? question : composeQuotedQuestion(panel.quote, question);
-    if (!resendFiles) panel.clearQuote();
-    // Uploaded attachments travel as file ids; the metadata renders them as
-    // file tokens under the question.
-    const files =
-      resendFiles ??
-      (attachments.attachments.flatMap((attachment) =>
-        attachment.fileId
-          ? [
-              {
-                id: attachment.fileId,
-                name: attachment.name,
-                mimetype: attachment.mimetype,
-                size: attachment.size
-              }
-            ]
-          : []
-      ) as SentFiles);
-    clearError();
-    setStreamErrorCode(null);
-    streamErrorCodeRef.current = null;
-    streamStartedRef.current = false;
-    // Previews of an earlier question that never started are no longer needed.
-    if (pendingSendRef.current) releasePreviews(pendingSendRef.current.attachments);
-    pendingSendRef.current = {
-      text,
-      attachments: attachments.detach(new Set(files.map((file) => file.id)))
-    };
-    setLastQuestion({ text, files });
-    if (!started) {
-      refocusComposer.current = Boolean(
-        startComposerRef.current?.contains(document.activeElement ?? null)
-      );
-    }
+  /** The files a batch of composer attachments travels as: ids for the request, names for the chips. */
+  const sentFiles = (batch: readonly Attachment[]): SentFiles =>
+    batch.flatMap((attachment) =>
+      attachment.fileId
+        ? [
+            {
+              id: attachment.fileId,
+              name: attachment.name,
+              mimetype: attachment.mimetype,
+              size: attachment.size
+            }
+          ]
+        : []
+    ) as SentFiles;
 
+  /** The request options as they stand now, for the question leaving the composer. */
+  function requestOptions(): SendRequest {
     const mention =
       partner.type === "group-chat" && mentionId !== NO_MENTION
         ? partner.mentionableAssistants?.find((assistant) => assistant.id === mentionId)
         : undefined;
-
-    // The backend wants exactly ONE of session_id/assistant_id/group_chat_id:
-    // continuing a session identifies the partner through the session.
-    const continuing = sessionIdRef.current !== null;
     const mcpOptions = mcpConversationOptions({
       servers: toolChoices.mcpServers,
       disabledServerIds: toolChoices.disabledMcpServerIds,
       autoAcceptTools: toolChoices.autoAcceptTools,
       supportsToolApproval: partner.type !== "group-chat"
     });
-    const body: ChatSendOptions = {
-      session_id: sessionIdRef.current,
-      assistant_id: continuing || partner.type === "group-chat" ? null : partner.id,
-      group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
-      files: files.map((file) => ({ id: file.id })),
+    return {
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
       disabled_capabilities: disabledCapabilitiesForRequest(
         partner,
@@ -560,6 +563,91 @@ function ConversationView({
       ),
       ...mcpOptions
     };
+  }
+
+  /**
+   * Sends a question; `resendFiles` repeats a failed question's attachments
+   * ("Försök igen"), which leave the composer if they were put back there.
+   * Attachments still uploading do not hold the question back: it leaves the
+   * composer at once and waits in the conversation until all of them are on
+   * the server (`awaitUploads`), or is withdrawn if they never are.
+   */
+  function sendQuestion(question: string, resendFiles?: SentFiles) {
+    if (!question || sending || usage.willExceedContext) return;
+    // A quote from a file or a view opens the question; it is sent once.
+    const quote = resendFiles ? null : panel.quote;
+    const text = resendFiles ? question : composeQuotedQuestion(quote, question);
+    if (!resendFiles) panel.clearQuote();
+    if (!started) {
+      refocusComposer.current = Boolean(
+        startComposerRef.current?.contains(document.activeElement ?? null)
+      );
+    }
+    const request = requestOptions();
+    // A retry leaves the composer alone unless it holds the retried question.
+    setInput((current) => (resendFiles && current.trim() !== question ? current : ""));
+    setMentionId(NO_MENTION);
+
+    const batch = attachments.attachments;
+    if (!resendFiles && batch.some((attachment) => attachment.uploading)) {
+      const pending: PendingQuestionState = {
+        text,
+        question,
+        quote,
+        keys: batch.map((attachment) => attachment.key),
+        request
+      };
+      const first = !started;
+      const controller = new AbortController();
+      pendingAbort.current = controller;
+      setPendingQuestion(pending);
+      // The request is issued once every attachment of the batch is on the
+      // server; an upload that fails (which the upload has reported) or a
+      // stop takes the question back out instead.
+      attachments.awaitUploads(pending.keys, controller.signal).then(
+        (ready) => {
+          if (!mounted.current) return;
+          pendingAbort.current = null;
+          setPendingQuestion(null);
+          issue(pending.text, sentFiles(ready), pending.request);
+        },
+        () => {
+          if (!mounted.current) return;
+          pendingAbort.current = null;
+          withdrawQuestion(pending, first);
+        }
+      );
+      return;
+    }
+    issue(text, resendFiles ?? sentFiles(batch), request);
+  }
+
+  /** Issues the request for a question whose files are all on the server. */
+  function issue(text: string, files: SentFiles, request: SendRequest) {
+    clearError();
+    setStreamErrorCode(null);
+    streamErrorCodeRef.current = null;
+    streamStartedRef.current = false;
+    // Previews of an earlier question that never started are no longer needed.
+    if (pendingSendRef.current) releasePreviews(pendingSendRef.current.attachments);
+    // Uploaded attachments travel as file ids; the metadata renders them as
+    // file chips under the question.
+    pendingSendRef.current = {
+      text,
+      attachments: attachments.detach(new Set(files.map((file) => file.id)))
+    };
+    setLastQuestion({ text, files });
+
+    // The backend wants exactly ONE of session_id/assistant_id/group_chat_id:
+    // continuing a session identifies the partner through the session.
+    const continuing = sessionIdRef.current !== null;
+    const body: ChatSendOptions = {
+      session_id: sessionIdRef.current,
+      assistant_id: continuing || partner.type === "group-chat" ? null : partner.id,
+      group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
+      files: files.map((file) => ({ id: file.id })),
+      ...request
+    };
 
     timings.markSent();
     const send = () => sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
@@ -567,12 +655,48 @@ function ConversationView({
     // assistant; the backend answers with what is stored, so that save lands first.
     if (hasPendingPartnerUpdates()) void awaitPartnerUpdates().then(send);
     else void send();
-    // A retry leaves the composer alone unless it holds the retried question.
-    setInput((current) => (resendFiles && current.trim() !== question ? current : ""));
-    setMentionId(NO_MENTION);
   }
 
-  const canSubmit = input.trim().length > 0 && !attachments.uploading && !usage.willExceedContext;
+  /** Takes a waiting question back out of the conversation; nothing was sent. */
+  function withdrawQuestion(pending: PendingQuestionState, first: boolean) {
+    setPendingQuestion(null);
+    // The draft comes back unless the user has already started a new one.
+    setInput((current) => (current.trim() ? current : pending.question));
+    panel.restoreQuote(pending.quote);
+    // A first question takes the view back to the start state; keep focus in
+    // the composer across that swap.
+    if (first) {
+      refocusComposer.current =
+        dockElement.current?.contains(document.activeElement ?? null) ?? false;
+    }
+  }
+
+  // While a question waits for its uploads they are shown on it, not in the composer.
+  const pendingKeys = new Set(pendingQuestion?.keys ?? []);
+  const pendingUploads: PendingUpload[] = pendingQuestion
+    ? attachments.attachments
+        .filter((attachment) => pendingKeys.has(attachment.key))
+        .map(({ key, name, size, mimetype, uploading }) => ({
+          key,
+          name,
+          size,
+          mimetype,
+          uploading
+        }))
+    : [];
+  const pendingDone = pendingUploads.filter((upload) => !upload.uploading).length;
+  const composerAttachments = pendingQuestion
+    ? {
+        ...attachments,
+        attachments: attachments.attachments.filter(
+          (attachment) => !pendingKeys.has(attachment.key)
+        )
+      }
+    : attachments;
+
+  // Attachments still uploading do not block: the question waits for them in
+  // the conversation.
+  const canSubmit = input.trim().length > 0 && !usage.willExceedContext;
   const quote = panel.quote;
   const composerQuote = quote
     ? { text: quote.text, source: quote.fileName, onRemove: () => panel.clearQuote() }
@@ -652,11 +776,12 @@ function ConversationView({
     onChange: setInput,
     onSubmit: () => sendQuestion(input.trim()),
     canSubmit,
-    busy,
-    onStop: () => void stop(),
+    busy: sending,
+    // A stop while the question still waits for its uploads takes it back.
+    onStop: () => (pendingAbort.current ? pendingAbort.current.abort() : void stop()),
     label: composerLabel,
     placeholder: t("chat_composer_placeholder"),
-    attachments,
+    attachments: composerAttachments,
     onOpenFileDialog: openAttachmentDialog,
     knowledge: partner.knowledge,
     tools,
@@ -707,7 +832,7 @@ function ConversationView({
       <span className="flex flex-col items-center gap-2">
         <span className="flex flex-wrap items-center justify-center gap-2">
           <span className="text-ax-error">{failure.message}</span>
-          {lastQuestion && !busy && (
+          {lastQuestion && !sending && (
             <Button
               label={t("chat_retry")}
               size="sm"
@@ -858,7 +983,26 @@ function ConversationView({
                 />
               );
             })}
-            {status === "submitted" && <PendingAnswer assistant={assistantIdentity} />}
+            {pendingQuestion && (
+              <PendingQuestion
+                text={pendingQuestion.text}
+                uploads={pendingUploads}
+                conversationFiles={allFiles}
+              />
+            )}
+            {(status === "submitted" || pendingQuestion) && (
+              <PendingAnswer
+                assistant={assistantIdentity}
+                status={
+                  pendingQuestion
+                    ? t("uploading_attachments_progress", {
+                        done: pendingDone,
+                        total: pendingUploads.length
+                      })
+                    : undefined
+                }
+              />
+            )}
             {errorNotice}
           </ChatMessageList>
         </ChatLayout>

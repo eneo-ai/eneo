@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import { AttachmentPreviewDialog } from "./attachments";
+import { AttachmentPreviewDialog, ComposerAttachments } from "./attachments";
+import type { Attachment } from "./use-attachments";
 
 afterEach(() => {
   cleanup();
@@ -66,5 +67,64 @@ describe("signed file previews", () => {
       within(dialog).getByText("Det gick inte att läsa in innehållet. Försök igen.")
     ).toBeTruthy();
     await expectNoAxeViolations(dialog);
+  });
+});
+
+describe("ComposerAttachments", () => {
+  const attachment = (index: number, uploading = false): Attachment => ({
+    key: `key-${index}`,
+    fileId: uploading ? undefined : `file-${index}`,
+    name: `Policy ${index}.pdf`,
+    size: 2_048,
+    mimetype: "application/pdf",
+    uploading
+  });
+
+  it("shows up to three attachments as chips with a named remove button", async () => {
+    const removeAttachment = vi.fn();
+    const { container } = renderInApp(
+      <ComposerAttachments
+        attachments={{
+          attachments: [attachment(1), attachment(2, true), attachment(3)],
+          removeAttachment
+        }}
+      />
+    );
+    const list = screen.getByRole("list", { name: "3 bilagor bifogade" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+    expect(within(list).getAllByText("PDF · 2 kB")).toHaveLength(2);
+    expect(within(list).getByText("Laddar upp…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Ta bort alla bilagor" })).toBeNull();
+    fireEvent.click(within(list).getByRole("button", { name: "Ta bort Policy 2.pdf" }));
+    expect(removeAttachment).toHaveBeenCalledWith("key-2");
+    await expectNoAxeViolations(container);
+  });
+
+  it("folds four or more into a summary row with the progress that unfolds on request", async () => {
+    const removeAttachment = vi.fn();
+    const items = [attachment(1), attachment(2), attachment(3, true), attachment(4, true)];
+    const { container } = renderInApp(
+      <ComposerAttachments attachments={{ attachments: items, removeAttachment }} />
+    );
+    expect(screen.getByText("4 bilagor bifogade")).toBeTruthy();
+    expect(screen.getByText("· 8 kB")).toBeTruthy();
+    expect(screen.getByText("2 av 4 klara")).toBeTruthy();
+    expect(
+      screen.getByRole("progressbar", { name: "Laddar upp..." }).getAttribute("aria-valuenow")
+    ).toBe("2");
+    expect(screen.queryByRole("list")).toBeNull();
+
+    const show = screen.getByRole("button", { name: "Visa" });
+    expect(show.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(show);
+    expect(show.getAttribute("aria-expanded")).toBe("true");
+    expect(show.textContent).toContain("Dölj");
+    expect(
+      within(screen.getByRole("list", { name: "4 bilagor bifogade" })).getAllByRole("listitem")
+    ).toHaveLength(4);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ta bort alla bilagor" }));
+    expect(removeAttachment.mock.calls.map(([key]) => key)).toEqual(items.map((item) => item.key));
+    await expectNoAxeViolations(container);
   });
 });

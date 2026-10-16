@@ -438,6 +438,16 @@ export class SidePanelStore {
     this.#emit();
   }
 
+  /**
+   * Puts a quote back in the composer: a question that was sent with it never
+   * reached the backend. A quote the reader made meanwhile stays.
+   */
+  restoreQuote(quote: PreviewQuote | null) {
+    if (quote === null || this.quote !== null) return;
+    this.quote = quote;
+    this.#emit();
+  }
+
   /** Offers `text` as the next message; the composer takes it with `takeSuggestion`. */
   suggestMessage(text: string) {
     this.suggestion = text;

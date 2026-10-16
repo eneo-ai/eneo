@@ -10,7 +10,7 @@ import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Copy, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, type ReactNode } from "react";
 
 import {
   CitationSourcesProvider,
@@ -61,9 +61,9 @@ import {
   InlineImage,
   McpImageStrip,
   mcpReferencesFromParts,
-  MessageFiles,
   ToolApprovalCard
 } from "./message-parts";
+import { MessageFiles, PendingMessageFiles, type PendingUpload } from "./message-files";
 
 /** Who answers: the chat partner's name and tile. */
 export type AssistantIdentity = { id: string; name: string; iconId?: string | null };
@@ -149,18 +149,19 @@ function QuestionQuote({
   );
 }
 
-/** The user's question: a filled bubble on the right, attachments as file tokens below. */
-function UserMessage({
-  message,
-  conversationFiles
+/** A question as sent: a filled bubble on the right, its files (`children`) below. */
+function Question({
+  text: sent,
+  conversationFiles,
+  children
 }: {
-  message: EneoUIMessage;
+  text: string;
   conversationFiles: readonly PreviewFile[];
+  children?: ReactNode;
 }) {
   const t = useTranslations();
   // A question may open with a passage quoted from a file preview.
-  const { quote, text } = parseQuotedQuestion(messageText(message));
-  const files = message.metadata?.files ?? [];
+  const { quote, text } = parseQuotedQuestion(sent);
   return (
     <AxChatMessage
       sender="user"
@@ -173,8 +174,45 @@ function UserMessage({
           {text}
         </ChatMessageBubble>
       )}
-      {files.length > 0 && <MessageFiles files={files} />}
+      {children}
     </AxChatMessage>
+  );
+}
+
+/** The user's question: a filled bubble on the right, attachments as file chips below. */
+function UserMessage({
+  message,
+  conversationFiles
+}: {
+  message: EneoUIMessage;
+  conversationFiles: readonly PreviewFile[];
+}) {
+  const files = message.metadata?.files ?? [];
+  return (
+    <Question text={messageText(message)} conversationFiles={conversationFiles}>
+      {files.length > 0 && <MessageFiles files={files} />}
+    </Question>
+  );
+}
+
+/**
+ * A question sent before its attachments were on the server. It stands in the
+ * conversation like any question, mirroring the uploads' progress, until the
+ * request is issued and the stored message takes its place.
+ */
+export function PendingQuestion({
+  text,
+  uploads,
+  conversationFiles = NO_FILES
+}: {
+  text: string;
+  uploads: readonly PendingUpload[];
+  conversationFiles?: readonly PreviewFile[];
+}) {
+  return (
+    <Question text={text} conversationFiles={conversationFiles}>
+      <PendingMessageFiles uploads={uploads} />
+    </Question>
   );
 }
 
@@ -214,14 +252,18 @@ function GeneratedFiles({ message }: { message: EneoUIMessage }) {
  * region: the view announces the finished answer instead (the spinner's own
  * status role is hidden).
  */
-function ThinkingStatus() {
+/**
+ * The badge reads as thinking by default; a question still waiting for its
+ * attachments to upload says what it waits for instead.
+ */
+function ThinkingStatus({ label }: { label?: string }) {
   const t = useTranslations();
   return (
     <span className="bg-ax-accent-muted text-ax-text-accent inline-flex min-h-[30px] items-center gap-1.5 self-start rounded-full ps-2 pe-3 text-[12.5px] font-semibold">
       <span aria-hidden="true" className="flex">
         <Spinner size="md" shade="inherit" />
       </span>
-      {t("chat_assistant_thinking")}
+      {label ?? t("chat_assistant_thinking")}
     </span>
   );
 }
@@ -626,7 +668,14 @@ function nameMatches(file: { name: string }, name: string): boolean {
  * yet: the header, a "thinking" status and skeleton lines (aria-hidden; the
  * live region announces the finished answer instead).
  */
-export function PendingAnswer({ assistant }: { assistant: AssistantIdentity }) {
+export function PendingAnswer({
+  assistant,
+  status
+}: {
+  assistant: AssistantIdentity;
+  /** What is waited for, when it is not the model: the question's uploads. */
+  status?: string;
+}) {
   return (
     <AxChatMessage
       sender="assistant"
@@ -634,7 +683,7 @@ export function PendingAnswer({ assistant }: { assistant: AssistantIdentity }) {
       className="w-full"
     >
       <div className="flex w-full flex-col gap-3 pt-1">
-        <ThinkingStatus />
+        <ThinkingStatus label={status} />
         <AnswerSkeleton />
       </div>
     </AxChatMessage>
