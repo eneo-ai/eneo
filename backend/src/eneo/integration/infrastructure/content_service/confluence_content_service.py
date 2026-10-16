@@ -95,7 +95,7 @@ class ConfluenceContentService:
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
             )
-            integration_knowledge.mark_sync_failed(error, datetime.now(timezone.utc))
+            integration_knowledge.mark_sync_failed(error)
             await self.integration_knowledge_repo.update(obj=integration_knowledge)
         except Exception:
             logger.error(
