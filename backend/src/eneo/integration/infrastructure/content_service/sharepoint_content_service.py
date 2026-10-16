@@ -135,6 +135,22 @@ class SyncItemsFailed(Exception):
         self.changes_detected = changes_detected
 
 
+class ScopeFolderUnavailable(Exception):
+    """Graph could not tell us where the selected folder is right now.
+
+    Raised before any item of a delta pass is classified: the stored path may
+    be stale (an ancestor renamed or moved), and classifying against it would
+    delete every nested file as out of scope. The pass fails with its token
+    kept and is replayed by the next sync.
+    """
+
+    def __init__(self, cause: Exception) -> None:
+        super().__init__(
+            f"Could not read the selected folder from SharePoint: "
+            f"{user_visible_error(cause)}"
+        )
+
+
 def _failure_summary(failure: Exception) -> SyncStats | None:
     return failure.summary if isinstance(failure, SyncItemsFailed) else None
 
@@ -1740,18 +1756,26 @@ class SharePointContentService:
         drive_id: str,
         scope_folder_id: str,
     ) -> Optional[str]:
-        """The scope folder's path as Graph has it now; ``None`` when unavailable."""
+        """The scope folder's path as Graph has it now; ``None`` when the folder is gone.
+
+        Only a 404 is an answer about the folder; any other failure says nothing
+        about where it is, so it fails the pass instead of letting the stored
+        path, which may be stale, decide what is out of scope.
+        """
         try:
             folder_metadata = await content_client.get_file_metadata(
                 drive_id=drive_id, item_id=scope_folder_id
             )
-        except Exception as exc:
+        except aiohttp.ClientResponseError as exc:
+            if exc.status != 404:
+                raise ScopeFolderUnavailable(exc) from exc
             logger.warning(
-                "Could not resolve folder_path for delta scope (folder_id=%s): %s",
+                "Scope folder %s is gone (404); classifying against the stored path",
                 scope_folder_id,
-                exc,
             )
             return None
+        except Exception as exc:
+            raise ScopeFolderUnavailable(exc) from exc
         return self._folder_path_from_item(cast(SharePointItem, folder_metadata))
 
     def _scope_folder_path_from_changes(

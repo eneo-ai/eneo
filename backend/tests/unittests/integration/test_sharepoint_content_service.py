@@ -20,6 +20,7 @@ from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     DeltaTokenExpiredException,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
+    ScopeFolderUnavailable,
     SharePointContentService,
     SimpleSharePointToken,
     SyncItemsFailed,
@@ -1656,7 +1657,9 @@ class TestDeltaChangesProcessing:
     async def test_unresolved_legacy_folder_path_skips_uncertain_deletion(
         self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
     ):
-        """Do not delete nested content when legacy folder scope cannot be resolved."""
+        """Do not delete nested content when a legacy folder scope cannot be
+        resolved: the scope folder is gone (404), no path was stored, and the
+        change set does not carry the folder itself."""
         mock_integration_knowledge.delta_token = "existing-delta-token-123"
         mock_integration_knowledge.drive_id = "drive-123"
         mock_integration_knowledge.selected_item_type = "folder"
@@ -1679,7 +1682,7 @@ class TestDeltaChangesProcessing:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
-            mock_client.get_file_metadata.side_effect = Exception("Graph timeout")
+            mock_client.get_file_metadata.side_effect = _http_error(404, "Not Found")
             mock_client.get_delta_changes.return_value = (
                 [
                     {
@@ -3557,8 +3560,9 @@ class TestDeltaFolderScopeOrdering:
         changes,
         folder_metadata=None,
     ):
-        """Without ``folder_metadata`` the scope folder cannot be read from Graph,
-        so the pass has only the stored path and the folder's own delta entry."""
+        """Without ``folder_metadata`` Graph answers 404 for the scope folder, so
+        the pass has only the stored path and the folder's own delta entry; an
+        exception is what the metadata read raises."""
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
         mock_dependencies["integration_knowledge_repo"].one.return_value = ik
         mock_dependencies[
@@ -3566,6 +3570,8 @@ class TestDeltaFolderScopeOrdering:
         ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
             return_value=[]
         )
+        if folder_metadata is None:
+            folder_metadata = _http_error(404, "Not Found")
         with patch(
             "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
         ) as mock_client_class:
@@ -3573,9 +3579,9 @@ class TestDeltaFolderScopeOrdering:
                 mock_client_class,
                 get_delta_changes=AsyncMock(return_value=(changes, "new-token")),
                 get_file_metadata=(
-                    AsyncMock(return_value=folder_metadata)
-                    if folder_metadata
-                    else AsyncMock(side_effect=RuntimeError("metadata unavailable"))
+                    AsyncMock(side_effect=folder_metadata)
+                    if isinstance(folder_metadata, Exception)
+                    else AsyncMock(return_value=folder_metadata)
                 ),
                 get_file_extraction_by_id=AsyncMock(
                     return_value=ExtractionResult.ok("text", "text/plain")
@@ -3672,6 +3678,54 @@ class TestDeltaFolderScopeOrdering:
         )
         assert folder_scoped.folder_path == "/Docs renamed/A"
         assert "1 file" in result
+
+    async def test_unreadable_scope_folder_fails_the_pass_before_classifying(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        """With an ancestor renamed meanwhile the stored path is stale; a Graph
+        error other than 404 must not let it decide what is out of scope."""
+        ik = _real_integration_knowledge(
+            delta_token="existing-delta-token-123",
+            drive_id="drive-123",
+            selected_item_type="folder",
+            folder_id="folder-a",
+            folder_path="/Documents/A",
+        )
+        changes = [
+            {
+                "id": "nested-1",
+                "name": "nested.docx",
+                "webUrl": "https://x/nested.docx",
+                "parentReference": {
+                    "id": "sub-folder",
+                    "path": "/drives/drive-123/root:/Docs renamed/A/Sub",
+                },
+            }
+        ]
+
+        with pytest.raises(
+            ScopeFolderUnavailable,
+            match="Could not read the selected folder from SharePoint: "
+            "HTTP 503 Service Unavailable",
+        ):
+            await self._run_delta(
+                service,
+                mock_dependencies,
+                mock_oauth_token,
+                ik,
+                changes,
+                folder_metadata=_http_error(503, "Service Unavailable"),
+            )
+
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
+        assert ik.delta_token == "existing-delta-token-123"
+        assert ik.folder_path == "/Documents/A"
+        assert ik.last_sync_status == "error"
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.status == "error"
+        assert sync_log.sync_type == "delta"
 
     async def test_folder_moved_into_scope_indexes_its_unindexed_files(
         self, service, mock_dependencies, mock_oauth_token, folder_scoped
