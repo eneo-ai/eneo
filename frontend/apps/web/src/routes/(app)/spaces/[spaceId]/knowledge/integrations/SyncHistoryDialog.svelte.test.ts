@@ -1,5 +1,5 @@
 import type { IntegrationKnowledge } from "@eneo/eneo-js";
-import { page } from "@vitest/browser/context";
+import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
@@ -34,17 +34,21 @@ function log(overrides: Partial<SyncLog>): SyncLog {
   } as SyncLog;
 }
 
-function respondWith(items: SyncLog[], total = items.length) {
-  getSyncLogs.mockResolvedValue({
+function pageOf(items: SyncLog[], total = items.length, current = 1) {
+  return {
     items,
     total_count: total,
     page_size: 10,
-    offset: 0,
+    offset: (current - 1) * 10,
     count: items.length,
-    current_page: 1,
+    current_page: current,
     total_pages: Math.max(1, Math.ceil(total / 10)),
-    has_next: total > 10
-  });
+    has_next: current * 10 < total
+  };
+}
+
+function respondWith(items: SyncLog[], total = items.length) {
+  getSyncLogs.mockResolvedValue(pageOf(items, total));
 }
 
 describe("SyncHistoryDialog", () => {
@@ -94,6 +98,30 @@ describe("SyncHistoryDialog", () => {
     const filesRow = page.getByText(`${m.files_synced()}:`).element().parentElement;
     expect(filesRow?.textContent).toContain("2");
     expect(filesRow?.textContent).not.toContain("9");
+  });
+
+  it("keeps keyboard focus on Next while the next page loads", async () => {
+    type SyncLogPage = ReturnType<typeof pageOf>;
+    let release!: (page: SyncLogPage) => void;
+    getSyncLogs.mockResolvedValueOnce(pageOf([log({ id: "a" })], 23, 1));
+    getSyncLogs.mockImplementationOnce(
+      () => new Promise<SyncLogPage>((resolve) => (release = resolve))
+    );
+    render(SyncHistoryDialog, { knowledge, open: true });
+
+    const next = page.getByRole("button", { name: m.next() });
+    await expect.element(next).toBeEnabled();
+    (next.element() as HTMLElement).focus();
+    await userEvent.keyboard("{Enter}");
+
+    await expect.element(next).toHaveAttribute("aria-disabled", "true");
+    // Not the disabled attribute: that is what would drop focus.
+    await expect.element(next).not.toHaveAttribute("disabled");
+    expect(document.activeElement).toBe(next.element());
+
+    release(pageOf([log({ id: "b" })], 23, 2));
+    await expect.element(page.getByText(m.page_x_of_y({ x: 2, y: 3 }))).toBeVisible();
+    expect(document.activeElement).toBe(next.element());
   });
 
   it("reports a failed load in the UI language", async () => {

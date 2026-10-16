@@ -12,6 +12,7 @@
   import { sanitizeLinkHref } from "$lib/components/markdown/sanitizeUrl";
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors";
+  import { focusHandoff } from "$lib/core/focus/focusHandoff";
   import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import {
@@ -71,6 +72,9 @@
   let searchText = $state("");
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   let loadGeneration = 0;
+
+  let previousButton = $state<HTMLElement | null>(null);
+  let nextButton = $state<HTMLElement | null>(null);
 
   let skipped = $state<IntegrationSkippedDocuments | null>(untrack(() => initialSkipped));
   let skippedError = $state<string | null>(null);
@@ -157,9 +161,15 @@
     void loadDocuments(toggleDocumentsSort(query, column));
   }
 
-  function goToPage(direction: -1 | 1) {
+  async function goToPage(direction: -1 | 1) {
+    // Still clickable from the keyboard while loading: the buttons stay enabled so focus stays put.
+    if (loading) return;
+    const [pressed, other] =
+      direction === 1 ? [nextButton, previousButton] : [previousButton, nextButton];
+    const handoff = focusHandoff(pressed);
     const offset = Math.max(0, documents.offset + direction * query.limit);
-    void loadDocuments({ ...query, offset });
+    await loadDocuments({ ...query, offset });
+    await handoff.to(other);
   }
 
   // The first sync completing while the page is open should fill the table
@@ -307,18 +317,26 @@
             </span>
           </p>
           <div class="flex gap-2">
+            <!-- disabled only for a page that does not exist; while loading the buttons stay
+                 focusable, since a focused button that turns disabled drops focus to the body. -->
             <Button
+              bind:ref={previousButton}
               variant="outline"
               size="sm"
-              disabled={!hasPrevious || loading}
+              disabled={!hasPrevious}
+              aria-disabled={loading}
+              class={loading ? "pointer-events-none opacity-50" : undefined}
               onclick={() => goToPage(-1)}
             >
               {m.previous()}
             </Button>
             <Button
+              bind:ref={nextButton}
               variant="outline"
               size="sm"
-              disabled={!hasNext || loading}
+              disabled={!hasNext}
+              aria-disabled={loading}
+              class={loading ? "pointer-events-none opacity-50" : undefined}
               onclick={() => goToPage(1)}
             >
               {m.next()}

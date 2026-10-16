@@ -278,6 +278,67 @@ describe("IntegrationDocumentsView", () => {
     await expect.element(page.getByRole("button", { name: m.previous() })).toBeEnabled();
   });
 
+  it("keeps keyboard focus on Next while the next page loads", async () => {
+    const firstPage = pageOf(
+      Array.from({ length: 50 }, (_, index) => doc(index + 1)),
+      0,
+      312
+    );
+    const secondPage = pageOf(
+      Array.from({ length: 50 }, (_, index) => doc(index + 51)),
+      50,
+      312
+    );
+    let release!: (page: IntegrationDocumentsPage) => void;
+    api.listDocuments.mockImplementation(
+      () => new Promise<IntegrationDocumentsPage>((resolve) => (release = resolve))
+    );
+    show({ initialDocuments: firstPage });
+
+    const next = page.getByRole("button", { name: m.next() });
+    (next.element() as HTMLElement).focus();
+    await userEvent.keyboard("{Enter}");
+
+    await expect.element(next).toHaveAttribute("aria-disabled", "true");
+    // Not the disabled attribute: that is what would drop focus.
+    await expect.element(next).not.toHaveAttribute("disabled");
+    expect(document.activeElement).toBe(next.element());
+
+    release(secondPage);
+    await expect
+      .element(
+        page.getByText(m.integration_documents_showing_range({ from: 51, to: 100, total: 312 }))
+      )
+      .toBeVisible();
+    await expect.element(next).toHaveAttribute("aria-disabled", "false");
+    expect(document.activeElement).toBe(next.element());
+  });
+
+  it("hands focus to Previous when Next reaches the last page", async () => {
+    const firstPage = pageOf(
+      Array.from({ length: 50 }, (_, index) => doc(index + 1)),
+      0,
+      60
+    );
+    api.listDocuments.mockResolvedValue(
+      pageOf(
+        Array.from({ length: 10 }, (_, index) => doc(index + 51)),
+        50,
+        60
+      )
+    );
+    show({ initialDocuments: firstPage });
+
+    const next = page.getByRole("button", { name: m.next() });
+    (next.element() as HTMLElement).focus();
+    await userEvent.keyboard("{Enter}");
+
+    await expect.element(next).toBeDisabled();
+    const previous = page.getByRole("button", { name: m.previous() });
+    await expect.element(previous).toBeEnabled();
+    await expect.poll(() => document.activeElement).toBe(previous.element());
+  });
+
   it("groups the skipped files by translated reason and notes the ones the capped list leaves out", async () => {
     show({
       initialSkipped: {

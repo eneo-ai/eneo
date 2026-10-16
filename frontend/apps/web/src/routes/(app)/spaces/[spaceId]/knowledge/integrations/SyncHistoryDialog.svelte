@@ -12,6 +12,7 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors";
+  import { focusHandoff } from "$lib/core/focus/focusHandoff";
   import { describeSkipReason } from "$lib/features/integrations/skipReasons";
   import {
     readSyncLogExtras,
@@ -38,6 +39,8 @@
   let totalPages = $state(1);
   let loadedKnowledgeId = $state<string | null>(null);
   let loadGeneration = 0;
+  let previousButton = $state<HTMLElement | null>(null);
+  let nextButton = $state<HTMLElement | null>(null);
 
   let pageStats = $derived(summarizeSyncLogPage(syncLogs));
 
@@ -75,9 +78,14 @@
     }
   }
 
-  function goToPage(page: number) {
-    if (!knowledge || page < 1 || page > totalPages) return;
-    void loadSyncHistory(knowledge, page);
+  async function goToPage(page: number) {
+    // Still clickable from the keyboard while loading: the buttons stay enabled so focus stays put.
+    if (!knowledge || loading || page < 1 || page > totalPages) return;
+    const [pressed, other] =
+      page > currentPage ? [nextButton, previousButton] : [previousButton, nextButton];
+    const handoff = focusHandoff(pressed);
+    await loadSyncHistory(knowledge, page);
+    await handoff.to(other);
   }
 
   $effect(() => {
@@ -284,17 +292,25 @@
 
     <Dialog.Footer class={dialogLayout.footer}>
       {#if totalPages > 1}
+        <!-- disabled only for a page that does not exist; while loading the buttons stay
+             focusable, since a focused button that turns disabled drops focus to the dialog. -->
         <div class="flex gap-2 sm:mr-auto">
           <Button
+            bind:ref={previousButton}
             variant="outline"
-            disabled={currentPage === 1 || loading}
+            disabled={currentPage === 1}
+            aria-disabled={loading}
+            class={loading ? "pointer-events-none opacity-50" : undefined}
             onclick={() => goToPage(currentPage - 1)}
           >
             {m.previous()}
           </Button>
           <Button
+            bind:ref={nextButton}
             variant="outline"
-            disabled={currentPage === totalPages || loading}
+            disabled={currentPage === totalPages}
+            aria-disabled={loading}
+            class={loading ? "pointer-events-none opacity-50" : undefined}
             onclick={() => goToPage(currentPage + 1)}
           >
             {m.next()}
