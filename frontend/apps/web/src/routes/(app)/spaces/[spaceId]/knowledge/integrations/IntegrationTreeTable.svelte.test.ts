@@ -80,6 +80,23 @@ describe("IntegrationTreeTable", () => {
     await expectNoAxeViolations();
   });
 
+  it("links to the source only for an http(s) URL", async () => {
+    render(IntegrationTreeTable, {
+      items: [
+        { ...item("skript", "Skript", "/Documents/Skript"), url: "javascript:alert(1)" },
+        item("rutiner", "Rutiner", "/Documents/Rutiner")
+      ],
+      spaceRouteId: "space-1"
+    });
+
+    await expect.element(page.getByRole("link", { name: "Skript" })).toBeVisible();
+    const sourceLinks = page.getByRole("link", { name: m.open_in_sharepoint() }).elements();
+    expect(sourceLinks.map((link) => link.getAttribute("href"))).toEqual([
+      "https://contoso.sharepoint.com/rutiner"
+    ]);
+    expect(page.getByRole("button", { name: m.open_in_sharepoint() }).elements()).toHaveLength(0);
+  });
+
   it("collapses and expands a parent from the keyboard", async () => {
     render(IntegrationTreeTable, { items, spaceRouteId: "space-1" });
     const toggle = page.getByRole("button", {

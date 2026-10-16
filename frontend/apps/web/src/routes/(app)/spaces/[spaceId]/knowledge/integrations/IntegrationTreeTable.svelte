@@ -68,6 +68,7 @@
       </Table.Header>
       <Table.Body>
         {#each rows as row (row.item.id)}
+          {@const sourceHref = sanitizeLinkHref(row.item.url)}
           <Table.Row>
             <Table.Cell class="max-w-[28rem]">
               <div class="flex items-center gap-1" style="padding-left: {row.depth * 1.5}rem">
@@ -105,11 +106,13 @@
               />
             </Table.Cell>
             <Table.Cell>
-              <ButtonCell
-                link={sanitizeLinkHref(row.item.url)}
-                label={previewLinkLabel(row.item.integration_type)}
-                linkIsExternal
-              />
+              {#if sourceHref}
+                <ButtonCell
+                  link={sourceHref}
+                  label={previewLinkLabel(row.item.integration_type)}
+                  linkIsExternal
+                />
+              {/if}
             </Table.Cell>
             <Table.Cell>
               <IntegrationActions knowledgeItem={row.item} />

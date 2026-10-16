@@ -1,5 +1,6 @@
 <script lang="ts">
   import * as Table from "$lib/components/resource-table/index.js";
+  import { sanitizeLinkHref } from "$lib/components/markdown/sanitizeUrl";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
@@ -262,11 +263,12 @@
       header: m.link(),
       cell: (displayItem) => {
         const di = displayItem.value;
-        if (di.kind === "wrapper") {
+        const link = di.kind === "item" ? sanitizeLinkHref(di.item.url) : undefined;
+        if (di.kind === "wrapper" || !link) {
           return Table.renderComponent(Table.FormattedCell, { value: "" });
         }
         return Table.renderComponent(Table.ButtonCell, {
-          link: di.item.url ?? "",
+          link,
           label: previewLinkLabel(di.item.integration_type),
           linkIsExternal: true
         });
