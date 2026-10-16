@@ -1503,6 +1503,7 @@ class Container(containers.DeclarativeContainer):
         confluence_auth_service=confluence_auth_service,
         sharepoint_auth_service=sharepoint_auth_service,
         redis_client=redis_client,
+        token_mapper=confluence_token_mapper,
     )
 
     # SharePoint auth router (after oauth_token_service)

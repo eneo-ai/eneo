@@ -1,8 +1,11 @@
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 from redis.exceptions import ConnectionError as RedisConnectionError
+from sqlalchemy.exc import OperationalError
 
 from eneo.integration.infrastructure import oauth_token_service as module
 from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
@@ -201,5 +204,126 @@ class TestCrossWorkerRefreshLease:
         repo.update.assert_awaited_once()
         release.assert_not_awaited()
 
-    def test_container_wires_the_redis_client(self):
+    def test_container_wires_the_redis_client_and_token_mapper(self):
         assert "redis_client" in Container.oauth_token_service.kwargs
+        assert "token_mapper" in Container.oauth_token_service.kwargs
+
+
+class _CommittedRow:
+    """The oauth_tokens row as another connection reads it, plus the own
+    connection the service writes it on; the caller's session is the mock
+    repo and never reaches this store."""
+
+    def __init__(self, *, fail: bool = False, lock_timeout: bool = False) -> None:
+        self.values = {"access_token": "old-access", "refresh_token": "old-refresh"}
+        self.fail = fail
+        self.lock_timeout = lock_timeout
+        self.writes = 0
+
+    @asynccontextmanager
+    async def session(self):
+        if self.fail:
+            raise RuntimeError("no connection")
+        session = MagicMock()
+        session.execute = AsyncMock(side_effect=self._execute)
+        session.begin = asynccontextmanager(self._begin)
+        yield session
+
+    async def _begin(self):
+        yield
+
+    async def _execute(self, stmt):
+        if not isinstance(stmt, sa.Update):
+            return
+        if self.lock_timeout:
+            raise OperationalError("UPDATE", {}, Exception("lock timeout"))
+        params = stmt.compile().params
+        for column in ("access_token", "refresh_token"):
+            self.values[column] = params[column].removeprefix("enc:")
+        self.writes += 1
+
+    def entity(self) -> MagicMock:
+        entity = MagicMock()
+        entity.access_token = self.values["access_token"]
+        entity.refresh_token = self.values["refresh_token"]
+        return entity
+
+
+def _committing_service(row: _CommittedRow, token, *, busy_rounds: int):
+    repo = AsyncMock()
+    repo.one.return_value = token
+    repo.one_fresh.side_effect = lambda id: row.entity()
+    repo.update.side_effect = lambda obj: obj
+    mapper = MagicMock()
+    mapper.to_db_dict.side_effect = lambda t: {
+        "access_token": f"enc:{t.access_token}",
+        "refresh_token": f"enc:{t.refresh_token}",
+    }
+    confluence = AsyncMock()
+    confluence.refresh_access_token.return_value = {
+        "access_token": "refreshed",
+        "refresh_token": "rotated",
+    }
+    svc = OauthTokenService(
+        oauth_token_repo=repo,
+        confluence_auth_service=confluence,
+        sharepoint_auth_service=AsyncMock(),
+        redis_client=_FakeRedis(busy_rounds=busy_rounds),
+        token_mapper=mapper,
+    )
+    return svc, repo, confluence
+
+
+class TestRefreshedTokenIsCommittedBeforeTheLeaseIsReleased:
+    async def test_a_waiter_sees_the_rotation_while_the_holders_job_is_uncommitted(
+        self, token, monkeypatch
+    ):
+        monkeypatch.setattr(module, "_REFRESH_LEASE_POLL_SECONDS", 0.001)
+        token_id = uuid4()
+        row = _CommittedRow()
+        holder, holder_repo, holder_auth = _committing_service(
+            row, token, busy_rounds=0
+        )
+        waiter_token = MagicMock(access_token="old-access", refresh_token="old-refresh")
+        waiter_token.token_type.is_confluence = True
+        waiter, waiter_repo, waiter_auth = _committing_service(
+            row, waiter_token, busy_rounds=1
+        )
+
+        with (
+            patch(f"{module.__name__}.sessionmanager", row),
+            patch(_REFRESH, new=AsyncMock(return_value=True)),
+            patch(_RELEASE, new=AsyncMock(return_value=True)),
+        ):
+            held = await holder.refresh_and_update_token(token_id=token_id)
+            waited = await waiter.refresh_and_update_token(token_id=token_id)
+
+        assert (held.access_token, held.refresh_token) == ("refreshed", "rotated")
+        assert row.values == {"access_token": "refreshed", "refresh_token": "rotated"}
+        holder_repo.update.assert_not_awaited()
+        holder_repo.one_fresh.assert_awaited_once_with(token.id)
+        assert (waited.access_token, waited.refresh_token) == ("refreshed", "rotated")
+        waiter_auth.refresh_access_token.assert_not_awaited()
+        waiter_repo.update.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "row",
+        [
+            pytest.param(_CommittedRow(fail=True), id="no-connection"),
+            pytest.param(_CommittedRow(lock_timeout=True), id="row-locked"),
+        ],
+    )
+    async def test_write_falls_back_to_the_callers_transaction(self, token, row):
+        svc, repo, _ = _committing_service(row, token, busy_rounds=0)
+
+        with (
+            patch(f"{module.__name__}.sessionmanager", row),
+            patch(_REFRESH, new=AsyncMock(return_value=True)),
+            patch(_RELEASE, new=AsyncMock(return_value=True)),
+        ):
+            result = await svc.refresh_and_update_token(token_id=uuid4())
+
+        assert (result.access_token, result.refresh_token) == ("refreshed", "rotated")
+        assert row.values["access_token"] == "old-access"
+        repo.update.assert_awaited_once_with(obj=token)
+        repo.one_fresh.assert_not_awaited()

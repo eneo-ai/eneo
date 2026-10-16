@@ -3,8 +3,11 @@ from contextlib import AsyncExitStack
 from time import monotonic
 from typing import TYPE_CHECKING, Optional
 
+import sqlalchemy as sa
 from redis.exceptions import RedisError
 
+from eneo.database.database import sessionmanager
+from eneo.database.tables.integration_table import OauthToken as OauthTokenDBModel
 from eneo.main.logging import get_logger
 from eneo.worker.redis.lease import redis_lease
 
@@ -23,6 +26,9 @@ if TYPE_CHECKING:
     from eneo.integration.infrastructure.auth_service.sharepoint_auth_service import (
         SharepointAuthService,
     )
+    from eneo.integration.infrastructure.mappers.oauth_token_mapper import (
+        OauthTokenMapper,
+    )
 
 logger = get_logger(__name__)
 
@@ -32,6 +38,7 @@ _REFRESH_LEASE_PREFIX = "integration:oauth_token_refresh:"
 _REFRESH_LEASE_TTL_SECONDS = 60
 _REFRESH_LEASE_WAIT_SECONDS = 30.0
 _REFRESH_LEASE_POLL_SECONDS = 0.2
+_TOKEN_WRITE_LOCK_TIMEOUT = "2s"
 
 
 class OauthTokenService:
@@ -45,12 +52,14 @@ class OauthTokenService:
         confluence_auth_service: "ConfluenceAuthService",
         sharepoint_auth_service: "SharepointAuthService",
         redis_client: Optional["aioredis.Redis"] = None,
+        token_mapper: Optional["OauthTokenMapper"] = None,
     ) -> None:
         super().__init__()
         self.oauth_token_repo = oauth_token_repo
         self.confluence_auth_service = confluence_auth_service
         self.sharepoint_auth_service = sharepoint_auth_service
         self.redis_client = redis_client
+        self.token_mapper = token_mapper
 
     @classmethod
     async def _get_refresh_lock(cls, token_id: "UUID") -> asyncio.Lock:
@@ -85,9 +94,9 @@ class OauthTokenService:
         """Refresh ``token_id`` once across processes and persist the result.
 
         Workers and API processes serialise on a Redis lease keyed by the token.
-        A caller that had to wait re-reads the row afterwards and reuses a token
-        another holder refreshed in the meantime (visible once that holder's
-        transaction has committed) instead of spending a second refresh.
+        The refreshed token is committed before the lease is released, so a
+        caller that had to wait re-reads the row afterwards and reuses it
+        instead of spending a second refresh.
         """
         lock = await self._get_refresh_lock(token_id)
         async with lock:
@@ -165,4 +174,45 @@ class OauthTokenService:
         if new_refresh_token:
             token.refresh_token = new_refresh_token
 
+        return await self._store(token)
+
+    async def _store(self, token: "OauthToken") -> "OauthToken":
+        """Persist the refreshed token so it is visible when the lease is released.
+
+        The caller's transaction can be a whole sync job and commits long after
+        the lease is gone; a waiter reading the row in between would refresh
+        again with the superseded refresh token, which revokes the family for
+        providers that rotate it, and a rollback of the job would discard the
+        rotation. The row is therefore written on its own connection, and the
+        caller's session re-reads it so later lookups there see it too. Without
+        a mapper, or when the row cannot be locked shortly (the caller's own
+        transaction already updated it), the write falls back to the caller's
+        transaction.
+        """
+        if self.token_mapper is not None:
+            columns = self.token_mapper.to_db_dict(token)
+            try:
+                async with sessionmanager.session() as session, session.begin():
+                    await session.execute(
+                        sa.text(
+                            f"SET LOCAL lock_timeout = '{_TOKEN_WRITE_LOCK_TIMEOUT}'"
+                        )
+                    )
+                    await session.execute(
+                        sa.update(OauthTokenDBModel)
+                        .where(OauthTokenDBModel.id == token.id)
+                        .values(
+                            access_token=columns["access_token"],
+                            refresh_token=columns["refresh_token"],
+                        )
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Could not persist refreshed OAuth token %s on its own "
+                    "connection (%s); storing it in the current transaction instead",
+                    token.id,
+                    type(exc).__name__,
+                )
+            else:
+                return await self.oauth_token_repo.one_fresh(token.id)
         return await self.oauth_token_repo.update(obj=token)
