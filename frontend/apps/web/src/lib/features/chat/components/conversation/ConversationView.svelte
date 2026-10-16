@@ -13,7 +13,8 @@
   import {
     getFilePreview,
     initFilePreview,
-    type DocumentExport
+    type DocumentExport,
+    type DocumentSaver
   } from "$lib/features/file-preview/FilePreview.svelte";
   import { previewKindOf, type PreviewFile } from "$lib/features/file-preview/previewKind";
   import FilePreviewLayout from "$lib/features/file-preview/components/FilePreviewLayout.svelte";
@@ -38,6 +39,7 @@
   import type { PanelContents } from "$lib/features/file-preview/panelContents";
   import { getAppContext } from "$lib/core/AppContext";
   import { onDestroy, untrack, type Snippet } from "svelte";
+  import { beforeNavigate } from "$app/navigation";
   import { followConversationScroll } from "../../followConversationScroll";
   import { m } from "$lib/paraglide/messages";
 
@@ -133,6 +135,28 @@
         eneo.conversations.exportDocument({ sessionId, fileId: file.id, format })
     };
   }
+  // A reader's edit of such a document is saved as its next version, which
+  // joins the conversation like a version the assistant made.
+  function documentSaver(file: PreviewFile): DocumentSaver | null {
+    const sessionId = chat.currentConversation.id;
+    if (!sessionId || previewKindOf(file) !== "markdown") return null;
+    if (chat.documents.versionsOf(file.id).length === 0) return null;
+    return {
+      save: async (content) => {
+        const version = await eneo.conversations.saveDocumentVersion({
+          sessionId,
+          fileId: file.id,
+          content
+        });
+        chat.addGeneratedFile(version);
+        return version;
+      }
+    };
+  }
+  // Leaving the page would lose unsaved edits to a document.
+  beforeNavigate((navigation) => {
+    if (filePreview.unsaved && !confirm(m.unsaved_changes_warning())) navigation.cancel();
+  });
 
   // A tool call of the answer being written.
   type LiveToolCall = Parameters<typeof chat.generatedFileIdsOf>[0] & {
@@ -259,6 +283,7 @@
   preview={filePreview}
   versionsOf={(file) => chat.documents.versionsOf(file.id)}
   exportOf={documentExport}
+  saverOf={documentSaver}
   contents={panelContents}
   occupant={{
     shown: appPane.shown,

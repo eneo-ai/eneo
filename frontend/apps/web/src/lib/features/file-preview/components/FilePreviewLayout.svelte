@@ -8,7 +8,7 @@
   import * as Sheet from "$lib/components/ui/sheet/index.js";
   import { m } from "$lib/paraglide/messages";
   import type { Snippet } from "svelte";
-  import type { DocumentExport, FilePreview } from "../FilePreview.svelte";
+  import type { DocumentExport, DocumentSaver, FilePreview } from "../FilePreview.svelte";
   import { panelContentsCount, type PanelContents } from "../panelContents";
   import type { PreviewFile } from "../previewKind";
   import FilePreviewPanel from "./FilePreviewPanel.svelte";
@@ -19,6 +19,8 @@
     versionsOf?: (file: PreviewFile) => PreviewFile[];
     /** How a file is exported, for a document that can be; null for any other file. */
     exportOf?: (file: PreviewFile) => DocumentExport | null;
+    /** How a document is saved as a new version, for a document that can be; null for any other file. */
+    saverOf?: (file: PreviewFile) => DocumentSaver | null;
     /**
      * Something other than a file that takes the panel (an interactive tool
      * view). The panel shows one thing at a time; while this is shown it
@@ -35,7 +37,7 @@
     children: Snippet;
   };
 
-  let { preview, versionsOf, exportOf, occupant, contents, children }: Props = $props();
+  let { preview, versionsOf, exportOf, saverOf, occupant, contents, children }: Props = $props();
 
   const panelId = $props.id();
   // The overview is the preview's state, so a file bundle in a message can
@@ -124,8 +126,10 @@
     if (event.key !== "Escape" || event.defaultPrevented) return;
     if (!panel?.contains(document.activeElement)) return;
     event.preventDefault();
-    // Escape steps back: out of the maximised panel first, then out of the panel.
+    // Escape steps back: out of the maximised panel first, then out of edit
+    // mode (asking before edits are lost), then out of the panel.
     if (maximised) preview.maximised = false;
+    else if (preview.editing) preview.stopEditing();
     else close();
   }
 </script>
@@ -173,6 +177,7 @@
         {preview}
         {versionsOf}
         {exportOf}
+        {saverOf}
         {contents}
         onoverview={hasContents ? openOverview : undefined}
         sheet={!split}

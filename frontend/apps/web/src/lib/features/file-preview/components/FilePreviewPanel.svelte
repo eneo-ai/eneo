@@ -1,4 +1,5 @@
 <script lang="ts">
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
@@ -13,9 +14,10 @@
   import FileText from "@lucide/svelte/icons/file-text";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Minimize2 from "@lucide/svelte/icons/minimize-2";
+  import Pencil from "@lucide/svelte/icons/pencil";
   import X from "@lucide/svelte/icons/x";
   import { toast } from "svelte-sonner";
-  import type { DocumentExport, FilePreview } from "../FilePreview.svelte";
+  import type { DocumentExport, DocumentSaver, FilePreview } from "../FilePreview.svelte";
   import type { PanelContents } from "../panelContents";
   import { previewKindOf, type PreviewFile } from "../previewKind";
   import DraftPreview from "./DraftPreview.svelte";
@@ -29,6 +31,8 @@
     versionsOf?: (file: PreviewFile) => PreviewFile[];
     /** How a file is exported, for a document that can be; null for any other file. */
     exportOf?: (file: PreviewFile) => DocumentExport | null;
+    /** How a document is saved as a new version, for a document that can be; null for any other file. */
+    saverOf?: (file: PreviewFile) => DocumentSaver | null;
     /** Everything the panel can show, for the switcher in the title. */
     contents?: PanelContents;
     /** Shown as a sheet over the conversation, where there is less room and nothing to maximise. */
@@ -36,7 +40,15 @@
     onoverview?: () => void;
   };
 
-  let { preview, versionsOf, exportOf, contents, onoverview, sheet = false }: Props = $props();
+  let {
+    preview,
+    versionsOf,
+    exportOf,
+    saverOf,
+    contents,
+    onoverview,
+    sheet = false
+  }: Props = $props();
 
   const attachmentUrls = getAttachmentUrlService();
 
@@ -183,6 +195,38 @@
   const highlight = $derived(
     preview.highlight ?? (preview.quote?.fileId === file?.id ? preview.quote : null)
   );
+
+  // Editing: the latest version of a Markdown document, once it is on show.
+  // Edits stay in the editor; one save makes one new version.
+  const saver = $derived(file ? (saverOf?.(file) ?? null) : null);
+  const canEdit = $derived(
+    !!saver && !!file && content?.kind === "markdown" && !draft && !later && !updating
+  );
+  const editing = $derived(preview.editing);
+  let saving = $state(false);
+  // The content components by file, for the document text the reader has edited.
+  let contentOf = $state<Record<string, FilePreviewContent>>({});
+
+  async function saveEdits() {
+    const current = file;
+    if (!current || !saver || !preview.editing?.dirty || saving) return;
+    const markdown = contentOf[current.id]?.getMarkdown();
+    if (markdown === null || markdown === undefined) return;
+    saving = true;
+    try {
+      const version = await saver.save(markdown);
+      preview.saved(version, markdown);
+    } catch {
+      toast.error(m.file_preview_save_failed());
+    } finally {
+      saving = false;
+    }
+  }
+
+  function discardEdits() {
+    if (file) contentOf[file.id]?.resetEditor();
+    preview.pendingDiscard?.proceed();
+  }
 </script>
 
 {#snippet versionButtons()}
@@ -325,6 +369,10 @@
           <span class="bg-accent-default size-1.5 shrink-0 rounded-full" aria-hidden="true"></span>
           {m.file_preview_writing()}
         </p>
+      {:else if editing}
+        <p class="text-muted-foreground truncate text-xs" role="status">
+          {m.file_preview_editing()}{editing.dirty ? ` · ${m.file_preview_unsaved_changes()}` : ""}
+        </p>
       {:else if latest}
         <p class="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
           <span class="truncate">{m.file_preview_older_version()}</span>
@@ -346,6 +394,24 @@
       >
         {@render versionButtons()}
       </div>
+    {/if}
+    {#if editing}
+      <Button variant="ghost" size="sm" disabled={saving} onclick={() => preview.stopEditing()}>
+        {m.cancel()}
+      </Button>
+      <Button size="sm" disabled={!editing.dirty || saving} onclick={saveEdits}>
+        {saving ? m.file_preview_saving() : m.save()}
+      </Button>
+    {:else if canEdit}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={m.file_preview_edit()}
+        title={m.file_preview_edit()}
+        onclick={() => preview.startEditing()}
+      >
+        <Pencil aria-hidden="true" />
+      </Button>
     {/if}
     {@render exportMenu()}
     {#if !sheet}
@@ -398,6 +464,12 @@
       <Button variant="outline" size="sm" class="mt-2" onclick={() => preview.retry()}
         >{m.retry()}</Button
       >
+    {:else if editing && preview.replacementContent}
+      <!-- The newer version waits until the reader is done with their edits. -->
+      <p class="text-muted-foreground text-xs">{m.file_preview_newer_version_while_editing()}</p>
+      <Button variant="outline" size="sm" class="mt-2" onclick={() => preview.stopEditing()}>
+        {m.file_preview_show_latest()}
+      </Button>
     {:else}
       <p class="text-accent-stronger font-medium">{m.file_preview_updating({ name: nextTitle })}</p>
       <p class="text-muted-foreground text-xs">{m.file_preview_keep_current()}</p>
@@ -430,14 +502,39 @@
         aria-hidden={view.pending ? "true" : undefined}
       >
         <FilePreviewContent
+          bind:this={contentOf[view.file.id]}
           content={view.content}
           title={view.file.name}
           highlight={view.pending ? null : highlight}
+          editable={!view.pending && !!editing}
           onready={() => preview.finishReplacement(view.file.id)}
           onerror={() => preview.failReplacement(view.file.id)}
           onquote={(text, locator) => preview.quoteSelection(text, locator)}
+          ondirty={() => preview.markEdited()}
+          onsave={saveEdits}
         />
       </div>
     {/each}
   {/if}
 </div>
+
+<AlertDialog.Root
+  open={preview.pendingDiscard !== null}
+  onOpenChange={(open) => {
+    if (!open) preview.keepEditing();
+  }}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.file_preview_discard_edits_title()}</AlertDialog.Title>
+      <AlertDialog.Description>{m.file_preview_discard_edits_description()}</AlertDialog.Description
+      >
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel onclick={() => preview.keepEditing()}>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action onclick={discardEdits}
+        >{m.file_preview_discard_edits()}</AlertDialog.Action
+      >
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

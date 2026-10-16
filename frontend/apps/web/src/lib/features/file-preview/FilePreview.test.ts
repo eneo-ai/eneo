@@ -313,3 +313,72 @@ it("opens the overview without a section from the panel's own controls", () => {
   preview.closeOverview(false);
   expect(preview.overview).toBeNull();
 });
+
+it("shows a saved version at once and keeps it ready for the next opening", async () => {
+  const preview = panel();
+  const document = { ...file, name: "report.md", mimetype: "text/markdown" };
+  vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
+  preview.open(document);
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  preview.startEditing();
+  preview.markEdited();
+  expect(preview.unsaved).toBe(true);
+
+  const version = { ...document, id: "report-2" };
+  preview.saved(version, "# Final\n");
+
+  expect(preview.editing).toBeNull();
+  expect(preview.file).toEqual(version);
+  expect(preview.content).toEqual({ kind: "markdown", text: "# Final\n", truncated: false });
+  vi.mocked(loadPreview).mockClear();
+  preview.open(file);
+  preview.open(version);
+  await vi.waitFor(() => expect(preview.file).toEqual(version));
+  expect(loadPreview).not.toHaveBeenCalledWith(
+    version,
+    expect.anything(),
+    expect.anything(),
+    expect.anything()
+  );
+});
+
+it("asks before unsaved edits are lost and then does what was asked", async () => {
+  const preview = panel();
+  const document = { ...file, name: "report.md", mimetype: "text/markdown" };
+  vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
+  preview.open(document);
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  preview.startEditing();
+  preview.markEdited();
+
+  preview.close();
+  expect(preview.shown).toBe(true);
+  expect(preview.pendingDiscard).not.toBeNull();
+  preview.keepEditing();
+  expect(preview.pendingDiscard).toBeNull();
+  expect(preview.editing).toEqual({ dirty: true });
+
+  preview.close();
+  preview.pendingDiscard?.proceed();
+  expect(preview.shown).toBe(false);
+  expect(preview.editing).toBeNull();
+});
+
+it("holds a newer version back while the reader edits and shows it when they stop", async () => {
+  const preview = panel();
+  const document = { ...file, name: "report.md", mimetype: "text/markdown" };
+  vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
+  preview.open(document);
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  preview.startEditing();
+
+  const newer = { ...document, id: "report-2" };
+  preview.arrive(newer);
+  await vi.waitFor(() => expect(preview.replacementContent).not.toBeNull());
+  preview.finishReplacement(newer.id);
+  expect(preview.file).toEqual(document);
+
+  preview.stopEditing();
+  expect(preview.file).toEqual(newer);
+  expect(preview.editing).toBeNull();
+});

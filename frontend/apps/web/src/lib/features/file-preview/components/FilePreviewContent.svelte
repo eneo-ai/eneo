@@ -27,9 +27,37 @@
     highlight: PreviewPassage | null;
     /** Called with the selected text, and where it stands, when the user quotes it. */
     onquote: (text: string, locator: string | null) => void;
+    /** Whether a Markdown document may be edited in place. */
+    editable?: boolean;
+    /** The reader changed the document's text. */
+    ondirty?: () => void;
+    /** The reader asked to save the document (Mod+S). */
+    onsave?: () => void;
   };
 
-  let { content, title, highlight, onquote, onready, onerror }: Props = $props();
+  let {
+    content,
+    title,
+    highlight,
+    onquote,
+    onready,
+    onerror,
+    editable = false,
+    ondirty,
+    onsave
+  }: Props = $props();
+
+  let editor = $state<DocumentEditor>();
+
+  /** The document as the reader has it now; null unless a Markdown document is shown. */
+  export function getMarkdown(): string | null {
+    return editor?.getMarkdown() ?? null;
+  }
+
+  /** Drops the reader's edits to the document on show. */
+  export function resetEditor() {
+    editor?.reset();
+  }
 
   // A Word document and the editor report readiness themselves.
   $effect(() => {
@@ -169,7 +197,16 @@
   {:else}
     <div class="min-h-0 flex-1 overflow-auto">
       {#if content.kind === "markdown"}
-        <DocumentEditor markdown={content.text} {highlight} {onquote} {onready} />
+        <DocumentEditor
+          bind:this={editor}
+          markdown={content.text}
+          {editable}
+          {highlight}
+          {onquote}
+          {ondirty}
+          {onsave}
+          {onready}
+        />
       {:else}
         <pre class="p-6 font-mono text-sm break-words whitespace-pre-wrap">{content.text}</pre>
       {/if}

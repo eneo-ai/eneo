@@ -76,8 +76,10 @@
             !!onquote &&
             !state.selection.empty &&
             state.doc.textBetween(from, to, "\n").trim().length > 0,
+          // Positioned within the editor, so it scrolls with the text and
+          // no transformed ancestor of the panel can throw it off.
           options: {
-            strategy: "fixed",
+            strategy: "absolute",
             placement: "top",
             offset: 8,
             flip: true,
