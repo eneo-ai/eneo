@@ -34,6 +34,12 @@ export type DocumentEditorHandle = {
 export type DocumentEditorProps = {
   /** The document as Markdown. A change replaces the content unless the reader has unsaved edits. */
   markdown: string;
+  /**
+   * The reader's unsaved text of the document, left by an editor that was
+   * torn down: shown in place of `markdown`, and still unsaved. Read when
+   * the editor is made.
+   */
+  edits?: string | null;
   editable?: boolean;
   /** A passage to mark and scroll to; null clears the mark. */
   highlight?: PreviewPassage | null;
@@ -42,11 +48,11 @@ export type DocumentEditorProps = {
   /** Called with the selected text, and where it stands, when the reader quotes it. */
   onQuote?: (text: string, locator: string | null) => void;
   /**
-   * Whether the document's text now differs from `markdown`. Called when
-   * that changes either way; never for a `markdown` update, nor for the
-   * editor's own tidying of a loaded document.
+   * The document's text as the reader has it, whenever they change it, and
+   * null once it is `markdown` again. Never called for a `markdown` update,
+   * nor for the editor's own tidying of a loaded document.
    */
-  onChange?: (dirty: boolean) => void;
+  onChange?: (text: string | null) => void;
   /** The reader asked to save (Mod+S) while editing. */
   onSave?: () => void;
   /** Each `markdown` value has been laid out. */
@@ -97,6 +103,7 @@ function reveal(editor: Editor, pos: number) {
  */
 export function DocumentEditor({
   markdown,
+  edits = null,
   editable = false,
   highlight = null,
   previousMarkdown = null,
@@ -118,6 +125,8 @@ export function DocumentEditor({
   const baseline = useRef<string | null>(null);
   // Content is being put in place; the editor's own tidying of it is no edit.
   const applying = useRef(false);
+  // Edits left by an earlier editor of this document, taken once at creation.
+  const left = useRef(edits);
   // Bumped when the document changed under the decorations, so they are placed again.
   const [rendered, setRendered] = useState(0);
   const callbacks = useRef({ onChange, onSave, onRender, onReady });
@@ -171,10 +180,11 @@ export function DocumentEditor({
       // document that is read-only.
       onUpdate: ({ editor: current }) => {
         if (applying.current || baseline.current === null || !current.isEditable) return;
-        const changed = withFinalNewline(current.getMarkdown()) !== baseline.current;
-        if (changed === dirty.current) return;
+        const text = withFinalNewline(current.getMarkdown());
+        const changed = text !== baseline.current;
+        if (!changed && !dirty.current) return;
         dirty.current = changed;
-        callbacks.current.onChange?.(changed);
+        callbacks.current.onChange?.(changed ? text : null);
       }
     },
     []
@@ -186,6 +196,19 @@ export function DocumentEditor({
   useEffect(() => {
     if (!editor) return;
     baseline.current ??= withFinalNewline(editor.getMarkdown());
+    // Edits left by an earlier editor of this document take the place of the
+    // loaded text, compared with it as before.
+    if (left.current !== null) {
+      applying.current = true;
+      try {
+        editor.commands.setContent(left.current, CONTENT);
+      } finally {
+        applying.current = false;
+      }
+      left.current = null;
+      dirty.current = withFinalNewline(editor.getMarkdown()) !== baseline.current;
+      if (!dirty.current) callbacks.current.onChange?.(null);
+    }
     callbacks.current.onRender?.();
     callbacks.current.onReady?.();
   }, [editor]);

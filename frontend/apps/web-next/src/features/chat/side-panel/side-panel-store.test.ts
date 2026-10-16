@@ -236,7 +236,7 @@ it("keeps a replacement waiting while the reader edits, and shows it once the ed
   const store = panel();
   store.open(file);
   await vi.waitFor(() => expect(store.status).toBe("ready"));
-  store.setDirty(true);
+  store.setEdits(file.id, "# Edited\n");
   expect(store.dirty).toBe(true);
   store.arrive(revision);
   await vi.waitFor(() => expect(store.replacementContent).not.toBeNull());
@@ -251,7 +251,7 @@ it("asks before edits are lost, and goes on once the reader agrees", async () =>
   const store = panel();
   store.open(file);
   await vi.waitFor(() => expect(store.status).toBe("ready"));
-  store.setDirty(true);
+  store.setEdits(file.id, "# Edited\n");
   store.open(revision);
   expect(store.pendingDiscard).not.toBeNull();
   expect(store.file).toEqual(file);
@@ -268,7 +268,7 @@ it("shows the saved version in place of the edited one", async () => {
   const store = panel();
   store.open(file);
   await vi.waitFor(() => expect(store.status).toBe("ready"));
-  store.setDirty(true);
+  store.setEdits(file.id, "# Edited\n");
   store.saved(revision, "# Edited\n");
   expect(store.dirty).toBe(false);
   expect(store.file).toEqual(revision);
@@ -281,7 +281,7 @@ it("a save settles a question about discarding edits that was still open", async
   const store = panel();
   store.open(file);
   await vi.waitFor(() => expect(store.status).toBe("ready"));
-  store.setDirty(true);
+  store.setEdits(file.id, "# Edited\n");
   // Something asked to close while the save was in flight.
   store.close();
   expect(store.pendingDiscard).not.toBeNull();
@@ -290,4 +290,34 @@ it("a save settles a question about discarding edits that was still open", async
 
   expect(store.pendingDiscard).toBeNull();
   expect(store.shown).toBe(true);
+});
+
+it("asks before quoting on a narrow screen takes unsaved edits away", async () => {
+  const store = panel();
+  store.setBesideConversation(false);
+  store.open(file);
+  await vi.waitFor(() => expect(store.status).toBe("ready"));
+  store.setEdits(file.id, "# Edited\n");
+  store.quoteSelection("Budget: 10", null);
+  expect(store.quote?.fileId).toBe(file.id);
+  expect(store.shown).toBe(true);
+  expect(store.pendingDiscard).not.toBeNull();
+  store.keepEditing();
+  expect(store.editsOf(file)).toBe("# Edited\n");
+});
+
+it("keeps the edited text for an editor that shows the document afresh", async () => {
+  const store = panel();
+  store.open(file);
+  await vi.waitFor(() => expect(store.status).toBe("ready"));
+  store.setEdits(file.id, "# Edited\n");
+  expect(store.editsOf(file)).toBe("# Edited\n");
+  expect(store.editsOf({ id: "other" })).toBeNull();
+  // Undone back to the file's text: nothing is unsaved.
+  store.setEdits(file.id, null);
+  expect(store.dirty).toBe(false);
+  expect(store.editsOf(file)).toBeNull();
+  store.setEdits(file.id, "# Edited again\n");
+  store.dropEdits();
+  expect(store.editsOf(file)).toBeNull();
 });

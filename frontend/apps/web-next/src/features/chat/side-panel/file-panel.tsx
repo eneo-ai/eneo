@@ -108,9 +108,11 @@ export function FilePanel({
   const exporting = file ? exportOf(file) : null;
   const content = panel.content;
   // The latest version of a Markdown document is edited in place. Edits stay
-  // in the editor; one save makes one new version.
+  // in the editor; one save makes one new version. While it is saved the
+  // document is read-only: the version saved is the text as it stood when the
+  // reader asked, and a keystroke meanwhile would be lost with the editor.
   const saver = file ? saverOf(file) : null;
-  const editable = !!saver && !!file && content?.kind === "markdown" && !draft && !later;
+  const editable = !!saver && !!file && content?.kind === "markdown" && !draft && !later && !saving;
   // What this version changed against the one before it, when asked for.
   const comparable = !!earlier && content?.kind === "markdown" && !draft;
   const comparing = comparable && panel.showChanges;
@@ -428,11 +430,12 @@ export function FilePanel({
                 title={view.file.name}
                 highlight={view.pending ? null : highlight}
                 editable={!view.pending && editable}
+                edits={view.pending ? null : panel.editsOf(view.file)}
                 previousMarkdown={view.pending ? null : previousMarkdown}
                 onReady={() => panel.finishReplacement(view.file.id)}
                 onError={() => panel.failReplacement(view.file.id)}
                 onQuote={(text, locator) => panel.quoteSelection(text, locator)}
-                onChange={(dirty) => panel.setDirty(dirty)}
+                onChange={(text) => panel.setEdits(view.file.id, text)}
                 onSave={() => void saveEdits()}
               />
             </div>

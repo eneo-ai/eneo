@@ -81,3 +81,27 @@ it("does not count the editor's own tidying of a loaded document as an edit", as
 
   expect(onChange).not.toHaveBeenCalled();
 });
+
+it("shows edits an earlier editor left, still unsaved", async () => {
+  const ref = createRef<DocumentEditorHandle>();
+  const onChange = vi.fn();
+  const onRender = vi.fn();
+  renderInApp(
+    <DocumentEditor
+      ref={ref}
+      markdown={MARKDOWN}
+      edits={"# Plan\n\nMötet hålls på tisdag.\n"}
+      editable
+      onChange={onChange}
+      onRender={onRender}
+    />
+  );
+  await vi.waitFor(() => expect(onRender).toHaveBeenCalledTimes(1));
+
+  expect(ref.current?.getMarkdown()).toBe("# Plan\n\nMötet hålls på tisdag.\n");
+  // Still the reader's unsaved text: the panel knows, so it is not told again.
+  expect(onChange).not.toHaveBeenCalled();
+
+  await act(async () => ref.current?.reset());
+  expect(ref.current?.getMarkdown()).toBe(MARKDOWN);
+});

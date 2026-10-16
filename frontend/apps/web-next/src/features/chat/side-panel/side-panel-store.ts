@@ -112,6 +112,9 @@ export class SidePanelStore {
    * keystroke; what would lose them asks first.
    */
   dirty = false;
+  // The edited text itself, so an editor torn down and mounted again (the
+  // layout crosses its breakpoint) shows the document as the reader left it.
+  #edits: { fileId: string; text: string } | null = null;
   /** Whether the document on show marks what it changed against the version before it. */
   showChanges = true;
   /**
@@ -441,16 +444,29 @@ export class SidePanelStore {
   // Editing
   // ---------------------------------------------------------------------
 
-  /** Whether the document's text now differs from the file. */
-  setDirty(dirty: boolean) {
-    if (this.dirty === dirty) return;
-    this.dirty = dirty;
+  /**
+   * The text of the document `fileId` as the reader has it now, or null once
+   * it is the file's text again.
+   */
+  setEdits(fileId: string, text: string | null) {
+    this.#edits = text === null ? null : { fileId, text };
+    this.dirty = text !== null;
     this.#emit();
+  }
+
+  /** The reader's unsaved text of `file`, for an editor that shows it afresh. */
+  editsOf(file: { id: string }): string | null {
+    return this.#edits?.fileId === file.id ? this.#edits.text : null;
+  }
+
+  #clearEdits() {
+    this.#edits = null;
+    this.dirty = false;
   }
 
   /** The reader let their edits go; a replacement that waited then shows. */
   dropEdits() {
-    this.dirty = false;
+    this.#clearEdits();
     this.#showReplacement();
     this.#emit();
   }
@@ -483,7 +499,7 @@ export class SidePanelStore {
     this.status = "ready";
     this.highlight = null;
     this.draft = null;
-    this.dirty = false;
+    this.#clearEdits();
     // A question about discarding the edits, asked while the save was in
     // flight, is settled: they are saved.
     this.pendingDiscard = null;
@@ -514,7 +530,7 @@ export class SidePanelStore {
     this.pendingDiscard = {
       proceed: () => {
         this.pendingDiscard = null;
-        this.dirty = false;
+        this.#clearEdits();
         action();
         this.#emit();
       }
@@ -537,8 +553,9 @@ export class SidePanelStore {
     const text = tidyQuoteText(selected);
     if (!this.file || !text) return;
     this.quote = { fileId: this.file.id, fileName: this.file.name, text, locator };
-    // On narrow screens the preview covers the composer; return to the chat.
-    if (!this.besideConversation) this.#close();
+    // On narrow screens the preview covers the composer; return to the
+    // chat. Unsaved edits would go with the panel, so that asks first.
+    if (!this.besideConversation) this.close();
     this.#emit();
   }
 
@@ -682,7 +699,7 @@ export class SidePanelStore {
     this.draft = null;
     this.content = null;
     this.highlight = null;
-    this.dirty = false;
+    this.#clearEdits();
     if (this.#opener?.isConnected) this.#opener.focus();
     this.#opener = null;
   }

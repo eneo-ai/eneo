@@ -33,10 +33,12 @@ type FilePreviewContentProps = {
   onError?: () => void;
   /** Whether a Markdown document may be edited in place. */
   editable?: boolean;
+  /** The reader's unsaved text of a Markdown document, shown in place of the file's. */
+  edits?: string | null;
   /** The version before this one, as Markdown; what changed against it is marked. */
   previousMarkdown?: string | null;
-  /** Whether the document's text now differs from the file. */
-  onChange?: (dirty: boolean) => void;
+  /** The document's text as the reader has it; null once it is the file's again. */
+  onChange?: (text: string | null) => void;
   /** The reader asked to save the document (Mod+S). */
   onSave?: () => void;
   ref?: Ref<FilePreviewContentHandle>;
@@ -86,6 +88,7 @@ export function FilePreviewContent({
   onReady,
   onError,
   editable = false,
+  edits = null,
   previousMarkdown = null,
   onChange,
   onSave,
@@ -241,6 +244,7 @@ export function FilePreviewContent({
             <DocumentEditor
               ref={editor}
               markdown={content.text}
+              edits={edits}
               editable={editable}
               highlight={highlight}
               previousMarkdown={previousMarkdown}
