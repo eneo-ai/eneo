@@ -1708,6 +1708,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/{session_id}/documents/{file_id}/versions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Save Conversation Document Version
+     * @description Save the reader's edited Markdown of a conversation document as its next version.
+     */
+    post: operations["save_conversation_document_version_api_v1_conversations__session_id__documents__file_id__versions__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/feedback/": {
     parameters: {
       query?: never;
@@ -9483,6 +9503,7 @@ export interface components {
       | "file_original_downloaded"
       | "file_signed_url_minted"
       | "document_exported"
+      | "document_version_saved"
       | "info_blob_original_download_link_created"
       | "website_created"
       | "website_updated"
@@ -10930,6 +10951,8 @@ export interface components {
        * @default false
        */
       has_download_reference?: boolean;
+      /** Revises File Id */
+      revises_file_id?: string | null;
       /**
        * Inline Text
        * @default true
@@ -13794,6 +13817,17 @@ export interface components {
       /** Is Default */
       is_default?: boolean | null;
     };
+    /**
+     * DocumentVersionCreate
+     * @description A reader's edited Markdown of a conversation document, saved as its next version.
+     */
+    DocumentVersionCreate: {
+      /**
+       * Content
+       * @description The whole document as Markdown, as the reader left it.
+       */
+      content: string;
+    };
     /** DynamicValuePublic */
     DynamicValuePublic: {
       /**
@@ -14613,6 +14647,8 @@ export interface components {
        * @default false
        */
       has_download_reference?: boolean;
+      /** Revises File Id */
+      revises_file_id?: string | null;
     };
     /** FileRestrictions */
     FileRestrictions: {
@@ -29249,6 +29285,8 @@ export interface operations {
                  * @default false
                  */
                 has_download_reference?: boolean;
+                /** Revises File Id */
+                revises_file_id?: string | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -29695,6 +29733,8 @@ export interface operations {
                  * @default false
                  */
                 has_download_reference?: boolean;
+                /** Revises File Id */
+                revises_file_id?: string | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -30983,6 +31023,8 @@ export interface operations {
                      * @default false
                      */
                     has_download_reference?: boolean;
+                    /** Revises File Id */
+                    revises_file_id?: string | null;
                   };
                 };
               }
@@ -31141,6 +31183,8 @@ export interface operations {
                      * @default false
                      */
                     has_download_reference?: boolean;
+                    /** Revises File Id */
+                    revises_file_id?: string | null;
                   };
                   /** InfoBlobAskAssistantPublic */
                   InfoBlobAskAssistantPublic: {
@@ -31929,6 +31973,80 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  save_conversation_document_version_api_v1_conversations__session_id__documents__file_id__versions__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description The version of a Markdown document the edit was made from */
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DocumentVersionCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FilePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
