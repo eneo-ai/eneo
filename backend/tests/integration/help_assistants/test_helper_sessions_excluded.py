@@ -302,6 +302,7 @@ async def _seed(container, admin_user) -> dict[str, UUID]:
 
     return {
         "tenant_id": admin_user.tenant_id,
+        "user_id": admin_user.id,
         "regular_assistant": regular_assistant,
         "helper_assistant": helper_assistant,
         "regular_session": regular_session,
@@ -386,6 +387,24 @@ SESSIONS_REPO_CASES: list[tuple[str, Callable[..., Awaitable[set[UUID]]], str]] 
         lambda repo, s: repo.get_by_tenant(tenant_id=s["tenant_id"]),
         "list",
     ),
+    (
+        "get_recent_for_user_excludes_helper",
+        lambda repo, s: repo.get_recent_for_user(
+            user_id=s["user_id"],
+            assistant_ids=[s["regular_assistant"], s["helper_assistant"]],
+            group_chat_ids=[s["group_chat"]],
+            limit=50,
+        ),
+        "list",
+    ),
+    (
+        "get_chat_partners_of_user_skips_helper_only_partners",
+        # The helper assistant's only conversation is helper-backed.
+        lambda repo, s: repo.get_chat_partners_of_user(
+            user_id=s["user_id"], tenant_id=s["tenant_id"], user_group_ids=[]
+        ),
+        "partners",
+    ),
 ]
 
 
@@ -414,6 +433,11 @@ async def test_sessions_repo_excludes_helper(
             )
             assert setup["helper_gc_session"] not in ids, (
                 f"{case_id}: helper group-chat session leaked"
+            )
+        elif shape == "partners":
+            partner_ids = {partner.id for partner in result}
+            assert setup["helper_assistant"] not in partner_ids, (
+                f"{case_id}: helper-only partner leaked"
             )
         elif shape == "list_then_total":
             items, total = result
@@ -463,6 +487,22 @@ async def test_sessions_repo_returns_regular_sessions(db_container, admin_user):
         ids = _ids(all_for_tenant)
         assert setup["regular_session"] in ids
         assert setup["regular_gc_session"] in ids
+
+        recent = await repo.get_recent_for_user(
+            user_id=setup["user_id"],
+            assistant_ids=[setup["regular_assistant"]],
+            group_chat_ids=[setup["group_chat"]],
+            limit=50,
+        )
+        assert _ids(recent) == {setup["regular_session"], setup["regular_gc_session"]}
+
+        partners = await repo.get_chat_partners_of_user(
+            user_id=setup["user_id"], tenant_id=setup["tenant_id"], user_group_ids=[]
+        )
+        assert {partner.id for partner in partners} == {
+            setup["regular_assistant"],
+            setup["group_chat"],
+        }
 
 
 # ---------------------------------------------------------------------------

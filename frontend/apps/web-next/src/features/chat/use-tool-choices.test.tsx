@@ -1,0 +1,120 @@
+// @vitest-environment jsdom
+import { act, cleanup } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import type { Schema } from "@/lib/api/models";
+import type { ChatPartner } from "@/lib/chat/types";
+import { renderHookInApp, testAppContext } from "@/test/render";
+import { useToolChoices } from "./use-tool-choices";
+
+afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
+});
+
+const server = (id: string): Schema<"MCPServerPublicDict"> => ({
+  id,
+  name: id,
+  description: null,
+  http_url: null,
+  http_auth_type: null,
+  purpose: "general",
+  is_enabled: true,
+  readiness_reason: null,
+  tags: null,
+  icon_url: null,
+  security_classification: null,
+  tools: []
+});
+
+const personal: ChatPartner = {
+  type: "default-assistant",
+  id: "personal-1",
+  name: "Personlig assistent",
+  enabledCapabilities: ["web_search", "image_generation"],
+  availableCapabilities: [
+    { purpose: "web_search", available: true, reason: null },
+    { purpose: "image_generation", available: true, reason: null }
+  ],
+  mcpServers: [server("diarium"), server("kalender")]
+};
+
+function renderChoices(partner: ChatPartner, showWebSearch = true) {
+  const appContext = testAppContext({
+    permissions: ["web_search", "image_generation"],
+    featureFlags: { showWebSearch }
+  });
+  return renderHookInApp(() => useToolChoices(partner), { appContext });
+}
+
+describe("useToolChoices", () => {
+  it("remembers the personal assistant's choices for the next conversation", () => {
+    const first = renderChoices(personal);
+    act(() => first.result.current.toggleCapability("image_generation"));
+    act(() => first.result.current.setDisabledMcpServerIds(new Set(["kalender"])));
+    expect([...first.result.current.disabledCapabilities]).toEqual(["image_generation"]);
+    first.unmount();
+
+    const next = renderChoices(personal);
+    expect([...next.result.current.disabledCapabilities]).toEqual(["image_generation"]);
+    expect([...next.result.current.disabledMcpServerIds]).toEqual(["kalender"]);
+  });
+
+  it("does not remember choices made with a space assistant", () => {
+    const assistant: ChatPartner = { ...personal, type: "assistant", id: "assistant-1" };
+    const first = renderChoices(assistant);
+    act(() => first.result.current.toggleCapability("web_search"));
+    first.unmount();
+
+    expect(renderChoices(assistant).result.current.disabledCapabilities.size).toBe(0);
+  });
+
+  it("hides web search when the deployment does not offer it", () => {
+    const { result } = renderChoices(personal, false);
+    expect(result.current.capabilities.map((capability) => capability.purpose)).toEqual([
+      "image_generation"
+    ]);
+  });
+
+  it("marks every function unavailable when the model cannot call tools", () => {
+    const noTools: ChatPartner = {
+      ...personal,
+      completionModel: { id: "m", name: "Basmodell", supports_tool_calling: false }
+    };
+    const { result } = renderChoices(noTools);
+    expect(result.current.modelSupportsTools).toBe(false);
+    expect(result.current.capabilities).toEqual([
+      { purpose: "web_search", available: false, reason: "model_no_tool_calling" },
+      { purpose: "image_generation", available: false, reason: "model_no_tool_calling" }
+    ]);
+
+    const withTools: ChatPartner = {
+      ...personal,
+      completionModel: { id: "m", name: "Modell", supports_tool_calling: true }
+    };
+    expect(renderChoices(withTools).result.current.modelSupportsTools).toBe(true);
+  });
+
+  it("keeps a more specific reason over the model's missing tool calling", () => {
+    const partner: ChatPartner = {
+      ...personal,
+      availableCapabilities: [
+        { purpose: "web_search", available: false, reason: "no_active_provider" },
+        { purpose: "image_generation", available: true, reason: null }
+      ],
+      completionModel: { id: "m", name: "Basmodell" }
+    };
+    expect(renderChoices(partner).result.current.capabilities.map((c) => c.reason)).toEqual([
+      "no_active_provider",
+      "model_no_tool_calling"
+    ]);
+  });
+
+  it("keeps the auto-approve choice across conversations", () => {
+    const first = renderChoices(personal);
+    expect(first.result.current.autoAcceptTools).toBe(true);
+    act(() => first.result.current.setAutoAcceptTools(false));
+    first.unmount();
+
+    expect(renderChoices(personal).result.current.autoAcceptTools).toBe(false);
+  });
+});

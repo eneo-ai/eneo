@@ -1,4 +1,8 @@
-"""Only tenant admins may call a model provider with its stored credentials."""
+"""Only tenant admins may call a model provider with its stored credentials.
+
+Connection-check and its legacy /test adapter are covered through the real
+service in test_provider_connection_check.py.
+"""
 
 from uuid import uuid4
 
@@ -34,11 +38,17 @@ async def tenant_tokens(db_container, patch_auth_service_jwt):
     ("method", "path", "body", "service_method", "result"),
     [
         ("GET", "models", None, "list_available_models", []),
-        ("POST", "test", None, "test_connection", {"success": True}),
         (
             "POST",
             "validate-model",
             {"model_name": "gpt-4o", "model_type": "completion"},
+            "validate_model",
+            {"success": True},
+        ),
+        (
+            "POST",
+            "validate-model",
+            {"model_name": "rerank-v3.5", "model_type": "rerank"},
             "validate_model",
             {"success": True},
         ),
@@ -70,3 +80,27 @@ async def test_provider_probes_require_admin(
     assert admin_response.status_code == 200, admin_response.text
     assert admin_response.json() == result
     assert calls == 1
+
+
+async def test_model_list_accepts_the_rerank_mode_filter(
+    client, tenant_tokens, monkeypatch
+):
+    """The ``mode`` query parameter is a fixed list; ``rerank`` must be in it,
+    otherwise the request is rejected with 422 before the service runs."""
+    seen: dict[str, object] = {}
+
+    async def fake_list(self, provider_id, mode=None):  # noqa: ARG001
+        seen["mode"] = mode
+        return [{"name": "rerank-v3.5", "mode": "rerank"}]
+
+    monkeypatch.setattr(ModelProviderService, "list_available_models", fake_list)
+    admin_token, _ = tenant_tokens
+
+    response = await client.get(
+        f"/api/v1/admin/model-providers/{uuid4()}/models/?mode=rerank",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert seen["mode"] == "rerank"
+    assert response.json() == [{"name": "rerank-v3.5", "mode": "rerank"}]

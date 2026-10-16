@@ -1,0 +1,54 @@
+title = "Eneo secret scanning"
+
+[extend]
+useDefault = true
+
+# Reviewed public test/example values only. Both the exact path and extracted
+# value must match, so squash commits and line moves do not invalidate reviews.
+# Keep these scoped to generic-api-key; all other built-in rules still apply.
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Public Fernet key for the isolated E2E stack's dummy credentials"
+condition = "AND"
+paths = ['''^docker-compose\.e2e(\.ci)?\.yml$''']
+regexTarget = "secret"
+regexes = ['''^yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=$''']
+
+[[rules.allowlists]]
+description = "Dummy provider key used by connection-check tests"
+condition = "AND"
+paths = [
+  '''^backend/tests/unittests/model_providers/test_provider_connection_probe\.py$''',
+  '''^backend/tests/unittests/model_providers/test_provider_connection_check\.py$''',
+  '''^backend/tests/integration/model_providers/test_provider_connection_check\.py$''',
+]
+regexTarget = "secret"
+regexes = ['''^sk-live-secret-1234$''']
+
+[[rules.allowlists]]
+description = "Dummy provider key whose suffix is asserted by the masking test"
+condition = "AND"
+paths = ['''^backend/tests/unittests/model_providers/test_model_provider_masked_api_key\.py$''']
+regexTarget = "secret"
+regexes = ['''^sk-live-0123456789abcd$''']
+
+[[rules.allowlists]]
+description = "Generated OpenAPI documentation examples, including earlier PR revisions"
+condition = "AND"
+paths = ['''^frontend/apps/web-next/src/lib/api/schema\.d\.ts$''']
+regexTarget = "secret"
+regexes = [
+  '''^sk-proj-abc123xyz$''',
+  '''^sk-proj-abc123\.\.\.$''',
+  '''^inp_3f5f2f7f7f\.\.\.d9a1$''',
+  '''^ina_6f2c9b3a8f\.\.\.7b31$''',
+]
+
+[[rules.allowlists]]
+description = "Dummy credential in an outbound-headers request rejected before use"
+condition = "AND"
+paths = ['''^backend/tests/integration/test_model_provider_outbound_headers\.py$''']
+regexTarget = "secret"
+regexes = ['''^sk-test-12345678$''']

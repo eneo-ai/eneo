@@ -71,6 +71,7 @@ class Assistant(Entity):
         published: bool,
         integration_knowledge_list: list["IntegrationKnowledge"] | None = None,
         mcp_servers: list["MCPServer"] | None = None,
+        mcp_tools: list[tuple[UUID, bool]] | None = None,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
         source_template: Optional["AssistantTemplate"] = None,
@@ -100,6 +101,7 @@ class Assistant(Entity):
         self._collections = collections
         self._integration_knowledge_list = integration_knowledge_list or []
         self.mcp_servers = mcp_servers or []
+        self.mcp_tools = mcp_tools or []
         self.created_at = created_at
         self.updated_at = updated_at
         self._attachments = attachments
@@ -129,10 +131,6 @@ class Assistant(Entity):
             document_template or DocumentTemplateChoice()
         )
         self.icon_id = icon_id
-
-        # Temporary attributes for update flow - not persisted directly
-        self._mcp_server_ids: list[UUID] | None = None
-        self._mcp_tool_settings: list[tuple[UUID, bool]] | None = None
 
     def _validate_embedding_model(self, items: _KnowledgeItemList):
         embedding_model_id_set = set([item.embedding_model.id for item in items])

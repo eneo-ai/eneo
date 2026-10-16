@@ -140,9 +140,8 @@ async def _pop_oauth_state(state: str) -> Optional[dict[str, str]]:
     client = await _get_redis_client()
     try:
         key = f"{OAUTH_STATE_PREFIX}{state}"
-        data = await client.get(key)
+        data = await client.getdel(key)
         if data is not None:
-            await client.delete(key)
             return json.loads(data)
         return None
     finally:
@@ -995,6 +994,13 @@ async def start_service_account_auth(
         user = container.user()
         _require_sharepoint_webhook_client_state()
 
+        try:
+            redirect_uri = get_settings().integration_callback_uri(
+                app_config.redirect_uri
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
         # Generate a secure state token
         state = secrets.token_urlsafe(32)
 
@@ -1007,6 +1013,7 @@ async def start_service_account_auth(
                 "tenant_domain": app_config.tenant_domain,
                 "tenant_id": str(user.tenant_id),
                 "user_id": str(user.id),
+                "redirect_uri": redirect_uri,
             },
         )
 
@@ -1017,6 +1024,7 @@ async def start_service_account_auth(
             client_id=app_config.client_id,
             client_secret=app_config.client_secret,
             tenant_domain=app_config.tenant_domain,
+            redirect_uri=redirect_uri,
         )
 
         logger.info(
@@ -1085,6 +1093,11 @@ async def service_account_auth_callback(
                 detail="OAuth state was initiated by a different tenant",
             )
 
+        if stored_state.get("user_id") != str(user.id):
+            raise HTTPException(
+                status_code=400, detail="OAuth state belongs to another user"
+            )
+
         # Exchange auth code for tokens
         service_account_auth_service = ServiceAccountAuthService()
         token_result = await service_account_auth_service.exchange_token(
@@ -1092,6 +1105,7 @@ async def service_account_auth_callback(
             client_id=stored_state["client_id"],
             client_secret=stored_state["client_secret"],
             tenant_domain=stored_state["tenant_domain"],
+            redirect_uri=stored_state.get("redirect_uri"),
         )
 
         # Configure service account

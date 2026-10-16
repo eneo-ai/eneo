@@ -61,6 +61,27 @@ describe("client error privacy", () => {
     );
   });
 
+  it("does not show a gateway's HTML page as the message of a failed stream", async () => {
+    const client = createClient({
+      baseUrl: "https://eneo.example",
+      fetch: async () =>
+        new Response("<html><body>504 Gateway Time-out</body></html>", {
+          status: 504,
+          headers: { "Content-Type": "text/html" }
+        })
+    });
+
+    await assert.rejects(
+      client.stream(endpoint, { requestBody: { "application/json": {} } }, {}),
+      (error) => {
+        assert.ok(error instanceof EneoError);
+        assert.equal(error.status, 504);
+        assert.equal(error.getReadableMessage(), "");
+        return true;
+      }
+    );
+  });
+
   it("retains only endpoint metadata when callers supply additional request fields", () => {
     const request = { endpoint, payload: { password } };
     const error = new EneoError("Failed", "CONNECTION", 0, 0, undefined, request);

@@ -154,7 +154,10 @@ and deployment, see [MCP Servers](/guides/mcp-servers#interactive-tool-views).
 - User interface, routing, and forms
 - Server-side rendering and the login flow (cookies are set server-side)
 - Streaming chat responses over Server-Sent Events
-- Live job and crawl status over the `/api/v1/ws` WebSocket
+- Live job and crawl status: the SvelteKit app listens on the `/api/v1/ws`
+  WebSocket; the React app (`web-next`) subscribes to the per-user
+  `/api/v1/jobs/events/` Server-Sent Events stream, which the backend feeds
+  from Redis pub/sub after each job status change commits
 
 **Directory structure:**
 
@@ -240,6 +243,50 @@ backend/
 
 ---
 
+### Space persistence ownership
+
+A loaded Space is a read projection. It can omit invalid applications, deleted
+members, deprecated models and disabled MCP servers, and can include knowledge
+inherited from its organization. It is never a complete database snapshot and
+must not be written back as one.
+
+| Write owner | Responsibility |
+| --- | --- |
+| `SpaceRepository` | Space settings, individual user/group memberships, explicit model/server/capability selections |
+| `AssistantRepository` | One assistant, its prompt and explicit knowledge, attachment and tool selections |
+| `GroupChatRepository` | One group chat and explicit replacements of its assistant seats |
+| `GroupRepository` | Collection configuration and distribution to Spaces |
+| `WebsiteRepository` | Website configuration and distribution; crawl lifecycle remains with `CrawlRunRepository` |
+| App, service and integration repositories | Their existing resource lifecycles |
+
+Services authorize the operation and validate its requested values before
+passing explicit write intent to the owning repository. Omitted relationships
+are untouched. An explicitly submitted list replaces that relationship;
+`[]` clears it, including currently hidden targets. The shared association writer
+compares that explicit selection with stored rows and writes only differences.
+Unchanged rows keep their timestamps. Renaming a Space cannot delete an assistant
+or materialize inherited knowledge as a direct distribution.
+
+Replacement writes lock their parent in the request transaction. Assistant moves
+lock both Spaces in ID order, then the assistant; group chat seat replacements
+take the same Space lock before validating membership. Moves update ownership
+without deleting the assistant or its history. Concurrent changes to distinct
+resources do not overwrite each other. Two explicit replacements of the same
+relationship remain serialized, last-writer-wins operations; there is no
+client-visible optimistic version contract.
+
+The security classification preview reports affected IDs without editing the
+Space projection. A committed classification change explicitly removes
+incompatible stored model/server selections, including hidden ones. The default
+assistant is a supported group chat member through the API and is included when
+resolving seats.
+
+Malformed stored model options remain visible to operators through the
+[inspection and repair API](/docs/api#inspect-and-repair-invalid-model-options).
+No schema migration or automatic data normalization is required. Roll back by
+redeploying the previous application only if its aggregate-save defect is
+acceptable; previously deleted resources require restoration from a backup.
+
 ### Database (PostgreSQL + pgvector)
 
 **Technology:**
@@ -251,8 +298,11 @@ backend/
 
 **Schema conventions:** every table is declared in
 `backend/src/eneo/database/tables/`. Table names are derived from the class
-name in snake case, primary keys are UUIDs, and rows carry `created_at` and
-`updated_at`.
+name in snake case. Entity tables use UUID primary keys and carry `created_at`
+and `updated_at`. Junction tables use composite primary keys;
+`BaseCrossReference` supplies both timestamps. The distribution links
+`groups_spaces` and `websites_spaces` use `CreatedAtMixin` and only carry
+`created_at`: links are inserted or deleted and have no mutable settings.
 
 **Core tables:**
 
@@ -320,6 +370,47 @@ stmt = (
   Retrieval cost therefore grows with the number of chunks in scope, not with
   the whole table.
 </Callout>
+
+#### Database schema check
+
+`backend/tests/integration/test_database_schema.py` checks that every table and
+column declared in SQLAlchemy's `Base.metadata` exists in the migrated database.
+It uses the same table registration as Alembic, including tables without an ORM
+class. New table modules must be registered through
+`backend/src/eneo/database/tables/__init__.py`, as required by Alembic. There is
+no separate test list to maintain and no dependency on a model's base class.
+
+The shared integration fixtures start disposable PostgreSQL and Redis containers
+and build the database with `alembic upgrade head`. They do not create the schema
+from the models with `metadata.create_all()`, which would hide missing migrations.
+Each table is a separate test case, named after the table. The test selects all
+declared columns with `LIMIT 0`: PostgreSQL validates their existence without
+reading or changing rows, so empty tables are checked too.
+
+**Run it:** with Docker running, from `backend/`, use the resource supervisor
+required by your environment to run:
+
+```bash
+uv run pytest -n 0 -m integration tests/integration/test_database_schema.py -v
+```
+
+**When it fails:** first distinguish a test failure from a fixture setup error.
+If container startup or a migration fails during setup, resolve that error first.
+For a missing table or column, the test ID identifies the table and PostgreSQL's
+error names the missing object. Compare its declaration in `src/eneo/database/tables/`
+with its migrations in `alembic/versions/`. Decide whether the model describes the
+intended stored data: add a migration for a needed schema change, correct an
+incorrect model declaration, or remove confirmed unused model code. Do not skip
+the table to make CI pass. For example, `groups_spaces` and `websites_spaces`
+incorrectly inherited `updated_at`; their insert/delete lifecycle only needs
+`created_at`, so the fix belongs in the models.
+
+**Limits:** this is a table-and-column existence check, not a complete schema
+comparison. Unregistered tables are outside its scope. It does not validate types,
+constraints, defaults, indexes, extra database columns, or upgrades with existing
+customer data. Keep focused migration
+and behavior tests for those contracts. The CI job named **Schema drift** is a
+separate check of the generated TypeScript API schema.
 
 ---
 

@@ -14,6 +14,14 @@ on:
       backend_digest:
         default: ''
         type: string
+      # Components that build from another directory (the Next beta builds
+      # from the frontend workspace with its own Dockerfile).
+      context:
+        default: ''
+        type: string
+      dockerfile:
+        default: ''
+        type: string
     outputs:
       digest:
         value: ${{ jobs.image.outputs.digest }}
@@ -72,7 +80,8 @@ jobs:
         id: build
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
         with:
-          context: ./${{ inputs.component }}
+          context: ${{ inputs.context || format('./{0}', inputs.component) }}
+          file: ${{ inputs.dockerfile || format('./{0}/Dockerfile', inputs.component) }}
           platforms: linux/amd64
           push: true
           sbom: true

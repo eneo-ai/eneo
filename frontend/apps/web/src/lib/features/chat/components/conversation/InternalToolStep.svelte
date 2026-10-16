@@ -1,27 +1,34 @@
 <!--
   Copyright (c) 2026 Sundsvalls Kommun
 
-  A call to one of Eneo's built-in loopback tools, rendered with a thinking-
-  like footprint instead of a tool card: a shimmer line while running
-  ("Söker kunskap…"), collapsing to a muted past-tense line when done
-  ("Sökte i kunskap"). Both states expand to the call's parameters on click;
-  the result joins the panel once the call completes. External MCP tools keep
-  their ReasoningToolStep cards.
+  A call to one of Eneo's built-in tools, rendered with a thinking-like
+  footprint instead of a tool card: a shimmer line while running ("Söker
+  kunskap…"), collapsing to a muted past-tense line when done ("Sökte i
+  kunskap"). Both states expand to the call's parameters on click; the result
+  joins the panel once the call completes. External MCP tools keep their
+  ReasoningToolStep cards.
+
+  A function step (a capability call: chart, file analysis, web search) carries
+  the function's icon on a chip, so it reads as work done rather than as a
+  lookup; a context step (knowledge, files) carries none.
 
   A call that created a document names it instead ("Skapade Införandeplan")
   and opens it beside the conversation: the step is the document's place in
-  the chat, so an answer carries no file card for it.
+  the chat, so an answer carries no file card for it. A call whose result has
+  a view the panel can show names that view the same way and opens it.
 -->
 <script lang="ts">
   import { sanitizeLinkHref } from "$lib/components/markdown/index.js";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
   import { previewKindOf } from "$lib/features/file-preview/previewKind";
+  import type { CapabilityDescriptor } from "$lib/features/mcp/capabilities";
   import { m } from "$lib/paraglide/messages";
-  import { ChevronRight, Download, FileText, X } from "@lucide/svelte";
+  import { AppWindow, ChevronRight, Download, FileText, X } from "@lucide/svelte";
   import type { GeneratedDocument } from "../../documentVersions";
   import ShimmerText from "./ShimmerText.svelte";
   import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";
+  import ToolStepIcon from "./ToolStepIcon.svelte";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";
 
@@ -29,13 +36,16 @@
     runningLabel,
     doneLabel,
     serverName,
+    identity = null,
     detail = null,
     args,
     toolCallId,
     onLoadResult,
     status,
     previousAttempt = false,
-    document = null
+    document = null,
+    icon = null,
+    view = null
   }: {
     /** Present-tense label without ellipsis, e.g. "Söker kunskap". */
     runningLabel: string;
@@ -43,6 +53,8 @@
     doneLabel: string;
     /** Localized server label ("Kunskap"), used in the result heading. */
     serverName: string;
+    /** The call as the model made it, "server · tool", shown in the expanded panel. */
+    identity?: string | null;
     /** Extra context for the call, e.g. a filename or search query. */
     detail?: string | null;
     args?: Record<string, unknown>;
@@ -57,6 +69,10 @@
      * `doneLabel` as its detail.
      */
     document?: { file: GeneratedDocument; label?: (name: string) => string } | null;
+    /** The function's icon for a function step; null for a context step. */
+    icon?: CapabilityDescriptor["icon"] | null;
+    /** The view of the call's result that the panel can show, named and opened from the step. */
+    view?: { name: string; open: () => void } | null;
   } = $props();
 
   const preview = getFilePreview();
@@ -92,13 +108,12 @@
   const [beforeName, afterName] = $derived(
     document?.label ? document.label(NAME).split(NAME) : [`${doneLabel} `, ""]
   );
+  // A finished call with a view is shown by that view, like a document.
+  const shownView = $derived(!file && status === "complete" ? view : null);
 </script>
 
 {#snippet documentLine()}
-  <FileText
-    class="h-3.5 w-3.5 shrink-0 {previewing ? 'text-accent-stronger' : ''}"
-    aria-hidden="true"
-  />
+  <ToolStepIcon icon={FileText} class={previewing ? "text-accent-stronger" : ""} />
   <span class="truncate">
     {beforeName}<span class="font-medium {previewing ? 'text-accent-stronger' : 'text-default'}"
       >{fileName}</span
@@ -115,7 +130,7 @@
     {#if previewable}
       <button
         type="button"
-        class="text-muted hover:text-secondary focus-visible:ring-accent-default flex w-fit min-w-0 items-center gap-1.5 rounded-sm text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        class="text-muted hover:text-secondary focus-visible:ring-accent-default flex w-fit min-w-0 items-center gap-2 rounded-sm text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
         aria-expanded={previewing}
         onclick={(event) => preview?.toggle(file, event.currentTarget)}
       >
@@ -142,7 +157,7 @@
         download={file.name}
         aria-label={m.generated_file_download({ name: file.name })}
         aria-disabled={href ? undefined : "true"}
-        class="text-muted hover:text-secondary focus-visible:ring-accent-default flex w-fit min-w-0 items-center gap-1.5 rounded-sm no-underline transition-colors focus-visible:ring-2 focus-visible:outline-none {href
+        class="text-muted hover:text-secondary focus-visible:ring-accent-default flex w-fit min-w-0 items-center gap-2 rounded-sm no-underline transition-colors focus-visible:ring-2 focus-visible:outline-none {href
           ? ''
           : 'pointer-events-none opacity-60'}"
       >
@@ -152,11 +167,32 @@
     {/if}
   </div>
   <!-- eslint-enable svelte/no-navigation-without-resolve -->
+{:else if shownView}
+  <!-- The step is the view's place in the chat: its name opens the view beside the conversation. -->
+  <button
+    type="button"
+    class="text-muted hover:text-secondary focus-visible:ring-accent-default flex w-fit max-w-full items-center gap-2 rounded-sm text-left text-sm leading-tight transition-colors focus-visible:ring-2 focus-visible:outline-none"
+    aria-label={m.tool_step_open_view({ name: shownView.name })}
+    onclick={shownView.open}
+  >
+    {#if icon}
+      <ToolStepIcon {icon} />
+    {/if}
+    <span class="truncate">
+      {doneLabel} <span class="text-default font-medium">{shownView.name}</span>
+    </span>
+    {#if detail}
+      <span class="text-muted min-w-0 max-w-full truncate text-xs opacity-70" title={detail}
+        >{detail}</span
+      >
+    {/if}
+    <AppWindow class="text-muted h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+  </button>
 {:else}
   <div role={isActive ? "status" : undefined} aria-label={isActive ? runningLabel : undefined}>
     <button
       type="button"
-      class="group flex w-fit max-w-full items-start justify-start gap-1.5 text-left text-sm leading-tight transition-colors {isActive
+      class="group flex w-fit max-w-full items-start justify-start gap-2 text-left text-sm leading-tight transition-colors {isActive
         ? ''
         : 'text-muted hover:text-secondary'} {canExpand ? 'cursor-pointer' : 'cursor-default'}"
       onclick={() => {
@@ -165,7 +201,10 @@
       disabled={!canExpand}
       aria-expanded={open}
     >
-      {#if isNegative}
+      {#if icon}
+        <!-- The chip carries the failure, so no bare cross precedes the text. -->
+        <ToolStepIcon {icon} tone={isNegative ? "negative" : "default"} class="-mt-px" />
+      {:else if isNegative}
         <X class="text-negative-default mt-0.5 h-3.5 w-3.5 shrink-0" />
       {/if}
       <span class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -204,6 +243,7 @@
     <ToolCallDetailsPanel
       {open}
       toolName={serverName}
+      {identity}
       {args}
       {toolCallId}
       {onLoadResult}

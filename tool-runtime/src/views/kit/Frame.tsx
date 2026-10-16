@@ -3,8 +3,10 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { InternationalizationProvider } from "@astryxdesign/core/i18n";
 import { Theme } from "@astryxdesign/core/theme";
 import { Toolbar } from "@astryxdesign/core/Toolbar";
+import svSE from "@astryxdesign/core/locales/sv-SE.json";
 import { neutralTheme } from "@astryxdesign/theme-neutral/built";
 import { HostContext, pick, useViewHost, type Host } from "./host";
 import { QuoteSelection } from "./Quote";
@@ -90,8 +92,11 @@ export function ViewFrame(props: FrameProps) {
   }, [app, connected, shown]);
 
   const canExpand = !fullscreen && context.availableDisplayModes?.includes("fullscreen");
+  // Astryx's own words (its copy button, its menus) in the host's language; English is built in.
+  const locale = (context.locale ?? "sv").toLowerCase().startsWith("sv") ? "sv-SE" : "en";
   return (
     <HostContext value={host}>
+      <InternationalizationProvider locale={locale} messages={{ "sv-SE": svSE }}>
       <Theme theme={neutralTheme} mode={context.theme === "dark" ? "dark" : "light"}>
         <div ref={root} className="eneo-view" data-view={props.name} hidden={!shown}>
           <Toolbar
@@ -124,6 +129,7 @@ export function ViewFrame(props: FrameProps) {
           <QuoteSelection />
         </div>
       </Theme>
+      </InternationalizationProvider>
     </HostContext>
   );
 }

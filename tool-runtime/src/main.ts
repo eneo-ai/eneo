@@ -12,6 +12,7 @@ import { defaultCacheRoot, SheetCache } from "./tools/tabular/cache";
 import type { QueryJobResult, SheetMetadata } from "./tools/tabular/ports";
 import { tabularTools } from "./tools/tabular/tool";
 import { queryResultView } from "./tools/tabular/view";
+import { computeResultView } from "./tools/compute/view";
 import type { InspectResult, RenderResult } from "./tools/documents/ports";
 import {
   builtinTemplateProvider,
@@ -54,6 +55,7 @@ const endpoints: Endpoint[] = [
       config.compute,
       async (job) =>
         (await isolate({ job, config: config.compute }, computeJobTimeoutMs)) as ComputeOutcome,
+      await computeResultView(),
     ),
   },
 ];

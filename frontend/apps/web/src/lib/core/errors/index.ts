@@ -30,6 +30,7 @@
  * message — functional but not localized.
  */
 export {
+  getAnswerFailureMessage,
   getErrorMessage,
   getErrorCodeMessage,
   SKILL_EXECUTION_BLOCK_CONFLICT,

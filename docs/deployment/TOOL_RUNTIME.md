@@ -4,8 +4,9 @@ The tool runtime is an isolated container included in the standard Eneo deployme
 Eneo-maintained MCP tools from an isolated process, never from the backend.
 It has four endpoints:
 
-- `/mcp/compute`: `run_javascript`, restricted compute over JSON. It is added
-  as an ordinary MCP server.
+- `/mcp/compute`: `run_javascript`, restricted compute over JSON, with CSV
+  export of tabular results. It is added as the provider of the **Compute**
+  capability (`compute`, "Beräkning" in Swedish).
 - `/mcp/file-analysis`: `inspect_table`, `query_table` and `assert_table` over
   attached CSV and XLSX files (more formats will follow). It is added as the
   provider of the **Ask a file** capability (`file_analysis`, "Fråga fil" in
@@ -116,17 +117,46 @@ support keeps the existing SVG/resvg image path. Interactive data is bounded
 at 200 KiB, below Eneo's 256 KiB structured-result limit; oversized data returns
 `CHART_DATA_TOO_LARGE` and asks the model to aggregate, filter or use PNG.
 
+## The result view
+
+`run_javascript` brings a result view (an MCP App) built with the same kit as
+the table view. Where Eneo shows tool views, a returned table of several rows
+appears under the answer, sortable, filterable and copyable; `display: "result"`
+shows a value of any shape (a number, a key/value list or JSON) when the user
+asked to see the result; `display: "none"` hides the view for intermediate
+steps. Under the result, a footer row shows the run time and a "Visa kod"
+toggle that opens tabs for the code (an Astryx code block with line numbers
+and a copy button), the input and the logs. When the
+input is a flat set of values, the reader can edit them and run the same code
+again from the view; that call goes through Eneo like any other tool call and
+follows the user's automatic-tools preference, and nothing reaches the
+conversation unless the reader quotes it. A failed run and a hidden step take
+no room; an exported table shows its first rows as a preview, with the file
+holding the rest. The tool tells the model when the reader sees the value
+(`shown`), so the answer does not repeat it.
+
 ### Enabling the Charts function after upgrading
 
-Apply migration `202610081100`, then add **Built into Eneo** under
-**Admin → Tools → Functions → Charts** and activate it. Enable **Charts** on the
-space and assistant, and grant its role permission. Existing roles receive no
-automatic permission grant; new predefined roles include it. The migration
-only widens the capability constraints and preserves all existing settings.
+Apply migrations `202610081100` and `202610091100`, then add **Built into
+Eneo** under **Admin → Tools → Functions → Charts** and activate it. Enable
+**Charts** on the space and assistant. The predefined Owner role holds the
+`charts` permission, on upgrade as on a new install; an administrator opts
+other roles in, as for file creation on new installs. The migrations only
+widen the capability constraints and preserve all existing settings.
 Existing bundled general chart servers keep their current attachments and
 can coexist with the new provider. Retire those general servers through the
 admin UI after configuring the function to avoid offering the same tool twice.
 Their old general-tool access rules continue to apply until then.
+
+### Enabling the Compute function after upgrading
+
+Apply migration `202610131300`, then add **Built into Eneo** under
+**Admin → Tools → Functions → Compute** and activate it. Enable **Compute** on
+the space and assistant. The migration grants the `compute` permission to the
+predefined Owner role only, as new installs do; other roles are opted in by
+an administrator. A bundled compute server added earlier from the MCP servers
+tab keeps its attachments and coexists with the new provider; retire it through
+the admin UI once the function is configured.
 
 ## TL;DR
 
@@ -202,9 +232,11 @@ level. Check the start-up line and the points above before raising it.
 `run_javascript` runs model-written JavaScript over bounded JSON input and
 returns bounded JSON output.
 
-- Each call runs in a fresh QuickJS (WebAssembly) runtime. It sees only `input`
-  and `console`, with no network, filesystem, timers, imports, host APIs or
-  environment, and keeps no state between calls.
+- Each call runs in a fresh QuickJS (WebAssembly) runtime. It sees only `input`,
+  `console` and two preinstalled, frozen globals (`Decimal` from decimal.js for
+  exact decimal arithmetic and `fmt` for Swedish number and date formatting,
+  since QuickJS has no Intl), with no network, filesystem, timers, imports, host
+  APIs or environment, and keeps no state between calls.
 - Each call runs in a separate child process that inherits nothing but `PATH`
   and a private temporary directory. The bearer token never reaches it.
 - Limits: 20,000 characters of code, 64 KiB input, 256 KiB result, 100 log
@@ -289,7 +321,9 @@ cannot be replaced reliably, so the Word original is needed.
 
 The runtime's tools are Eneo's own code, so they are trusted like a built-in
 provider's. A completion lists the running runtime's catalog (cached per
-backend process for five minutes) and keeps only the administrator's per-tool
+backend process for `BUNDLED_CATALOG_TTL_SECONDS`, 300 by default; a
+development install sets it to a few seconds so a rebuilt view reaches chats
+at once) and keeps only the administrator's per-tool
 decisions (enabled, display name) from the stored rows, so a new runtime image
 is in use as soon as it runs; nobody has to press **Sync tools**. Pressing it
 still refreshes the stored rows the admin pages show, and the changes are
@@ -367,10 +401,10 @@ adopt the complete bundle, and remove the extra runtime overlay/profile.
 release. Registrations, external providers, permissions and activation decisions
 are preserved. Installing the service does not enable capabilities.
 
-In **Admin > Tools > Functions**, turn on **Ask a file**, **Create a file** or
-**Charts**, then grant the desired space and assistant access. **Compute**
-remains under **MCP servers**. Existing roles still need the permissions
-described above; active external providers are not replaced automatically.
+In **Admin > Tools > Functions**, turn on **Ask a file**, **Create a file**,
+**Charts** or **Compute**, then grant the desired space and assistant access.
+Existing roles still need the permissions described above; active external
+providers are not replaced automatically.
 
 To omit the runtime explicitly:
 

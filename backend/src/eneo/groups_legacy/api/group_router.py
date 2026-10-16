@@ -479,12 +479,23 @@ async def run_semantic_search(
 
     collection = await service.get_collection(id)
 
+    rerank = None
+    if search_parameters.rerank:
+        # The installation's default reranker, if the collection's space may
+        # use it; otherwise the search runs as without the flag.
+        space = await container.space_service().get_space(collection.space_id)
+        rerank = await container.rerank_service().spec_for_default(
+            query=search_parameters.search_string,
+            security_classification=space.security_classification,
+        )
+
     results = await datastore.semantic_search(
         search_string=search_parameters.search_string,
         embedding_model=collection.embedding_model,
         collections=[collection],
         num_chunks=search_parameters.num_chunks,
         autocut_cutoff=search_parameters.autocut_cutoff,
+        rerank=rerank,
     )
 
     return protocol.to_paginated_response(results)

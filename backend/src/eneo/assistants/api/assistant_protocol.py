@@ -24,9 +24,7 @@ from eneo.questions.question import (
 from eneo.sessions.session import (
     AskChatResponse,
     AskResponse,
-    EneoEventType,
     SessionInDB,
-    SSEEneoEvent,
     SSEError,
     SSEFiles,
     SSEFirstChunk,
@@ -220,12 +218,6 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
             tool_call_id=chunk.image.tool_call_id if chunk.image else None,
         )
 
-    elif chunk.response_type == ResponseType.ENEO_EVENT:
-        data = SSEEneoEvent(
-            session_id=session_id,
-            eneo_event_type=EneoEventType.GENERATING_IMAGE,
-        )
-
     elif chunk.response_type == ResponseType.TOOL_CALL:
         tool_calls = cast(
             Sequence[_SupportsToolCallMetadata], chunk.tool_calls_metadata or []
@@ -355,6 +347,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
             session_id=session_id,
             error=chunk.error or "",
             error_code=chunk.error_code,
+            code=chunk.error_reason,
         )
 
     else:

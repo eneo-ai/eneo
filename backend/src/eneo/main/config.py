@@ -315,6 +315,9 @@ class Settings(BaseSettings):
     # Tool-call budget for the built-in image generation provider. Image
     # models routinely take longer than a general MCP tool call.
     image_generation_timeout_seconds: int = 240
+    # Upper bound for one rerank call to a provider, starting with the
+    # registration-time connection test.
+    rerank_request_timeout_seconds: int = 10
     mcp_tool_output_max_chars: int = 32768
     # Decoded size cap for a single MCP image content block; larger images
     # are dropped before they can be persisted as generated files.
@@ -330,6 +333,10 @@ class Settings(BaseSettings):
     mcp_tool_file_max_count: int = 4
     mcp_circuit_breaker_failure_threshold: int = 5
     mcp_circuit_breaker_cooldown_seconds: int = 60
+    # How long a backend process keeps the bundled runtime's tool catalog
+    # before listing it again. A rebuilt view or a changed tool reaches chats
+    # only after the next listing, so development installs set this low.
+    bundled_catalog_ttl_seconds: int = 300
 
     # MCP Apps (io.modelcontextprotocol/ui): interactive HTML views declared
     # by MCP tools and rendered in sandboxed iframes in assistant chat.
@@ -398,6 +405,14 @@ class Settings(BaseSettings):
     oidc_redirect_grace_period_seconds: int = 900
     strict_oidc_redirect_validation: bool = True
     oidc_clock_leeway_seconds: int = 120
+
+    # OIDC resource-server mode: accept IdP-issued access tokens as bearer auth
+    # alongside the HS256 Eneo JWT. The issuer is a discovery base URL
+    # ({issuer}/.well-known/openid-configuration must resolve).
+    oidc_resource_server_enabled: bool = False
+    oidc_accepted_issuer: Optional[str] = None
+    oidc_accepted_audience: Optional[str] = None
+    oidc_jwks_cache_ttl_seconds: int = 3600
 
     # Generic OIDC config (renamed from MOBILITYGUARD_*)
     oidc_discovery_endpoint: Optional[str] = None
@@ -569,6 +584,30 @@ class Settings(BaseSettings):
 
     # integration callback
     oauth_callback_url: Optional[str] = None
+    oauth_callback_urls: list[str] = Field(default_factory=list)
+
+    def integration_callback_uri(self, requested: str | None = None) -> str:
+        """Select an exact operator-registered callback, preserving its path."""
+        default = self.oauth_callback_url
+        if not default and self.public_origin:
+            default = self.public_origin + "/integrations/callback/token/"
+        allowed = set(self.oauth_callback_urls)
+        if default:
+            allowed.add(default)
+        if requested is not None and requested not in allowed:
+            raise ValueError("The integration callback is not registered.")
+        selected = requested if requested is not None else default
+        if selected is None:
+            raise ValueError("OAUTH_CALLBACK_URL or PUBLIC_ORIGIN must be set.")
+        if selected != selected.strip() or any(ord(char) < 32 for char in selected):
+            raise ValueError(
+                "The integration callback must not contain whitespace controls."
+            )
+        validate_redirect_uri(selected)
+        parsed = urlparse(selected)
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("The integration callback must not contain credentials.")
+        return selected
 
     # Confluence
     confluence_client_id: Optional[str] = None
@@ -979,6 +1018,13 @@ class Settings(BaseSettings):
             logging.error(
                 "MCP_CIRCUIT_BREAKER_COOLDOWN_SECONDS must be greater than zero. Current value: %s",
                 self.mcp_circuit_breaker_cooldown_seconds,
+            )
+            sys.exit(1)
+
+        if self.bundled_catalog_ttl_seconds < 0:
+            logging.error(
+                "BUNDLED_CATALOG_TTL_SECONDS must be zero or greater. Current value: %s",
+                self.bundled_catalog_ttl_seconds,
             )
             sys.exit(1)
 

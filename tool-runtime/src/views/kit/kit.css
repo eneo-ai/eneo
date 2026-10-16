@@ -4,6 +4,11 @@ html,
 body {
   margin: 0;
 }
+/* The frame is sized to the view's reported height, and in the larger view the view scrolls
+   itself; the document never does, so a line box a pixel taller than its row draws no bar. */
+html {
+  overflow: hidden;
+}
 [hidden] {
   display: none !important;
 }
@@ -55,3 +60,4 @@ body {
 :root[data-mode="fullscreen"] .eneo-view > * {
   flex-shrink: 0;
 }
+

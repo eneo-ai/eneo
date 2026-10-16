@@ -77,6 +77,13 @@ from eneo.server.dependencies.container import (
 )
 from eneo.server.dependencies.get_repository import get_repository
 from eneo.server.protocol import responses
+from eneo.sysadmin.stored_model_configuration import (
+    ConfigurationInspection,
+    ConfigurationRepair,
+    ConfigurationRepairResult,
+    ResourceKind,
+    StoredModelConfigurationRepository,
+)
 from eneo.sysadmin.sysadmin_service import SysAdminService
 from eneo.tenants.tenant import (
     TenantBase,
@@ -102,6 +109,67 @@ router = APIRouter(
 _DEPLOYMENT_ADMIN_ACCESS_REASON = (
     "Deployment administration requires the configured super API key."
 )
+
+
+@router.get(
+    "/tenants/{tenant_id}/model-configurations/{kind}/invalid/",
+    response_model=ConfigurationInspection,
+    summary="Inspect a page of persisted model configurations without loading applications",
+    description=(
+        "Scan up to 200 stored configurations in one tenant, including resources "
+        "hidden by validation failures. Return invalid field paths, error codes "
+        "and source fingerprints without exposing raw configuration values. "
+        "Use next_after to continue scanning; inspection never modifies data."
+    ),
+    responses=responses.get_responses([400]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
+async def inspect_model_configurations(
+    tenant_id: UUID,
+    kind: ResourceKind,
+    container: Annotated[Container, Depends(get_container())],
+    after: UUID | None = None,
+    limit: int = Query(default=100, ge=1, le=200),
+) -> ConfigurationInspection:
+    repository = StoredModelConfigurationRepository(
+        cast(AsyncSession, container.session())
+    )
+    return await repository.inspect(tenant_id, kind, after=after, limit=limit)
+
+
+@router.post(
+    "/tenants/{tenant_id}/model-configurations/{kind}/{resource_id}/repair/",
+    response_model=ConfigurationRepairResult,
+    summary="Preview or apply an explicit repair of invalid stored model options",
+    description=(
+        "Repair one invalid configuration in the specified tenant using explicit, "
+        "validated replacement options. Defaults to dry-run. The source fingerprint "
+        "must match the inspected value, unless the requested replacement is already "
+        "stored. Reject changed or valid configurations; return 404 when the resource "
+        "does not belong to the tenant."
+    ),
+    responses=responses.get_responses([400, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
+)
+async def repair_model_configuration(
+    tenant_id: UUID,
+    kind: ResourceKind,
+    resource_id: UUID,
+    payload: ConfigurationRepair,
+    container: Annotated[Container, Depends(get_container())],
+) -> ConfigurationRepairResult:
+    repository = StoredModelConfigurationRepository(
+        cast(AsyncSession, container.session())
+    )
+    return await repository.repair(tenant_id, kind, resource_id, payload)
 
 
 class OIDCDebugToggleRequest(BaseModel):

@@ -50,7 +50,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9035: () => m.eneo_error_9035(), // SECURITY_CLASSIFICATION_MISMATCH
   9036: () => m.eneo_error_9036(), // MCP_UPSTREAM_ERROR
   9037: () => m.eneo_error_9037(), // MCP_UPSTREAM_AUTH_ERROR
-  9017: () => m.eneo_error_9017(), // NAME_COLLISION (duplicate display name)
+  9017: () => m.eneo_error_9017(), // NAME_COLLISION (a taken name, for any resource)
   9042: () => m.eneo_error_9042(), // ENCRYPTION_NOT_CONFIGURED
 
   // --- AI service errors ---
@@ -72,6 +72,9 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
 
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE
+
+  // --- Governance ---
+  9069: () => m.eneo_error_9069(), // PROMPT_IN_USE_BY_GOVERNANCE
 
   // --- Concurrent changes ---
   9043: () => m.eneo_error_9043(), // SKILL_REVISION_CONFLICT
@@ -104,6 +107,34 @@ function getQuotaReasonMessage(error: EneoError): string | undefined {
 }
 
 /**
+ * A failed answer names what went wrong in the payload's `code`, both in an
+ * HTTP error (9010/9041) and in the stream's `error` event. Each message says
+ * on whose side the problem is, so users can tell a provider outage from a
+ * fault in Eneo and know whether trying again can help.
+ */
+const ANSWER_FAILURE_MESSAGES: Record<string, () => string> = {
+  provider_unavailable: () => m.provider_failure_unavailable(),
+  provider_timeout: () => m.provider_failure_timeout(),
+  provider_unreachable: () => m.provider_failure_unreachable(),
+  provider_connection_lost: () => m.provider_failure_connection_lost(),
+  provider_rate_limited: () => m.provider_failure_rate_limited(),
+  provider_model_not_found: () => m.provider_failure_model_not_found(),
+  provider_rejected_request: () => m.provider_failure_rejected_request(),
+  provider_error: () => m.eneo_error_9010(),
+  stream_error: () => m.chat_answer_failed_internal()
+};
+
+/**
+ * Localized message for a failed answer, or undefined when the error does not
+ * say why the answer failed.
+ */
+export function getAnswerFailureMessage(error: unknown): string | undefined {
+  if (!(error instanceof EneoError)) return undefined;
+  const reason = error.response?.code;
+  return typeof reason === "string" ? ANSWER_FAILURE_MESSAGES[reason]?.() : undefined;
+}
+
+/**
  * Get a localized, user-facing error message from any error.
  *
  * Resolution order:
@@ -120,7 +151,10 @@ function getQuotaReasonMessage(error: EneoError): string | undefined {
  */
 export function getErrorMessage(error: unknown, fallback?: string): string {
   if (error instanceof EneoError) {
-    const mapped = getQuotaReasonMessage(error) ?? getErrorCodeMessage(error.code);
+    const mapped =
+      getQuotaReasonMessage(error) ??
+      getAnswerFailureMessage(error) ??
+      getErrorCodeMessage(error.code);
     if (mapped) {
       return mapped;
     }

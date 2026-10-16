@@ -1,5 +1,16 @@
 # flake8: noqa
 
+# Keep the placement rule identical for knowledge and MCP resource citations.
+# The model supplies the tags; rewriting them after generation could attach a
+# source to the wrong claim, especially while the answer is streaming.
+CITATION_PLACEMENT_INSTRUCTION = (
+    "Put each tag after the punctuation ending its complete sourced sentence. "
+    "If a list item or table cell has no sentence, put the tag after the complete "
+    "item or cell. Never put it after a heading, bold label, or introductory "
+    "phrase before its claim. Example: **Smakprofil:** Brasilianskt kaffe är "
+    'fylligt och milt. <inref id="<source_id>"/>'
+)
+
 # Inline instruction appended after the MCP resource blocks. Lives next to the
 # data so the model gets the citation rule whenever a tool returns resources,
 # without requiring the system-level SHOW_REFERENCES_PROMPT (that one only fires
@@ -9,9 +20,11 @@
 MCP_TOOL_REFERENCES_INSTRUCTION = (
     "The tool returned one or more sources above, each delimited by triple "
     "quotes and opening with a source_id line. When you use information from a "
-    "source, cite it with an inline self-closing tag immediately after the "
-    'relevant text: <inref id="<source_id>"/>, using that source\'s 8-character '
-    "source_id. If the user asks about a source, refer to its title, never the "
+    "source, cite its supporting sentence or sentence-free item with an inline "
+    "self-closing tag "
+    '<inref id="<source_id>"/>, using that source\'s 8-character source_id. '
+    f"{CITATION_PLACEMENT_INSTRUCTION} "
+    "If the user asks about a source, refer to its title, never the "
     "source_id."
 )
 
@@ -54,23 +67,27 @@ ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     'chosen tool fails, read_file ("Read attached file"), when available, accepts '
     'every file_ref in its url input. Entries with "kind": "image" are images; '
     "pass their file_ref to image tools, not read_file. "
+    "For an attached CSV, TSV or Excel file, use inspect_table and query_table, "
+    "which read the file itself: to describe what it contains as well as for "
+    "totals, groupings, comparisons and other calculations. Do not calculate from "
+    "quoted text, earlier samples or a full-file text dump, and do not re-type "
+    "the file's rows into another tool. "
     "For Selected table rows, pass the provided file reference, including sheet and "
     "source_rows, unchanged to inspect_table and query_table. These are coordinates "
     "in the immutable original file, not values or positions in a sorted query result. "
-    "The runtime filters the source before running DuckDB SQL. Use query_table for "
-    "comparisons, totals and calculations before answering; do not calculate from "
-    "quoted text, earlier samples or a full-file text dump. Keep the filter for "
+    "The runtime filters the source before running DuckDB SQL. Keep the filter for "
     "follow-up queries on that selection. If the tools cannot apply source_rows, "
     "explain the limitation instead of guessing or silently querying other rows."
 )
 
 
-SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.
-Only use the sources to answer questions. You MUST reference every source you use by adding an inline XML self-closing tag immediately after the information: <inref id="<source_id>"/>
+SHOW_REFERENCES_PROMPT = f"""Use the provided sources delimited by triple quotes to answer questions.
+Only use the sources to answer questions. You MUST cite every sentence or sentence-free item that uses a source with an inline XML self-closing tag: <inref id="<source_id>"/>
 
 Rules:
-- Every claim, fact, or piece of information taken from a source MUST be followed by its reference tag.
-- Use the 8-character source_id from the source metadata. Example: if source_id is a5477f85, write <inref id="a5477f85"/> right after the relevant sentence or paragraph.
+- Every sourced sentence or sentence-free list item or table cell MUST be followed by its reference tag.
+- Use the 8-character source_id from the source metadata.
+- {CITATION_PLACEMENT_INSTRUCTION}
 - If information comes from multiple sources, include multiple tags: <inref id="a5477f85"/><inref id="b3291cc0"/>
 - If the user asks about the sources, respond with the source_title, never the source_id.
 - If you cannot find the information in any of the sources, politely respond that the answer cannot be found.
