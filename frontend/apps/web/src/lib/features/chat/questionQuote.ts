@@ -3,6 +3,19 @@ import { isLocator } from "$lib/features/file-preview/passageLocator";
 /** Whether a quote is a Markdown table (cells quoted from a document's table). */
 export const isTableQuote = (text: string) => /^\|.*\|\n\|(?: --- \|)+\n/.test(text);
 
+/** What a table quote holds, for a place too small to show the table: its columns and how many rows. */
+export function tableQuoteSummary(text: string): { columns: string[]; rows: number } | null {
+  if (!isTableQuote(text)) return null;
+  const lines = text.split("\n").filter((line) => line.trim());
+  const cells = (line: string) =>
+    line
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((cell) => cell.trim());
+  return { columns: cells(lines[0]), rows: Math.max(0, lines.length - 2) };
+}
+
 /**
  * A quote from a file, carried in the text of a question.
  *

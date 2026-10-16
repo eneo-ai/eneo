@@ -3941,6 +3941,8 @@
   "file_preview_maximise": "Maximise",
   "file_preview_restore_size": "Restore size",
   "file_preview_page_break": "Page break",
+  "file_quote_table_row": "1 row",
+  "file_quote_table_rows": "{count} rows",
   "file_preview_version_number": "Version {number}",
   "file_preview_version_by_assistant": "Created by the assistant",
   "file_preview_restore_version": "Restore this version",
