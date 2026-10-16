@@ -24,6 +24,7 @@ from eneo.integration.infrastructure.content_service.sharepoint_content_service 
     ScopeFolderUnavailable,
     SharePointContentService,
     SimpleSharePointToken,
+    SyncAccessDenied,
     SyncItemsFailed,
     extract_text_from_canvas_layout,
 )
@@ -1979,7 +1980,9 @@ class TestGetFileContent:
         client = AsyncMock()
         client.get_file_extraction_by_id.return_value = ExtractionResult.ok("Body")
 
-        assert await service._get_file_content(client, self.ITEM) == ("Body", None)
+        assert await service._get_file_content(
+            client, self.ITEM, service._initialize_stats()
+        ) == ("Body", None)
         client.get_file_extraction_by_id.assert_awaited_once_with(
             drive_id="drive-1", item_id="item-1"
         )
@@ -2029,7 +2032,9 @@ class TestGetFileContent:
         else:
             client.get_file_extraction_by_id.return_value = outcome
 
-        content, skip_reason = await service._get_file_content(client, self.ITEM)
+        content, skip_reason = await service._get_file_content(
+            client, self.ITEM, service._initialize_stats()
+        )
 
         assert (content, skip_reason) == (None, expected_reason)
         assert (
@@ -2060,14 +2065,18 @@ class TestGetFileContent:
     async def test_items_without_content_are_skipped_silently(self, service, item):
         client = AsyncMock()
 
-        assert await service._get_file_content(client, item) == (None, None)
+        assert await service._get_file_content(
+            client, item, service._initialize_stats()
+        ) == (None, None)
         client.get_file_extraction_by_id.assert_not_called()
 
     async def test_unsupported_extension_is_decided_before_download(self, service):
         client = AsyncMock()
         item = {**self.ITEM, "name": "Old.DOC"}
 
-        content, skip_reason = await service._get_file_content(client, item)
+        content, skip_reason = await service._get_file_content(
+            client, item, service._initialize_stats()
+        )
 
         assert content is None
         assert skip_reason == "Unsupported file type (legacy Word .doc, save as .docx)"
@@ -3910,7 +3919,6 @@ class TestDeltaExtractionOutcomes:
                 "Exceeds extraction limit (1000 PDF pages)",
             ),
             (_http_error(404, "Not Found"), "Error: HTTP 404 Not Found"),
-            (_http_error(403, "Forbidden"), "Error: HTTP 403 Forbidden"),
             (
                 ValueError("SharePoint file 'x' exceeds max download size (1 > 0)"),
                 "File too large (exceeds 50 MB limit)",
@@ -3987,6 +3995,78 @@ class TestDeltaExtractionOutcomes:
         assert sync_log.metadata["skipped_details"] == [
             {"file": "scan.pdf", "reason": expected_reason + RETRY_NOTE}
         ]
+
+    @pytest.mark.parametrize("every_download_refused", [False, True])
+    async def test_a_refusal_is_about_the_file_unless_every_download_was_refused(
+        self, service, mock_dependencies, mock_oauth_token, every_download_refused
+    ):
+        """One 403 among successes names a file; a pass in which nothing could be
+        downloaded names the identity, so it fails and keeps its token."""
+        ik = _real_integration_knowledge(delta_token="token-1")
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        second = (
+            _http_error(403, "Forbidden")
+            if every_download_refused
+            else ExtractionResult.ok("Body")
+        )
+
+        with (
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+            patch.object(
+                service, "_process_info_blob", AsyncMock(return_value="embedded")
+            ),
+        ):
+            _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(
+                    return_value=(
+                        [
+                            _delta_file("item-1", "a.docx"),
+                            _delta_file("item-2", "b.docx"),
+                        ],
+                        "token-2",
+                    )
+                ),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=[_http_error(403, "Forbidden"), second]
+                ),
+            )
+            failure = None
+            try:
+                await service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+            except SyncAccessDenied as exc:
+                failure = exc
+
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        if every_download_refused:
+            assert str(failure) == (
+                "SharePoint refused all 2 downloads (HTTP 403); check the "
+                "integration's access to this library, the next sync retries them"
+            )
+            assert ik.delta_token == "token-1"
+            assert ik.last_sync_status == "error"
+            assert ik.last_sync_error == str(failure)
+            assert ik.last_sync_summary["skipped_items"] == 2
+            assert ik.last_sync_summary["failed_items"] == 2
+            assert sync_log.status == "error"
+            assert sync_log.metadata["changes_detected"] == 2
+        else:
+            assert failure is None
+            assert ik.delta_token == "token-2"
+            assert ik.last_sync_status == "success"
+            assert ik.last_sync_summary["files_processed"] == 1
+            assert ik.last_sync_summary["skipped_items"] == 1
+            assert "failed_items" not in ik.last_sync_summary
+            assert sync_log.status == "success"
+        assert sync_log.metadata["skipped_details"][0] == {
+            "file": "a.docx",
+            "reason": "Error: HTTP 403 Forbidden",
+        }
 
     async def test_a_stale_copy_that_cannot_be_removed_fails_the_item_once_uncached(
         self, service, mock_dependencies, mock_oauth_token

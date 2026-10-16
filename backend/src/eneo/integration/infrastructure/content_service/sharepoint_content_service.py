@@ -126,14 +126,45 @@ class SyncItemsFailed(Exception):
     and the skipped details that name the files.
     """
 
-    def __init__(self, summary: SyncStats, *, changes_detected: int | None = None):
+    def __init__(
+        self,
+        summary: SyncStats,
+        *,
+        changes_detected: int | None = None,
+        message: str | None = None,
+    ):
         failed = summary.get("failed_items", 0)
         super().__init__(
-            f"{failed} file{'s' if failed != 1 else ''} could not be processed; "
+            message
+            or f"{failed} file{'s' if failed != 1 else ''} could not be processed; "
             f"the next sync retries {'them' if failed != 1 else 'it'}"
         )
         self.summary = summary
         self.changes_detected = changes_detected
+
+
+class SyncAccessDenied(SyncItemsFailed):
+    """Every download of the pass was refused (HTTP 403).
+
+    One refusal among successes is about that file (a sensitivity label, a
+    broken-inheritance folder) and the pass moves past it. When nothing could
+    be downloaded the problem is the identity (a conditional access policy, a
+    changed Sites.Selected grant), so the pass fails and keeps its token.
+    """
+
+    def __init__(
+        self, summary: SyncStats, *, forbidden: int, changes_detected: int | None = None
+    ):
+        super().__init__(
+            summary,
+            changes_detected=changes_detected,
+            message=(
+                f"SharePoint refused all {forbidden} "
+                f"download{'s' if forbidden != 1 else ''} (HTTP 403); check the "
+                "integration's access to this library, the next sync retries "
+                f"{'them' if forbidden != 1 else 'it'}"
+            ),
+        )
 
 
 class ScopeFolderUnavailable(Exception):
@@ -419,11 +450,13 @@ class SharePointContentService:
                 stats=stats,
                 access_token_provider=access_token_provider,
             )
-            summary_stats = self._build_summary_stats(stats)
+            summary_stats, forbidden = self._summarize_pass(stats)
+            # The baseline is not persisted and an existing token is cleared
+            # by the failure record: the next sync is a full one and retries
+            # the failed files instead of a delta never seeing them again.
+            if forbidden:
+                raise SyncAccessDenied(summary_stats, forbidden=forbidden)
             if summary_stats.get("failed_items"):
-                # The baseline is not persisted and an existing token is cleared
-                # by the failure record: the next sync is a full one and retries
-                # the failed files instead of a delta never seeing them again.
                 raise SyncItemsFailed(summary_stats)
 
             integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
@@ -880,14 +913,20 @@ class SharePointContentService:
                         pending_change_keys=pending_change_keys,
                     )
 
-                summary_stats = self._build_summary_stats(stats)
-                if summary_stats.get("failed_items"):
+                summary_stats, forbidden = self._summarize_pass(stats)
+                if forbidden or summary_stats.get("failed_items"):
                     # Keep the token: Graph never re-emits an item once a pass
                     # moved past it, so the next pass replays this one. Items
                     # indexed now are skipped as unchanged through the
                     # post-commit ChangeKey cache; the scope path refreshed
                     # above was persisted so the replay classifies as this pass did.
                     self._schedule_post_commit_change_keys(pending_change_keys)
+                    if forbidden:
+                        raise SyncAccessDenied(
+                            summary_stats,
+                            forbidden=forbidden,
+                            changes_detected=len(changes),
+                        )
                     raise SyncItemsFailed(summary_stats, changes_detected=len(changes))
 
                 integration_knowledge.delta_token = new_delta_token
@@ -1098,7 +1137,11 @@ class SharePointContentService:
                             return delta_baseline
 
                         content, skip_reason = await self._extract_file(
-                            content_client, actual_drive_id, folder_id_value, item_name
+                            content_client,
+                            actual_drive_id,
+                            folder_id_value,
+                            item_name,
+                            stats,
                         )
                         if content and not is_unextractable_content(content):
                             outcome = await self._process_info_blob(
@@ -1253,7 +1296,7 @@ class SharePointContentService:
         item_name = item.get("name", "")
         item_id = item.get("id")
         try:
-            content, skip_reason = await self._get_file_content(client, item)
+            content, skip_reason = await self._get_file_content(client, item, stats)
             if content and not is_unextractable_content(content):
                 outcome = await self._process_info_blob(
                     title=item_name,
@@ -1832,7 +1875,7 @@ class SharePointContentService:
                 return
 
             content, skip_reason = await self._extract_file(
-                content_client, drive_id, item_id, item_name
+                content_client, drive_id, item_id, item_name, stats
             )
             if content and not is_unextractable_content(content):
                 outcome = await self._process_info_blob(
@@ -2297,6 +2340,19 @@ class SharePointContentService:
             "skipped_details": [],
         }
 
+    def _summarize_pass(self, stats: SyncStats) -> tuple[SyncStats, int]:
+        """The pass summary, and how many downloads were refused if all of them were.
+
+        Refusals were counted as file-level skips as they came; once the pass
+        shows they were the only outcome they become its failures.
+        """
+        forbidden = 0
+        attempts = stats.get("download_attempts", 0)
+        if attempts and stats.get("download_forbidden", 0) == attempts:
+            forbidden = attempts
+            stats["failed_items"] = stats.get("failed_items", 0) + forbidden
+        return self._build_summary_stats(stats), forbidden
+
     def _build_summary_stats(self, stats: SyncStats) -> SyncStats:
         skipped_details = stats.get("skipped_details", [])
         summary: SyncStats = {
@@ -2485,7 +2541,7 @@ class SharePointContentService:
         return file_extension_to_type(item.get("name", ""))
 
     async def _get_file_content(
-        self, client: SharePointContentClient, item: SharePointItem
+        self, client: SharePointContentClient, item: SharePointItem, stats: SyncStats
     ) -> tuple[Optional[str], Optional[str]]:
         item_id = item.get("id")
         item_name = item.get("name", "").lower()
@@ -2499,7 +2555,7 @@ class SharePointContentService:
         if skip_reason:
             return None, skip_reason
 
-        return await self._extract_file(client, drive_id, item_id, item_name)
+        return await self._extract_file(client, drive_id, item_id, item_name, stats)
 
     async def _extract_file(
         self,
@@ -2507,6 +2563,7 @@ class SharePointContentService:
         drive_id: str,
         item_id: str,
         item_name: str,
+        stats: SyncStats,
     ) -> tuple[Optional[str], Optional[str]]:
         """``(text, None)`` or ``(None, skip_reason)`` for an outcome of the file itself.
 
@@ -2515,6 +2572,7 @@ class SharePointContentService:
         unexpected) propagates: it says nothing about the file, so the caller
         must not move past it.
         """
+        stats["download_attempts"] = stats.get("download_attempts", 0) + 1
         try:
             result = await client.get_file_extraction_by_id(
                 drive_id=drive_id, item_id=item_id
@@ -2533,6 +2591,8 @@ class SharePointContentService:
         except aiohttp.ClientResponseError as e:
             if e.status not in _ITEM_LEVEL_HTTP_STATUSES:
                 raise
+            if e.status == 403:
+                stats["download_forbidden"] = stats.get("download_forbidden", 0) + 1
             logger.warning(
                 "File %s (item_id=%s) is gone or not accessible: %s",
                 item_name,
