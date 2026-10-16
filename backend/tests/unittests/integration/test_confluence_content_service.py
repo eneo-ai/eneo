@@ -94,6 +94,8 @@ async def test_completed_sync_is_marked_succeeded(service, knowledge, token):
         "last_sync_status": "success",
         "last_sync_error": None,
         "last_synced_at": knowledge.last_synced_at,
+        "last_sync_summary": None,
+        "delta_token": None,
     }
 
 

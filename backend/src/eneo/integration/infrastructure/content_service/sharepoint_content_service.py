@@ -38,6 +38,9 @@ from eneo.integration.infrastructure.content_service.sharepoint_metadata import 
     extract_source_metadata,
     source_metadata_fingerprint,
 )
+from eneo.integration.infrastructure.content_service.sync_state import (
+    SyncStateRecorder,
+)
 from eneo.integration.infrastructure.content_service.types import (
     SharePointItem,
     SharePointTokenProtocol,
@@ -196,21 +199,6 @@ def _log_pass_failure(context: str, failure: Exception) -> None:
         logger.error("%s: %s", context, failure, exc_info=True)
 
 
-def _sync_outcome_fields(
-    knowledge: "IntegrationKnowledge", *, with_summary: bool = True
-) -> SyncStateFields:
-    """The columns a finished pass writes; the entity copy carries the values."""
-    fields: SyncStateFields = {
-        "last_sync_status": knowledge.last_sync_status,
-        "last_sync_error": knowledge.last_sync_error,
-        "last_synced_at": knowledge.last_synced_at,
-        "delta_token": knowledge.delta_token,
-    }
-    if with_summary:
-        fields["last_sync_summary"] = knowledge.last_sync_summary
-    return fields
-
-
 class SimpleSharePointToken:
     """Simple token wrapper for SharePoint API calls.
 
@@ -353,6 +341,7 @@ class SharePointContentService:
         self.tenant_app_auth_service = tenant_app_auth_service
         self.service_account_auth_service = service_account_auth_service
         self.sync_log_repo = sync_log_repo
+        self._sync_state = SyncStateRecorder(integration_knowledge_repo, sync_log_repo)
         self.change_key_service = change_key_service
         # Strong refs to in-flight post-commit ChangeKey flush tasks so the event
         # loop does not GC them before they run.
@@ -451,10 +440,9 @@ class SharePointContentService:
                 id=integration_knowledge_id
             )
             resolved_integration_knowledge_id = integration_knowledge.id
-            integration_knowledge.mark_sync_started(started_at)
             resolved_site_id = site_id or integration_knowledge.site_id
             resolved_drive_id = drive_id or integration_knowledge.drive_id
-            binding: SyncStateFields = {"last_sync_attempted_at": started_at}
+            binding: SyncStateFields = {}
             if site_id and not getattr(integration_knowledge, "site_id", None):
                 integration_knowledge.site_id = site_id
                 binding["site_id"] = site_id
@@ -470,9 +458,7 @@ class SharePointContentService:
             if folder_path:
                 integration_knowledge.folder_path = folder_path
                 binding["folder_path"] = folder_path
-            await self.integration_knowledge_repo.update_sync_state(
-                integration_knowledge.id, **binding
-            )
+            await self._sync_state.started(integration_knowledge, started_at, **binding)
 
             delta_baseline = await self._pull_content(
                 token=token,
@@ -494,15 +480,13 @@ class SharePointContentService:
                 raise SyncItemsFailed(summary_stats)
 
             integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
-            integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
             if delta_baseline:
                 integration_knowledge.delta_token = delta_baseline
-
-            await self.integration_knowledge_repo.update_sync_state(
-                integration_knowledge.id, **_sync_outcome_fields(integration_knowledge)
+            await self._sync_state.succeeded(
+                integration_knowledge, datetime.now(timezone.utc)
             )
 
-            await self._add_sync_log(
+            await self._sync_state.add_log(
                 SyncLog(
                     integration_knowledge_id=resolved_integration_knowledge_id,
                     sync_type="full",
@@ -521,12 +505,12 @@ class SharePointContentService:
 
         except Exception as e:
             summary = _failure_summary(e)
-            await self._record_sync_failure(
+            await self._sync_state.failed(
                 resolved_integration_knowledge_id,
                 e,
                 sync_type="full",
                 started_at=started_at,
-                summary=summary,
+                summary_counts=_summary_counts(summary) if summary else None,
                 metadata=_sync_metadata(
                     summary, trigger=sync_trigger, recovery=recovery
                 ),
@@ -534,88 +518,6 @@ class SharePointContentService:
             )
             _log_pass_failure("Error in pull_content", e)
             raise
-
-    async def _record_sync_failure(
-        self,
-        integration_knowledge_id: UUID | None,
-        failure: Exception,
-        *,
-        sync_type: str,
-        started_at: datetime,
-        metadata: SyncMetadata,
-        summary: SyncStats | None = None,
-        clear_delta_token: bool = False,
-    ) -> None:
-        """Persist the failure before re-raising; never raises itself.
-
-        The worker commits on a soft failure (see
-        ``_schedule_post_commit_change_keys``), so the status written here is what
-        the UI shows. Only the status columns are written, so a rename committed
-        during the sync survives. Each write is attempted on its own so a broken
-        status row still leaves a sync log, and neither can replace the
-        exception being recorded. ``clear_delta_token`` drops the token when a
-        full sync could not finish every item: a delta from it would never
-        re-emit those items, so the next sync must be a full one.
-        """
-        if integration_knowledge_id is None:
-            return
-        error = user_visible_error(failure)
-        failed_at = datetime.now(timezone.utc)
-        try:
-            integration_knowledge = await self.integration_knowledge_repo.one(
-                id=integration_knowledge_id
-            )
-            integration_knowledge.mark_sync_failed(error)
-            fields: SyncStateFields = {
-                "last_sync_status": integration_knowledge.last_sync_status,
-                "last_sync_error": integration_knowledge.last_sync_error,
-            }
-            if summary is not None:
-                integration_knowledge.last_sync_summary = _summary_counts(summary)
-                fields["last_sync_summary"] = integration_knowledge.last_sync_summary
-            if clear_delta_token:
-                integration_knowledge.delta_token = None
-                fields["delta_token"] = None
-            await self.integration_knowledge_repo.update_sync_state(
-                integration_knowledge_id, **fields
-            )
-        except Exception:
-            logger.error(
-                "Could not record sync failure on integration knowledge %s",
-                integration_knowledge_id,
-                exc_info=True,
-            )
-        await self._add_sync_log(
-            SyncLog(
-                integration_knowledge_id=integration_knowledge_id,
-                sync_type=sync_type,
-                status="error",
-                started_at=started_at,
-                completed_at=failed_at,
-                error_message=error,
-                metadata=metadata,
-            )
-        )
-
-    async def _add_sync_log(self, sync_log: SyncLog) -> None:
-        """Write the pass's sync log; never raises.
-
-        The status row and the token are already written by the time the log
-        is added, so a failing log write must not reach the failure path and
-        turn a finished success into an error, nor replace the exception a
-        failure record is for.
-        """
-        if self.sync_log_repo is None:
-            return
-        try:
-            await self.sync_log_repo.add(sync_log)
-        except Exception:
-            logger.error(
-                "Could not write the %s sync log for integration knowledge %s",
-                sync_log.status,
-                sync_log.integration_knowledge_id,
-                exc_info=True,
-            )
 
     async def process_delta_changes(
         self,
@@ -655,10 +557,7 @@ class SharePointContentService:
                 id=integration_knowledge_id
             )
             resolved_integration_knowledge_id = integration_knowledge.id
-            integration_knowledge.mark_sync_started(started_at)
-            await self.integration_knowledge_repo.update_sync_state(
-                integration_knowledge.id, last_sync_attempted_at=started_at
-            )
+            await self._sync_state.started(integration_knowledge, started_at)
             resolved_site_id = site_id or integration_knowledge.site_id
             resolved_drive_id = drive_id or integration_knowledge.drive_id
 
@@ -744,14 +643,10 @@ class SharePointContentService:
                         integration_knowledge.last_sync_summary = _summary_counts(
                             summary_stats
                         )
-                    integration_knowledge.mark_sync_succeeded(
-                        datetime.now(timezone.utc)
-                    )
-                    await self.integration_knowledge_repo.update_sync_state(
-                        integration_knowledge.id,
-                        **_sync_outcome_fields(
-                            integration_knowledge, with_summary=record_failure
-                        ),
+                    await self._sync_state.succeeded(
+                        integration_knowledge,
+                        datetime.now(timezone.utc),
+                        with_summary=record_failure,
                     )
 
                     logger.info("Delta sync completed: no changes detected")
@@ -800,12 +695,12 @@ class SharePointContentService:
             if not record_failure:
                 raise
             summary = _failure_summary(e)
-            await self._record_sync_failure(
+            await self._sync_state.failed(
                 resolved_integration_knowledge_id,
                 e,
                 sync_type="delta",
                 started_at=started_at,
-                summary=summary,
+                summary_counts=_summary_counts(summary) if summary else None,
                 metadata=_sync_metadata(
                     summary,
                     trigger=sync_trigger,
@@ -1075,13 +970,12 @@ class SharePointContentService:
         replace_summary = record_failure or _delta_worth_logging(summary_stats)
         if replace_summary:
             integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
-        integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
-
         logger.info(f"Delta sync completed: {summary_stats}")
 
-        await self.integration_knowledge_repo.update_sync_state(
-            integration_knowledge.id,
-            **_sync_outcome_fields(integration_knowledge, with_summary=replace_summary),
+        await self._sync_state.succeeded(
+            integration_knowledge,
+            datetime.now(timezone.utc),
+            with_summary=replace_summary,
         )
 
         self._schedule_post_commit_change_keys(pending_change_keys)
@@ -1091,7 +985,7 @@ class SharePointContentService:
         )
 
         if _delta_worth_logging(summary_stats):
-            await self._add_sync_log(
+            await self._sync_state.add_log(
                 SyncLog(
                     integration_knowledge_id=resolved_integration_knowledge_id,
                     sync_type="delta",

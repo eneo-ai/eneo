@@ -9,8 +9,10 @@ from eneo.integration.domain.entities.oauth_token import ConfluenceToken, OauthT
 from eneo.integration.infrastructure.clients.confluence_content_client import (
     ConfluenceContentClient,
 )
+from eneo.integration.infrastructure.content_service.sync_state import (
+    SyncStateRecorder,
+)
 from eneo.main.logging import get_logger
-from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
     from eneo.info_blobs.info_blob_service import InfoBlobService
@@ -52,6 +54,7 @@ class ConfluenceContentService:
         self.info_blob_service = info_blob_service
         self.integration_knowledge_repo = integration_knowledge_repo
         self.oauth_token_service = oauth_token_service
+        self._sync_state = SyncStateRecorder(integration_knowledge_repo)
 
     async def pull_content(
         self,
@@ -64,54 +67,25 @@ class ConfluenceContentService:
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
             )
-            integration_knowledge.mark_sync_started(started_at)
-            await self.integration_knowledge_repo.update_sync_state(
-                integration_knowledge.id, last_sync_attempted_at=started_at
-            )
+            await self._sync_state.started(integration_knowledge, started_at)
             await self._pull_content(
                 token_id=token_id,
                 space_key=space_key,
                 integration_knowledge_id=integration_knowledge_id,
             )
-            integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
-            await self.integration_knowledge_repo.update_sync_state(
-                integration_knowledge.id,
-                last_sync_status=integration_knowledge.last_sync_status,
-                last_sync_error=integration_knowledge.last_sync_error,
-                last_synced_at=integration_knowledge.last_synced_at,
+            await self._sync_state.succeeded(
+                integration_knowledge, datetime.now(timezone.utc)
             )
         except Exception as e:
-            await self._record_sync_failure(
-                integration_knowledge_id, user_visible_error(e)
+            await self._sync_state.failed(
+                integration_knowledge_id,
+                e,
+                sync_type="full",
+                started_at=started_at,
+                metadata={"trigger": "manual"},
             )
             logger.error(f"Error in Confluence pull_content: {e}", exc_info=True)
             raise
-
-    async def _record_sync_failure(
-        self, integration_knowledge_id: UUID, error: str
-    ) -> None:
-        """Persist the failure before re-raising; never raises itself.
-
-        The worker commits on a soft failure, so the status written here is
-        what the UI shows. Only the status columns are written, so a rename
-        committed during the sync survives.
-        """
-        try:
-            integration_knowledge = await self.integration_knowledge_repo.one(
-                id=integration_knowledge_id
-            )
-            integration_knowledge.mark_sync_failed(error)
-            await self.integration_knowledge_repo.update_sync_state(
-                integration_knowledge_id,
-                last_sync_status=integration_knowledge.last_sync_status,
-                last_sync_error=integration_knowledge.last_sync_error,
-            )
-        except Exception:
-            logger.error(
-                "Could not record sync failure on integration knowledge %s",
-                integration_knowledge_id,
-                exc_info=True,
-            )
 
     async def _pull_content(
         self,
