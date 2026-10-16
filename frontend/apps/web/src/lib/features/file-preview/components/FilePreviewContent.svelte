@@ -31,8 +31,8 @@
     editable?: boolean;
     /** The version before this one, as Markdown; what changed against it is marked. */
     previousMarkdown?: string | null;
-    /** The reader changed the document's text. */
-    ondirty?: () => void;
+    /** Whether the document's text now differs from the file. */
+    onchange?: (dirty: boolean) => void;
     /** The reader asked to save the document (Mod+S). */
     onsave?: () => void;
   };
@@ -46,7 +46,7 @@
     onerror,
     editable = false,
     previousMarkdown = null,
-    ondirty,
+    onchange,
     onsave
   }: Props = $props();
 
@@ -207,7 +207,7 @@
           {highlight}
           {previousMarkdown}
           {onquote}
-          {ondirty}
+          {onchange}
           {onsave}
           {onready}
         />

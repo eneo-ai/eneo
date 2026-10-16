@@ -528,7 +528,7 @@
           onready={() => preview.finishReplacement(view.file.id)}
           onerror={() => preview.failReplacement(view.file.id)}
           onquote={(text, locator) => preview.quoteSelection(text, locator)}
-          ondirty={() => preview.markEdited()}
+          onchange={(dirty) => preview.setDirty(dirty)}
           onsave={saveEdits}
         />
       </div>

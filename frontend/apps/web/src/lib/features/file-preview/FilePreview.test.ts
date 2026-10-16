@@ -320,7 +320,7 @@ it("shows a saved version at once and keeps it ready for the next opening", asyn
   vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
   preview.open(document);
   await vi.waitFor(() => expect(preview.status).toBe("ready"));
-  preview.markEdited();
+  preview.setDirty(true);
   expect(preview.unsaved).toBe(true);
 
   const version = { ...document, id: "report-2" };
@@ -347,7 +347,7 @@ it("asks before unsaved edits are lost and then does what was asked", async () =
   vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
   preview.open(document);
   await vi.waitFor(() => expect(preview.status).toBe("ready"));
-  preview.markEdited();
+  preview.setDirty(true);
 
   preview.close();
   expect(preview.shown).toBe(true);
@@ -368,7 +368,7 @@ it("holds a newer version back while edits are unsaved and shows it when they ar
   vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
   preview.open(document);
   await vi.waitFor(() => expect(preview.status).toBe("ready"));
-  preview.markEdited();
+  preview.setDirty(true);
 
   const newer = { ...document, id: "report-2" };
   preview.arrive(newer);

@@ -185,9 +185,9 @@ export class FilePreview {
     return this.dirty;
   }
 
-  /** The reader changed the document's text. */
-  markEdited() {
-    this.dirty = true;
+  /** Whether the document's text now differs from the file. */
+  setDirty(dirty: boolean) {
+    this.dirty = dirty;
   }
 
   /** The reader let their edits go; a replacement that waited then shows. */

@@ -62,9 +62,8 @@ export function documentExtensions({
   ];
 }
 
-/** Markdown as the document tools write it: ending in a newline. */
-export const withFinalNewline = (markdown: string) =>
-  markdown.endsWith("\n") ? markdown : `${markdown}\n`;
+/** Markdown as the document tools write it: ending in one newline, with no blank lines after the text. */
+export const withFinalNewline = (markdown: string) => `${markdown.replace(/\s+$/, "")}\n`;
 
 /** Converts between Markdown and the document model without an editor. */
 export function documentMarkdown(options: DocumentExtensionOptions = {}) {

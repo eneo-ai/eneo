@@ -28,8 +28,12 @@
     previousMarkdown?: string | null;
     /** Called with the selected text, and where it stands, when the reader quotes it. */
     onquote?: (text: string, locator: string | null) => void;
-    /** The reader changed the content; never called for a `markdown` update. */
-    ondirty?: () => void;
+    /**
+     * Whether the document's text now differs from `markdown`. Called when
+     * that changes either way; never for a `markdown` update, nor for the
+     * editor's own tidying of a loaded document.
+     */
+    onchange?: (dirty: boolean) => void;
     /** The reader asked to save (Mod+S) while editing. */
     onsave?: () => void;
     /** Each `markdown` value has been laid out. */
@@ -44,7 +48,7 @@
     highlight = null,
     previousMarkdown = null,
     onquote,
-    ondirty,
+    onchange,
     onsave,
     onrender,
     onready
@@ -114,10 +118,15 @@
         }
       }
     });
-    // A keystroke only marks the document edited; nothing is saved here.
+    // A keystroke only marks the document edited; nothing is saved here. The
+    // mark compares text, since the editor also tidies a loaded document (a
+    // paragraph to type in after a final code block) without changing it.
     created.on("update", () => {
-      dirty = true;
-      ondirty?.();
+      const changed =
+        applied !== null && withFinalNewline(created.getMarkdown()) !== withFinalNewline(applied);
+      if (changed === dirty) return;
+      dirty = changed;
+      onchange?.(dirty);
     });
     editor = created;
     applied = initial;
