@@ -28,6 +28,7 @@ OTHER_TENANT_ID = UUID("00000000-0000-0000-0000-00000000bbbb")
 class MockUser:
     def __init__(self, id, permissions=None, role=None, user_groups_ids=None):
         self.id = id
+        self.tenant_id = TENANT_ID
         if permissions is None:
             self.permissions = {Permission.SHARED_SPACES}
         else:
@@ -1592,6 +1593,32 @@ def test_key_denies_when_facts_carry_no_tenant():
 
 # Organization space: the role follows the tenant admin permission held now.
 # Membership rows are added for admins and outlive a revoked admin role.
+
+
+@pytest.mark.parametrize("tenant_id", [TENANT_ID, OTHER_TENANT_ID, None])
+@pytest.mark.parametrize("credential", ["session", "user", "service"])
+@pytest.mark.parametrize("has_member_row", [False, True])
+def test_org_admin_access_stays_within_the_authenticated_tenant(
+    tenant_id, credential, has_member_row
+):
+    user = MockUser(id=200, role=MockSpaceRole.ADMIN, permissions=ALL_PERMISSIONS)
+    if credential != "session":
+        user.active_api_key = MockServiceKey(
+            "tenant", None, "admin", ownership=credential
+        )
+    space = MockSpace(
+        user_id=None,
+        tenant_space_id=None,
+        tenant_id=tenant_id,
+        members={user.id: user} if has_member_row else {},
+    )
+    actor = _actor(user, space)
+
+    allowed = tenant_id == TENANT_ID
+    assert actor.can_read_space() is allowed
+    assert actor.can_read_assistants() is allowed
+    assert actor.can_create_assistants() is allowed
+    assert actor.can_delete_space() is allowed
 
 
 @pytest.mark.parametrize(

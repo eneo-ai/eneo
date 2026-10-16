@@ -546,6 +546,11 @@ class SpaceActor:
         # follows the admin permission held now, never a membership row, which
         # outlives the admin role that added it.
         if self.space.is_organization():
+            if (
+                self.space.tenant_id is None
+                or self.space.tenant_id != self.user.tenant_id
+            ):
+                return None
             return (
                 SpaceRole.ADMIN if Permission.ADMIN in self.user.permissions else None
             )

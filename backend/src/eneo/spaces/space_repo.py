@@ -1350,7 +1350,7 @@ class SpaceRepository:
         self, id: UUID
     ) -> SpaceApplicationsProjection:
         space_in_db = await self.session.scalar(
-            sa.select(Spaces).where(Spaces.id == id)
+            self._in_caller_tenant(sa.select(Spaces).where(Spaces.id == id))
         )
         if space_in_db is None:
             raise NotFoundException()

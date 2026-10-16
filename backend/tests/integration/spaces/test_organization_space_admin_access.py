@@ -19,10 +19,95 @@ from eneo.authentication.auth_models import (
     ApiKeyState,
     ApiKeyType,
 )
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.roles_table import Roles
-from eneo.database.tables.spaces_table import SpacesUsers
+from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+from eneo.main.exceptions import NotFoundException
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+async def organization_spaces(db_container, tenant_factory, user_factory):
+    """Two tenants' private resources; the caller has no organization row."""
+    async with db_container() as container:
+        session = container.session()
+        own = await container.space_service().get_or_create_tenant_space()
+        foreign_tenant = await tenant_factory(session)
+        foreign_user = await user_factory(session, tenant_id=foreign_tenant.id)
+        foreign = Spaces(name="Foreign organization", tenant_id=foreign_tenant.id)
+        session.add(foreign)
+        await session.flush()
+        for space_id, user_id, name in (
+            (own.id, container.user().id, "Private own assistant"),
+            (foreign.id, foreign_user.id, "Private foreign assistant"),
+        ):
+            session.add(
+                Assistants(
+                    name=name,
+                    space_id=space_id,
+                    user_id=user_id,
+                    logging_enabled=False,
+                    is_default=False,
+                    published=False,
+                )
+            )
+        await session.execute(
+            sa.delete(SpacesUsers).where(SpacesUsers.space_id == own.id)
+        )
+        return own.id, foreign.id
+
+
+@pytest.mark.parametrize("suffix", ["", "knowledge/", "applications/"])
+async def test_session_admin_reads_only_their_own_organization_space(
+    client,
+    db_container,
+    admin_user,
+    patch_auth_service_jwt,
+    organization_spaces,
+    suffix,
+):
+    own_id, foreign_id = organization_spaces
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    own = await client.get(f"/api/v1/spaces/{own_id}/{suffix}", headers=headers)
+    assert own.status_code == 200, own.text
+    if suffix == "applications/":
+        assert "Private own assistant" in {
+            assistant["name"] for assistant in own.json()["assistants"]["items"]
+        }
+
+    foreign = await client.get(f"/api/v1/spaces/{foreign_id}/{suffix}", headers=headers)
+    assert foreign.status_code == 404, foreign.text
+    assert "Private foreign assistant" not in foreign.text
+
+
+async def test_application_projection_does_not_load_another_tenants_resources(
+    db_container, organization_spaces
+):
+    own_id, foreign_id = organization_spaces
+    async with db_container() as container:
+        repo = container.space_repo()
+        with pytest.raises(NotFoundException):
+            await repo.get_applications_projection(foreign_id)
+        own = await repo.get_applications_projection(own_id)
+        assert "Private own assistant" in {item.name for item in own.assistants}
+
+
+async def test_org_key_owner_check_rejects_a_foreign_tenant_before_route_authorization(
+    client, db_container, admin_user, organization_spaces
+):
+    _, foreign_id = organization_spaces
+    # Deliberately inconsistent persisted scope. An admin in the key's tenant
+    # must not count as an admin of the foreign organization during authentication.
+    secret = await _mint_space_key(db_container, admin_user, str(foreign_id))
+    response = await client.get(
+        f"/api/v1/spaces/{foreign_id}/applications/", headers={"X-API-Key": secret}
+    )
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "owner_membership_revoked"
 
 
 async def _revoke_admin_role(db_container, user) -> None:

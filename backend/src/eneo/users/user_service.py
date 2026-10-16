@@ -972,7 +972,7 @@ class UserService:
             sa.exists()
             .where(SpacesUsers.space_id == space_id, SpacesUsers.user_id == user.id)
             .label("member"),
-        ).where(Spaces.id == space_id)
+        ).where(Spaces.id == space_id, Spaces.tenant_id == user.tenant_id)
         assert self._session is not None
         row = (await self._session.execute(query)).one_or_none()
         if row is None:
