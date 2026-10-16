@@ -3,6 +3,7 @@ import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
 import { Markdown, MarkdownManager } from "@tiptap/markdown";
 import StarterKit from "@tiptap/starter-kit";
+import { DocumentCodeBlock } from "./codeBlock";
 import { EneoImage } from "./eneoImage";
 import { PageBreak } from "./pageBreak";
 import { PassageHighlight } from "./passageHighlight";
@@ -44,10 +45,10 @@ export function documentExtensions({
         isAllowedUri: (url, context) => context.defaultValidate(url) && isAllowedHref(url),
         shouldAutoLink: () => false
       },
-      codeBlock: {
-        HTMLAttributes: { class: "bg-overlay-stronger rounded-lg px-8 py-7 overflow-auto" }
-      }
+      // Replaced by the highlighted code block below.
+      codeBlock: false
     }),
+    DocumentCodeBlock,
     TableKit.configure({ table: { resizable: false } }),
     TaskList,
     TaskItem.configure({ nested: true }),
