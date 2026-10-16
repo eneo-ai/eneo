@@ -69,7 +69,7 @@ docker compose --env-file .env --env-file release.env up -d
 docker logs eneo_db_init
 # Should see: "Great! Your Tenant and User are all set up."
 
-# 8. Login with DEFAULT_USER_EMAIL / DEFAULT_USER_PASSWORD (change password immediately!)
+# 8. Login with DEFAULT_USER_EMAIL / DEFAULT_USER_PASSWORD; Eneo asks for a new password at this first login
 ```
 
 The default stack does not require a separate object store. Eneo can keep

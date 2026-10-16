@@ -69,6 +69,7 @@ Eneo-issued browser, internal MCP and module tokens share one identity contract:
 | `user_id` | Immutable UUID of the authenticated Eneo account |
 | `tenant_id` | UUID of the account's organization when the token was issued |
 | `credential_version` | Required integer matching the account's current credential version |
+| `auth_method` | `password` when the session started with the local password login; absent for federated and exchanged sessions |
 | `iss`, `aud`, `iat`, `exp` | Required issuer, audience, issue time and expiry |
 | `sub`, `username` | Email and optional display name; never used to select the account |
 
@@ -94,6 +95,37 @@ by username and must not remain in a rolling deployment. No account rename,
 account merge or database migration is needed for this change. A recovery build
 must retain the identity validation; rolling back to username-based
 authentication reintroduces the vulnerability.
+
+### Local Password Lifecycle
+
+Accounts that sign in with a password stored in Eneo follow the tenant's
+password lifecycle policy. Accounts that sign in through an identity provider
+have no local password and are never affected, and a federated session is not
+blocked by a stale local password: the policy only acts on sessions whose
+`auth_method` claim is `password`.
+
+| Rule | Default | Effect |
+|------|---------|--------|
+| `require_change_after_admin_set` | on | A password chosen by someone other than the account (an administrator in **Admin → Users**, the sysadmin API, or the `DEFAULT_USER_PASSWORD` seed) is a one-time password. The account must choose its own at its next password sign-in. |
+| `max_age_days` | unset | A local password must be replaced after this many days. The age counts from the last change; passwords that existed before the lifecycle was introduced count from that upgrade. |
+
+Administrators edit the policy under **Admin → Users → Password policy**
+(`GET`/`PATCH /api/v1/admin/password-policy`). The sysadmin API may create an
+account with `password_change_required: false` when the password is meant to
+be permanent, for example for a service account.
+
+A password session that must replace its password still signs in, so the
+account can do exactly that. Every other endpoint answers `403` with error
+code `9070` (`password_change_required`) until the password has been replaced
+through `POST /api/v1/users/me/password/`, which stays reachable together with
+`GET /api/v1/users/me/`, the password policy and session invalidation.
+`GET /api/v1/users/me/` reports the state as `password_status`:
+`change_required`, the `reason` (`admin_set` or `expired`), `changed_at` and
+`expires_at`. The web app sends such a session to `/password-change`, where the
+user enters the one-time or expired password as the current password. The
+change bumps the credential version, so the user signs in again with the new
+password. API keys are separate credentials with their own policy and are not
+affected.
 
 ### Signed State Token
 
