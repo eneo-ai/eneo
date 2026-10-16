@@ -23,7 +23,11 @@ it.each([
   "java\tscript:alert(1)",
   "data:text/html,x",
   "mailto:registrator@kommun.se",
-  "/spaces/1/settings"
+  "/spaces/1/settings",
+  "https:/spaces/1/settings",
+  "https:settings",
+  "ht tps://kommun.se/riktlinje",
+  "https://"
 ])("renders a citation to %j without a link", (url) => {
   const { body } = render(Markdown, {
     props: { source: 'Se <inref id="aaaaaaaa"/>', references: [reference("aaaaaaaa-1", url)] }

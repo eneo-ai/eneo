@@ -39,8 +39,6 @@ export function sanitizeLinkHref(href: string | null | undefined): string | unde
   return SAFE_LINK_SCHEMES.has(match[1]) ? href : undefined;
 }
 
-const WEB_LINK_SCHEMES = new Set(["http", "https"]);
-
 /**
  * Returns `href` when it is an absolute http(s) URL, otherwise `undefined`.
  *
@@ -49,9 +47,17 @@ const WEB_LINK_SCHEMES = new Set(["http", "https"]);
  * relative or a mail or phone link, and whoever stored it chose the value.
  */
 export function sanitizeWebHref(href: string | null | undefined): string | undefined {
-  if (!href) return undefined;
-  const match = SCHEME_RE.exec(normalizeForSchemeCheck(href));
-  return match && WEB_LINK_SCHEMES.has(match[1]) ? href : undefined;
+  // Require an authority in the original string: `https:settings` and
+  // `https:/settings` otherwise resolve relative to the current HTTPS page.
+  // Removing spaces/control characters here could also approve a different URL.
+  if (!href || !/^https?:\/\//i.test(href)) return undefined;
+  try {
+    // The prefix alone does not reject a missing/invalid host or an invalid port.
+    new URL(href);
+    return href;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

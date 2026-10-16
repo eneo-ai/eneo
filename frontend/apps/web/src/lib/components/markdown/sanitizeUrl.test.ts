@@ -5,9 +5,14 @@ describe("sanitizeWebHref", () => {
   it.each([
     "https://kommun.se/riktlinje",
     "http://intranat.kommun.local/sida",
-    "HTTPS://KOMMUN.SE"
+    "HTTPS://KOMMUN.SE",
+    "https://kommun.se/riktlinje?q=a%20b#avsnitt",
+    "https://räksmörgås.se/riktlinje",
+    "http://[::1]:8080/riktlinje"
   ])("keeps the http(s) address %j", (href) => {
     expect(sanitizeWebHref(href)).toBe(href);
+    // Accepted source links must resolve independently of the current page.
+    expect(new URL(href, "https://eneo.example/conversations/123").href).toBe(new URL(href).href);
   });
 
   it.each([
@@ -21,6 +26,15 @@ describe("sanitizeWebHref", () => {
     "/spaces/1/settings",
     "//annan.example/sida",
     "riktlinje.pdf",
+    "https:/spaces/1/settings",
+    "https:settings",
+    "http:settings",
+    "ht tps://kommun.se/riktlinje",
+    "ht\u0000tps://kommun.se/riktlinje",
+    "https://",
+    "https://kommun se/riktlinje",
+    "https://[invalid]/riktlinje",
+    "https://kommun.se:99999/riktlinje",
     "",
     null,
     undefined

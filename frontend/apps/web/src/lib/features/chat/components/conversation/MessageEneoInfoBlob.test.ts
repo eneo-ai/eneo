@@ -43,7 +43,11 @@ it.each([
   "JaVaScRiPt:alert(1)",
   "vbscript:msgbox(1)",
   "mailto:registrator@kommun.se",
-  "//annan.example/sida"
+  "//annan.example/sida",
+  "https:/spaces/1/settings",
+  "https:settings",
+  "ht tps://kommun.se/riktlinje",
+  "https://"
 ])("previews a citation to %j instead of linking it", (url) => {
   const body = citation(url);
 
