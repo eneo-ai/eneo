@@ -200,7 +200,9 @@
   }
 </script>
 
-<div bind:this={mount} class="document-editor"></div>
+<!-- Positioned, so the quote action placed in it moves with the text when the
+     panel scrolls, whatever is positioned outside the scroller. -->
+<div bind:this={mount} class="document-editor relative"></div>
 <!-- Placed by the editor over the selection; hidden until there is one. -->
 <div bind:this={menu} class="z-30" style:visibility="hidden">
   {#if onquote}
