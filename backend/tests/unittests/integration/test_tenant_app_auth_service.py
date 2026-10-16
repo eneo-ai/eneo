@@ -380,8 +380,7 @@ async def test_test_credentials_network_error(service, mock_tenant_app):
 
         # Assert
         assert success is False
-        assert error is not None
-        assert "Connection failed" in error
+        assert error == "Connection error"
 
 
 async def test_invalid_credentials_raises_error(service, mock_tenant_app):

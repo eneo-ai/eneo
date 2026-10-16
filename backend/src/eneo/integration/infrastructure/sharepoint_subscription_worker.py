@@ -16,6 +16,7 @@ from eneo.integration.infrastructure.content_service.sharepoint_content_service 
 )
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 from eneo.worker.worker import Worker
 
 if TYPE_CHECKING:
@@ -217,7 +218,9 @@ async def renew_expiring_subscriptions(container: Container):
                 # rather than counted a second time.
                 await persist_renewal_failure(subscription, container)
             else:
-                await record_renewal_failure(subscription, container, str(exc))
+                await record_renewal_failure(
+                    subscription, container, user_visible_error(exc)
+                )
             failed_count += 1
 
     logger.info(

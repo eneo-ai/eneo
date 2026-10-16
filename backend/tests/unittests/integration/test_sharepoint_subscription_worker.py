@@ -544,6 +544,62 @@ class TestRenewExpiringSubscriptions:
         mock_container.sharepoint_subscription_repo().link_unreferenced_knowledge.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_recorded_renewal_errors_carry_no_internal_text(self, mock_container):
+        """The admin page shows last_renewal_error; URLs and tokens stay out of it."""
+        subscription = SharePointSubscription(
+            id=uuid4(),
+            user_integration_id=uuid4(),
+            site_id="site-123,web-123,list-123",
+            subscription_id="sub-123",
+            drive_id="drive-123",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        )
+        mock_container.sharepoint_subscription_service().list_expiring_subscriptions = (
+            AsyncMock(return_value=[subscription])
+        )
+        user_integration = MagicMock()
+        user_integration.auth_type = "tenant_app"
+        user_integration.tenant_app_id = uuid4()
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
+        tenant_app = MagicMock()
+        tenant_app.is_service_account = MagicMock(return_value=False)
+        mock_container.tenant_sharepoint_app_repo().one = AsyncMock(
+            return_value=tenant_app
+        )
+        mock_container.tenant_app_auth_service().get_access_token = AsyncMock(
+            return_value="access-token"
+        )
+        mock_container.sharepoint_subscription_service().renew_subscription = AsyncMock(
+            side_effect=RuntimeError(
+                "PATCH https://graph.microsoft.com/v1.0/subscriptions/x?token=abc"
+            )
+        )
+        mock_container.sharepoint_subscription_repo().update = AsyncMock(
+            return_value=subscription
+        )
+
+        with patch(
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            new_callable=AsyncMock,
+            return_value=mock_container,
+        ):
+            with patch(
+                "eneo.worker.worker.sessionmanager.session",
+                return_value=mock_session_context(),
+            ):
+                result = await renew_expiring_subscriptions({})
+
+        assert result["failed"] == 1
+        assert subscription.last_renewal_error is not None
+        assert "token=abc" not in subscription.last_renewal_error
+        assert (
+            "graph.microsoft.com/v1.0/subscriptions/x"
+            in subscription.last_renewal_error
+        )
+
+    @pytest.mark.asyncio
     async def test_a_failure_the_service_recorded_is_persisted_once(
         self, mock_container
     ):

@@ -6,6 +6,7 @@ from typing import Optional
 import httpx
 
 from eneo.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
+from eneo.observability.error_text import user_visible_error
 
 logger = logging.getLogger(__name__)
 
@@ -176,9 +177,8 @@ class TenantAppAuthService:
             logger.error(f"Credentials test failed for app {app.id}: {error_msg}")
             return (False, error_msg)
         except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Credentials test failed for app {app.id}: {error_msg}")
-            return (False, error_msg)
+            logger.error(f"Credentials test failed for app {app.id}: {e}")
+            return (False, user_visible_error(e))
 
     def clear_cache(self, app_id: str) -> None:
         """Clear cached token for an app."""

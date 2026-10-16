@@ -26,6 +26,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 from eneo.roles.permissions import Permission
 from eneo.spaces.space_repo import INTEGRATION_KNOWLEDGE_SOURCE
 
@@ -425,7 +426,7 @@ class IntegrationKnowledgeService:
                         knowledge=None,
                         integration_knowledge_id=None,
                         job=None,
-                        error=str(exc),
+                        error=user_visible_error(exc),
                     )
                 )
 

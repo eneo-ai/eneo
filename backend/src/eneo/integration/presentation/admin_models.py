@@ -78,6 +78,12 @@ class TenantSharePointAppPublic(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Failures stored before credential errors were cleaned may hold URLs or host names.
+    @field_validator("last_auth_error")
+    @classmethod
+    def _clean_auth_error(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else user_visible_error(value)
+
     model_config = ConfigDict(from_attributes=True)
 
 

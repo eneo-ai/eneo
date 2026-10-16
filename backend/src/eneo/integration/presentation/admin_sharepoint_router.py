@@ -396,11 +396,11 @@ async def configure_sharepoint_app(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Failed to configure SharePoint app: {e}")
+    except Exception:
+        logger.error("Failed to configure SharePoint app", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to configure SharePoint app: {str(e)}",
+            detail="Failed to configure SharePoint app",
         )
 
 
@@ -447,11 +447,11 @@ async def get_sharepoint_app(
 
         return _to_app_public(app, encryption_service)
 
-    except Exception as e:
-        logger.error(f"Failed to get SharePoint app: {e}")
+    except Exception:
+        logger.error("Failed to get SharePoint app", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get SharePoint app: {str(e)}",
+            detail="Failed to get SharePoint app",
         )
 
 
@@ -641,11 +641,11 @@ async def delete_sharepoint_app(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Failed to delete SharePoint app: {e}", exc_info=True)
+    except Exception:
+        logger.error("Failed to delete SharePoint app", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete SharePoint app: {str(e)}",
+            detail="Failed to delete SharePoint app",
         )
 
 
@@ -725,11 +725,11 @@ async def list_sharepoint_subscriptions(
 
         return result
 
-    except Exception as e:
-        logger.error(f"Failed to list SharePoint subscriptions: {e}")
+    except Exception:
+        logger.error("Failed to list SharePoint subscriptions", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list SharePoint subscriptions: {str(e)}",
+            detail="Failed to list SharePoint subscriptions",
         )
 
 
@@ -804,9 +804,15 @@ async def renew_expired_subscriptions(
                         container=container,
                     )
                 except Exception as token_error:
-                    error_msg = f"Failed to resolve token for subscription {sub.id}: {token_error}"
-                    logger.error(error_msg)
-                    errors.append(error_msg)
+                    logger.error(
+                        "Failed to resolve token for subscription %s: %s",
+                        sub.id,
+                        token_error,
+                    )
+                    errors.append(
+                        f"Failed to resolve token for subscription {sub.id}: "
+                        f"{user_visible_error(token_error)}"
+                    )
                     failed += 1
                     continue
 
@@ -828,7 +834,7 @@ async def renew_expired_subscriptions(
                     f"Error recreating subscription {sub.id}: {exc}", exc_info=True
                 )
                 failed += 1
-                errors.append(f"Subscription {sub.id}: {str(exc)}")
+                errors.append(f"Subscription {sub.id}: {user_visible_error(exc)}")
 
         result = SubscriptionRenewalResult(
             total_subscriptions=len(all_subscriptions),
@@ -845,14 +851,11 @@ async def renew_expired_subscriptions(
 
         return result
 
-    except Exception as e:
-        logger.error(
-            f"Failed to renew expired subscriptions: {e}",
-            exc_info=True,  # This logs the full stack trace
-        )
+    except Exception:
+        logger.error("Failed to renew expired subscriptions", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to renew expired subscriptions: {str(e)}",
+            detail="Failed to renew expired subscriptions",
         )
 
 
@@ -930,7 +933,7 @@ async def recreate_all_subscriptions(
                 f"Error recreating subscription {sub.id}: {exc}", exc_info=True
             )
             failed += 1
-            errors.append(f"Subscription {sub.id}: {exc}")
+            errors.append(f"Subscription {sub.id}: {user_visible_error(exc)}")
 
     return SubscriptionRenewalResult(
         total_subscriptions=len(subscriptions),
@@ -1017,7 +1020,7 @@ async def recreate_subscription(
             )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to get access token: {token_error}",
+                detail=f"Failed to get access token: {user_visible_error(token_error)}",
             )
 
         # Recreate subscription
@@ -1053,14 +1056,13 @@ async def recreate_subscription(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.error(
-            f"Failed to recreate subscription {subscription_id}: {e}",
-            exc_info=True,  # This logs the full stack trace
+            "Failed to recreate subscription %s", subscription_id, exc_info=True
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to recreate subscription: {str(e)}",
+            detail="Failed to recreate subscription",
         )
 
 
@@ -1145,11 +1147,11 @@ async def start_service_account_auth(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Failed to start service account OAuth: {e}")
+    except Exception:
+        logger.error("Failed to start service account OAuth", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start service account OAuth: {str(e)}",
+            detail="Failed to start service account OAuth",
         )
 
 
@@ -1403,9 +1405,9 @@ async def service_account_auth_callback(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Failed to complete service account OAuth: {e}", exc_info=True)
+    except Exception:
+        logger.error("Failed to complete service account OAuth", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to complete service account OAuth: {str(e)}",
+            detail="Failed to complete service account OAuth",
         )
