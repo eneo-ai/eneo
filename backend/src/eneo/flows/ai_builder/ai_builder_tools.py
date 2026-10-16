@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Literal, NotRequired, TypedDict, cast
@@ -74,7 +75,10 @@ def build_propose_flow_tool_schema(
     review_scope: "ReviewEditScope | None" = None,
     permissions: "EditOperationPermissions | None" = None,
     structured_review_mode: FlowStepReviewMode | None = None,
+    tool_refs: Sequence[str] = (),
 ) -> ProposalToolSchema:
+    """``tool_refs`` are the tools a step may read (``tool_use``); none
+    leaves the property out."""
     if current_steps is None:
         return cast(
             ProposalToolSchema,
@@ -84,6 +88,7 @@ def build_propose_flow_tool_schema(
                 is_pure_audio_transcription=is_pure_audio_transcription,
                 confirmed_runtime_inputs=confirmed_runtime_inputs,
                 structured_review_mode=structured_review_mode,
+                tool_refs=tool_refs,
             ),
         )
     return cast(
@@ -94,6 +99,7 @@ def build_propose_flow_tool_schema(
             tool_name=PROPOSE_FLOW_TOOL_NAME,
             review_scope=review_scope,
             permissions=permissions,
+            tool_refs=tool_refs,
         ),
     )
 

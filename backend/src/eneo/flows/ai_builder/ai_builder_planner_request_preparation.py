@@ -654,9 +654,7 @@ def build_proposal_prepared(
         raise UnsupportedSavedStepsError(unsupported)
     review_scope = review_edit_scope_for_turn(conversation)
     if flow is not None:
-        _refuse_turns_on_unchangeable_steps(
-            flow, targets=_targeted_step_refs(plan_edit_context, review_scope)
-        )
+        _refuse_unusable_tool_configurations(flow)
     if flow is not None:
         refuse_ambiguous_structured_review_baseline(
             flow.steps, planning_state.checkpoint_intents
@@ -748,19 +746,26 @@ def build_proposal_prepared(
         if is_pure_audio_transcription
         else structured_result_review_mode(planning_state.checkpoint_intents)
     )
-    proposal_tool_schema = build_propose_flow_tool_schema(
-        current_steps=None if flow is None else list(flow.steps),
-        resource_catalog=resource_catalog,
-        is_pure_audio_transcription=is_pure_audio_transcription,
-        review_scope=review_scope if saved_step_permissions is None else None,
-        permissions=saved_step_permissions,
-        confirmed_runtime_inputs=(
-            compile_context.confirmed_runtime_input_requirements
-            if compile_context is not None and not is_edit_mode
-            else ()
-        ),
-        structured_review_mode=structured_review_mode,
-    )
+
+    def proposal_schema(tool_refs: tuple[str, ...]) -> ProposalToolSchema:
+        return build_propose_flow_tool_schema(
+            current_steps=None if flow is None else list(flow.steps),
+            resource_catalog=resource_catalog,
+            is_pure_audio_transcription=is_pure_audio_transcription,
+            review_scope=review_scope if saved_step_permissions is None else None,
+            permissions=saved_step_permissions,
+            confirmed_runtime_inputs=(
+                compile_context.confirmed_runtime_input_requirements
+                if compile_context is not None and not is_edit_mode
+                else ()
+            ),
+            structured_review_mode=structured_review_mode,
+            tool_refs=tool_refs,
+        )
+
+    # Every tool the catalogue could list: the request is planned with the
+    # largest schema, and narrowed to the fitted list below.
+    proposal_tool_schema = proposal_schema(resource_catalog.tools.listed_refs)
     # A review-backed proposal carries run excerpts: the tenant's review-evidence
     # cap bounds this whole request (prompt, attachments, conversation, tools)
     # through the one budget every later step and the provider boundary use.
@@ -974,6 +979,19 @@ def build_proposal_prepared(
         fitted_review_evidence,
         fitted_tool_catalog,
     )
+    turn_tool_catalog = replace(resource_catalog.tools, projection=fitted_tool_catalog)
+    if flow is not None:
+        # Decided on the fitted catalogue: the tools the prompt names are the
+        # only ones a step's tool use may name.
+        _refuse_turns_only_on_tool_steps(
+            flow,
+            targets=_targeted_step_refs(plan_edit_context, review_scope),
+            tools_named=bool(turn_tool_catalog.listed_refs),
+        )
+    if turn_tool_catalog.listed_refs != resource_catalog.tools.listed_refs:
+        # A step names only a tool the prompt shows; a ref the fit cut would
+        # name a tool the model never saw.
+        proposal_tool_schema = proposal_schema(turn_tool_catalog.listed_refs)
     prepared_prompt = _prepare_prompt_messages(
         conversation=conversation,
         system_prompt=proposal_system_prompt,
@@ -1018,13 +1036,7 @@ def build_proposal_prepared(
         system_prompt_hash=prepared_prompt.system_prompt_hash,
         plan_edit_context=plan_edit_context,
         prior_spec_for_revision=prior_spec_for_revision,
-        resource_catalog=replace(
-            resource_catalog,
-            tools=replace(
-                resource_catalog.tools,
-                projection=fitted_tool_catalog,
-            ),
-        ),
+        resource_catalog=replace(resource_catalog, tools=turn_tool_catalog),
         planning_state=planning_state,
         compile_context=compile_context,
         proposal_tool_schema=proposal_tool_schema,
@@ -1052,31 +1064,38 @@ def _targeted_step_refs(
     return frozenset(targets)
 
 
-def _refuse_turns_on_unchangeable_steps(
-    flow: "Flow", *, targets: frozenset[str]
-) -> None:
-    """Answer, before any proposal is paid for, a turn the Builder cannot serve
-    because of a step it carries but may not change (a tool step): the turn
-    targets only such steps, or one of them holds a tool configuration that
-    cannot be used, which only a change to that step could fix. A read of
-    another step that no longer fits is left to validation of the edited flow:
-    an edit of the producer can repair it."""
+def _refuse_unusable_tool_configurations(flow: "Flow") -> None:
+    """Answer, before any proposal is paid for, a turn on a flow one of whose
+    tool steps holds a tool configuration that cannot be used: only a change
+    to that step could fix it, and an edit changes a tool step only through
+    its tool use. A read of another step that no longer fits is left to
+    validation of the edited flow: an edit of the producer can repair it."""
 
-    kept = unchangeable_saved_steps(flow.steps)
-    if not kept:
-        return
-    kept_refs = {step.existing_step_ref for step in kept}
-    if targets and targets <= kept_refs:
-        raise UnsupportedSavedStepsError(
-            [step for step in kept if step.existing_step_ref in targets]
-        )
     by_order = {step.step_order: step for step in flow.steps}
     if blocked := [
         step
-        for step in kept
+        for step in unchangeable_saved_steps(flow.steps)
         if not _tool_configuration_usable(by_order[step.step_order])
     ]:
         raise UnsupportedSavedStepsError(blocked)
+
+
+def _refuse_turns_only_on_tool_steps(
+    flow: "Flow", *, targets: frozenset[str], tools_named: bool
+) -> None:
+    """Answer, before any proposal is paid for, a turn that targets only tool
+    steps while its prompt names no tool: such a step changes only through
+    its tool use, which then has no tool to name."""
+
+    kept = unchangeable_saved_steps(flow.steps)
+    if (
+        targets
+        and targets <= {step.existing_step_ref for step in kept}
+        and not tools_named
+    ):
+        raise UnsupportedSavedStepsError(
+            [step for step in kept if step.existing_step_ref in targets]
+        )
 
 
 def _tool_configuration_usable(step: "FlowStep") -> bool:

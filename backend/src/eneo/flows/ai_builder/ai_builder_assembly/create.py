@@ -75,6 +75,14 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     structured_fields_have_document_items,
     structured_fields_have_source_leaf,
 )
+from eneo.flows.ai_builder.ai_builder_tool_catalog import (
+    EMPTY_TOOL_CATALOG,
+    AIBuilderToolCatalog,
+)
+from eneo.flows.ai_builder.ai_builder_tool_use import (
+    BoundToolUse,
+    require_bound_tool_use,
+)
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     ConfirmedRuntimeMetadataField,
@@ -139,6 +147,7 @@ CreateAssemblyRejectionReason = Literal[
     "structured_review_target_ambiguous",
     "terminal_schema_requires_json_terminal",
     "structured_fan_in_exceeds_limit",
+    "tool_step_shape_unsupported",
     "unsupported_aggregation_intent",
     "unsupported_architecture_hints",
     "unsupported_final_output_type",
@@ -148,6 +157,10 @@ CreateAssemblyRejectionReason = Literal[
 ]
 
 _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
+    "tool_step_shape_unsupported": (
+        "A flow that fills a DOCX template or only transcribes audio has no "
+        "step that reads an MCP tool: set tool_use to null on every step."
+    ),
     "structured_review_target_ambiguous": (
         "Several steps produce structured results. Set review_mode on exactly "
         "the one whose result the person reviews."
@@ -274,6 +287,7 @@ _REJECTION_REPAIR_DISPOSITION: dict[
     "structured_review_target_ambiguous": "model_correctable",
     "terminal_schema_requires_json_terminal": "user_action",
     "structured_fan_in_exceeds_limit": "model_correctable",
+    "tool_step_shape_unsupported": "model_correctable",
     "unsupported_aggregation_intent": "user_action",
     "unsupported_architecture_hints": "user_action",
     "unsupported_final_output_type": "user_action",
@@ -353,6 +367,7 @@ def try_compile_create_intent_with_assembly(
     field_diagnostics: list[LintWarning] | None = None,
     speaker_naming_review: bool = False,
     inferred_structured_review: FlowStepReviewMode | None = None,
+    tool_catalog: AIBuilderToolCatalog = EMPTY_TOOL_CATALOG,
 ) -> FlowDraftSpecCore | CreateAssemblyRejection:
     if inferred_structured_review is not None:
         # The plan declared no reviewed step: each authored step offers the
@@ -391,6 +406,7 @@ def try_compile_create_intent_with_assembly(
             field_provenance=field_provenance,
             field_diagnostics=field_diagnostics,
             speaker_naming_review=speaker_naming_review,
+            tool_catalog=tool_catalog,
         )
         if isinstance(plan, CreateAssemblyRejection):
             return plan
@@ -445,6 +461,7 @@ def _assemble_create_intent(
     field_provenance: dict[str, FlowInputFieldProvenance] | None = None,
     field_diagnostics: list[LintWarning] | None = None,
     speaker_naming_review: bool = False,
+    tool_catalog: AIBuilderToolCatalog = EMPTY_TOOL_CATALOG,
 ) -> FlowAssemblyPlan | CreateAssemblyRejection:
     if runtime_input_type == InputType.JSON and final_output_type == OutputType.TEXT:
         return _reject("unsupported_runtime_output_tuple")
@@ -492,6 +509,10 @@ def _assemble_create_intent(
     )
     if final_output_mode == OutputMode.TEMPLATE_FILL and not template_fill_requested:
         return _reject("invalid_template_fill_mode")
+    if (template_fill_requested or is_pure_audio_transcription) and any(
+        step.tool_use is not None for step in intent.steps
+    ):
+        return _reject("tool_step_shape_unsupported")
     if terminal_output_schema is not None and (
         document_artifact_requested or final_output_type != OutputType.JSON
     ):
@@ -625,6 +646,24 @@ def _assemble_create_intent(
         )
         if step_output_type is None:
             return _reject("step_output_type_mismatch", step_index=index + 1)
+        if semantic_step.tool_use is not None:
+            planned_steps.append(
+                _planned_tool_step(
+                    semantic_step,
+                    tool_use=require_bound_tool_use(
+                        semantic_step.tool_use, tool_catalog
+                    ),
+                    output_type=step_output_type,
+                    output_mode=semantic_output_mode,
+                    role=_linear_step_role(
+                        output_type=step_output_type,
+                        is_terminal=is_terminal_semantic_step,
+                        document_artifact_requested=document_artifact_requested,
+                    ),
+                )
+            )
+            previous_output_type = step_output_type
+            continue
         if (
             index == 0
             and runtime_input_type in _FILE_INPUT_TYPES
@@ -1604,9 +1643,15 @@ def _place_runtime_form_fields(
         [read.field_name for read in step.declared_form_field_reads]
         for step in planned_steps
     ]
+    # A field a tool argument reads is placed by that argument.
+    tool_read_names = {
+        name for step in planned_steps for name in step.tool_run_input_fields
+    }
     for field in form_fields:
         name = field.name
         record = runtime_fields_by_name.get(name)
+        if record is None and name in tool_read_names and name != main_text_name:
+            continue
         has_template_target = (
             name in template_names and template_target_index is not None
         )
@@ -1695,6 +1740,36 @@ def _declared_structured_review(
     never the structured result, so the declaration is lost there, not moved."""
 
     return step.review_mode if output_type is OutputType.JSON else None
+
+
+def _planned_tool_step(
+    semantic_step: SemanticStepIntent,
+    *,
+    tool_use: BoundToolUse,
+    output_type: OutputType,
+    output_mode: OutputMode,
+    role: PlannedStepRole,
+) -> PlannedStep:
+    """A step whose input is its tool's answer, as text: every answer a tool
+    gives a step reads as text (runtime/tool_input). It is no target of the
+    run form's fields, which reach a tool only through its arguments."""
+
+    return PlannedStep(
+        role=role,
+        name=semantic_step.name,
+        instructions=semantic_step.instructions,
+        input_source=InputSource.TOOL,
+        input_type=InputType.TEXT,
+        output_type=output_type,
+        output_mode=output_mode,
+        underlag_channel="tool",
+        proposal_steps=_proposal_steps(semantic_step),
+        output_fields=tuple(semantic_step.output_fields or ()),
+        knowledge_refs=tuple(semantic_step.knowledge_refs),
+        citations_requested=semantic_step.citations_requested,
+        review_mode=_declared_structured_review(semantic_step, output_type),
+        tool_use=tool_use,
+    )
 
 
 def _proposal_steps(step: SemanticStepIntent) -> tuple[int, ...]:

@@ -7,6 +7,7 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
+from eneo.flows.ai_builder.ai_builder_tool_use import BoundToolUse
 from eneo.flows.domain.flow import RuntimeInputExecutionMode
 from eneo.flows.flow_authoring_spec import (
     InputSource,
@@ -214,6 +215,8 @@ class NewStepDraft(BaseModel):
     citations_requested: bool = False
     review_mode: FlowStepReviewMode | None = None
     output_fields: list[StructuredFieldDraft] | None = None
+    # The MCP tool whose answer is the step's input (input_source tool).
+    tool_use: BoundToolUse | None = None
 
     @field_validator("name", "instructions")
     @classmethod

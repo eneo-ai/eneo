@@ -427,22 +427,43 @@ async def test_the_answer_becomes_the_input_the_step_declares_or_is_refused(
     assert len(caller.calls) == 1
 
 
-@pytest.mark.parametrize("value", [1.5, None], ids=["number", "null"])
+@pytest.mark.parametrize(
+    ("value", "required", "sent"),
+    [
+        pytest.param(1.5, [], True, id="number"),
+        pytest.param(None, ["q"], True, id="null-required"),
+        pytest.param(None, [], False, id="null-optional-left-out"),
+    ],
+)
 async def test_a_bound_argument_keeps_the_json_type_of_what_it_names(
-    user, value: object
+    user, value: object, required: list[str], sent: bool
 ) -> None:
-    # Kills the mutant that interpolates a reference as a template does: a
-    # list, a number or null would reach the tool as its text.
-    facts = _facts()
+    # Kills the mutant that interpolates a reference as a template does (a
+    # number or null would reach the tool as its text), and the one that
+    # sends null for an argument the tool does not require: a run-form field
+    # left empty would then fail every run whose schema takes no null.
+    facts = _facts(
+        input_schema={
+            "type": "object",
+            "properties": {"q": {"type": ["number", "null"]}},
+            "required": required,
+        }
+    )
     caller = _answered({"ok": True})
     executor = _tool_executor(user, _Facts(facts), caller)
     run = _running(user, {"v": value})
 
-    await _read(executor, _tool_step(facts, arguments={"q": "{{flow_input.v}}"}), run)
+    resolved = await _read(
+        executor, _tool_step(facts, arguments={"q": "{{flow_input.v}}"}), run
+    )
 
     (call,) = caller.calls
-    assert call["arguments"] == {"q": value}
-    assert type(call["arguments"]["q"]) is type(value)
+    assert call["arguments"] == ({"q": value} if sent else {})
+    assert type(call["arguments"].get("q")) is type(value)
+    assert [edge.binding_ref for edge in resolved.edges] == [
+        *(["tool.arguments.q:flow_input.v"] if sent else []),
+        "tool.answer",
+    ]
     assert call["tool_name"] == "lookup_case"
     assert call["server"] is facts.server
     assert call["max_answer_bytes"] == executor.max_inline_text_bytes

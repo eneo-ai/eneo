@@ -61,6 +61,7 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     SessionPlansResponse,
     SessionResponse,
     SessionTelemetrySummary,
+    SessionToolsResponse,
 )
 from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyResultResponse as ApplyResult,
@@ -2016,6 +2017,67 @@ async def detach_session_attachment(
     )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/sessions/{session_id}/tools",
+    response_model=SessionToolsResponse,
+    operation_id="get_ai_builder_tools",
+    summary="List Session Tools",
+    description=(
+        "Return every MCP tool of the session's space with the ref the Builder "
+        "names it by, its server's and its own name, the approved description, "
+        "the server's classification level and why a flow cannot use it, if it "
+        "cannot. No server address or credential is returned. A space with more "
+        "tools than a list may hold returns none, with `over_bound` true."
+    ),
+    responses={
+        200: {"description": "The space's MCP tools as the Builder names them."},
+        **_ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for this session.",
+            message="API key space scope does not match requested AI builder resource.",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
+            details={"auth_layer": "api_key_scope"},
+        ),
+        **_ai_builder_error_response(
+            description="AI Builder session not found.",
+            message="AI Builder session not found.",
+            code=AIBuilderErrorCode.NOT_FOUND,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.BUILDER_TOOLS_LIST),
+)
+async def get_session_tools(
+    request: Request,
+    session_id: Annotated[
+        UUID,
+        Path(
+            description="Identifier of the AI Builder session whose space's tools should be listed."
+        ),
+    ],
+    container: ContainerWithUserDep,
+) -> SessionToolsResponse:
+    """Return the space's MCP tools with their Builder refs."""
+    service = container.ai_builder_service()
+    session: BuilderSession = await service.get_session(session_id)
+    # The same grant as a turn: the user may edit flows in the space.
+    await _authorize_ai_builder_request(
+        request,
+        container,
+        action=FlowApiAction.BUILDER_TOOLS_LIST,
+        space_id=session.space_id,
+        session=session,
+        require_creator=True,
+    )
+    return SessionToolsResponse.from_space_tool_options(
+        await container.flow_service().list_space_tool_options(
+            space_id=session.space_id
+        )
+    )
 
 
 @router.get(

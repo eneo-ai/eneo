@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -26,6 +27,7 @@ from eneo.flows.domain.tool_input import (
     read_tool_input_config,
     required_tool_arguments,
     tool_input_schema_sha256,
+    undeclared_tool_arguments,
 )
 from eneo.flows.domain.tool_input_validation import (
     invalid_tool_config,
@@ -171,10 +173,10 @@ async def pin_tool_steps(
     is not a valid JSON Schema of a draft Eneo supports
     (``typed_io_tool_invalid_schema``), or that
     gives no value for an argument the schema's top-level ``required`` names,
-    or a fixed value that the schema's top-level ``properties`` refuses for
-    its argument where publish judges it
-    (``_refuse_fixed_argument_outside_schema``; both
-    ``typed_io_tool_invalid_config``). The steps have
+    gives an argument whose name the schema refuses, or a fixed value that
+    the schema's top-level ``properties`` refuses for its argument where
+    publish judges it
+    (``check_tool_configuration``; each ``typed_io_tool_invalid_config``). The steps have
     passed the graph check, so each tool configuration reads.
     """
     pins: dict[int, PublishedToolInputConfig] = {}
@@ -194,16 +196,14 @@ async def pin_tool_steps(
             )
         ).tool
         fingerprint = tool_input_schema_sha256(tool.input_schema)
-        if tool.input_schema is not None and fingerprint not in checked:
-            # CPU-bound, and its time grows with the schema: off the event
-            # loop, so other requests are served while it runs, and once for
-            # each schema of this publish, however many steps use it.
-            await asyncio.to_thread(
-                _refuse_invalid_tool_schema, step.step_order, tool.input_schema
-            )
-            checked.add(fingerprint)
-        _refuse_missing_required_argument(step.step_order, config, tool)
-        await _refuse_fixed_argument_outside_schema(step.step_order, config, tool)
+        finding = await check_tool_configuration(
+            config,
+            input_schema=tool.input_schema,
+            # Once for each schema of this publish, however many steps use it.
+            check_schema=fingerprint not in checked,
+        )
+        _refuse_for_finding(step.step_order, tool.name, finding)
+        checked.add(fingerprint)
         pins[step.step_order] = PublishedToolInputConfig(
             mcp_server_id=config.mcp_server_id,
             tool_id=config.tool_id,
@@ -214,17 +214,101 @@ async def pin_tool_steps(
     return pins
 
 
-def _refuse_invalid_tool_schema(
-    step_order: int, input_schema: dict[str, object]
-) -> None:
-    # A run checks the step's arguments against this schema before each call.
-    # With a schema that is no valid JSON Schema, or of a draft Eneo does not
-    # support, it could check none, so the tool is not pinned.
-    label = f"Step {step_order}: the tool's input schema"
+class ToolConfigurationProblem(StrEnum):
+    # The approved input schema is no valid JSON Schema of a draft Eneo
+    # supports: no run could check the tool's arguments.
+    INVALID_SCHEMA = "invalid_schema"
+    MISSING_REQUIRED = ToolArgumentProblem.MISSING_REQUIRED.value
+    UNDECLARED_ARGUMENT = ToolArgumentProblem.UNDECLARED_ARGUMENT.value
+    OUTSIDE_SCHEMA = ToolArgumentProblem.OUTSIDE_SCHEMA.value
+    # The checker of fixed values failed on the host, so nothing is proven.
+    UNVERIFIED = "unverified"
+
+
+@dataclass(frozen=True, slots=True)
+class ToolConfigurationFinding:
+    problem: ToolConfigurationProblem
+    argument: str | None = None
+    # The schema keyword an outside-schema value fails, when it is known.
+    rule: str | None = None
+
+
+async def check_tool_configuration(
+    config: ToolInputConfig,
+    *,
+    input_schema: dict[str, object] | None,
+    check_schema: bool = True,
+) -> ToolConfigurationFinding | None:
+    """The first problem of a tool step's configuration against the tool's
+    approved input schema, None when there is none: publish's checks, which
+    the AI Builder runs on a proposed tool step too.
+
+    In order: a schema that is no valid JSON Schema of a draft Eneo supports
+    (skipped with ``check_schema`` False, for a schema found valid before), an
+    argument the schema's top-level ``required`` names that the step does not
+    give, an argument whose name the schema refuses whatever its value
+    (``undeclared_tool_arguments``), then a fixed value the schema's
+    top-level ``properties`` refuses for its argument. A bound value is known only when the step runs, and is
+    checked then. When the checker of fixed values fails on the host the
+    finding is ``unverified``: nothing is proven either way.
+    """
+    if input_schema is not None and check_schema:
+        # CPU-bound, and its time grows with the schema: off the event loop,
+        # so other requests are served while it runs.
+        if await asyncio.to_thread(_schema_is_unevaluable, input_schema):
+            return ToolConfigurationFinding(ToolConfigurationProblem.INVALID_SCHEMA)
+    for name in required_tool_arguments(input_schema or {}):
+        if name not in config.arguments:
+            return ToolConfigurationFinding(
+                ToolConfigurationProblem.MISSING_REQUIRED, argument=name
+            )
+    if input_schema is None:
+        return None
+    if undeclared := undeclared_tool_arguments(input_schema, config.arguments):
+        return ToolConfigurationFinding(
+            ToolConfigurationProblem.UNDECLARED_ARGUMENT, argument=undeclared[0]
+        )
+    bound = {argument.name for argument in config.bound_arguments()}
+    fixed = {
+        name: value for name, value in config.arguments.items() if name not in bound
+    }
+    if not fixed:
+        return None
+    try:
+        outside = await check_fixed_tool_properties(fixed, input_schema)
+    except ToolArgumentCheckFailed:
+        # The checker logs the host fault.
+        return ToolConfigurationFinding(ToolConfigurationProblem.UNVERIFIED)
+    if not isinstance(outside, FixedPropertyViolation):
+        return None
+    return ToolConfigurationFinding(
+        ToolConfigurationProblem.OUTSIDE_SCHEMA,
+        argument=outside.argument,
+        rule=outside.violation.rule,
+    )
+
+
+def _schema_is_unevaluable(input_schema: dict[str, object]) -> bool:
+    label = "the tool's input schema"
     try:
         refuse_unknown_dialect(input_schema, label=label)
         refuse_unevaluable_contract(input_schema, label=label)
     except ContractUnevaluable:
+        return True
+    return False
+
+
+def _refuse_for_finding(
+    step_order: int, tool_name: str, finding: ToolConfigurationFinding | None
+) -> None:
+    """Publish's refusal for a finding. Publishing proves no violation when
+    the checker failed; the run still checks the full arguments before making
+    a tool call."""
+    if finding is None or finding.problem is ToolConfigurationProblem.UNVERIFIED:
+        return
+    if finding.problem is ToolConfigurationProblem.INVALID_SCHEMA:
+        # A run checks the step's arguments against this schema before each
+        # call; with a schema it cannot evaluate it could check none.
         raise FlowStepValidationError(
             f"Step {step_order}: the input schema the MCP server gives for the "
             "tool is not a valid JSON Schema, or of a draft Eneo does not "
@@ -233,64 +317,33 @@ def _refuse_invalid_tool_schema(
             step_order=step_order,
             code=FlowApiErrorCode.TYPED_IO_TOOL_INVALID_SCHEMA,
             context={"step_order": step_order},
-        ) from None
-
-
-def _refuse_missing_required_argument(
-    step_order: int, config: ToolInputConfig, tool: MCPServerTool
-) -> None:
-    # A run checks the whole arguments object against the schema before each
-    # call. That an argument the schema requires is absent is already known
-    # here, whatever a bound argument will hold: every run would fail on it.
-    for name in required_tool_arguments(tool.input_schema or {}):
-        if name not in config.arguments:
-            raise invalid_tool_config(
-                f"Step {step_order}: tool '{tool.name}' requires the argument "
-                f"'{name}', which the step does not give.",
-                step_order=step_order,
-                context={
-                    "step_order": step_order,
-                    **tool_argument_context(
-                        name, ToolArgumentProblem.MISSING_REQUIRED.value
-                    ),
-                },
-            )
-
-
-async def _refuse_fixed_argument_outside_schema(
-    step_order: int, config: ToolInputConfig, tool: MCPServerTool
-) -> None:
-    # A fixed value is the same at every run, so a value that its property's
-    # schema refuses fails every run's argument check. A bound value is known
-    # only when the step runs, and is checked then.
-    if tool.input_schema is None:
-        return
-    bound = {argument.name for argument in config.bound_arguments()}
-    fixed = {
-        name: value for name, value in config.arguments.items() if name not in bound
-    }
-    if not fixed:
-        return
-    try:
-        outside = await check_fixed_tool_properties(fixed, tool.input_schema)
-    except ToolArgumentCheckFailed:
-        # The checker logs the host fault. Publishing proves no violation;
-        # the run still checks the full arguments before making a tool call.
-        return
-    if not isinstance(outside, FixedPropertyViolation):
-        return
-    rule = (
-        "" if outside.violation.rule is None else f" (rule '{outside.violation.rule}')"
-    )
+        )
+    argument = finding.argument or ""
+    if finding.problem is ToolConfigurationProblem.MISSING_REQUIRED:
+        # Every run would fail on it, whatever a bound argument will hold.
+        message = (
+            f"Step {step_order}: tool '{tool_name}' requires the argument "
+            f"'{argument}', which the step does not give."
+        )
+    elif finding.problem is ToolConfigurationProblem.UNDECLARED_ARGUMENT:
+        # Every run would fail on its name, whatever its value.
+        message = (
+            f"Step {step_order}: the input schema of tool '{tool_name}' "
+            f"declares no argument '{argument}' and takes no other."
+        )
+    else:
+        # A fixed value is the same at every run, so every run would fail.
+        rule = "" if finding.rule is None else f" (rule '{finding.rule}')"
+        message = (
+            f"Step {step_order}: the fixed value of argument '{argument}' does "
+            f"not fit the input schema of tool '{tool_name}'{rule}."
+        )
     raise invalid_tool_config(
-        f"Step {step_order}: the fixed value of argument '{outside.argument}' does "
-        f"not fit the input schema of tool '{tool.name}'{rule}.",
+        message,
         step_order=step_order,
         context={
             "step_order": step_order,
-            **tool_argument_context(
-                outside.argument, ToolArgumentProblem.OUTSIDE_SCHEMA.value
-            ),
+            **tool_argument_context(argument, finding.problem.value),
         },
     )
 

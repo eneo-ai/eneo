@@ -15,6 +15,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     MAX_DIAGNOSTIC_NAMES,
     BoundedListing,
     CorrectableFailure,
+    ProposalAnswer,
     display_value,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -29,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     disambiguate_ai_builder_step_names,
     normalize_ai_builder_spec,
 )
+from eneo.flows.ai_builder.ai_builder_tool_validation import check_written_tool_steps
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.flow_authoring_spec import (
@@ -46,9 +48,12 @@ class PreparedCompiledSpecResult:
     spec: FlowDraftSpecCore | None
     validation: SpecValidationResult | None
     failure_feedback: str | None = None
+    # The turn's answer when a tool step it wrote uses a tool no flow can
+    # check: the person's to change, not the model's.
+    answer: ProposalAnswer | None = None
 
 
-def prepare_compiled_spec_for_session(
+async def prepare_compiled_spec_for_session(
     *,
     spec: FlowDraftSpecCore,
     target_kind: TargetKind,
@@ -95,11 +100,28 @@ def prepare_compiled_spec_for_session(
             step_ref=step.plan_step_ref,
             code="kept_step_read_retargeted",
             message=(
-                f"Step '{step.name}' reads an MCP tool and stays as saved, but this "
-                "edit makes one of its arguments name another step. Keep the step "
-                "it reads, under the same name, before it."
+                f"Step '{step.name}' reads an MCP tool, and an edit changes "
+                "nothing of it but its tool use, but this edit makes one of its "
+                "saved reads (an argument or its instructions) name another "
+                "step. Keep the step it reads, under the same name, before it."
             ),
         )
+    if resource_catalog is not None:
+        # On the final spec, after the kept steps are restored: only the tool
+        # steps this turn wrote are judged (a kept one was published before).
+        answer = await check_written_tool_steps(
+            prepared_spec,
+            written=lambda step: (
+                mutation_scope is None or not mutation_scope.is_protected(step)
+            ),
+            catalog=resource_catalog.tools,
+            validation=validation,
+            ui_language=ui_language,
+        )
+        if answer is not None:
+            return PreparedCompiledSpecResult(
+                spec=None, validation=validation, answer=answer
+            )
     _enforce_terminal_output_alignment(
         validation=validation,
         spec=prepared_spec,

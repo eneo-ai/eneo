@@ -526,6 +526,58 @@ def test_only_a_top_level_list_of_names_is_read_as_required_arguments(
     assert required_tool_arguments(input_schema) == names
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("top", "refused"),
+    [
+        pytest.param({"additionalProperties": False}, True, id="closed"),
+        pytest.param({}, False, id="open"),
+        pytest.param(
+            {"additionalProperties": False, "patternProperties": {"^l": {}}},
+            False,
+            id="pattern-left-to-run",
+        ),
+        pytest.param(
+            {
+                "additionalProperties": False,
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "$ref": "#/definitions/args",
+                "definitions": {"args": {"type": "object"}},
+            },
+            False,
+            id="draft-07-ref-stands-for-the-whole-schema",
+        ),
+    ],
+)
+async def test_publish_refuses_an_argument_a_closed_schema_does_not_declare(
+    user, top: dict[str, object], refused: bool
+) -> None:
+    # Kills the mutants that publish an argument whose name a closed schema
+    # refuses (every run would fail on additionalProperties), refuse one an
+    # open schema takes (the editor writes such arguments), or decide one a
+    # pattern or a sibling-hiding "$ref" leaves to the run's check.
+    facts = _Facts(_facts(input_schema={**_SCHEMA, **top}))
+    flow = _tool_flow(user, facts.facts)
+    service, _, version_repo = _publisher(user, flow, facts)
+
+    if not refused:
+        await service.publish_flow(flow_id=flow.id)
+        version_repo.create.assert_awaited_once()
+        return
+    with pytest.raises(BadRequestException) as refusal:
+        await service.publish_flow(flow_id=flow.id)
+
+    assert refusal.value.code == "typed_io_tool_invalid_config"
+    assert refusal.value.context == {
+        "step_order": 2,
+        "field": "input_config.tool.arguments.limit",
+        "argument": "limit",
+        "problem": "undeclared_argument",
+    }
+    assert "declares no argument 'limit'" in str(refusal.value)
+    version_repo.create.assert_not_awaited()
+
+
 def _limit_schema(limit: object, **top: object) -> dict[str, object]:
     """The step's tool requires case_id (bound to text) and declares it an
     integer, and gives ``limit`` (fixed to 5) the property ``limit``."""

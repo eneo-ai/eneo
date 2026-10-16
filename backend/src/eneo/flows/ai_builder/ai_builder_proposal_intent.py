@@ -45,6 +45,10 @@ from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
 from eneo.flows.ai_builder.ai_builder_structured_field_normalizer import (
     normalize_structured_field_list,
 )
+from eneo.flows.ai_builder.ai_builder_tool_use import (
+    ToolUseIntent,
+    tool_use_property_schema,
+)
 from eneo.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 from eneo.flows.flow_authoring_spec import (
     MAX_FLOW_AUTHORING_STEPS,
@@ -462,6 +466,9 @@ class SemanticStepIntent(BaseModel):
     knowledge_refs: list[str] = Field(default_factory=list)
     citations_requested: bool = False
     review_mode: FlowStepReviewMode | None = None
+    # The MCP tool whose answer is the step's input; None for a step that
+    # reads its input as the plan's position gives it.
+    tool_use: ToolUseIntent | None = None
     # Retain the authored position so unbound form reads identify their owner.
     _proposal_step: int | None = PrivateAttr(default=None)
 
@@ -532,6 +539,9 @@ class _CreateSemanticStepArguments(BaseModel):
     # The step whose JSON result the person reviews; only offered, and only
     # admitted, when a structured-result review was requested.
     review_mode: FlowStepReviewMode | None = None
+    # Only offered while the turn's prompt lists a tool, a refused one too: a
+    # step that names it ends the turn with the refusal's reason.
+    tool_use: ToolUseIntent | None = None
 
 
 class ProposalStructuredFieldIntent(BaseModel):
@@ -649,6 +659,8 @@ class ModifyExistingStep(BaseModel):
     uses_form_fields: list[str] | None = None
     uses_previous_fields: list[PreviousFieldRef] | None = None
     document_delivery_mode: DocumentDeliveryMode | None = None
+    # A tool step's tool use, the one thing an edit may change on it.
+    tool_use: ToolUseIntent | None = None
 
     @field_validator("output_fields", mode="before")
     @classmethod
@@ -884,6 +896,7 @@ def build_create_flow_tool_schema(
     is_pure_audio_transcription: bool = False,
     confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
     structured_review_mode: FlowStepReviewMode | None = None,
+    tool_refs: Sequence[str] = (),
 ) -> dict[str, Any]:
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
     step_schema = build_semantic_step_schema(
@@ -891,6 +904,7 @@ def build_create_flow_tool_schema(
         include_review_mode=structured_review_mode is not None,
         include_form_field_refs=False,
         kb_refs=kb_refs,
+        tool_refs=tool_refs,
     )
     if is_pure_audio_transcription:
         step_schema["properties"] = {
@@ -1006,6 +1020,7 @@ def build_semantic_step_schema(
     include_review_mode: bool = True,
     include_form_field_refs: bool = True,
     kb_refs: list[str] | None = None,
+    tool_refs: Sequence[str] = (),
 ) -> dict[str, Any]:
     schema: dict[str, Any] = {
         "type": "object",
@@ -1068,6 +1083,7 @@ def build_semantic_step_schema(
                 if include_review_mode
                 else {}
             ),
+            **({"tool_use": tool_use_property_schema(tool_refs)} if tool_refs else {}),
         },
         "additionalProperties": False,
     }

@@ -403,6 +403,9 @@ NonPlanKind: TypeAlias = Literal[
     "edit_blocked_by_custom_underlag",
     "edit_blocked_by_unsupported_step",
     "structured_review_target_ambiguous",
+    # The request needs an MCP tool the space may not use, or whose input
+    # schema no flow can check.
+    "tool_not_usable",
 ]
 RequiredAction: TypeAlias = Literal[
     "none",
@@ -412,6 +415,8 @@ RequiredAction: TypeAlias = Literal[
     "simplify_template",
     "rename_form_field",
     "edit_in_step_editor",
+    # An administrator of the space or of the instance changes what blocks it.
+    "make_tool_usable",
 ]
 # How many names a diagnostic or an answer lists, and how much of each: a
 # template can carry a thousand placeholders, and neither should.

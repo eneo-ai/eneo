@@ -6,13 +6,21 @@ the usable tools in a stable order inside fixed budgets, and the refused
 ones, with the refusal that names why, kept aside for guidance. The proposal
 prompt then fits the projection to the model's room with
 ``fit_tool_catalog_projection``.
+
+Each tool carries a ref the planner names it by (``tool_ref``): minted from
+its server's and its own id, so it is the same in every turn, whatever else
+the space adds, and it resolves (``AIBuilderToolCatalog.resolve_ref``) for
+every tool of the space, also one the budgets left out of the prompt. (Two
+tools whose refs coincide, which a space does not have in practice, have none.)
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
-from collections.abc import Callable
-from dataclasses import dataclass, replace
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Literal, TypeAlias
 from uuid import UUID
 
@@ -37,6 +45,13 @@ from eneo.mcp_servers.application.unattended_tool_use import UnattendedToolRefus
 # and is itself marked as not shown.
 TOOL_CATALOG_OVERVIEW_MAX_CHARS = 6_000
 TOOL_CATALOG_SCHEMA_MAX_CHARS = 12_000
+# The refused tools the prompt names, so a request for one is answered with
+# its refusal instead of another tool: names and a code only.
+TOOL_CATALOG_UNAVAILABLE_MAX_CHARS = 2_000
+# Hex digits of the ids' digest a ref holds: the same for every tool, so what
+# else the space offers never changes a ref. 48 bits leave two tools of one
+# space sharing a ref (``_mint_refs``) a chance far below any real space's.
+TOOL_REF_HEX_DIGITS = 12
 
 ToolSchemaState = Literal["included", "over_budget", "none_declared"]
 
@@ -46,6 +61,7 @@ class AIBuilderListedTool:
     """A usable tool as the planner sees it: approved text only, and no
     address or credential of its server, which the list never reads."""
 
+    ref: str
     server_id: UUID
     server_name: str
     tool_id: UUID
@@ -60,12 +76,22 @@ class AIBuilderListedTool:
 
 
 @dataclass(frozen=True, slots=True)
+class AIBuilderUnavailableTool:
+    ref: str
+    server_name: str
+    tool_name: str
+    reason: UnattendedToolRefusal
+
+
+@dataclass(frozen=True, slots=True)
 class AIBuilderToolCatalogListed:
     tools: tuple[AIBuilderListedTool, ...]
     # Usable tools not listed, for the budget or the model's room; the
     # planner is told how many.
     omitted_count: int
     kind: Literal["listed"] = "listed"
+    # Refused tools named with their refusal, within their own budget.
+    unavailable: tuple[AIBuilderUnavailableTool, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,11 +118,8 @@ AIBuilderToolCatalogProjection: TypeAlias = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class AIBuilderUnavailableTool:
-    server_name: str
-    tool_name: str
-    reason: UnattendedToolRefusal
+def _no_usable_tools() -> Mapping[str, FlowToolOption]:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,12 +128,84 @@ class AIBuilderToolCatalog:
     # Refused tools, in the same order, so guidance can name why a tool the
     # user asks for cannot be used instead of the planner inventing one.
     unavailable: tuple[AIBuilderUnavailableTool, ...]
+    # Every usable tool of the space by ref, whatever the projection lists:
+    # a ref the budgets left out of this turn's prompt still names its tool.
+    usable_by_ref: Mapping[str, FlowToolOption] = field(
+        default_factory=_no_usable_tools
+    )
+
+    def resolve_ref(self, ref: str) -> FlowToolOption | AIBuilderUnavailableTool | None:
+        """The usable tool ``ref`` names, the refused one with its refusal,
+        or None for a ref no tool of the space has."""
+        usable = self.usable_by_ref.get(ref)
+        if usable is not None:
+            return usable
+        return next((tool for tool in self.unavailable if tool.ref == ref), None)
+
+    def usable_option(self, server_id: UUID, tool_id: UUID) -> FlowToolOption | None:
+        """The usable tool with these ids, None when the space has none."""
+        return next(
+            (
+                option
+                for option in self.usable_by_ref.values()
+                if (option.mcp_server_id, option.tool_id) == (server_id, tool_id)
+            ),
+            None,
+        )
+
+    @property
+    def listed_refs(self) -> tuple[str, ...]:
+        """The refs of the tools this turn's prompt names, usable ones first,
+        in its order."""
+        if not isinstance(self.projection, AIBuilderToolCatalogListed):
+            return ()
+        return (
+            *(tool.ref for tool in self.projection.tools),
+            *(tool.ref for tool in self.projection.unavailable),
+        )
 
 
 EMPTY_TOOL_CATALOG = AIBuilderToolCatalog(
     projection=AIBuilderToolCatalogListed(tools=(), omitted_count=0),
     unavailable=(),
 )
+
+
+def tool_ref(server_id: UUID, tool_id: UUID) -> str:
+    """The ref the planner names a tool by: ``tool_`` and the first hex digits
+    of the SHA-256 of its server's and its own id. Not an index, so a tool the
+    space adds moves no other tool's ref, and not a uuid, which the spec
+    refuses as a portable ref."""
+    digest = hashlib.sha256(f"{server_id}|{tool_id}".encode()).hexdigest()
+    return f"tool_{digest[:TOOL_REF_HEX_DIGITS]}"
+
+
+def tool_options_with_refs(
+    options: Sequence[FlowToolOption],
+) -> list[tuple[str, FlowToolOption]]:
+    """Every tool of the space in catalogue order that has a ref, with the ref
+    the planner names it by: the session's tool list shows the same refs."""
+    ordered = sorted(options, key=_catalog_order)
+    refs = _mint_refs(ordered)
+    return [
+        (refs[key], option)
+        for option in ordered
+        if (key := (option.mcp_server_id, option.tool_id)) in refs
+    ]
+
+
+def _mint_refs(options: list[FlowToolOption]) -> dict[tuple[UUID, UUID], str]:
+    """Each tool's ref. Two distinct tools that share one ref get none: a ref
+    that moved to tell them apart would change with the catalogue, and a ref
+    must name one tool."""
+    refs = {
+        (option.mcp_server_id, option.tool_id): tool_ref(
+            option.mcp_server_id, option.tool_id
+        )
+        for option in options
+    }
+    shared = Counter(refs.values())
+    return {key: ref for key, ref in refs.items() if shared[ref] == 1}
 
 
 def build_ai_builder_tool_catalog(
@@ -122,22 +217,23 @@ def build_ai_builder_tool_catalog(
         return AIBuilderToolCatalog(
             projection=AIBuilderToolCatalogTooLarge(), unavailable=()
         )
-    ordered = sorted(tool_options.options, key=_catalog_order)
-    usable = [option for option in ordered if option.refusal is None]
+    with_refs = tool_options_with_refs(tool_options.options)
+    usable_by_ref = {ref: option for ref, option in with_refs if option.refusal is None}
     unavailable = tuple(
         AIBuilderUnavailableTool(
+            ref=ref,
             server_name=option.mcp_server_name,
             tool_name=option.tool_name,
             reason=option.refusal,
         )
-        for option in ordered
+        for ref, option in with_refs
         if option.refusal is not None
     )
     listed: list[AIBuilderListedTool] = []
     overview_chars = 0
     schema_chars = 0
-    for option in usable:
-        tool = _listed_tool(option, cut_description=cut_description)
+    for ref, option in usable_by_ref.items():
+        tool = _listed_tool(option, ref=ref, cut_description=cut_description)
         schema = tool.input_schema_json
         if schema is not None and (
             schema_chars + len(schema) > TOOL_CATALOG_SCHEMA_MAX_CHARS
@@ -150,15 +246,28 @@ def build_ai_builder_tool_catalog(
         overview_chars += tool_chars
         schema_chars += len(tool.input_schema_json or "")
         listed.append(tool)
-    if usable and not listed:
+    named_unavailable: list[AIBuilderUnavailableTool] = []
+    unavailable_chars = 0
+    for tool in unavailable:
+        line_chars = len(_unavailable_line(tool)) + 1
+        if unavailable_chars + line_chars > TOOL_CATALOG_UNAVAILABLE_MAX_CHARS:
+            continue
+        unavailable_chars += line_chars
+        named_unavailable.append(tool)
+    if usable_by_ref and not listed:
         return AIBuilderToolCatalog(
-            projection=AIBuilderToolCatalogTooLarge(), unavailable=unavailable
+            projection=AIBuilderToolCatalogTooLarge(),
+            unavailable=unavailable,
+            usable_by_ref=usable_by_ref,
         )
     return AIBuilderToolCatalog(
         projection=AIBuilderToolCatalogListed(
-            tools=tuple(listed), omitted_count=len(usable) - len(listed)
+            tools=tuple(listed),
+            omitted_count=len(usable_by_ref) - len(listed),
+            unavailable=tuple(named_unavailable),
         ),
         unavailable=unavailable,
+        usable_by_ref=usable_by_ref,
     )
 
 
@@ -170,8 +279,9 @@ def fit_tool_catalog_projection(
     """The first of the projection's reductions the prompt has room for, or
     the left-out outcome when none has.
 
-    Schemas go first, the last listed first; then tools, the last first;
-    then the whole list gives way to the too-large sentence. A reduction is
+    The refused tools' names go first; then schemas, the last listed first;
+    then tools, the last first; then the whole list gives way to the
+    too-large sentence. A reduction is
     not always shorter than the one before (a short schema is longer than
     the sentence that replaces it), so they are tried in order, at most two
     per listed tool and one more, stopping at the first that fits.
@@ -187,8 +297,11 @@ def _reductions(
 ) -> list[AIBuilderToolCatalogProjection]:
     if not isinstance(projection, AIBuilderToolCatalogListed):
         return [projection]
-    tools = list(projection.tools)
     steps: list[AIBuilderToolCatalogProjection] = [projection]
+    if projection.unavailable:
+        projection = replace(projection, unavailable=())
+        steps.append(projection)
+    tools = list(projection.tools)
     for index in reversed(range(len(tools))):
         if tools[index].input_schema_json is None:
             continue
@@ -218,18 +331,28 @@ def render_tool_catalog_block(projection: AIBuilderToolCatalogProjection) -> str
             "This space offers more MCP tools than fit in this context, so "
             "none are listed."
         )
-    if not projection.tools:
-        return ""
     lines: list[str] = []
     for tool in projection.tools:
         lines.extend((tool_overview_line(tool), _schema_line(tool)))
     if projection.omitted_count:
         lines.append(f"{projection.omitted_count} more usable tools are not listed.")
+    if projection.unavailable:
+        lines.append("Not usable in this space (the reason is the refusal code):")
+        lines.extend(_unavailable_line(tool) for tool in projection.unavailable)
     return "\n".join(lines)
+
+
+def _unavailable_line(tool: AIBuilderUnavailableTool) -> str:
+    return (
+        f"- ref={tool.ref} | tool={json.dumps(tool.tool_name, ensure_ascii=False)}"
+        f" | server={json.dumps(tool.server_name, ensure_ascii=False)}"
+        f" | reason={tool.reason.value}"
+    )
 
 
 def tool_overview_line(tool: AIBuilderListedTool) -> str:
     fields = [
+        f"ref={tool.ref}",
         f"tool={json.dumps(tool.tool_name, ensure_ascii=False)}",
         f"server={json.dumps(tool.server_name, ensure_ascii=False)}",
     ]
@@ -266,10 +389,11 @@ def _catalog_order(option: FlowToolOption) -> tuple[str, str, UUID, UUID]:
 
 
 def _listed_tool(
-    option: FlowToolOption, *, cut_description: Callable[[str], str]
+    option: FlowToolOption, *, ref: str, cut_description: Callable[[str], str]
 ) -> AIBuilderListedTool:
     schema = option.input_schema
     return AIBuilderListedTool(
+        ref=ref,
         server_id=option.mcp_server_id,
         server_name=option.mcp_server_name,
         tool_id=option.tool_id,

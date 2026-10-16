@@ -8,7 +8,7 @@ composed into an argument, so nothing in a flow assembles a query out of run
 data.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID
@@ -43,6 +43,9 @@ class ToolArgumentProblem(StrEnum):
     # The step's fixed value for an argument is one that the tool's input
     # schema refuses for that argument.
     OUTSIDE_SCHEMA = "outside_schema"
+    # The step gives an argument whose name the tool's input schema refuses
+    # whatever its value (``undeclared_tool_arguments``).
+    UNDECLARED_ARGUMENT = "undeclared_argument"
 
 
 class ToolArgumentError(ValueError):
@@ -106,6 +109,7 @@ class PublishedToolInputConfig(ToolInputConfig):
 
 
 _ARGUMENT_NAMES = TypeAdapter[list[str]](list[str])
+_PROPERTIES = TypeAdapter[dict[str, object]](dict[str, object])
 
 # Lineage is asked about editable steps and about published ones.
 _SAVED_OR_PUBLISHED = TypeAdapter[ToolInputConfig](
@@ -132,6 +136,30 @@ def required_tool_arguments(input_schema: Mapping[str, object]) -> tuple[str, ..
         return tuple(_ARGUMENT_NAMES.validate_python(input_schema.get("required")))
     except ValidationError:
         return ()
+
+
+def undeclared_tool_arguments(
+    input_schema: Mapping[str, object], names: Iterable[str]
+) -> tuple[str, ...]:
+    """The names among ``names`` that the tool's input schema refuses
+    whatever their values: its top-level ``additionalProperties`` is false,
+    no ``patternProperties`` stands beside it, and its top-level
+    ``properties`` does not name them. Any other schema leaves every name to
+    the run's check, as does a top-level ``$ref`` in a draft that reads no
+    keyword beside it (``ref_ignores_siblings``)."""
+    if (
+        ref_ignores_siblings(input_schema)
+        or input_schema.get("additionalProperties") is not False
+        or "patternProperties" in input_schema
+    ):
+        return ()
+    try:
+        declared = _PROPERTIES.validate_python(
+            input_schema.get("properties", {}), strict=True
+        )
+    except ValidationError:
+        declared = {}
+    return tuple(name for name in names if name not in declared)
 
 
 def read_tool_input_config(

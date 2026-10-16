@@ -414,12 +414,14 @@ class TestBuildEditFlowToolSchema:
         add_payload = _add_step_payload_schema(schema)
 
         assert set(add_payload["properties"]) < set(SemanticStepIntent.model_fields)
-        # Edit authors its wiring as explicit refs.
+        # Edit authors its wiring as explicit refs; a tool use only while the
+        # turn names tools.
         assert set(SemanticStepIntent.model_fields) - set(
             add_payload["properties"]
         ) == {
             "uses_previous_fields",
             "uses_previous_outputs",
+            "tool_use",
         }
 
     def test_modify_step_schema_exposes_typed_previous_field_refs(self):

@@ -72,7 +72,7 @@ An applied edit writes only what the approved plan lists as changed. A modified 
 
 The Builder cannot edit a saved Flow that has a step which fetches data over HTTP, takes an image as input, or sends its result over HTTP. The Builder asks its usual questions first; when it would propose the edit, it instead answers with the names of those steps and a pointer to the step editor, where they are changed by hand, and no plan is proposed. A request to edit another step of the same Flow is refused the same way and the answer says that no edits can be proposed while those steps exist.
 
-A saved Flow with steps that read an MCP tool stays editable. The Builder keeps those steps as they are saved, name and configuration included: no edit changes or removes one, another step that takes the same name gets the suffix, and a whole-Flow edit shows the model each one's arguments (as JSON, the first 220 characters). A request scoped to one of those steps, or a run failure or suggestion that names only such steps, gets the same step-editor answer as above, and so does any edit while one of them holds a tool configuration that cannot be used. A tool argument that reads an earlier step's result counts as a read of that step: an edit that removes the producer step, or the output field the argument reads, is refused or sent back to the model for a fix. An argument that names its producer by number (`step_1`) follows the producer when it moves; an edit that would make a read in such a step (an argument or its instructions) name another step, by number or by name (for example by removing the producer and giving another step its name), is sent back to the model; `föregående_steg` keeps meaning the step just before.
+A saved Flow with steps that read an MCP tool stays editable. The Builder keeps those steps as they are saved, name and configuration included, unless the edit changes a step's tool arguments while the space's tools are listed to the Builder (see External data and delivery): no edit removes one, another step that takes the same name gets the suffix, and a whole-Flow edit shows the model each one's arguments (as JSON, the first 220 characters). A request scoped to one of those steps, or a run failure or suggestion that names only such steps, gets the same step-editor answer as above while the Builder lists no tool of the space, and so does any edit while one of them holds a tool configuration that cannot be used. A tool argument that reads an earlier step's result counts as a read of that step: an edit that removes the producer step, or the output field the argument reads, is refused or sent back to the model for a fix. An argument that names its producer by number (`step_1`) follows the producer when it moves; an edit that would make a read in such a step (an argument or its instructions; for a step whose arguments the edit writes, its instructions) name another step, by number or by name (for example by removing the producer and giving another step its name), is sent back to the model; `föregående_steg` keeps meaning the step just before.
 
 When no step of a saved Flow reads what a run is started with (the run text or a step's upload) and the Flow has no form fields, the Builder does not need an answer about what the Flow receives at runtime, and its summary says that the Flow receives no input. It still asks when it reads a material in the request: a word such as PDF or document can be read that way even when it names the result. A tool argument or a step's prompt that reads the run input, for example `{{flow_input.text}}`, is such a read. The Builder reads the steps' sources, prompts, bindings, tool arguments and output settings for this, and asks as before when it cannot read every step's prompt and configuration, or when a step fetches or sends data over HTTP. The run form does not change: a Flow without form fields and uploads still shows a text box.
 
@@ -294,10 +294,31 @@ See <a href="/docs/flows#advanced-step-input-templates-underlag-till-steget">Adv
 
 ## External data and delivery
 
-AI Builder does not advertise or configure MCP servers and tools for Flows: it
-keeps a tool step added in the step editor, but does not propose or change one.
-Use supported Flow inputs for required data: runtime form or file input, prior
-step output, or knowledge.
+When the space has MCP tools that Flows may use, AI Builder can propose a step
+that reads the answer of one of them. It names the tool and, for each argument,
+a fixed value, a field of the run form that the person fills in when starting a
+run, or a field that an earlier step's JSON result declares (the earlier step is
+counted as the plan lists its steps, so a transcription step the Builder puts
+first in an audio Flow is not counted). An argument read from the run form gets
+a field of the matching type: a date, a number, text, or a choice from the
+tool's allowed values; the field is required when the tool requires the
+argument, and an optional one left empty is not sent to the tool. An argument
+that names an existing run-form field must spell it as the form does, and that
+field must fit the tool (the same type, only values the tool accepts, required
+wherever the tool requires it) or the Builder uses another field name. A plan whose first step reads a tool
+gets no field for run text; files the run is started with are still read by the
+first step. Before showing the plan, the Builder checks each
+argument the way publishing does: a required argument without a value, an
+argument the tool's input schema neither declares nor takes, or a fixed value
+the schema refuses, is sent back to the model to fix.
+When the request needs a tool that the space may not use (for example switched
+off in the space or waiting for review), the Builder says why instead of
+proposing a step with another tool. In an edit, the Builder may add a step that
+reads a tool and change the arguments of a saved tool step; nothing else of a
+saved tool step changes, and a tool step the edit does not name stays as saved.
+A plan that fills a DOCX template or only transcribes audio has no tool step.
+Otherwise use supported Flow inputs for required data: runtime form or file
+input, prior step output, or knowledge.
 
 The Builder proposes only what it can write safely: text, JSON, audio, document,
 file, and any-type input from the run, the previous step, or all previous steps,

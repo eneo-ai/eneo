@@ -29,9 +29,9 @@ class FlowAuthoringInputSource(str, Enum):
     """Input sources an authoring spec can carry.
 
     A tool step travels with its configuration, which names the tool by the
-    ids of this instance only: the Builder carries a saved one unchanged, and
-    flow packages refuse that configuration. HTTP input stays out: its config
-    holds credentials that no spec may carry.
+    ids of this instance only: the Builder compiles one from a typed tool use
+    or carries a saved one, and flow packages refuse that configuration. HTTP
+    input stays out: its config holds credentials that no spec may carry.
     """
 
     FLOW_INPUT = FlowInputSource.FLOW_INPUT.value

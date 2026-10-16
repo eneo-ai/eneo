@@ -56,6 +56,8 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     collect_flow_spec_resource_bindings,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from eneo.flows.ai_builder.ai_builder_tool_catalog import EMPTY_TOOL_CATALOG
+from eneo.flows.ai_builder.ai_builder_tool_validation import tool_use_ref_outcome
 from eneo.flows.ai_builder.ai_builder_tools import parse_create_flow_intent_arguments
 from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, OutputType
@@ -100,12 +102,30 @@ async def process_create_intent_arguments(
             )
         ):
             return repair
+        tool_catalog = (
+            resource_catalog.tools
+            if resource_catalog is not None
+            else EMPTY_TOOL_CATALOG
+        )
+        if tool_outcome := tool_use_ref_outcome(
+            (
+                (f"step {number} '{display_value(step.name)}'", step.tool_use)
+                for number, step in enumerate(intent.steps, start=1)
+                if step.tool_use is not None
+            ),
+            catalog=tool_catalog,
+            ui_language=(
+                compile_context.ui_language if compile_context is not None else None
+            ),
+        ):
+            return tool_outcome
         field_diagnostics: list[LintWarning] = []
         spec = compile_create_intent_to_spec(
             intent,
             context=compile_context,
             field_diagnostics=field_diagnostics,
             obligation_projection=obligation_projection,
+            tool_catalog=tool_catalog,
         )
     except ProposalIntentArgumentError as error:
         logger.info(
@@ -206,7 +226,7 @@ async def _process_create_spec(
     field_diagnostics: list[LintWarning] | None = None,
     ui_language: str | None = None,
 ) -> PreparationOutcome:
-    prepared = prepare_compiled_spec_for_session(
+    prepared = await prepare_compiled_spec_for_session(
         spec=spec,
         target_kind=TargetKind.CREATE,
         available_model_refs=available_model_refs,
@@ -215,6 +235,8 @@ async def _process_create_spec(
         terminal_output_type=committed_terminal_output_type,
         ui_language=ui_language,
     )
+    if prepared.answer is not None:
+        return prepared.answer
     if prepared.failure_feedback is not None:
         if prepared.validation is not None and prepared.validation.errors:
             logger.info(

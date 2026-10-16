@@ -501,9 +501,9 @@ _NOT_EXPOSED_INPUT_SOURCES: Mapping[FlowInputSource, str] = MappingProxyType(
             "neither proposes nor edits it."
         ),
         FlowInputSource.TOOL: (
-            "A tool input names one governed MCP tool by its id: the Builder has "
-            "no catalogue of the tools a space has activated, so it carries a "
-            "saved tool step unchanged but neither proposes nor edits one."
+            "A tool input names one governed MCP tool by its id, which the model "
+            "never writes: a proposed step reads a tool through its typed "
+            "tool_use, which the step compiler turns into the configuration."
         ),
     }
 )

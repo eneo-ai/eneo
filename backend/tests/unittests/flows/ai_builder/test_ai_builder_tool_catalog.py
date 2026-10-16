@@ -13,6 +13,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     build_proposal_prepared,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    outbound_proposal_tool_schemas,
+    proposal_turn_tool_schemas,
+)
 from eneo.flows.ai_builder.ai_builder_requirements_state import RequirementsState
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     RESOURCE_DESCRIPTION_MAX_CHARS,
@@ -26,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_tool_catalog import (
     fit_tool_catalog_projection,
     render_tool_catalog_block,
 )
+from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
 from eneo.flows.application.flow_tool_options import (
     FlowToolOption,
     FlowToolOptions,
@@ -33,6 +38,7 @@ from eneo.flows.application.flow_tool_options import (
     SpaceToolOptions,
 )
 from eneo.mcp_servers.application.unattended_tool_use import UnattendedToolRefusal
+from eneo.tokens.token_utils import count_tool_tokens
 from tests.unittests.flows.ai_builder.test_ai_builder_planner import (
     _budget_policy,
     _document_architecture_state,
@@ -112,7 +118,9 @@ def test_usable_tools_are_offered_by_server_then_tool_and_refused_ones_kept_asid
         ("Cases", "close_case", UnattendedToolRefusal.TOOL_SWITCHED_OFF_IN_SPACE)
     ]
     assert block.index('"lookup_case"') < block.index('"forecast"')
-    assert "close_case" not in block and "Stänger" not in block
+    # A refused tool is named with its refusal only, after the usable ones.
+    assert block.index('"forecast"') < block.index('"close_case"')
+    assert "reason=tool_switched_off_in_space" in block and "Stänger" not in block
     assert "x" * (RESOURCE_DESCRIPTION_MAX_CHARS + 1) not in block
 
 
@@ -217,17 +225,19 @@ def _shape(projection: AIBuilderToolCatalogProjection) -> object:
     return (
         tuple((t.tool_name, t.schema_state) for t in projection.tools),
         projection.omitted_count,
+        len(projection.unavailable),
     )
 
 
-def test_a_catalogue_gives_way_schemas_first_then_tools_then_whole() -> None:
-    # Kills: tools dropped before schemas, the first tools dropped instead
-    # of the last, the too-large sentence skipped, a block returned that
-    # the room does not hold.
+def test_a_catalogue_gives_way_refused_tools_first_then_schemas_then_tools() -> None:
+    # Kills: a schema dropped before the refused tools' names, tools dropped
+    # before schemas, the first tools dropped instead of the last, the
+    # too-large sentence skipped, a block returned that the room does not hold.
     tools, block = _tools(
         _option("S", "a", schema=_schema_of_length(100)),
         _option("S", "b", schema=_schema_of_length(100)),
         _option("S", "c"),
+        _option("S", "d", refusal=UnattendedToolRefusal.TOOL_SWITCHED_OFF),
     )
     shapes: list[object] = []
     for room in range(len(block), -1, -1):
@@ -241,11 +251,12 @@ def test_a_catalogue_gives_way_schemas_first_then_tools_then_whole() -> None:
 
     inc, over, none = "included", "over_budget", "none_declared"
     assert shapes == [
-        ((("a", inc), ("b", inc), ("c", none)), 0),
-        ((("a", inc), ("b", over), ("c", none)), 0),
-        ((("a", over), ("b", over), ("c", none)), 0),
-        ((("a", over), ("b", over)), 1),
-        ((("a", over),), 2),
+        ((("a", inc), ("b", inc), ("c", none)), 0, 1),
+        ((("a", inc), ("b", inc), ("c", none)), 0, 0),
+        ((("a", inc), ("b", over), ("c", none)), 0, 0),
+        ((("a", over), ("b", over), ("c", none)), 0, 0),
+        ((("a", over), ("b", over)), 1, 0),
+        ((("a", over),), 2, 0),
         "too_large",
         "left_out",
     ]
@@ -331,9 +342,12 @@ def test_the_catalogue_takes_only_the_room_a_turn_without_tools_leaves(
 
     assert isinstance(without.request_budget, AIBuilderPlannedRequestBudget)
     assert isinstance(with_tools.request_budget, AIBuilderPlannedRequestBudget)
+    # Only the schema's tool_use property is required content; the
+    # catalogue's text is not.
     assert (
-        with_tools.request_budget.reserved_output_tokens
-        == without.request_budget.reserved_output_tokens
+        with_tools.request_budget.required_input_tokens
+        - without.request_budget.required_input_tokens
+        == _schema_tokens(full.listed_refs) - _schema_tokens(())
     )
     fitted = with_tools.resource_catalog.tools.projection
     prompt = str(with_tools.llm_messages[0]["content"])
@@ -342,6 +356,29 @@ def test_the_catalogue_takes_only_the_room_a_turn_without_tools_leaves(
     else:
         assert _shown(fitted) < _shown(full.projection)
     assert render_tool_catalog_block(fitted) in prompt
+    # A step names only a tool the prompt shows.
+    step = with_tools.proposal_tool_schema["function"]["parameters"]["properties"][
+        "steps"
+    ]["items"]["properties"]
+    offered = (
+        step["tool_use"]["properties"]["tool_ref"]["enum"] if "tool_use" in step else []
+    )
+    assert offered == list(with_tools.resource_catalog.tools.listed_refs)
+
+
+def _schema_tokens(tool_refs: tuple[str, ...]) -> int:
+    schema = build_propose_flow_tool_schema(
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[]
+        ),
+        tool_refs=tool_refs,
+    )
+    return count_tool_tokens(
+        outbound_proposal_tool_schemas(
+            proposal_turn_tool_schemas(schema, None), strict=False
+        ),
+        "openai/gpt-5.4",
+    )
 
 
 def test_a_space_without_tools_adds_nothing_to_the_prompt() -> None:

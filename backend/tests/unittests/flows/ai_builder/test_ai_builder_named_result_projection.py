@@ -11,6 +11,7 @@ two of those steps.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -272,14 +273,16 @@ def _compile_through_the_whole_path(
     spec = compile_create_intent_to_spec(
         intent, context=context, obligation_projection=projection
     )
-    prepared = prepare_compiled_spec_for_session(
-        spec=spec,
-        target_kind=TargetKind.CREATE,
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
-        terminal_output_type=(context.final_output_type if context else None),
-        ui_language="sv",
+    prepared = asyncio.run(
+        prepare_compiled_spec_for_session(
+            spec=spec,
+            target_kind=TargetKind.CREATE,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            terminal_output_type=(context.final_output_type if context else None),
+            ui_language="sv",
+        )
     )
     assert prepared.failure_feedback is None, prepared.failure_feedback
     assert prepared.spec is not None

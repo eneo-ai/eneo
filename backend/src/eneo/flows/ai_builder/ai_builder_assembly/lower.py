@@ -101,6 +101,11 @@ def lower_assembly_plan(
                 ),
             ),
             ui_language=plan.ui_language,
+            tool_argument_steps=(
+                None
+                if planned_step.tool_use is None
+                else _steps_by_proposal_number(plan.steps, compiled_steps)
+            ),
         )
         if planned_step.output_mode != compiled_step.output_mode:
             raise ValueError("Planned step output_mode diverged during lowering.")
@@ -195,6 +200,25 @@ def _speaker_naming_participants_field(
     return name
 
 
+def _steps_by_proposal_number(
+    planned_steps: tuple[PlannedStep, ...], compiled_steps: list[StepSpec]
+) -> list[StepSpec]:
+    """The compiled steps as the proposal numbered its steps: at N - 1 the
+    step that carries proposal step N, up to the first number no compiled
+    step carries. A step the assembly adds (an audio run's transcription)
+    carries none, so it takes no number."""
+
+    carriers = {
+        number: compiled
+        for planned, compiled in zip(planned_steps, compiled_steps, strict=False)
+        for number in planned.proposal_steps
+    }
+    numbered: list[StepSpec] = []
+    while (number := len(numbered) + 1) in carriers:
+        numbered.append(carriers[number])
+    return numbered
+
+
 def _new_step_draft_from_planned_step(
     step: PlannedStep,
     *,
@@ -219,6 +243,7 @@ def _new_step_draft_from_planned_step(
         document_delivery_mode=step.document_delivery_mode,
         citations_requested=step.citations_requested,
         review_mode=step.review_mode,
+        tool_use=step.tool_use,
     )
 
 

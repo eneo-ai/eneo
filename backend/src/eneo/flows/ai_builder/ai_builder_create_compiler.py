@@ -60,6 +60,14 @@ from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     apply_template_attachment_contract,
     template_preparation_stage_limit_exceeded,
 )
+from eneo.flows.ai_builder.ai_builder_tool_catalog import (
+    EMPTY_TOOL_CATALOG,
+    AIBuilderToolCatalog,
+)
+from eneo.flows.ai_builder.ai_builder_tool_use import (
+    require_bound_tool_use,
+    run_form_fields_for_tool_uses,
+)
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -100,6 +108,7 @@ def compile_create_intent_to_spec(
     context: CreateCompileContext | None = None,
     field_diagnostics: list[LintWarning] | None = None,
     obligation_projection: ProposalObligationProjection | None = None,
+    tool_catalog: AIBuilderToolCatalog = EMPTY_TOOL_CATALOG,
 ) -> FlowDraftSpecCore:
     checkpoint_intents = (
         context.checkpoint_intents if context is not None else None
@@ -124,13 +133,41 @@ def compile_create_intent_to_spec(
         if context is not None and context.final_output_type is not None
         else OutputType.TEXT
     )
+    # A plan whose first step reads a tool reads no run text, so the run form
+    # gets no main-text field; files or JSON the run is started with are the
+    # person's choice, and only a first step that reads them keeps it.
+    reads_run_text = not intent.steps or intent.steps[0].tool_use is None
+    if not reads_run_text and runtime_input_type is not InputType.TEXT:
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            repair_disposition="model_correctable",
+            detail=(
+                f"A run of this flow is started with {runtime_input_type.value} "
+                "input, which the first step must read: put the step that reads "
+                "an MCP tool after it."
+            ),
+            log_context={
+                "failure_code": "tool_step_before_run_input",
+                "reason": "tool_step_before_run_input",
+            },
+        )
     (
         form_fields,
         dropped_primary_input_field_names,
     ) = _compile_form_fields(
         context=context,
-        runtime_input_type=runtime_input_type,
+        runtime_input_type=runtime_input_type if reads_run_text else None,
         field_diagnostics=field_diagnostics,
+    )
+    form_fields.extend(
+        run_form_fields_for_tool_uses(
+            [
+                require_bound_tool_use(step.tool_use, tool_catalog)
+                for step in intent.steps
+                if step.tool_use is not None
+            ],
+            form_fields=form_fields,
+        )
     )
     final_output_mode = context.final_output_mode if context is not None else None
     pattern_ids = context.pattern_ids if context is not None else ()
@@ -142,6 +179,7 @@ def compile_create_intent_to_spec(
             runtime_input_type=runtime_input_type,
             text_source_reader_planned=(
                 runtime_input_type is InputType.TEXT
+                and reads_run_text
                 and (
                     final_output_type is OutputType.JSON
                     or (len(intent.steps) > 1 and bool(intent.steps[0].output_fields))
@@ -207,6 +245,7 @@ def compile_create_intent_to_spec(
             if declared_step is None
             else None
         ),
+        tool_catalog=tool_catalog,
     )
     if isinstance(assembly_spec, CreateAssemblyRejection):
         raise AIBuilderArchitectureError(

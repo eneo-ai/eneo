@@ -34,6 +34,7 @@ _MODIFY_KEEP_NULL = (
     "uses_previous_fields",
     "output_fields",
     "review_mode",
+    "tool_use",
 )
 _ASSISTANT_KEEP_NULL = ("instructions", "knowledge_refs")
 _ADD_KEEP_NULL = (

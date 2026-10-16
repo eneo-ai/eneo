@@ -8,7 +8,7 @@ that every existing step is either represented in order or explicitly removed.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from typing import Any, cast
 from uuid import UUID
@@ -70,6 +70,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from eneo.flows.ai_builder.ai_builder_step_reads import (
+    ReadSite,
     form_fields_read,
     kept_step_read_producers,
     run_step_names,
@@ -86,6 +87,7 @@ from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     apply_template_attachment_contract,
     template_preparation_stage_limit_exceeded,
 )
+from eneo.flows.ai_builder.ai_builder_tool_catalog import EMPTY_TOOL_CATALOG
 from eneo.flows.application.flow_authoring_description_semantics import (
     FlowSemanticSignature,
 )
@@ -159,14 +161,16 @@ class EditMutationScope:
     protected_steps: Mapping[str, StepSpec]
     # Every saved step by ref, the baseline a compiled step is judged against.
     saved_steps: Mapping[str, StepSpec]
-    # Per step no edit may change (a tool step), its saved authoring form, and
-    # the saved flow in run order as (saved ref, name): every read of such a
-    # step that names a producer by number or by name must name that step after
-    # the edit too.
+    # Per step no edit may change but for its tool use (a tool step), its
+    # saved authoring form, and the saved flow in run order as (saved ref,
+    # name): every read of such a step that names a producer by number or by
+    # name must name that step after the edit too, but for the tool arguments
+    # of a step whose tool use the edit writes (`tool_use_written`).
     kept_as_saved: Mapping[str, StepSpec] = dataclass_field(
         default_factory=_nothing_kept
     )
     saved_run_steps: tuple[tuple[str | None, str], ...] = ()
+    tool_use_written: frozenset[str] = frozenset()
 
     def is_protected(self, step: StepSpec) -> bool:
         return step.existing_step_ref in self.protected_steps
@@ -186,23 +190,21 @@ class EditMutationScope:
         }
         if not unchanged:
             return self
-        return EditMutationScope(
-            protected_steps={**self.protected_steps, **unchanged},
-            saved_steps=self.saved_steps,
-            kept_as_saved=self.kept_as_saved,
-            saved_run_steps=self.saved_run_steps,
-        )
+        return replace(self, protected_steps={**self.protected_steps, **unchanged})
 
     def keeping(
         self,
         steps: Mapping[str, StepSpec],
         saved: FlowDraftSpecCore,
         saved_steps: Sequence[FlowStep],
+        *,
+        tool_use_written: frozenset[str],
     ) -> EditMutationScope:
-        """Also protect `steps`, each in the form given, and hold each as
-        `saved` (the saved flow's authoring spec) has it, with the saved flow
-        its reads name."""
+        """Also protect `steps`, each in the form given, and hold each of them
+        and of `tool_use_written` as `saved` (the saved flow's authoring spec)
+        has it, with the saved flow its reads name."""
 
+        held = steps.keys() | tool_use_written
         ordered = sorted(saved_steps, key=lambda step: step.step_order)
         return EditMutationScope(
             protected_steps={**self.protected_steps, **steps},
@@ -212,9 +214,10 @@ class EditMutationScope:
                 **{
                     ref: step
                     for step in saved.steps
-                    if (ref := step.existing_step_ref) is not None and ref in steps
+                    if (ref := step.existing_step_ref) is not None and ref in held
                 },
             },
+            tool_use_written=self.tool_use_written | tool_use_written,
             saved_run_steps=tuple(
                 (
                     existing_step_ref_for_order(step.step_order),
@@ -244,9 +247,29 @@ class EditMutationScope:
             for step in spec.steps
             if (saved := self.kept_as_saved.get(step.existing_step_ref or ""))
             is not None
-            and kept_step_read_producers(saved, run_steps, names, renumbering)
-            != kept_step_read_producers(saved, self.saved_run_steps, saved_names, {})
+            and kept_step_read_producers(
+                saved,
+                run_steps,
+                names,
+                renumbering,
+                excluded_sites=self._written_sites(step),
+            )
+            != kept_step_read_producers(
+                saved,
+                self.saved_run_steps,
+                saved_names,
+                {},
+                excluded_sites=self._written_sites(step),
+            )
         ]
+
+    def _written_sites(self, step: StepSpec) -> frozenset[ReadSite]:
+        # The tool arguments a written tool use carries are the edit's own.
+        return (
+            frozenset({ReadSite.INPUT_CONFIG})
+            if step.existing_step_ref in self.tool_use_written
+            else frozenset()
+        )
 
     def restore(self, spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
         steps = [
@@ -356,10 +379,21 @@ def compile_edit_proposal(
             "The revision must preserve the saved step sequence.",
             code=AIBuilderErrorCode.BAD_REQUEST,
         )
-    kept_refs = frozenset(
+    tool_step_refs = frozenset(
         step.existing_step_ref for step in unchangeable_saved_steps(current_steps)
     )
-    _refuse_changes_to_kept_steps(proposal, kept_refs)
+    _refuse_changes_to_kept_steps(proposal, tool_step_refs)
+    # A tool step whose tool use this turn writes is compiled like any changed
+    # step, its other reads held as saved; every other one stays as saved.
+    tool_use_written = tool_step_refs & {
+        step.existing_step_ref
+        for step in proposal.steps
+        if isinstance(step, ModifyExistingStep) and step.tool_use is not None
+    }
+    kept_refs = tool_step_refs - tool_use_written
+    tool_catalog = (
+        resource_catalog.tools if resource_catalog is not None else EMPTY_TOOL_CATALOG
+    )
     saved_step_revision = revision_spec is not None
     mutation_scope: EditMutationScope | None = None
     if revision_spec is not None:
@@ -374,6 +408,7 @@ def compile_edit_proposal(
             if requested_primary_runtime_input_type is not None
             else False
         ),
+        tool_catalog=tool_catalog,
     )
     baseline = edit_baseline_spec(saved=base_spec, revision=revision_spec)
     prepared = _prepare_ordered_edit_proposal(
@@ -387,6 +422,7 @@ def compile_edit_proposal(
         base_spec=baseline,
         proposal=prepared.proposal,
         ui_language=ui_language,
+        tool_catalog=tool_catalog,
     )
     compiled_steps = compiled_spec.steps
 
@@ -401,11 +437,14 @@ def compile_edit_proposal(
     )
     if mutation_scope is not None:
         mutation_scope = mutation_scope.protecting_unchanged(compiled_steps)
-    if kept_refs:
+    if tool_step_refs:
         mutation_scope = (
             mutation_scope or EditMutationScope(protected_steps={}, saved_steps={})
         ).keeping(
-            _as_saved(baseline, compiled_steps, kept_refs), base_spec, current_steps
+            _as_saved(baseline, compiled_steps, kept_refs),
+            base_spec,
+            current_steps,
+            tool_use_written=tool_use_written,
         )
     inherited_template_bindings = _inherited_template_bindings(
         current_steps,
@@ -564,24 +603,40 @@ def compile_edit_proposal(
 
 
 def _refuse_changes_to_kept_steps(
-    proposal: OrderedEditProposal, kept_refs: frozenset[str]
+    proposal: OrderedEditProposal, tool_step_refs: frozenset[str]
 ) -> None:
-    """A step no edit may change (a tool step) is only kept: the edit schema
-    never offers it for a change or a removal, and no proposal makes one."""
+    """An edit changes a tool step's tool use and nothing else of it, removes
+    none, and gives a tool use to no other step: the edit schema offers no
+    more, and no proposal makes more."""
 
+    modifications = [
+        step for step in proposal.steps if isinstance(step, ModifyExistingStep)
+    ]
     changed = {
         step.existing_step_ref
-        for step in proposal.steps
-        if isinstance(step, ModifyExistingStep)
-        and step.authored_fields
-        and step.existing_step_ref in kept_refs
-    } | (proposal.removed_existing_step_refs & kept_refs)
+        for step in modifications
+        if step.existing_step_ref in tool_step_refs
+        and step.authored_fields - {"tool_use"}
+    } | (proposal.removed_existing_step_refs & tool_step_refs)
     if changed:
         raise AIBuilderBadRequestException(
-            f"Steps {', '.join(sorted(changed))} read an MCP tool and stay as "
-            "saved: list each with kind=keep and nothing else.",
+            f"Steps {', '.join(sorted(changed))} read an MCP tool: an edit "
+            "changes only their tool_use, or lists each with kind=keep and "
+            "nothing else.",
             code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
             context={"step_refs": sorted(changed)},
+        )
+    misplaced = sorted(
+        step.existing_step_ref
+        for step in modifications
+        if step.tool_use is not None and step.existing_step_ref not in tool_step_refs
+    )
+    if misplaced:
+        raise AIBuilderBadRequestException(
+            f"Steps {', '.join(misplaced)} read no MCP tool, so a tool_use does "
+            "not change them: add a step that reads the tool instead.",
+            code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
+            context={"step_refs": misplaced},
         )
 
 

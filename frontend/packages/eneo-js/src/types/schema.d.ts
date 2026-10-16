@@ -4984,6 +4984,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/ai-builder/sessions/{session_id}/tools": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Session Tools
+     * @description Return every MCP tool of the session's space with the ref the Builder names it by, its server's and its own name, the approved description, the server's classification level and why a flow cannot use it, if it cannot. No server address or credential is returned. A space with more tools than a list may hold returns none, with `over_bound` true.
+     */
+    get: operations["get_ai_builder_tools"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/runs/capacity/": {
     parameters: {
       query?: never;
@@ -19405,9 +19425,9 @@ export interface components {
      * @description Input sources an authoring spec can carry.
      *
      *     A tool step travels with its configuration, which names the tool by the
-     *     ids of this instance only: the Builder carries a saved one unchanged, and
-     *     flow packages refuse that configuration. HTTP input stays out: its config
-     *     holds credentials that no spec may carry.
+     *     ids of this instance only: the Builder compiles one from a typed tool use
+     *     or carries a saved one, and flow packages refuse that configuration. HTTP
+     *     input stays out: its config holds credentials that no spec may carry.
      * @enum {string}
      */
     FlowAuthoringInputSource: "flow_input" | "previous_step" | "all_previous_steps" | "tool";
@@ -36461,6 +36481,65 @@ export interface components {
        * @default 0
        */
       wall_clock_ms_total?: number;
+    };
+    /**
+     * SessionToolOption
+     * @description One MCP tool of the session's space as the Builder names it: approved
+     *     text only, never an address or a credential of its server.
+     */
+    SessionToolOption: {
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       * @description The MCP server that offers the tool.
+       */
+      mcp_server_id: string;
+      /**
+       * Mcp Server Name
+       * @description The server's name.
+       */
+      mcp_server_name: string;
+      /**
+       * Mcp Server Security Level
+       * @description The level of the server's security classification; null when the server has none or security classifications are off.
+       */
+      mcp_server_security_level: number | null;
+      /**
+       * Ref
+       * @description The ref the Builder's planner names the tool by, the same in every turn of the space.
+       */
+      ref: string;
+      /** @description Why a flow in the space cannot use the tool now; null when it can. */
+      refusal: components["schemas"]["UnattendedToolRefusal"] | null;
+      /**
+       * Tool Description
+       * @description The tool's description as an administrator last approved it; null when there is none.
+       */
+      tool_description: string | null;
+      /**
+       * Tool Id
+       * Format: uuid
+       * @description The tool, as a proposed step's tool configuration names it.
+       */
+      tool_id: string;
+      /**
+       * Tool Name
+       * @description The tool's name at its server.
+       */
+      tool_name: string;
+    };
+    /** SessionToolsResponse */
+    SessionToolsResponse: {
+      /**
+       * Over Bound
+       * @description The space offers more tools than a list may hold, so none are listed and the Builder lists none to its planner either.
+       */
+      over_bound: boolean;
+      /**
+       * Tools
+       * @description Every MCP tool of the session's space, by server name and then tool name, usable or not; empty when the space has none or `over_bound`.
+       */
+      tools: components["schemas"]["SessionToolOption"][];
     };
     /**
      * SetFederationRequest
@@ -60655,6 +60734,93 @@ export interface operations {
       };
     };
   };
+  get_ai_builder_tools: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the AI Builder session whose space's tools should be listed. */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The space's MCP tools as the Builder names them. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionToolsResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "unauthorized",
+           *       "code": "insufficient_scope",
+           *       "details": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "diagnostic_context": {
+           *         "error_category": "unauthorized",
+           *         "error_code": "insufficient_scope",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description AI Builder session not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "not_found",
+           *       "code": "not_found",
+           *       "diagnostic_context": {
+           *         "error_category": "not_found",
+           *         "error_code": "not_found",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9000,
+           *       "message": "AI Builder session not found.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_flow_run_capacity: {
     parameters: {
       query?: never;
@@ -61848,7 +62014,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
-      /** @description The flow cannot be published because its draft definition is incomplete or invalid. A step whose tool the instance or the space does not allow is refused with `typed_io_tool_not_allowed`; `context` holds `step_order`, `refusal` (the refusing level), `mcp_server_id` and `tool_id`. A step whose tool has an input schema that is not a valid JSON Schema, or of a draft Eneo does not support, is refused with `typed_io_tool_invalid_schema`. A step that gives no value for an argument the schema's top-level `required` names is refused with `typed_io_tool_invalid_config` (not for a `required` beside a top-level `$ref` in drafts 3, 4, 6 and 7, which a run does not read either); `context` holds `step_order`, `field`, `argument` and `problem` `missing_required`. A step whose fixed (not bound) argument value does not fit the subschema the input schema's top-level `properties` gives for that argument is refused with `typed_io_tool_invalid_config` and `problem` `outside_schema`; not beside a top-level `$ref` in drafts 3, 4, 6 and 7, and not when the bounded property check times out, cannot evaluate the subschema, or cannot run on this host: a run checks those. A step that calls an AI model while its assistant has no model, or a step whose model has no provider, is refused with `flow_assistant_model_provider_required`; `context` holds `issue_code` and `step_order`. When security classifications are on and such a step must clear a classification level, publish reports the classification refusal first. */
+      /** @description The flow cannot be published because its draft definition is incomplete or invalid. A step whose tool the instance or the space does not allow is refused with `typed_io_tool_not_allowed`; `context` holds `step_order`, `refusal` (the refusing level), `mcp_server_id` and `tool_id`. A step whose tool has an input schema that is not a valid JSON Schema, or of a draft Eneo does not support, is refused with `typed_io_tool_invalid_schema`. A step that gives no value for an argument the schema's top-level `required` names is refused with `typed_io_tool_invalid_config` (not for a `required` beside a top-level `$ref` in drafts 3, 4, 6 and 7, which a run does not read either); `context` holds `step_order`, `field`, `argument` and `problem` `missing_required`. A step that gives an argument whose name the schema refuses whatever its value (top-level `additionalProperties` is false, no top-level `patternProperties`, and top-level `properties` does not name it; not beside a top-level `$ref` in drafts 3, 4, 6 and 7) is refused with `typed_io_tool_invalid_config` and `problem` `undeclared_argument`. A step whose fixed (not bound) argument value does not fit the subschema the input schema's top-level `properties` gives for that argument is refused with `typed_io_tool_invalid_config` and `problem` `outside_schema`; not beside a top-level `$ref` in drafts 3, 4, 6 and 7, and not when the bounded property check times out, cannot evaluate the subschema, or cannot run on this host: a run checks those. A step that calls an AI model while its assistant has no model, or a step whose model has no provider, is refused with `flow_assistant_model_provider_required`; `context` holds `issue_code` and `step_order`. When security classifications are on and such a step must clear a classification level, publish reports the classification refusal first. */
       400: {
         headers: {
           [name: string]: unknown;

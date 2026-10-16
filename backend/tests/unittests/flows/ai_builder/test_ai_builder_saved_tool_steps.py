@@ -1,13 +1,16 @@
-"""Edit turns on a saved flow whose steps read MCP tools.
+"""Edit turns on a saved flow whose steps read MCP tools, in a space whose
+tools the turn does not name.
 
-A tool step is carried as saved and never changed by the Builder: a turn that
-targets one is refused, every other turn keeps its tool and fixed values, and
-its bound arguments are reads that the final flow's validation and the write
-judge like any other read.
+A tool step is then carried as saved and never changed by the Builder: a turn
+that targets one is refused, every other turn keeps its tool and fixed values,
+and its bound arguments are reads that the final flow's validation and the
+write judge like any other read. (With tools named, an edit may write a tool
+step's tool use: test_ai_builder_tool_steps.)
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Mapping
 from typing import Any
@@ -144,13 +147,15 @@ def _apply(
             for step in flow.steps
         },
     )
-    prepared = prepare_compiled_spec_for_session(
-        spec=compiled.spec,
-        target_kind=TargetKind.EDIT,
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
-        mutation_scope=compiled.mutation_scope,
+    prepared = asyncio.run(
+        prepare_compiled_spec_for_session(
+            spec=compiled.spec,
+            target_kind=TargetKind.EDIT,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            mutation_scope=compiled.mutation_scope,
+        )
     )
     assert prepared.spec is not None and prepared.validation is not None
     changes = compiled.approval_for_prepared_spec(prepared.spec).diff.step_changes
@@ -434,13 +439,15 @@ def test_a_name_another_step_takes_from_a_tool_step_is_suffixed_on_that_step() -
         base_flow_revision=1,
     )
 
-    prepared = prepare_compiled_spec_for_session(
-        spec=compiled.spec,
-        target_kind=TargetKind.EDIT,
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
-        mutation_scope=compiled.mutation_scope,
+    prepared = asyncio.run(
+        prepare_compiled_spec_for_session(
+            spec=compiled.spec,
+            target_kind=TargetKind.EDIT,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            mutation_scope=compiled.mutation_scope,
+        )
     ).spec
     assert prepared is not None
     changes = compiled.approval_for_prepared_spec(prepared).diff.step_changes

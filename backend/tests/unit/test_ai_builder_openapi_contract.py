@@ -122,6 +122,10 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
         "get",
     ): "get_ai_builder_models",
     (
+        "/api/v1/flows/ai-builder/sessions/{session_id}/tools",
+        "get",
+    ): "get_ai_builder_tools",
+    (
         "/api/v1/flows/ai-builder/sessions/{session_id}/plans",
         "get",
     ): "list_ai_builder_session_plans",

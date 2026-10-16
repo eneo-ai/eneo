@@ -70,11 +70,17 @@ from eneo.flows.ai_builder.ai_builder_telemetry import ProviderCallKind
 from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
 )
+from eneo.flows.ai_builder.ai_builder_tool_catalog import tool_options_with_refs
 from eneo.flows.ai_builder.ai_builder_tools import AdmissionNormalizerFamily
+from eneo.flows.application.flow_tool_options import (
+    FlowToolOptionsOverBound,
+    SpaceToolOptions,
+)
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_ai_builder_budget_settings import (
     AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
 )
+from eneo.mcp_servers.domain.unattended_tool_refusal import UnattendedToolRefusal
 
 AI_BUILDER_REASONING_EFFORT_MAX_LENGTH = 32
 
@@ -979,6 +985,77 @@ class SessionModelsResponse(BaseModel):
     )
 
 
+class SessionToolOption(BaseModel):
+    """One MCP tool of the session's space as the Builder names it: approved
+    text only, never an address or a credential of its server."""
+
+    ref: str = Field(
+        description=(
+            "The ref the Builder's planner names the tool by, the same in every "
+            "turn of the space."
+        )
+    )
+    mcp_server_id: UUID = Field(description="The MCP server that offers the tool.")
+    mcp_server_name: str = Field(description="The server's name.")
+    mcp_server_security_level: int | None = Field(
+        description=(
+            "The level of the server's security classification; null when the "
+            "server has none or security classifications are off."
+        )
+    )
+    tool_id: UUID = Field(
+        description="The tool, as a proposed step's tool configuration names it."
+    )
+    tool_name: str = Field(description="The tool's name at its server.")
+    tool_description: str | None = Field(
+        description=(
+            "The tool's description as an administrator last approved it; null "
+            "when there is none."
+        )
+    )
+    refusal: UnattendedToolRefusal | None = Field(
+        description=(
+            "Why a flow in the space cannot use the tool now; null when it can."
+        )
+    )
+
+
+class SessionToolsResponse(BaseModel):
+    tools: list[SessionToolOption] = Field(
+        description=(
+            "Every MCP tool of the session's space, by server name and then tool "
+            "name, usable or not; empty when the space has none or `over_bound`."
+        )
+    )
+    over_bound: bool = Field(
+        description=(
+            "The space offers more tools than a list may hold, so none are "
+            "listed and the Builder lists none to its planner either."
+        )
+    )
+
+    @classmethod
+    def from_space_tool_options(cls, options: SpaceToolOptions) -> SessionToolsResponse:
+        if isinstance(options, FlowToolOptionsOverBound):
+            return cls(tools=[], over_bound=True)
+        return cls(
+            tools=[
+                SessionToolOption(
+                    ref=ref,
+                    mcp_server_id=option.mcp_server_id,
+                    mcp_server_name=option.mcp_server_name,
+                    mcp_server_security_level=option.mcp_server_security_level,
+                    tool_id=option.tool_id,
+                    tool_name=option.tool_name,
+                    tool_description=option.tool_description,
+                    refusal=option.refusal,
+                )
+                for ref, option in tool_options_with_refs(options.options)
+            ],
+            over_bound=False,
+        )
+
+
 class PlanResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={"example": AI_BUILDER_PLAN_RESPONSE_EXAMPLE}
@@ -1028,6 +1105,8 @@ __all__ = [
     "AI_BUILDER_PLAN_RESPONSE_EXAMPLE",
     "AI_BUILDER_SESSION_LIST_RESPONSE_EXAMPLE",
     "AI_BUILDER_SESSION_MODELS_RESPONSE_EXAMPLE",
+    "SessionToolOption",
+    "SessionToolsResponse",
     "AI_BUILDER_SESSION_PLANS_RESPONSE_EXAMPLE",
     "AI_BUILDER_SESSION_RESPONSE_EXAMPLE",
     "ApplyPlanRequest",

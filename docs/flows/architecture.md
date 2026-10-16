@@ -262,20 +262,57 @@ separate 12,000-character budget; a tool whose schema does not fit is listed
 with its schema marked as not shown. When the space has usable tools but none
 is listed, or the space's list exceeds the editor's list bounds, the prompt says
 the catalogue is not shown. Refused tools are not offered; the turn keeps them
-with their refusal code for guidance. The projection holds no server address or
-credential: the reader does not read them. Proposed steps cannot call a tool
-yet.
+with their refusal code for guidance, and names them, within a 2,000-character
+budget of their own, by name and refusal code only. The projection holds no
+server address or credential: the reader does not read them.
+
+Each tool has a ref (`tool_` and the first twelve hex digits of the SHA-256 of
+its server's and its own id; two tools whose refs coincide, which a space does
+not have in practice, get none), so a ref is a function of the two ids alone,
+the same in every turn, and resolves for every tool of the space, also one the
+budgets left out. A proposed step reads a tool through its
+`tool_use` (`ai_builder_tool_use.py`): the ref of a tool the prompt names and,
+per argument, a fixed JSON value, a run-form field or a field an earlier step's
+JSON output declares, that step counted as the proposal lists its steps (in
+create through `PlannedStep.proposal_steps`, so a step the assembly adds takes
+no number). The step compiler writes the editor's `ToolInputConfig`
+from it with the owners other reads use (`form_field_reference_expression`,
+`SourceRefBinding.template_expression`), after the earlier-step reference has
+passed the declared-field check; a run-form field the argument names and the
+form does not have is added in create, typed from the argument's schema and
+required when any argument that reads it is, while an edit adds it only through
+its `form_fields`. A field the form has is bound only when its type and options
+fit the argument's schema and it is required wherever the argument is; the
+model is asked for another field name otherwise. An argument whose schema has an
+`enum` the run form cannot hold exactly (a padded or non-string value) gets no
+field: the model gives a fixed value or an earlier step's field. A tool step's input type is
+text. A ref no tool of the space has is sent back to the model; a ref of a
+refused tool ends the turn with an answer naming the refusal
+(`tool_use_ref_outcome`, before compile). On the final spec,
+`prepare_compiled_spec_for_session` runs publish's own argument checks
+(`check_tool_configuration` in `flow_tool_publication.py`, which publish raises
+through) on every tool step the turn wrote: a missing required argument, an
+argument whose name the schema refuses, or a fixed value the schema refuses is
+an error the model repairs; a schema no flow
+can check ends the turn with an answer; a checker host fault leaves a warning.
+An edit writes a saved tool step's tool use and nothing else of it; a tool step
+the edit does not write stays protected as saved. Every saved tool step's reads
+keep naming the producer they named when saved (`kept_step_read_retargeted`),
+but the tool arguments of a step whose tool use the edit writes.
 
 The catalogue is optional prompt content. The request budget is planned from
 the prompt without it, so the answer reserve is the same as in a turn without
-tools, and it is fitted last, after the replayed requirements, review evidence
+tools except for the `tool_use` property the step schema then carries, and it is
+fitted last, after the replayed requirements, review evidence
 and attachments, into the room left for the system prompt; conversation history
 above the configured minimum yields to it, as it does to attachments. Its
-reductions are tried in order and the first that fits is sent: schemas are
-dropped first (the last listed first), then tools (the last first), then the
+reductions are tried in order and the first that fits is sent: the refused
+tools' names are dropped first, then schemas (the last listed first), then tools
+(the last first), then the
 list gives way to the "not shown" sentence; when not even that fits, the block
 is left out and the turn records the typed `left_out` outcome. The projection
-recorded on the prepared turn is the one sent.
+recorded on the prepared turn is the one sent, and the step schema's
+`tool_use` offers the refs of exactly the tools it names.
 
 Every Builder provider call goes through one owner
 (`ai_builder_provider_call.complete_with_silence_deadline`). The answer is

@@ -743,7 +743,7 @@ def _parse_options(
             raise BadRequestException(
                 f"metadata_json.form_schema.fields[{index}].options must be a list for multiselect."
             )
-        parsed = _parse_option_list(cast(list[object], options), index=index)
+        parsed = parse_form_field_options(cast(list[object], options), index=index)
         if mode is FlowFormSchemaParseMode.WRITE and not parsed:
             raise BadRequestException(
                 f"metadata_json.form_schema.fields[{index}].options must contain at "
@@ -756,7 +756,7 @@ def _parse_options(
                 f"metadata_json.form_schema.fields[{index}].options must be a list for select."
             )
         if isinstance(options, list):
-            parsed = _parse_option_list(cast(list[object], options), index=index)
+            parsed = parse_form_field_options(cast(list[object], options), index=index)
             if mode is FlowFormSchemaParseMode.WRITE and not parsed:
                 raise BadRequestException(
                     f"metadata_json.form_schema.fields[{index}].options must contain "
@@ -772,7 +772,9 @@ def _parse_options(
     return None
 
 
-def _parse_option_list(options: list[object], *, index: int) -> list[str]:
+def parse_form_field_options(options: list[object], *, index: int) -> list[str]:
+    """The options of the form field at ``index``, each stripped; raises for a
+    blank one or one that repeats another in any case."""
     parsed_options: list[str] = []
     normalized_options: set[str] = set()
     for option_index, option in enumerate(options):

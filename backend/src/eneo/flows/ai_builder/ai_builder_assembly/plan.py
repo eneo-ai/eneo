@@ -19,6 +19,10 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     structured_fields_have_document_items,
     structured_fields_have_source_leaf,
 )
+from eneo.flows.ai_builder.ai_builder_tool_use import (
+    BoundToolUse,
+    RunInputToolArgument,
+)
 from eneo.flows.ai_builder.planning_state import AggregationIntent
 from eneo.flows.domain.flow import RuntimeInputExecutionMode
 from eneo.flows.enums import (
@@ -53,6 +57,8 @@ PlannedStepRole = Literal[
 ]
 UnderlagChannel = Literal[
     "flow_input",
+    # The answer of the step's MCP tool.
+    "tool",
     "implicit_previous",
     "whole_object",
     "field_refs",
@@ -95,6 +101,19 @@ class PlannedStep:
     citations_requested: bool = False
     # Create review placement is projected from typed checkpoint intents after assembly.
     review_mode: FlowStepReviewMode | None = None
+    # The MCP tool whose answer the step reads (input_source tool).
+    tool_use: BoundToolUse | None = None
+
+    @property
+    def tool_run_input_fields(self) -> tuple[str, ...]:
+        """The run-form fields the step's tool arguments read."""
+        if self.tool_use is None:
+            return ()
+        return tuple(
+            argument.field_name
+            for argument in self.tool_use.arguments
+            if isinstance(argument, RunInputToolArgument)
+        )
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -177,6 +196,26 @@ class FlowAssemblyPlan:
 
 
 def _validate_underlag_channel_shape(step: PlannedStep) -> None:
+    if (step.input_source == InputSource.TOOL) != (step.tool_use is not None):
+        raise ValueError(
+            f"Planned step {step.name!r} reads a tool only with a tool use."
+        )
+    if step.input_source == InputSource.TOOL:
+        if step.underlag_channel != "tool":
+            raise ValueError(
+                f"Planned step {step.name!r} declares underlag_channel "
+                f"{step.underlag_channel!r}; expected 'tool'."
+            )
+        if (
+            step.form_field_refs
+            or step.previous_field_refs
+            or step.previous_output_refs
+        ):
+            raise ValueError(
+                f"Planned step {step.name!r} reads its tool's answer, so it "
+                "takes no form fields or previous refs as underlag."
+            )
+        return
     if step.input_source == InputSource.FLOW_INPUT:
         if step.underlag_channel != "flow_input":
             raise ValueError(
@@ -228,6 +267,8 @@ def derive_underlag_channel(
 ) -> UnderlagChannel:
     if input_source == InputSource.FLOW_INPUT:
         return "flow_input"
+    if input_source == InputSource.TOOL:
+        return "tool"
     if input_source == InputSource.ALL_PREVIOUS_STEPS:
         return "fan_in"
     if previous_field_refs:
@@ -244,9 +285,10 @@ def derive_underlag_channel(
 
 
 def _step_capabilities_are_supported(step: PlannedStep) -> bool:
-    if step.role == "speaker_naming":
-        # Exposure governs what the planner may author; the backend inserts
-        # this step itself, so only engine legality applies.
+    if step.role == "speaker_naming" or step.tool_use is not None:
+        # Exposure governs what the planner may author as an input_source
+        # choice; the backend inserts this step itself, or compiles a tool
+        # step from the typed tool use, so only engine legality applies.
         return supports_step_io_tuple(
             input_type=FlowInputType(step.input_type.value),
             output_type=FlowOutputType(step.output_type.value),
@@ -276,10 +318,14 @@ def _validate_step_order(
     )
     source_reader_steps = tuple(planned_step_is_source_reader(step) for step in steps)
     for index, step in enumerate(steps):
+        if step.input_source == InputSource.TOOL:
+            # A tool step reads its tool's answer wherever it stands; its
+            # arguments' reads are compiled and checked with the step.
+            continue
         if index == 0:
             if step.input_source != InputSource.FLOW_INPUT:
                 raise ValueError(
-                    "The first FlowAssemblyPlan step must read flow input."
+                    "The first FlowAssemblyPlan step must read flow input or a tool."
                 )
             continue
         if step.input_source == InputSource.FLOW_INPUT:
@@ -384,7 +430,11 @@ def _validate_form_field_placement(
             raise ValueError(
                 f"Planned step {step.name!r} is not a legal form-field target."
             )
-    placed_names = {field_name for step in steps for field_name in step.form_field_refs}
+    placed_names = {
+        field_name
+        for step in steps
+        for field_name in (*step.form_field_refs, *step.tool_run_input_fields)
+    }
     unknown_names = placed_names - declared_names
     if unknown_names:
         raise ValueError(

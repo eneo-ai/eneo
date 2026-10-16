@@ -45,6 +45,7 @@ from eneo.flows.domain.tool_input import (
     PublishedToolInputConfig,
     ToolArgumentError,
     read_published_tool_input_config,
+    required_tool_arguments,
     tool_input_schema_sha256,
 )
 from eneo.flows.enums import FlowInputType
@@ -262,13 +263,16 @@ async def resolve_tool_input(
     returns, so nothing reads the answer before its result is stored.
     """
     config = pinned_tool_config(step)
-    arguments, argument_edges = _resolve_arguments(step, config, context, deps)
+    resolved, bound_edges = _resolve_arguments(step, config, context, deps)
     usable = await read_usable_tool(
         step_order=step.step_order,
         config=config,
         facts_reader=deps.facts_reader,
         tenant_id=run.tenant_id,
         space_id=space_id,
+    )
+    arguments, argument_edges = _arguments_sent(
+        resolved, bound_edges, input_schema=usable.tool.input_schema
     )
     counted_level = _counted_server_level(step, usable.server, counted_server_levels)
     await _refuse_arguments_outside_the_schema(step, arguments, usable.tool)
@@ -439,9 +443,10 @@ def _resolve_arguments(
     config: PublishedToolInputConfig,
     context: FlowVariableContext,
     deps: ToolInputDeps,
-) -> tuple[dict[str, object], tuple[FlowResolvedInputEdge, ...]]:
-    """The arguments object the tool gets: a fixed value as it is stored, a
-    bound one replaced by the value its reference names, with its JSON type."""
+) -> tuple[dict[str, object], dict[str, FlowResolvedInputEdge]]:
+    """Every argument the step gives: a fixed value as it is stored, a bound
+    one replaced by the value its reference names, with its JSON type; and
+    the evidence edge of each bound one, by name."""
     try:
         bound = config.bound_arguments()
     except ToolArgumentError as exc:
@@ -452,7 +457,7 @@ def _resolve_arguments(
             step_order=step.step_order,
         ) from None
     arguments: dict[str, object] = dict(config.arguments)
-    edges: list[FlowResolvedInputEdge] = []
+    edges: dict[str, FlowResolvedInputEdge] = {}
     for argument in bound:
         value, edge = deps.variable_resolver.resolve_reference_with_evidence(
             argument.expression,
@@ -460,8 +465,29 @@ def _resolve_arguments(
             binding_ref=f"tool.arguments.{argument.name}",
         )
         arguments[argument.name] = value
-        edges.append(edge)
-    return arguments, tuple(edges)
+        edges[argument.name] = edge
+    return arguments, edges
+
+
+def _arguments_sent(
+    resolved: Mapping[str, object],
+    bound_edges: Mapping[str, FlowResolvedInputEdge],
+    *,
+    input_schema: Mapping[str, object] | None,
+) -> tuple[dict[str, object], tuple[FlowResolvedInputEdge, ...]]:
+    """The arguments object the tool gets, and the edges of the bound ones in
+    it. A bound argument whose value is null is left out, with its edge, when
+    the schema's top-level ``required`` does not name it: a run-form field
+    left empty reads as null, and an optional argument without a value is
+    one the tool is not given. A fixed null is the author's and stays."""
+    required = set(required_tool_arguments(input_schema or {}))
+    absent = {
+        name for name in bound_edges if resolved[name] is None and name not in required
+    }
+    return (
+        {name: value for name, value in resolved.items() if name not in absent},
+        tuple(edge for name, edge in bound_edges.items() if name not in absent),
+    )
 
 
 def _unevaluable_schema(

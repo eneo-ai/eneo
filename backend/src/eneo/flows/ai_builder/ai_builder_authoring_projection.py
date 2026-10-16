@@ -23,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_output_contract,
     compile_review_policy,
     compile_step_input_bindings,
+    compile_tool_step_input_config,
     derive_input_contract,
     derive_output_mode,
     effective_input_type_for_bindings,
@@ -56,6 +57,15 @@ from eneo.flows.ai_builder.ai_builder_step_reads import (
     spec_step_refs,
     step_reads,
 )
+from eneo.flows.ai_builder.ai_builder_tool_catalog import (
+    EMPTY_TOOL_CATALOG,
+    AIBuilderToolCatalog,
+)
+from eneo.flows.ai_builder.ai_builder_tool_use import (
+    BoundToolUse,
+    require_bound_tool_use,
+    run_form_fields_for_tool_uses,
+)
 from eneo.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
 )
@@ -65,6 +75,7 @@ from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
+    InputSource,
     InputType,
     OutputMode,
     OutputType,
@@ -120,6 +131,7 @@ def materialize_ordered_edit_proposal(
     *,
     primary_runtime_input_type: InputType | None = None,
     primary_runtime_required: bool = True,
+    tool_catalog: AIBuilderToolCatalog = EMPTY_TOOL_CATALOG,
 ) -> MaterializedOrderedEditProposal:
     payload = proposal.model_dump(
         mode="python",
@@ -151,6 +163,7 @@ def materialize_ordered_edit_proposal(
             step_index=index,
             primary_runtime_input_type=primary_runtime_input_type,
             primary_runtime_required=primary_runtime_required,
+            tool_catalog=tool_catalog,
         )
         for index, item in enumerate(proposal.steps)
     ]
@@ -163,9 +176,16 @@ def _materialize_ordered_edit_step(
     step_index: int,
     primary_runtime_input_type: InputType | None,
     primary_runtime_required: bool,
+    tool_catalog: AIBuilderToolCatalog,
 ) -> object:
     if not isinstance(item, IntentAddStep):
         return item
+    if item.step.tool_use is not None:
+        return MaterializedAddStep(
+            step=_new_tool_step_draft(
+                item.step, require_bound_tool_use(item.step.tool_use, tool_catalog)
+            )
+        )
     return MaterializedAddStep(
         step=_new_step_draft_from_semantic_intent(
             item.step,
@@ -173,6 +193,27 @@ def _materialize_ordered_edit_step(
             primary_runtime_input_type=primary_runtime_input_type,
             primary_runtime_required=primary_runtime_required,
         )
+    )
+
+
+def _new_tool_step_draft(
+    step: SemanticStepIntent, tool_use: BoundToolUse
+) -> NewStepDraft:
+    """An added step that reads its tool's answer, as text, wherever it stands:
+    never the step that reads the run's primary input, and with no underlag
+    of its own (its reads are its tool arguments)."""
+
+    return NewStepDraft(
+        name=step.name,
+        instructions=step.instructions,
+        input_source=InputSource.TOOL,
+        input_type=InputType.TEXT,
+        output_type=step.output_type or OutputType.TEXT,
+        knowledge_refs=list(step.knowledge_refs),
+        citations_requested=step.citations_requested,
+        review_mode=step.review_mode,
+        output_fields=step.output_fields,
+        tool_use=tool_use,
     )
 
 
@@ -222,6 +263,7 @@ def compile_ordered_edit_proposal(
     base_spec: FlowDraftSpecCore,
     proposal: MaterializedOrderedEditProposal,
     ui_language: str | None = None,
+    tool_catalog: AIBuilderToolCatalog = EMPTY_TOOL_CATALOG,
 ) -> FlowDraftSpecCore:
     base_by_ref = {
         step.existing_step_ref: step
@@ -244,6 +286,7 @@ def compile_ordered_edit_proposal(
     )
     preserved_refs: list[str] = []
     compiled_steps: list[StepSpec] = []
+    tool_uses: list[BoundToolUse] = []
 
     for index, item in enumerate(proposal.steps):
         plan_ref = make_plan_step_ref(index)
@@ -265,15 +308,43 @@ def compile_ordered_edit_proposal(
             preserved_refs.append(item.existing_step_ref)
             continue
         preserved_refs.append(item.existing_step_ref)
-        compiled = _compile_existing_step_modification(
-            base_step,
-            item,
-            prior_steps=compiled_steps,
-            saved=saved,
-            ui_language=ui_language,
-        )
+        if item.tool_use is not None:
+            # Only a tool step takes a tool use, and nothing else of it
+            # changes (``_refuse_changes_to_kept_steps``).
+            tool_use = require_bound_tool_use(item.tool_use, tool_catalog)
+            tool_uses.append(tool_use)
+            compiled = base_step.model_copy(
+                update={
+                    "input_config": {
+                        **(base_step.input_config or {}),
+                        **compile_tool_step_input_config(
+                            tool_use, numbered_steps=compiled_steps
+                        ),
+                    }
+                }
+            )
+        else:
+            compiled = _compile_existing_step_modification(
+                base_step,
+                item,
+                prior_steps=compiled_steps,
+                saved=saved,
+                ui_language=ui_language,
+            )
         compiled_steps.append(compiled.model_copy(update={"plan_step_ref": plan_ref}))
 
+    _refuse_tool_arguments_without_run_form_fields(
+        [
+            *(
+                item.step.tool_use
+                for item in proposal.steps
+                if isinstance(item, MaterializedAddStep)
+                and item.step.tool_use is not None
+            ),
+            *tool_uses,
+        ],
+        form_fields=form_fields or [],
+    )
     validate_existing_step_ref_coverage(
         current_refs=set(base_by_ref),
         preserved_refs=preserved_refs,
@@ -290,6 +361,31 @@ def compile_ordered_edit_proposal(
             compiled_steps=compiled_steps,
         ),
     )
+
+
+def _refuse_tool_arguments_without_run_form_fields(
+    uses: list[BoundToolUse], *, form_fields: list[FormFieldSpec]
+) -> None:
+    """An edit's run_input argument reads a field of the run form the edit
+    leaves: a field it does not have is one the edit adds in form_fields."""
+
+    missing = run_form_fields_for_tool_uses(uses, form_fields=form_fields)
+    if missing:
+        names = ", ".join(f"'{field.name}'" for field in missing)
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            repair_disposition="model_correctable",
+            detail=(
+                f"Tool arguments read the run-form fields {names}, which the "
+                "flow's run form does not have. Bind each argument to an "
+                "existing run-form field or an earlier step's field, or, in an "
+                "edit of the whole flow, add the field to form_fields."
+            ),
+            log_context={
+                "failure_code": "tool_argument_run_input_field_missing",
+                "reason": "tool_argument_run_input_field_missing",
+            },
+        )
 
 
 def apply_existing_step_patch(

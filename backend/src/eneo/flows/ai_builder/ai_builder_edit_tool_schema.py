@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
@@ -20,6 +21,7 @@ from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
     build_proposal_structured_field_schema,
     build_review_mode_schema,
 )
+from eneo.flows.ai_builder.ai_builder_tool_use import tool_use_property_schema
 from eneo.flows.application.flow_authoring_snapshot import unchangeable_saved_steps
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
@@ -40,22 +42,32 @@ def build_edit_flow_tool_schema(
     tool_name: str,
     review_scope: "ReviewEditScope | None" = None,
     permissions: "EditOperationPermissions | None" = None,
+    tool_refs: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Offer saved-step modifications or an ordered edit within the turn's scope."""
+    """Offer saved-step modifications or an ordered edit within the turn's scope.
+
+    With ``tool_refs`` (the tools the turn's prompt names), an added step may
+    read a tool, and a saved tool step may change its tool use and nothing
+    else; without them a saved tool step is offered as kind=keep only."""
     if review_scope is not None and permissions is not None:
         raise ValueError("Supply either review_scope or permissions, not both.")
     saved_step_edit = permissions is not None
     permissions = permissions if permissions is not None else review_scope
 
     valid_refs = [existing_step_ref_for_order(s.step_order) for s in current_steps]
-    # A step no edit may change is offered as kind=keep only.
+    # A step no edit may change (a tool step) is offered as kind=keep, and as
+    # a change of its tool use while the turn names tools.
     unchangeable = {
         step.existing_step_ref for step in unchangeable_saved_steps(current_steps)
     }
+
     changeable_refs = [ref for ref in valid_refs if ref not in unchangeable]
 
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
-    step_payload_schema = build_semantic_step_schema(kb_refs=kb_refs)
+    step_payload_schema = build_semantic_step_schema(
+        kb_refs=kb_refs, tool_refs=tool_refs
+    )
+    tool_step_refs = [ref for ref in valid_refs if ref in unchangeable]
     if permissions is None:
         modifiable_refs = changeable_refs
     else:
@@ -68,10 +80,20 @@ def build_edit_flow_tool_schema(
         modifiable_refs = [
             ref for ref in changeable_refs if ref in permissions.step_refs
         ]
+        tool_step_refs = [ref for ref in tool_step_refs if ref in permissions.step_refs]
     modify_step_schema = _build_modify_step_schema(
         valid_refs=modifiable_refs,
         kb_refs=kb_refs,
     )
+    modify_branches: list[dict[str, Any]] = [modify_step_schema]
+    if tool_refs and tool_step_refs:
+        tool_branch = _build_modify_tool_step_schema(
+            tool_step_refs=tool_step_refs, tool_refs=tool_refs
+        )
+        # A branch whose ref list is empty offers nothing.
+        modify_branches = (
+            [modify_step_schema, tool_branch] if modifiable_refs else [tool_branch]
+        )
     add_step_schema = {
         "type": "object",
         "required": ["kind", "step"],
@@ -116,7 +138,7 @@ def build_edit_flow_tool_schema(
             ),
             "items": {
                 "anyOf": [
-                    modify_step_schema,
+                    *modify_branches,
                     _build_keep_step_schema(valid_refs=valid_refs),
                     add_step_schema,
                 ]
@@ -134,13 +156,17 @@ def build_edit_flow_tool_schema(
                 "existing_step_ref. Give only the fields that change. Omit "
                 "unchanged steps; the server preserves their identity and order."
             ),
-            "items": modify_step_schema,
+            "items": (
+                {"anyOf": modify_branches}
+                if len(modify_branches) > 1
+                else modify_branches[0]
+            ),
             "minItems": 1,
-            "maxItems": len(modifiable_refs),
+            "maxItems": len(modifiable_refs) + len(tool_step_refs),
         }
     else:
         step_branches: list[dict[str, Any]] = [
-            modify_step_schema,
+            *modify_branches,
             _build_keep_step_schema(valid_refs=valid_refs),
         ]
         if permissions.may_add:
@@ -319,6 +345,36 @@ def _build_modify_step_schema(
                 ),
             },
             "review_mode": build_review_mode_schema(),
+        },
+    }
+
+
+def _build_modify_tool_step_schema(
+    *, tool_step_refs: list[str], tool_refs: Sequence[str]
+) -> dict[str, Any]:
+    """A saved tool step's one changeable part: its tool use, in full."""
+    return {
+        "type": "object",
+        "required": ["kind", "existing_step_ref", "tool_use"],
+        "additionalProperties": False,
+        "properties": {
+            "kind": {"type": "string", "enum": ["modify"]},
+            "existing_step_ref": {
+                "type": "string",
+                "enum": tool_step_refs,
+                "description": (
+                    "A saved step that reads an MCP tool. Only its tool use "
+                    "changes; list it with kind=keep to leave it as it is."
+                ),
+            },
+            "tool_use": {
+                **tool_use_property_schema(tool_refs),
+                "type": "object",
+                "description": (
+                    "The step's complete tool use after the edit: the tool and "
+                    "every argument it gives."
+                ),
+            },
         },
     }
 

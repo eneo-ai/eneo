@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -210,13 +211,15 @@ def _prepare_valid_spec(
     target_kind: TargetKind = TargetKind.CREATE,
     terminal_output_type: OutputType | None = None,
 ) -> FlowDraftSpecCore:
-    result = prepare_compiled_spec_for_session(
-        spec=spec,
-        target_kind=target_kind,
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
-        terminal_output_type=terminal_output_type,
+    result = asyncio.run(
+        prepare_compiled_spec_for_session(
+            spec=spec,
+            target_kind=target_kind,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            terminal_output_type=terminal_output_type,
+        )
     )
 
     assert result.spec is not None
@@ -238,12 +241,14 @@ def test_prepare_create_spec_does_not_run_transition_normalizer() -> None:
             return_value=SpecValidationResult(),
         ),
     ):
-        result = prepare_compiled_spec_for_session(
-            spec=spec,
-            target_kind=TargetKind.CREATE,
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
+        result = asyncio.run(
+            prepare_compiled_spec_for_session(
+                spec=spec,
+                target_kind=TargetKind.CREATE,
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=None,
+            )
         )
 
     assert result.spec == spec
@@ -270,12 +275,14 @@ def test_prepare_create_spec_rejects_unknown_flow_input_key() -> None:
         }
     )
 
-    result = prepare_compiled_spec_for_session(
-        spec=spec,
-        target_kind=TargetKind.CREATE,
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
+    result = asyncio.run(
+        prepare_compiled_spec_for_session(
+            spec=spec,
+            target_kind=TargetKind.CREATE,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+        )
     )
 
     assert result.validation is not None
@@ -296,12 +303,14 @@ def test_prepare_compiled_spec_for_session_returns_resource_failure_feedback() -
             return_value="resource issue",
         ),
     ):
-        result = prepare_compiled_spec_for_session(
-            spec=_make_spec(),
-            target_kind=TargetKind.CREATE,
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=MagicMock(),
+        result = asyncio.run(
+            prepare_compiled_spec_for_session(
+                spec=_make_spec(),
+                target_kind=TargetKind.CREATE,
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=MagicMock(),
+            )
         )
 
     assert result.spec is None
@@ -355,13 +364,15 @@ def test_create_terminal_output_drift_is_a_typed_compiler_defect() -> None:
         ),
         pytest.raises(AIBuilderArchitectureError) as exc_info,
     ):
-        prepare_compiled_spec_for_session(
-            spec=spec,
-            target_kind=TargetKind.CREATE,
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-            terminal_output_type=OutputType.PDF,
+        asyncio.run(
+            prepare_compiled_spec_for_session(
+                spec=spec,
+                target_kind=TargetKind.CREATE,
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=None,
+                terminal_output_type=OutputType.PDF,
+            )
         )
 
     assert exc_info.value.public_code == "architecture_materialization_failed"
@@ -375,13 +386,15 @@ def test_create_terminal_output_drift_is_a_typed_compiler_defect() -> None:
 
 
 def test_edit_terminal_output_drift_remains_validation_feedback() -> None:
-    result = prepare_compiled_spec_for_session(
-        spec=_make_spec(),
-        target_kind=TargetKind.EDIT,
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
-        terminal_output_type=OutputType.DOCX,
+    result = asyncio.run(
+        prepare_compiled_spec_for_session(
+            spec=_make_spec(),
+            target_kind=TargetKind.EDIT,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            terminal_output_type=OutputType.DOCX,
+        )
     )
 
     assert result.spec is not None
@@ -393,12 +406,14 @@ def test_edit_terminal_output_drift_remains_validation_feedback() -> None:
 
 
 def test_prepare_compiled_spec_for_session_disambiguates_duplicate_step_names() -> None:
-    result = prepare_compiled_spec_for_session(
-        spec=_duplicate_step_name_spec(),
-        target_kind=TargetKind.EDIT,
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
+    result = asyncio.run(
+        prepare_compiled_spec_for_session(
+            spec=_duplicate_step_name_spec(),
+            target_kind=TargetKind.EDIT,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+        )
     )
 
     assert result.spec is not None
@@ -427,13 +442,15 @@ def test_prepare_compiled_spec_for_session_rejects_text_document_pass_through() 
         }
     )
 
-    result = prepare_compiled_spec_for_session(
-        spec=spec,
-        target_kind=TargetKind.CREATE,
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
-        terminal_output_type=OutputType.DOCX,
+    result = asyncio.run(
+        prepare_compiled_spec_for_session(
+            spec=spec,
+            target_kind=TargetKind.CREATE,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            terminal_output_type=OutputType.DOCX,
+        )
     )
 
     assert result.spec is not None
@@ -457,13 +474,15 @@ def test_prepare_compiled_spec_preserves_citation_validation_family() -> None:
         }
     )
 
-    result = prepare_compiled_spec_for_session(
-        spec=spec,
-        target_kind=TargetKind.CREATE,
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
-        terminal_output_type=OutputType.JSON,
+    result = asyncio.run(
+        prepare_compiled_spec_for_session(
+            spec=spec,
+            target_kind=TargetKind.CREATE,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            terminal_output_type=OutputType.JSON,
+        )
     )
 
     assert result.validation is not None
@@ -511,12 +530,14 @@ def test_an_existing_step_keeps_its_model() -> None:
     )
     [luna_ref] = catalog.model_refs
 
-    result = prepare_compiled_spec_for_session(
-        spec=_spec_with_models((luna_ref, "step_1")),
-        target_kind=TargetKind.EDIT,
-        available_model_refs=catalog.model_refs,
-        available_kb_refs=None,
-        resource_catalog=catalog,
+    result = asyncio.run(
+        prepare_compiled_spec_for_session(
+            spec=_spec_with_models((luna_ref, "step_1")),
+            target_kind=TargetKind.EDIT,
+            available_model_refs=catalog.model_refs,
+            available_kb_refs=None,
+            resource_catalog=catalog,
+        )
     )
 
     assert result.spec is not None

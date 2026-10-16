@@ -26,6 +26,11 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     complete_runtime_source_output_contract,
     runtime_managed_source_field_names,
 )
+from eneo.flows.ai_builder.ai_builder_tool_use import (
+    BoundToolUse,
+    EarlierStepToolArgument,
+    compile_tool_input_config,
+)
 from eneo.flows.enums import flow_output_mode_uses_completion_model
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
@@ -108,7 +113,11 @@ def compile_new_step_draft(
     assistant_output_fields: list[StructuredFieldDraft] | None = None,
     ui_language: str | None = None,
     require_declared_previous_fields: bool = False,
+    tool_argument_steps: list[StepSpec] | None = None,
 ) -> StepSpec:
+    """`tool_argument_steps` are the steps a tool argument's `from_step`
+    numbers, as the proposal numbered them; `prior_steps` when None (an edit
+    proposal lists every step of the flow)."""
     step_draft = normalize_new_step_input_shape(
         step_draft,
         step_index=len(prior_steps),
@@ -118,21 +127,32 @@ def compile_new_step_draft(
         compile_output_contract(step_draft.output_fields),
         runtime_input_execution_mode=step_draft.runtime_input_execution_mode,
     )
-    input_config = compile_runtime_input_overrides(
-        step_draft,
-        previous_item_map_max_items=_previous_runtime_max_files(prior_steps),
-    )
-    binding_draft = (
-        step_draft.model_copy(update={"uses_form_fields": []})
-        if step_draft.previous_item_map_enabled
-        else step_draft
-    )
-    input_bindings = compile_input_bindings(
-        binding_draft,
-        prior_steps,
-        run_input=run_input,
-        require_declared_previous_fields=require_declared_previous_fields,
-    )
+    input_bindings: dict[str, Any] | None
+    if step_draft.tool_use is not None:
+        # The tool's answer is the step's whole input: no underlag binding.
+        input_config = compile_tool_step_input_config(
+            step_draft.tool_use,
+            numbered_steps=(
+                prior_steps if tool_argument_steps is None else tool_argument_steps
+            ),
+        )
+        input_bindings = None
+    else:
+        input_config = compile_runtime_input_overrides(
+            step_draft,
+            previous_item_map_max_items=_previous_runtime_max_files(prior_steps),
+        )
+        binding_draft = (
+            step_draft.model_copy(update={"uses_form_fields": []})
+            if step_draft.previous_item_map_enabled
+            else step_draft
+        )
+        input_bindings = compile_input_bindings(
+            binding_draft,
+            prior_steps,
+            run_input=run_input,
+            require_declared_previous_fields=require_declared_previous_fields,
+        )
     effective_input_type = effective_input_type_for_bindings(
         input_source=input_source,
         input_type=step_draft.input_type,
@@ -179,6 +199,42 @@ def compile_new_step_draft(
         update={"input_config": resolve_runtime_input_config(step_spec=step)}
     )
     return step
+
+
+def compile_tool_step_input_config(
+    tool_use: BoundToolUse, *, numbered_steps: list[StepSpec]
+) -> dict[str, Any]:
+    """A tool step's configuration, after its earlier-step arguments are
+    checked the way every previous-field reference is: a step before it that
+    declares the field. `numbered_steps` are the steps before it that
+    `from_step` counts, in that order."""
+
+    try:
+        _require_resolvable_previous_refs(
+            [
+                PreviousFieldRef(
+                    from_step=argument.from_step, field_path=argument.field_path
+                )
+                for argument in tool_use.arguments
+                if isinstance(argument, EarlierStepToolArgument)
+            ],
+            ref_kind="tool_use.arguments",
+            prior_steps=numbered_steps,
+            require_declared_fields=True,
+        )
+    except AIBuilderBadRequestException as error:
+        # The planner wrote the source, so the planner repairs it, in create
+        # as in edit.
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            repair_disposition="model_correctable",
+            detail=str(error),
+            log_context={
+                "failure_code": "tool_argument_earlier_step_unresolvable",
+                "reason": "tool_argument_earlier_step_unresolvable",
+            },
+        ) from None
+    return compile_tool_input_config(tool_use, numbered_steps=numbered_steps)
 
 
 def effective_input_type_for_bindings(
@@ -873,7 +929,9 @@ def _compile_previous_field_source_refs(
 def _require_resolvable_previous_refs(
     refs: Sequence[PreviousFieldRef | PreviousOutputRef],
     *,
-    ref_kind: Literal["uses_previous_fields", "uses_previous_outputs"],
+    ref_kind: Literal[
+        "uses_previous_fields", "uses_previous_outputs", "tool_use.arguments"
+    ],
     prior_steps: list[StepSpec],
     require_declared_fields: bool = False,
 ) -> None:
@@ -929,7 +987,7 @@ def _require_resolvable_previous_refs(
                 )
                 + ". Its declared fields are: "
                 + (", ".join(declared) if declared else "none")
-                + ". Reference one of those in uses_previous_fields, or drop the "
+                + f". Reference one of those in {ref_kind}, or drop the "
                 "reference; what a step declares changes only by editing that "
                 "step.",
                 code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,

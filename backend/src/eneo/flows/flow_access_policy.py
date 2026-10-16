@@ -27,6 +27,7 @@ class FlowApiAction(str, Enum):
     BUILDER_SESSION_READ = "builder_session_read"
     BUILDER_ATTACHMENT_DETACH = "builder_attachment_detach"
     BUILDER_MODELS_LIST = "builder_models_list"
+    BUILDER_TOOLS_LIST = "builder_tools_list"
     BUILDER_PLAN_READ = "builder_plan_read"
     BUILDER_PLAN_LIST = "builder_plan_list"
     BUILDER_SESSION_CANCEL = "builder_session_cancel"
@@ -157,6 +158,12 @@ FLOW_ACTION_REQUIREMENTS: dict[FlowApiAction, FlowActionRequirement] = {
         requires_flow_edit=True,
     ),
     FlowApiAction.BUILDER_MODELS_LIST: FlowActionRequirement(
+        required_permissions=_BUILDER_PERMISSIONS,
+        denial_message="You do not have permission to use Flow AI Builder.",
+        service_key_capability="ai_builder",
+        requires_flow_edit=True,
+    ),
+    FlowApiAction.BUILDER_TOOLS_LIST: FlowActionRequirement(
         required_permissions=_BUILDER_PERMISSIONS,
         denial_message="You do not have permission to use Flow AI Builder.",
         service_key_capability="ai_builder",

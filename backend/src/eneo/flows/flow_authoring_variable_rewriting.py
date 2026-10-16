@@ -20,7 +20,7 @@ from eneo.flows.input_binding_contract_rules import (
     source_ref_bindings,
     source_ref_step_order,
 )
-from eneo.flows.step_lineage import ConfigChannel
+from eneo.flows.step_lineage import ConfigChannel, config_channel
 from eneo.flows.variable_resolver import (
     TEMPLATE_VARIABLE_PATTERN,
     runtime_step_alias,
@@ -71,6 +71,22 @@ def rewrite_step_spec_variables(
         )
         if rewritten_output_config != step_spec.output_config:
             updates["output_config"] = rewritten_output_config
+
+    # Only the strings the step's modes interpolate (a tool step's bound
+    # arguments): the rest of the input config is data.
+    rewritten_input_config = rewrite_config_sites(
+        step_spec.input_config,
+        config_channel(
+            column="input_config",
+            config=step_spec.input_config,
+            input_source=FlowInputSource(step_spec.input_source.value),
+            output_mode=FlowOutputMode(step_spec.output_mode.value),
+            step_order=1,
+        ),
+        lambda _, text: rewrite_variable_string(text, ref_to_order),
+    )
+    if rewritten_input_config != step_spec.input_config:
+        updates["input_config"] = rewritten_input_config
 
     if updates:
         return step_spec.model_copy(update=updates)

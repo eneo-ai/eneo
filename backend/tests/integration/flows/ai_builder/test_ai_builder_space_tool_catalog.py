@@ -18,6 +18,7 @@ from eneo.database.tables.mcp_server_table import (
     SpacesMCPServers,
     SpacesMCPServerTools,
 )
+from eneo.flows.ai_builder.ai_builder_tool_catalog import tool_ref
 from eneo.prompts.api.prompt_models import PromptCreate
 from tests.integration.flows.ai_builder.test_ai_builder_unsupported_saved_steps_api import (
     _drive_to_answer,
@@ -38,6 +39,7 @@ _ADDRESS = "https://mcp-private-host.example/internal-path"
 _CREDENTIAL = "sk-live-tool-server-credential"
 _PENDING = "Text an administrator has not approved"
 _HEADING = "MCP tools in this space"
+_REFUSED_HEADING = "Not usable in this space"
 
 
 async def _seed_space_tools(db_container, space_id: UUID) -> UUID:
@@ -206,9 +208,68 @@ async def test_create_and_edit_sessions_give_the_planner_the_same_tool_catalogue
     assert create_block == blocks["edit"][0]
     assert create_block.index('"list_cases"') < create_block.index('"lookup_case"')
     assert '"case_id"' in create_block and "Slår upp ett ärende." in create_block
-    assert "close_case" not in create_block
-    later_block = blocks["after_switch_off"][0]
-    assert '"list_cases"' in later_block and "lookup_case" not in later_block
+    # A refused tool is named after the usable ones, with its refusal only.
+    usable, refused = create_block.split(_REFUSED_HEADING)
+    assert "close_case" not in usable and "Stänger." not in create_block
+    assert '"close_case"' in refused and "reason=tool_switched_off_in_space" in refused
+    later_usable = blocks["after_switch_off"][0].split(_REFUSED_HEADING)[0]
+    assert '"list_cases"' in later_usable and "lookup_case" not in later_usable
+    async with db_container() as container:
+        await container.session().execute(
+            sa.delete(MCPServers).where(MCPServers.http_url == _ADDRESS)
+        )
+
+
+async def test_a_session_lists_its_spaces_tools_by_ref_without_any_address(
+    client,
+    bearer_token,  # noqa: F811
+    completion_model_factory,
+    db_container,
+) -> None:
+    # Kills: a list read by another key than the session's space, a refused
+    # tool left out (guidance needs it), a ref other than the planner's, an
+    # address or credential in the answer.
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name=f"Tool list {uuid4().hex[:6]}",
+    )
+    lookup_id = await _seed_space_tools(db_container, UUID(space_id))
+    session_id = await _create_ai_builder_session(
+        client=client, bearer_token=bearer_token, space_id=space_id
+    )
+
+    response = await client.get(
+        f"/api/v1/flows/ai-builder/sessions/{session_id}/tools",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["over_bound"] is False
+    tools = body["tools"]
+    assert [(tool["tool_name"], tool["refusal"]) for tool in tools] == [
+        ("close_case", "tool_switched_off_in_space"),
+        ("list_cases", None),
+        ("lookup_case", None),
+    ]
+    assert {key for tool in tools for key in tool} == {
+        "ref",
+        "mcp_server_id",
+        "mcp_server_name",
+        "mcp_server_security_level",
+        "tool_id",
+        "tool_name",
+        "tool_description",
+        "refusal",
+    }
+    lookup = next(tool for tool in tools if tool["tool_id"] == str(lookup_id))
+    assert lookup["ref"] == tool_ref(UUID(lookup["mcp_server_id"]), lookup_id)
+    assert lookup["tool_description"] == "Slår upp ett ärende."
+    for secret in (_ADDRESS, "mcp-private-host", _CREDENTIAL, _PENDING):
+        assert secret not in response.text, secret
     async with db_container() as container:
         await container.session().execute(
             sa.delete(MCPServers).where(MCPServers.http_url == _ADDRESS)

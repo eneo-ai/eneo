@@ -84,6 +84,9 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     collect_flow_spec_resource_bindings,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from eneo.flows.ai_builder.ai_builder_tool_catalog import EMPTY_TOOL_CATALOG
+from eneo.flows.ai_builder.ai_builder_tool_use import ToolUseIntent
+from eneo.flows.ai_builder.ai_builder_tool_validation import tool_use_ref_outcome
 from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
@@ -166,6 +169,17 @@ def _authored_knowledge_refs(
             )
 
 
+def _authored_tool_uses(
+    proposal: OrderedEditProposal,
+) -> Iterator[tuple[str, ToolUseIntent]]:
+    for entry in proposal.steps:
+        if isinstance(entry, ModifyExistingStep):
+            if entry.tool_use is not None:
+                yield f"step {display_value(entry.existing_step_ref)}", entry.tool_use
+        elif entry.step.tool_use is not None:
+            yield f"new step '{display_value(entry.step.name)}'", entry.step.tool_use
+
+
 PROPOSE_FLOW_EDIT_FORCED_TOOL_PROMPT = (
     "Return one valid propose_flow tool call that keeps the flow coherent. "
     "Do not answer with prose."
@@ -226,6 +240,18 @@ async def process_edit_arguments(
         )
     ):
         return repair
+    if tool_outcome := tool_use_ref_outcome(
+        _authored_tool_uses(authored_proposal),
+        catalog=(
+            resource_catalog.tools
+            if resource_catalog is not None
+            else EMPTY_TOOL_CATALOG
+        ),
+        ui_language=compile_context.ui_language
+        if compile_context is not None
+        else None,
+    ):
+        return tool_outcome
     current_step_refs = [
         existing_step_ref_for_order(step.step_order)
         for step in sorted(flow.steps, key=lambda step: step.step_order)
@@ -268,7 +294,7 @@ async def process_edit_arguments(
     )
     ui_language = compile_context.ui_language if compile_context is not None else None
 
-    def compile_and_prepare(
+    async def compile_and_prepare(
         candidate: OrderedEditProposal,
     ) -> _PreparedCandidate | ProposalAnswer | CorrectableFailure | TerminalFailure:
         """One deterministic path from an edit proposal to the plan it becomes."""
@@ -337,7 +363,7 @@ async def process_edit_arguments(
                 phase=AIBuilderErrorPhase.PROPOSAL,
                 details={"resource_kind": str(exc.kind)},
             )
-        prepared = prepare_compiled_spec_for_session(
+        prepared = await prepare_compiled_spec_for_session(
             spec=edit_result.spec,
             target_kind=TargetKind.EDIT,
             available_model_refs=available_model_refs,
@@ -351,6 +377,8 @@ async def process_edit_arguments(
             ui_language=ui_language,
             mutation_scope=edit_result.mutation_scope,
         )
+        if prepared.answer is not None:
+            return prepared.answer
         if prepared.failure_feedback is not None:
             return CorrectableFailure(
                 feedback=prepared.failure_feedback,
@@ -365,7 +393,7 @@ async def process_edit_arguments(
             approval=edit_result.approval_for_prepared_spec(prepared.spec),
         )
 
-    candidate = compile_and_prepare(proposal)
+    candidate = await compile_and_prepare(proposal)
     if not isinstance(candidate, _PreparedCandidate):
         return candidate
 
@@ -376,7 +404,7 @@ async def process_edit_arguments(
         # document step's output mode, a duplicate name's suffix) is its own
         # housekeeping, not the model reaching past the findings. The scope is
         # held to the difference; the plan the user approves shows all of it.
-        baseline = compile_and_prepare(
+        baseline = await compile_and_prepare(
             _apply_server_owned_input_fields(
                 _unchanged_edit_proposal(flow.steps), planning_state=planning_state
             )

@@ -152,13 +152,15 @@ def kept_step_read_producers(
     steps: Sequence[tuple[str | None, str]],
     names: Mapping[str, int],
     renumbering: Mapping[int, int],
+    *,
+    excluded_sites: frozenset[ReadSite] = frozenset(),
 ) -> tuple[str | None, ...]:
     """Which listed step each step read at every template site of `step`
-    (step_template_sites) names when the flow runs, by that step's saved ref:
-    None for a step an edit adds or a read that names no listed step. `steps`
-    is the flow in run order as (saved ref, name), `names` its run_step_names,
-    and `renumbering` the step_N aliases the apply rewrites (saved position to
-    new).
+    (step_template_sites) but `excluded_sites` names when the flow runs, by
+    that step's saved ref: None for a step an edit adds or a read that names
+    no listed step. `steps` is the flow in run order as (saved ref, name),
+    `names` its run_step_names, and `renumbering` the step_N aliases the
+    apply rewrites (saved position to new).
 
     Read as the run binds it (variable_resolver): a step_N alias by position
     and a step's name to that step's text (a step may not be named like a
@@ -169,7 +171,8 @@ def kept_step_read_producers(
         steps[order - 1][0]
         if (order := reference.step_order) is not None and 1 <= order <= len(steps)
         else None
-        for _, text in step_template_sites(step)
+        for site, text in step_template_sites(step)
+        if site not in excluded_sites
         for reference in analyze_template(
             renumber_step_aliases(text, renumbering),
             step_refs=dict(names),

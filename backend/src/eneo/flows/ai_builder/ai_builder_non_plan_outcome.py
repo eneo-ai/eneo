@@ -130,7 +130,7 @@ def decline_reason_from_arguments(arguments: dict[str, Any]) -> DeclineReason | 
 def decline_message(
     reason: DeclineReason, *, ui_language: str | None, step_name: str | None = None
 ) -> str:
-    language = "en" if _uses_english(ui_language) else "sv"
+    language = "en" if uses_english(ui_language) else "sv"
     if step_name:
         return _SELECTED_STEP_DECLINE_MESSAGES[reason][language].format(
             step=_code_span(_shortened(step_name))
@@ -138,7 +138,8 @@ def decline_message(
     return _DECLINE_MESSAGES[reason][language]
 
 
-def _uses_english(ui_language: str | None) -> bool:
+def uses_english(ui_language: str | None) -> bool:
+    """Whether a message to the user is in English; Swedish otherwise."""
     return ui_language is not None and ui_language.casefold().startswith("en")
 
 
@@ -158,7 +159,7 @@ def scoped_revision_out_of_reach_message(*, ui_language: str | None) -> str:
     """What the user is told when only a whole-plan edit can carry the change."""
 
     return SCOPED_REVISION_OUT_OF_REACH_MESSAGES[
-        "en" if _uses_english(ui_language) else "sv"
+        "en" if uses_english(ui_language) else "sv"
     ]
 
 
@@ -353,7 +354,7 @@ def user_action_answer(
     if error.repair_disposition != "user_action" or mapped is None:
         return None
     outcome = non_plan_outcome(*mapped, affected=error.affected)
-    language = "en" if _uses_english(ui_language) else "sv"
+    language = "en" if uses_english(ui_language) else "sv"
     messages = (
         _SEVERAL_NAMES_MESSAGES.get(outcome.kind) if len(error.affected) > 1 else None
     ) or _USER_ACTION_MESSAGES[outcome.kind]
@@ -389,7 +390,7 @@ def ambiguous_saved_structured_reviews_answer(
     outcome = non_plan_outcome(
         "structured_review_target_ambiguous", "edit_in_step_editor", affected=names
     )
-    language = "en" if _uses_english(ui_language) else "sv"
+    language = "en" if uses_english(ui_language) else "sv"
     return ProposalAnswer(
         answer=_USER_ACTION_MESSAGES[outcome.kind][language].format(
             names=_name_list(outcome.affected, outcome.affected_remaining, language)
@@ -413,7 +414,7 @@ def saved_steps_not_editable_answer(
     outcome = non_plan_outcome(
         "edit_blocked_by_unsupported_step", "edit_in_step_editor", affected=names
     )
-    language = "en" if _uses_english(ui_language) else "sv"
+    language = "en" if uses_english(ui_language) else "sv"
     messages = _SEVERAL_NAMES_MESSAGES if len(names) > 1 else _USER_ACTION_MESSAGES
     answer = messages[outcome.kind][language].format(
         names=_name_list(outcome.affected, outcome.affected_remaining, language)
@@ -457,7 +458,7 @@ _STALE_SAVED_STEP_REVISION_MESSAGES: Final[dict[str, str]] = {
 
 def stale_saved_step_revision_message(*, ui_language: str | None) -> str:
     return _STALE_SAVED_STEP_REVISION_MESSAGES[
-        "en" if _uses_english(ui_language) else "sv"
+        "en" if uses_english(ui_language) else "sv"
     ]
 
 
@@ -497,7 +498,7 @@ def unsettled_text_answer(
     """What the user is told while text they wrote cannot be built on yet."""
 
     return _UNSETTLED_TEXT_ANSWERS[unsettled][
-        "en" if _uses_english(ui_language) else "sv"
+        "en" if uses_english(ui_language) else "sv"
     ]
 
 
