@@ -387,7 +387,6 @@ class SharePointContentService:
         sync_trigger: str = "manual",
         recovery: str | None = None,
     ) -> str:
-        sync_log = None
         started_at = datetime.now(timezone.utc)
         resolved_integration_knowledge_id: UUID | None = integration_knowledge_id
 
@@ -472,8 +471,8 @@ class SharePointContentService:
                 integration_knowledge.id, **_sync_outcome_fields(integration_knowledge)
             )
 
-            if self.sync_log_repo:
-                sync_log = SyncLog(
+            await self._add_sync_log(
+                SyncLog(
                     integration_knowledge_id=resolved_integration_knowledge_id,
                     sync_type="full",
                     status="success",
@@ -485,7 +484,7 @@ class SharePointContentService:
                         recovery=recovery,
                     ),
                 )
-                await self.sync_log_repo.add(sync_log)
+            )
 
             return self._format_summary_for_job(summary_stats)
 
@@ -555,24 +554,35 @@ class SharePointContentService:
                 integration_knowledge_id,
                 exc_info=True,
             )
+        await self._add_sync_log(
+            SyncLog(
+                integration_knowledge_id=integration_knowledge_id,
+                sync_type=sync_type,
+                status="error",
+                started_at=started_at,
+                completed_at=failed_at,
+                error_message=error,
+                metadata=metadata,
+            )
+        )
+
+    async def _add_sync_log(self, sync_log: SyncLog) -> None:
+        """Write the pass's sync log; never raises.
+
+        The status row and the token are already written by the time the log
+        is added, so a failing log write must not reach the failure path and
+        turn a finished success into an error, nor replace the exception a
+        failure record is for.
+        """
         if self.sync_log_repo is None:
             return
         try:
-            await self.sync_log_repo.add(
-                SyncLog(
-                    integration_knowledge_id=integration_knowledge_id,
-                    sync_type=sync_type,
-                    status="error",
-                    started_at=started_at,
-                    completed_at=failed_at,
-                    error_message=error,
-                    metadata=metadata,
-                )
-            )
+            await self.sync_log_repo.add(sync_log)
         except Exception:
             logger.error(
-                "Could not write the error sync log for integration knowledge %s",
-                integration_knowledge_id,
+                "Could not write the %s sync log for integration knowledge %s",
+                sync_log.status,
+                sync_log.integration_knowledge_id,
                 exc_info=True,
             )
 
@@ -978,9 +988,9 @@ class SharePointContentService:
                     f"Processed {len(changes)} delta changes for integration knowledge {resolved_integration_knowledge_id}"
                 )
 
-                if self.sync_log_repo:
-                    if _delta_worth_logging(summary_stats):
-                        sync_log = SyncLog(
+                if _delta_worth_logging(summary_stats):
+                    await self._add_sync_log(
+                        SyncLog(
                             integration_knowledge_id=resolved_integration_knowledge_id,
                             sync_type="delta",
                             status="success",
@@ -992,12 +1002,12 @@ class SharePointContentService:
                                 changes_detected=len(changes),
                             ),
                         )
-                        await self.sync_log_repo.add(sync_log)
-                    else:
-                        logger.info(
-                            f"Skipping sync log creation for integration knowledge {integration_knowledge_id}: "
-                            "no files processed or deleted"
-                        )
+                    )
+                else:
+                    logger.info(
+                        f"Skipping sync log creation for integration knowledge {integration_knowledge_id}: "
+                        "no files processed or deleted"
+                    )
 
                 return self._format_summary_for_job(summary_stats)
 

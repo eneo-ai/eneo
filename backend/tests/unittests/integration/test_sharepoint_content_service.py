@@ -3432,6 +3432,59 @@ class TestSyncStatus:
         assert ik.last_sync_status == "error"
         assert ik.last_sync_error == "Graph 503"
 
+    @pytest.mark.parametrize("mode", ["full", "delta"])
+    async def test_a_failing_sync_log_write_does_not_flip_a_finished_success(
+        self, service, mock_dependencies, mock_oauth_token, mode
+    ):
+        """Blobs, status and token are written before the log; the log is a record
+        of the pass, not part of it."""
+        ik = _real_integration_knowledge(
+            delta_token="token-1" if mode == "delta" else None
+        )
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+        add = mock_dependencies["sync_log_repo"].add
+        add.side_effect = RuntimeError("sync_logs locked")
+        listing = [_delta_file("item-1", "a.docx")]
+
+        with (
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+            patch.object(
+                service, "_process_info_blob", AsyncMock(return_value="embedded")
+            ),
+        ):
+            _mock_graph_client(
+                mock_client_class,
+                get_drive_root_children=AsyncMock(return_value=listing),
+                get_delta_changes=AsyncMock(return_value=(listing, "token-2")),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body")
+                ),
+            )
+            if mode == "full":
+                result = await service.pull_content(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+            else:
+                result = await service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        add.assert_awaited_once()
+        assert result == "Imported 1 file"
+        assert ik.last_sync_status == "success"
+        assert ik.last_sync_error is None
+        assert ik.delta_token == ("token-2" if mode == "delta" else "delta-token")
+        written = mock_dependencies["integration_knowledge_repo"].update_sync_state
+        assert written.await_args.kwargs["last_sync_status"] == "success"
+
     async def test_reconcile_warning_reaches_summary_and_sync_log(
         self, service, mock_dependencies, mock_oauth_token
     ):
