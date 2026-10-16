@@ -11220,6 +11220,11 @@ export interface components {
        */
       icon_id?: string | null;
       /**
+       * Rerank Model Id
+       * @description ID of the rerank model, or None for vector order only
+       */
+      rerank_model_id?: string | null;
+      /**
        * Insight Enabled
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
        */
@@ -11377,6 +11382,11 @@ export interface components {
        * @description ID of the completion model, or None if not configured
        */
       completion_model_id?: string | null;
+      /**
+       * Rerank Model Id
+       * @description ID of the rerank model, or None for vector order only
+       */
+      rerank_model_id?: string | null;
     };
     /**
      * AssistantTemplateAdminCreate
@@ -13507,6 +13517,11 @@ export interface components {
        * @description Icon ID referencing an uploaded icon
        */
       icon_id?: string | null;
+      /**
+       * Rerank Model Id
+       * @description ID of the rerank model, or None for vector order only
+       */
+      rerank_model_id?: string | null;
       /**
        * Insight Enabled
        * @default false
@@ -17015,6 +17030,11 @@ export interface components {
       transcription_models: components["schemas"]["TranscriptionModelSecurityStatus"][];
       /** Image Models */
       image_models: components["schemas"]["ImageModelSecurityStatus"][];
+      /**
+       * Rerank Models
+       * @default []
+       */
+      rerank_models?: components["schemas"]["RerankModelSecurityStatus"][];
     };
     /** ModelsRestrictionInput */
     ModelsRestrictionInput: {
@@ -18539,6 +18559,11 @@ export interface components {
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
        */
       icon_id?: string | null;
+      /**
+       * Rerank Model Id
+       * @description Rerank model that re-scores retrieved knowledge before it reaches the model. Must be enabled and meet the space's security classification. Set to null to search in vector order only.
+       */
+      rerank_model_id?: string | null;
       /** Skill Bindings */
       skill_bindings?: components["schemas"]["AssistantSkillBindingInput"][] | null;
     };
@@ -19539,6 +19564,71 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+    };
+    /** RerankModelSecurityStatus */
+    RerankModelSecurityStatus: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Family */
+      family?: string | null;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      /** Org */
+      org?: string | null;
+      /**
+       * Can Access
+       * @default false
+       */
+      can_access?: boolean;
+      /**
+       * Is Locked
+       * @default true
+       */
+      is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean;
+      /**
+       * Is Org Default
+       * @default false
+       */
+      is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
+      /** Meets Security Classification */
+      meets_security_classification?: boolean | null;
     };
     /** RerankModelUpdate */
     RerankModelUpdate: {
