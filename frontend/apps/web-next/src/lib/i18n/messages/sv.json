@@ -461,6 +461,7 @@
   "delete_assistant": "Radera assistent",
   "confirm_delete_assistant": "Är du säker på att du vill radera denna assistent? Denna åtgärd kan inte ångras.",
   "move_assistant": "Flytta assistent",
+  "move_assistant_knowledge_hint": "Kunskap från den här ytan följer inte med assistenten. I den nya ytan använder den bara kunskap som finns där.",
   "destination": "Destination",
   "moving": "Flyttar...",
   "could_not_delete_collection": "Kunde inte radera samling.",

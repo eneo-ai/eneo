@@ -581,6 +581,7 @@
   "move": "Move",
   "delete_assistant": "Delete assistant",
   "move_assistant": "Move assistant",
+  "move_assistant_knowledge_hint": "Knowledge from this space does not move with the assistant. In the new space it only uses knowledge available there.",
   "destination": "Destination",
   "moving": "Moving...",
   "could_not_delete_collection": "Could not delete collection.",

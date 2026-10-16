@@ -129,6 +129,7 @@
   bind:open={showMoveDialog}
   title={m.move_assistant()}
   submitLabel={m.move_assistant()}
+  hint={m.move_assistant_knowledge_hint()}
   onMove={moveAssistant}
 />
 

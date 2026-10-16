@@ -152,6 +152,7 @@ export function AssistantActions({ assistant }: { assistant: AssistantSparse }) 
         open={showMove}
         onOpenChange={setShowMove}
         title={t("move_assistant")}
+        hint={t("move_assistant_knowledge_hint")}
         confirmLabel={t("move_assistant")}
         pending={move.isPending}
         onMove={(targetSpaceId) => move.mutate(targetSpaceId)}
