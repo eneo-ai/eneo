@@ -4866,5 +4866,21 @@
   "audit_action_document_template_deleted": "Document Template Removed",
   "audit_action_document_template_deleted_description": "A document template was removed from the organisation's library",
   "audit_action_document_template_default_set": "Default Document Template Set",
-  "audit_action_document_template_default_set_description": "A document template was made the organisation's default"
+  "audit_action_document_template_default_set_description": "A document template was made the organisation's default",
+  "password_change_required_title": "Choose a new password",
+  "password_change_required_admin_set": "The password you signed in with was set by an administrator and can only be used once. Choose your own password to continue.",
+  "password_change_required_expired": "Your password has expired under your organisation's password policy. Choose a new password to continue.",
+  "password_change_required_current_hint": "Enter the password you just signed in with as the current password.",
+  "admin_password_change_required_badge": "Password change pending",
+  "admin_password_one_time_hint": "The user must choose their own password at their first sign-in.",
+  "admin_password_policy_title": "Password policy",
+  "admin_password_policy_description": "Applies to passwords stored in Eneo. Accounts that sign in through your identity provider are not affected.",
+  "admin_password_policy_require_change": "Admin-set passwords are one-time",
+  "admin_password_policy_require_change_desc": "A password set by an administrator must be replaced by the user at their first sign-in.",
+  "admin_password_policy_max_age": "Maximum password age",
+  "admin_password_policy_max_age_desc": "Users must choose a new password after this many days. Leave empty so passwords never expire.",
+  "admin_password_policy_max_age_invalid": "Enter a whole number of days between 1 and 3650, or leave the field empty.",
+  "admin_password_policy_days": "days",
+  "admin_password_policy_never": "Never",
+  "admin_password_policy_updated": "Password policy saved."
 }

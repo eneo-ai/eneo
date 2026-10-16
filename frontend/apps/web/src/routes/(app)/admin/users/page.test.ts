@@ -18,7 +18,8 @@ function eventWithPolicy(policy: unknown) {
               counts: { active: 0, inactive: 0 }
             }
           }),
-          passwordPolicy: async () => policy
+          passwordPolicy: async () => policy,
+          getPasswordLifecyclePolicy: async () => lifecyclePolicy
         }
       }
     }),
@@ -26,6 +27,8 @@ function eventWithPolicy(policy: unknown) {
     url: new URL("https://eneo.example/admin/users")
   };
 }
+
+const lifecyclePolicy = { require_change_after_admin_set: true, max_age_days: null };
 
 describe("admin password policy loading", () => {
   test("loads the local policy independently of the administrator's own password provider", async () => {
@@ -82,9 +85,15 @@ function makeEvent(search: string) {
   const event = {
     url: new URL(`https://eneo.test/admin/users${search}`),
     depends: vi.fn(),
-    parent: vi
-      .fn()
-      .mockResolvedValue({ eneo: { users: { list, passwordPolicy: async () => policy } } })
+    parent: vi.fn().mockResolvedValue({
+      eneo: {
+        users: {
+          list,
+          passwordPolicy: async () => policy,
+          getPasswordLifecyclePolicy: async () => lifecyclePolicy
+        }
+      }
+    })
   };
   return { event: event as unknown as Parameters<typeof load>[0], list, users };
 }

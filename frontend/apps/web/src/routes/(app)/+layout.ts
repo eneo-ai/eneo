@@ -1,5 +1,7 @@
 import { createZitadelClient } from "$lib/core/Zitadel";
 import { createEneo, createEneoSocket } from "@eneo/eneo-js";
+import { redirect } from "@sveltejs/kit";
+import { passwordChangeUrl } from "$lib/features/auth/passwordChangeRequired";
 
 export const load = async (event) => {
   event.depends("global:state");
@@ -46,17 +48,22 @@ export const load = async (event) => {
     return null;
   };
 
-  const [userInfo, user, tenant, backendVersion, limits, settings, whatsNewState] =
-    await Promise.all([
-      getUserInfo(),
-      eneo.users.me(),
-      eneo.users.tenant(),
-      eneo.version.get(),
-      eneo.limits.list(),
-      eneo.settings.get(),
-      // Non-essential: an older backend during a rolling deploy must not block the app.
-      eneo.whatsNew.getState().catch(() => null)
-    ]);
+  // Resolved first: a password session whose local password must be replaced
+  // is refused by every other endpoint until it has done so.
+  const user = await eneo.users.me();
+  if (user.password_status?.change_required) {
+    redirect(302, passwordChangeUrl(event.url));
+  }
+
+  const [userInfo, tenant, backendVersion, limits, settings, whatsNewState] = await Promise.all([
+    getUserInfo(),
+    eneo.users.tenant(),
+    eneo.version.get(),
+    eneo.limits.list(),
+    eneo.settings.get(),
+    // Non-essential: an older backend during a rolling deploy must not block the app.
+    eneo.whatsNew.getState().catch(() => null)
+  ]);
 
   const versions = {
     frontend: environment.frontendVersion,

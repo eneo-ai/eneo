@@ -51,6 +51,9 @@
   const allRoles = $derived(admin.roles);
   const userGroups = $derived(admin.userGroups);
   const capability = $derived(admin.passwordCapability);
+  const oneTimePassword = $derived(
+    admin.passwordLifecyclePolicy.require_change_after_admin_set !== false
+  );
   const id = $props.id();
   const userId = $derived(user.id);
   let username = $state("");
@@ -209,6 +212,9 @@
           <Field.Legend>{m.password()}</Field.Legend>
           <Field.Description id={`${id}-password-hint`}>
             {mode === "update" ? m.admin_password_optional_hint() : m.admin_password_create_hint()}
+            {#if oneTimePassword}
+              {m.admin_password_one_time_hint()}
+            {/if}
           </Field.Description>
           <Field.Group class="gap-4">
             <Field.Field data-invalid={!!newPasswordError}>
