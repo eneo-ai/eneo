@@ -15,6 +15,9 @@ from eneo.integration.domain.entities.sync_log import SyncLog
 from eneo.integration.domain.entities.tenant_sharepoint_app import (
     TenantSharePointApp,
 )
+from eneo.integration.domain.repositories.integration_knowledge_repo import (
+    SyncStateFields,
+)
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     AccessTokenProvider,
     DeltaTokenExpiredException,
@@ -134,6 +137,17 @@ class SyncItemsFailed(Exception):
 
 def _failure_summary(failure: Exception) -> SyncStats | None:
     return failure.summary if isinstance(failure, SyncItemsFailed) else None
+
+
+def _sync_outcome_fields(knowledge: "IntegrationKnowledge") -> SyncStateFields:
+    """The columns a finished pass writes; the entity copy carries the values."""
+    return {
+        "last_sync_status": knowledge.last_sync_status,
+        "last_sync_error": knowledge.last_sync_error,
+        "last_synced_at": knowledge.last_synced_at,
+        "last_sync_summary": knowledge.last_sync_summary,
+        "delta_token": knowledge.delta_token,
+    }
 
 
 class SimpleSharePointToken:
@@ -358,21 +372,25 @@ class SharePointContentService:
             integration_knowledge.mark_sync_started(started_at)
             resolved_site_id = site_id or integration_knowledge.site_id
             resolved_drive_id = drive_id or integration_knowledge.drive_id
+            binding: SyncStateFields = {"last_sync_attempted_at": started_at}
             if site_id and not getattr(integration_knowledge, "site_id", None):
                 integration_knowledge.site_id = site_id
-
+                binding["site_id"] = site_id
             if drive_id:
                 integration_knowledge.drive_id = drive_id
+                binding["drive_id"] = drive_id
             if resource_type:
                 integration_knowledge.resource_type = resource_type
-
+                binding["resource_type"] = resource_type
             if folder_id:
                 integration_knowledge.folder_id = folder_id
-
+                binding["folder_id"] = folder_id
             if folder_path:
                 integration_knowledge.folder_path = folder_path
-
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+                binding["folder_path"] = folder_path
+            await self.integration_knowledge_repo.update_sync_state(
+                integration_knowledge.id, **binding
+            )
 
             await self._pull_content(
                 token=_require_sharepoint_token(token),
@@ -389,10 +407,6 @@ class SharePointContentService:
                 # No delta baseline either: the next sync is a full one and
                 # retries the failed files instead of never seeing them again.
                 raise SyncItemsFailed(summary_stats)
-
-            integration_knowledge = await self.integration_knowledge_repo.one(
-                id=resolved_integration_knowledge_id
-            )
 
             integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
             integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
@@ -429,7 +443,9 @@ class SharePointContentService:
                         f"Failed to initialize delta token for integration knowledge {resolved_integration_knowledge_id}: {e}"
                     )
 
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+            await self.integration_knowledge_repo.update_sync_state(
+                integration_knowledge.id, **_sync_outcome_fields(integration_knowledge)
+            )
 
             if self.sync_log_repo:
                 sync_log = SyncLog(
@@ -477,10 +493,10 @@ class SharePointContentService:
 
         The worker commits on a soft failure (see
         ``_schedule_post_commit_change_keys``), so the status written here is what
-        the UI shows. The row is read again in this session so the status write
-        does not depend on the caller still holding an entity copy. Each write
-        is attempted on its own so a broken status row still leaves a sync log,
-        and neither can replace the exception being recorded.
+        the UI shows. Only the status columns are written, so a rename committed
+        during the sync survives. Each write is attempted on its own so a broken
+        status row still leaves a sync log, and neither can replace the
+        exception being recorded.
         """
         if integration_knowledge_id is None:
             return
@@ -491,9 +507,16 @@ class SharePointContentService:
                 id=integration_knowledge_id
             )
             integration_knowledge.mark_sync_failed(error)
+            fields: SyncStateFields = {
+                "last_sync_status": integration_knowledge.last_sync_status,
+                "last_sync_error": integration_knowledge.last_sync_error,
+            }
             if summary is not None:
                 integration_knowledge.last_sync_summary = _summary_counts(summary)
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+                fields["last_sync_summary"] = integration_knowledge.last_sync_summary
+            await self.integration_knowledge_repo.update_sync_state(
+                integration_knowledge_id, **fields
+            )
         except Exception:
             logger.error(
                 "Could not record sync failure on integration knowledge %s",
@@ -574,12 +597,11 @@ class SharePointContentService:
             )
             resolved_integration_knowledge_id = integration_knowledge.id
             integration_knowledge.mark_sync_started(started_at)
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+            await self.integration_knowledge_repo.update_sync_state(
+                integration_knowledge.id, last_sync_attempted_at=started_at
+            )
             resolved_site_id = site_id or integration_knowledge.site_id
             resolved_drive_id = drive_id or integration_knowledge.drive_id
-            if integration_knowledge.delta_token is None:
-                site_id = resolved_site_id
-                drive_id = resolved_drive_id
 
             if not integration_knowledge.delta_token:
                 logger.warning(
@@ -640,8 +662,8 @@ class SharePointContentService:
                         resolved_integration_knowledge_id,
                     )
                     integration_knowledge.delta_token = None
-                    await self.integration_knowledge_repo.update(
-                        obj=integration_knowledge
+                    await self.integration_knowledge_repo.update_sync_state(
+                        integration_knowledge.id, delta_token=None
                     )
                     delegated_to_full_sync = True
                     return await self.pull_content(
@@ -681,8 +703,9 @@ class SharePointContentService:
                     integration_knowledge.mark_sync_succeeded(
                         datetime.now(timezone.utc)
                     )
-                    await self.integration_knowledge_repo.update(
-                        obj=integration_knowledge
+                    await self.integration_knowledge_repo.update_sync_state(
+                        integration_knowledge.id,
+                        **_sync_outcome_fields(integration_knowledge),
                     )
 
                     logger.info("Delta sync completed: no changes detected")
@@ -716,8 +739,9 @@ class SharePointContentService:
                         if refreshed_scope_path != scope_folder_path:
                             scope_folder_path = refreshed_scope_path
                             integration_knowledge.folder_path = refreshed_scope_path
-                            await self.integration_knowledge_repo.update(
-                                obj=integration_knowledge
+                            await self.integration_knowledge_repo.update_sync_state(
+                                integration_knowledge.id,
+                                folder_path=refreshed_scope_path,
                             )
                     elif not scope_folder_path:
                         logger.warning(
@@ -867,10 +891,7 @@ class SharePointContentService:
                     # moved past it, so the next pass replays this one. Items
                     # indexed now are skipped as unchanged through the
                     # post-commit ChangeKey cache; the scope path refreshed
-                    # above is persisted so the replay classifies as this pass did.
-                    await self.integration_knowledge_repo.update(
-                        obj=integration_knowledge
-                    )
+                    # above was persisted so the replay classifies as this pass did.
                     self._schedule_post_commit_change_keys(pending_change_keys)
                     raise SyncItemsFailed(summary_stats, changes_detected=len(changes))
 
@@ -880,7 +901,10 @@ class SharePointContentService:
 
                 logger.info(f"Delta sync completed: {summary_stats}")
 
-                await self.integration_knowledge_repo.update(obj=integration_knowledge)
+                await self.integration_knowledge_repo.update_sync_state(
+                    integration_knowledge.id,
+                    **_sync_outcome_fields(integration_knowledge),
+                )
 
                 self._schedule_post_commit_change_keys(pending_change_keys)
 
@@ -1017,10 +1041,12 @@ class SharePointContentService:
                         refreshed_folder_path = self._folder_path_from_item(
                             cast(SharePointItem, item_info)
                         )
+                        scope: SyncStateFields = {"selected_item_type": "folder"}
                         if refreshed_folder_path:
                             integration_knowledge.folder_path = refreshed_folder_path
-                        await self.integration_knowledge_repo.update(
-                            obj=integration_knowledge
+                            scope["folder_path"] = refreshed_folder_path
+                        await self.integration_knowledge_repo.update_sync_state(
+                            integration_knowledge.id, **scope
                         )
                         processed_items: set[str] = set()
                         await self._fetch_and_process_content(
@@ -1051,8 +1077,8 @@ class SharePointContentService:
                             f"for integration knowledge {integration_knowledge_id}"
                         )
                         integration_knowledge.selected_item_type = "file"
-                        await self.integration_knowledge_repo.update(
-                            obj=integration_knowledge
+                        await self.integration_knowledge_repo.update_sync_state(
+                            integration_knowledge.id, selected_item_type="file"
                         )
 
                         unsupported_reason = unsupported_file_reason(item_name)
@@ -1094,8 +1120,8 @@ class SharePointContentService:
                         return stats
                 else:
                     integration_knowledge.selected_item_type = "site_root"
-                    await self.integration_knowledge_repo.update(
-                        obj=integration_knowledge
+                    await self.integration_knowledge_repo.update_sync_state(
+                        integration_knowledge.id, selected_item_type="site_root"
                     )
 
                     # Enumerate the drive the knowledge is bound to; asking Graph for

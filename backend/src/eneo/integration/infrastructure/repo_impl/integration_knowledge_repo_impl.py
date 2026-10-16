@@ -1,10 +1,11 @@
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 
 import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
-from typing_extensions import override
+from typing_extensions import Unpack, override
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeDBModel,
 )
@@ -19,6 +20,7 @@ from eneo.integration.domain.entities.integration_knowledge import (
 )
 from eneo.integration.domain.repositories.integration_knowledge_repo import (
     IntegrationKnowledgeRepository,
+    SyncStateFields,
 )
 from eneo.integration.infrastructure.mappers.integration_knowledge_mapper import (
     IntegrationKnowledgeMapper,
@@ -113,6 +115,21 @@ class IntegrationKnowledgeRepoImpl(
     @override
     async def remove(self, id: "UUID") -> None:
         await self.delete(id=id)
+
+    @override
+    async def update_sync_state(
+        self, id: "UUID", **fields: Unpack[SyncStateFields]
+    ) -> None:
+        if not fields:
+            return
+        stmt = (
+            sa.update(self._db_model)
+            .where(self._db_model.id == id)
+            .values(**cast(dict[str, object], fields))
+        )
+        result = await self.session.execute(stmt)
+        if affected_row_count(result) == 0:
+            raise NotFoundException(f"{self._db_model.__name__} not found")
 
     @override
     async def adjust_size(self, id: "UUID", delta: int) -> int:

@@ -1222,8 +1222,10 @@ class TestDeltaChangesProcessing:
             )
 
         assert mock_integration_knowledge.delta_token is None
-        mock_dependencies["integration_knowledge_repo"].update.assert_called_with(
-            obj=mock_integration_knowledge
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].update_sync_state.assert_any_await(
+            mock_integration_knowledge.id, delta_token=None
         )
         mock_pull.assert_called_once()
         kwargs = mock_pull.call_args.kwargs
@@ -1289,7 +1291,8 @@ class TestDeltaChangesProcessing:
 
         # Verify the delta token was updated
         assert mock_integration_knowledge.delta_token == "new-delta-token-xyz"
-        mock_dependencies["integration_knowledge_repo"].update.assert_called()
+        written = mock_dependencies["integration_knowledge_repo"].update_sync_state
+        assert written.await_args.kwargs["delta_token"] == "new-delta-token-xyz"
 
     async def test_deleted_delta_uses_sharepoint_item_id_for_delete(
         self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
@@ -2733,7 +2736,11 @@ class TestFolderFullSyncRefreshesFolderPath:
                 )
 
         assert ik.folder_path == "/Documents/A renamed"
-        mock_dependencies["integration_knowledge_repo"].update.assert_any_await(obj=ik)
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].update_sync_state.assert_any_await(
+            ik.id, selected_item_type="folder", folder_path="/Documents/A renamed"
+        )
 
     async def test_keeps_folder_path_when_metadata_has_no_resolvable_path(
         self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
@@ -3040,7 +3047,7 @@ class TestSyncStatus:
         ik = _real_integration_knowledge(last_synced_at=None)
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
         mock_dependencies["integration_knowledge_repo"].one.return_value = ik
-        update = mock_dependencies["integration_knowledge_repo"].update
+        written = mock_dependencies["integration_knowledge_repo"].update_sync_state
 
         with patch.object(
             service, "_pull_content", AsyncMock(side_effect=RuntimeError("Graph 503"))
@@ -3053,7 +3060,11 @@ class TestSyncStatus:
         assert ik.last_sync_status == "error"
         assert ik.last_sync_error == "Graph 503"
         assert ik.last_synced_at is None
-        assert update.await_args.kwargs["obj"] is ik
+        assert written.await_args.args == (ik.id,)
+        assert written.await_args.kwargs == {
+            "last_sync_status": "error",
+            "last_sync_error": "Graph 503",
+        }
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
         assert sync_log.status == "error"
 
@@ -3119,7 +3130,7 @@ class TestSyncStatus:
         ik = _real_integration_knowledge(delta_token="token-1")
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
         mock_dependencies["integration_knowledge_repo"].one.return_value = ik
-        update = mock_dependencies["integration_knowledge_repo"].update
+        written = mock_dependencies["integration_knowledge_repo"].update_sync_state
 
         with patch(
             "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
@@ -3136,7 +3147,46 @@ class TestSyncStatus:
         assert ik.last_sync_status == "error"
         assert ik.last_sync_error == "throttled"
         assert ik.last_sync_attempted_at is not None
-        assert update.await_args.kwargs["obj"] is ik
+        assert written.await_args.args == (ik.id,)
+        assert written.await_args.kwargs == {
+            "last_sync_status": "error",
+            "last_sync_error": "throttled",
+        }
+
+    @pytest.mark.parametrize("mode", ["full", "delta"])
+    async def test_a_pass_writes_only_sync_state_columns(
+        self, service, mock_dependencies, mock_oauth_token, mode
+    ):
+        """The entity copy is minutes old by the end of a pass; a rename committed
+        meanwhile survives because no pass writes the whole row."""
+        ik = _real_integration_knowledge(
+            delta_token="token-1" if mode == "delta" else None
+        )
+        repo = mock_dependencies["integration_knowledge_repo"]
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        repo.one.return_value = ik
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(return_value=([], "token-2")),
+            )
+            if mode == "full":
+                await service.pull_content(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+            else:
+                await service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        repo.update.assert_not_awaited()
+        assert repo.update_sync_state.await_count >= 2
+        for call in repo.update_sync_state.await_args_list:
+            assert call.args == (ik.id,)
+            assert "name" not in call.kwargs and "wrapper_name" not in call.kwargs
 
     async def test_unrecorded_delta_failure_leaves_the_owning_sync_status(
         self, service, mock_dependencies, mock_oauth_token
@@ -4120,7 +4170,7 @@ class TestSelectedItemTypePersistence:
         repo = mock_dependencies["integration_knowledge_repo"]
 
         # Like the mapper, every read yields a fresh entity: only an explicit
-        # update() carries an in-memory correction to the row.
+        # sync-state write carries an in-memory correction to the row.
         async def fresh_read(**_) -> IntegrationKnowledge:
             return _real_integration_knowledge(
                 id=knowledge_id, selected_item_type=stale_type, folder_id=folder_id
@@ -4128,8 +4178,10 @@ class TestSelectedItemTypePersistence:
 
         persisted: list[str] = []
         repo.one = AsyncMock(side_effect=fresh_read)
-        repo.update = AsyncMock(
-            side_effect=lambda obj: persisted.append(obj.selected_item_type)
+        repo.update_sync_state = AsyncMock(
+            side_effect=lambda _id, **fields: persisted.append(
+                fields.get("selected_item_type")
+            )
         )
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
         mock_dependencies[

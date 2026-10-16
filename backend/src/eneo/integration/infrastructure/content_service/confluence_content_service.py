@@ -65,17 +65,21 @@ class ConfluenceContentService:
                 id=integration_knowledge_id
             )
             integration_knowledge.mark_sync_started(started_at)
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+            await self.integration_knowledge_repo.update_sync_state(
+                integration_knowledge.id, last_sync_attempted_at=started_at
+            )
             await self._pull_content(
                 token_id=token_id,
                 space_key=space_key,
                 integration_knowledge_id=integration_knowledge_id,
             )
-            integration_knowledge = await self.integration_knowledge_repo.one(
-                id=integration_knowledge_id
-            )
             integration_knowledge.mark_sync_succeeded(datetime.now(timezone.utc))
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+            await self.integration_knowledge_repo.update_sync_state(
+                integration_knowledge.id,
+                last_sync_status=integration_knowledge.last_sync_status,
+                last_sync_error=integration_knowledge.last_sync_error,
+                last_synced_at=integration_knowledge.last_synced_at,
+            )
         except Exception as e:
             await self._record_sync_failure(
                 integration_knowledge_id, user_visible_error(e)
@@ -89,14 +93,19 @@ class ConfluenceContentService:
         """Persist the failure before re-raising; never raises itself.
 
         The worker commits on a soft failure, so the status written here is
-        what the UI shows.
+        what the UI shows. Only the status columns are written, so a rename
+        committed during the sync survives.
         """
         try:
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
             )
             integration_knowledge.mark_sync_failed(error)
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+            await self.integration_knowledge_repo.update_sync_state(
+                integration_knowledge_id,
+                last_sync_status=integration_knowledge.last_sync_status,
+                last_sync_error=integration_knowledge.last_sync_error,
+            )
         except Exception:
             logger.error(
                 "Could not record sync failure on integration knowledge %s",
@@ -203,7 +212,9 @@ class ConfluenceContentService:
                 integration_knowledge_id
             )
         )
-        await self.integration_knowledge_repo.update(obj=integration_knowledge)
+        await self.integration_knowledge_repo.update_sync_state(
+            integration_knowledge_id, size=integration_knowledge.size
+        )
 
     @staticmethod
     def _require_confluence_token(token: OauthToken) -> ConfluenceToken:

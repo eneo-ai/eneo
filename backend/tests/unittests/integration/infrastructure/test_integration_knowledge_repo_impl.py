@@ -111,3 +111,33 @@ class TestDocumentCountProjection:
         await repo.attach_document_counts([])
 
         session.execute.assert_not_called()
+
+
+class TestUpdateSyncState:
+    """A sync writes its own columns only; a rename committed meanwhile survives."""
+
+    async def test_writes_only_the_given_sync_columns(self, repo, session):
+        knowledge_id = uuid4()
+        session.execute.return_value = MagicMock(rowcount=1)
+
+        await repo.update_sync_state(
+            knowledge_id, last_sync_status="success", delta_token="token-2"
+        )
+
+        sql = _compiled(session.execute.await_args.args[0])
+        assert sql.startswith(
+            "UPDATE integration_knowledge SET last_sync_status='success', "
+            "delta_token='token-2', updated_at=now() WHERE"
+        )
+        assert f"'{knowledge_id}'" in sql
+
+    async def test_without_fields_issues_no_query(self, repo, session):
+        await repo.update_sync_state(uuid4())
+
+        session.execute.assert_not_called()
+
+    async def test_missing_row_raises(self, repo, session):
+        session.execute.return_value = MagicMock(rowcount=0)
+
+        with pytest.raises(NotFoundException):
+            await repo.update_sync_state(uuid4(), last_sync_status="error")
