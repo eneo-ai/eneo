@@ -52,26 +52,6 @@ export function initGroups(client) {
     },
 
     /**
-     * Transfer a group into a different space. Needs matching embedding model to be available
-     * Will throw error if not possible
-     * @param {{group: {id: string}, targetSpace: {id: string}}} params
-     * @throws {EneoError}
-     * */
-    transfer: async ({ group, targetSpace }) => {
-      const { id } = group;
-      await client.fetch("/api/v1/groups/{id}/transfer/", {
-        method: "post",
-        params: { path: { id } },
-        requestBody: {
-          "application/json": {
-            target_space_id: targetSpace.id
-          }
-        }
-      });
-      return true;
-    },
-
-    /**
      * Get info of a group via its id.
      * @param  {{id: string} | Group} group group
      * @returns {Promise<Group>} Full info about the queried group

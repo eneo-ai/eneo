@@ -270,7 +270,11 @@ or materialize inherited knowledge as a direct distribution.
 Replacement writes lock their parent in the request transaction. Assistant moves
 lock both Spaces in ID order, then the assistant; group chat seat replacements
 take the same Space lock before validating membership. Moves update ownership
-without deleting the assistant or its history. Concurrent changes to distinct
+without deleting the assistant or its history. Assistants and services move
+alone: their collections and websites stay in the Space that owns them.
+Collections and websites cannot be moved or shared between Spaces; the only
+distribution is from an organization Space, whose knowledge its child Spaces
+see. Concurrent changes to distinct
 resources do not overwrite each other. Two explicit replacements of the same
 relationship remain serialized, last-writer-wins operations; there is no
 client-visible optimistic version contract.
