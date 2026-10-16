@@ -906,26 +906,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/groups/{id}/transfer/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Transfer Group To Space
-     * @description Transfer a collection (legacy group) to another space.
-     */
-    post: operations["transfer_group_to_space_api_v1_groups__id__transfer__post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/settings/": {
     parameters: {
       query?: never;
@@ -5478,26 +5458,6 @@ export interface paths {
     get: operations["get_latest_crawl_run_api_v1_websites__id__runs_latest__get"];
     put?: never;
     post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/websites/{id}/transfer/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Transfer Website To Space
-     * @description Transfer a website to another space by id.
-     */
-    post: operations["transfer_website_to_space_api_v1_websites__id__transfer__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -23128,19 +23088,6 @@ export interface components {
       /** Owner Name */
       owner_name?: string | null;
     };
-    /** TransferApplicationRequest */
-    TransferApplicationRequest: {
-      /**
-       * Target Space Id
-       * Format: uuid
-       */
-      target_space_id: string;
-      /**
-       * Move Resources
-       * @default false
-       */
-      move_resources?: boolean;
-    };
     /** TransferRequest */
     TransferRequest: {
       /**
@@ -28165,66 +28112,6 @@ export interface operations {
       };
     };
   };
-  transfer_group_to_space_api_v1_groups__id__transfer__post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["TransferRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
   get_settings_api_v1_settings__get: {
     parameters: {
       query?: never;
@@ -30143,7 +30030,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["TransferApplicationRequest"];
+        "application/json": components["schemas"]["TransferRequest"];
       };
     };
     responses: {
@@ -32801,7 +32688,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["TransferApplicationRequest"];
+        "application/json": components["schemas"]["TransferRequest"];
       };
     };
     responses: {
@@ -43798,58 +43685,6 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["CrawlRunPublic"] | null;
         };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  transfer_website_to_space_api_v1_websites__id__transfer__post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Unique identifier of the website to transfer */
-        id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["TransferRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
       };
       /** @description Forbidden */
       403: {
