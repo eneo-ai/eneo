@@ -20,6 +20,7 @@ from eneo.integration.domain.value_objects import (
     SkippedDetail,
     SyncMetadata,
 )
+from eneo.integration.presentation.validation import https_url_or_none
 from eneo.jobs.job_models import Task
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.models import ResourcePermission
@@ -308,7 +309,10 @@ class IntegrationKnowledgePublic(BaseModel):
     id: UUID
     name: str
     original_name: Optional[str] = None
-    url: str
+    url: Optional[str] = Field(
+        description="Web URL of the item in its source; null unless an absolute "
+        "https URL"
+    )
     tenant_id: UUID
     space_id: UUID
     user_integration_id: UUID
@@ -332,6 +336,11 @@ class IntegrationKnowledgePublic(BaseModel):
     # Annotating the bare Enum base class produced an empty enum (`never`) in
     # the OpenAPI spec; the assembler always sets a Task member.
     task: Task
+
+    @field_validator("url")
+    @classmethod
+    def _https_only(cls, value: Optional[str]) -> Optional[str]:
+        return https_url_or_none(value)
 
 
 class SyncLog(BaseModel):
@@ -415,10 +424,18 @@ class IntegrationDocumentItem(BaseModel):
         description="Folders between the imported item and the document, "
         "URL-decoded and without the file name; empty for the item itself."
     )
-    url: Optional[str] = Field(None, description="Web URL of the source document")
+    url: Optional[str] = Field(
+        None,
+        description="Web URL of the source document; null unless an absolute https URL",
+    )
     size: int
     updated_at: Optional[datetime] = None
     source_metadata: list[SourceMetadataEntry] = []
+
+    @field_validator("url")
+    @classmethod
+    def _https_only(cls, value: Optional[str]) -> Optional[str]:
+        return https_url_or_none(value)
 
 
 class IntegrationDocumentsPage(BaseModel):

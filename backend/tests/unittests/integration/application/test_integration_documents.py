@@ -195,6 +195,15 @@ def test_document_items_carry_the_relative_path_and_source_metadata():
     ]
 
 
+@pytest.mark.parametrize(
+    "url", ["javascript:alert(1)", "http://contoso.sharepoint.com/x"]
+)
+def test_documents_only_link_to_https(url):
+    items = document_items([_blob(url=url)], _item())
+
+    assert items[0].url is None
+
+
 def test_confluence_pages_have_no_relative_path():
     item = _item(
         "confluence",
