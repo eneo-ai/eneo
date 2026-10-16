@@ -186,7 +186,7 @@ Each event is a standard SSE frame whose `event` field names the payload type an
 | `tool_approval_required` | `SSEToolApprovalRequired` | `approval_id` and the pending `tools`. Only with `require_tool_approval: true`. |
 | `tool_approval_timeout` | `SSEToolApprovalTimeout` | `approval_id` and the `tools` whose approval expired. |
 | `token_usage` | `SSETokenUsage` | `usage` with prompt, completion, turn, and context token counts. |
-| `error` | `SSEError` | `error` (message) and optional numeric `error_code`. |
+| `error` | `SSEError` | `error` (message), optional numeric `error_code`, and `code`, the reason the answer failed. Provider failures use the codes in [When a provider fails](/guides/ai-providers#when-a-provider-fails); `stream_error` means Eneo itself failed. The stream ends after this event. |
 
 ```bash
 curl -N -X POST "https://your-domain.com/api/v1/conversations/" \
@@ -297,6 +297,8 @@ Unhandled failures return `500` with `{"error": "Internal server error", "error_
 Every response carries an `X-Trace-Id` header (and `X-Correlation-ID` for older clients). If you send `X-Correlation-ID` or `X-Request-ID` with a request, the value is echoed as `request_id` in structured error bodies, which makes client and server logs easy to correlate.
 
 Handle errors by `code` or `eneo_error_code`, never by parsing the English `message`.
+
+A failed call to the AI provider returns `eneo_error_code` `9010` (`503`) or `9041` (`400`) with `code` naming the cause, for example `provider_unreachable` or `provider_rate_limited`, and `details.retryable` saying whether retrying can succeed. See [When a provider fails](/guides/ai-providers#when-a-provider-fails) for the full list.
 
 | Status | Typical meaning |
 |--------|-----------------|

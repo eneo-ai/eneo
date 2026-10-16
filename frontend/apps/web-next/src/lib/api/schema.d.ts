@@ -20132,6 +20132,12 @@ export interface components {
        * @description Experimental feature that tries to limit the amount of chunks to only the relevant ones, based on the score. Set to null (or omit completely) to not use this feature
        */
       autocut_cutoff?: number | null;
+      /**
+       * Rerank
+       * @description Rerank the candidates with the installation's default rerank model. Reranked results carry the reranker's scores and autocut_cutoff is ignored; without a usable rerank model the search runs as without this flag.
+       * @default false
+       */
+      rerank?: boolean;
     };
     /** SemanticSearchResponse */
     SemanticSearchResponse: {
@@ -24851,6 +24857,11 @@ export interface components {
        * @default null
        */
       error_code?: number | null;
+      /**
+       * Code
+       * @default null
+       */
+      code?: string | null;
     };
   };
   responses: never;
@@ -31644,6 +31655,8 @@ export interface operations {
                 error: string;
                 /** Error Code */
                 error_code?: number | null;
+                /** Code */
+                code?: string | null;
               };
         };
       };

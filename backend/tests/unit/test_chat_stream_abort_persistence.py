@@ -579,6 +579,57 @@ async def test_streaming_handle_response_no_partial_save_on_normal_completion():
 
 
 @pytest.mark.asyncio
+async def test_streaming_handle_response_passes_a_failed_answer_on_to_the_client():
+    """The adapter ends a failed answer with an ERROR chunk instead of raising;
+    dropping it here let a cut-off answer reach the client as a finished one."""
+
+    async def fake_completion_stream():
+        yield Completion(response_type=ResponseType.TEXT, text="Half an ")
+        yield Completion(
+            response_type=ResponseType.ERROR,
+            error="The connection to the AI provider was interrupted.",
+            error_code=503,
+            error_reason="provider_connection_lost",
+            stop=True,
+        )
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=3,
+        usage=None,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    from eneo.assistants.assistant_service import AssistantService
+
+    gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+        svc,  # pyright: ignore[reportArgumentType]
+        response=response,
+        datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+        question="hello?",
+        files=[],
+        completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+        session=_make_session_in_db(),
+        stream=True,
+        assistant_id=uuid4(),
+        question_id=uuid4(),
+        **_skill_runtime_args(
+            initial_skill_context_tokens=2,
+            final_skill_context_tokens=2,
+        ),
+    )
+    collected: list[Completion] = [c async for c in gen]
+
+    errors = [c for c in collected if c.response_type == ResponseType.ERROR]
+    assert [e.error_reason for e in errors] == ["provider_connection_lost"]
+    # What did arrive is still saved, so the conversation keeps the partial text.
+    update_kwargs = session_service_mock.complete_question_with_answer.call_args.kwargs
+    assert update_kwargs["answer"] == "Half an "
+
+
+@pytest.mark.asyncio
 async def test_streaming_handle_response_persists_cumulative_input_estimate():
     async def fake_completion_stream():
         yield Completion(

@@ -347,6 +347,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
             session_id=session_id,
             error=chunk.error or "",
             error_code=chunk.error_code,
+            code=chunk.error_reason,
         )
 
     else:

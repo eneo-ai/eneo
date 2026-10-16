@@ -138,11 +138,16 @@ export class FilePreview {
   cover = $state.raw<PreviewCover | null>(null);
   /**
    * The panel's overview of everything the conversation has to show, with the
-   * section it opened on and the element to hand the focus back to. It lives
-   * here so a file bundle in a message can open it as the panel's own controls
-   * do; the layout decides how it is shown.
+   * section it opened on, the upload group it points at and the element to
+   * hand the focus back to. It lives here so a file bundle in a message can
+   * open it as the panel's own controls do; the layout decides how it is shown.
    */
-  overview = $state.raw<{ section: "uploads" | null; opener: string | null } | null>(null);
+  overview = $state.raw<{
+    section: "uploads" | null;
+    /** The question whose uploads the overview marks; see `uploadGroupKey`. */
+    group: string | null;
+    opener: string | null;
+  } | null>(null);
 
   constructor(urls: AttachmentUrls) {
     this.#urls = urls;
@@ -154,14 +159,19 @@ export class FilePreview {
   }
 
   /**
-   * Shows the overview, open at `section`; `opener` gets the focus back when
-   * it closes. A file or view on show leaves the panel first.
+   * Shows the overview, open at `section` and marking the upload `group`;
+   * `opener` gets the focus back when it closes. A file or view on show
+   * leaves the panel first.
    */
-  showOverview(section: "uploads" | null = null, opener?: HTMLElement | null) {
+  showOverview(
+    section: "uploads" | null = null,
+    opener?: HTMLElement | null,
+    group: string | null = null
+  ) {
     this.cover?.leave();
     if (this.shown) this.close();
     if (opener && !opener.id) opener.id = `preview-opener-${crypto.randomUUID()}`;
-    this.overview = { section, opener: opener?.id ?? null };
+    this.overview = { section, group, opener: opener?.id ?? null };
   }
 
   /** Closes the overview; the focus returns to its opener unless told otherwise. */
