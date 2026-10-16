@@ -125,6 +125,15 @@ function data(item: IntegrationKnowledge, title: string): PageData {
   } as unknown as PageData;
 }
 
+/** A crumb's text as read out: the title stays, decorations such as the ellipsis do not. */
+function crumbText(link: Element) {
+  return Array.from(link.childNodes)
+    .filter((node) => !(node instanceof Element && node.getAttribute("aria-hidden") === "true"))
+    .map((node) => node.textContent)
+    .join("")
+    .trim();
+}
+
 describe("integration documents page", () => {
   beforeEach(() => {
     api.listDocuments.mockReset();
@@ -138,7 +147,7 @@ describe("integration documents page", () => {
     await expect.element(page.getByRole("heading", { level: 1 })).toHaveTextContent("Protokoll");
     await expect.element(page.getByText("KS-1.pdf")).toBeVisible();
     const crumbs = page.getByRole("navigation", { name: m.breadcrumb() }).getByRole("link");
-    expect(crumbs.elements().map((link) => link.textContent?.trim())).toEqual([
+    expect(crumbs.elements().map(crumbText)).toEqual([
       `←\u00a0${m.integrations()}`,
       "Kommunstyrelsen"
     ]);
@@ -157,7 +166,7 @@ describe("integration documents page", () => {
         .getByRole("navigation", { name: m.breadcrumb() })
         .getByRole("link")
         .elements()
-        .map((link) => link.textContent?.trim())
+        .map(crumbText)
     ).toEqual([`←\u00a0${m.integrations()}`]);
     expect(api.listDocuments).not.toHaveBeenCalled();
   });
