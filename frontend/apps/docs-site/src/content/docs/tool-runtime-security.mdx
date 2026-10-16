@@ -239,11 +239,6 @@ the per-job confinement:
 | Resources    | `mem_limit: 2g`, `cpus: 2`, `pids_limit: 256`                                                                     |
 | Supply chain | landrun built from a pinned release; Python packages installed with `--require-hashes`                            |
 
-A sandboxed container runtime such as gVisor (`runtime: runsc` on the service)
-adds a layer between the container and the host kernel. It protects the host,
-not one conversation from another, so it complements the confinement above
-and does not replace it.
-
 Deployments that do not use the reference stack (another orchestrator, the
 development container) must provide this layer themselves: no egress, a
 read-only root filesystem, no capabilities and resource limits.
@@ -315,8 +310,11 @@ URLs or tokens.
 
 ## What this does not cover
 
-- **The host kernel itself.** Landlock is a kernel feature; gVisor or a
-  similar sandbox is the layer between the container and the host.
+- **The host kernel itself.** Landlock is a kernel feature, and the reference
+  stack runs the container on the host kernel with Docker's default runtime.
+  Sandboxed container runtimes such as gVisor or Kata Containers exist for
+  that layer, but Eneo has not run the tool runtime under one and makes no
+  claim about compatibility; a deployment that tries it is on its own.
 - **Residency of original bytes and parsed sheets.** They stay in the
   memory-backed `/tmp` for follow-up questions, 30 minutes idle by default.
   `TOOL_RUNTIME_TABULAR_CACHE_TTL_SECONDS` shortens that, down to 60 seconds.
@@ -344,7 +342,6 @@ handle files of that level. Before raising it:
 3. Confirm `FILE_REFERENCE_BASE_URL` points at an address only the runtime and
    trusted servers can reach, and that `TOOL_RUNTIME_FILE_ORIGINS` pins it.
 4. Decide on the cache lifetime for the data involved.
-5. Consider a sandboxed container runtime where the host offers one.
 
 ## Security-relevant settings
 

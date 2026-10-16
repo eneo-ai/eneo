@@ -196,9 +196,11 @@ What the operator contributes:
 5. **Decide on cache residency.** Original bytes and parsed sheets stay in the
    memory-backed `/tmp` for follow-up questions, 30 minutes idle by default.
    `TOOL_RUNTIME_TABULAR_CACHE_TTL_SECONDS` shortens that, down to 60 seconds.
-6. **Consider a sandboxed container runtime** such as gVisor (`runtime: runsc`
-   on the service) where the host offers one. It adds a layer between the
-   container and the host kernel; it does not replace the confinement above.
+
+Sandboxed container runtimes (gVisor, Kata Containers) add a layer between the
+container and the host kernel. Eneo has not run the tool runtime under one, so
+they are outside the supported configuration; a deployment that tries one does
+so untested.
 
 Setting a security classification on the built-in server in **Admin > Tools**
 is the administrator's statement that this deployment may handle files of that
