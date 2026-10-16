@@ -73,7 +73,9 @@ class _FakeSessionManager:
         self.statements.append(stmt)
         if self.lock_timeout and isinstance(stmt, sa.Update):
             raise OperationalError(
-                "UPDATE", {}, Exception("canceling statement due to lock timeout")
+                "UPDATE tenant_sharepoint_apps SET ...",
+                {"service_account_refresh_token_encrypted": "enc:ciphertext"},
+                Exception("canceling statement due to lock timeout"),
             )
 
     async def _begin(self):
@@ -231,11 +233,33 @@ class TestSuccess:
         app = _app()
         sessions = _FakeSessionManager(lock_timeout=True)
 
-        with patch(f"{_MODULE}.sessionmanager", sessions):
+        with (
+            patch(f"{_MODULE}.sessionmanager", sessions),
+            patch(f"{_MODULE}.logger") as log,
+        ):
             assert await provider.get_access_token(app) == "at"
 
         assert len(sessions.updates()) == 1
         assert app.auth_status == "ok"
+        repo.update.assert_awaited_once_with(app)
+        logged = [
+            str(call.args[0]) % call.args[1:] for call in log.warning.call_args_list
+        ]
+        assert logged and all("enc:ciphertext" not in line for line in logged)
+
+    async def test_failed_success_write_does_not_fail_the_acquisition(self):
+        account_auth = AsyncMock()
+        account_auth.refresh_access_token.return_value = {
+            "access_token": "at",
+            "refresh_token": "refresh-2",
+        }
+        provider, repo = _provider(account_auth=account_auth, encryption=False)
+        repo.update.side_effect = RuntimeError("connection lost")
+        app = _app(AUTH_METHOD_SERVICE_ACCOUNT)
+
+        assert await provider.get_access_token(app) == "at"
+
+        assert app.service_account_refresh_token == "refresh-2"
         repo.update.assert_awaited_once_with(app)
 
 
@@ -268,6 +292,42 @@ class TestFailure:
                 id="interaction_required",
             ),
             pytest.param(401, {}, "HTTP 401", id="bare-401"),
+            pytest.param(
+                400,
+                {
+                    "error": "invalid_scope",
+                    "error_description": "AADSTS70011: scope is not valid",
+                },
+                "AADSTS70011: scope is not valid",
+                id="invalid_scope",
+            ),
+            pytest.param(
+                400,
+                {
+                    "error": "invalid_resource",
+                    "error_description": "AADSTS500011: resource principal not found",
+                },
+                "AADSTS500011: resource principal not found",
+                id="invalid_resource",
+            ),
+            pytest.param(
+                400,
+                {
+                    "error": "invalid_request",
+                    "error_description": "AADSTS90002: Tenant 'contsoo' not found.",
+                },
+                "AADSTS90002: Tenant 'contsoo' not found.",
+                id="invalid_request-tenant-not-found",
+            ),
+            pytest.param(
+                400,
+                {
+                    "error": "invalid_request",
+                    "error_description": "AADSTS700016: Application with identifier 'x' was not found",
+                },
+                "AADSTS700016: Application with identifier 'x' was not found",
+                id="invalid_request-application-not-found",
+            ),
         ],
     )
     async def test_credential_refusal_is_recorded_on_its_own_connection(
@@ -323,6 +383,16 @@ class TestFailure:
                 _token_error(503, {"error": "temporarily_unavailable"}), id="5xx"
             ),
             pytest.param(httpx.ConnectTimeout("slow"), id="timeout"),
+            pytest.param(
+                _token_error(
+                    400,
+                    {
+                        "error": "invalid_request",
+                        "error_description": "AADSTS900144: The request body must contain the following parameter: 'grant_type'.",
+                    },
+                ),
+                id="invalid_request-malformed-call",
+            ),
         ],
     )
     async def test_transient_failures_are_not_credential_failures(self, error):
