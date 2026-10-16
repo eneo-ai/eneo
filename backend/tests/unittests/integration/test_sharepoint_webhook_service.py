@@ -179,10 +179,18 @@ async def test_client_state_validation_accepts_valid(setup: Setup, mock_notifica
     )
 
 
-async def test_client_state_validation_rejects_invalid(setup: Setup, mock_notification):
+@pytest.mark.parametrize(
+    "client_state",
+    [
+        pytest.param("wrong-client-state", id="wrong"),
+        pytest.param("é", id="non-ascii"),
+    ],
+)
+async def test_client_state_validation_rejects_invalid(
+    setup: Setup, mock_notification, client_state
+):
     """Notifications with incorrect client state are rejected."""
-    # Modify notification to have wrong client state
-    mock_notification["clientState"] = "wrong-client-state"
+    mock_notification["clientState"] = client_state
 
     # Set up mock responses
     setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
@@ -207,6 +215,30 @@ async def test_client_state_validation_rejects_malformed(
 
     setup.service._fetch_knowledge_by_subscription.assert_not_called()
     setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
+
+
+async def test_configured_client_state_is_compared_stripped_as_utf8(
+    setup: Setup, mock_notification
+):
+    """A secret with surrounding whitespace or non-ASCII characters still matches."""
+    settings = MagicMock(sharepoint_webhook_client_state=" sécret \n")
+    with patch(
+        "eneo.integration.infrastructure.sharepoint_webhook_service.get_settings",
+        return_value=settings,
+    ):
+        service = SharepointWebhookService(
+            session=setup.session,
+            oauth_token_repo=setup.oauth_token_repo,
+            job_repo=setup.job_repo,
+            user_repo=setup.user_repo,
+            change_key_service=setup.change_key_service,
+            sharepoint_subscription_repo=setup.sharepoint_subscription_repo,
+        )
+    mock_notification["clientState"] = "sécret"
+
+    assert service.authenticated_notifications({"value": [mock_notification]}) == [
+        mock_notification
+    ]
 
 
 async def test_rejects_all_when_client_state_not_configured(

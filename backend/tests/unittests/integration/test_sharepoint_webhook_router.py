@@ -197,6 +197,32 @@ async def test_bad_bodies_are_refused_before_any_lookup(api, body, headers):
     api.session.execute.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "client_state",
+    [
+        pytest.param("not-the-secret", id="wrong"),
+        pytest.param("é", id="non-ascii"),
+        pytest.param(None, id="missing"),
+    ],
+)
+async def test_unauthenticated_notifications_are_acknowledged_without_a_transaction(
+    api, client_state
+):
+    notification = _notification()
+    if client_state is None:
+        del notification["clientState"]
+    else:
+        notification["clientState"] = client_state
+
+    response = await api.client.post(WEBHOOK, json={"value": [notification]})
+
+    assert response.status_code == 202
+    assert response.json() == {"status": "acknowledged"}
+    api.session.begin.assert_not_called()
+    api.session.execute.assert_not_called()
+    api.subscription_repo.get_by_subscription_id.assert_not_called()
+
+
 async def test_unknown_subscription_is_acknowledged_but_ignored(api):
     response = await api.client.post(
         WEBHOOK, json={"value": [_notification("sub-unknown")]}

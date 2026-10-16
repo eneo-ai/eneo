@@ -177,11 +177,15 @@ async def sharepoint_webhook(
             first.get("changeType"),
         )
 
-    # The transaction opens only for a validated notification body, so junk
-    # posted at the public URL costs no database connection.
-    session = cast(AsyncSession, container.session())
-    async with session.begin():
-        service = container.sharepoint_webhook_service()
-        await service.handle_notifications(payload)
+    # The transaction opens only for notifications carrying the configured
+    # clientState, so junk or forged bodies posted at the public URL cost no
+    # database connection. Rejections are acknowledged like any other body;
+    # the response must not tell a sender whether its secret was right.
+    service = container.sharepoint_webhook_service()
+    accepted = service.authenticated_notifications(payload)
+    if accepted:
+        session = cast(AsyncSession, container.session())
+        async with session.begin():
+            await service.handle_notifications({"value": accepted})
 
     return JSONResponse(status_code=202, content={"status": "acknowledged"})

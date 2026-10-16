@@ -39,6 +39,18 @@ from eneo.users.user_repo import UsersRepository
 logger = get_logger(__name__)
 
 
+def client_state_matches(expected: str | None, value: object) -> bool:
+    """Constant-time comparison of a notification's clientState with the secret.
+
+    Compared as UTF-8 bytes: ``hmac.compare_digest`` refuses non-ASCII text,
+    which would turn a forged ``clientState`` into a 500 and break every
+    notification for a secret containing one.
+    """
+    if not expected or not isinstance(value, str):
+        return False
+    return hmac.compare_digest(value.encode("utf-8"), expected.encode("utf-8"))
+
+
 class SharepointWebhookService:
     """Handles callbacks from Microsoft Graph change notifications.
 
@@ -64,7 +76,45 @@ class SharepointWebhookService:
         self.change_key_service = change_key_service
         self.sharepoint_subscription_repo = sharepoint_subscription_repo
         settings = get_settings()
-        self.expected_client_state = settings.sharepoint_webhook_client_state
+        # Stripped once, as the subscription service sends it to Graph; a
+        # trailing newline in the environment must not drop every notification.
+        configured = settings.sharepoint_webhook_client_state
+        self.expected_client_state: str | None = (
+            configured.strip() if configured else None
+        )
+
+    def authenticated_notifications(
+        self, notifications: SharePointWebhookPayload
+    ) -> list[SharePointWebhookNotification]:
+        """The notifications whose ``clientState`` matches the configured secret.
+
+        clientState is the only authentication for this endpoint (it is
+        unauthenticated at the HTTP layer). Fail closed: without a configured
+        secret genuine Graph notifications cannot be told from forged ones, so
+        none is accepted.
+        """
+        values = notifications.get("value")
+        if not values:
+            logger.debug("SharePoint webhook called without notifications")
+            return []
+        if not self.expected_client_state:
+            logger.error(
+                "Rejecting SharePoint webhook: SHAREPOINT_WEBHOOK_CLIENT_STATE is "
+                "not configured, so notifications cannot be authenticated."
+            )
+            return []
+        accepted: list[SharePointWebhookNotification] = []
+        for notification in values:
+            if not client_state_matches(
+                self.expected_client_state, notification.get("clientState")
+            ):
+                logger.warning(
+                    "Ignoring webhook notification with unexpected clientState. "
+                    "This may indicate a security issue or SHAREPOINT_WEBHOOK_CLIENT_STATE mismatch."
+                )
+                continue
+            accepted.append(notification)
+        return accepted
 
     async def handle_notifications(
         self, notifications: SharePointWebhookPayload
@@ -77,35 +127,8 @@ class SharepointWebhookService:
         subscription. ChangeKey-based deduplication prevents processing of
         duplicate notifications.
         """
-        values = notifications.get("value")
-        if not values:
-            logger.debug("SharePoint webhook called without notifications")
-            return
-
-        # clientState is the only authentication for this endpoint (it is
-        # unauthenticated at the HTTP layer). Fail closed: without a configured
-        # secret we cannot tell genuine Graph notifications from forged ones, so
-        # reject everything rather than silently accepting unverified payloads.
-        if not self.expected_client_state:
-            logger.error(
-                "Rejecting SharePoint webhook: SHAREPOINT_WEBHOOK_CLIENT_STATE is "
-                "not configured, so notifications cannot be authenticated."
-            )
-            return
-
         by_subscription: dict[str, list[SharePointWebhookNotification]] = {}
-        for notification in values:
-            client_state = notification.get("clientState")
-            # Constant-time compare to avoid leaking the secret via timing.
-            if not isinstance(client_state, str) or not hmac.compare_digest(
-                client_state, self.expected_client_state
-            ):
-                logger.warning(
-                    "Ignoring webhook notification with unexpected clientState. "
-                    "This may indicate a security issue or SHAREPOINT_WEBHOOK_CLIENT_STATE mismatch."
-                )
-                continue
-
+        for notification in self.authenticated_notifications(notifications):
             subscription_id = notification.get("subscriptionId")
             if not isinstance(subscription_id, str) or not subscription_id:
                 logger.warning("Ignoring webhook notification without subscriptionId")
