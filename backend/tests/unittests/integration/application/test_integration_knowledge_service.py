@@ -29,7 +29,11 @@ from eneo.integration.infrastructure.sharepoint_subscription_service import (
     SharePointSubscriptionService,
 )
 from eneo.main.container.container import Container
-from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.roles.permissions import Permission
 from tests.fixtures import TEST_USER
 
@@ -104,6 +108,39 @@ def service(actor: MagicMock, space: MagicMock, integration_knowledge: MagicMock
     )
 
     return service
+
+
+@pytest.mark.parametrize(
+    "method, permission, kwargs",
+    [
+        pytest.param("remove_knowledge", "can_delete_integrations", {}, id="remove"),
+        pytest.param("trigger_full_sync", "can_edit_integrations", {}, id="sync"),
+        pytest.param(
+            "update_knowledge_name",
+            "can_edit_integrations",
+            {"name": "New"},
+            id="rename",
+        ),
+    ],
+)
+async def test_a_non_member_cannot_probe_item_ids_through_mutations(
+    service: IntegrationKnowledgeService,
+    actor: MagicMock,
+    space: MagicMock,
+    method: str,
+    permission: str,
+    kwargs: dict[str, str],
+):
+    """Membership is refused before the lookup, so an unknown id is a 403, not a 404."""
+    getattr(actor, permission).return_value = False
+    space.get_integration_knowledge.side_effect = NotFoundException()
+
+    with pytest.raises(UnauthorizedException):
+        await getattr(service, method)(
+            space_id=space.id, integration_knowledge_id=uuid4(), **kwargs
+        )
+
+    space.get_integration_knowledge.assert_not_called()
 
 
 class TestTenantAppAdminPermission:

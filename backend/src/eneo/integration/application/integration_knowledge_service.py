@@ -497,14 +497,15 @@ class IntegrationKnowledgeService:
 
         space = await self.space_repo.one(id=space_id)
 
+        # Membership is checked before the item is looked up so a non-member
+        # cannot probe which items a space holds.
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_delete_integrations():
+            raise UnauthorizedException()
+
         knowledge = space.get_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id
         )
-
-        actor = self.actor_manager.get_space_actor_from_space(space)
-
-        if not actor.can_delete_integrations():
-            raise UnauthorizedException()
 
         # SECURITY: tenant_app integrations require admin permission
         if knowledge.user_integration.auth_type == "tenant_app":
@@ -592,13 +593,13 @@ class IntegrationKnowledgeService:
     ) -> "JobInDb":
         """Trigger a full resync for an existing SharePoint integration knowledge."""
         space = await self.space_repo.one(id=space_id)
-        knowledge = space.get_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id
-        )
-
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_edit_integrations():
             raise UnauthorizedException()
+
+        knowledge = space.get_integration_knowledge(
+            integration_knowledge_id=integration_knowledge_id
+        )
 
         if knowledge.space_id != space.id:
             raise UnauthorizedException(
@@ -712,14 +713,13 @@ class IntegrationKnowledgeService:
     ) -> IntegrationKnowledge:
         """Update the name of an integration knowledge item."""
         space = await self.space_repo.one(id=space_id)
-        # Verify the knowledge exists in this space (for permission check)
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_edit_integrations():
+            raise UnauthorizedException()
+
         space_knowledge = space.get_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id
         )
-        actor = self.actor_manager.get_space_actor_from_space(space)
-
-        if not actor.can_edit_integrations():
-            raise UnauthorizedException()
 
         # SECURITY: tenant_app integrations require admin permission
         if space_knowledge.user_integration.auth_type == "tenant_app":
