@@ -1,11 +1,13 @@
 """SharePoint sync tasks: a webhook that loses the lease race is not dropped."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.integration.tasks import integration_task
 
@@ -257,3 +259,32 @@ async def test_waiter_whose_marker_was_drained_has_nothing_to_prepare(
     assert result.startswith("Skipped")
     service.process_delta_changes.assert_not_called()
     assert LOCK_KEY not in fake_redis.store
+
+
+@pytest.mark.parametrize("task", [delta_task, full_task], ids=["delta", "full"])
+@pytest.mark.parametrize("outcome", ["commit", "rollback"])
+async def test_lease_is_held_until_the_tasks_transaction_has_ended(
+    fake_redis, service, container, params, task, outcome
+):
+    """The worker commits after the task returns; the next holder must not
+    read this sync's rows before they are visible."""
+    session = AsyncSession()
+    container.session.return_value = session
+    held_after_return = None
+    try:
+        async with session.begin():
+            await task(params, container)
+            held_after_return = LOCK_KEY in fake_redis.store
+            if outcome == "rollback":
+                raise RuntimeError("commit refused")
+    except RuntimeError:
+        pass
+    for _ in range(5):
+        if LOCK_KEY not in fake_redis.store:
+            break
+        await asyncio.sleep(0)
+    await session.close()
+
+    assert held_after_return is True
+    assert LOCK_KEY not in fake_redis.store
+    assert fake_redis.closed
