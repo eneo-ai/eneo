@@ -472,6 +472,7 @@ class AIBuilderRepository:
         tenant_id: UUID,
         actor_user_id: UUID,
         actor_user_group_ids: set[UUID],
+        actor_organization_space_role: SpaceRole | None,
         scoped_space_id: UUID | None,
         target_kind: TargetKind | None = None,
         drafts_only: bool = False,
@@ -508,10 +509,10 @@ class AIBuilderRepository:
                 actor_user_group_ids=actor_user_group_ids,
                 roles=_roles_allowing_flow_edit(SHARED_SPACE_PERMISSIONS),
             )
-            admin_membership = _space_role_membership_exists(
-                actor_user_id=actor_user_id,
-                actor_user_group_ids=actor_user_group_ids,
-                roles=_roles_allowing_flow_edit(ORG_SPACE_PERMISSIONS),
+            organization_editable = (
+                actor_organization_space_role is not None
+                and actor_organization_space_role.value
+                in _roles_allowing_flow_edit(ORG_SPACE_PERMISSIONS)
             )
             stmt = (
                 select(
@@ -544,8 +545,10 @@ class AIBuilderRepository:
                     BuilderSessions.tenant_id == tenant_id,
                     BuilderSessions.actor_user_id == actor_user_id,
                     Spaces.tenant_id == tenant_id,
-                    # Personal access is ownership-backed; shared and organization
-                    # access is membership-backed by their canonical ACL maps.
+                    # Personal access is ownership-backed, shared access is
+                    # membership-backed, and organization access follows the
+                    # caller's organization space role (organization_space_role);
+                    # each through its canonical ACL map.
                     sa.or_(
                         Spaces.user_id == actor_user_id,
                         sa.and_(
@@ -556,7 +559,7 @@ class AIBuilderRepository:
                         sa.and_(
                             Spaces.user_id.is_(None),
                             Spaces.tenant_space_id.is_(None),
-                            admin_membership,
+                            sa.true() if organization_editable else sa.false(),
                         ),
                     ),
                     (

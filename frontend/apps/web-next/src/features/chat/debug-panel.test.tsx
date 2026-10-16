@@ -6,7 +6,9 @@ import type { EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { deriveActivity } from "./activity";
-import { ActivityPanel, type ActivityTab } from "./activity-panel";
+import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
+import { SidePanel } from "./side-panel/side-panel";
+import { SidePanelStore } from "./side-panel/side-panel-store";
 import type { SkillActivationEvidence } from "./turn-debug";
 
 const spies = vi.hoisted(() => ({
@@ -138,19 +140,34 @@ function Harness({
   onClose?: () => void;
 }) {
   const [tab, setTab] = useState<ActivityTab>(initialTab);
+  const [panel] = useState(() => new SidePanelStore(() => Promise.reject(new Error("unused"))));
   return (
-    <ActivityPanel
-      variant="side"
-      messageId={messageId}
-      activity={deriveActivity({ ...answer, id: messageId }, {})}
-      durations={null}
-      sessionId="s-1"
-      tab={tab}
-      onTabChange={setTab}
-      focusSource={null}
-      debug={{ sessionId: "s-1", onSelectTurn }}
-      onClose={onClose}
-    />
+    <SidePanel
+      panel={panel}
+      messages={[]}
+      contents={{ views: [], documents: [], uploads: [] }}
+      versionsOf={() => []}
+      exportOf={() => null}
+      latestActivity={null}
+      activity={{
+        detail: "",
+        onClose,
+        body: (
+          <ActivityPanelBody
+            messageId={messageId}
+            activity={deriveActivity({ ...answer, id: messageId }, {})}
+            durations={null}
+            sessionId="s-1"
+            tab={tab}
+            onTabChange={setTab}
+            focusSource={null}
+            debug={{ sessionId: "s-1", onSelectTurn }}
+          />
+        )
+      }}
+    >
+      <div />
+    </SidePanel>
   );
 }
 

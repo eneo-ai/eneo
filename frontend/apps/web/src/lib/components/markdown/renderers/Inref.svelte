@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { EneoInrefToken } from "../CustomComponents";
   import { getReferenceContext } from "../ReferenceContext.js";
+  import { sanitizeWebHref } from "../sanitizeUrl.js";
 
   type Props = { token: EneoInrefToken };
   const { token }: Props = $props();
@@ -34,7 +35,7 @@
   <!-- eslint-disable svelte/no-navigation-without-resolve -- external URL from reference metadata -->
   <a
     class="border-stronger bg-secondary hover:bg-hover-stronger inline-block min-h-7 min-w-7 rounded-lg border border-b-2 px-2 text-center font-mono text-base font-normal no-underline hover:cursor-pointer"
-    href={reference.metadata.url}
+    href={sanitizeWebHref(reference.metadata.url)}
     target="_blank"
     rel="noreferrer">{reference.number}</a
   >

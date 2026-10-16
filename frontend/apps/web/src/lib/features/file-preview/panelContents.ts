@@ -1,5 +1,5 @@
+import type { UploadGroup } from "$lib/features/chat/conversationUploads";
 import type { ConversationDocument } from "$lib/features/chat/documentVersions";
-import type { PreviewFile } from "./previewKind";
 
 /** Something other than a file that the panel can show: an interactive tool view. */
 export type PanelView = {
@@ -16,5 +16,16 @@ export type PanelView = {
 export type PanelContents = {
   views: PanelView[];
   documents: ConversationDocument[];
-  uploads: PreviewFile[];
+  /** The uploads, by the question they were sent with. */
+  uploads: UploadGroup[];
 };
+
+/** How many things the panel has to show. */
+export function panelContentsCount(contents: PanelContents | null | undefined): number {
+  if (!contents) return 0;
+  return (
+    contents.views.length +
+    contents.documents.length +
+    contents.uploads.reduce((sum, group) => sum + group.files.length, 0)
+  );
+}

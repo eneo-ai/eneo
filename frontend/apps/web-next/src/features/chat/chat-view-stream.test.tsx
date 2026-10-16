@@ -15,7 +15,9 @@ const spies = vi.hoisted(() => ({
   sent: [] as { text: string; body: unknown }[],
   mode: "fail" as "fail" | "refused" | "json" | "answer" | "hold",
   titled: [] as string[],
-  rated: [] as { path: string; params: unknown; body: unknown }[]
+  rated: [] as { path: string; params: unknown; body: unknown }[],
+  /** While set, the files upload waits for the test to finish it. */
+  holdUpload: null as null | ((upload: { id: string; name: string }) => void)
 }));
 
 // Fails before streaming starts, or streams a short answer (AI SDK UI chunks).
@@ -84,10 +86,16 @@ vi.mock("@/lib/api/browser", () => ({
     GET: vi.fn(async () => ({ data: undefined, response: new Response() })),
     POST: vi.fn(async (path: string, init: { params?: { path?: { session_id?: string } } }) => {
       if (path === "/api/v1/files/") {
-        return {
-          data: { id: "file-1", name: "Policy.pdf", mimetype: "application/pdf", size: 2048 },
+        const uploaded = (upload: { id: string; name: string }) => ({
+          data: { ...upload, mimetype: "application/pdf", size: 2048 },
           response: new Response()
-        };
+        });
+        if (spies.holdUpload !== null) {
+          return new Promise<ReturnType<typeof uploaded>>((resolve) => {
+            spies.holdUpload = (upload) => resolve(uploaded(upload));
+          });
+        }
+        return uploaded({ id: "file-1", name: "Policy.pdf" });
       }
       if (path.endsWith("/title/")) spies.titled.push(init.params?.path?.session_id ?? "");
       return { data: { name: "Gräns för direktupphandling" }, response: new Response() };
@@ -113,6 +121,7 @@ afterEach(() => {
   spies.titled.length = 0;
   spies.rated.length = 0;
   spies.mode = "fail";
+  spies.holdUpload = null;
 });
 
 const partner: ChatPartner = {
@@ -358,14 +367,14 @@ describe("ChatView when generation fails", () => {
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     const file = new File(["%PDF"], "Policy.pdf", { type: "application/pdf" });
     fireEvent.change(input, { target: { files: [file] } });
-    const attachments = await screen.findByRole("list", { name: "Bilagor" });
-    await waitFor(() => expect(within(attachments).getByText(/Klar att använda/)).toBeTruthy());
+    const attachments = await screen.findByRole("list", { name: "1 bilaga bifogad" });
+    await waitFor(() => expect(within(attachments).queryByText("Laddar upp…")).toBeNull());
 
     ask("Sammanfatta policyn");
     expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
     // Back in the composer (it has the remove button; the log's copy does not).
     await screen.findByRole("button", { name: "Ta bort Policy.pdf" });
-    const restored = screen.getByRole("list", { name: "Bilagor" });
+    const restored = screen.getByRole("list", { name: "1 bilaga bifogad" });
     const preview = within(restored).getByRole("button", { name: /^Förhandsvisning: Policy\.pdf/ });
     expect(preview.hasAttribute("disabled")).toBe(false);
     expect(revoke).not.toHaveBeenCalled();
@@ -379,6 +388,95 @@ describe("ChatView when generation fails", () => {
       expect(screen.queryByRole("button", { name: "Ta bort Policy.pdf" })).toBeNull()
     );
     await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:policy"));
+    vi.unstubAllGlobals();
+  });
+
+  it("sends a question with uploads still running and issues the request once they are done", async () => {
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: () => "blob:policy", revokeObjectURL: vi.fn() })
+    );
+    spies.mode = "answer";
+    spies.holdUpload = () => {};
+    const appContext = testAppContext({
+      limits: {
+        attachments: {
+          formats: [
+            { mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000, vision: false }
+          ],
+          ai_builder_max_count: 10,
+          ai_builder_max_message_chars: 4000
+        }
+      }
+    });
+    const { container } = renderInApp(<Harness />, { appContext });
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, {
+      target: { files: [new File(["%PDF"], "Policy.pdf", { type: "application/pdf" })] }
+    });
+    await screen.findByRole("list", { name: "1 bilaga bifogad" });
+
+    ask("Sammanfatta policyn");
+    // The question is in the conversation at once, with its upload on it,
+    // while nothing has been sent and the composer is clear.
+    const question = await screen.findByText("Sammanfatta policyn");
+    expect(question).toBeTruthy();
+    expect(screen.getByText("Laddar upp bilagor (0 av 1)...")).toBeTruthy();
+    expect(spies.sent).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Ta bort Policy.pdf" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Stoppa generering" })).toBeTruthy();
+
+    await act(async () => {
+      spies.holdUpload!({ id: "file-1", name: "Policy.pdf" });
+    });
+    await waitFor(() => expect(spies.sent).toHaveLength(1));
+    expect(spies.sent[0]?.body).toMatchObject({ files: [{ id: "file-1" }] });
+    expect(await screen.findByText("Gränsen är 700 000 kr.")).toBeTruthy();
+    expect(screen.queryByText(/Laddar upp bilagor/)).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("takes a waiting question back and restores the draft when it is stopped", async () => {
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: () => "blob:policy", revokeObjectURL: vi.fn() })
+    );
+    spies.holdUpload = () => {};
+    const appContext = testAppContext({
+      limits: {
+        attachments: {
+          formats: [
+            { mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000, vision: false }
+          ],
+          ai_builder_max_count: 10,
+          ai_builder_max_message_chars: 4000
+        }
+      }
+    });
+    const { container } = renderInApp(<Harness />, { appContext });
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, {
+      target: { files: [new File(["%PDF"], "Policy.pdf", { type: "application/pdf" })] }
+    });
+    await screen.findByRole("list", { name: "1 bilaga bifogad" });
+
+    ask("Sammanfatta policyn");
+    await screen.findByText("Laddar upp bilagor (0 av 1)...");
+    fireEvent.click(screen.getByRole("button", { name: "Stoppa generering" }));
+
+    // Back to the start state with the draft and its attachment in the composer.
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("textbox", { name: /Meddelande till/ }) as HTMLTextAreaElement).value
+      ).toBe("Sammanfatta policyn")
+    );
+    expect(screen.getByRole("button", { name: "Ta bort Policy.pdf" })).toBeTruthy();
+    expect(screen.queryByText(/Laddar upp bilagor/)).toBeNull();
+    // The upload finishing later sends nothing by itself.
+    await act(async () => {
+      spies.holdUpload!({ id: "file-1", name: "Policy.pdf" });
+    });
+    expect(spies.sent).toHaveLength(0);
     vi.unstubAllGlobals();
   });
 });

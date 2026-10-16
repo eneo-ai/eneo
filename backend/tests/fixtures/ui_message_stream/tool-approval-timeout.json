@@ -179,7 +179,11 @@
           "server_name": "files",
           "title": "Read a file",
           "purpose": null,
-          "is_internal": true
+          "is_internal": true,
+          "is_bundled": null,
+          "app_view": null,
+          "approved": false,
+          "result_status": "timeout_denied"
         }
       }
     },
@@ -193,7 +197,11 @@
           "server_name": "files",
           "title": "Read a file",
           "purpose": null,
-          "is_internal": true
+          "is_internal": true,
+          "is_bundled": null,
+          "app_view": null,
+          "approved": false,
+          "result_status": "timeout_denied"
         }
       }
     },
@@ -375,21 +383,29 @@
           "input": {
             "path": "a.txt"
           },
+          "errorText": "timeout_denied",
           "callProviderMetadata": {
             "eneo": {
               "server_name": "files",
               "title": "Read a file",
               "purpose": null,
-              "is_internal": true
+              "is_internal": true,
+              "is_bundled": null,
+              "app_view": null,
+              "approved": false,
+              "result_status": "timeout_denied"
             }
           },
-          "errorText": "timeout_denied",
           "resultProviderMetadata": {
             "eneo": {
               "server_name": "files",
               "title": "Read a file",
               "purpose": null,
-              "is_internal": true
+              "is_internal": true,
+              "is_bundled": null,
+              "app_view": null,
+              "approved": false,
+              "result_status": "timeout_denied"
             }
           }
         },

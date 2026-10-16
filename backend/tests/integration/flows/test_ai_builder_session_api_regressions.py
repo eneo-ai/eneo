@@ -31,6 +31,7 @@ from sse_starlette import ServerSentEvent
 from starlette.requests import Request
 from starlette.types import Message, Scope
 
+from eneo.actors.actors.space_actor import SpaceRole, organization_space_role
 from eneo.assistants.assistant import AssistantOrigin
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.domain.action_types import ActionType
@@ -1587,6 +1588,7 @@ async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_n
             tenant_id=tenant_id,
             actor_user_id=admin_user.id,
             actor_user_group_ids=admin_user.user_groups_ids,
+            actor_organization_space_role=organization_space_role(admin_user),
             scoped_space_id=None,
         )
         # The Flöden list asks for drafts only: a session the user never
@@ -1596,6 +1598,7 @@ async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_n
             tenant_id=tenant_id,
             actor_user_id=admin_user.id,
             actor_user_group_ids=admin_user.user_groups_ids,
+            actor_organization_space_role=organization_space_role(admin_user),
             scoped_space_id=space_id,
             target_kind=TargetKind.CREATE,
             drafts_only=True,
@@ -1604,6 +1607,7 @@ async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_n
             tenant_id=tenant_id,
             actor_user_id=admin_user.id,
             actor_user_group_ids=admin_user.user_groups_ids,
+            actor_organization_space_role=organization_space_role(admin_user),
             scoped_space_id=uuid4(),
             drafts_only=True,
         )
@@ -1674,21 +1678,14 @@ async def test_ai_builder_session_list_filters_access_before_limit_in_one_query(
             )
         )
         assert organization_space_id is not None
-        organization_membership = await database_session.scalar(
-            select(SpacesUsers).where(
+        # The organization space follows the admin permission held now: the
+        # actor reaches it without a membership row.
+        await database_session.execute(
+            sa.delete(SpacesUsers).where(
                 SpacesUsers.space_id == organization_space_id,
                 SpacesUsers.user_id == actor_user_id,
             )
         )
-        if organization_membership is None:
-            organization_membership = SpacesUsers(
-                space_id=organization_space_id,
-                user_id=actor_user_id,
-                role="admin",
-            )
-            database_session.add(organization_membership)
-        else:
-            organization_membership.role = "admin"
 
         editor_space = Spaces(
             tenant_id=tenant_id,
@@ -1886,24 +1883,25 @@ async def test_ai_builder_session_list_filters_access_before_limit_in_one_query(
             tenant_id=tenant_id,
             actor_user_id=actor_user_id,
             actor_user_group_ids=set(),
+            actor_organization_space_role=SpaceRole.ADMIN,
             scoped_space_id=organization_space_id,
         )
         assert [session.id for session, _title in organization_rows] == [
             organization_session_id
         ]
 
-        organization_membership.role = "editor"
-        await database_session.flush()
+        # Once the admin permission is revoked, the actor's own sessions there
+        # are no longer listed.
         assert (
             await repo.list_sessions_with_draft_titles(
                 tenant_id=tenant_id,
                 actor_user_id=actor_user_id,
                 actor_user_group_ids=set(),
+                actor_organization_space_role=None,
                 scoped_space_id=organization_space_id,
             )
             == []
         )
-        organization_membership.role = "admin"
 
         bind = database_session.sync_session.bind
         assert bind is not None
@@ -1933,7 +1931,13 @@ async def test_ai_builder_session_list_filters_access_before_limit_in_one_query(
     returned_session_ids = [
         UUID(item["session_id"]) for item in response.json()["sessions"]
     ]
-    assert returned_session_ids == expected_visible_session_ids
+    # The bearer's role has no admin permission, so the organization space's
+    # session is not listed, whatever rows the space has.
+    assert returned_session_ids == [
+        session_id
+        for session_id in expected_visible_session_ids
+        if session_id != organization_session_id
+    ]
     assert returned_session_ids[:2] == visible_session_ids
 
     normalized_selects = [

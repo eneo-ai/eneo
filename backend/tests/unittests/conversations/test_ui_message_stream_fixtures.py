@@ -25,6 +25,7 @@ import pytest
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModelPublic,
+    GeneratedFile,
     McpToolReference,
     ResponseType,
     TokenUsage,
@@ -52,6 +53,9 @@ TENANT_ID = UUID("77777777-7777-7777-7777-777777777777")
 EMBEDDING_MODEL_ID = UUID("88888888-8888-8888-8888-888888888888")
 SOURCE_ID = UUID("99999999-9999-9999-9999-999999999999")
 MODEL_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+DOCUMENT_FILE_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+VIEW_ID = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
+MCP_SERVER_ID = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
 BASE_URL = "http://backend:8123/"
 
 
@@ -113,6 +117,62 @@ def _tool(
         result_status=status,
         # The loopback files server: Eneo's own, by routing (not by its name).
         is_internal=True,
+    )
+
+
+def _document_tool(
+    status: str | None, arguments: dict[str, object] | None
+) -> ToolCallMetadata:
+    """A bundled runtime call whose tool has an approved MCP App view."""
+    return ToolCallMetadata(
+        server_name="documents",
+        tool_name="create_document",
+        title="Create a document",
+        arguments=arguments,
+        tool_call_id="call-doc",
+        result_status=status,
+        mcp_tool_name="documents__create_document",
+        is_internal=True,
+        is_bundled=True,
+        app_view={
+            "view_id": str(VIEW_ID),
+            "mcp_server_id": str(MCP_SERVER_ID),
+            "ui": {"prefersBorder": True},
+        },
+    )
+
+
+def _argument_delta(piece: str) -> Completion:
+    return Completion(
+        response_type=ResponseType.TOOL_CALL_DELTA,
+        tool_call_id="call-doc",
+        arguments_delta=piece,
+    )
+
+
+def _generated_document() -> Completion:
+    content = b"# Plan\n"
+    return Completion(
+        response_type=ResponseType.FILES,
+        image=GeneratedFile(
+            data=content,
+            mime_type="text/markdown",
+            tool_call_id="call-doc",
+            mcp_tool_name="documents__create_document",
+            filename="plan.md",
+        ),
+        generated_file=File(
+            id=DOCUMENT_FILE_ID,
+            name="plan.md",
+            checksum="def",
+            size=len(content),
+            mimetype="text/markdown",
+            file_type=FileType.TEXT,
+            text=content.decode(),
+            owner_type=PrincipalType.USER,
+            owner_user_id=USER_ID,
+            tenant_id=TENANT_ID,
+        ),
     )
 
 
@@ -236,6 +296,30 @@ SCENARIOS: dict[
             Completion(
                 response_type=ResponseType.FILES, generated_file=_generated_file()
             ),
+            _usage(),
+        ],
+        [],
+    ),
+    "tool-input-streaming": lambda: (
+        [
+            # Announced before its arguments are written; then the argument
+            # JSON arrives in pieces, then the complete arguments.
+            _tool_call(_document_tool(status="pending", arguments=None)),
+            _argument_delta('{"title": "Pl'),
+            _argument_delta('an"}'),
+            _tool_call(_document_tool(status="pending", arguments={"title": "Plan"})),
+            _tool_call(_document_tool(status="succeeded", arguments={"title": "Plan"})),
+            _text("The plan is ready."),
+            _usage(),
+        ],
+        [],
+    ),
+    "generated-document": lambda: (
+        [
+            _tool_call(_document_tool(status=None, arguments={"title": "Plan"})),
+            _tool_call(_document_tool(status="succeeded", arguments={"title": "Plan"})),
+            _generated_document(),
+            _text("Here is the plan."),
             _usage(),
         ],
         [],

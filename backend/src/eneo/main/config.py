@@ -372,6 +372,34 @@ class Settings(BaseSettings):
     # Ceiling for one decoded ui:// HTML resource.
     mcp_app_resource_max_bytes: int = 2 * 1024 * 1024
     mcp_app_view_token_expiry_seconds: int = 3600
+    # Addresses besides public_origin that may frame a view and talk to it: a
+    # second frontend served alongside the first, as a JSON list of origins
+    # (e.g. ["https://next.your-domain.com"]). Each is held to the rules of
+    # public_origin.
+    mcp_app_host_origins: list[str] = Field(default_factory=list)
+
+    @field_validator("mcp_app_host_origins")
+    @classmethod
+    def validate_mcp_app_host_origins(cls, v: list[str]) -> list[str]:
+        origins: list[str] = []
+        for index, entry in enumerate(v):
+            try:
+                origin = validate_public_origin(entry)
+            except ValueError as exc:
+                raise ValueError(f"MCP_APP_HOST_ORIGINS entry {index}: {exc}") from exc
+            if origin is not None and origin not in origins:
+                origins.append(origin)
+        return origins
+
+    def mcp_app_view_host_origins(self) -> list[str]:
+        """Every address a view may be framed by, each once: the public
+        origin first, then the extra hosts. Empty where none is known, and a
+        view can then be framed by nothing."""
+        origins: list[str] = []
+        for origin in [self.public_origin, *self.mcp_app_host_origins]:
+            if origin and origin not in origins:
+                origins.append(origin)
+        return origins
 
     # Database connection pool configuration
     # Why: Controls PostgreSQL connection pooling behavior for SQLAlchemy async engine

@@ -532,6 +532,15 @@ AccessControlList = dict[SpaceRole, dict[SpaceResourceType, set[SpaceAction]]]
 
 
 # TODO: Let the services use can_perform_action()
+def organization_space_role(user: "UserInDB") -> SpaceRole | None:
+    """The role the user holds in their tenant's organization space now.
+
+    The organization space belongs to the tenant's admins: its role follows
+    the admin permission held now, never a membership row, which outlives the
+    admin role that added it."""
+    return SpaceRole.ADMIN if Permission.ADMIN in user.permissions else None
+
+
 class SpaceActor:
     def __init__(
         self,
@@ -596,6 +605,14 @@ class SpaceActor:
             if self.user.id == self.space.user_id:
                 return SpaceRole.OWNER
             return None
+
+        if self.space.is_organization():
+            if (
+                self.space.tenant_id is None
+                or self.space.tenant_id != self.user.tenant_id
+            ):
+                return None
+            return organization_space_role(self.user)
 
         direct_role = self._get_direct_role()
         group_role = self._get_highest_group_role()

@@ -1,7 +1,13 @@
 # Eneo tool runtime
 
 Eneo's bundled, isolated MCP provider. It is a small Bun service. Operator
-documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
+documentation lives in `docs/deployment/TOOL_RUNTIME.md`. Why it is a
+separate service, and the security model its code implements, are described
+on the docs site: `frontend/apps/docs-site/src/content/docs/tool-architecture.mdx`
+and `frontend/apps/docs-site/src/content/docs/tool-runtime-security.mdx`
+(published under https://docs.eneo.ai/dev/docs/). Keep the security page in
+step when changing `src/server.ts`, `src/sandbox.ts`, `src/child.ts`, the
+download policy or an engine's limits.
 
 - `POST /mcp/compute` is a stateless Streamable HTTP MCP endpoint (JSON
   responses) exposing `run_javascript`.

@@ -282,21 +282,50 @@ async def test_published_only_hides_drafts_even_where_the_user_edits(
 
 
 async def test_the_organization_space_lists_flows_to_its_admins(
-    client: AsyncClient, world: World, db_container
+    client: AsyncClient, world: World, db_container, admin_user
 ):
+    # The organization space belongs to the tenant's admins: the admin
+    # permission held now decides, with or without a membership row.
     async with db_container() as container:
-        await container.session().execute(
-            sa.update(SpacesUsers)
-            .where(
+        admin_role = await container.role_repo().create_role(
+            RoleCreate(
+                name=f"flow-admin-{uuid4().hex[:8]}",
+                permissions=[Permission.ADMIN],
+                tenant_id=admin_user.tenant_id,
+            )
+        )
+        session = container.session()
+        await session.execute(
+            sa.insert(users_roles_table).values(
+                user_id=world.reader_id, role_id=admin_role.id
+            )
+        )
+        await session.execute(
+            sa.delete(SpacesUsers).where(
                 SpacesUsers.space_id == world.org_space_id,
                 SpacesUsers.user_id == world.reader_id,
             )
-            .values(role="admin")
         )
 
     items = await _discover(client, world.reader_headers)
 
     assert _ids(items) == world.ids((*VISIBLE, "org.published"))
+
+    async with db_container() as container:
+        await container.session().execute(
+            sa.delete(users_roles_table).where(
+                users_roles_table.c.user_id == world.reader_id,
+                users_roles_table.c.role_id == admin_role.id,
+            )
+        )
+
+    assert _ids(await _discover(client, world.reader_headers)) == world.ids(VISIBLE)
+    # Nor does the selection hand the organization space to a non-admin.
+    async with db_container() as container:
+        reader = await container.user_repo().get_user_by_id(world.reader_id)
+    async with db_container(user=reader) as container:
+        facts = await container.space_repo().get_member_access_facts()
+    assert world.org_space_id not in {fact.id for fact in facts}
 
 
 async def test_pages_across_spaces_in_one_order_without_repeats(

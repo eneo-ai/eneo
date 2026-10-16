@@ -149,7 +149,8 @@
           "original_size": null,
           "transcription": null,
           "token_count": null,
-          "has_download_reference": false
+          "has_download_reference": false,
+          "tool_call_id": null
         }
       }
     },
@@ -313,7 +314,8 @@
               "original_size": null,
               "transcription": null,
               "token_count": null,
-              "has_download_reference": false
+              "has_download_reference": false,
+              "tool_call_id": null
             }
           }
         }

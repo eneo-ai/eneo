@@ -12,7 +12,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import raiseload, selectinload
 from sqlalchemy.sql.dml import ReturningInsert, ReturningUpdate
 
-from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
+from eneo.actors.actors.space_actor import (
+    SpaceAccessFacts,
+    SpaceRoleFact,
+    organization_space_role,
+)
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant import Assistant, AssistantOrigin
 from eneo.authentication.auth_models import ApiKeyScopeType
@@ -1575,7 +1579,7 @@ class SpaceRepository:
         self, id: UUID
     ) -> SpaceApplicationsProjection:
         space_in_db = await self.session.scalar(
-            sa.select(Spaces).where(Spaces.id == id)
+            self._in_caller_tenant(sa.select(Spaces).where(Spaces.id == id))
         )
         if space_in_db is None:
             raise NotFoundException()
@@ -1993,7 +1997,8 @@ class SpaceRepository:
 
     async def get_member_access_facts(self) -> list[SpaceAccessFacts]:
         """Access facts for every space the user belongs to: their personal
-        space and each space they are a member of directly or through a group.
+        space, each space they are a member of directly or through a group,
+        and the organization space while they hold the admin permission.
         Reads membership columns only; no space is hydrated."""
         return await self._member_access_facts()
 
@@ -2032,6 +2037,14 @@ class SpaceRepository:
                     Spaces.user_id == user.id,
                     SpacesUsers.user_id.is_not(None),
                     Spaces.group_members.any(group_membership),
+                    # Its role follows the admin permission, not a row.
+                    sa.and_(
+                        Spaces.user_id.is_(None),
+                        Spaces.tenant_space_id.is_(None),
+                        sa.true()
+                        if organization_space_role(user) is not None
+                        else sa.false(),
+                    ),
                 ),
             )
         )

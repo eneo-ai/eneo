@@ -1,24 +1,10 @@
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
-import { getQueryClient } from "@/lib/api/query";
-import { eneoApi } from "@/lib/api/server";
-import { pageTitle } from "@/lib/page-metadata";
-import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
-import { mcpServersQueryOptions } from "@/features/admin/mcp/mcp";
-import { McpServersPage } from "@/features/admin/mcp/mcp-page";
+import { permanentRedirect } from "next/navigation";
+import { TOOLS_TAB_HREF } from "@/features/admin/tools/tools-tabs";
 
-export const generateMetadata = pageTitle("mcp_servers");
-
-export default async function AdminMcpServersRoute() {
-  const queryClient = getQueryClient();
-  const api = eneoApi();
-  await Promise.all([
-    queryClient.query(mcpServersQueryOptions(api)),
-    queryClient.query(securityClassificationsQueryOptions(api))
-  ]);
-
-  return (
-    <HydrationBoundary state={dehydrate(queryClient)}>
-      <McpServersPage />
-    </HydrationBoundary>
-  );
+/**
+ * The MCP servers are a tab of Verktyg now; an old link or bookmark lands on
+ * that tab. The server detail route beneath this one stays.
+ */
+export default function AdminMcpServersRoute() {
+  permanentRedirect(TOOLS_TAB_HREF["mcp-servers"]);
 }

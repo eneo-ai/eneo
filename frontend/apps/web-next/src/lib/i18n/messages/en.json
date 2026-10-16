@@ -1524,6 +1524,10 @@
   "conversation_uploads_filter": "Filter files…",
   "conversation_uploads_filter_all": "All {count}",
   "conversation_uploads_filter_empty": "No files match",
+  "conversation_uploads_group": "Question {ordinal}",
+  "conversation_uploads_group_files_one": "{count} file",
+  "conversation_uploads_group_files_other": "{count} files",
+  "conversation_uploads_group_matching": "{shown} of {count} files",
   "attachments_show_less": "Show less",
   "answer": "Answer:",
   "unknown_assistant": "Unknown assistant",
@@ -9815,5 +9819,11 @@
   "beta_return_to_legacy": "Return to the previous app",
   "select_additional_knowledge": "Select additional knowledge sources that this assistant will be able to search for relevant answers.",
   "organization_knowledge_description": "Select additional sources from your organization's space that this assistant will be able to search for relevant answers.",
-  "skill_used_in_reply": "Skill “{name}” used in this reply"
+  "skill_used_in_reply": "Skill “{name}” used in this reply",
+  "workspace_preview_row_label": "row {row}",
+  "workspace_preview_table_hint": "Select rows with the checkboxes to ask about them, or select text to quote it. Hold Shift to select a range.",
+  "workspace_preview_selection_actions": "Actions for selected rows",
+  "side_panel_latest_answer": "Latest answer",
+  "chat_quote_label": "Quote",
+  "chat_quote_remove": "Remove the quote"
 }

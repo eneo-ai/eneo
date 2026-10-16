@@ -14,6 +14,7 @@ from uuid import UUID
 import litellm
 from pydantic import ValidationError
 
+from eneo.actors.actors.space_actor import organization_space_role
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.authentication.auth_models import ApiKeyPermission, ApiKeyScopeType
 from eneo.completion_models.domain.model_capacity import ModelCapacity
@@ -470,6 +471,7 @@ class AIBuilderService:
             tenant_id=self.user.tenant_id,
             actor_user_id=self.user.id,
             actor_user_group_ids=self.user.user_groups_ids,
+            actor_organization_space_role=organization_space_role(self.user),
             scoped_space_id=scoped_space_id,
             target_kind=target_kind,
             drafts_only=drafts_only,
