@@ -3,6 +3,7 @@
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { IconLinkExternal } from "@eneo/icons/link-external";
   import { Page } from "$lib/components/layout";
+  import { sanitizeLinkHref } from "$lib/components/markdown/sanitizeUrl";
   import { Button } from "$lib/components/ui/button/index.js";
   import { previewLinkLabel } from "$lib/features/integrations/IntegrationData";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -39,6 +40,7 @@
     ];
   });
   let parent = $derived(parents[parents.length - 1]);
+  let sourceHref = $derived(sanitizeLinkHref(knowledge.url));
 
   // The item was deleted from its actions menu: this page has nothing left to show.
   // The space store can still predate a fresh import, so only a disappearance counts.
@@ -72,8 +74,8 @@
     <Page.Title {parents} title={knowledge.name} truncate></Page.Title>
     <div class="flex-grow"></div>
     <Page.Flex>
-      {#if knowledge.url}
-        <Button variant="outline" href={knowledge.url} target="_blank" rel="noopener noreferrer">
+      {#if sourceHref}
+        <Button variant="outline" href={sourceHref} target="_blank" rel="noopener noreferrer">
           {previewLinkLabel(knowledge.integration_type)}
           <IconLinkExternal size="sm" data-icon="inline-end" />
         </Button>

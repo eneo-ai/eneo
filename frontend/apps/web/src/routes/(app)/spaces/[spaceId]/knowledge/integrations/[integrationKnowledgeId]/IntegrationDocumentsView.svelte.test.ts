@@ -161,6 +161,7 @@ describe("IntegrationDocumentsView", () => {
     show();
 
     const input = page.getByRole("searchbox", { name: m.integration_documents_search_label() });
+    await expect.element(input).toHaveAttribute("maxlength", "200");
     await userEvent.fill(input, "bil");
     expect(api.listDocuments).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(300);
@@ -205,6 +206,45 @@ describe("IntegrationDocumentsView", () => {
     await sortBySize.click();
     expect(lastDocumentsCall()).toMatchObject({ sort: "size", order: "desc" });
     await expect.poll(headerSort).toBe("descending");
+  });
+
+  it("keeps the shown sort on a failed request and retries the requested one", async () => {
+    // Rejecting after a macrotask keeps the rejection off the test's own hooks.
+    api.listDocuments.mockImplementationOnce(
+      () => new Promise((_, reject) => setTimeout(() => reject(new Error("boom")), 0))
+    );
+    show();
+
+    const sortBySize = page.getByRole("button", { name: m.size() });
+    const headerSort = () => sortBySize.element().closest("th")?.getAttribute("aria-sort");
+    await sortBySize.click();
+
+    const alert = page.getByRole("alert");
+    await expect.element(alert).toHaveTextContent(m.integration_documents_load_failed());
+    await expect.element(alert).toHaveTextContent(m.request_failed());
+    expect(headerSort()).toBe("none");
+    await expect.element(page.getByText("Protokoll KS 2026-01.pdf")).toBeVisible();
+
+    api.listDocuments.mockResolvedValue(pageOf([doc(5)]));
+    await alert.getByRole("button", { name: m.retry() }).click();
+    expect(lastDocumentsCall()).toMatchObject({ sort: "size", order: "asc" });
+    await expect.poll(headerSort).toBe("ascending");
+    await expect.element(page.getByText("Protokoll KS 2026-05.pdf")).toBeVisible();
+    expect(page.getByRole("alert").elements()).toHaveLength(0);
+  });
+
+  it("renders no source link for a URL with an unsafe scheme", async () => {
+    show({
+      initialDocuments: pageOf([
+        doc(1, { url: "javascript:alert(1)" }),
+        doc(2, { url: "https://contoso.sharepoint.com/sites/ks/KS-2.pdf" })
+      ])
+    });
+    await expect.element(page.getByText("Protokoll KS 2026-01.pdf")).toBeVisible();
+    const links = page.getByRole("link", { name: m.open_in_sharepoint() }).elements();
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "https://contoso.sharepoint.com/sites/ks/KS-2.pdf"
+    ]);
   });
 
   it("paginates with a range label and prev/next buttons", async () => {

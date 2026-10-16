@@ -9,12 +9,14 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
+  import { sanitizeLinkHref } from "$lib/components/markdown/sanitizeUrl";
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors";
   import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import {
     DEFAULT_INTEGRATION_DOCUMENTS_QUERY,
+    INTEGRATION_DOCUMENTS_QUERY_MAX_LENGTH,
     documentsPageRange,
     groupSkippedByReason,
     lastPageOffset,
@@ -60,7 +62,9 @@
 
   // Tab clicks reassign it; a navigation's `tab` param (a "Visa" link, history) resets it.
   let tab = $derived<string>(initialTab);
+  // The query the rows and the sort headers show; a failed request leaves it as it was.
   let query = $state<IntegrationDocumentsQuery>({ ...DEFAULT_INTEGRATION_DOCUMENTS_QUERY });
+  let requestedQuery: IntegrationDocumentsQuery | null = null;
   let documents = $state<IntegrationDocumentsPage>(untrack(() => initialDocuments));
   let loading = $state(false);
   let error = $state<string | null>(null);
@@ -103,7 +107,7 @@
 
   async function loadDocuments(next: IntegrationDocumentsQuery) {
     const generation = ++loadGeneration;
-    query = next;
+    requestedQuery = next;
     loading = true;
     error = null;
     try {
@@ -118,6 +122,7 @@
       if (page.items.length === 0 && next.offset > lastOffset) {
         return loadDocuments({ ...next, offset: lastOffset });
       }
+      query = next;
       documents = page;
     } catch (err) {
       if (generation !== loadGeneration) return;
@@ -197,6 +202,7 @@
         oninput={onSearchInput}
         aria-label={m.integration_documents_search_label()}
         placeholder={m.integration_documents_search_placeholder()}
+        maxlength={INTEGRATION_DOCUMENTS_QUERY_MAX_LENGTH}
         class="max-w-md"
       />
 
@@ -206,7 +212,11 @@
           role="alert"
         >
           <span>{m.integration_documents_load_failed()}: {error}</span>
-          <Button variant="outline" size="sm" onclick={() => loadDocuments(query)}>
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={() => loadDocuments(requestedQuery ?? query)}
+          >
             {m.retry()}
           </Button>
         </div>
@@ -242,6 +252,7 @@
             </Table.Header>
             <Table.Body>
               {#each documents.items as document (document.id)}
+                {@const sourceHref = sanitizeLinkHref(document.url)}
                 <Table.Row>
                   <Table.Cell class="max-w-[28rem]">
                     <BlobPreview
@@ -269,9 +280,9 @@
                     {/if}
                   </Table.Cell>
                   <Table.Cell>
-                    {#if document.url}
+                    {#if sourceHref}
                       <Button
-                        href={document.url}
+                        href={sourceHref}
                         target="_blank"
                         rel="noopener noreferrer"
                         variant="ghost"

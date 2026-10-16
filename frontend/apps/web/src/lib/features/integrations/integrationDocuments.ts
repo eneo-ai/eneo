@@ -15,6 +15,8 @@ export type IntegrationDocumentsQuery = {
 };
 
 export const INTEGRATION_DOCUMENTS_PAGE_SIZE = 50;
+/** The API answers 422 to a longer `q`. */
+export const INTEGRATION_DOCUMENTS_QUERY_MAX_LENGTH = 200;
 
 export const DEFAULT_INTEGRATION_DOCUMENTS_QUERY: IntegrationDocumentsQuery = {
   q: "",

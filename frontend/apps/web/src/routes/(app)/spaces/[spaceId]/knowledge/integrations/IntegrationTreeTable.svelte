@@ -2,6 +2,7 @@
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { SvelteSet } from "svelte/reactivity";
+  import { sanitizeLinkHref } from "$lib/components/markdown/sanitizeUrl";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
@@ -103,7 +104,7 @@
             </Table.Cell>
             <Table.Cell>
               <ButtonCell
-                link={row.item.url ?? ""}
+                link={sanitizeLinkHref(row.item.url)}
                 label={previewLinkLabel(row.item.integration_type)}
                 linkIsExternal
               />
