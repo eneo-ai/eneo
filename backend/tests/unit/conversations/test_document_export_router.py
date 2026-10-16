@@ -151,6 +151,7 @@ def _saving_context():
 def _version_file(file_id, **fields):
     return SimpleNamespace(
         id=file_id,
+        revises_file_id=fields.get("revises_file_id"),
         model_dump=lambda: {
             "id": file_id,
             "created_at": None,
@@ -183,6 +184,7 @@ async def test_saving_a_version_authorizes_first_then_saves_and_audits_once():
             file=_version_file(version, revises_file_id=base),
             created=True,
             question_id=uuid4(),
+            replaced_file_id=None,
         )
 
     response = Response()
@@ -214,6 +216,8 @@ async def test_saving_a_version_authorizes_first_then_saves_and_audits_once():
     assert recorded["action"].value == "document_version_saved"
     assert recorded["entity_id"] == version
     assert recorded["metadata"]["revises_file_id"] == str(base)
+    assert recorded["metadata"]["edited_from_file_id"] == str(base)
+    assert recorded["metadata"]["replaced_file_id"] is None
     assert recorded["outcome"].value == "success"
 
 
