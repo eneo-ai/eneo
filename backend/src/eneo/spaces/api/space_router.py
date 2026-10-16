@@ -1103,7 +1103,9 @@ async def delete_space_integration_knowledge(
     space = await container.space_repo().one(id=id)
     actor = container.actor_manager().get_space_actor_from_space(space)
     if not actor.can_delete_integrations():
-        raise UnauthorizedException()
+        raise UnauthorizedException(
+            "User does not have permission to remove integration knowledge from this space"
+        )
     knowledge = space.get_integration_knowledge(
         integration_knowledge_id=integration_knowledge_id
     )
@@ -1302,7 +1304,9 @@ async def trigger_integration_full_sync(
     space = await container.space_repo().one(id=id)
     actor = container.actor_manager().get_space_actor_from_space(space)
     if not actor.can_edit_integrations():
-        raise UnauthorizedException()
+        raise UnauthorizedException(
+            "User does not have permission to sync integration knowledge in this space"
+        )
     knowledge = space.get_integration_knowledge(
         integration_knowledge_id=integration_knowledge_id
     )
