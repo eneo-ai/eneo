@@ -200,7 +200,9 @@ class OrgTokenProvider:
         try:
             if app.is_service_account():
                 token_data = (
-                    await self.service_account_auth_service.refresh_access_token(app)
+                    await self.service_account_auth_service.refresh_access_token(
+                        app, force_refresh=force_refresh
+                    )
                 )
                 access_token = token_data["access_token"]
                 new_refresh_token = token_data.get("refresh_token")

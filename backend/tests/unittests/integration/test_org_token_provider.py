@@ -438,12 +438,22 @@ class TestTestConnection:
         assert app.auth_status == "ok"
 
 
-async def test_access_token_provider_forces_a_fresh_token():
+@pytest.mark.parametrize(
+    "auth_method", [AUTH_METHOD_TENANT_APP, AUTH_METHOD_SERVICE_ACCOUNT]
+)
+async def test_access_token_provider_forces_a_fresh_token(auth_method):
     app_auth = AsyncMock()
     app_auth.get_access_token.return_value = "fresh"
-    provider, _ = _provider(app_auth=app_auth)
-    app = _app(last_auth_success_at=_NOW)
+    account_auth = AsyncMock()
+    account_auth.refresh_access_token.return_value = {"access_token": "fresh"}
+    provider, _ = _provider(app_auth=app_auth, account_auth=account_auth)
+    app = _app(auth_method, last_auth_success_at=_NOW)
 
     with patch(f"{_MODULE}.sessionmanager", _FakeSessionManager()):
         assert await provider.access_token_provider(app)() == "fresh"
-    app_auth.get_access_token.assert_awaited_once_with(app, force_refresh=True)
+    if auth_method == AUTH_METHOD_SERVICE_ACCOUNT:
+        account_auth.refresh_access_token.assert_awaited_once_with(
+            app, force_refresh=True
+        )
+    else:
+        app_auth.get_access_token.assert_awaited_once_with(app, force_refresh=True)

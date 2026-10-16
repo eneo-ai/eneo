@@ -196,7 +196,7 @@ class TestGetTokenForSubscription:
         assert token is not None
         assert token.access_token == "service-account-access-token"
         mock_container.service_account_auth_service().refresh_access_token.assert_called_once_with(
-            tenant_app
+            tenant_app, force_refresh=False
         )
         tenant_app.update_refresh_token.assert_called_once_with("new-refresh-token")
         mock_container.tenant_sharepoint_app_repo().update.assert_called_once_with(

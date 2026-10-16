@@ -875,7 +875,7 @@ class TestRemoveKnowledge:
 
         # Verify service_account_auth_service was called
         service_account_auth_service.refresh_access_token.assert_called_once_with(
-            tenant_app_service_account
+            tenant_app_service_account, force_refresh=False
         )
         tenant_app_service_account.update_refresh_token.assert_called_once_with(
             "new-refresh-token"
@@ -1250,7 +1250,7 @@ class TestCreateSpaceIntegrationKnowledge:
 
         # Verify service_account_auth_service was called
         service_account_auth_service.refresh_access_token.assert_called_once_with(
-            tenant_app_service_account
+            tenant_app_service_account, force_refresh=False
         )
         tenant_app_service_account.update_refresh_token.assert_called_once_with(
             "new-refresh-token"

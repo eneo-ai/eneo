@@ -1481,9 +1481,8 @@ class Container(containers.DeclarativeContainer):
     )
 
     # Service account auth service for delegated permissions via service account
-    service_account_auth_service = providers.Factory(
-        ServiceAccountAuthService,
-    )
+    # Singleton: it holds the per-process access-token cache.
+    service_account_auth_service = providers.Singleton(ServiceAccountAuthService)
     org_token_provider = providers.Factory(
         OrgTokenProvider,
         tenant_app_repo=tenant_sharepoint_app_repo,

@@ -307,6 +307,65 @@ class TestRefreshAccessToken:
         assert posted_data["grant_type"] == "refresh_token"
 
 
+def _posting_client(responses: list[MagicMock]) -> AsyncMock:
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.__aexit__.return_value = None
+    client.post.side_effect = responses
+    return client
+
+
+def _token_response(payload: dict[str, object]) -> MagicMock:
+    response = MagicMock(spec=httpx.Response)
+    response.status_code = 200
+    response.json.return_value = payload
+    return response
+
+
+class TestAccessTokenCache:
+    """One refresh per token lifetime, not one per acquisition."""
+
+    async def test_a_cached_token_is_reused_without_a_rotation(
+        self, service, mock_tenant_app, mock_token_response
+    ):
+        client = _posting_client([_token_response(mock_token_response)])
+
+        with patch("httpx.AsyncClient", return_value=client):
+            first = await service.refresh_access_token(mock_tenant_app)
+            second = await service.refresh_access_token(mock_tenant_app)
+
+        assert first["refresh_token"] == "new-refresh-token-abc"
+        assert second["access_token"] == first["access_token"]
+        assert second.get("refresh_token") is None
+        assert client.post.call_count == 1
+
+    @pytest.mark.parametrize(
+        "miss", ["secret-changed", "account-changed", "expiring", "forced"]
+    )
+    async def test_the_cache_misses_when_it_must(
+        self, service, mock_tenant_app, mock_token_response, miss
+    ):
+        if miss == "expiring":
+            mock_token_response = {**mock_token_response, "expires_in": 60}
+        later = {**mock_token_response, "access_token": "later-access-token"}
+        client = _posting_client(
+            [_token_response(mock_token_response), _token_response(later)]
+        )
+
+        with patch("httpx.AsyncClient", return_value=client):
+            await service.refresh_access_token(mock_tenant_app)
+            if miss == "secret-changed":
+                mock_tenant_app.client_secret = "rotated-secret"
+            elif miss == "account-changed":
+                mock_tenant_app.service_account_email = "other@contoso.com"
+            second = await service.refresh_access_token(
+                mock_tenant_app, force_refresh=miss == "forced"
+            )
+
+        assert second["access_token"] == "later-access-token"
+        assert client.post.call_count == 2
+
+
 class TestTestRefreshToken:
     """Tests for test_refresh_token method."""
 
