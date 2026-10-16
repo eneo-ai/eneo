@@ -11,12 +11,44 @@ export const ROWS_LOCATOR =
 /** Which of several identical passages is meant. */
 export const OCCURRENCE_LOCATOR = /^occurrence (\d+) of \d+$/;
 
+/** A rectangle of cells in one of a document's tables, counted from 1 with the header as row 1. */
+export const TABLE_CELLS_LOCATOR =
+  /^table (\d+), rows? (\d+)(?:-(\d+))?, columns? (\d+)(?:-(\d+))?$/;
+
 /** More matches than this and the passage is not worth locating. */
 export const MAX_MATCHES = 200;
 
 /** Whether `text` is a locator, as opposed to the tail of a file name. */
 export const isLocator = (text: string) =>
-  !!parseTableLocator(text) || ROWS_LOCATOR.test(text) || OCCURRENCE_LOCATOR.test(text);
+  !!parseTableLocator(text) ||
+  ROWS_LOCATOR.test(text) ||
+  OCCURRENCE_LOCATOR.test(text) ||
+  TABLE_CELLS_LOCATOR.test(text);
+
+const span = (first: number, last: number) => (first === last ? `${first}` : `${first}-${last}`);
+const plural = (first: number, last: number) => (first === last ? "" : "s");
+
+/** The locator for a rectangle of cells: `rows` and `columns` run from 1, both ends included. */
+export const tableCellsLocator = (
+  table: number,
+  rows: [number, number],
+  columns: [number, number]
+) =>
+  `table ${table}, row${plural(...rows)} ${span(...rows)}, column${plural(...columns)} ${span(...columns)}`;
+
+/** The table and the cells a table locator points at, else null. */
+export function parseTableCellsLocator(
+  locator: string | null
+): { table: number; rows: [number, number]; columns: [number, number] } | null {
+  const match = locator ? TABLE_CELLS_LOCATOR.exec(locator) : null;
+  if (!match) return null;
+  const [, table, firstRow, lastRow, firstColumn, lastColumn] = match;
+  return {
+    table: Number(table),
+    rows: [Number(firstRow), Number(lastRow ?? firstRow)],
+    columns: [Number(firstColumn), Number(lastColumn ?? firstColumn)]
+  };
+}
 
 /** The sheet a locator points into, when it names one. */
 export const locatorSheet = (locator: string | null) =>

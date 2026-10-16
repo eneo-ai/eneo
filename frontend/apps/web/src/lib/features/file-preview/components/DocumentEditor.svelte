@@ -2,6 +2,7 @@
   import { Editor } from "@tiptap/core";
   import { BubbleMenu } from "@tiptap/extension-bubble-menu";
   import { TextSelection } from "@tiptap/pm/state";
+  import { CellSelection } from "@tiptap/pm/tables";
   import TextQuote from "@lucide/svelte/icons/text-quote";
   import { tick, untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -9,7 +10,12 @@
   import { m } from "$lib/paraglide/messages";
   import type { PreviewPassage } from "../FilePreview.svelte";
   import { documentExtensions, withFinalNewline } from "../editor/extensions";
-  import { findPassageSpans, locateSelection, selectedText } from "../editor/passages";
+  import {
+    cellSelectionQuote,
+    findPassageSpans,
+    locateSelection,
+    selectedText
+  } from "../editor/passages";
 
   type Props = {
     /** The document as Markdown. A change replaces the content unless the reader has unsaved edits. */
@@ -90,7 +96,6 @@
       content: initial,
       contentType: "markdown",
       editable: untrack(() => editable),
-      injectCSS: false,
       editorProps: {
         attributes: {
           class: "prose mx-auto max-w-[72ch] p-6 text-base break-words outline-none"
@@ -180,7 +185,13 @@
     if (!editor || !onquote) return;
     const { doc, selection } = editor.state;
     const { from, to } = selection;
-    onquote(selectedText(doc, from, to), locateSelection(doc, from, to));
+    if (selection instanceof CellSelection) {
+      // Cells dragged across in a table: quoted row by row, located by cell.
+      const quoted = cellSelectionQuote(doc, selection);
+      onquote(quoted.text, quoted.locator);
+    } else {
+      onquote(selectedText(doc, from, to), locateSelection(doc, from, to));
+    }
     editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(doc, to)));
     document.getSelection()?.removeAllRanges();
   }

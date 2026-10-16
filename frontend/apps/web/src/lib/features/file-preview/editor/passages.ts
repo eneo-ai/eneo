@@ -1,5 +1,13 @@
 import type { Node } from "@tiptap/pm/model";
-import { MAX_MATCHES, occurrenceIndex, occurrenceLocator, stripForMatch } from "../passageLocator";
+import { type CellSelection, TableMap } from "@tiptap/pm/tables";
+import {
+  MAX_MATCHES,
+  occurrenceIndex,
+  occurrenceLocator,
+  parseTableCellsLocator,
+  stripForMatch,
+  tableCellsLocator
+} from "../passageLocator";
 
 /** A stretch of a ProseMirror document, as positions in it. */
 export type Span = { from: number; to: number };
@@ -57,12 +65,72 @@ export function locateSelection(doc: Node, from: number, to: number): string | n
   return index === -1 ? null : occurrenceLocator(index + 1, occurrences.length);
 }
 
+/** The document's tables in order, each with the position its rows start at. */
+function tables(doc: Node): { node: Node; start: number }[] {
+  const found: { node: Node; start: number }[] = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name !== "table") return true;
+    found.push({ node, start: pos + 1 });
+    return false;
+  });
+  return found;
+}
+
+const cellText = (cell: Node | null) => (cell?.textContent ?? "").replace(/\s+/g, " ").trim();
+
 /**
- * The place of a quoted passage in the document: the one occurrence its
- * locator points at, else every occurrence, since the text alone cannot tell
- * them apart.
+ * A rectangle of selected cells as a quote: one line per row with the cells
+ * between bars, as a Markdown table reads, and a locator naming the cells so
+ * they can be pointed out again.
+ */
+export function cellSelectionQuote(
+  doc: Node,
+  selection: CellSelection
+): { text: string; locator: string } {
+  const start = selection.$anchorCell.start(-1);
+  const table = selection.$anchorCell.node(-1);
+  const map = TableMap.get(table);
+  const rect = map.rectBetween(selection.$anchorCell.pos - start, selection.$headCell.pos - start);
+  const lines: string[] = [];
+  for (let row = rect.top; row < rect.bottom; row++) {
+    const cells = map.cellsInRect({ ...rect, top: row, bottom: row + 1 });
+    lines.push(`| ${cells.map((pos) => cellText(table.nodeAt(pos))).join(" | ")} |`);
+  }
+  const index = tables(doc).findIndex((candidate) => candidate.start === start) + 1;
+  return {
+    text: lines.join("\n"),
+    locator: tableCellsLocator(index, [rect.top + 1, rect.bottom], [rect.left + 1, rect.right])
+  };
+}
+
+/** The content of each cell a table locator points at; null for any other locator. */
+function findTableCellSpans(doc: Node, locator: string | null): Span[] | null {
+  const parsed = parseTableCellsLocator(locator);
+  if (!parsed) return null;
+  const table = tables(doc)[parsed.table - 1];
+  if (!table) return [];
+  const map = TableMap.get(table.node);
+  const rect = {
+    top: Math.max(0, parsed.rows[0] - 1),
+    bottom: Math.min(map.height, parsed.rows[1]),
+    left: Math.max(0, parsed.columns[0] - 1),
+    right: Math.min(map.width, parsed.columns[1])
+  };
+  if (rect.top >= rect.bottom || rect.left >= rect.right) return [];
+  return map.cellsInRect(rect).flatMap((pos) => {
+    const cell = table.node.nodeAt(pos);
+    return cell ? [{ from: table.start + pos + 1, to: table.start + pos + cell.nodeSize - 1 }] : [];
+  });
+}
+
+/**
+ * The place of a quoted passage in the document: the cells a table locator
+ * names, the one occurrence an occurrence locator points at, else every
+ * occurrence, since the text alone cannot tell them apart.
  */
 export function findPassageSpans(doc: Node, passage: string, locator: string | null): Span[] {
+  const cells = findTableCellSpans(doc, locator);
+  if (cells) return cells;
   const occurrences = findOccurrences(doc, passage);
   const index = occurrenceIndex(locator);
   const match = index === null ? undefined : occurrences[index - 1];
