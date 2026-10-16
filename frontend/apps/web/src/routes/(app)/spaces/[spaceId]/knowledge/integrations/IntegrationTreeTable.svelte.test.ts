@@ -101,8 +101,13 @@ describe("IntegrationTreeTable", () => {
     expect(rowNames()).toEqual(["Protokoll", "Bilagor", "Rutiner"]);
   });
 
-  it("filters by name and keeps the parent of a matching child", async () => {
+  it("filters by name and keeps the parent of a matching child, collapsed or not", async () => {
     render(IntegrationTreeTable, { items, spaceRouteId: "space-1" });
+    await page
+      .getByRole("button", { name: m.sharepoint_collapse_folder_named({ name: "Protokoll" }) })
+      .click();
+    await expect.poll(rowNames).toEqual(["Protokoll", "Rutiner"]);
+
     await userEvent.fill(page.getByRole("searchbox", { name: m.ui_filter() }), "bil");
     await expect.poll(rowNames).toEqual(["Protokoll", "Bilagor"]);
 

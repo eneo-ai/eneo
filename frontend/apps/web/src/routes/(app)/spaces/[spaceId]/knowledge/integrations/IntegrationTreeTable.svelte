@@ -32,10 +32,12 @@
   const collapsed = new SvelteSet<string>();
 
   let tree = $derived(buildIntegrationTree(items));
+  let filtering = $derived(filterText.trim() !== "");
   let rows = $derived(
     flattenIntegrationTree(
       filterIntegrationTree(tree, filterText),
-      (item) => !collapsed.has(item.id)
+      // A filter shows every match, also below a parent someone closed.
+      (item) => filtering || !collapsed.has(item.id)
     )
   );
 

@@ -192,7 +192,9 @@
         {errorOpen ? m.integration_sync_error_hide() : m.integration_sync_error_show()}
       </Collapsible.Trigger>
       <Collapsible.Content>
-        <ul class="text-negative-stronger mt-1 space-y-0.5 break-words whitespace-normal">
+        <ul
+          class="text-negative-stronger mt-1 space-y-0.5 whitespace-normal [overflow-wrap:anywhere]"
+        >
           {#each errorMessages as error, index (index)}
             <li>
               {#if error.itemName}

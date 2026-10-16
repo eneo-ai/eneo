@@ -270,9 +270,9 @@
             {/if}
 
             <div class="text-muted flex items-center gap-4 text-xs">
-              <span>{m.duration()}: {getDuration(log)}</span>
+              <span class="shrink-0">{m.duration()}: {getDuration(log)}</span>
               {#if log.error_message}
-                <span class="text-negative-default font-medium"
+                <span class="text-negative-default min-w-0 font-medium [overflow-wrap:anywhere]"
                   >{m.error()}: {log.error_message}</span
                 >
               {/if}
