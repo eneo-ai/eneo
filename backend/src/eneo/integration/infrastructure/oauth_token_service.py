@@ -1,7 +1,8 @@
 import asyncio
+from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
 from time import monotonic
-from typing import TYPE_CHECKING, AsyncIterator, Optional
+from typing import TYPE_CHECKING, Optional
 
 import sqlalchemy as sa
 from redis.exceptions import RedisError
@@ -65,7 +66,7 @@ class OauthTokenService:
 
     @classmethod
     @asynccontextmanager
-    async def _refresh_lock(cls, token_id: "UUID") -> AsyncIterator[None]:
+    async def _refresh_lock(cls, token_id: "UUID") -> AsyncGenerator[None, None]:
         token_key = str(token_id)
         async with cls._refresh_locks_guard:
             lock, holders = cls._refresh_locks.get(token_key, (asyncio.Lock(), 0))
