@@ -486,15 +486,6 @@ class Space:
         """Get a group member by ID."""
         return self.group_members[group_id]
 
-    def add_website(self, website: "Website"):
-        if not self.is_embedding_model_in_space(website.embedding_model.id):
-            raise BadRequestException("Embedding model is not in the space")
-
-        if any(w.id == website.id for w in self.websites):
-            return
-
-        self.websites.append(website)
-
     def add_assistant(self, assistant: "Assistant"):
         if assistant.id in [a.id for a in self.assistants]:
             raise BadRequestException("Assistant is already in the space")

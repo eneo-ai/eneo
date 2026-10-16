@@ -5,11 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { deriveActivity } from "./activity";
-import { ActivityPanel, type ActivityTab } from "./activity-panel";
+import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
 import { ActivityPill } from "./activity-pill";
 import { sourceAnchorId } from "./activity-sources";
 import type { TurnDurations } from "./activity-timings";
+import { SidePanel } from "./side-panel/side-panel";
+import { SidePanelStore } from "./side-panel/side-panel-store";
 
 type Part = EneoUIMessage["parts"][number];
 
@@ -60,6 +63,12 @@ const durations: TurnDurations = {
   finishedAt: null
 };
 
+const EMPTY_CONTENTS = { views: [], documents: [], uploads: [] };
+
+/**
+ * The activity as the chat shows it: the pill in the conversation, the body
+ * as the side panel's occupant. Below 1024px the panel is a bottom sheet.
+ */
 function Harness({
   initialSource = null,
   variant = "side"
@@ -67,31 +76,46 @@ function Harness({
   initialSource?: number | null;
   variant?: "side" | "sheet";
 }) {
+  setViewport(variant === "sheet" ? "phone" : "desktop");
   const [open, setOpen] = useState(initialSource !== null);
   const [tab, setTab] = useState<ActivityTab>(initialSource !== null ? "sources" : "steps");
+  const [panel] = useState(() => new SidePanelStore(() => Promise.reject(new Error("unused"))));
   const activity = deriveActivity(message, { knowledge });
   return (
-    <>
+    <SidePanel
+      panel={panel}
+      messages={[message]}
+      contents={EMPTY_CONTENTS}
+      versionsOf={() => []}
+      exportOf={() => null}
+      latestActivity={null}
+      activity={
+        open
+          ? {
+              detail: "4 steg",
+              onClose: () => setOpen(false),
+              body: (
+                <ActivityPanelBody
+                  messageId={message.id}
+                  activity={activity}
+                  durations={durations}
+                  sessionId={null}
+                  tab={tab}
+                  onTabChange={setTab}
+                  focusSource={initialSource}
+                />
+              )
+            }
+          : null
+      }
+    >
       <ActivityPill
         activity={activity}
         durations={durations}
         expanded={open}
         onToggle={() => setOpen((value) => !value)}
       />
-      {open && (
-        <ActivityPanel
-          variant={variant}
-          messageId={message.id}
-          activity={activity}
-          durations={durations}
-          sessionId={null}
-          tab={tab}
-          onTabChange={setTab}
-          focusSource={initialSource}
-          onClose={() => setOpen(false)}
-        />
-      )}
-    </>
+    </SidePanel>
   );
 }
 

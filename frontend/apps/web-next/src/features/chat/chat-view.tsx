@@ -4,7 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import { Button } from "@astryxdesign/core/Button";
 import { ChatLayout, ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
-import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
@@ -30,14 +30,28 @@ import type { AnswerRating, ChatPartner, EneoUIMessage } from "@/lib/chat/types"
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { rescueFocus } from "@/lib/focus-rescue";
 import { conversationFiles, deriveActivity } from "./activity";
-import { ActivityPanel, type ActivityTab } from "./activity-panel";
+import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
+import { documentDraft } from "./side-panel/document-draft";
+import { documentExport } from "./side-panel/document-export";
+import { conversationDocuments, editedPassage } from "./side-panel/document-versions";
+import { messageGeneratedFiles, messageToolCalls } from "./side-panel/message-tool-calls";
+import { conversationUploads, type PanelContents } from "./side-panel/panel-contents";
+import type { PreviewQuote } from "./side-panel/side-panel-store";
+import { composeQuotedQuestion } from "./side-panel/question-quote";
+import { SidePanel } from "./side-panel/side-panel";
+import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
+import { isExportableDocument } from "./side-panel/file-panel";
+import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mcp-apps/mcp-apps";
+import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { useAnswerFeedback } from "./answer-feedback";
 import { disabledCapabilitiesForRequest } from "./chat-capabilities";
-import { ChatMessage, PendingAnswer, type ActivityRequest } from "./chat-message";
+import { matchesUpload } from "./chat-attachment-plan";
+import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } from "./chat-message";
 import { Composer } from "./composer";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools, mcpConversationOptions } from "./mcp-controls";
+import type { PendingUpload } from "./message-files";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 import { historyQueryKey } from "./session-actions";
 import { StartState } from "./start-state";
@@ -51,6 +65,26 @@ function isoNow(): string {
 }
 
 type SentFiles = NonNullable<NonNullable<EneoUIMessage["metadata"]>["files"]>;
+
+/** The request options of a question as they stood when it left the composer. */
+type SendRequest = Omit<ChatSendOptions, "files" | "session_id" | "assistant_id" | "group_chat_id">;
+
+/**
+ * A question sent before its attachments were on the server. It waits in the
+ * conversation, mirroring their progress, and the request is issued once all
+ * of them are uploaded; an upload that fails, or a stop, takes it back out
+ * and returns the draft to the composer.
+ */
+type PendingQuestionState = {
+  /** The text as sent, quote included. */
+  text: string;
+  /** What the user typed, for the composer should the send be cancelled. */
+  question: string;
+  quote: PreviewQuote | null;
+  /** The composer attachments it was sent with. */
+  keys: string[];
+  request: SendRequest;
+};
 
 /** Which answer's activity is shown, on which tab, and which source to focus. */
 export type ActivityState = { messageId: string; tab: ActivityTab; source: number | null };
@@ -100,30 +134,10 @@ function ConversationMessage({
     sessionId !== null && message.role === "assistant" && !isStreaming
       ? { value: rating, onChange: (value: AnswerRating) => rate(sessionId, value) }
       : null;
-  return <ChatMessage {...props} feedback={feedback} />;
+  return <ChatMessage {...props} sessionId={sessionId} feedback={feedback} />;
 }
 
-/**
- * One conversation: the start state, then the message list with the docked
- * composer. Remount it (a new `key`) for another conversation; a view that
- * unmounts while an answer streams lets the stream finish (the answer is
- * saved and the history refreshed) but no longer calls its callbacks, so it
- * never changes the conversation shown after it.
- */
-export function ChatView({
-  partner,
-  initialSessionId = null,
-  initialMessages = [],
-  focusComposerIfLost = false,
-  onSessionCreated,
-  onNewConversation,
-  onTitle,
-  onStartedChange,
-  modelSelector,
-  partnerToken,
-  activity,
-  onActivityChange
-}: {
+type ChatViewProps = {
   partner: ChatPartner;
   initialSessionId?: string | null;
   initialMessages?: EneoUIMessage[];
@@ -148,14 +162,49 @@ export function ChatView({
   partnerToken?: ReactNode;
   activity: ActivityState | null;
   onActivityChange: (next: ActivityState | null) => void;
-}) {
+};
+
+/**
+ * One conversation: the start state, then the message list with the docked
+ * composer and the side panel. Remount it (a new `key`) for another
+ * conversation; a view that unmounts while an answer streams lets the stream
+ * finish (the answer is saved and the history refreshed) but no longer calls
+ * its callbacks, so it never changes the conversation shown after it.
+ */
+export function ChatView(props: ChatViewProps) {
+  return (
+    <SidePanelProvider>
+      <ConversationView {...props} />
+    </SidePanelProvider>
+  );
+}
+
+function ConversationView({
+  partner,
+  initialSessionId = null,
+  initialMessages = [],
+  focusComposerIfLost = false,
+  onSessionCreated,
+  onNewConversation,
+  onTitle,
+  onStartedChange,
+  modelSelector,
+  partnerToken,
+  activity,
+  onActivityChange
+}: ChatViewProps) {
   const t = useTranslations();
   const { featureFlags, can } = useAppContext();
   const queryClient = useQueryClient();
-  const attachments = useAttachments(partner);
+  // A file sent earlier in this conversation is attached again as it is,
+  // without another upload. The uploads come from the messages, set up below.
+  const uploadsRef = useRef<PreviewFile[]>([]);
+  const attachments = useAttachments(partner, {
+    findExisting: (file) => uploadsRef.current.find((uploaded) => matchesUpload(file, uploaded))
+  });
+  const panel = useSidePanel()!;
   // The Felsök tab reads a saved turn's diagnostics; group chats have none.
   const debugAvailable = can("assistant_debug") && partner.type !== "group-chat";
-  const isDesktop = useMediaQuery("(min-width: 1024px)");
   // Astryx's shared polite live region (mounted empty, cleared after a moment):
   // only "Svaret är klart", errors and tool approvals go there, never tokens.
   const announce = useAnnounce();
@@ -177,6 +226,9 @@ export function ChatView({
   // The question on its way: its text and the attachments it took from the
   // composer, put back if it fails before the answer starts.
   const pendingSendRef = useRef<{ text: string; attachments: Attachment[] } | null>(null);
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestionState | null>(null);
+  // Ends the wait for the pending question's uploads (a stop while it waits).
+  const pendingAbort = useRef<AbortController | null>(null);
   // The last question and its files, for "Försök igen" after an error.
   const [lastQuestion, setLastQuestion] = useState<{ text: string; files: SentFiles } | null>(null);
   const isNewSession = useRef(initialSessionId === null);
@@ -329,11 +381,122 @@ export function ChatView({
     });
 
   const busy = status === "submitted" || status === "streaming";
+  // The composer is taken from the moment a question leaves it, uploads included.
+  const sending = busy || pendingQuestion !== null;
 
   // Record client-side step timings for the answer being streamed.
   useEffect(() => {
     timings.observe(messages, busy, Date.now());
   }, [timings, messages, busy]);
+
+  // What the conversation has to show in the side panel.
+  const documents = useMemo(
+    () =>
+      conversationDocuments(
+        messages.map((message) => ({
+          files: messageGeneratedFiles(message),
+          calls: messageToolCalls(message)
+        }))
+      ),
+    [messages]
+  );
+  const uploads = useMemo(() => conversationUploads(messages), [messages]);
+  useEffect(() => {
+    uploadsRef.current = uploads;
+  }, [uploads]);
+  const allFiles = useMemo<PreviewFile[]>(
+    () => [...uploads, ...messages.flatMap(messageGeneratedFiles)],
+    [uploads, messages]
+  );
+  const panelContents: PanelContents = {
+    views: messages
+      .flatMap(messageAppViewCalls)
+      .filter((call) => panel.offeredViews.has(call.toolCallId))
+      .reverse()
+      .map((call) => ({
+        id: call.toolCallId,
+        title: appViewTitle(call, t),
+        subject: appViewSubject(call),
+        shown: panel.viewCallId === call.toolCallId,
+        open: () => panel.openView(call.toolCallId)
+      })),
+    documents: documents.documents,
+    uploads
+  };
+  const versionsOf = (file: PreviewFile) => documents.versionsOf(file.id);
+  // A Markdown document the assistant made here can be handed over as Word or
+  // PDF: the assistant's own document tool renders it, when it has one.
+  const exportOf = (file: PreviewFile) =>
+    sessionId && isExportableDocument(file) && documents.versionsOf(file.id).length > 0
+      ? documentExport(sessionId, file.id)
+      : null;
+
+  // The panel and an answer's activity share the side region, one at a time.
+  const panelOpen = panel.occupant.kind !== "closed";
+  useEffect(() => {
+    if (activity) panel.closeAll();
+  }, [activity, panel]);
+  useEffect(() => {
+    if (panelOpen) onActivityChange(null);
+  }, [panelOpen, onActivityChange]);
+
+  // The panel follows the answer being written: a document draft shows there
+  // while the assistant writes it, and a file created in the live turn takes
+  // it over, so an edit is seen without reopening anything. Files of a
+  // conversation loaded from history are only noted, never opened.
+  useEffect(() => {
+    if (busy) panel.beginAnswer();
+    else panel.endDraft();
+  }, [busy, panel]);
+  const last = messages.at(-1);
+  const liveCalls = useMemo(
+    () => (busy && last?.role === "assistant" ? messageToolCalls(last) : []),
+    [busy, last]
+  );
+  const liveFiles = useMemo(
+    () => (busy && last?.role === "assistant" ? messageGeneratedFiles(last) : []),
+    [busy, last]
+  );
+  useEffect(() => {
+    // The newest document being written: actual text as it arrives.
+    for (let index = liveCalls.length - 1; index >= 0; index--) {
+      const call = liveCalls[index]!;
+      const draft = documentDraft(
+        call,
+        call.input,
+        liveFiles.some((file) => file.toolCallId === call.toolCallId)
+      );
+      if (draft) {
+        panel.write(draft);
+        return;
+      }
+    }
+  }, [liveCalls, liveFiles, panel]);
+  const arrivedFiles = useRef(new Set<string>());
+  useEffect(() => {
+    for (const file of liveFiles) {
+      if (!file.id || !file.toolCallId || arrivedFiles.current.has(file.id)) continue;
+      // Files arrive with their call's id, so hidden analysis exports never
+      // replace the reader's preview: only a document the model wrote opens.
+      arrivedFiles.current.add(file.id);
+      const call = liveCalls.find((candidate) => candidate.toolCallId === file.toolCallId);
+      if (call?.purpose !== "file_creation" || !panel.canPreview(file)) continue;
+      const changed = editedPassage(call.input);
+      panel.arrive(file, changed ? { text: changed, locator: null } : null, call.toolCallId);
+    }
+  }, [liveFiles, liveCalls, panel]);
+
+  // A message an interactive view offered lands in the composer.
+  useEffect(
+    () =>
+      panel.subscribe(() => {
+        const text = panel.takeSuggestion();
+        if (text === null) return;
+        setInput((current) => (current.trim() ? `${current}\n${text}` : text));
+        dockTextareaRef.current?.focus();
+      }),
+    [panel]
+  );
 
   const preflight = usePreflight({
     question: input,
@@ -354,7 +517,7 @@ export function ChatView({
     fileInput.current?.click();
   }, []);
 
-  const started = messages.length > 0;
+  const started = messages.length > 0 || pendingQuestion !== null;
   const reportStarted = useEffectEvent((value: boolean) => onStartedChange?.(value));
   useEffect(() => {
     reportStarted(started);
@@ -364,64 +527,34 @@ export function ChatView({
     }
   }, [started]);
 
-  /**
-   * Sends a question; `resendFiles` repeats a failed question's attachments
-   * ("Försök igen"), which leave the composer if they were put back there.
-   */
-  function sendQuestion(text: string, resendFiles?: SentFiles) {
-    if (!text || busy || attachments.uploading || usage.willExceedContext) return;
-    // Uploaded attachments travel as file ids; the metadata renders them as
-    // file tokens under the question.
-    const files =
-      resendFiles ??
-      (attachments.attachments.flatMap((attachment) =>
-        attachment.fileId
-          ? [
-              {
-                id: attachment.fileId,
-                name: attachment.name,
-                mimetype: attachment.mimetype,
-                size: attachment.size
-              }
-            ]
-          : []
-      ) as SentFiles);
-    clearError();
-    setStreamErrorCode(null);
-    streamErrorCodeRef.current = null;
-    streamStartedRef.current = false;
-    // Previews of an earlier question that never started are no longer needed.
-    if (pendingSendRef.current) releasePreviews(pendingSendRef.current.attachments);
-    pendingSendRef.current = {
-      text,
-      attachments: attachments.detach(new Set(files.map((file) => file.id)))
-    };
-    setLastQuestion({ text, files });
-    if (!started) {
-      refocusComposer.current = Boolean(
-        startComposerRef.current?.contains(document.activeElement ?? null)
-      );
-    }
+  /** The files a batch of composer attachments travels as: ids for the request, names for the chips. */
+  const sentFiles = (batch: readonly Attachment[]): SentFiles =>
+    batch.flatMap((attachment) =>
+      attachment.fileId
+        ? [
+            {
+              id: attachment.fileId,
+              name: attachment.name,
+              mimetype: attachment.mimetype,
+              size: attachment.size
+            }
+          ]
+        : []
+    ) as SentFiles;
 
+  /** The request options as they stand now, for the question leaving the composer. */
+  function requestOptions(): SendRequest {
     const mention =
       partner.type === "group-chat" && mentionId !== NO_MENTION
         ? partner.mentionableAssistants?.find((assistant) => assistant.id === mentionId)
         : undefined;
-
-    // The backend wants exactly ONE of session_id/assistant_id/group_chat_id:
-    // continuing a session identifies the partner through the session.
-    const continuing = sessionIdRef.current !== null;
     const mcpOptions = mcpConversationOptions({
       servers: toolChoices.mcpServers,
       disabledServerIds: toolChoices.disabledMcpServerIds,
       autoAcceptTools: toolChoices.autoAcceptTools,
       supportsToolApproval: partner.type !== "group-chat"
     });
-    const body: ChatSendOptions = {
-      session_id: sessionIdRef.current,
-      assistant_id: continuing || partner.type === "group-chat" ? null : partner.id,
-      group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
-      files: files.map((file) => ({ id: file.id })),
+    return {
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
       disabled_capabilities: disabledCapabilitiesForRequest(
         partner,
@@ -430,6 +563,91 @@ export function ChatView({
       ),
       ...mcpOptions
     };
+  }
+
+  /**
+   * Sends a question; `resendFiles` repeats a failed question's attachments
+   * ("Försök igen"), which leave the composer if they were put back there.
+   * Attachments still uploading do not hold the question back: it leaves the
+   * composer at once and waits in the conversation until all of them are on
+   * the server (`awaitUploads`), or is withdrawn if they never are.
+   */
+  function sendQuestion(question: string, resendFiles?: SentFiles) {
+    if (!question || sending || usage.willExceedContext) return;
+    // A quote from a file or a view opens the question; it is sent once.
+    const quote = resendFiles ? null : panel.quote;
+    const text = resendFiles ? question : composeQuotedQuestion(quote, question);
+    if (!resendFiles) panel.clearQuote();
+    if (!started) {
+      refocusComposer.current = Boolean(
+        startComposerRef.current?.contains(document.activeElement ?? null)
+      );
+    }
+    const request = requestOptions();
+    // A retry leaves the composer alone unless it holds the retried question.
+    setInput((current) => (resendFiles && current.trim() !== question ? current : ""));
+    setMentionId(NO_MENTION);
+
+    const batch = attachments.attachments;
+    if (!resendFiles && batch.some((attachment) => attachment.uploading)) {
+      const pending: PendingQuestionState = {
+        text,
+        question,
+        quote,
+        keys: batch.map((attachment) => attachment.key),
+        request
+      };
+      const first = !started;
+      const controller = new AbortController();
+      pendingAbort.current = controller;
+      setPendingQuestion(pending);
+      // The request is issued once every attachment of the batch is on the
+      // server; an upload that fails (which the upload has reported) or a
+      // stop takes the question back out instead.
+      attachments.awaitUploads(pending.keys, controller.signal).then(
+        (ready) => {
+          if (!mounted.current) return;
+          pendingAbort.current = null;
+          setPendingQuestion(null);
+          issue(pending.text, sentFiles(ready), pending.request);
+        },
+        () => {
+          if (!mounted.current) return;
+          pendingAbort.current = null;
+          withdrawQuestion(pending, first);
+        }
+      );
+      return;
+    }
+    issue(text, resendFiles ?? sentFiles(batch), request);
+  }
+
+  /** Issues the request for a question whose files are all on the server. */
+  function issue(text: string, files: SentFiles, request: SendRequest) {
+    clearError();
+    setStreamErrorCode(null);
+    streamErrorCodeRef.current = null;
+    streamStartedRef.current = false;
+    // Previews of an earlier question that never started are no longer needed.
+    if (pendingSendRef.current) releasePreviews(pendingSendRef.current.attachments);
+    // Uploaded attachments travel as file ids; the metadata renders them as
+    // file chips under the question.
+    pendingSendRef.current = {
+      text,
+      attachments: attachments.detach(new Set(files.map((file) => file.id)))
+    };
+    setLastQuestion({ text, files });
+
+    // The backend wants exactly ONE of session_id/assistant_id/group_chat_id:
+    // continuing a session identifies the partner through the session.
+    const continuing = sessionIdRef.current !== null;
+    const body: ChatSendOptions = {
+      session_id: sessionIdRef.current,
+      assistant_id: continuing || partner.type === "group-chat" ? null : partner.id,
+      group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
+      files: files.map((file) => ({ id: file.id })),
+      ...request
+    };
 
     timings.markSent();
     const send = () => sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
@@ -437,12 +655,52 @@ export function ChatView({
     // assistant; the backend answers with what is stored, so that save lands first.
     if (hasPendingPartnerUpdates()) void awaitPartnerUpdates().then(send);
     else void send();
-    // A retry leaves the composer alone unless it holds the retried question.
-    setInput((current) => (resendFiles && current.trim() !== text ? current : ""));
-    setMentionId(NO_MENTION);
   }
 
-  const canSubmit = input.trim().length > 0 && !attachments.uploading && !usage.willExceedContext;
+  /** Takes a waiting question back out of the conversation; nothing was sent. */
+  function withdrawQuestion(pending: PendingQuestionState, first: boolean) {
+    setPendingQuestion(null);
+    // The draft comes back unless the user has already started a new one.
+    setInput((current) => (current.trim() ? current : pending.question));
+    panel.restoreQuote(pending.quote);
+    // A first question takes the view back to the start state; keep focus in
+    // the composer across that swap.
+    if (first) {
+      refocusComposer.current =
+        dockElement.current?.contains(document.activeElement ?? null) ?? false;
+    }
+  }
+
+  // While a question waits for its uploads they are shown on it, not in the composer.
+  const pendingKeys = new Set(pendingQuestion?.keys ?? []);
+  const pendingUploads: PendingUpload[] = pendingQuestion
+    ? attachments.attachments
+        .filter((attachment) => pendingKeys.has(attachment.key))
+        .map(({ key, name, size, mimetype, uploading }) => ({
+          key,
+          name,
+          size,
+          mimetype,
+          uploading
+        }))
+    : [];
+  const pendingDone = pendingUploads.filter((upload) => !upload.uploading).length;
+  const composerAttachments = pendingQuestion
+    ? {
+        ...attachments,
+        attachments: attachments.attachments.filter(
+          (attachment) => !pendingKeys.has(attachment.key)
+        )
+      }
+    : attachments;
+
+  // Attachments still uploading do not block: the question waits for them in
+  // the conversation.
+  const canSubmit = input.trim().length > 0 && !usage.willExceedContext;
+  const quote = panel.quote;
+  const composerQuote = quote
+    ? { text: quote.text, source: quote.fileName, onRemove: () => panel.clearQuote() }
+    : null;
 
   const activityMessage = activity
     ? messages.find((message) => message.id === activity.messageId)
@@ -518,16 +776,18 @@ export function ChatView({
     onChange: setInput,
     onSubmit: () => sendQuestion(input.trim()),
     canSubmit,
-    busy,
-    onStop: () => void stop(),
+    busy: sending,
+    // A stop while the question still waits for its uploads takes it back.
+    onStop: () => (pendingAbort.current ? pendingAbort.current.abort() : void stop()),
     label: composerLabel,
     placeholder: t("chat_composer_placeholder"),
-    attachments,
+    attachments: composerAttachments,
     onOpenFileDialog: openAttachmentDialog,
     knowledge: partner.knowledge,
     tools,
     mention,
     modelSelector,
+    quote: composerQuote,
     contextBar: (
       <ContextUsageBar
         usage={usage}
@@ -572,7 +832,7 @@ export function ChatView({
       <span className="flex flex-col items-center gap-2">
         <span className="flex flex-wrap items-center justify-center gap-2">
           <span className="text-ax-error">{failure.message}</span>
-          {lastQuestion && !busy && (
+          {lastQuestion && !sending && (
             <Button
               label={t("chat_retry")}
               size="sm"
@@ -630,9 +890,58 @@ export function ChatView({
     );
   }
 
+  // The latest answer's activity, offered in the panel's switcher.
+  const latestAnswer = messages.findLast((message) => message.role === "assistant");
+  const latestActivity =
+    latestAnswer &&
+    deriveActivity(latestAnswer, { streaming: busy && latestAnswer === messages.at(-1) })
+      .hasActivity
+      ? {
+          detail: t("chat_activity_steps", {
+            count: deriveActivity(latestAnswer, { knowledge: partner.knowledge }).steps.length
+          }),
+          open: () => onActivityChange({ messageId: latestAnswer.id, tab: "steps", source: null })
+        }
+      : null;
+
   return (
     <>
-      <div className="flex min-h-0 flex-1">
+      <SidePanel
+        panel={panel}
+        messages={messages}
+        contents={panelContents}
+        versionsOf={versionsOf}
+        exportOf={exportOf}
+        latestActivity={latestActivity}
+        activity={
+          activity && activityMessage && activityForPanel
+            ? {
+                detail: t("chat_activity_steps", { count: activityForPanel.steps.length }),
+                onClose: closeActivity,
+                body: (
+                  <ActivityPanelBody
+                    messageId={activityMessage.id}
+                    activity={activityForPanel}
+                    durations={timings.durations(activityMessage.id)}
+                    sessionId={sessionId}
+                    tab={activity.tab}
+                    onTabChange={(tab) => onActivityChange({ ...activity, tab, source: null })}
+                    focusSource={activity.source}
+                    debug={
+                      debugAvailable && sessionId !== null
+                        ? {
+                            sessionId,
+                            onSelectTurn: (messageId) =>
+                              onActivityChange({ messageId, tab: "debug", source: null })
+                          }
+                        : null
+                    }
+                  />
+                )
+              }
+            : null
+        }
+      >
         <ChatLayout
           className="min-w-0 flex-1"
           // WCAG 2.4.11: Tab and focus() scroll the focused element above the
@@ -669,36 +978,35 @@ export function ChatView({
                     toggleActivity(message.id, trigger, request)
                   }
                   canDebug={debugAvailable && sessionId !== null}
+                  conversationFiles={allFiles}
+                  documents={documents.documents}
                 />
               );
             })}
-            {status === "submitted" && <PendingAnswer assistant={assistantIdentity} />}
+            {pendingQuestion && (
+              <PendingQuestion
+                text={pendingQuestion.text}
+                uploads={pendingUploads}
+                conversationFiles={allFiles}
+              />
+            )}
+            {(status === "submitted" || pendingQuestion) && (
+              <PendingAnswer
+                assistant={assistantIdentity}
+                status={
+                  pendingQuestion
+                    ? t("uploading_attachments_progress", {
+                        done: pendingDone,
+                        total: pendingUploads.length
+                      })
+                    : undefined
+                }
+              />
+            )}
             {errorNotice}
           </ChatMessageList>
         </ChatLayout>
-        {activity && activityMessage && activityForPanel && (
-          <ActivityPanel
-            variant={isDesktop ? "side" : "sheet"}
-            messageId={activityMessage.id}
-            activity={activityForPanel}
-            durations={timings.durations(activityMessage.id)}
-            sessionId={sessionId}
-            tab={activity.tab}
-            onTabChange={(tab) => onActivityChange({ ...activity, tab, source: null })}
-            focusSource={activity.source}
-            debug={
-              debugAvailable && sessionId !== null
-                ? {
-                    sessionId,
-                    onSelectTurn: (messageId) =>
-                      onActivityChange({ messageId, tab: "debug", source: null })
-                  }
-                : null
-            }
-            onClose={closeActivity}
-          />
-        )}
-      </div>
+      </SidePanel>
       {fileInputElement}
     </>
   );

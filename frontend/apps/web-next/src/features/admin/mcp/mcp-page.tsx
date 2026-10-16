@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { DropdownMenu as AxDropdownMenu } from "@astryxdesign/core/DropdownMenu";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   ChevronRight,
   Lock,
@@ -30,15 +31,22 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Switch as AxSwitch } from "@/components/astryx/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
+import { BUNDLED_SERVERS, SOURCE_KINDS } from "@/features/admin/tools/bundled";
 import { browserApi } from "@/lib/api/browser";
+import { getErrorMessage } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { McpServerDialog } from "./mcp-dialog";
 import { hostFromUrl, initials, pendingTools } from "./mcp-helpers";
 import {
+  BUNDLED_KEY,
+  bundledToolsQueryOptions,
+  createBundledMcpServer,
   deleteMcpServer,
   MCP_KEY,
   mcpServersQueryOptions,
@@ -246,13 +254,47 @@ function McpServerCard({
 
 const FILTERS: Filter[] = ["all", "attention", "enabled", "disabled"];
 
-export function McpServersPage() {
+/**
+ * The MCP servers spaces and assistants connect. A function's sources are
+ * servers too, but they are managed on the functions tab and only shown here
+ * on request. `embedded` leaves the page header to the surrounding tools page
+ * (tools-page.tsx), which holds the tabs.
+ */
+export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}) {
   const t = useTranslations();
+  const queryClient = useQueryClient();
   const { data: allServers } = useSuspenseQuery(mcpServersQueryOptions(browserApi));
+  const bundledTools = useQuery(bundledToolsQueryOptions(browserApi));
+  const [showFunctionServers, setShowFunctionServers] = useState(false);
   const servers = useMemo(
-    () => allServers.filter((server) => !server.purpose || server.purpose === "general"),
-    [allServers]
+    () =>
+      allServers.filter(
+        (server) =>
+          server.http_auth_type !== "internal" &&
+          (showFunctionServers || !server.purpose || server.purpose === "general")
+      ),
+    [allServers, showFunctionServers]
   );
+  // General servers built into Eneo that this tenant has not added yet, each
+  // added with one click; its tools are then reviewed like any other server's.
+  const bundledToAdd = (bundledTools.data?.items ?? []).filter(
+    (tool) => tool.available && tool.purpose === "general" && !tool.mcp_server_id
+  );
+  const addBundled = useMutation({
+    mutationFn: (tool: string) => createBundledMcpServer(browserApi, tool, false),
+    onSuccess: async (_, tool) => {
+      toast.success(t("tools_bundled_added", { name: t(BUNDLED_SERVERS[tool]?.label ?? tool) }));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: MCP_KEY }),
+        queryClient.invalidateQueries({ queryKey: BUNDLED_KEY })
+      ]);
+    },
+    onError: (cause, tool) =>
+      toast.error(
+        getErrorMessage(cause, t) ||
+          t("tools_bundled_add_failed", { name: t(BUNDLED_SERVERS[tool]?.label ?? tool) })
+      )
+  });
   const { data: security } = useSuspenseQuery(securityClassificationsQueryOptions(browserApi));
   const securityEnabled = security.security_enabled;
   const [showAdd, setShowAdd] = useState(false);
@@ -288,13 +330,61 @@ export function McpServersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [servers, search, filter, securityEnabled]);
 
+  // One entry point: the servers built into Eneo first, then an external one.
+  const addControl =
+    bundledToAdd.length > 0 ? (
+      <AxDropdownMenu
+        button={{
+          label: t("add_mcp_server"),
+          variant: "primary",
+          icon: <Plus className="size-4" />,
+          isDisabled: addBundled.isPending
+        }}
+        placement="below"
+        alignment="end"
+        menuWidth={340}
+        items={[
+          {
+            type: "section",
+            title: t("mcp_auth_bundled"),
+            items: bundledToAdd.map((bundled) => ({
+              id: bundled.tool,
+              label: t(BUNDLED_SERVERS[bundled.tool]?.label ?? bundled.tool),
+              description: BUNDLED_SERVERS[bundled.tool]
+                ? t(BUNDLED_SERVERS[bundled.tool]!.description)
+                : undefined,
+              icon: <SOURCE_KINDS.bundled.icon className="size-4" />,
+              onClick: () => addBundled.mutate(bundled.tool)
+            }))
+          },
+          { type: "divider" },
+          {
+            id: "external",
+            label: t("tools_source_external"),
+            description: t("tools_external_menu_description"),
+            icon: <SOURCE_KINDS.external.icon className="size-4" />,
+            onClick: () => setShowAdd(true)
+          }
+        ]}
+      />
+    ) : (
+      <Button onClick={() => setShowAdd(true)}>
+        <Plus className="size-4" /> {t("add_mcp_server")}
+      </Button>
+    );
+
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <PageHeader title={t("mcp_servers")}>
-        <Button onClick={() => setShowAdd(true)}>
-          <Plus className="size-4" /> {t("add_mcp_server")}
-        </Button>
-      </PageHeader>
+    <div className={cn("flex w-full flex-col gap-6", !embedded && "mx-auto max-w-5xl")}>
+      {embedded ? (
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <p className="text-muted-foreground max-w-2xl text-sm">
+            {t("tools_connections_description")}
+          </p>
+          {addControl}
+        </div>
+      ) : (
+        <PageHeader title={t("mcp_servers")}>{addControl}</PageHeader>
+      )}
 
       {servers.length === 0 ? (
         <EmptyState
@@ -357,6 +447,12 @@ export function McpServersPage() {
                 </button>
               ))}
             </div>
+            <AxSwitch
+              label={t("tools_show_function_servers")}
+              size="sm"
+              value={showFunctionServers}
+              onChange={setShowFunctionServers}
+            />
           </div>
 
           {visible.length === 0 ? (

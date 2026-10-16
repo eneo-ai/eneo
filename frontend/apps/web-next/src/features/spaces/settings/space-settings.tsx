@@ -731,7 +731,7 @@ function McpServersSection() {
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-muted-foreground text-sm">{t("enable_mcp_servers_in_admin")}</p>
           <Button asChild variant="outline" size="sm">
-            <Link href="/admin/mcp-servers">{t("mcp_servers")}</Link>
+            <Link href="/admin/tools?tab=mcp-servers">{t("mcp_servers")}</Link>
           </Button>
         </div>
       ) : (

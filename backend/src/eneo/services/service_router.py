@@ -23,7 +23,7 @@ from eneo.services.service import (
 from eneo.services.service_factory import get_runner_from_service
 from eneo.services.service_protocol import from_domain_service, to_question
 from eneo.services.service_runner import ServiceRunner
-from eneo.spaces.api.space_models import TransferApplicationRequest
+from eneo.spaces.api.space_models import TransferRequest
 
 router = APIRouter()
 
@@ -226,7 +226,7 @@ async def get_service_runs(
 )
 async def transfer_service_to_space(
     id: UUID,
-    transfer_req: TransferApplicationRequest,
+    transfer_req: TransferRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service_service = container.service_service()
@@ -234,5 +234,4 @@ async def transfer_service_to_space(
     await service_service.move_service_to_space(
         service_id=id,
         space_id=transfer_req.target_space_id,
-        move_resources=transfer_req.move_resources,
     )

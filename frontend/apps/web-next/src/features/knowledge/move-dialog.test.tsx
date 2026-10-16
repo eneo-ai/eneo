@@ -35,13 +35,13 @@ it("shows a missing destination at its picker on move, which takes focus", async
     <MoveResourceDialog
       open
       onOpenChange={() => {}}
-      title="Flytta samling"
+      title="Flytta assistent"
       confirmLabel="Flytta"
       pending={false}
       onMove={onMove}
     />
   );
-  const dialog = screen.getByRole("dialog", { name: "Flytta samling" });
+  const dialog = screen.getByRole("dialog", { name: "Flytta assistent" });
   const move = within(dialog).getByRole("button", { name: "Flytta" });
   // Never disabled: a disabled button says nothing about what is missing.
   expect((move as HTMLButtonElement).disabled).toBe(false);

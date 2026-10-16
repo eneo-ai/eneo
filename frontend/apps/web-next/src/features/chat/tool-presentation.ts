@@ -62,6 +62,8 @@ function metadata(part: ToolLike): {
   purpose: string | null;
   /** The server is one of Eneo's own, judging by the backend's flag (or the name when it carries none). */
   ownServer: boolean;
+  /** The server is a provider built into Eneo (the tool runtime it ships with). */
+  bundled: boolean;
 } {
   const values = eneoToolMetadata(part);
   const server = "server_name" in values ? values.server_name : null;
@@ -71,9 +73,23 @@ function metadata(part: ToolLike): {
     serverName: typeof server === "string" ? server : "",
     title: typeof title === "string" ? title : null,
     purpose: typeof purpose === "string" ? purpose : null,
-    ownServer: isOwnServer(values.is_internal)
+    ownServer: isOwnServer(values.is_internal),
+    bundled: values.is_bundled === true
   };
 }
+
+/**
+ * Capabilities whose calls read as one function whichever provider served
+ * them ("Skapar fil", "Skapade diagram"): the step's label key and the name
+ * of the function, by the purpose the backend stamps on the call. Searches
+ * and image calls have their own rules above the table.
+ */
+const CAPABILITY_STEPS: Record<string, { label: string; server: string }> = {
+  file_analysis: { label: "tool_file_analysis", server: "file_analysis" },
+  file_creation: { label: "tool_file_creation", server: "file_creation" },
+  charts: { label: "tool_charts", server: "charts" },
+  compute: { label: "tool_compute", server: "compute" }
+};
 
 function argumentsOf(part: ToolLike): Record<string, unknown> {
   return part.input && typeof part.input === "object" && !Array.isArray(part.input)
@@ -100,7 +116,7 @@ export function skillName(part: ToolLike): string {
 
 /** Human-facing names for Eneo tools and capability calls; external MCP titles stay intact. */
 export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
-  const { serverName, title, purpose, ownServer } = metadata(part);
+  const { serverName, title, purpose, ownServer, bundled } = metadata(part);
   const args = argumentsOf(part);
   const query = searchQuery(args);
   if (isSkillCall(part)) {
@@ -123,6 +139,9 @@ export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
   if (ownServer && serverName === "files" && part.toolName === "read_file") {
     return { label: t(`tool_read_file${suffix}`), server: t("internal_files_server") };
   }
+  // An external provider's own name stays visible as the source; one of
+  // Eneo's own (loopback or built in) is not named, the label says it all.
+  const provider = (own: boolean) => (serverName && !own && !bundled ? serverName : null);
   if (purpose === "web_search") {
     return {
       label: t(
@@ -130,7 +149,7 @@ export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
         query ? { query } : undefined
       ),
       server: t("web_search"),
-      provider: serverName && serverName !== "web_search" ? serverName : null
+      provider: provider(serverName === "web_search")
     };
   }
   if (purpose === "image_generation" || (ownServer && serverName === "image_generation")) {
@@ -138,8 +157,15 @@ export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
     return {
       label: t(`tool_${editing ? "edit" : "generate"}_image${suffix}`),
       server: t("image_generation"),
-      // An external provider's own name stays visible; Eneo's built-in one does not.
-      provider: serverName && !(ownServer && serverName === "image_generation") ? serverName : null
+      provider: provider(ownServer && serverName === "image_generation")
+    };
+  }
+  const capability = purpose ? CAPABILITY_STEPS[purpose] : undefined;
+  if (capability) {
+    return {
+      label: t(`${capability.label}${suffix}`),
+      server: t(capability.server),
+      provider: provider(false)
     };
   }
   return {

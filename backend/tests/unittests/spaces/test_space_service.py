@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.roles.permissions import Permission
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.space_service import SpaceService
 from tests.fixtures import TEST_USER
@@ -195,3 +196,65 @@ async def test_get_spaces_defaults_include_applications_to_false(
     service.repo.get_spaces_for_member.assert_called_once_with(
         include_applications=False
     )
+
+
+@pytest.mark.parametrize(
+    ("is_admin", "lists_organization"), [(True, True), (False, False)]
+)
+async def test_get_spaces_lists_the_organization_space_only_for_admins(
+    service: SpaceService, is_admin: bool, lists_organization: bool
+):
+    """A former admin's membership row must not keep the space in their list."""
+    organization = MagicMock(user_id=None, tenant_space_id=None)
+    shared = MagicMock(user_id=None, tenant_space_id=uuid4())
+    service.repo.get_spaces_for_member.return_value = [organization, shared]
+    service.user = MagicMock(permissions={Permission.ADMIN} if is_admin else set())
+
+    spaces = await service.get_spaces()
+
+    assert spaces == ([organization, shared] if lists_organization else [shared])
+
+
+def _organization_space(member_ids: list) -> MagicMock:
+    hub = MagicMock(id=uuid4())
+    hub.members = {member_id: MagicMock(id=member_id) for member_id in member_ids}
+    hub.remove_member.side_effect = lambda user_id: hub.members.pop(user_id)
+    return hub
+
+
+def _admin(user_id) -> MagicMock:
+    return MagicMock(id=user_id, username=f"admin-{user_id}", email=f"{user_id}@x.se")
+
+
+async def test_ensure_org_admin_members_makes_the_members_exactly_the_admins(
+    service: SpaceService,
+):
+    admin, new_admin, former_admin = uuid4(), uuid4(), uuid4()
+    hub = _organization_space([admin, former_admin])
+    service.user_repo.list_tenant_admins.return_value = [
+        _admin(admin),
+        _admin(new_admin),
+    ]
+    reloaded = MagicMock()
+    service.repo.one.return_value = reloaded
+
+    result = await service.ensure_org_admin_members(hub)
+
+    added = service.repo.add_member.await_args_list
+    assert [(call.args[0], call.args[1].id) for call in added] == [(hub.id, new_admin)]
+    service.repo.remove_member.assert_awaited_once_with(hub.id, former_admin)
+    assert set(hub.members) == {admin, new_admin}
+    assert result is reloaded
+
+
+async def test_ensure_org_admin_members_leaves_an_up_to_date_space_alone(
+    service: SpaceService,
+):
+    admin = uuid4()
+    hub = _organization_space([admin])
+    service.user_repo.list_tenant_admins.return_value = [_admin(admin)]
+
+    assert await service.ensure_org_admin_members(hub) is hub
+    service.repo.add_member.assert_not_awaited()
+    service.repo.remove_member.assert_not_awaited()
+    service.repo.one.assert_not_awaited()

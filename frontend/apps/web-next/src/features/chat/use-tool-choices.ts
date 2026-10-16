@@ -24,7 +24,12 @@ import {
 
 const AUTO_ACCEPT_TOOLS_STORAGE_KEY = "autoAcceptToolsEnabled";
 
-function autoAcceptToolsPreference(): boolean {
+/**
+ * Whether tools run without asking first, as the user last chose in the
+ * composer's tool menu. Eneo's own interactive views follow it for the calls
+ * they make; external views ask for each call regardless.
+ */
+export function autoAcceptToolsPreference(): boolean {
   if (typeof window === "undefined") return true;
   try {
     return window.localStorage.getItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY) !== "false";
