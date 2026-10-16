@@ -21395,6 +21395,11 @@ export interface components {
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
+      /**
+       * Organization Space Id
+       * @description Organization space identity, independent of the caller's membership.
+       */
+      organization_space_id: string | null;
       /** Enabled Capabilities */
       enabled_capabilities?: (
         "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
