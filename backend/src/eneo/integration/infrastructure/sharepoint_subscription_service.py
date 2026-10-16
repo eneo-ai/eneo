@@ -24,8 +24,14 @@ from eneo.integration.infrastructure.content_service.types import (
 from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 
 logger = get_logger(__name__)
+
+RECREATE_FAILED_MESSAGE = (
+    "Microsoft Graph did not accept a replacement subscription; "
+    "the existing one was kept"
+)
 
 
 def normalize_notification_url(url: str) -> str:
@@ -273,8 +279,6 @@ class SharePointSubscriptionService:
         Returns:
             True if recreation successful, False otherwise
         """
-        # Graph drops the old subscription before the new payload is built;
-        # with no URL or client state there would be nothing to put back.
         self.require_webhook_configuration()
         logger.info(
             f"Recreating expired subscription {subscription.subscription_id} "
@@ -282,14 +286,11 @@ class SharePointSubscriptionService:
         )
         old_subscription_id = subscription.subscription_id
 
-        # Step 1: Try to delete old subscription from Microsoft Graph (may already be gone)
-        await self._delete_graph_subscription(
-            subscription_id=subscription.subscription_id, token=token
-        )
-        # Note: We don't check the result - expired subscriptions may already be
-        # deleted by Microsoft Graph automatically
-
-        # Step 2: Create new subscription in Microsoft Graph
+        # Graph allows two subscriptions on one resource, so the replacement is
+        # created while the old one still stands. A failed create (the new
+        # origin not yet serving TLS, Graph refusing the validation handshake)
+        # then leaves Graph and the row as they were; a row left with a deleted
+        # id would not be looked at again until its stored expiry.
         new_subscription_id = await self._create_graph_subscription(
             token=token,
             site_id=subscription.site_id if not is_onedrive else None,
@@ -298,11 +299,27 @@ class SharePointSubscriptionService:
 
         if not new_subscription_id:
             logger.error(
-                f"Failed to create new subscription for expired subscription {subscription.id}"
+                f"Failed to create a replacement for subscription {subscription.id}; "
+                f"keeping {old_subscription_id[:20]}..."
             )
+            subscription.mark_renewal_failure(
+                user_visible_error(RECREATE_FAILED_MESSAGE)
+            )
+            try:
+                await self.subscription_repo.update(subscription)
+            except Exception as exc:
+                logger.warning(
+                    "Could not record the failed recreation of subscription %s (%s)",
+                    subscription.id,
+                    type(exc).__name__,
+                )
             return False
 
-        # Step 3: Update existing DB record with new subscription_id and expiration
+        # The old subscription may already be gone; the result is not checked.
+        await self._delete_graph_subscription(
+            subscription_id=old_subscription_id, token=token
+        )
+
         new_expiration = datetime.now(timezone.utc) + timedelta(
             minutes=self.subscription_lifetime_minutes
         )

@@ -315,41 +315,56 @@ class TestRecreateExpiredSubscription:
         assert updated_sub.last_renewal_failed_at is None
         assert updated_sub.last_renewal_error is None
 
-    async def test_recreate_deletes_old_subscription_first(
+    async def test_recreate_creates_the_replacement_before_deleting_the_old(
         self, service, mock_subscription_repo, expired_subscription, mock_token
     ):
-        """Attempts to delete old subscription before creating new one."""
+        """Graph allows two subscriptions per resource; the old one goes last."""
         old_subscription_id = expired_subscription.subscription_id
+        graph = MagicMock()
 
-        with patch.object(
-            service, "_delete_graph_subscription", return_value=True
-        ) as mock_delete:
-            with patch.object(
+        with (
+            patch.object(
+                service, "_delete_graph_subscription", return_value=True
+            ) as mock_delete,
+            patch.object(
                 service, "_create_graph_subscription", return_value="new-sub-id"
-            ):
-                await service.recreate_expired_subscription(
-                    subscription=expired_subscription,
-                    token=mock_token,
-                )
+            ) as mock_create,
+        ):
+            graph.attach_mock(mock_create, "create")
+            graph.attach_mock(mock_delete, "delete")
+            await service.recreate_expired_subscription(
+                subscription=expired_subscription,
+                token=mock_token,
+            )
 
+        assert [call[0] for call in graph.mock_calls] == ["create", "delete"]
         mock_delete.assert_called_once_with(
             subscription_id=old_subscription_id,
             token=mock_token,
         )
 
-    async def test_recreate_fails_if_graph_creation_fails(
+    async def test_recreate_keeps_the_old_subscription_when_creation_fails(
         self, service, mock_subscription_repo, expired_subscription, mock_token
     ):
-        """Returns False if creating new Graph subscription fails."""
-        with patch.object(service, "_delete_graph_subscription", return_value=True):
-            with patch.object(service, "_create_graph_subscription", return_value=None):
-                result = await service.recreate_expired_subscription(
-                    subscription=expired_subscription,
-                    token=mock_token,
-                )
+        """A failed create leaves Graph untouched and is recorded on the row."""
+        old_subscription_id = expired_subscription.subscription_id
+
+        with (
+            patch.object(service, "_delete_graph_subscription") as mock_delete,
+            patch.object(service, "_create_graph_subscription", return_value=None),
+        ):
+            result = await service.recreate_expired_subscription(
+                subscription=expired_subscription,
+                token=mock_token,
+            )
 
         assert result is False
-        mock_subscription_repo.update.assert_not_called()
+        mock_delete.assert_not_called()
+        assert expired_subscription.subscription_id == old_subscription_id
+        assert expired_subscription.consecutive_renewal_failures == 1
+        assert expired_subscription.last_renewal_failed_at is not None
+        assert expired_subscription.last_renewal_error
+        mock_subscription_repo.update.assert_awaited_once_with(expired_subscription)
 
     @pytest.mark.parametrize(
         "missing, named_setting",

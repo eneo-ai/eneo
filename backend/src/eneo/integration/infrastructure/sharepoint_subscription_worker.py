@@ -31,13 +31,20 @@ async def record_renewal_failure(
     container: Container,
     error_message: str,
 ) -> None:
+    """Record and persist a failed renewal attempt."""
+    subscription.mark_renewal_failure(error_message)
+    await persist_renewal_failure(subscription, container)
+
+
+async def persist_renewal_failure(
+    subscription: SharePointSubscription, container: Container
+) -> None:
     """Persist renewal failure state without failing the maintenance job.
 
     Runs in its own SAVEPOINT so a single failure can never poison the shared
     cron transaction and silently drop later subscriptions' health writes.
     """
     try:
-        subscription.mark_renewal_failure(error_message)
         session = cast("AsyncSession", container.session())
         async with session.begin_nested():
             await container.sharepoint_subscription_repo().update(subscription)
@@ -164,6 +171,7 @@ async def renew_expiring_subscriptions(container: Container):
     session = cast("AsyncSession", container.session())
 
     for subscription in expiring:
+        failures_before = subscription.consecutive_renewal_failures
         try:
             token = await get_token_for_subscription(subscription, container)
             if not token:
@@ -203,7 +211,13 @@ async def renew_expiring_subscriptions(container: Container):
             )
             # The savepoint above has rolled back, so the transaction is clean for
             # this failure write (which uses its own savepoint).
-            await record_renewal_failure(subscription, container, str(exc))
+            if subscription.consecutive_renewal_failures > failures_before:
+                # The service already recorded why a recreation failed; the
+                # rollback took that write with it, so it is written again
+                # rather than counted a second time.
+                await persist_renewal_failure(subscription, container)
+            else:
+                await record_renewal_failure(subscription, container, str(exc))
             failed_count += 1
 
     logger.info(
