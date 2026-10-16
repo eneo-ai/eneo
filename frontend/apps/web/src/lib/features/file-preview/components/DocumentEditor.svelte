@@ -277,14 +277,21 @@
     background-color: var(--warning-dimmer);
   }
 
+  /* The dimmer tokens are too faint for a mark inside running text; the
+     default tones mixed down read in both themes. Added text is also
+     underlined, so the change shows without its colour. */
   .document-editor :global(.change-added) {
-    background-color: var(--positive-dimmer);
+    background-color: color-mix(in oklab, var(--positive-default) 28%, transparent);
     border-radius: 0.15em;
+    text-decoration: underline;
+    text-decoration-color: var(--positive-default);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 0.15em;
   }
 
   .document-editor :global(.change-removed) {
     margin-right: 0.25em;
-    background-color: var(--negative-dimmer);
+    background-color: color-mix(in oklab, var(--negative-default) 22%, transparent);
     border-radius: 0.15em;
     color: var(--color-muted-foreground);
     text-decoration: line-through;
