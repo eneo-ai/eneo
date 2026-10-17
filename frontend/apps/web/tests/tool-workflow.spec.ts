@@ -130,11 +130,14 @@ test("workbook tools produce a report, preserve revisions, and recheck export su
   await expect(
     conversation.getByText("E2E workflow revision complete.", { exact: true })
   ).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByText("Revised wording.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /^(Previous version|Föregående version)$/ }).click();
+  // The newest version marks what it changed against the one before, so its
+  // paragraph also carries the replaced words.
+  await expect(page.getByText(/Revised wording\./)).toBeVisible();
+  await page.getByRole("button", { name: /^Version 2 (of|av) 2$/ }).click();
+  await page.getByRole("menuitem", { name: /^Version 1\b/ }).click();
   await expect(page.getByText("Draft wording.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /^(Next version|Nästa version)$/ }).click();
-  await expect(page.getByText("Revised wording.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /^(Show latest|Visa senaste)$/ }).click();
+  await expect(page.getByText(/Revised wording\./)).toBeVisible();
   const revised: WorkflowConversation = await api(`/conversations/${sessionId}/`);
   const revisedMessages = revised.messages ?? revised.questions ?? [];
   const documents = revisedMessages
