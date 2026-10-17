@@ -204,9 +204,11 @@
                 tc.is_internal
               ));
       return {
+        // The step opens the document at its newest version, a reader's
+        // saved edit included.
         document: file
           ? {
-              file,
+              file: chat.documents.latestOf(file.id) ?? file,
               label: createsFile
                 ? revisedFileId(tc.arguments)
                   ? (name: string) => m.tool_document_updated({ name })
@@ -312,16 +314,23 @@
   const createdDocument = (step: (typeof tracedSteps)[number]) =>
     step.document !== null && step.status === "complete";
   // Documents no step of this answer accounts for (an answer saved before
-  // calls recorded their files) keep a card, so each stays reachable.
+  // calls recorded their files) keep a card, so each stays reachable. A
+  // version a reader saved belongs to the document it revises, which the
+  // step that made the document opens at its newest version.
   const unclaimedDocumentIds = $derived.by(() => {
     const claimed = new Set(
       tracedSteps.flatMap((step) =>
-        step.kind !== "external" && step.document ? [step.document.file.id] : []
+        step.kind !== "external" && step.document
+          ? [
+              step.document.file.id,
+              ...chat.documents.versionsOf(step.document.file.id).map((version) => version.id)
+            ]
+          : []
       )
     );
     return new Set(
       message.generated_files
-        .filter((file) => isDocument(file) && !claimed.has(file.id))
+        .filter((file) => isDocument(file) && !claimed.has(file.id) && !file.revises_file_id)
         .map((file) => file.id)
     );
   });

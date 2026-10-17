@@ -212,6 +212,29 @@ export class ChatService {
     )
   );
 
+  /**
+   * A version a reader saved of a document joins the answer that holds the
+   * version it was edited from, as the backend has stored it, so the
+   * documents and their versions update without reloading the conversation.
+   */
+  addGeneratedFile(file: ConversationMessage["generated_files"][number]) {
+    const messages = this.currentConversation.messages ?? [];
+    const holder =
+      messages.find((message) =>
+        message.generated_files?.some((other) => other.id === file.revises_file_id)
+      ) ?? messages.at(-1);
+    if (!holder || holder.generated_files?.some((other) => other.id === file.id)) return;
+    holder.generated_files = [...(holder.generated_files ?? []), file];
+  }
+
+  /** A reader's version a newer save of theirs replaced is gone from the conversation. */
+  removeGeneratedFile(fileId: string) {
+    for (const message of this.currentConversation.messages ?? []) {
+      if (!message.generated_files?.some((file) => file.id === fileId)) continue;
+      message.generated_files = message.generated_files.filter((file) => file.id !== fileId);
+    }
+  }
+
   /** Actual text/sheets as they arrive, with a visible preparation state from call start. */
   get writingDocument(): DocumentDraft | null {
     if (!this.askQuestion.isLoading) return null;

@@ -3,13 +3,17 @@ import { render } from "vitest-browser-svelte";
 import { expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import { FilePreview, type DocumentExport } from "../FilePreview.svelte";
+import { loadPreview } from "../loadPreview";
 import FilePreviewPanel from "./FilePreviewPanel.svelte";
 
 vi.mock("$lib/features/attachments/AttachmentUrlService.svelte", () => ({
-  getAttachmentUrlService: () => ({ getOriginalUrl: () => "/original" })
+  getAttachmentUrlService: () => ({
+    getOriginalUrl: () => "/original",
+    resolveUrl: async () => "/image"
+  })
 }));
 vi.mock("../loadPreview", () => ({
-  loadPreview: async () => ({ kind: "text", text: "Report text", truncated: false }),
+  loadPreview: vi.fn(async () => ({ kind: "text", text: "Report text", truncated: false })),
   PreviewTooLargeError: class extends Error {}
 }));
 const file = { id: "report", name: "Report.md", mimetype: "text/markdown", size: 20 };
@@ -91,4 +95,38 @@ it("discards pending availability when the displayed version changes", async () 
   await expect
     .element(page.getByRole("menuitem", { name: /Word/ }))
     .toHaveAttribute("data-disabled");
+});
+
+async function setupDocument(truncated: boolean) {
+  vi.mocked(loadPreview).mockResolvedValueOnce({ kind: "markdown", text: "# Del\n", truncated });
+  const preview = new FilePreview({ resolveOriginalUrl: async () => "/original" } as never);
+  preview.besideConversation = true;
+  preview.open(file);
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  render(FilePreviewPanel, {
+    preview,
+    versionsOf: () => [file],
+    saverOf: () => ({ save: vi.fn() })
+  });
+}
+
+/** The editor's text surface, once it is on the page. */
+const editorSurface = () =>
+  vi.waitFor(() => {
+    const surface = document.querySelector(".ProseMirror");
+    expect(surface).not.toBeNull();
+    return surface as HTMLElement;
+  });
+
+it("lets the reader edit a whole document", async () => {
+  await setupDocument(false);
+  const surface = await editorSurface();
+  await vi.waitFor(() => expect(surface.getAttribute("contenteditable")).toBe("true"));
+});
+
+it("keeps a document cut short by the preview read-only", async () => {
+  await setupDocument(true);
+  await expect.element(page.getByText(m.file_preview_text_truncated())).toBeVisible();
+  const surface = await editorSurface();
+  await vi.waitFor(() => expect(surface.getAttribute("contenteditable")).toBe("false"));
 });

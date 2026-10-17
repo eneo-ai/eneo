@@ -33,6 +33,7 @@ from eneo.ai_models.completion_models.completion_model import (
     TokenUsage,
     ToolCallMetadata,
 )
+from eneo.assistants.assistant_service import NonStreamingAnswer
 from eneo.sessions import session_service as session_service_module
 from eneo.sessions.session_service import (
     SessionService,
@@ -815,7 +816,7 @@ async def test_non_streaming_handle_response_persists_context_without_changing_c
             **_skill_runtime_args(final_skill_context_tokens=37),
         )
 
-    assert answer == "ok"
+    assert answer == NonStreamingAnswer(text="ok")
     persisted = session_service_mock.complete_question_with_answer.await_args.kwargs
     assert persisted["num_tokens_question"] == 1020
     assert persisted["num_tokens_answer"] == 60
@@ -871,7 +872,7 @@ async def test_non_streaming_handle_response_persists_tool_calls_for_replay():
             **_skill_runtime_args(),
         )
 
-    assert answer == "ok"
+    assert answer == NonStreamingAnswer(text="ok")
     persisted = session_service_mock.complete_question_with_answer.await_args.kwargs
     tool_calls = persisted["tool_calls"]
     assert tool_calls is not None and len(tool_calls) == 1
