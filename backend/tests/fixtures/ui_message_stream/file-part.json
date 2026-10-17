@@ -142,7 +142,8 @@
           "transcription": null,
           "token_count": null,
           "has_download_reference": false,
-          "revises_file_id": null
+          "revises_file_id": null,
+          "tool_call_id": null
         }
       }
     },
@@ -217,8 +218,8 @@
                 "temperature": {
                   "supported": true,
                   "control": "slider",
-                  "minimum": 0.0,
-                  "maximum": 2.0,
+                  "minimum": 0,
+                  "maximum": 2,
                   "step": 0.01,
                   "options": null
                 },
@@ -299,7 +300,8 @@
               "transcription": null,
               "token_count": null,
               "has_download_reference": false,
-              "revises_file_id": null
+              "revises_file_id": null,
+              "tool_call_id": null
             }
           }
         }

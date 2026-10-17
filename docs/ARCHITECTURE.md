@@ -82,6 +82,7 @@ graph TD
         FE[Frontend Container<br/>SvelteKit on Node.js<br/>Port 3000]
         BE[Backend Container<br/>FastAPI on Uvicorn<br/>Port 8000]
         WK[Worker Container<br/>ARQ Background Tasks]
+        TR[Tool Runtime Container<br/>Isolated MCP tools<br/>Private network only]
     end
 
     subgraph "Data Layer"
@@ -114,10 +115,14 @@ graph TD
     WK --> DB
     WK --> FS
 
+    BE -->|MCP over private network| TR
+    WK -->|MCP over private network| TR
+    TR -.->|Signed file links only| BE
+
     class WEB,API userFacing
     class FE userFacing
     class BE appLogic
-    class WK workers
+    class WK,TR workers
     class DB,FS dataStore
     class REDIS caching
     class OPENAI,ANTHROPIC,AZURE,LOCAL external
@@ -127,6 +132,7 @@ graph TD
 - **Frontend**: Serves the web UI and proxies API requests
 - **Backend**: FastAPI application with domain services (authentication, spaces, assistants, files, AI integration)
 - **Worker**: ARQ processes background tasks (file processing, web crawling, transcription, document embedding)
+- **Tool Runtime**: Eneo-maintained MCP tools that run model-written code and parse user files (compute, tabular analysis, charts, document creation) in confined child processes, with no database, credentials or internet route
 - **PostgreSQL**: Primary database with pgvector for semantic search
 - **Redis**: Caching, job queue, and pub/sub messaging
 
@@ -645,6 +651,27 @@ Eneo routes all AI requests through **LiteLLM**, supporting 60+ providers (OpenA
 - **Connection Testing**: Validate credentials and connectivity before going live
 - **Encrypted Credentials**: All API keys encrypted at rest with Fernet
 
+### Tools and MCP
+
+Everything a model can call is a Model Context Protocol (MCP) tool, served
+from one of three places and run through one proxy in the backend:
+
+- **Loopback servers** inside the backend process (`internal_mcp/`): knowledge
+  search, attachment reading and image generation. Thin tools whose scope is a
+  per-completion token and whose definitions ship with the release.
+- **The bundled tool runtime** (`tool-runtime/`, its own container): compute,
+  tabular file analysis, charts and document creation. Work that runs
+  model-written code or parses untrusted files, kept out of the chat API in
+  confined per-job processes with no credentials and no egress.
+- **Independently operated MCP servers**: domain integrations and alternative
+  providers, registered by administrators with catalog approval.
+
+The reasoning behind that split and the comparison of the tiers are on the
+docs site in [Tools and MCP Architecture](https://docs.eneo.ai/dev/docs/tool-architecture);
+the runtime's layered defences are in
+[Tool Runtime Security](https://docs.eneo.ai/dev/docs/tool-runtime-security).
+Operators configure the runtime with [deployment/TOOL_RUNTIME.md](deployment/TOOL_RUNTIME.md).
+
 ---
 
 ## Background Processing
@@ -758,6 +785,7 @@ graph TD
         FE[Frontend<br/>SvelteKit Server<br/>Port 3000]
         BE[Backend<br/>FastAPI Server<br/>Port 8000]
         WK[Worker<br/>ARQ Tasks]
+        TR[Tool Runtime<br/>Port 3010, tool_runtime_net only]
         INIT[DB Init<br/>Migrations]
     end
 
@@ -784,6 +812,9 @@ graph TD
     WK --> REDIS
     WK --> DB
 
+    BE --> TR
+    WK --> TR
+
     INIT --> DB
 
     DB --> DB_VOL
@@ -795,7 +826,7 @@ graph TD
     class TRAEFIK infra
     class FE userFacing
     class BE appLogic
-    class WK workers
+    class WK,TR workers
     class INIT infra
     class DB dataStore
     class REDIS caching
@@ -810,6 +841,7 @@ graph TD
 **Container Images:**
 - Frontend: `ghcr.io/eneo-ai/eneo-frontend:latest`
 - Backend/Worker: `ghcr.io/eneo-ai/eneo-backend:latest`
+- Tool Runtime: `ghcr.io/eneo-ai/eneo-tool-runtime` (same version as the backend, from the release bundle)
 - PostgreSQL: `pgvector/pgvector:pg16`
 - Redis: `redis:7-alpine`
 

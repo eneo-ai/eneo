@@ -93,11 +93,16 @@ def _tool_chunks(
 ) -> list[dict[str, Any]]:
     """Maps eneo tool-call metadata onto dynamic-tool chunks.
 
-    Every tool call yields its `tool-input-available` chunk first: the AI SDK
-    rejects an output for a tool call it has not seen, and a denied approval
-    reaches the client as a terminal status without any earlier snapshot. A
-    terminal result_status then adds the output chunk. The caller drops the
-    repeats, so a snapshot that only repeats the input phase emits nothing new.
+    A call announced before its arguments are written (`arguments` is None
+    and the call has not finished) yields `tool-input-start`: the client
+    shows it in the `input-streaming` state and the argument deltas that
+    follow fill in its input. Otherwise the call yields
+    `tool-input-available` first: the AI SDK rejects an output for a tool
+    call it has not seen, and a denied approval reaches the client as a
+    terminal status without any earlier snapshot. A terminal result_status
+    then adds the output chunk. The caller drops the repeats (and a start
+    after the input is known), so a snapshot that only repeats a phase emits
+    nothing new.
 
     The backend streams status snapshots (not tool outputs), so the output
     payload carries the execution status. Tool calls without a tool_call_id
@@ -109,17 +114,15 @@ def _tool_chunks(
         base = {
             "toolCallId": tool_call_id,
             "dynamic": True,
-            "providerMetadata": {
-                "eneo": {
-                    "server_name": tool.server_name,
-                    "title": tool.title,
-                    "purpose": tool.purpose,
-                    # Stamped by the server the call was routed to; clients
-                    # never infer it from the display name.
-                    "is_internal": tool.is_internal,
-                }
-            },
+            "providerMetadata": {"eneo": _tool_metadata(tool)},
         }
+        status = tool.result_status
+        finished = status == "succeeded" or status in _TOOL_ERROR_STATUSES
+        if tool.arguments is None and not finished:
+            chunks.append(
+                {"type": "tool-input-start", "toolName": tool.tool_name, **base}
+            )
+            continue
         chunks.append(
             {
                 "type": "tool-input-available",
@@ -128,7 +131,6 @@ def _tool_chunks(
                 **base,
             }
         )
-        status = tool.result_status
         if status == "succeeded":
             chunks.append(
                 {"type": "tool-output-available", "output": {"status": status}, **base}
@@ -136,6 +138,24 @@ def _tool_chunks(
         elif status in _TOOL_ERROR_STATUSES:
             chunks.append({"type": "tool-output-error", "errorText": status, **base})
     return chunks
+
+
+def _tool_metadata(tool: "ToolCallMetadata") -> dict[str, Any]:
+    """The `providerMetadata.eneo` object of every tool chunk."""
+    return {
+        "server_name": tool.server_name,
+        "title": tool.title,
+        "purpose": tool.purpose,
+        # Stamped by the server the call was routed to; clients never infer
+        # it from the display name.
+        "is_internal": tool.is_internal,
+        "is_bundled": tool.is_bundled,
+        # The approved MCP App view, known from the announcement on, so a
+        # client can open the view while the arguments are still written.
+        "app_view": tool.app_view,
+        "approved": tool.approved,
+        "result_status": tool.result_status,
+    }
 
 
 def _approval_decision_chunks(
@@ -197,7 +217,9 @@ def _tool_approval_chunk(
     }
 
 
-def _generated_file_chunk(file: Any, base_url: str) -> dict[str, Any]:
+def _generated_file_chunk(
+    file: Any, base_url: str, tool_call_id: Optional[str]
+) -> dict[str, Any]:
     public = FilePublic(**file.model_dump())
     expires_at = int(time.time()) + _GENERATED_FILE_URL_TTL_SECONDS
     token = generate_signed_token(
@@ -212,7 +234,14 @@ def _generated_file_chunk(file: Any, base_url: str) -> dict[str, Any]:
         "url": url,
         "mediaType": public.mimetype,
         "filename": public.name,
-        "providerMetadata": {"eneo": json.loads(public.model_dump_json())},
+        "providerMetadata": {
+            "eneo": {
+                **json.loads(public.model_dump_json()),
+                # The call that produced the file, so a client can show it
+                # with that call (null when unknown).
+                "tool_call_id": tool_call_id,
+            }
+        },
     }
 
 
@@ -308,6 +337,8 @@ async def _ui_message_chunks(
     reasoning_open = False
     tool_fallback_ids: dict[int, str] = {}
     emitted_tool_chunks: set[str] = set()
+    # Calls announced with tool-input-start whose input is still being written.
+    streaming_inputs: set[str] = set()
     # approval_id -> tool_call_ids awaiting a decision (see _approval_decision_chunks).
     pending_approvals: dict[str, list[str]] = {}
 
@@ -355,7 +386,13 @@ async def _ui_message_chunks(
 
         elif response_type == ResponseType.FILES:
             assert completion.generated_file is not None
-            yield _generated_file_chunk(completion.generated_file, base_url)
+            yield _generated_file_chunk(
+                completion.generated_file,
+                base_url,
+                tool_call_id=(
+                    completion.image.tool_call_id if completion.image else None
+                ),
+            )
 
         elif response_type == ResponseType.TOOL_CALL:
             tools = list(completion.tool_calls_metadata or [])
@@ -370,16 +407,36 @@ async def _ui_message_chunks(
                 yield reference_chunk
             for chunk_dict in _tool_chunks(tools, tool_fallback_ids):
                 # Tool snapshots repeat; emit each (id, phase) transition once.
-                key = f"{chunk_dict['toolCallId']}:{chunk_dict['type']}"
-                if key not in emitted_tool_chunks:
-                    emitted_tool_chunks.add(key)
-                    yield chunk_dict
+                call_id = chunk_dict["toolCallId"]
+                key = f"{call_id}:{chunk_dict['type']}"
+                if key in emitted_tool_chunks:
+                    continue
+                if (
+                    chunk_dict["type"] == "tool-input-start"
+                    and f"{call_id}:tool-input-available" in emitted_tool_chunks
+                ):
+                    # Restarting would send a known input back to streaming.
+                    continue
+                emitted_tool_chunks.add(key)
+                if chunk_dict["type"] == "tool-input-start":
+                    streaming_inputs.add(call_id)
+                elif chunk_dict["type"] == "tool-input-available":
+                    streaming_inputs.discard(call_id)
+                yield chunk_dict
 
         elif response_type == ResponseType.TOOL_CALL_DELTA:
-            # The argument text of a call still being written. The v3 stream
-            # renders calls from their TOOL_CALL snapshots, which carry the
-            # complete arguments, so the deltas add nothing here.
-            continue
+            # The argument text of an announced call as the model writes it.
+            # Only a started call whose input is not yet known takes deltas:
+            # the SDK rejects a delta for a call it has not seen start, and
+            # the complete arguments of `tool-input-available` supersede them.
+            if completion.tool_call_id in streaming_inputs and (
+                completion.arguments_delta
+            ):
+                yield {
+                    "type": "tool-input-delta",
+                    "toolCallId": completion.tool_call_id,
+                    "inputTextDelta": completion.arguments_delta,
+                }
 
         elif response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
             assert completion.approval_id is not None

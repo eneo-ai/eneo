@@ -129,7 +129,11 @@
           "server_name": "files",
           "title": "Read a file",
           "purpose": null,
-          "is_internal": true
+          "is_internal": true,
+          "is_bundled": null,
+          "app_view": null,
+          "approved": null,
+          "result_status": null
         }
       }
     },
@@ -164,7 +168,11 @@
           "server_name": "files",
           "title": "Read a file",
           "purpose": null,
-          "is_internal": true
+          "is_internal": true,
+          "is_bundled": null,
+          "app_view": null,
+          "approved": null,
+          "result_status": "succeeded"
         }
       }
     },
@@ -248,8 +256,8 @@
                 "temperature": {
                   "supported": true,
                   "control": "slider",
-                  "minimum": 0.0,
-                  "maximum": 2.0,
+                  "minimum": 0,
+                  "maximum": 2,
                   "step": 0.01,
                   "options": null
                 },
@@ -317,23 +325,31 @@
           "input": {
             "path": "a.txt"
           },
+          "output": {
+            "status": "succeeded"
+          },
           "callProviderMetadata": {
             "eneo": {
               "server_name": "files",
               "title": "Read a file",
               "purpose": null,
-              "is_internal": true
+              "is_internal": true,
+              "is_bundled": null,
+              "app_view": null,
+              "approved": null,
+              "result_status": null
             }
-          },
-          "output": {
-            "status": "succeeded"
           },
           "resultProviderMetadata": {
             "eneo": {
               "server_name": "files",
               "title": "Read a file",
               "purpose": null,
-              "is_internal": true
+              "is_internal": true,
+              "is_bundled": null,
+              "app_view": null,
+              "approved": null,
+              "result_status": "succeeded"
             }
           }
         },

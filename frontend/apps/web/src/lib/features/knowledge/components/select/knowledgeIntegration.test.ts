@@ -119,4 +119,32 @@ describe("getSelectedIntegrationDisplay", () => {
     expect(display[0].type).toBe("single");
     expect(display[0].type === "single" && display[0].knowledge.id).toBe("1");
   });
+
+  test("keeps every saved selection in a wrapper when some sources are no longer available", () => {
+    const display = getSelectedIntegrationDisplay(all, [all[0]]);
+    expect(display).toHaveLength(1);
+    expect(
+      display[0].type === "wrapper" && display[0].wrapper.items.map((item) => item.id)
+    ).toEqual(["1", "2"]);
+  });
+
+  test("does not substitute an available source for a different saved selection", () => {
+    const display = getSelectedIntegrationDisplay([all[1]], [all[0]]);
+    expect(display).toHaveLength(1);
+    expect(display[0].type === "single" && display[0].knowledge.id).toBe("2");
+  });
+
+  test("compares source identities rather than counts when deciding whether a wrapper is fully selected", () => {
+    const stale = item({
+      id: "stale",
+      wrapper_id: "w1",
+      wrapper_name: "Site",
+      integration_type: "sharepoint"
+    });
+    const display = getSelectedIntegrationDisplay([all[0], stale], all);
+    expect(display.every((entry) => entry.type === "single")).toBe(true);
+    expect(
+      display.flatMap((entry) => (entry.type === "single" ? [entry.knowledge.id] : [])).sort()
+    ).toEqual(["1", "stale"]);
+  });
 });

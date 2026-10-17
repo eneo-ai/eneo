@@ -60,6 +60,7 @@ it("covers every fixture the backend ships", () => {
     "backend-error",
     "cancelled-mid-stream",
     "file-part",
+    "generated-document",
     "plain-text",
     "reasoning-and-text",
     "sources",
@@ -67,7 +68,8 @@ it("covers every fixture the backend ships", () => {
     "tool-approval-denied",
     "tool-approval-timeout",
     "tool-call-with-output",
-    "tool-failure"
+    "tool-failure",
+    "tool-input-streaming"
   ]);
 });
 
@@ -164,6 +166,60 @@ describe("tool approval", () => {
     expect(chat.lastMessage!.parts.filter((part) => part.type === "dynamic-tool")).toEqual([
       expect.objectContaining({ output: { status: "succeeded" } })
     ]);
+  });
+});
+
+describe("tool input streaming", () => {
+  const streaming = fixtures.find((fixture) => fixture.name === "tool-input-streaming")!;
+
+  /** The input the tool part shows after each start and delta event, in order. */
+  const expectedInputs = [undefined, { title: "Pl" }, { title: "Plan" }];
+
+  it("shows the call while its arguments are written, then settles with the output", async () => {
+    const encoder = new TextEncoder();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        controller = c;
+      }
+    });
+    fetchMock.mockResolvedValueOnce(sseResponse(body));
+    const harness = createHarness();
+    const pending = harness.send();
+    const toolPart = () =>
+      harness.chat.lastMessage?.parts.find((part) => part.type === "dynamic-tool");
+
+    const streamed: unknown[] = [];
+    for (const event of streaming.events) {
+      controller.enqueue(encoder.encode(toSseBody([event], { done: false })));
+      if (event.type === "tool-input-start" || event.type === "tool-input-delta") {
+        const input = expectedInputs[streamed.length];
+        await vi.waitFor(() => {
+          expect(toolPart()).toMatchObject({ state: "input-streaming" });
+          expect((toolPart() as { input?: unknown }).input).toEqual(input);
+        });
+        streamed.push(structuredClone(toolPart()));
+      }
+    }
+    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+    controller.close();
+    await pending;
+
+    expect(streamed).toHaveLength(expectedInputs.length);
+    // The view is known from the announcement on.
+    expect(streamed[0]).toMatchObject({
+      toolCallId: "call-doc",
+      callProviderMetadata: {
+        eneo: { is_bundled: true, app_view: { ui: { prefersBorder: true } } }
+      }
+    });
+    expect(harness.chat.status).toBe("ready");
+    expect(toolPart()).toMatchObject({
+      toolCallId: "call-doc",
+      state: "output-available",
+      input: { title: "Plan" },
+      output: { status: "succeeded" }
+    });
   });
 });
 
