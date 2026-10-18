@@ -8,8 +8,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any, Literal
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import httpx
@@ -26,7 +26,10 @@ from litellm.exceptions import (
 )
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 
-from eneo.ai_models.completion_models.completion_model import CompletionModel
+from eneo.ai_models.completion_models.completion_model import (
+    CompletionModel,
+    ModelKwargs,
+)
 from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
@@ -69,10 +72,7 @@ from eneo.flows.ai_builder.ai_builder_provider_call import ProviderCallTiming
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_declared_schema_candidate,
 )
-from eneo.flows.ai_builder.ai_builder_settings import (
-    SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS,
-    AIBuilderBudgetPolicy,
-)
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     NAMED_RESULT_DELTA_CITATION_MAX_ITEMS,
     CheckpointUpdateDiagnostic,
@@ -1293,6 +1293,7 @@ def test_a_review_request_cited_only_from_earlier_text_is_never_taken(
         current,
     ]
     classification_input = build_slot_classification_input(conversation, None)
+    reasons: list[str] = []
 
     result = parse_slot_classification_response(
         json.dumps(
@@ -1318,13 +1319,16 @@ def test_a_review_request_cited_only_from_earlier_text_is_never_taken(
         ),
         allowed_slot_values={},
         classification_input=classification_input,
+        on_reject=reasons.append,
     )
 
     if earlier_status == "settled":
         assert result is not None
         assert result.checkpoint_updates == ()
+        assert reasons == []
         return
     assert result is None
+    assert reasons == ["checkpoint_cites_unread_message"]
     refused = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(outcome="parse_failed"),
         prompt_hash="a" * 64,
@@ -1337,6 +1341,69 @@ def test_a_review_request_cited_only_from_earlier_text_is_never_taken(
     )
     assert earlier.message_id not in changes
     assert changes[current.message_id] == "unread"
+
+
+_REFUSAL_REQUEST = "Innan dokumentet skapas vill jag granska sammanställningen."
+_REFUSAL_UPDATE: dict[str, object] = {
+    "operation": "update",
+    "producer_kind": "structured_result",
+    "mode": "edit",
+    "confidence": "high",
+    "reason": "Granskning före dokumentet.",
+    "evidence": [_evidence(_REFUSAL_REQUEST)],
+    "evidence_level": "explicit",
+}
+
+
+def _checkpoint_reply(*changes: dict[str, object]) -> str:
+    return json.dumps(
+        {
+            **_VALID_CLASSIFICATION_RESPONSE,
+            "checkpoint_updates": [{**_REFUSAL_UPDATE, **change} for change in changes],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("content", "reason"),
+    [
+        pytest.param(content, reason, id=reason)
+        for content, reason in [
+            ('{"slots": [], "slots": []}', "duplicate_key"),
+            ('["slots"]', "not_object"),
+            ('{"unrelated": 1}', "no_contract_keys"),
+            (
+                json.dumps({**_VALID_CLASSIFICATION_RESPONSE, "file_roles": "none"}),
+                "top_level_field_invalid",
+            ),
+            (_checkpoint_reply({"confidence": "low"}), "checkpoint_item_invalid"),
+            (_checkpoint_reply({"evidence": []}), "checkpoint_evidence_unverified"),
+            (_checkpoint_reply({"reason": "  "}), "checkpoint_reason_empty"),
+            (
+                _checkpoint_reply({"speaker_naming": "yes"}),
+                "checkpoint_speaker_naming_not_boolean",
+            ),
+            (_checkpoint_reply({}, {}), "checkpoint_duplicate_producer"),
+        ]
+    ],
+)
+def test_a_refused_reply_reports_the_one_reason_it_was_refused_for(
+    content: str, reason: str
+) -> None:
+    # json_invalid and checkpoint_cites_unread_message are asserted where their
+    # inputs are built (the unreadable-log and earlier-text tests).
+    # Mutant: report another reason, or none, for a refusal.
+    reasons: list[str] = []
+
+    result = parse_slot_classification_response(
+        content,
+        allowed_slot_values={},
+        classification_input=_classification_input(_REFUSAL_REQUEST),
+        on_reject=reasons.append,
+    )
+
+    assert result is None
+    assert reasons == [reason]
 
 
 def test_a_restated_checkpoint_beside_the_current_change_keeps_the_change() -> None:
@@ -1421,7 +1488,10 @@ async def test_an_unreadable_classification_is_logged_not_dropped_silently() -> 
         attempt = await classify_slots(
             litellm_client=litellm_client,
             completion_model_route=_route(model="gpt-test"),
-            classification_input=_classification_input("Build a text flow."),
+            classification_input=replace(
+                _classification_input("Build a text flow."),
+                unread_user_message_ids=frozenset({"user-0"}),
+            ),
             allowed_slot_values={"primary_runtime_input": {"text"}},
             tenant_id=uuid4(),
         )
@@ -1433,6 +1503,47 @@ async def test_an_unreadable_classification_is_logged_not_dropped_silently() -> 
     assert message == "AI Builder slot classification response did not parse"
     assert extra["slot_names"] == ("primary_runtime_input",)
     assert extra["content_chars"] == len("{not-json")
+    assert extra["reject_reason"] == "json_invalid"
+    # Mutant: log 0 (or the wrong set) instead of the held unread message count.
+    assert extra["held_unread_user_messages"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_classification_cut_off_at_the_cap_is_logged_with_its_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = AsyncMock()
+    client.acompletion.return_value = _cut_off_response()
+
+    with patch.object(classifier.logger, "warning") as warning_log:
+        attempt = await classify_slots(
+            litellm_client=client,
+            completion_model_route=_reasoning_route(
+                monkeypatch,
+                turn_effort="high",
+                offered=["high", "low"],
+                confirmed_levels=("low",),
+            ),
+            classification_input=_classification_input(f"Summarize {uuid4()}"),
+            allowed_slot_values={},
+            tenant_id=uuid4(),
+        )
+
+    assert attempt.outcome == "output_limit_exceeded"
+    # Both asks are cut off, and each leaves its own line.
+    assert warning_log.call_count == 2
+    message = warning_log.call_args.args[0]
+    extra = warning_log.call_args.kwargs["extra"]
+    assert message == "AI Builder slot classification reply carried no reading"
+    assert extra["outcome"] == "output_limit_exceeded"
+    assert extra["finish_reason"] == "length"
+    assert extra["max_tokens"] == client.acompletion.await_args.kwargs["max_tokens"]
+    # Mutant: leave the effort out of the log line.
+    assert extra["reasoning_effort"] == "low"
+    assert (
+        extra["reasoning_effort"]
+        == (client.acompletion.await_args.kwargs["reasoning_effort"])
+    )
 
 
 @pytest.mark.asyncio
@@ -1683,6 +1794,7 @@ async def test_the_second_ask_gets_only_the_remaining_call_ceiling(
             conversation_safety_buffer_tokens=0,
             minimum_conversation_budget_tokens=0,
             classification_timeout_seconds=100.0,
+            classification_ceiling_seconds=1000.0,
             provider_call_ceiling_seconds=1000.0,
         ),
     )
@@ -3556,7 +3668,7 @@ async def test_classifier_timeout_does_not_repeat_provider_work(
 
     assert len(requests) == 1
     payload = json.loads(requests[0].content)
-    assert payload["max_completion_tokens"] == SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS
+    assert payload["max_completion_tokens"] == 128_000
     assert "max_tokens" not in payload
     assert (
         exc_info.value.public_error.details["retry_scope"] == "acknowledged_same_turn"
@@ -5504,6 +5616,96 @@ async def test_classification_preserves_selected_reasoning_effort(monkeypatch) -
     assert call_kwargs["max_tokens"] == 512
 
 
+def _reasoning_route(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    turn_effort: str | None,
+    offered: list[str],
+    confirmed_levels: tuple[str, ...],
+) -> ResolvedCompletionModelRoute:
+    """A route that takes a reasoning effort, with the turn's effort set."""
+    capabilities = "eneo.completion_models.infrastructure.tenant_model_capabilities"
+    monkeypatch.setattr(
+        f"{capabilities}.get_supported_openai_params",
+        lambda **_kwargs: ["reasoning_effort"],
+    )
+    monkeypatch.setattr(
+        f"{capabilities}.resolve_reasoning_effort_options",
+        lambda **_kwargs: confirmed_levels,
+    )
+    return replace(
+        _route(
+            model="model-a",
+            provider_type="provider-a",
+            supported=SupportedModelKwargs(
+                reasoning_effort=ModelKwargCapability(
+                    supported=True, control="select", options=offered
+                )
+            ),
+        ),
+        requested_model_kwargs=ModelKwargs(reasoning_effort=turn_effort),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("setting", "turn_effort", "offered", "confirmed_levels", "sent"),
+    [
+        # Mutant: send the turn's effort instead of the lowest level below it.
+        (None, "high", ["high", "none", "low"], ("none", "low"), "none"),
+        # Mutant: pin an offered level the route refuses to send ("none"
+        # unconfirmed), which fails the classification before any call.
+        (None, "high", ["high", "none", "low"], ("low",), "low"),
+        # Mutant: pick the lowest level although the turn sends no effort,
+        # which adds reasoning the turn never had.
+        (None, None, ["none", "low"], ("low",), None),
+        # Mutant: treat an effort the scale does not place as above every level.
+        (None, "deep", ["deep", "none", "low"], ("none", "low"), "deep"),
+        # Mutant: choose among levels at or above the turn's when none below it
+        # is offered, which reasons more than the turn.
+        (None, "low", ["medium", "high"], (), "low"),
+        # Mutant: pin the lowest although the operator keeps the turn's.
+        ("turn", "high", ["high", "none", "low"], ("none", "low"), "high"),
+    ],
+)
+async def test_classification_never_reasons_more_than_the_turn(
+    monkeypatch: pytest.MonkeyPatch,
+    setting: Literal["turn"] | None,
+    turn_effort: str | None,
+    offered: list[str],
+    confirmed_levels: tuple[str, ...],
+    sent: str | None,
+) -> None:
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(_VALID_CLASSIFICATION_RESPONSE)
+    )
+    # The default setting is the lowest; only "turn" is passed explicitly.
+    policy_overrides: dict[str, Any] = (
+        {} if setting is None else {"classification_reasoning_effort": setting}
+    )
+
+    await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=_reasoning_route(
+            monkeypatch,
+            turn_effort=turn_effort,
+            offered=offered,
+            confirmed_levels=confirmed_levels,
+        ),
+        classification_input=_classification_input(f"Summarize {uuid4()}"),
+        allowed_slot_values={"terminal_output": {"structured_json"}},
+        tenant_id=uuid4(),
+        budget_policy=AIBuilderBudgetPolicy(
+            conversation_safety_buffer_tokens=0,
+            minimum_conversation_budget_tokens=0,
+            **policy_overrides,
+        ),
+    )
+
+    assert litellm_client.acompletion.await_args.kwargs.get("reasoning_effort") == sent
+
+
 def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
     messages = classifier._build_slot_classification_prompt(
         classification_input=_classification_input("en fil jag kan ladda ner"),
@@ -6038,14 +6240,17 @@ async def test_classify_slots_sends_the_room_the_request_leaves_below_the_ceilin
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("model_output_tokens", "sent_max_tokens"),
+    ("model_output_tokens", "answer_cap_tokens", "sent_max_tokens"),
     [
-        (16_000, 16_000),
-        (32_768, SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS),
+        (16_000, None, 16_000),
+        # Mutant: a fixed classification answer cap the operator did not set.
+        (32_768, None, 32_768),
+        # Mutant: the operator's cost cap is not applied.
+        (32_768, 16_384, 16_384),
     ],
 )
 async def test_classify_slots_sends_the_models_ceiling_up_to_the_answer_cap(
-    model_output_tokens: int, sent_max_tokens: int
+    model_output_tokens: int, answer_cap_tokens: int | None, sent_max_tokens: int
 ) -> None:
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
@@ -6062,13 +6267,16 @@ async def test_classify_slots_sends_the_models_ceiling_up_to_the_answer_cap(
         attempt = await classify_slots(
             litellm_client=litellm_client,
             completion_model_route=_route(),
-            classification_input=_classification_input("Return JSON with case_id."),
+            classification_input=_classification_input(
+                f"Return JSON with case_id {uuid4()}."
+            ),
             allowed_slot_values={"terminal_output": {"structured_json"}},
             tenant_id=uuid4(),
             capacity=ModelCapacity(100_000, model_output_tokens),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=100,
                 minimum_conversation_budget_tokens=0,
+                classification_answer_cap_tokens=answer_cap_tokens,
             ),
         )
 
@@ -7684,6 +7892,7 @@ async def test_strict_classifier_preserves_raw_arguments_and_semantic_diagnostic
         schema_candidate_fingerprints=(),
         schema_sent=True,
         read_declarations=True,
+        on_reject=ANY,
     )
     assert capture.call_args.args[0] == arguments
     assert attempt.result == expected

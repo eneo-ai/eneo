@@ -39,10 +39,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     SCHEMA_MAX_DEPTH,
     SCHEMA_MAX_JSON_BYTES,
 )
-from eneo.flows.ai_builder.ai_builder_settings import (
-    SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS,
-    AIBuilderBudgetPolicy,
-)
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationInput,
     SlotClassificationSource,
@@ -226,9 +223,7 @@ async def test_classifier_attachments_preserve_answer_room_and_model_capacity(
     )
 
     sent = client.acompletion.await_args.kwargs
-    assert sent["max_tokens"] == min(
-        output_ceiling, SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS
-    )
+    assert sent["max_tokens"] == output_ceiling
     uploaded = [item for item in admitted.sources if item.kind == "uploaded_file"]
     assert len(uploaded) == 2
     assert all(item.coverage == coverage for item in uploaded)

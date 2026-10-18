@@ -14,10 +14,13 @@ from uuid import UUID
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
+    REASONING_EFFORT_SCALE,
     SupportedModelKwargs,
 )
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputMode,
+    route_sends_reasoning_effort,
+    selectable_reasoning_effort_options,
 )
 from eneo.flows.ai_builder import (
     ai_builder_slot_classification_contract as slot_classification_contract,
@@ -72,6 +75,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationAttemptOutcome,
     SlotClassificationBias,
     SlotClassificationInput,
+    SlotClassificationRejectReason,
     SlotClassificationReplyOutcome,
     SlotClassificationResult,
     SlotClassificationSource,
@@ -268,7 +272,12 @@ async def classify_slots(
     started_at = time.perf_counter()
     completion_kwargs = prepare_ai_builder_provider_kwargs(
         completion_model_route,
-        ModelKwargs(temperature=0.0),
+        ModelKwargs(
+            temperature=0.0,
+            reasoning_effort=_classification_reasoning_effort(
+                completion_model_route, budget_policy=budget_policy
+            ),
+        ),
         stage="slot_classification",
         request_id=usage_tracker.request_id if usage_tracker is not None else None,
         tenant_id=tenant_id,
@@ -441,7 +450,28 @@ async def classify_slots(
         )
         if refused is not None:
             attempt = refused
+            # A reply with no reading leaves the user's text unread, so a
+            # runaway or empty one must say so beyond the persisted outcome.
+            logger.warning(
+                "AI Builder slot classification reply carried no reading",
+                extra={
+                    **_log_context(
+                        tenant_id=tenant_id,
+                        model=litellm_model,
+                        slot_names=slot_names,
+                        cached=False,
+                    ),
+                    "outcome": refused.outcome,
+                    "finish_reason": finish_reason
+                    if isinstance(finish_reason, str)
+                    else None,
+                    "content_chars": len(text),
+                    "max_tokens": completion_kwargs["max_tokens"],
+                    "reasoning_effort": completion_kwargs.get("reasoning_effort"),
+                },
+            )
         else:
+            reject_reasons: list[SlotClassificationRejectReason] = []
             result = slot_classification_contract.parse_slot_classification_response(
                 text,
                 allowed_slot_values=slot_values,
@@ -453,6 +483,7 @@ async def classify_slots(
                     SlotClassificationTransport.STRICT_JSON_SCHEMA,
                 },
                 read_declarations=read_declarations,
+                on_reject=reject_reasons.append,
             )
             if result is None:
                 # The turn continues without this reading (discovery asks
@@ -468,6 +499,11 @@ async def classify_slots(
                             cached=False,
                         ),
                         "content_chars": len(text),
+                        "reject_reason": reject_reasons[0] if reject_reasons else None,
+                        "reasoning_effort": completion_kwargs.get("reasoning_effort"),
+                        "held_unread_user_messages": len(
+                            classification_input.unread_user_message_ids
+                        ),
                     },
                 )
                 attempt = SlotClassificationAttempt(outcome="parse_failed")
@@ -592,6 +628,48 @@ def _protected_slot_classification_input(
             if source.kind in {"user_message", "structured_answer"}
             and source.message_id == classification_input.current_user_message_id
         ),
+    )
+
+
+def _classification_reasoning_effort(
+    route: ResolvedCompletionModelRoute,
+    *,
+    budget_policy: AIBuilderBudgetPolicy,
+) -> str | None:
+    """The effort classification sends instead of the turn's; None keeps it.
+
+    Reading the user's text into slots is a small extraction, so unless the
+    operator keeps the turn's effort it runs at the lowest level below the
+    turn's that the route offers and can send. It never reasons more than the
+    turn: a turn without an effort already sends the route's off or lowest
+    default, and nothing is known to reason less than a level off the scale.
+    """
+    turn_effort = route.requested_model_kwargs.reasoning_effort
+    if (
+        budget_policy.classification_reasoning_effort == "turn"
+        or turn_effort is None
+        or turn_effort not in REASONING_EFFORT_SCALE
+    ):
+        return None
+    # Only scale levels are looked up, so the longest of them bounds the options.
+    offered = selectable_reasoning_effort_options(
+        route.supported_model_kwargs.reasoning_effort,
+        max_length=max(map(len, REASONING_EFFORT_SCALE)),
+    )
+    return next(
+        (
+            level
+            for level in REASONING_EFFORT_SCALE[
+                : REASONING_EFFORT_SCALE.index(turn_effort)
+            ]
+            if level in offered
+            and route_sends_reasoning_effort(
+                litellm_model=route.litellm_model,
+                provider_type=route.provider_type,
+                effort=level,
+            )
+        ),
+        None,
     )
 
 

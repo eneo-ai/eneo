@@ -520,7 +520,9 @@ def prepare_ai_builder_provider_kwargs(
     Builder's value (a temperature below the route's advertised minimum),
     the Builder leaves it out, so the provider default applies, and logs
     one warning naming the route and value. A user's reasoning effort, held
-    by the route, stays strict.
+    by the route, stays strict. Slot classification passes an effort of its
+    own, one the route offers and can send, which replaces the user's for
+    that call only.
     """
     supported = route.supported_model_kwargs
     not_offered: dict[str, None] = {}

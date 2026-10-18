@@ -8,7 +8,6 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_settings import (
-    SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS,
     AIBuilderBudgetPolicy,
     AIBuilderRequestBudget,
     apply_ai_builder_budget_policy_patch,
@@ -20,6 +19,7 @@ from eneo.flows.flow_ai_builder_budget_settings import (
     AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT,
     AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
 )
+from eneo.main.config import Settings, get_settings
 
 
 def test_ai_builder_policy_resolves_admin_owned_operating_limits() -> None:
@@ -87,9 +87,9 @@ def _policy(**overrides: object) -> AIBuilderBudgetPolicy:
     )
 
 
-# Classification answers are capped below the model's ceiling
-# (test_a_classification_answer_never_gets_more_room_than_it_can_need).
-@pytest.mark.parametrize("operation", ["proposal", "review"])
+# Mutant (classification): a fixed classification answer cap the operator did
+# not set.
+@pytest.mark.parametrize("operation", ["classification", "proposal", "review"])
 @pytest.mark.parametrize(
     ("context_window", "output_ceiling"),
     [(1_000_000, 128_000), (128_000, 16_384)],
@@ -248,31 +248,90 @@ def test_classification_uses_model_capacity_and_the_shared_request_deadline(
     assert resolved.provider_output_cap_tokens == 8_000
 
 
-def test_a_classification_answer_never_gets_more_room_than_it_can_need() -> None:
-    # A gemma reading ran to the model's 32,768-token ceiling and returned
-    # nothing usable; the classification reply is small, so the room is its own.
-    policy = AIBuilderBudgetPolicy(
-        conversation_safety_buffer_tokens=2_000,
-        minimum_conversation_budget_tokens=4_000,
+@pytest.mark.parametrize(
+    (
+        "classification_timeout",
+        "provider_ceiling",
+        "classification_ceiling",
+        "expected",
+    ),
+    [
+        # Mutant: classification keeps the provider call ceiling.
+        (None, 1_800.0, None, 600.0),
+        # Mutant: the default follows the proposal deadline, not classification's.
+        (100.0, 1_800.0, None, 200.0),
+        # Mutant: the default may exceed the provider call ceiling.
+        (None, 400.0, None, 400.0),
+        # Mutant: the operator's ceiling is not read.
+        (None, 1_800.0, 900.0, 900.0),
+    ],
+)
+def test_classification_ceiling_defaults_to_one_silence_deadline_per_ask(
+    classification_timeout: float | None,
+    provider_ceiling: float,
+    classification_ceiling: float | None,
+    expected: float,
+) -> None:
+    policy = resolve_ai_builder_budget_policy(
+        None,
+        defaults=SimpleNamespace(
+            ai_builder_conversation_safety_buffer_tokens=2_000,
+            ai_builder_minimum_conversation_budget_tokens=4_000,
+            ai_builder_proposal_timeout_seconds=300.0,
+            ai_builder_classification_timeout_seconds=classification_timeout,
+            ai_builder_provider_call_ceiling_seconds=provider_ceiling,
+            ai_builder_classification_ceiling_seconds=classification_ceiling,
+            ai_builder_classification_answer_cap_tokens=4_096,
+            ai_builder_classification_reasoning_effort="turn",
+        ),
     )
 
     budget = policy.classification_request_budget(
-        capacity=ModelCapacity(1_000_000, 32_768)
+        capacity=ModelCapacity(128_000, 32_768)
     )
-    planned = budget.plan(required_input_tokens=20_000)
-    assert planned is not None
-    resolved = planned.resolve(input_tokens=30_000)
 
-    assert resolved is not None
-    assert resolved.model_output_ceiling_tokens == 32_768
-    assert planned.reserved_output_tokens == SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS
-    assert resolved.provider_output_cap_tokens == SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS
-    # A proposal on the same model keeps the model's whole ceiling.
-    proposal = policy.proposal_request_budget(
-        capacity=ModelCapacity(1_000_000, 32_768)
-    ).resolve_whole(input_tokens=20_000)
-    assert proposal is not None
-    assert proposal.provider_output_cap_tokens == 32_768
+    assert budget.ceiling_seconds == expected
+    # Mutant: the operator's answer cap or effort choice is not read.
+    assert budget.answer_ceiling_tokens == 4_096
+    assert policy.classification_reasoning_effort == "turn"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "loads"),
+    [
+        # Mutant: a ceiling below the classification silence deadline loads.
+        (
+            {
+                "ai_builder_classification_timeout_seconds": 240.0,
+                "ai_builder_classification_ceiling_seconds": 200.0,
+            },
+            False,
+        ),
+        # Mutant: the check ignores the deadline classification inherits.
+        ({"ai_builder_classification_ceiling_seconds": 299.0}, False),
+        ({"ai_builder_classification_ceiling_seconds": 300.0}, True),
+        # Mutant: a ceiling above the provider call ceiling loads.
+        ({"ai_builder_classification_ceiling_seconds": 1_801.0}, False),
+        ({"ai_builder_classification_ceiling_seconds": float("inf")}, False),
+        # Mutant: a zero answer cap loads.
+        ({"ai_builder_classification_answer_cap_tokens": 0}, False),
+    ],
+)
+def test_classification_settings_are_checked_when_settings_load(
+    overrides: dict[str, float], loads: bool
+) -> None:
+    values = {
+        **get_settings().model_dump(),
+        "ai_builder_proposal_timeout_seconds": 300.0,
+        "ai_builder_provider_call_ceiling_seconds": 1_800.0,
+        "ai_builder_classification_timeout_seconds": None,
+        **overrides,
+    }
+    if loads:
+        Settings.model_validate(values)
+    else:
+        with pytest.raises(SystemExit):
+            Settings.model_validate(values)
 
 
 def test_classification_honors_an_explicit_deployment_deadline() -> None:

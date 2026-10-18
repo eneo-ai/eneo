@@ -180,6 +180,20 @@ def _reasoning_effort_select() -> ModelKwargCapability:
     )
 
 
+# The known reasoning-effort levels, least reasoning first. An admin may
+# declare a route's levels in any order, so which level reasons less is read
+# from this scale, never from the declared order.
+REASONING_EFFORT_SCALE: tuple[str, ...] = (
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+)
+
+
 def reasoning_effort_options_from_model_info(
     model_info: Mapping[str, object],
 ) -> list[str]:

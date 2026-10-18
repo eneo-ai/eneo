@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from typing import Any, Literal, NamedTuple, TypeGuard, assert_never, cast, get_args
@@ -77,6 +77,21 @@ SlotClassificationAttemptOutcome = Literal[
 UNREAD_CLASSIFICATION_OUTCOMES: frozenset[SlotClassificationAttemptOutcome] = frozenset(
     {"no_content", "parse_failed", "output_limit_exceeded"}
 )
+# Why a reply that reached the parser was refused whole, for the log: the
+# parser's other refusals are per entry and surface as diagnostics.
+SlotClassificationRejectReason = Literal[
+    "json_invalid",
+    "duplicate_key",
+    "not_object",
+    "no_contract_keys",
+    "top_level_field_invalid",
+    "checkpoint_item_invalid",
+    "checkpoint_cites_unread_message",
+    "checkpoint_evidence_unverified",
+    "checkpoint_reason_empty",
+    "checkpoint_speaker_naming_not_boolean",
+    "checkpoint_duplicate_producer",
+]
 SlotClassificationDiagnosticCode = Literal[
     "slot_outcome_duplicate",
     "slot_outcome_malformed",
@@ -530,8 +545,9 @@ def parse_slot_classification_response(
     schema_candidate_fingerprints: Collection[str] = (),
     schema_sent: bool = True,
     read_declarations: bool = True,
+    on_reject: Callable[[SlotClassificationRejectReason], None] | None = None,
 ) -> SlotClassificationResult | None:
-    """Read a classifier reply.
+    """Read a classifier reply; a reply refused whole reports why to on_reject.
 
     schema_sent says the response schema went with the request, so a
     resolved entry lacking a declaration it requires is unresolved.
@@ -540,12 +556,21 @@ def parse_slot_classification_response(
     value, grade nor evidence, and the slot is what the reply's own entry says.
     """
 
+    def reject(reason: SlotClassificationRejectReason) -> None:
+        if on_reject is not None:
+            on_reject(reason)
+
     try:
         raw = _decode_slot_classification_json(content)
-    except (json.JSONDecodeError, _DuplicateJsonKey):
+    except json.JSONDecodeError:
+        reject("json_invalid")
+        return None
+    except _DuplicateJsonKey:
+        reject("duplicate_key")
         return None
 
     if raw is None:
+        reject("not_object")
         return None
     slot_values = normalize_slot_classification_values(allowed_slot_values)
     lenient = _top_level_read_leniently(
@@ -557,6 +582,7 @@ def parse_slot_classification_response(
         allowed_slot_names=frozenset(slot_values),
     )
     if lenient is None:
+        reject("no_contract_keys")
         return None
     raw_dict, relocated_entries = lenient
     relocated_slot_names = frozenset(name for name, _ in relocated_entries)
@@ -565,6 +591,7 @@ def parse_slot_classification_response(
         allowed_slot_values=allowed_slot_values,
         schema_candidate_fingerprints=schema_candidate_fingerprints,
     ):
+        reject("top_level_field_invalid")
         return None
 
     raw_slot_entries = _raw_slot_entries_by_name(
@@ -660,7 +687,8 @@ def parse_slot_classification_response(
         raw_dict["checkpoint_updates"],
         classification_input=classification_input,
     )
-    if parsed_checkpoints is None:
+    if isinstance(parsed_checkpoints, str):
+        reject(parsed_checkpoints)
         return None
     checkpoint_updates, checkpoint_diagnostics = parsed_checkpoints
     form_intake = _parse_form_intake(
@@ -1269,10 +1297,11 @@ def _parse_checkpoint_updates(
     tuple[
         tuple[ClassifiedCheckpointUpdate, ...], tuple[CheckpointUpdateDiagnostic, ...]
     ]
-    | None
+    | SlotClassificationRejectReason
 ):
+    # The top-level field check refuses a non-list first; this keeps the type.
     if not isinstance(raw_value, list):
-        return None
+        return "top_level_field_invalid"
     producer_kinds = set(get_args(CheckpointProducerKind))
     review_modes = {mode.value: mode for mode in FlowStepReviewMode}
     source_kinds = {
@@ -1287,25 +1316,25 @@ def _parse_checkpoint_updates(
     seen_producers: set[str] = set()
     for item in cast(list[object], raw_value):
         if not isinstance(item, dict):
-            return None
+            return "checkpoint_item_invalid"
         payload = cast(dict[str, object], item)
         operation = payload.get("operation")
         if not _is_update_operation(operation):
-            return None
+            return "checkpoint_item_invalid"
         producer_kind = payload.get("producer_kind")
         if not isinstance(producer_kind, str) or producer_kind not in producer_kinds:
-            return None
+            return "checkpoint_item_invalid"
         confidence = payload.get("confidence", _OMITTED_CONFIDENCE)
         if not _is_confidence(confidence) or confidence == "low":
-            return None
+            return "checkpoint_item_invalid"
         raw_mode = payload.get("mode")
         if operation == "update":
             if not isinstance(raw_mode, str) or raw_mode not in review_modes:
-                return None
+                return "checkpoint_item_invalid"
             mode = review_modes[raw_mode]
         else:
             if raw_mode is not None:
-                return None
+                return "checkpoint_item_invalid"
             mode = None
         raw_evidence: object = payload.get("evidence", [])
         # Fail closed before any quote is validated or dropped: an update that
@@ -1316,21 +1345,21 @@ def _parse_checkpoint_updates(
             source_message_ids,
             classification_input.unread_user_message_ids,
         ):
-            return None
+            return "checkpoint_cites_unread_message"
         evidence = _parse_classification_evidence(
             raw_evidence,
             classification_input=classification_input,
         )
         if not evidence or current_user_message_id is None:
-            return None
+            return "checkpoint_evidence_unverified"
         reason = payload.get("reason", "checkpoint classification")
         if not isinstance(reason, str) or not reason.strip():
-            return None
+            return "checkpoint_reason_empty"
         # Absent reads as no naming; a present value must be a boolean.
         if "speaker_naming" in payload and not isinstance(
             payload["speaker_naming"], bool
         ):
-            return None
+            return "checkpoint_speaker_naming_not_boolean"
         cited_message_ids = {
             source_message_ids[cited.source_id]
             for cited in evidence
@@ -1344,7 +1373,7 @@ def _parse_checkpoint_updates(
         if current_user_message_id not in cited_message_ids:
             continue
         if producer_kind in seen_producers:
-            return None
+            return "checkpoint_duplicate_producer"
         seen_producers.add(producer_kind)
         evidence_level = _validated_evidence_level(
             payload.get("evidence_level", "inferred"),

@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -259,6 +259,10 @@ AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT = 0.5
 # silence deadline is what detects a dead call, this only bounds a runaway one.
 # Independent of the send-lock lease, which the turn renews while it works.
 AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT = 1800.0
+# Which reasoning effort the slot classification call sends: the lowest level
+# below the turn's that the route offers and can send, or the turn's own.
+AIBuilderClassificationReasoningEffort = Literal["lowest", "turn"]
+AI_BUILDER_CLASSIFICATION_REASONING_EFFORT_DEFAULT: AIBuilderClassificationReasoningEffort = "lowest"
 
 
 class Settings(BaseSettings):
@@ -495,6 +499,19 @@ class Settings(BaseSettings):
     ai_builder_provider_call_ceiling_seconds: float = (
         AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT
     )
+    # Classification reads the user's text before the turn can plan, so a
+    # runaway one must not hold the turn for the whole provider call ceiling.
+    # Unset, its asks together get one classification silence deadline per
+    # ask, within that ceiling; a value lies between the classification
+    # silence deadline and the provider call ceiling.
+    ai_builder_classification_ceiling_seconds: float | None = None
+    # Unset, a classification answer is bounded by the model's output limit
+    # and the room its request leaves, like every other Builder call; a value
+    # is a cost guard below that.
+    ai_builder_classification_answer_cap_tokens: int | None = None
+    # Reading the user's text into slots is a small extraction: by default it
+    # does not spend the reasoning effort the turn plans with.
+    ai_builder_classification_reasoning_effort: AIBuilderClassificationReasoningEffort = AI_BUILDER_CLASSIFICATION_REASONING_EFFORT_DEFAULT
     ai_builder_send_lock_lease_seconds: int = 900
 
     crawl_heartbeat_interval_seconds: int = (
@@ -1044,6 +1061,35 @@ class Settings(BaseSettings):
                 "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS must not be below the "
                 "proposal or classification silence deadline. Current value: %s",
                 self.ai_builder_provider_call_ceiling_seconds,
+            )
+            sys.exit(1)
+        classification_silence = (
+            self.ai_builder_classification_timeout_seconds
+            if self.ai_builder_classification_timeout_seconds is not None
+            else self.ai_builder_proposal_timeout_seconds
+        )
+        classification_ceiling = self.ai_builder_classification_ceiling_seconds
+        # The finite provider ceiling also refuses an infinite or NaN value.
+        if classification_ceiling is not None and not (
+            classification_silence
+            <= classification_ceiling
+            <= self.ai_builder_provider_call_ceiling_seconds
+        ):
+            logging.error(
+                "AI_BUILDER_CLASSIFICATION_CEILING_SECONDS must lie between the "
+                "classification silence deadline and "
+                "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS. Current value: %s",
+                classification_ceiling,
+            )
+            sys.exit(1)
+        if (
+            self.ai_builder_classification_answer_cap_tokens is not None
+            and self.ai_builder_classification_answer_cap_tokens < 1
+        ):
+            logging.error(
+                "AI_BUILDER_CLASSIFICATION_ANSWER_CAP_TOKENS must be greater than "
+                "zero. Current value: %s",
+                self.ai_builder_classification_answer_cap_tokens,
             )
             sys.exit(1)
 

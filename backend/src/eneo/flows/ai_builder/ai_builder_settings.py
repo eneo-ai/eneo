@@ -25,21 +25,13 @@ from eneo.flows.flow_ai_builder_budget_settings import (
 )
 from eneo.main.config import (
     AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT,
+    AI_BUILDER_CLASSIFICATION_REASONING_EFFORT_DEFAULT,
     AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT,
+    AIBuilderClassificationReasoningEffort,
     get_settings,
 )
 
 AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS = 300.0
-
-# The most a slot classification answer may take, reasoning included, whatever
-# the model allows. The reply itself is a small bounded object: the largest of
-# 82 captured replies (2026-09-26, both measured routes) was 4,785 characters,
-# about 1,500 tokens. A reasoning model spends more than it writes: the largest
-# of 109 resolved calls in a 2026-10-01 paired run used 10,419 completion
-# tokens. A call that runs away does not stop at any cap (all reached 32,768
-# when that was the cap, 16,384 since), so it is asked again instead of given
-# more room. Re-measure before lowering it.
-SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS = 16_384
 
 # How often a classification reply cut off at the output cap is asked again
 # with the identical request: runaway replies come per call, not per input, and
@@ -274,6 +266,13 @@ class AIBuilderBudgetPolicy:
     # Classification shares the proposal deadline unless deployment policy
     # explicitly gives it a different one.
     classification_timeout_seconds: float | None = None
+    # See Settings.ai_builder_classification_ceiling_seconds.
+    classification_ceiling_seconds: float | None = None
+    # See Settings.ai_builder_classification_answer_cap_tokens.
+    classification_answer_cap_tokens: int | None = None
+    classification_reasoning_effort: AIBuilderClassificationReasoningEffort = (
+        AI_BUILDER_CLASSIFICATION_REASONING_EFFORT_DEFAULT
+    )
     proposal_timeout_seconds: float = AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS
     max_attachments: int = AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT
     max_message_chars: int = AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT
@@ -321,18 +320,26 @@ class AIBuilderBudgetPolicy:
         capacity: ModelCapacity,
         request_id: str | None = None,
     ) -> AIBuilderRequestBudget:
+        timeout_seconds = (
+            self.classification_timeout_seconds
+            if self.classification_timeout_seconds is not None
+            else self.proposal_timeout_seconds
+        )
         return AIBuilderRequestBudget(
             capacity=capacity,
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
-            ceiling_seconds=self.provider_call_ceiling_seconds,
-            timeout_seconds=(
-                self.classification_timeout_seconds
-                if self.classification_timeout_seconds is not None
-                else self.proposal_timeout_seconds
+            ceiling_seconds=(
+                self.classification_ceiling_seconds
+                if self.classification_ceiling_seconds is not None
+                else min(
+                    (1 + SLOT_CLASSIFICATION_CUT_OFF_REASKS) * timeout_seconds,
+                    self.provider_call_ceiling_seconds,
+                )
             ),
+            timeout_seconds=timeout_seconds,
             request_id=request_id,
-            answer_cap_tokens=SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS,
+            answer_cap_tokens=self.classification_answer_cap_tokens,
         )
 
     def review_request_budget(
@@ -402,6 +409,17 @@ def _default_policy(defaults: Any | None = None) -> AIBuilderBudgetPolicy:
             float(source.ai_builder_classification_timeout_seconds)
             if source.ai_builder_classification_timeout_seconds is not None
             else None
+        ),
+        classification_ceiling_seconds=getattr(
+            source, "ai_builder_classification_ceiling_seconds", None
+        ),
+        classification_answer_cap_tokens=getattr(
+            source, "ai_builder_classification_answer_cap_tokens", None
+        ),
+        classification_reasoning_effort=getattr(
+            source,
+            "ai_builder_classification_reasoning_effort",
+            AI_BUILDER_CLASSIFICATION_REASONING_EFFORT_DEFAULT,
         ),
         proposal_timeout_seconds=float(source.ai_builder_proposal_timeout_seconds),
         max_attachments=AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
@@ -506,6 +524,15 @@ def resolve_ai_builder_budget_policy(
         provider_call_ceiling_seconds=resolved_defaults.provider_call_ceiling_seconds,
         classification_timeout_seconds=(
             resolved_defaults.classification_timeout_seconds
+        ),
+        classification_ceiling_seconds=(
+            resolved_defaults.classification_ceiling_seconds
+        ),
+        classification_answer_cap_tokens=(
+            resolved_defaults.classification_answer_cap_tokens
+        ),
+        classification_reasoning_effort=(
+            resolved_defaults.classification_reasoning_effort
         ),
         proposal_timeout_seconds=resolved_defaults.proposal_timeout_seconds,
         max_attachments=operating_limits["max_attachments"],

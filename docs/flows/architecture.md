@@ -260,8 +260,18 @@ call, however much it keeps producing; it is policy of its own and never below
 the silence deadline. Neither is the send-lock lease, which the turn renews
 while it works. An explicitly configured
 `AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS` overrides the silence deadline for
-classification; leaving it unset restores inheritance. Model context capacity
-does not establish provider processing speed, so deadlines are deployment
+classification; leaving it unset restores inheritance. Classification has a
+whole-call ceiling of its own, shared by its ask and its one re-ask after a
+cut-off answer: `AI_BUILDER_CLASSIFICATION_CEILING_SECONDS`, by default twice
+its silence deadline and never above `AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS`.
+A classification answer is bounded by the model's output limit and the room its
+request leaves, like every other Builder call, unless
+`AI_BUILDER_CLASSIFICATION_ANSWER_CAP_TOKENS` sets a cost cap. When the turn
+sends a reasoning effort, classification sends the lowest level below it that
+the model offers and the route can send, so it never reasons more than the
+turn, unless `AI_BUILDER_CLASSIFICATION_REASONING_EFFORT=turn` keeps the
+user's. Model
+context capacity does not establish provider processing speed, so deadlines are deployment
 policy. A proxy between Eneo and the provider that closes idle connections must
 allow at least this silence; see the failure telemetry above for how such a
 timeout is recognised (`local_deadline` names the timer that expired, silence
