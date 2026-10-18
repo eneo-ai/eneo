@@ -961,7 +961,7 @@ def test_the_scorer_names_its_output_gold_and_digests_the_corpus(
         expected_observations=[],
     )
 
-    assert harness.SCORER_SEMANTICS_VERSION == 4
+    assert harness.SCORER_SEMANTICS_VERSION == 5
     assert identity["output_gold_sha256"] == gold_module.gold_sha256()
     assert {"ai_builder_output_gold.json", "ai_builder_output_gold.py"} <= set(
         harness._SCORER_MODULES  # pyright: ignore[reportPrivateUsage]

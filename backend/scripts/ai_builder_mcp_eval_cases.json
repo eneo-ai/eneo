@@ -1,0 +1,1561 @@
+{
+ "version": 9,
+ "description": "Builder MCP eval corpus (eneo-epim.36, validation plan v3 section 2): families 1-9 against the stub catalogue blocks of demo-stack/builder-guards/mcp_stub_catalog.json. Each case names its seed block in the cohort mcp_block:<block>; a screen runs one block at a time with that block's seed manifest (--mcp-seed-manifest).",
+ "synthetic_user_profiles": {
+  "mcp_report_author": {
+   "description": "Reads data into a text report; no extra run-form fields unless the case names them.",
+   "question_answers": {
+    "primary_runtime_input": {
+     "selected_option_id": "text"
+    },
+    "terminal_output": {
+     "selected_option_id": "structured_text"
+    },
+    "post_processing_goal": {
+     "selected_option_id": "summarize_or_overview"
+    },
+    "report_disposition": {
+     "selected_option_id": "synthesized_overview"
+    },
+    "comparison_scope": {
+     "selected_option_id": "no_direct_compare"
+    },
+    "structured_io_contract": {
+     "selected_option_id": "extract_or_compute_fields"
+    },
+    "runtime_metadata_fields": {
+     "selected_option_id": "no_extra_metadata"
+    }
+   }
+  }
+ },
+ "cases": [
+  {
+   "id": "mcp_f1_daily_metrics_summary",
+   "prompt": "Bygg ett flöde som sammanfattar anläggningens driftvärden för en period: medel- och toppeffekt per dygn och vilka dygn som avviker. Hämta dygnsvärdena, ett värde per dygn, från de datakällor som utrymmet har. Perioden anges i körformuläret med två datumfält: from_date och to_date (ÅÅÅÅ-MM-DD). Skriv de avvikande dygnen som en lista, ett dygn per rad med datumet i formen ÅÅÅÅ-MM-DD och dygnets toppeffekt i kW. Sammanfattningen ska vara text.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:driftdata-only",
+    "mcp_family:1",
+    "mcp_train"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "runtime_metadata_fields": {
+     "selected_option_id": "detailed_runtime_metadata"
+    },
+    "runtime_metadata_field_details": {
+     "input_fields": [
+      {
+       "value": {
+        "name": "from_date",
+        "label": "Från datum",
+        "type": "date",
+        "required": true,
+        "options": []
+       },
+       "purpose": "interpret_input"
+      },
+      {
+       "value": {
+        "name": "to_date",
+        "label": "Till datum",
+        "type": "date",
+        "required": true,
+        "options": []
+       },
+       "purpose": "interpret_input"
+      }
+     ]
+    },
+    "primary_runtime_input": {
+     "selected_option_preference": [
+      "no_run_input",
+      "text"
+     ]
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "use"
+    },
+    {
+     "family": "choice",
+     "tool": {
+      "server": "Driftdata",
+      "name": "query_daily_metrics"
+     }
+    },
+    {
+     "family": "argument",
+     "argument": "from_date",
+     "source": "run_input",
+     "field": "from_date"
+    },
+    {
+     "family": "argument",
+     "argument": "to_date",
+     "source": "run_input",
+     "field": "to_date"
+    },
+    {
+     "family": "argument",
+     "argument": "unit",
+     "source": "fixed",
+     "value": "day"
+    }
+   ],
+   "execution": {
+    "inputs": {
+     "form_fields": {
+      "from_date": "2026-09-01",
+      "to_date": "2026-09-30"
+     }
+    },
+    "expect": {
+     "output_kind": "text",
+     "required_facts": [
+      "2026-09-03",
+      "2026-09-11",
+      "2026-09-17",
+      "2026-09-24"
+     ],
+     "associations": [
+      {
+       "fact": "2026-09-03",
+       "with": "1413",
+       "not_with": "1618.5"
+      },
+      {
+       "fact": "2026-09-11",
+       "with": "1618.5",
+       "not_with": "1369.5"
+      },
+      {
+       "fact": "2026-09-17",
+       "with": "1369.5",
+       "not_with": "1506"
+      },
+      {
+       "fact": "2026-09-24",
+       "with": "1506",
+       "not_with": "1413"
+      }
+     ]
+    }
+   },
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ]
+     ],
+     "uses": [
+      {
+       "tool": {
+        "server": "Driftdata",
+        "name": "query_daily_metrics"
+       },
+       "arguments": {
+        "from_date": {
+         "run_input": {
+          "field": "from_date",
+          "type": "date"
+         }
+        },
+        "to_date": {
+         "run_input": {
+          "field": "to_date",
+          "type": "date"
+         }
+        },
+        "unit": {
+         "fixed": "day"
+        }
+       }
+      }
+     ],
+     "calls": [
+      {
+       "tool": {
+        "server": "Driftdata",
+        "name": "query_daily_metrics"
+       },
+       "arguments": {
+        "from_date": "2026-09-01",
+        "to_date": "2026-09-30",
+        "unit": "day"
+       }
+      }
+     ],
+     "run_input": {
+      "from_date": "2026-09-01",
+      "to_date": "2026-09-30"
+     }
+    }
+   },
+   "note": "Contrast pair with mcp_f1_daily_metrics_summary_no_tools (same task, empty catalogue). primary_runtime_input prefers no_run_input, else text: the product still asks it after a 'use' answer even when the first step reads a tool and offers no 'no run input' option until bead eneo-epim.38, so one corpus measures both."
+  },
+  {
+   "id": "mcp_f2_protocol_decoy_catalogue",
+   "prompt": "Bygg ett flöde där jag laddar upp anteckningar från ett möte som ett dokument, och flödet gör ett protokoll av dem: närvarande, beslut och åtgärdspunkter med ansvarig och datum. Protokollet ska vara text.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:decoy",
+    "mcp_family:2",
+    "mcp_train"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "primary_runtime_input": {
+     "selected_option_id": "documents"
+    },
+    "document_material_scope": {
+     "selected_option_id": "single_document_case"
+    },
+    "post_processing_goal": {
+     "selected_option_id": "structure_key_information"
+    },
+    "mapped_file_limit": {
+     "selected_option_id": "organization_limit"
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "use"
+    }
+   ],
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ]
+     ],
+     "uses": []
+    }
+   },
+   "note": "Negative contrast: the space's only tool (a calendar) does not serve the task, so even after a 'use' answer no step may read a tool. Relevance is the product contract: it is asked whenever the space's catalogue is non-empty, so the expectation keeps one relevance question; over-asking is measured separately (M1 per turn, M6 questions), not by the validation plan's wording, which is not the oracle."
+  },
+  {
+   "id": "mcp_f3_anomaly_events_chain",
+   "prompt": "Bygg ett flöde som tar fram en rapport över förra månadens dagar med avvikande förbrukning. Hämta uppgifterna från de datakällor som utrymmet har tillgång till: först dygnsvärdena för perioden och vilka dagar som avviker, sedan händelserna (larm, omstarter, underhåll) för just de avvikande dagarna. Rapporten ska lista varje avvikande dag med medel- och toppeffekt och dagens händelser. Steget som hämtar dygnsvärdena ska ge de avvikande dagarna som en lista av datum i fältet anomaly_days. Perioden anges i körformuläret med två datumfält: from_date (datum) och to_date (datum). Datum skrivs ÅÅÅÅ-MM-DD, också i rapporten, där varje avvikande dag står på en egen rad med sin toppeffekt i kW. Rapporten ska vara text.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:driftdata-only",
+    "mcp_family:3",
+    "mcp_train"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "runtime_metadata_fields": {
+     "selected_option_id": "detailed_runtime_metadata"
+    },
+    "runtime_metadata_field_details": {
+     "input_fields": [
+      {
+       "value": {
+        "name": "from_date",
+        "label": "Från datum",
+        "type": "date",
+        "required": true,
+        "options": []
+       },
+       "purpose": "interpret_input"
+      },
+      {
+       "value": {
+        "name": "to_date",
+        "label": "Till datum",
+        "type": "date",
+        "required": true,
+        "options": []
+       },
+       "purpose": "interpret_input"
+      }
+     ]
+    },
+    "primary_runtime_input": {
+     "selected_option_preference": [
+      "no_run_input",
+      "text"
+     ]
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "use"
+    },
+    {
+     "family": "choice",
+     "tool": {
+      "server": "Driftdata",
+      "name": "query_daily_metrics"
+     }
+    },
+    {
+     "family": "argument",
+     "argument": "from_date",
+     "source": "run_input",
+     "field": "from_date"
+    },
+    {
+     "family": "argument",
+     "argument": "to_date",
+     "source": "run_input",
+     "field": "to_date"
+    },
+    {
+     "family": "argument",
+     "argument": "unit",
+     "source": "fixed",
+     "value": "day"
+    },
+    {
+     "family": "choice",
+     "tool": {
+      "server": "Driftdata",
+      "name": "query_events"
+     }
+    },
+    {
+     "family": "argument",
+     "argument": "days",
+     "source": "earlier",
+     "step": {
+      "tool": {
+       "server": "Driftdata",
+       "name": "query_daily_metrics"
+      }
+     },
+     "field": "anomaly_days"
+    }
+   ],
+   "execution": {
+    "inputs": {
+     "form_fields": {
+      "from_date": "2026-09-01",
+      "to_date": "2026-09-30"
+     }
+    },
+    "expect": {
+     "output_kind": "text",
+     "required_facts": [
+      "2026-09-03",
+      "2026-09-11",
+      "2026-09-17",
+      "2026-09-24"
+     ],
+     "associations": [
+      {
+       "fact": "2026-09-03",
+       "with": "1413",
+       "not_with": "1618.5"
+      },
+      {
+       "fact": "2026-09-11",
+       "with": "1618.5",
+       "not_with": "1369.5"
+      },
+      {
+       "fact": "2026-09-17",
+       "with": "1369.5",
+       "not_with": "1506"
+      },
+      {
+       "fact": "2026-09-24",
+       "with": "1506",
+       "not_with": "1413"
+      }
+     ]
+    }
+   },
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ]
+     ],
+     "uses": [
+      {
+       "tool": {
+        "server": "Driftdata",
+        "name": "query_daily_metrics"
+       },
+       "arguments": {
+        "from_date": {
+         "run_input": {
+          "field": "from_date",
+          "type": "date"
+         }
+        },
+        "to_date": {
+         "run_input": {
+          "field": "to_date",
+          "type": "date"
+         }
+        },
+        "unit": {
+         "fixed": "day"
+        }
+       }
+      },
+      {
+       "tool": {
+        "server": "Driftdata",
+        "name": "query_events"
+       },
+       "arguments": {
+        "days": {
+         "earlier": {
+          "step": {
+           "tool": {
+            "server": "Driftdata",
+            "name": "query_daily_metrics"
+           }
+          },
+          "field": "anomaly_days"
+         }
+        }
+       }
+      }
+     ],
+     "calls": [
+      {
+       "tool": {
+        "server": "Driftdata",
+        "name": "query_daily_metrics"
+       },
+       "arguments": {
+        "from_date": "2026-09-01",
+        "to_date": "2026-09-30",
+        "unit": "day"
+       }
+      },
+      {
+       "tool": {
+        "server": "Driftdata",
+        "name": "query_events"
+       },
+       "arguments": {
+        "days": [
+         "2026-09-03",
+         "2026-09-11",
+         "2026-09-17",
+         "2026-09-24"
+        ]
+       }
+      }
+     ],
+     "run_input": {
+      "from_date": "2026-09-01",
+      "to_date": "2026-09-30"
+     }
+    }
+   },
+   "note": "The events step must read anomaly_days (a list of dates) from the step that reads query_daily_metrics, not the metrics' days rows (a list of objects): binding the object list is product defect eneo-epim.25 and fails M3. The prompt names the producer's field because a step's output fields are the planner's own names. primary_runtime_input prefers no_run_input, else text: the product still asks it after a 'use' answer even when the first step reads a tool and offers no 'no run input' option until bead eneo-epim.38, so one corpus measures both."
+  },
+  {
+   "id": "mcp_f4_case_by_number",
+   "prompt": "Build a flow that reads one case from the case register by its case number and writes a short status note: title, status, handler and registration date. The case number is given in the run form field case_id (a whole number). The note is text.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:all-three",
+    "mcp_family:4",
+    "mcp_train"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "runtime_metadata_fields": {
+     "selected_option_id": "detailed_runtime_metadata"
+    },
+    "runtime_metadata_field_details": {
+     "input_fields": [
+      {
+       "value": {
+        "name": "case_id",
+        "label": "Case number",
+        "type": "number",
+        "required": true,
+        "options": []
+       },
+       "purpose": "interpret_input"
+      }
+     ]
+    },
+    "primary_runtime_input": {
+     "selected_option_preference": [
+      "no_run_input",
+      "text"
+     ]
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "use"
+    },
+    {
+     "family": "choice",
+     "tool": {
+      "server": "Ärenden",
+      "name": "get_case"
+     }
+    },
+    {
+     "family": "argument",
+     "argument": "case_id",
+     "source": "run_input",
+     "field": "case_id"
+    }
+   ],
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ]
+     ],
+     "uses": [
+      {
+       "tool": {
+        "server": "Ärenden",
+        "name": "get_case"
+       },
+       "arguments": {
+        "case_id": {
+         "run_input": {
+          "field": "case_id",
+          "type": "number"
+         }
+        }
+       }
+      }
+     ]
+    }
+   },
+   "note": "Near tools: get_case fits; search_cases reads the same register. A tool_choice question here fails M1 (one tool fits); if it is asked, M2 records the model's pick. Not run: how a number field reaches a tool argument is not pinned yet. primary_runtime_input prefers no_run_input, else text: the product still asks it after a 'use' answer even when the first step reads a tool and offers no 'no run input' option until bead eneo-epim.38, so one corpus measures both."
+  },
+  {
+   "id": "mcp_f5_named_tool_absent",
+   "prompt": "Använd verktyget query_daily_metrics i Driftdata och bygg ett flöde som sammanfattar anläggningens dygnsvärden för en period, med medel- och toppeffekt per dygn. Perioden anges i körformuläret med två datumfält: from_date och to_date (ÅÅÅÅ-MM-DD). Sammanfattningen ska vara text.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:decoy",
+    "mcp_family:5",
+    "mcp_train"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "runtime_metadata_fields": {
+     "selected_option_id": "detailed_runtime_metadata"
+    },
+    "runtime_metadata_field_details": {
+     "input_fields": [
+      {
+       "value": {
+        "name": "from_date",
+        "label": "Från datum",
+        "type": "date",
+        "required": true,
+        "options": []
+       },
+       "purpose": "interpret_input"
+      },
+      {
+       "value": {
+        "name": "to_date",
+        "label": "Till datum",
+        "type": "date",
+        "required": true,
+        "options": []
+       },
+       "purpose": "interpret_input"
+      }
+     ]
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "use"
+    }
+   ],
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ]
+     ],
+     "uses": []
+    }
+   },
+   "note": "Open product decision: the named tool is not in the space (only a calendar tool is), and a tool of a server the space lacks has no typed refusal, so no guidance outcome is possible; the expectation keeps current behaviour (a plan) and requires that no step reads the unrelated tool. The 'disabled tool' variant needs a seed block with a switched-off tool, which mcp_stub_catalog.json has not."
+  },
+  {
+   "id": "mcp_f6_named_search_cases",
+   "prompt": "Använd verktyget search_cases i Ärenden och bygg ett flöde som listar pågående ärenden (status pending) vars titel innehåller ett sökord. Sökordet anges i körformulärets textfält query. Listan ska vara text med ärendenummer och titel.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:cases-only",
+    "mcp_family:6",
+    "mcp_train"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "runtime_metadata_fields": {
+     "selected_option_id": "detailed_runtime_metadata"
+    },
+    "runtime_metadata_field_details": {
+     "input_fields": [
+      {
+       "value": {
+        "name": "query",
+        "label": "Sökord",
+        "type": "text",
+        "required": true,
+        "options": []
+       },
+       "purpose": "interpret_input"
+      }
+     ]
+    },
+    "primary_runtime_input": {
+     "selected_option_preference": [
+      "no_run_input",
+      "text"
+     ]
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "use"
+    },
+    {
+     "family": "choice",
+     "tool": {
+      "server": "Ärenden",
+      "name": "search_cases"
+     }
+    },
+    {
+     "family": "argument",
+     "argument": "status",
+     "source": "fixed",
+     "value": "pending"
+    },
+    {
+     "family": "argument",
+     "argument": "query",
+     "source": "run_input",
+     "field": "query"
+    }
+   ],
+   "execution": {
+    "inputs": {
+     "form_fields": {
+      "query": "Bullerklagomål"
+     }
+    },
+    "expect": {
+     "output_kind": "text",
+     "required_facts": [
+      "Bullerklagomål Hamnen"
+     ]
+    }
+   },
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ]
+     ],
+     "uses": [
+      {
+       "tool": {
+        "server": "Ärenden",
+        "name": "search_cases"
+       },
+       "arguments": {
+        "status": {
+         "fixed": "pending"
+        },
+        "query": {
+         "run_input": {
+          "field": "query",
+          "type": "text"
+         }
+        }
+       }
+      }
+     ],
+     "calls": [
+      {
+       "tool": {
+        "server": "Ärenden",
+        "name": "search_cases"
+       },
+       "arguments": {
+        "status": "pending",
+        "query": "Bullerklagomål"
+       }
+      }
+     ],
+     "run_input": {
+      "query": "Bullerklagomål"
+     }
+    }
+   },
+   "note": "A named tool still gets the relevance question (the use answer is the consent), then no tool_choice when only that tool fits. primary_runtime_input prefers no_run_input, else text: the product still asks it after a 'use' answer even when the first step reads a tool and offers no 'no run input' option until bead eneo-epim.38, so one corpus measures both."
+  },
+  {
+   "id": "mcp_f7_open_permits_no_input",
+   "prompt": "Bygg ett flöde som vid varje körning listar alla öppna bygglovsärenden i ärenderegistret. Flödet har ingen indata: status är alltid open och sökordet alltid Bygglov. Listan ska vara text med ett ärende per rad: ärendenummer och titel.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:cases-only",
+    "mcp_family:7",
+    "mcp_train"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "primary_runtime_input": {
+     "selected_option_preference": [
+      "no_run_input",
+      "text"
+     ]
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "use"
+    },
+    {
+     "family": "choice",
+     "tool": {
+      "server": "Ärenden",
+      "name": "search_cases"
+     }
+    },
+    {
+     "family": "argument",
+     "argument": "status",
+     "source": "fixed",
+     "value": "open"
+    },
+    {
+     "family": "argument",
+     "argument": "query",
+     "source": "fixed",
+     "value": "Bygglov"
+    }
+   ],
+   "execution": {
+    "inputs": {},
+    "expect": {
+     "output_kind": "text",
+     "required_facts": [
+      "Bygglov altan Storgatan 4",
+      "Bygglov garage Björkvägen 7"
+     ],
+     "associations": [
+      {
+       "fact": "Bygglov altan Storgatan 4",
+       "with": "1000",
+       "not_with": "1008"
+      },
+      {
+       "fact": "Bygglov garage Björkvägen 7",
+       "with": "1008",
+       "not_with": "1000"
+      }
+     ]
+    }
+   },
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ]
+     ],
+     "uses": [
+      {
+       "tool": {
+        "server": "Ärenden",
+        "name": "search_cases"
+       },
+       "arguments": {
+        "status": {
+         "fixed": "open"
+        },
+        "query": {
+         "fixed": "Bygglov"
+        }
+       }
+      }
+     ],
+     "calls": [
+      {
+       "tool": {
+        "server": "Ärenden",
+        "name": "search_cases"
+       },
+       "arguments": {
+        "status": "open",
+        "query": "Bygglov"
+       }
+      }
+     ],
+     "run_input": {}
+    }
+   },
+   "note": "Every tool value is fixed; the run gets no form values and no text. primary_runtime_input prefers no_run_input, else text: the product still asks it after a 'use' answer even when the first step reads a tool and offers no 'no run input' option until bead eneo-epim.38, so one corpus measures both."
+  },
+  {
+   "id": "mcp_f8_edit_add_case_lookup",
+   "prompt": "Lägg till ett första steg som hämtar ärendet ur ärenderegistret med verktyget get_case. Ärendenumret anges i ett nytt fält case_id (ett heltal) i körformuläret. Övriga steg ska bedöma och besvara det hämtade ärendet. Rör inget annat i flödet.",
+   "complexity": "medium",
+   "domain": "mcp_eval_edit",
+   "cohorts": [
+    "mcp_block:cases-only",
+    "mcp_family:8",
+    "mcp_train"
+   ],
+   "apply_plan": true,
+   "tool_answers": [
+    {
+     "family": "choice",
+     "tool": {
+      "server": "Ärenden",
+      "name": "get_case"
+     }
+    },
+    {
+     "family": "argument",
+     "argument": "case_id",
+     "source": "run_input",
+     "field": "case_id"
+    }
+   ],
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "choice"
+      ]
+     ],
+     "uses": [
+      {
+       "tool": {
+        "server": "Ärenden",
+        "name": "get_case"
+       },
+       "arguments": {
+        "case_id": {
+         "run_input": {
+          "field": "case_id",
+          "type": "number"
+         }
+        }
+       }
+      }
+     ]
+    }
+   },
+   "edit": {
+    "seed_flow_fixture": "edit_seed_a.json",
+    "scope": "whole_flow"
+   },
+   "note": "An edit asks no relevance question; each new tool use is confirmed with a tool_choice question. The paired case (an unrelated edit of a flow that already reads a tool, the use kept) is not in the corpus: a seed fixture cannot hold the per-seed server and tool ids."
+  },
+  {
+   "id": "mcp_f9_declined_then_follow_up",
+   "prompt": "Bygg ett flöde där jag laddar upp ett mötesprotokoll som ett dokument, och flödet tar fram en lista över åtgärdspunkterna med vem som ansvarar och när det ska vara klart. Listan ska vara text.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:driftdata-only",
+    "mcp_family:9",
+    "mcp_train"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "primary_runtime_input": {
+     "selected_option_id": "documents"
+    },
+    "document_material_scope": {
+     "selected_option_id": "single_document_case"
+    },
+    "post_processing_goal": {
+     "selected_option_id": "structure_key_information"
+    },
+    "mapped_file_limit": {
+     "selected_option_id": "organization_limit"
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "dont_use"
+    }
+   ],
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ],
+      []
+     ],
+     "uses": []
+    }
+   },
+   "script": {
+    "turns": [
+     "Lägg också till mötets datum överst i listan."
+    ]
+   },
+   "note": "After 'no' to tools, the follow-up turn in the same session must not add a tool step."
+  },
+  {
+   "id": "mcp_f1_daily_metrics_summary_no_tools",
+   "prompt": "Bygg ett flöde som sammanfattar anläggningens driftvärden för en period: medel- och toppeffekt per dygn och vilka dygn som avviker. Dygnsvärdena, ett värde per dygn, klistrar jag in som text när flödet körs. Sammanfattningen ska vara text.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:empty",
+    "mcp_family:1",
+    "mcp_test"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "dont_use"
+    }
+   ],
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [],
+     "uses": []
+    }
+   },
+   "note": "Contrast of mcp_f1_daily_metrics_summary: the space's server has no tools, so no tool question is asked and no step reads a tool."
+  },
+  {
+   "id": "mcp_f2_invoice_fields_irrelevant_catalogue",
+   "prompt": "Build a flow where I upload a supplier invoice as a document and the flow extracts the invoice number, the amount to pay and the due date. The result is text.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:all-three",
+    "mcp_family:2",
+    "mcp_test"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "primary_runtime_input": {
+     "selected_option_id": "documents"
+    },
+    "document_material_scope": {
+     "selected_option_id": "single_document_case"
+    },
+    "post_processing_goal": {
+     "selected_option_id": "structure_key_information"
+    },
+    "mapped_file_limit": {
+     "selected_option_id": "organization_limit"
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "use"
+    }
+   ],
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ]
+     ],
+     "uses": []
+    }
+   },
+   "note": "Negative contrast: none of the space's tools (operating data, cases, calendar) serves an invoice, so no step may read one even after a 'use' answer. Relevance is the product contract: it is asked whenever the space's catalogue is non-empty, so the expectation keeps one relevance question; over-asking is measured separately (M1 per turn, M6 questions), not by the validation plan's wording, which is not the oracle."
+  },
+  {
+   "id": "mcp_f3_case_lookup_chain",
+   "prompt": "Bygg ett flöde som letar upp ett pågående ärende (status pending) i ärenderegistret vars titel innehåller ett sökord, och sedan läser hela ärendet för att se handläggare och registreringsdatum. Steget som söker ska ge ärendenumret för den första träffen som ett heltal i fältet first_case_id, och steget som läser ärendet ska använda det. Sökordet anges i körformulärets textfält query. Svaret ska vara text med titel, handläggare och registreringsdatum.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:cases-only",
+    "mcp_family:3",
+    "mcp_test"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "runtime_metadata_fields": {
+     "selected_option_id": "detailed_runtime_metadata"
+    },
+    "runtime_metadata_field_details": {
+     "input_fields": [
+      {
+       "value": {
+        "name": "query",
+        "label": "Sökord",
+        "type": "text",
+        "required": true,
+        "options": []
+       },
+       "purpose": "interpret_input"
+      }
+     ]
+    },
+    "primary_runtime_input": {
+     "selected_option_preference": [
+      "no_run_input",
+      "text"
+     ]
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "use"
+    },
+    {
+     "family": "choice",
+     "tool": {
+      "server": "Ärenden",
+      "name": "search_cases"
+     }
+    },
+    {
+     "family": "choice",
+     "tool": {
+      "server": "Ärenden",
+      "name": "get_case"
+     }
+    },
+    {
+     "family": "argument",
+     "argument": "status",
+     "source": "fixed",
+     "value": "pending"
+    },
+    {
+     "family": "argument",
+     "argument": "query",
+     "source": "run_input",
+     "field": "query"
+    },
+    {
+     "family": "argument",
+     "argument": "case_id",
+     "source": "earlier",
+     "step": {
+      "tool": {
+       "server": "Ärenden",
+       "name": "search_cases"
+      }
+     },
+     "field": "first_case_id"
+    }
+   ],
+   "execution": {
+    "inputs": {
+     "form_fields": {
+      "query": "Bullerklagomål"
+     }
+    },
+    "expect": {
+     "output_kind": "text",
+     "required_facts": [
+      "Anna"
+     ]
+    }
+   },
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ]
+     ],
+     "uses": [
+      {
+       "tool": {
+        "server": "Ärenden",
+        "name": "search_cases"
+       },
+       "arguments": {
+        "status": {
+         "fixed": "pending"
+        },
+        "query": {
+         "run_input": {
+          "field": "query",
+          "type": "text"
+         }
+        }
+       }
+      },
+      {
+       "tool": {
+        "server": "Ärenden",
+        "name": "get_case"
+       },
+       "arguments": {
+        "case_id": {
+         "earlier": {
+          "step": {
+           "tool": {
+            "server": "Ärenden",
+            "name": "search_cases"
+           }
+          },
+          "field": "first_case_id"
+         }
+        }
+       }
+      }
+     ],
+     "calls": [
+      {
+       "tool": {
+        "server": "Ärenden",
+        "name": "search_cases"
+       },
+       "arguments": {
+        "status": "pending",
+        "query": "Bullerklagomål"
+       }
+      },
+      {
+       "tool": {
+        "server": "Ärenden",
+        "name": "get_case"
+       },
+       "arguments": {
+        "case_id": 1002
+       }
+      }
+     ],
+     "run_input": {
+      "query": "Bullerklagomål"
+     }
+    }
+   },
+   "note": "Chain with another task and schema than mcp_f3_anomaly_events_chain: an integer field of the search step feeds get_case. The output fact is the handler, which only get_case answers. primary_runtime_input prefers no_run_input, else text: the product still asks it after a 'use' answer even when the first step reads a tool and offers no 'no run input' option until bead eneo-epim.38, so one corpus measures both."
+  },
+  {
+   "id": "mcp_f6_named_free_busy",
+   "prompt": "Use the tool free_busy in Kalender and build a flow that shows when a person is busy on a given day. The person and the day are given in the run form fields person (text) and date (YYYY-MM-DD). The answer is text listing each busy slot on its own line as from HH:MM to HH:MM.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:all-three",
+    "mcp_family:6",
+    "mcp_test"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "runtime_metadata_fields": {
+     "selected_option_id": "detailed_runtime_metadata"
+    },
+    "runtime_metadata_field_details": {
+     "input_fields": [
+      {
+       "value": {
+        "name": "person",
+        "label": "Person",
+        "type": "text",
+        "required": true,
+        "options": []
+       },
+       "purpose": "interpret_input"
+      },
+      {
+       "value": {
+        "name": "date",
+        "label": "Datum",
+        "type": "date",
+        "required": true,
+        "options": []
+       },
+       "purpose": "interpret_input"
+      }
+     ]
+    },
+    "primary_runtime_input": {
+     "selected_option_preference": [
+      "no_run_input",
+      "text"
+     ]
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "use"
+    },
+    {
+     "family": "choice",
+     "tool": {
+      "server": "Kalender",
+      "name": "free_busy"
+     }
+    },
+    {
+     "family": "argument",
+     "argument": "person",
+     "source": "run_input",
+     "field": "person"
+    },
+    {
+     "family": "argument",
+     "argument": "date",
+     "source": "run_input",
+     "field": "date"
+    }
+   ],
+   "execution": {
+    "inputs": {
+     "form_fields": {
+      "person": "Anna",
+      "date": "2026-09-15"
+     }
+    },
+    "expect": {
+     "output_kind": "text",
+     "required_facts": [
+      "10:00",
+      "13:00",
+      "16:00"
+     ],
+     "associations": [
+      {
+       "fact": "10:00",
+       "with": "11:00",
+       "not_with": "14:00"
+      },
+      {
+       "fact": "13:00",
+       "with": "14:00",
+       "not_with": "17:00"
+      },
+      {
+       "fact": "16:00",
+       "with": "17:00",
+       "not_with": "11:00"
+      }
+     ]
+    }
+   },
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ]
+     ],
+     "uses": [
+      {
+       "tool": {
+        "server": "Kalender",
+        "name": "free_busy"
+       },
+       "arguments": {
+        "person": {
+         "run_input": {
+          "field": "person",
+          "type": "text"
+         }
+        },
+        "date": {
+         "run_input": {
+          "field": "date",
+          "type": "date"
+         }
+        }
+       }
+      }
+     ],
+     "calls": [
+      {
+       "tool": {
+        "server": "Kalender",
+        "name": "free_busy"
+       },
+       "arguments": {
+        "person": "Anna",
+        "date": "2026-09-15"
+       }
+      }
+     ],
+     "run_input": {
+      "person": "Anna",
+      "date": "2026-09-15"
+     }
+    }
+   },
+   "note": "primary_runtime_input prefers no_run_input, else text: the product still asks it after a 'use' answer even when the first step reads a tool and offers no 'no run input' option until bead eneo-epim.38, so one corpus measures both."
+  },
+  {
+   "id": "mcp_f7_september_hourly_no_input",
+   "prompt": "Bygg ett flöde som vid varje körning går igenom september 2026, från 2026-09-01 till 2026-09-30, med timvärden och listar de dygn som avviker. Flödet har ingen indata: perioden och upplösningen per timme är alltid desamma. Skriv de avvikande dygnen som en lista, ett dygn per rad med datumet i formen ÅÅÅÅ-MM-DD och dygnets toppeffekt i kW. Listan ska vara text.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:driftdata-only",
+    "mcp_family:7",
+    "mcp_test"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "primary_runtime_input": {
+     "selected_option_preference": [
+      "no_run_input",
+      "text"
+     ]
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "use"
+    },
+    {
+     "family": "choice",
+     "tool": {
+      "server": "Driftdata",
+      "name": "query_daily_metrics"
+     }
+    },
+    {
+     "family": "argument",
+     "argument": "from_date",
+     "source": "fixed",
+     "value": "2026-09-01"
+    },
+    {
+     "family": "argument",
+     "argument": "to_date",
+     "source": "fixed",
+     "value": "2026-09-30"
+    },
+    {
+     "family": "argument",
+     "argument": "unit",
+     "source": "fixed",
+     "value": "hour"
+    }
+   ],
+   "execution": {
+    "inputs": {},
+    "expect": {
+     "output_kind": "text",
+     "required_facts": [
+      "2026-09-03",
+      "2026-09-11",
+      "2026-09-17",
+      "2026-09-24"
+     ],
+     "associations": [
+      {
+       "fact": "2026-09-03",
+       "with": "1413",
+       "not_with": "1618.5"
+      },
+      {
+       "fact": "2026-09-11",
+       "with": "1618.5",
+       "not_with": "1369.5"
+      },
+      {
+       "fact": "2026-09-17",
+       "with": "1369.5",
+       "not_with": "1506"
+      },
+      {
+       "fact": "2026-09-24",
+       "with": "1506",
+       "not_with": "1413"
+      }
+     ]
+    }
+   },
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ]
+     ],
+     "uses": [
+      {
+       "tool": {
+        "server": "Driftdata",
+        "name": "query_daily_metrics"
+       },
+       "arguments": {
+        "from_date": {
+         "fixed": "2026-09-01"
+        },
+        "to_date": {
+         "fixed": "2026-09-30"
+        },
+        "unit": {
+         "fixed": "hour"
+        }
+       }
+      }
+     ],
+     "calls": [
+      {
+       "tool": {
+        "server": "Driftdata",
+        "name": "query_daily_metrics"
+       },
+       "arguments": {
+        "from_date": "2026-09-01",
+        "to_date": "2026-09-30",
+        "unit": "hour"
+       }
+      }
+     ],
+     "run_input": {}
+    }
+   },
+   "note": "primary_runtime_input prefers no_run_input, else text: the product still asks it after a 'use' answer even when the first step reads a tool and offers no 'no run input' option until bead eneo-epim.38, so one corpus measures both."
+  },
+  {
+   "id": "mcp_f9_declined_minutes_follow_up",
+   "prompt": "Build a flow where I upload the minutes of a board meeting as a document and the flow lists every decision with its paragraph number. The list is text.",
+   "complexity": "medium",
+   "domain": "mcp_eval",
+   "cohorts": [
+    "mcp_block:cases-only",
+    "mcp_family:9",
+    "mcp_test"
+   ],
+   "apply_plan": true,
+   "synthetic_user_profile": "mcp_report_author",
+   "question_answer_overrides": {
+    "primary_runtime_input": {
+     "selected_option_id": "documents"
+    },
+    "document_material_scope": {
+     "selected_option_id": "single_document_case"
+    },
+    "post_processing_goal": {
+     "selected_option_id": "structure_key_information"
+    },
+    "mapped_file_limit": {
+     "selected_option_id": "organization_limit"
+    }
+   },
+   "tool_answers": [
+    {
+     "family": "relevance",
+     "option": "dont_use"
+    }
+   ],
+   "expected": {
+    "expected_mcp": {
+     "outcome": {
+      "kind": "applied_plan"
+     },
+     "turns": [
+      [
+       "relevance"
+      ],
+      []
+     ],
+     "uses": []
+    }
+   },
+   "script": {
+    "turns": [
+     "Also add who chaired the meeting at the top of the list."
+    ]
+   },
+   "note": "After 'no' to tools, the follow-up turn in the same session must not add a tool step."
+  }
+ ]
+}

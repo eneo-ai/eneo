@@ -30,6 +30,7 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from dataclasses import fields as dataclass_fields
+from datetime import UTC, datetime
 from decimal import Decimal
 from http.client import HTTPException
 from pathlib import Path
@@ -164,11 +165,16 @@ OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 5
 # target check is its output type; mechanism diagnostics
 # (`ai_builder_plan_mechanisms`) ride along in every Builder observation's
 # report (not the oracle arm's) and decide nothing.
-SCORER_SEMANTICS_VERSION = 4
+# v5: a case's `expected.expected_mcp` is judged by its MCP checks
+# (`ai_builder_mcp_eval.mcp_checks`, M1-M6): those that apply grade its plan
+# and output in place of the content and binding graders, and its outcome
+# replaces `plan_created`.
+SCORER_SEMANTICS_VERSION = 5
 # The scoring modules beside the harness: what a verdict means is written in
 # their bytes too, so a receipt records them with the harness's own digest.
 _SCORER_MODULES = (
     "ai_builder_edit_expectation.py",
+    "ai_builder_mcp_eval.py",
     "ai_builder_oracle_arm.py",
     "ai_builder_output_gold.json",
     "ai_builder_output_gold.py",
@@ -245,6 +251,25 @@ from ai_builder_edit_expectation import (  # noqa: E402
     unassessed_check,
 )
 from ai_builder_intake_answers import intake_message  # noqa: E402
+from ai_builder_mcp_eval import (  # noqa: E402
+    OUTPUT_CHECK_NAMES as MCP_OUTPUT_CHECK_NAMES,
+)
+from ai_builder_mcp_eval import (
+    PLAN_CHECK_NAMES as MCP_PLAN_CHECK_NAMES,
+)
+from ai_builder_mcp_eval import (
+    SCRIPTED_TURN_KEY,
+    TOOL_ANSWER_RULES,
+    McpExpectation,
+    SeedManifest,
+    ToolAnswerRule,
+    ToolSelector,
+    case_tool_selectors,
+    load_seed_manifest,
+    mcp_checks,
+    observation_calls,
+    scripted_tool_answer,
+)
 from ai_builder_plan_mechanisms import plan_mechanisms  # noqa: E402
 from ai_builder_release_gate import replacement_limit  # noqa: E402
 from ai_builder_runtime_lineage import (  # noqa: E402
@@ -766,10 +791,13 @@ _PARENT_UNSUPPORTED_SCRIPT_KINDS: frozenset[str] = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class CaseScript:
-    """One scripted user act; a correction answers the first card with `message`."""
+    """Scripted user acts: one act of `kind` (a correction answers the first
+    card with `message`), and `turns`, follow-up messages sent in the same
+    session, one after each plan."""
 
-    kind: CaseScriptKind
+    kind: CaseScriptKind | None
     message: str | None = None
+    turns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -792,6 +820,9 @@ class BattleCase:
     execution: CaseExecution | None = None
     source: CaseSource | None = None
     script: CaseScript | None = None
+    # Answers to MCP tool questions by typed rule (`scripted_tool_answer`);
+    # declared at the top level, so part of the case contract only when set.
+    tool_answers: tuple[ToolAnswerRule, ...] = ()
     # What the case measures when the request asks for more than one run
     # can deliver. Descriptive only: each observation report carries it as
     # case_note, outside the sealed case identity and contract.
@@ -870,8 +901,20 @@ def _source_contract(source: CaseSource) -> JsonObject:
 
 def _script_contract(script: CaseScript) -> JsonObject:
     return {
-        "kind": script.kind,
+        **({"kind": script.kind} if script.kind is not None else {}),
         **({"message": script.message} if script.message is not None else {}),
+        **({"turns": list(script.turns)} if script.turns else {}),
+    }
+
+
+def _tool_answers_contract(case: BattleCase) -> JsonObject:
+    """Only a case that declares tool answers carries the key, so every other
+    contract hash holds."""
+
+    if not case.tool_answers:
+        return {}
+    return {
+        "tool_answers": [rule.model_dump(mode="json") for rule in case.tool_answers]
     }
 
 
@@ -900,6 +943,7 @@ def _case_record(case: BattleCase, *, file_ids: Sequence[str]) -> JsonObject:
         record["source"] = _source_contract(case.source)
     if case.script is not None:
         record["script"] = _script_contract(case.script)
+    record.update(_tool_answers_contract(case))
     if case.execution is not None:
         record["execution"] = _execution_contract(case.execution)
     return record
@@ -940,6 +984,7 @@ def _case_contract_payload(case: BattleCase) -> JsonObject:
     # Only a scripted case carries the key, so every other contract hash holds.
     if case.script is not None:
         payload["script"] = _script_contract(case.script)
+    payload.update(_tool_answers_contract(case))
     if case.edit is not None:
         payload["edit"] = _edit_contract(case.edit)
     if case.execution is not None:
@@ -996,6 +1041,9 @@ def _observed_case_contract_payload(case: Mapping[str, object]) -> JsonObject:
     raw_script = case.get("script")
     if isinstance(raw_script, Mapping):
         payload["script"] = dict(cast(Mapping[str, Any], raw_script))
+    raw_tool_answers = case.get("tool_answers")
+    if isinstance(raw_tool_answers, list):
+        payload["tool_answers"] = list(cast(list[object], raw_tool_answers))
     raw_edit = case.get("edit")
     if isinstance(raw_edit, Mapping):
         edit = cast(Mapping[str, Any], raw_edit)
@@ -1524,6 +1572,7 @@ def main() -> int:
     try:
         _validate_arm_args(args)
         cases = _cases_from_args(args)
+        _require_mcp_seed(args, cases)
         not_supported_on_parent = _parent_unsupported_case_ids(cases)
         for case_id in not_supported_on_parent:
             print(f"{case_id}: not_supported_on_parent (a protocol case; not run)")
@@ -1757,6 +1806,44 @@ def _validate_arm_args(args: argparse.Namespace) -> None:
         )
 
 
+def _mcp_seed_manifest(args: argparse.Namespace) -> SeedManifest | None:
+    path = getattr(args, "mcp_seed_manifest", None)
+    return load_seed_manifest(Path(path), space_id=args.space_id) if path else None
+
+
+def _require_mcp_seed(args: argparse.Namespace, cases: Sequence[BattleCase]) -> None:
+    """Refuse, before any observation, MCP cases the seed cannot serve: every
+    tool a case names must be in the run space's manifest."""
+
+    needs_seed: list[str] = []
+    named: list[tuple[str, ToolSelector]] = []
+    for case in cases:
+        raw = (case.expected or {}).get("expected_mcp")
+        expectation = McpExpectation.model_validate(raw) if raw is not None else None
+        if expectation is not None or case.tool_answers:
+            needs_seed.append(case.case_id)
+        named += [
+            (case.case_id, selector)
+            for selector in case_tool_selectors(expectation, case.tool_answers)
+        ]
+    manifest = _mcp_seed_manifest(args)
+    if manifest is None:
+        if needs_seed:
+            raise ValueError(
+                "--mcp-seed-manifest is required by: " + ", ".join(needs_seed)
+            )
+        return
+    unknown = sorted(
+        {
+            f"{case_id}: {s.server}/{s.name}"
+            for case_id, s in named
+            if not manifest.tool(s)
+        }
+    )
+    if unknown:
+        raise ValueError("tools missing from the seed manifest: " + "; ".join(unknown))
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Exercise Flow AI Builder create mode through the local API."
@@ -1775,6 +1862,15 @@ def _parse_args() -> argparse.Namespace:
         "--space-id",
         default=os.getenv("ENEO_SPACE_ID"),
         help="Target space UUID. Can also be set with ENEO_SPACE_ID.",
+    )
+    parser.add_argument(
+        "--mcp-seed-manifest",
+        default=None,
+        help=(
+            "Seed manifest of the space's MCP tools (version 1). Required by a "
+            "case with expected.expected_mcp or tool_answers; it resolves tools "
+            "named by server and name, and names the call log read per observation."
+        ),
     )
     parser.add_argument(
         "--prompt",
@@ -2288,12 +2384,14 @@ _CASE_KEYS = frozenset(
         "edit",
         "source",
         "script",
+        "tool_answers",
         "note",
     }
 )
 _EXPECTATION_KEYS = frozenset(
     {
         "allow_question_instead_of_plan",
+        "expected_mcp",
         "expected_classifier_slots",
         "expected_file_roles",
         "expected_form_field_groups",
@@ -2460,22 +2558,69 @@ def _case_script(raw: object, *, path: Path, case_id: str) -> CaseScript | None:
     owner = f"{path} case {case_id}.script"
     if not isinstance(raw, Mapping):
         raise ValueError(f"{owner} must be an object.")
-    raw = cast(Mapping[str, object], raw)
-    kind = raw.get("kind")
+    act = dict(cast(Mapping[str, object], raw))
+    turns = act.pop("turns", [])
+    if not isinstance(turns, list) or not all(
+        isinstance(turn, str) and turn.strip() for turn in cast(list[object], turns)
+    ):
+        raise ValueError(f"{owner}.turns must be a list of non-empty messages.")
+    follow_ups = tuple(cast(list[str], turns))
+    kind = act.get("kind")
+    if not act and follow_ups:
+        return CaseScript(kind=None, turns=follow_ups)
     if kind == "correction":
-        message = raw.get("message")
-        if set(raw) != {"kind", "message"} or not (
+        message = act.get("message")
+        if set(act) != {"kind", "message"} or not (
             isinstance(message, str) and message.strip()
         ):
             raise ValueError(f"{owner} correction needs exactly kind and a message.")
-        return CaseScript(kind="correction", message=message)
-    if kind in _PARENT_UNSUPPORTED_SCRIPT_KINDS and set(raw) == {"kind"}:
-        return CaseScript(kind=cast(CaseScriptKind, kind))
+        return CaseScript(kind="correction", message=message, turns=follow_ups)
+    if kind in _PARENT_UNSUPPORTED_SCRIPT_KINDS and set(act) == {"kind"}:
+        return CaseScript(kind=cast(CaseScriptKind, kind), turns=follow_ups)
     raise ValueError(
         f"{owner} must be a correction with a message, or a bare "
         + " or ".join(sorted(_PARENT_UNSUPPORTED_SCRIPT_KINDS))
-        + "."
+        + ", with any follow-up turns."
     )
+
+
+def _case_tool_answers(
+    raw: object, *, path: Path, case_id: str
+) -> tuple[ToolAnswerRule, ...]:
+    if raw is None:
+        return ()
+    try:
+        rules = TOOL_ANSWER_RULES.validate_python(raw)
+    except ValidationError as error:
+        raise ValueError(f"{path} case {case_id}.tool_answers: {error}") from error
+    if not rules:
+        raise ValueError(f"{path} case {case_id}.tool_answers must not be empty.")
+    return tuple(rules)
+
+
+def _validate_mcp_expectation(path: Path, case: BattleCase) -> None:
+    """`expected.expected_mcp` has its closed shape, and declares run-probe
+    calls and run input only for a case whose plan is run on that input."""
+
+    raw = (case.expected or {}).get("expected_mcp")
+    if raw is None:
+        return
+    owner = f"{path} case {case.case_id}.expected.expected_mcp"
+    try:
+        expectation = McpExpectation.model_validate(raw)
+    except ValidationError as error:
+        raise ValueError(f"{owner}: {error}") from error
+    run = case.execution
+    if (expectation.calls is not None or expectation.run_input is not None) and (
+        run is None
+    ):
+        raise ValueError(f"{owner}: calls and run_input need an executed plan.")
+    if (
+        expectation.run_input is not None
+        and run is not None
+        and (dict(run.inputs.form_fields) != expectation.run_input)
+    ):
+        raise ValueError(f"{owner}: run_input must be execution.inputs.form_fields.")
 
 
 def _read_cases_file(path: Path) -> list[BattleCase]:
@@ -2643,8 +2788,12 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
                 path=path,
                 case_id=case_id,
             ),
+            tool_answers=_case_tool_answers(
+                raw_case.get("tool_answers"), path=path, case_id=case_id
+            ),
             note=note,
         )
+        _validate_mcp_expectation(path, case)
         if "expected_removals" in (case.expected or {}) and (
             case.script is None or case.script.kind != "correction"
         ):
@@ -2988,6 +3137,18 @@ def _validate_question_answers(
                 answer_keys == {"custom_value"}
                 and isinstance(answer_map.get("custom_value"), str)
                 and bool(str(answer_map["custom_value"]).strip())
+            )
+            or (
+                answer_keys == {"selected_option_preference"}
+                and isinstance(
+                    preference := answer_map["selected_option_preference"], list
+                )
+                and bool(preference)
+                and all(
+                    isinstance(option_id, str) and bool(option_id.strip())
+                    for option_id in cast(list[object], preference)
+                )
+                and len(set(cast(list[str], preference))) == len(preference)
             )
         )
         if not valid_shapes:
@@ -5564,6 +5725,10 @@ def _run_case_session(
     seeded_flow: SeededFlow | None,
 ) -> JsonObject:
     started_at = time.strftime("%Y%m%dT%H%M%S")
+    # Read before the session exists, so a broken seed costs no Builder call;
+    # the call log is read for this observation's window only.
+    mcp_seed = _mcp_seed_manifest(args)
+    observed_from = datetime.now(UTC)
     if existing_session_id:
         session_id = existing_session_id
         initial_session = _request_json(
@@ -5620,11 +5785,24 @@ def _run_case_session(
         if case.script is not None and case.script.kind == "correction"
         else None
     )
-    while (
-        interactions[-1].get("plan_id") is None
-        and len(interactions) < MAX_INTERACTIONS_PER_CASE
-    ):
-        current = interactions[-1]
+
+    def send(message: str, question_answer: JsonObject | None) -> JsonObject:
+        return _send_and_fetch(
+            config=config,
+            session_id=session_id,
+            message=message,
+            model_id=args.model_id,
+            file_ids=(),
+            ui_language=args.ui_language,
+            question_answer=question_answer,
+            edit_context=edit_context,
+        )
+
+    def reply(current: JsonObject) -> JsonObject | None:
+        """The case's next message in this turn, sent; None when the case has
+        no answer to what the Builder last said."""
+
+        nonlocal pending_correction
         if (
             pending_correction is not None
             and (corrected_card := _latest_requirements_summary(current)) is not None
@@ -5634,20 +5812,8 @@ def _run_case_session(
             answered_requirement_versions.add(
                 str(corrected_card.get("requirements_version") or "")
             )
-            interactions.append(
-                _send_and_fetch(
-                    config=config,
-                    session_id=session_id,
-                    message=pending_correction,
-                    model_id=args.model_id,
-                    file_ids=(),
-                    ui_language=args.ui_language,
-                    question_answer=None,
-                    edit_context=edit_context,
-                )
-            )
-            pending_correction = None
-            continue
+            correction, pending_correction = pending_correction, None
+            return send(correction, None)
         if (
             args.auto_confirm_requirements
             and (requirements_summary := _latest_requirements_summary(current))
@@ -5666,7 +5832,7 @@ def _run_case_session(
                     # A card that contradicts the frozen gold, or cannot be
                     # scored against it, is never confirmed; the quality and
                     # evidence reports record why.
-                    break
+                    return None
                 declared_decisions = (case.expected or {}).get("expected_key_decisions")
                 if isinstance(declared_decisions, list) and declared_decisions:
                     failed_decision_checks = [
@@ -5682,58 +5848,64 @@ def _run_case_session(
                     if failed_decision_checks:
                         # Do not confirm a disclosure that violates the case
                         # contract; the quality report records why.
-                        break
+                        return None
                 answered_requirement_versions.add(version)
-                interactions.append(
-                    _send_and_fetch(
-                        config=config,
-                        session_id=session_id,
-                        message=CONFIRM_MESSAGE,
-                        model_id=args.model_id,
-                        file_ids=(),
+                return send(
+                    CONFIRM_MESSAGE,
+                    _requirements_confirmation_payload(
+                        requirements_summary=requirements_summary,
                         ui_language=args.ui_language,
-                        question_answer=_requirements_confirmation_payload(
-                            requirements_summary=requirements_summary,
-                            ui_language=args.ui_language,
-                        ),
-                        edit_context=edit_context,
-                    )
+                    ),
                 )
-                continue
 
-        if (question := _latest_structured_question(current)) is not None:
-            answer = _configured_question_answer(
-                question=question,
-                configured_answers=case.configured_question_answers or {},
-                answer_sources=case.question_answer_sources or {},
+        if (question := _latest_structured_question(current)) is None:
+            return None
+        answer = _configured_question_answer(
+            question=question,
+            configured_answers=case.configured_question_answers or {},
+            answer_sources=case.question_answer_sources or {},
+        )
+        if answer is None and case.edit is not None:
+            answer = _configured_edit_question_answer(
+                question=question, answers=case.edit.answers
             )
-            if answer is None and case.edit is not None:
-                answer = _configured_edit_question_answer(
-                    question=question, answers=case.edit.answers
-                )
-            if answer is not None:
-                response = _send_and_fetch(
-                    config=config,
-                    session_id=session_id,
-                    message=answer["message"],
-                    model_id=args.model_id,
-                    file_ids=(),
-                    ui_language=args.ui_language,
-                    question_answer=answer["question_answer"],
-                    edit_context=edit_context,
-                )
-                response["configured_answer_source"] = answer["answer_source"]
-                interactions.append(response)
-                continue
-        break
+        if answer is None and case.tool_answers:
+            answer = scripted_tool_answer(question, case.tool_answers, mcp_seed)
+        if answer is None:
+            return None
+        response = send(answer["message"], answer["question_answer"])
+        response["configured_answer_source"] = answer["answer_source"]
+        return response
+
+    # A turn the case cannot answer, or one the interaction limit cuts off,
+    # ends the observation; a follow-up is sent only after a plan.
+    follow_ups = case.script.turns if case.script is not None else ()
+    for turn, follow_up in enumerate((None, *follow_ups)):
+        if follow_up is not None:
+            if len(interactions) >= MAX_INTERACTIONS_PER_CASE:
+                break
+            interactions.append({**send(follow_up, None), SCRIPTED_TURN_KEY: turn})
+        while (
+            not _turn_has_plan(interactions[-1], first_turn=follow_up is None)
+            and len(interactions) < MAX_INTERACTIONS_PER_CASE
+        ):
+            response = reply(interactions[-1])
+            if response is None:
+                break
+            interactions.append(response)
+        if not _turn_has_plan(interactions[-1], first_turn=follow_up is None):
+            break
 
     final_interaction = interactions[-1]
-    plan = final_interaction.get("plan")
+    # Only the last turn's own plan is applied and graded: a follow-up turn
+    # that ended without one still has the session's previous plan as latest.
+    turn_planned = _last_turn_owns_plan(interactions)
+    plan = final_interaction.get("plan") if turn_planned else None
     plan = plan if isinstance(plan, dict) else None
     plan_summary = _summarize_plan(plan)
     applied_flow_evidence = None
     flow_lifecycle: JsonObject = {"status": "not_applied"}
-    plan_id = _optional_string(final_interaction, "plan_id")
+    plan_id = _optional_string(final_interaction, "plan_id") if turn_planned else None
     event_summary = _interaction_event_summary(interactions)
     edit_evidence: JsonObject | None = None
     if seeded_flow is not None:
@@ -5764,7 +5936,10 @@ def _run_case_session(
         return structural["verdict"] == "pass"
 
     refusal: BattleFlowLifecycleError | None = None
+    # A call the test server logs before this instant was made while authoring.
+    run_probe_started_at: datetime | None = None
     if case.apply_plan and plan_id is not None:
+        run_probe_started_at = datetime.now(UTC)
         try:
             applied_flow_evidence, runtime_evidence, flow_lifecycle = (
                 _apply_execute_and_cleanup_flow(
@@ -5795,6 +5970,19 @@ def _run_case_session(
             flow_lifecycle = error.flow_lifecycle
     else:
         runtime_evidence = None
+    mcp_evidence: JsonObject | None = (
+        {
+            "manifest": mcp_seed.model_dump(mode="json"),
+            "calls": observation_calls(
+                mcp_seed, started=observed_from, ended=datetime.now(UTC)
+            ),
+            "run_probe_started_at": (
+                run_probe_started_at.isoformat() if run_probe_started_at else None
+            ),
+        }
+        if mcp_seed is not None
+        else None
+    )
     journey = _journey_summary(
         interactions,
         expected=case.expected or {},
@@ -5831,23 +6019,6 @@ def _run_case_session(
             else None
         ),
     )
-    quality_report = _quality_report(
-        plan=plan,
-        summary=plan_summary,
-        expected=case.expected or {},
-        event_summary=event_summary,
-        journey=journey,
-        classifier_diagnostics=classifier_diagnostics,
-        attached_file_ids=file_ids,
-        applied_flow=(
-            applied_flow_evidence.get("flow")
-            if isinstance(applied_flow_evidence, Mapping)
-            and isinstance(applied_flow_evidence.get("flow"), Mapping)
-            else None
-        ),
-        runtime_evidence=runtime_evidence,
-        output_expectation=case.execution.expect if case.execution else None,
-    )
     live_execution_provenance = _live_execution_provenance(
         case=case,
         cases_path=cases_path,
@@ -5863,21 +6034,6 @@ def _run_case_session(
         interactions=interactions,
         requested_reasoning_effort=config.reasoning_effort,
     )
-    quality_report = _quality_report_with_live_provenance(
-        quality_report,
-        provenance=live_execution_provenance,
-        expected=case.expected or {},
-    )
-    if case.edit is not None and case.edit.gold is not None and edit_evidence:
-        quality_report["edit"] = _edit_report(
-            case.edit,
-            executes=case.executes,
-            structural=structural or _judge_edit(case.edit, edit_evidence),
-            evidence=edit_evidence,
-            runtime_evidence=runtime_evidence,
-            output_success=quality_report.get("output_success"),
-        )
-
     bundle: JsonObject = {
         "artifact_mode": "live_execution",
         "case_identity": _case_identity(case),
@@ -5890,7 +6046,7 @@ def _run_case_session(
         "space_id": args.space_id,
         "case": _case_record(case, file_ids=file_ids),
         "session_id": session_id,
-        "plan_id": final_interaction.get("plan_id"),
+        "plan_id": plan_id,
         "initial_session": initial_session,
         "interactions": interactions,
         "latest_session": final_interaction.get("latest_session"),
@@ -5904,9 +6060,34 @@ def _run_case_session(
         "applied_flow_evidence": applied_flow_evidence,
         "flow_lifecycle": flow_lifecycle,
         "runtime_evidence": runtime_evidence,
-        "runtime_metrics": _runtime_metrics_from_quality_report(quality_report),
-        "quality_report": quality_report,
+        **({"mcp_evidence": mcp_evidence} if mcp_evidence is not None else {}),
+        "runtime_metrics": None,
+        "quality_report": None,
     }
+    # Scored from the bundle's own keys, as a reanalysis scores it.
+    quality_report = _quality_report_with_live_provenance(
+        _quality_report_of(
+            bundle,
+            summary=plan_summary,
+            event_summary=event_summary,
+            journey=journey,
+            expected=case.expected or {},
+            output_expectation=case.execution.expect if case.execution else None,
+        ),
+        provenance=live_execution_provenance,
+        expected=case.expected or {},
+    )
+    if case.edit is not None and case.edit.gold is not None and edit_evidence:
+        quality_report["edit"] = _edit_report(
+            case.edit,
+            executes=case.executes,
+            structural=structural or _judge_edit(case.edit, edit_evidence),
+            evidence=edit_evidence,
+            runtime_evidence=runtime_evidence,
+            output_success=quality_report.get("output_success"),
+        )
+    bundle["runtime_metrics"] = _runtime_metrics_from_quality_report(quality_report)
+    bundle["quality_report"] = quality_report
     if case.edit is not None and seeded_flow is not None:
         bundle["case"]["edit"] = _edit_contract(case.edit)
         bundle["edit_evidence"] = edit_evidence
@@ -5917,6 +6098,27 @@ def _run_case_session(
             "failure_class": fields["failure_class"],
         }
     return bundle
+
+
+def _turn_has_plan(interaction: Mapping[str, Any], *, first_turn: bool) -> bool:
+    """The first turn ends at its plan as the session reports it; a follow-up
+    turn only at a plan its own events propose, since the session's latest
+    plan is still the previous turn's."""
+
+    if first_turn:
+        return interaction.get("plan_id") is not None
+    return _last_plan_id(_mapping_list(interaction.get("events"))) is not None
+
+
+def _last_turn_owns_plan(interactions: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether the final interaction's plan is its turn's own: always in the
+    first turn; in a follow-up turn only when its own events propose it. The
+    one rule of which plan is applied (the live run) and graded (the shared
+    reader, `_quality_report_of`)."""
+
+    if not any(item.get(SCRIPTED_TURN_KEY) is not None for item in interactions):
+        return True
+    return _turn_has_plan(interactions[-1], first_turn=False)
 
 
 def _edit_outcome(
@@ -7206,6 +7408,7 @@ def _output_report(
     runtime_evidence: Mapping[str, object] | None,
     *,
     runtime_checks: Sequence[Mapping[str, Any]],
+    binding_without_gold: bool = True,
 ) -> JsonObject:
     """The one verdict on what an executed run delivered.
 
@@ -7331,9 +7534,10 @@ def _output_report(
             }
         )
     checks.extend(located)
-    checks.append(
-        _value_binding_check(gold, located, delivered=isinstance(raw_text, str))
-    )
+    if binding_without_gold or sum(fact.location is None for fact in gold.facts) < 2:
+        checks.append(
+            _value_binding_check(gold, located, delivered=isinstance(raw_text, str))
+        )
     checks.extend(
         check
         for check in runtime_checks
@@ -7585,10 +7789,20 @@ def _configured_question_answer(
             },
         }
 
-    selected_ids = _configured_selected_option_ids(answer_config)
+    options = _question_options_by_key(question)
+    preference = answer_config.get("selected_option_preference")
+    if isinstance(preference, list):
+        # The first listed option this showing offers: one corpus answers a
+        # product that offers the preferred option and one that does not yet.
+        chosen = next(
+            (option for option in cast(list[str], preference) if option in options),
+            None,
+        )
+        selected_ids = [chosen] if chosen is not None else []
+    else:
+        selected_ids = _configured_selected_option_ids(answer_config)
     if not selected_ids:
         return None
-    options = _question_options_by_key(question)
     missing = [option_id for option_id in selected_ids if option_id not in options]
     if missing:
         raise ValueError(
@@ -9514,13 +9728,15 @@ def _checks_state(checks: Sequence[Mapping[str, Any]]) -> str:
     return "unmeasured"
 
 
-def _graded_state(checks: Sequence[Mapping[str, Any]], *, grader: str) -> str:
-    """`_checks_state`, but a dimension whose semantic grader did not run is
-    never a pass: its other checks passing measures names, counts and
+def _graded_state(
+    checks: Sequence[Mapping[str, Any]], *, graders: Sequence[str]
+) -> str:
+    """`_checks_state`, but a dimension whose semantic graders did not all
+    run is never a pass: its other checks passing measures names, counts and
     formats, not what the dimension means."""
 
     state = _checks_state(checks)
-    if state == "pass" and not any(check.get("name") == grader for check in checks):
+    if state == "pass" and not set(graders) <= {check.get("name") for check in checks}:
         return "unmeasured"
     return state
 
@@ -9552,6 +9768,12 @@ def _verdict_states(
     executes = isinstance(contract.get("execution"), Mapping)
     checks = _mapping_list(report.get("checks"))
     delivery_names = set(_string_list(report.get("delivery_check_names")))
+    # An MCP case's applicable checks grade its plan and output
+    # (`_mcp_report`), and its output even when nothing runs: the test
+    # server's log says whether authoring called a tool.
+    mcp_required = mapping(report.get("required_check_names"))
+    mcp_plan = _string_list(mcp_required.get("plan"))
+    mcp_output = _string_list(mcp_required.get("output"))
     edit_checks = _mapping_list(mapping(report.get("edit")).get("checks"))
     evidence = bundle.get("runtime_evidence")
     stopped = any(
@@ -9572,11 +9794,14 @@ def _verdict_states(
     elif structural:
         # An edit case's plan is judged by its edit gold: a right decline has no
         # plan for the generic checks to find.
-        plan = _checks_state(structural)
+        plan = _graded_state(
+            [*structural, *(c for c in checks if c.get("name") in mcp_plan)],
+            graders=mcp_plan,
+        )
     else:
         plan = _graded_state(
             [c for c in checks if c.get("name") not in delivery_names],
-            grader=PLAN_CONTENT_GRADER,
+            graders=mcp_plan or (PLAN_CONTENT_GRADER,),
         )
     if not (executes and review_policy.get("mode") == "edit"):
         review_edit = NOT_REQUIRED_STATE
@@ -9585,7 +9810,13 @@ def _verdict_states(
             [c for c in checks if c.get("name") == "review_edit_reaches_delivery"]
         )
     if not executes:
-        output = NOT_REQUIRED_STATE
+        output = (
+            _graded_state(
+                [c for c in checks if c.get("name") in mcp_output], graders=mcp_output
+            )
+            if mcp_output
+            else NOT_REQUIRED_STATE
+        )
     elif evidence is None or stopped:
         output = "unmeasured"
     else:
@@ -9603,7 +9834,7 @@ def _verdict_states(
                 ),
                 *(c for c in edit_checks if c.get("category") == "execution"),
             ],
-            grader=OUTPUT_BINDING_GRADER,
+            graders=mcp_output or (OUTPUT_BINDING_GRADER,),
         )
     states = {"plan": plan, "review_edit": review_edit, "output": output}
     if observation_status == "acquisition_failure":
@@ -10096,6 +10327,46 @@ def _verified_suite_receipt_membership(
     }
 
 
+def _quality_report_of(
+    bundle: Mapping[str, Any],
+    *,
+    summary: JsonObject,
+    event_summary: Mapping[str, Any],
+    journey: Mapping[str, Any],
+    expected: Mapping[str, Any],
+    output_expectation: OutputExpectation | None,
+) -> JsonObject:
+    """The quality report of the evidence an observation bundle keeps: the
+    live run and a reanalysis read it from the same keys."""
+
+    def mapping(key: str) -> Mapping[str, Any] | None:
+        value = bundle.get(key)
+        return cast(Mapping[str, Any], value) if isinstance(value, Mapping) else None
+
+    interactions = _mapping_list(bundle.get("interactions"))
+    plan = bundle.get("plan") if _last_turn_owns_plan(interactions) else None
+    case = mapping("case") or {}
+    script = case.get("script")
+    follow_ups = script.get("turns") if isinstance(script, Mapping) else None
+    applied = mapping("applied_flow_evidence") or {}
+    applied_flow = applied.get("flow")
+    return _quality_report(
+        plan=plan if isinstance(plan, dict) else None,
+        summary=summary,
+        expected=expected,
+        event_summary=event_summary,
+        journey=journey,
+        classifier_diagnostics=mapping("classifier_diagnostics"),
+        attached_file_ids=tuple(_string_list(case.get("file_ids"))),
+        applied_flow=applied_flow if isinstance(applied_flow, Mapping) else None,
+        runtime_evidence=mapping("runtime_evidence"),
+        output_expectation=output_expectation,
+        interactions=interactions,
+        mcp_evidence=mapping("mcp_evidence"),
+        declared_turns=1 + len(_string_list(follow_ups)),
+    )
+
+
 def _rescored_evidence(
     bundle: Mapping[str, Any], *, expected: Mapping[str, Any], path: Path
 ) -> tuple[JsonObject, JsonObject, JsonObject, JsonObject]:
@@ -10119,31 +10390,12 @@ def _rescored_evidence(
         expected=expected,
         interaction_limit=MAX_INTERACTIONS_PER_CASE,
     )
-    report = _quality_report(
-        plan=plan,
+    report = _quality_report_of(
+        bundle,
         summary=summary,
-        expected=expected,
         event_summary=event_summary,
         journey=journey,
-        classifier_diagnostics=(
-            bundle.get("classifier_diagnostics")
-            if isinstance(bundle.get("classifier_diagnostics"), Mapping)
-            else None
-        ),
-        attached_file_ids=tuple(
-            _string_list(case.get("file_ids")) if isinstance(case, Mapping) else ()
-        ),
-        applied_flow=(
-            bundle["applied_flow_evidence"].get("flow")
-            if isinstance(bundle.get("applied_flow_evidence"), Mapping)
-            and isinstance(bundle["applied_flow_evidence"].get("flow"), Mapping)
-            else None
-        ),
-        runtime_evidence=(
-            bundle.get("runtime_evidence")
-            if isinstance(bundle.get("runtime_evidence"), Mapping)
-            else None
-        ),
+        expected=expected,
         output_expectation=(
             _observed_output_expectation(case, owner=f"{path} case.execution.expect")
             if isinstance(case, Mapping) and isinstance(case.get("execution"), Mapping)
@@ -10415,6 +10667,30 @@ def _run_seed_calibration(
     return 0 if state == "passed" else 1
 
 
+# The evidence a Builder's terminal error leaves incomplete: no model answered
+# the turn it ended, so the observed model cannot be shown.
+_TERMINAL_ERROR_EVIDENCE_GAPS = frozenset(
+    {"observation_model_provenance_consistent", "live_model_provenance_complete"}
+)
+
+
+def _only_model_provenance_missing(evidence_report: Mapping[str, Any]) -> bool:
+    """Whether every failed evidence check is model provenance, counting the
+    provenance shape check by the live checks it failed on."""
+
+    failed: set[str] = set()
+    for check in _mapping_list(evidence_report.get("failed_checks")):
+        if check.get("name") == "observation_provenance_shape_complete":
+            failed |= {
+                str(inner.get("name"))
+                for inner in _mapping_list(check.get("actual"))
+                if inner.get("passed") is not True
+            }
+        else:
+            failed.add(str(check.get("name")))
+    return bool(failed) and failed <= _TERMINAL_ERROR_EVIDENCE_GAPS
+
+
 def _validated_reanalysis_bundle(path: Path, value: object) -> JsonObject:
     if not isinstance(value, dict):
         raise ValueError(f"{path} did not contain a JSON object.")
@@ -10488,7 +10764,21 @@ def _validated_reanalysis_bundle(path: Path, value: object) -> JsonObject:
     ):
         raise ValueError(f"{path} has incomplete source quality evidence.")
     evidence_report = _observation_evidence_report(value)
-    if evidence_report.get("valid") is not True:
+    # A turn the Builder ended with its own error leaves the provenance of its
+    # model incomplete; the live run judges it error-terminated (`_suite_result`),
+    # and so may a reanalysis, read from its interactions again. Only that gap
+    # is excused: every other integrity check still applies.
+    error_terminated = (
+        _journey_summary(
+            interactions,
+            expected={},
+            interaction_limit=MAX_INTERACTIONS_PER_CASE,
+        ).get("outcome_class")
+        in _ERROR_TERMINATED_OUTCOME_CLASSES
+    )
+    if evidence_report.get("valid") is not True and not (
+        error_terminated and _only_model_provenance_missing(evidence_report)
+    ):
         failed_names = _failed_check_names(
             {"failed_checks": evidence_report.get("failed_checks")}
         )
@@ -10712,7 +11002,7 @@ def _decode_sse_event(event: str, data_lines: list[str]) -> JsonObject:
     return result
 
 
-def _last_plan_id(events: list[JsonObject]) -> str | None:
+def _last_plan_id(events: Sequence[Mapping[str, object]]) -> str | None:
     for event in reversed(events):
         if event.get("event") != "plan":
             continue
@@ -12299,7 +12589,12 @@ def _final_output_scoring(
         else []
     )
     return runtime_checks, _output_report(
-        output_expectation, runtime_evidence, runtime_checks=runtime_checks
+        output_expectation,
+        runtime_evidence,
+        runtime_checks=runtime_checks,
+        # An MCP case's output is graded by its run-probe calls (M5): the
+        # placement grader applies only where its gold places the facts.
+        binding_without_gold=expected.get("expected_mcp") is None,
     )
 
 
@@ -12349,6 +12644,9 @@ def _quality_report(
     applied_flow: Mapping[str, object] | None = None,
     runtime_evidence: Mapping[str, object] | None = None,
     output_expectation: OutputExpectation | None = None,
+    interactions: Sequence[Mapping[str, Any]] = (),
+    mcp_evidence: Mapping[str, Any] | None = None,
+    declared_turns: int = 1,
 ) -> JsonObject:
     checks: list[JsonObject] = []
     warnings: list[str] = []
@@ -12374,7 +12672,21 @@ def _quality_report(
     question_event_count = _int_value(event_summary.get("question_event_count"))
     if question_event_count is None:
         question_event_count = len(question_event_ids)
-    if allows_structured_question:
+    # An MCP case's outcome (M4) says whether a plan is right, so the generic
+    # plan-or-question check is not asked of it.
+    mcp_report: JsonObject = {}
+    if (raw_mcp := expected.get("expected_mcp")) is not None:
+        gating, mcp_report = _mcp_report(
+            McpExpectation.model_validate(raw_mcp),
+            interactions=interactions,
+            plan=plan,
+            applied=applied_flow is not None,
+            evidence=mcp_evidence,
+            declared_turns=declared_turns,
+        )
+        checks.extend(gating)
+        delivery_check_names.extend(mcp_report["required_check_names"]["output"])
+    elif allows_structured_question:
         add_check(
             "plan_or_structured_question",
             plan is not None or bool(question_event_ids),
@@ -12795,9 +13107,13 @@ def _quality_report(
             "checks": checks,
             "delivery_check_names": delivery_check_names,
             "warnings": warnings,
+            # No plan has plan metrics; the key keeps the report whole, so a
+            # stalled or answered turn can be scored again by reanalysis.
+            "metrics": {},
             "mechanisms": mechanisms,
             **decision_report,
             **output_report,
+            **mcp_report,
         }
 
     if expected_primary_input_type := _optional_string(
@@ -13146,7 +13462,42 @@ def _quality_report(
         "mechanisms": mechanisms,
         **decision_report,
         **output_report,
+        **mcp_report,
     }
+
+
+def _mcp_report(
+    expectation: McpExpectation,
+    *,
+    interactions: Sequence[Mapping[str, Any]],
+    plan: Mapping[str, Any] | None,
+    applied: bool,
+    evidence: Mapping[str, Any] | None,
+    declared_turns: int,
+) -> tuple[list[JsonObject], JsonObject]:
+    """The MCP checks that judge the case, and the report beside them: every
+    check as measured (`mcp_checks`, M2 and M6 only reported there) and the
+    names each dimension needs before it can pass (`_verdict_states`)."""
+
+    measured = mcp_checks(
+        expectation,
+        interactions=interactions,
+        plan=plan,
+        applied=applied,
+        evidence=evidence,
+        declared_turns=declared_turns,
+    )
+    applicable = [check for check in measured if check["applicable"]]
+    required = {
+        "plan": [c["name"] for c in applicable if c["name"] in MCP_PLAN_CHECK_NAMES],
+        "output": [
+            c["name"] for c in applicable if c["name"] in MCP_OUTPUT_CHECK_NAMES
+        ],
+    }
+    gating = [
+        c for c in applicable if c["name"] in {*required["plan"], *required["output"]}
+    ]
+    return gating, {"mcp_checks": measured, "required_check_names": required}
 
 
 def _summarize_applied_flow(flow: Mapping[str, object] | None) -> JsonObject:
