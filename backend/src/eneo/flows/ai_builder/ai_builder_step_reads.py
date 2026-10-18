@@ -245,27 +245,35 @@ def step_reads(
     return tuple(reads)
 
 
-# What a run is started with, on a flow that declares no form fields: its
-# text or payload, an alias of it, a step's own upload.
+# What a run is started with besides its form fields: its text or payload
+# (read whole, it carries the fields too), an alias of it, a step's own upload.
 _RUN_INPUT_CHANNELS = frozenset(
     {ReadChannel.RUN_INPUT, ReadChannel.RUN_INPUT_ALIAS, ReadChannel.STEP_INPUT}
 )
 
 
-def no_step_reads_run_input(steps: Sequence[StepSpec]) -> bool:
-    """Whether, on a flow that declares no form fields, every step's reads are
-    known and none is of what a run is started with, at any site `step_reads`
-    enumerates (a tool argument bound to {{flow_input.text}} too). A
-    configuration that cannot be read is unknown, never "reads nothing"."""
+def steps_reading_run_input(
+    steps: Sequence[StepSpec], *, form_field_names: set[str]
+) -> tuple[int, ...]:
+    """The 1-based orders of the steps that read what a run is started with
+    besides the run form's declared fields (`form_field_names`), at any site
+    `step_reads` enumerates (a tool argument bound to {{flow_input.text}}
+    too). A step whose configuration cannot be read is counted: unknown is
+    never "reads nothing"."""
 
-    if any(_has_unreadable_config(step) for step in steps):
-        return False
     step_refs = spec_step_refs(steps)
-    return not any(
-        read.channel in _RUN_INPUT_CHANNELS
+    return tuple(
+        order
         for order, step in enumerate(steps, 1)
-        for read in step_reads(
-            step, order=order, step_refs=step_refs, form_field_names=set()
+        if _has_unreadable_config(step)
+        or any(
+            read.channel in _RUN_INPUT_CHANNELS
+            for read in step_reads(
+                step,
+                order=order,
+                step_refs=step_refs,
+                form_field_names=form_field_names,
+            )
         )
     )
 

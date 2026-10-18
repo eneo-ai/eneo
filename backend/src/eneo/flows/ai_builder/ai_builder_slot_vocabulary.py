@@ -54,7 +54,7 @@ LLM_RESOLVABLE_SLOT_NAMES: frozenset[str] = (
     KNOWN_REQUIREMENT_SLOT_NAMES - NON_LLM_RESOLVABLE_SLOT_NAMES
 )
 
-# The primary_runtime_input value of a saved flow no step of which reads what a
-# run is started with. Derived from the flow, never offered as an answer: the
-# question lists materials a run can receive.
+# The primary_runtime_input value of a flow no step of which reads what a run is
+# started with: derived from a saved flow, or answered in a create session whose
+# person said to use the space's tools (offers_no_run_input).
 NO_RUN_INPUT: Final = "no_run_input"

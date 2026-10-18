@@ -107,7 +107,9 @@ from eneo.flows.ai_builder.ai_builder_slot_interaction_policy import (
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
     LLM_RESOLVABLE_SLOT_NAMES,
+    NO_RUN_INPUT,
 )
+from eneo.flows.ai_builder.ai_builder_tool_answers import offers_no_run_input
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
@@ -1757,8 +1759,11 @@ def llm_resolvable_slot_values_for_state(
             model_confidence="high",
         )
     }
+    # no_run_input is the person's answer only (offers_no_run_input): whether
+    # the space's tools may supply a run's data is not in the request text.
     return {
-        slot_name: legal_slot_values(slot_name) for slot_name in sorted(candidate_slots)
+        slot_name: legal_slot_values(slot_name) - {NO_RUN_INPUT}
+        for slot_name in sorted(candidate_slots)
     }
 
 
@@ -2017,6 +2022,15 @@ def _resolve_slots(
             or input_intent.primary_runtime_input
         )
     )
+    if (
+        primary_runtime_input == NO_RUN_INPUT
+        and NO_RUN_INPUT not in flow_defaults.get("primary_runtime_input", ())
+        and not offers_no_run_input(conversation, is_edit_mode=flow is not None)
+    ):
+        # The person's no_run_input answer counts only while the run-input
+        # question still offers it: once they decline the tools, the slot
+        # is open again.
+        primary_runtime_input = "unknown"
     if primary_runtime_input != "unknown":
         slots["primary_runtime_input"] = _build_slot(
             name="primary_runtime_input",

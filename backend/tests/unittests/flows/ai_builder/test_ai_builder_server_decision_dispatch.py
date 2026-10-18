@@ -1429,6 +1429,7 @@ async def test_a_shown_question_stores_the_token_its_event_carries() -> None:
     # move with it, so an answer naming the shown question still binds.
     assert result.new_planning_state_version == 5
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_persisted_after(conversation, repo),
         message="",
         question_answer={

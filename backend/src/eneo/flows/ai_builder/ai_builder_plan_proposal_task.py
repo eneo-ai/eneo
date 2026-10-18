@@ -235,7 +235,7 @@ def build_plan_proposal_system_prompt(
         *create_mode_rules,
         "",
         "Committed architecture:",
-        _architecture_block(planning_state),
+        _architecture_block(planning_state, is_edit_mode=is_edit_mode),
         "",
         "Resolved planning slots:",
         _resolved_slots_block(planning_state),
@@ -346,7 +346,7 @@ def _requested_output_sections_block(
     return "\n".join(f"- {section}" for section in requested_output_sections.sections)
 
 
-def _architecture_block(planning_state: PlanningState) -> str:
+def _architecture_block(planning_state: PlanningState, *, is_edit_mode: bool) -> str:
     commit = planning_state.architecture_commit
     if commit is None:
         return "- No committed architecture is present. Create the safest valid plan."
@@ -358,6 +358,17 @@ def _architecture_block(planning_state: PlanningState) -> str:
     return "\n".join(
         [
             *tuples,
+            *(
+                []
+                # The create compile sends back a first step without a tool
+                # (_require_no_run_input_read); an edit keeps the saved steps.
+                if commit.reads_run_input or is_edit_mode
+                else [
+                    "- No run input: nothing is uploaded or pasted when the flow "
+                    "runs; the first step reads an MCP tool (its arguments from "
+                    "run-form fields or fixed values)."
+                ]
+            ),
             "- implementation_strategy: server-selected capability profile (ids hidden from user-facing text)",
         ]
     )

@@ -391,10 +391,10 @@ def test_semantic_corpus_schema_and_coverage_are_frozen() -> None:
 def test_exact_label_matrix_covers_every_catalog_option_in_both_locales() -> None:
     assert len(LLM_RESOLVABLE_SLOT_NAMES) == 8
     assert (
-        len({(case.slot_name, case.option_value) for case in EXACT_LABEL_CASES}) == 35
+        len({(case.slot_name, case.option_value) for case in EXACT_LABEL_CASES}) == 36
     )
-    assert len(EXACT_LABEL_CASES) == 70
-    assert len({case.id for case in EXACT_LABEL_CASES}) == 70
+    assert len(EXACT_LABEL_CASES) == 72
+    assert len({case.id for case in EXACT_LABEL_CASES}) == 72
     assert {
         (case.slot_name, case.locale, case.option_value, case.label)
         for case in EXACT_LABEL_CASES
@@ -427,6 +427,7 @@ def test_exact_label_uses_neutral_response_lifecycle(
         metadata=metadata_for_assistant_question(question),
     )
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=[assistant_message],
         message=case.label,
         question_answer=None,
@@ -470,6 +471,7 @@ async def test_representative_exact_labels_cross_prompt_parse_and_citation_bound
         metadata=metadata_for_assistant_question(question),
     )
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=[assistant_message],
         message=case.label,
         question_answer=None,

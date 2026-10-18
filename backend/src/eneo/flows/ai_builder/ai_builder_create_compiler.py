@@ -55,6 +55,7 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
+from eneo.flows.ai_builder.ai_builder_step_reads import steps_reading_run_input
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     MAX_TEMPLATE_PREPARATION_STAGES,
     apply_template_attachment_contract,
@@ -355,9 +356,49 @@ def compile_create_intent_to_spec(
                     "reason": "template_preparation_stage_limit_exceeded",
                 },
             )
-        return _spec_satisfying_attested_contract(
+        final_spec = _spec_satisfying_attested_contract(
             compiled_spec, projection=obligation_projection
         )
+        if context is not None and not context.reads_run_input:
+            _require_no_run_input_read(final_spec)
+        return final_spec
+
+
+def _require_no_run_input_read(spec: FlowDraftSpecCore) -> None:
+    """The committed architecture reads no run input: its data comes from the
+    space's MCP tools. So the final spec's first step reads a tool, and no
+    step reads what a run is started with; the run form's fields may be
+    read."""
+
+    orders = set(
+        steps_reading_run_input(
+            spec.steps,
+            form_field_names={field.name for field in spec.form_fields or ()},
+        )
+    )
+    if spec.steps and spec.steps[0].input_source is not InputSource.TOOL:
+        orders.add(1)
+    if not orders:
+        return
+    steps = ", ".join(
+        f"step {order} '{display_value(spec.steps[order - 1].name)}'"
+        for order in sorted(orders)
+    )
+    raise AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        repair_disposition="model_correctable",
+        detail=(
+            "The flow receives no run input: nothing is uploaded or pasted when "
+            "it runs, and MCP tools fetch its data. So start with a step that "
+            "reads an MCP tool (its arguments from run-form fields or fixed "
+            "values), and let no step read the run input; this does not hold "
+            f"for {steps}."
+        ),
+        log_context={
+            "failure_code": "run_input_read_without_run_input",
+            "reason": "run_input_read_without_run_input",
+        },
+    )
 
 
 def _canonicalize_attested_output_fields(

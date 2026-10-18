@@ -233,6 +233,7 @@ def _answer(
 ) -> None:
     """Send an answer through the validation every client answer passes."""
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=conversation,
         message="",
         question_answer=StructuredQuestionAnswerRequest(
@@ -448,6 +449,7 @@ def test_letting_eneo_decide_a_tool_choice_picks_the_models_tool() -> None:
         conversation, BackendQuestion(question_data=choice, assistant_text="?")
     )
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=conversation,
         message="",
         question_answer=DelegatedQuestionAnswerRequest(

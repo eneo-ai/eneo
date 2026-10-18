@@ -29,7 +29,13 @@ if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
 
 PrimaryRuntimeInput = Literal[
-    "audio", "documents", "json", "text", "text_and_documents", "unknown"
+    "audio",
+    "documents",
+    "json",
+    "text",
+    "text_and_documents",
+    "no_run_input",
+    "unknown",
 ]
 
 # Two user-facing questions settle which material a run receives: the plain

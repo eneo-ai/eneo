@@ -5,13 +5,16 @@ from dataclasses import dataclass
 from typing import cast
 from uuid import UUID
 
+from eneo.flows.ai_builder.ai_builder_form_fields import (
+    extract_form_fields_from_metadata,
+)
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     BASIC_RUNTIME_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
     RuntimeMetadataState,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import NO_RUN_INPUT
-from eneo.flows.ai_builder.ai_builder_step_reads import no_step_reads_run_input
+from eneo.flows.ai_builder.ai_builder_step_reads import steps_reading_run_input
 from eneo.flows.application.flow_authoring_snapshot import (
     flow_step_to_authoring_spec,
     unsupported_saved_steps,
@@ -193,17 +196,18 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
 
 
 def _reads_no_run_input(flow: Flow, steps: list[FlowStep]) -> bool:
-    """Whether the flow's facts settle that a run is started with nothing.
+    """Whether the flow's facts settle that a run is started with nothing but
+    its form's fields.
 
     Decided only for a flow read with every step's prompt (a prompt can read
-    the run input too), whose run form declares no fields and whose every step
-    the authoring vocabulary carries; any other flow is left to the question.
+    the run input too) and whose every step the authoring vocabulary carries;
+    any other flow is left to the question. A field the authoring vocabulary
+    cannot read is not counted as one, so a read of it stays a run-input read.
     """
 
     if (
         not isinstance(flow, FlowWithStepPrompts)
         or any(step.assistant_id not in flow.step_prompts for step in steps)
-        or _has_form_fields(flow)
         or unsupported_saved_steps(steps)
     ):
         return False
@@ -211,7 +215,7 @@ def _reads_no_run_input(flow: Flow, steps: list[FlowStep]) -> bool:
         assistant_id: AssistantAuthoringSnapshot(instructions=prompt)
         for assistant_id, prompt in flow.step_prompts.items()
     }
-    return no_step_reads_run_input(
+    return not steps_reading_run_input(
         [
             flow_step_to_authoring_spec(
                 step,
@@ -219,7 +223,11 @@ def _reads_no_run_input(flow: Flow, steps: list[FlowStep]) -> bool:
                 assistant_snapshots=prompts,
             )
             for step in steps
-        ]
+        ],
+        form_field_names={
+            field.name
+            for field in extract_form_fields_from_metadata(flow.metadata_json) or ()
+        },
     )
 
 

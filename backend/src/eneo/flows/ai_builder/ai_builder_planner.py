@@ -533,6 +533,7 @@ class AIBuilderPlanner:
             message=message,
             question_answer=question_answer,
             ui_language=ui_language,
+            is_edit_mode=flow is not None,
             retried_turn_message_id=(
                 str(session.latest_turn.user_message_id)
                 if retried and session.latest_turn is not None

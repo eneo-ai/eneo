@@ -48,6 +48,9 @@ class CreateCompileContext:
     """
 
     runtime_input_type: InputType | None = None
+    # False when the committed architecture reads no run input: no step of the
+    # compiled flow may read one (compile_create_intent_to_spec).
+    reads_run_input: bool = True
     runtime_required: bool = True
     runtime_max_files: int | None = None
     final_output_type: OutputType | None = None
@@ -196,6 +199,7 @@ def create_compile_context_from_planning_state(
     final_output_type = _final_output_type_from_architecture(architecture)
     return CreateCompileContext(
         runtime_input_type=runtime_input_type,
+        reads_run_input=architecture is None or architecture.reads_run_input,
         runtime_max_files=planning_state.mapped_file_limit.accepted_value,
         final_output_type=final_output_type,
         final_output_mode=_final_output_mode_from_architecture(architecture),

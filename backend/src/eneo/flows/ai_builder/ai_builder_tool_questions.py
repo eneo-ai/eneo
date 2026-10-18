@@ -39,7 +39,6 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     StructuredQuestionAnswerMetadata,
-    question_answer_from_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
@@ -63,10 +62,18 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalNeedsDecision,
     display_value,
 )
-from eneo.flows.ai_builder.ai_builder_question_state import shown_question
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import resolve_locale
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     quote_from_unprompted_user_message,
+)
+from eneo.flows.ai_builder.ai_builder_tool_answers import (
+    ARGUMENT_FIXED,
+    NO_TOOL,
+    RELEVANCE_DONT_USE,
+    RELEVANCE_SHOW_TOOLS,
+    RELEVANCE_USE,
+    answered_tool_relevance,
+    tool_answers,
 )
 from eneo.flows.ai_builder.ai_builder_tool_catalog import (
     TOOL_CATALOG_SCHEMA_MAX_CHARS,
@@ -88,7 +95,6 @@ from eneo.flows.ai_builder.ai_builder_tool_question_ids import (
     ToolChoiceQuestion,
     ToolQuestion,
     ToolRelevanceQuestion,
-    parse_tool_question_id,
     tool_question_facts,
     tool_question_id,
 )
@@ -116,11 +122,6 @@ from eneo.flows.runtime.tool_argument_check import (
 )
 from eneo.json_types import JsonValue
 
-RELEVANCE_USE = "use"
-RELEVANCE_DONT_USE = "dont_use"
-RELEVANCE_SHOW_TOOLS = "show_tools"
-NO_TOOL = "no_tool"
-ARGUMENT_FIXED = "fixed"
 _ARGUMENT_RUN_INPUT_PREFIX = "run_input:"
 _ARGUMENT_VALUE_PREFIX = "value:"
 _ARGUMENT_EARLIER_PREFIX = "earlier_step:"
@@ -1046,30 +1047,6 @@ def _joined(items: list[str], locale: Locale) -> str:
 # ---------------------------------------------------------------------------
 
 
-def tool_answer_is_valid(
-    answer: StructuredQuestionAnswerMetadata, *, shown: StructuredQuestionPayload | None
-) -> bool:
-    """Whether an answer to a tool question picks exactly one option of the
-    question as it was shown, with a typed value only for a fixed value."""
-    if shown is None:
-        return False
-    selected = _selected_option(answer)
-    if selected is None or selected not in {option.id for option in shown.options}:
-        return False
-    custom = (answer.custom_value or "").strip()
-    if selected == ARGUMENT_FIXED and shown.allow_custom:
-        return bool(custom)
-    return answer.custom_value is None
-
-
-def _selected_option(answer: StructuredQuestionAnswerMetadata) -> str | None:
-    ids = answer.selected_option_ids or []
-    if answer.selected_option_id is not None:
-        ids = [*ids, answer.selected_option_id]
-    unique = set(ids)
-    return next(iter(unique)) if len(unique) == 1 else None
-
-
 def fold_tool_decisions(
     conversation: Sequence[ConversationMessage], *, catalog: AIBuilderToolCatalog
 ) -> ToolDecisions:
@@ -1079,47 +1056,30 @@ def fold_tool_decisions(
     kept as a decision. The decisions hold the most recently answered uses
     and arguments within their bounds, so a session always reloads; an
     answer this build cannot read is skipped."""
-    decisions = ToolDecisions()
-    shown: dict[str, StructuredQuestionPayload] = {}
-    for message in conversation:
-        if message.role == "assistant":
-            payload = shown_question(message)
-            if payload is not None and parse_tool_question_id(payload.question_id):
-                shown[payload.question_id] = payload
-            continue
-        if message.role != "user":
-            continue
-        answer = question_answer_from_metadata(message.metadata)
-        if answer is None or answer.question_id is None:
-            continue
-        question = parse_tool_question_id(answer.question_id)
-        payload = shown.get(answer.question_id)
-        if question is None or not tool_answer_is_valid(answer, shown=payload):
-            continue
-        assert payload is not None
-        selected = _selected_option(answer)
-        option = next(option for option in payload.options if option.id == selected)
-        _apply_answer(
-            decisions, question, option=option, answer=answer, catalog=catalog
-        )
+    relevance = answered_tool_relevance(conversation)
+    decisions = ToolDecisions(
+        relevance=relevance.relevance, tools_requested=relevance.tools_requested
+    )
+    for item in tool_answers(conversation):
+        if not isinstance(item.question, ToolRelevanceQuestion):
+            _apply_answer(
+                decisions,
+                item.question,
+                option=item.option,
+                answer=item.answer,
+                catalog=catalog,
+            )
     return decisions
 
 
 def _apply_answer(
     decisions: ToolDecisions,
-    question: ToolQuestion,
+    question: ToolChoiceQuestion | ToolArgumentQuestion,
     *,
     option: StructuredQuestionOptionPayload,
     answer: StructuredQuestionAnswerMetadata,
     catalog: AIBuilderToolCatalog,
 ) -> None:
-    if isinstance(question, ToolRelevanceQuestion):
-        if option.id == RELEVANCE_SHOW_TOOLS:
-            decisions.tools_requested = True
-        else:
-            decisions.relevance = "use" if option.id == RELEVANCE_USE else "dont_use"
-            decisions.tools_requested = False
-        return
     # The use answered last moves to the end; the oldest is dropped first.
     current = decisions.uses.pop(question.use_ref, None) or ToolUseDecision()
     updated: ToolUseDecision | None

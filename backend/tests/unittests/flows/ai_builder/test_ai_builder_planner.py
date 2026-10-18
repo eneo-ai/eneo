@@ -1232,6 +1232,7 @@ def test_prepare_user_question_metadata_preserves_requirements_confirmation_and_
     None
 ):
     result = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=[],
         message="",
         question_answer={
@@ -1499,6 +1500,7 @@ async def test_accepted_turn_persists_that_the_session_acts_on_a_review(
 
 def test_prepare_user_question_metadata_ingests_structured_slot_answer() -> None:
     result = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=[],
         message="documents",
         question_answer={
@@ -1601,6 +1603,7 @@ def test_prepare_user_question_metadata_rejects_uningestable_structured_answers(
 ) -> None:
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=[],
             message="",
             question_answer=question_answer,
@@ -1618,6 +1621,7 @@ def test_prepare_user_question_metadata_keeps_supported_non_slot_questions(
     question_id: str,
 ) -> None:
     result = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=[],
         message="",
         question_answer={
@@ -1644,6 +1648,7 @@ def test_prepare_user_question_metadata_accepts_schema_direction_answer() -> Non
     ]
 
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=[
             ConversationMessage(
                 role="assistant",
@@ -1685,6 +1690,7 @@ def test_prepare_user_question_metadata_accepts_schema_direction_answer() -> Non
 
 def test_prepare_user_question_metadata_without_pending_question_is_neutral() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=[],
         message="Hello",
         question_answer=None,
@@ -7205,9 +7211,13 @@ async def test_only_a_retry_of_an_uncommitted_turn_sets_its_own_message_aside(
 
 
 @pytest.mark.asyncio
-async def test_admission_is_told_when_a_turn_attaches_files(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("edits_a_flow", [False, True])
+async def test_admission_is_told_when_a_turn_attaches_files_or_edits_a_flow(
+    monkeypatch: pytest.MonkeyPatch, edits_a_flow: bool
 ) -> None:
+    # Kills: the intake told nothing of the attached files, or told a create
+    # session that it edits a flow (or the reverse), which decides whether
+    # it takes a no_run_input answer.
     planner = _make_planner()
     session = BuilderSession(
         id=uuid4(),
@@ -7255,10 +7265,12 @@ async def test_admission_is_told_when_a_turn_attaches_files(
             completion_model_route=_route(),
             turn_preflight=preflight,
             capacity=ModelCapacity(100_000, 4_096),
+            flow=_reviewed_flow() if edits_a_flow else None,
         ):
             pass
 
     assert captured["sends_files"] is True
+    assert captured["is_edit_mode"] is edits_a_flow
 
 
 def _hanging_provider_call(

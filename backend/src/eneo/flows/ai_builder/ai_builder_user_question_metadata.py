@@ -45,8 +45,12 @@ from eneo.flows.ai_builder.ai_builder_requirements_disclosure import resolve_loc
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import NO_RUN_INPUT
+from eneo.flows.ai_builder.ai_builder_tool_answers import (
+    offers_no_run_input,
+    tool_answer_is_valid,
+)
 from eneo.flows.ai_builder.ai_builder_tool_question_ids import parse_tool_question_id
-from eneo.flows.ai_builder.ai_builder_tool_questions import tool_answer_is_valid
 from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_FIELD_NAME_MAX_LENGTH,
     is_named_result_location_id,
@@ -75,6 +79,7 @@ def prepare_user_question_metadata(
     message: str,
     question_answer: AIBuilderQuestionAnswerInput | None,
     ui_language: str | None = None,
+    is_edit_mode: bool,
     retried_turn_message_id: str | None = None,
     sends_files: bool = False,
 ) -> PreparedUserQuestionMetadata:
@@ -88,6 +93,9 @@ def prepare_user_question_metadata(
     `sends_files` says the turn attaches files. Files close an open question
     just as words do, so a file-only turn says what it is exactly as text
     must.
+
+    `is_edit_mode` says the session edits a saved flow, where the run-input
+    question takes no no_run_input answer (offers_no_run_input).
     """
     if ui_language is None and question_answer is not None:
         ui_language = ui_language_from_question_answer(question_answer)
@@ -169,6 +177,7 @@ def prepare_user_question_metadata(
         metadata = metadata_for_user_message(
             question_answer=_validated_structured_question_answer(
                 conversation=conversation,
+                is_edit_mode=is_edit_mode,
                 answer=_delegated_answer(
                     conversation=conversation,
                     delegation=delegation,
@@ -186,6 +195,7 @@ def prepare_user_question_metadata(
         metadata = metadata_for_user_message(
             question_answer=_validated_structured_question_answer(
                 conversation=conversation,
+                is_edit_mode=is_edit_mode,
                 answer=answer,
             )
         )
@@ -516,6 +526,7 @@ def _validated_reopen_question(
 def _validated_structured_question_answer(
     *,
     conversation: list[ConversationMessage],
+    is_edit_mode: bool,
     answer: StructuredQuestionAnswerMetadata,
 ) -> StructuredQuestionAnswerMetadata:
     question_id = question_answer_question_id(answer)
@@ -539,6 +550,12 @@ def _validated_structured_question_answer(
         return answer
 
     if _has_unsupported_slot_value(answer, question_id):
+        _raise_invalid_question_payload("unsupported_question_value")
+    if (
+        canonical_question_id(question_id) == "primary_runtime_input"
+        and NO_RUN_INPUT in question_answer_values(answer)
+        and not offers_no_run_input(conversation, is_edit_mode=is_edit_mode)
+    ):
         _raise_invalid_question_payload("unsupported_question_value")
 
     if canonical_question_id(question_id) == "schema_direction":

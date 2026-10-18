@@ -32,6 +32,7 @@ from typing import Literal
 
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
+    NO_RUN_INPUT,
     DiscoveryFamily,
 )
 
@@ -277,12 +278,12 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
     question_sv="Vilket material ska flödet ta emot vid körning?",
     question_en="What source material should the flow accept at runtime?",
     help_sv=(
-        "Ett flöde har en primär indata per körning. Välj det format som "
+        "Ett flöde har högst en primär indata per körning. Välj det format som "
         "användaren faktiskt ska ladda upp eller klistra in."
     ),
     help_en=(
-        "A flow has one primary runtime input per run. Pick the format the "
-        "user will actually upload or paste."
+        "A flow has at most one primary runtime input per run. Pick the format "
+        "the user will actually upload or paste."
     ),
     options=(
         _option(
@@ -360,6 +361,34 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
                 "Användaren kan både klistra in text och bifoga filer i samma körning."
             ),
             example_en="The user can both paste text and attach files in the same run.",
+        ),
+        # Offered only where the flow's data can come from the space's tools
+        # (offers_no_run_input); the classifier is never offered it.
+        _option(
+            id=NO_RUN_INPUT,
+            label_sv="Inget material – verktygen hämtar datan",
+            label_en="No material – the tools fetch the data",
+            description_sv=(
+                "Inget laddas upp eller klistras in. Verktygen hämtar datan med "
+                "värden från körformulärets fält eller fasta värden."
+            ),
+            description_en=(
+                "Nothing is uploaded or pasted. The tools fetch the data with "
+                "values from the run form's fields or fixed values."
+            ),
+            meaning=(
+                "Nothing is uploaded or pasted when the flow runs: MCP tools supply "
+                "the data, and their arguments come from run-form fields or fixed "
+                "values."
+            ),
+            value=NO_RUN_INPUT,
+            example_sv=(
+                "Användaren fyller i ett datumintervall och verktyget hämtar "
+                "värdena för det."
+            ),
+            example_en=(
+                "The user fills in a date range and the tool fetches the values for it."
+            ),
         ),
     ),
     worked_examples_sv=(

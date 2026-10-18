@@ -456,6 +456,7 @@ def test_a_delegated_question_is_settled_and_never_asked_again() -> None:
         ),
     ]
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=conversation,
         message="",
         question_answer={

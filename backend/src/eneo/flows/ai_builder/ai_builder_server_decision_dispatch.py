@@ -50,9 +50,11 @@ from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     resolve_locale,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import NO_RUN_INPUT
 from eneo.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
 )
+from eneo.flows.ai_builder.ai_builder_tool_answers import offers_no_run_input
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
@@ -317,6 +319,20 @@ def situate_question(
     decided.
     """
 
+    if canonical_question_id(
+        payload.question_id
+    ) == "primary_runtime_input" and not offers_no_run_input(
+        conversation, is_edit_mode=flow is not None
+    ):
+        # Nor is it recommended: the planning-state fold drops an answer of it
+        # by the same predicate, and in an edit only the current option is.
+        payload = payload.model_copy(
+            update={
+                "options": [
+                    option for option in payload.options if option.value != NO_RUN_INPUT
+                ]
+            }
+        )
     current_option_id = _current_option_id(payload, flow=flow)
     keeps_recommendation = (
         payload.recommended_option_id == current_option_id

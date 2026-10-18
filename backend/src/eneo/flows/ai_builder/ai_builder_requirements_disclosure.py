@@ -1587,8 +1587,13 @@ def _slot_value(value: str) -> str:
 
 def _slot_value_for_slot(slot_name: str, value: str, locale: Locale) -> str:
     if slot_name == "primary_runtime_input" and value == NO_RUN_INPUT:
-        # Derived from the flow, so no question option carries its label.
-        return "Ingen indata" if locale == "sv" else "No input"
+        # The option's label names the tools, and a saved flow read as taking
+        # no input may read none; its run form may still ask for fields.
+        return (
+            "Inget material att ladda upp eller klistra in"
+            if locale == "sv"
+            else "No material to upload or paste"
+        )
     try:
         rendered = render_question(slot_name, locale)
     except KeyError:

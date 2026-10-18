@@ -149,6 +149,7 @@ def build_planner_action_policy(
         session_state,
         derived_commit=derived_commit,
         unresolved_core_slots=unresolved_core_slots,
+        is_edit_mode=is_edit_mode,
     ) or (
         # An unresolved schema direction can still make the projection
         # inapplicable: selecting the attached schema as the output schema
@@ -216,6 +217,7 @@ def _architecture_refusal_code(
     *,
     derived_commit: ArchitectureCommitDraft | None,
     unresolved_core_slots: frozenset[str],
+    is_edit_mode: bool,
 ) -> AIBuilderErrorCode | None:
     if (
         session_state.commit_grade_slot_value("terminal_output") == "pdf_document"
@@ -246,6 +248,11 @@ def _architecture_refusal_code(
     )
     if terminal_mode is not FlowAuthoringOutputMode.TEMPLATE_FILL:
         return None
+    if not is_edit_mode and not architecture.reads_run_input:
+        # A created template-fill flow takes no tool step, and a created flow
+        # without run input starts with one: no create plan can be both. An
+        # edit keeps a saved flow's steps, so it is not refused here.
+        return AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE
     selection = session_state.template_selection()
     if not template_attachment_selection_is_valid(selection.count):
         return AIBuilderErrorCode.TEMPLATE_ATTACHMENT_SELECTION_INVALID

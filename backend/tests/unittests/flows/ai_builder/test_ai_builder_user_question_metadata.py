@@ -69,6 +69,7 @@ def _pending_question_conversation(
 
 def test_free_text_records_only_which_pending_question_the_user_responded_to() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_pending_question_conversation(),
         message="Make it a PDF",
         question_answer=None,
@@ -83,6 +84,7 @@ def test_free_text_records_only_which_pending_question_the_user_responded_to() -
 
 def test_explicit_ui_answer_is_the_only_source_of_question_answer_metadata() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_pending_question_conversation(),
         message="PDF",
         question_answer={
@@ -105,6 +107,7 @@ def test_explicit_ui_answer_is_the_only_source_of_question_answer_metadata() -> 
 def test_fixed_choice_catalog_question_rejects_custom_answer() -> None:
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_pending_question_conversation(),
             message="A spreadsheet",
             question_answer={
@@ -120,6 +123,7 @@ def test_fixed_choice_catalog_question_rejects_custom_answer() -> None:
 
 def test_mapped_file_limit_accepts_catalog_supported_custom_answer() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_pending_question_conversation("mapped_file_limit"),
         message="3",
         question_answer={
@@ -140,6 +144,7 @@ def test_mapped_file_limit_accepts_catalog_supported_custom_answer() -> None:
 def test_non_catalog_fixed_question_rejects_custom_answer() -> None:
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_pending_question_conversation("flow_input_architecture"),
             message="Process each department separately",
             question_answer={
@@ -200,6 +205,7 @@ def test_invalid_schema_direction_selection_is_rejected_before_persistence() -> 
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=conversation,
             message="Use both as input.",
             question_answer={
@@ -215,6 +221,7 @@ def test_invalid_schema_direction_selection_is_rejected_before_persistence() -> 
 
 def test_free_text_for_non_classifier_question_remains_response_only() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_pending_question_conversation("flow_input_architecture"),
         message="Use one shared input",
         question_answer=None,
@@ -229,6 +236,7 @@ def test_free_text_for_non_classifier_question_remains_response_only() -> None:
 
 def test_free_text_for_pending_field_details_records_response_only() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_pending_question_conversation("runtime_metadata_field_details"),
         message="Case id",
         question_answer=None,
@@ -241,6 +249,7 @@ def test_free_text_for_pending_field_details_records_response_only() -> None:
 
 def test_runtime_metadata_field_collection_is_accepted_as_a_real_answer() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_pending_question_conversation("runtime_metadata_field_details"),
         message="Case id",
         question_answer={
@@ -288,6 +297,7 @@ def test_answered_question_is_not_attributed_to_later_free_text() -> None:
     ]
 
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=conversation,
         message="One more thing",
         question_answer=None,
@@ -298,6 +308,7 @@ def test_answered_question_is_not_attributed_to_later_free_text() -> None:
 
 def test_free_text_without_a_pending_question_preserves_only_ui_language() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=[],
         message="Hello",
         question_answer=None,
@@ -309,6 +320,7 @@ def test_free_text_without_a_pending_question_preserves_only_ui_language() -> No
 
 def test_blank_turn_does_not_claim_to_answer_a_pending_question() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_pending_question_conversation(),
         message="  \n",
         question_answer=None,
@@ -381,6 +393,7 @@ def _recommended_question_conversation(
 
 def test_delegated_answer_records_the_recommendation_as_the_users_answer() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_recommended_question_conversation(),
         message="",
         question_answer={
@@ -404,6 +417,7 @@ def test_delegated_answer_records_the_recommendation_as_the_users_answer() -> No
 def test_delegation_is_refused_when_the_question_recommends_nothing() -> None:
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_recommended_question_conversation(recommended_option_id=None),
             message="",
             question_answer={
@@ -424,6 +438,7 @@ def test_delegation_is_refused_for_a_question_that_is_no_longer_pending() -> Non
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=conversation,
             message="",
             question_answer={
@@ -439,6 +454,7 @@ def test_delegation_is_refused_for_a_question_that_is_no_longer_pending() -> Non
 def test_delegation_is_refused_when_it_names_another_question() -> None:
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_recommended_question_conversation(),
             message="",
             question_answer={
@@ -464,6 +480,7 @@ def test_delegation_is_refused_when_the_recorded_recommendation_is_unusable() ->
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=conversation,
             message="",
             question_answer={
@@ -481,6 +498,7 @@ def test_a_client_cannot_claim_eneo_made_its_choice() -> None:
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_recommended_question_conversation(),
             message="Word, please.",
             question_answer={
@@ -507,6 +525,7 @@ def test_delegation_is_refused_when_the_recorded_question_disagrees_with_itself(
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=conversation,
             message="",
             question_answer={
@@ -610,6 +629,7 @@ def _assumed_question_conversation(
 
 def test_current_assumption_can_be_persisted_as_a_reopen_command() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_assumed_question_conversation(),
         message="",
         question_answer={
@@ -662,6 +682,7 @@ def test_reopen_command_is_refused_against_the_current_disclosure(
 ) -> None:
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_assumed_question_conversation(),
             message="",
             question_answer=payload,
@@ -679,6 +700,7 @@ def test_editing_keeps_same_leaf_locations_distinct_by_opaque_id() -> None:
     kept_ids = [events.id, alerts.id, alerts_timestamp.id]
 
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_disclosed_fields_conversation(
             named_content_fields=[
                 events,
@@ -711,6 +733,7 @@ def test_editing_rejects_an_unknown_opaque_location_id_exactly() -> None:
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_disclosed_fields_conversation(named_content_fields=[events]),
             message="",
             question_answer={
@@ -737,6 +760,7 @@ def test_a_name_that_only_looks_like_a_location_id_is_a_name_the_user_added(
     events = _located_field("events")
 
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_disclosed_fields_conversation(named_content_fields=[events]),
         message="",
         question_answer={
@@ -759,6 +783,7 @@ def test_a_name_that_only_looks_like_a_location_id_is_a_name_the_user_added(
 
 def test_editing_the_field_list_records_the_set_the_user_left_standing() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_disclosed_fields_conversation(),
         message="",
         question_answer={
@@ -792,6 +817,7 @@ def test_editing_rekeys_placements_to_the_deduplicated_spelling() -> None:
     # lookup cannot silently drop the placed addition to root.
     parent = _located_field("events")
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_disclosed_fields_conversation(named_content_fields=[parent]),
         message="",
         question_answer={
@@ -814,6 +840,7 @@ def test_editing_the_field_list_is_refused_against_an_older_disclosure() -> None
     # since, their set describes fields that are no longer the ones on offer.
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_disclosed_fields_conversation(),
             message="",
             question_answer={
@@ -837,6 +864,7 @@ def test_editing_the_field_list_is_refused_against_an_older_disclosure() -> None
 def test_a_field_name_with_no_identity_is_refused_by_name(field_name: str) -> None:
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_disclosed_fields_conversation(),
             message="",
             question_answer={
@@ -858,6 +886,7 @@ def test_a_field_name_keeps_the_punctuation_the_card_showed_it_with() -> None:
     # mostly the card echoing them back. Reading one as a path or a shape
     # declaration would make an existing chip impossible to keep.
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_disclosed_fields_conversation(),
         message="",
         question_answer={
@@ -879,6 +908,7 @@ def test_a_field_name_keeps_the_punctuation_the_card_showed_it_with() -> None:
 
 def test_the_same_field_named_twice_is_recorded_once() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_disclosed_fields_conversation(),
         message="",
         question_answer={
@@ -1049,6 +1079,7 @@ def test_an_answer_to_a_replaced_showing_is_refused_as_stale(
 ) -> None:
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=shown(),
             message="",
             question_answer=answer(_REPLACED_TOKEN),
@@ -1075,6 +1106,7 @@ def test_an_answer_naming_no_showing_is_told_to_reload_the_page(
     # on; it is told the one fix that works, in words it shows as they are.
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=shown(),
             message="",
             question_answer=answer(None),
@@ -1093,6 +1125,7 @@ def test_an_answer_naming_the_stored_showing_is_applied(
     decision: str,
 ) -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=shown(),
         message="",
         question_answer=answer(_SHOWN_TOKEN),
@@ -1111,11 +1144,13 @@ def test_an_answer_to_a_showing_from_before_tokens_keeps_the_older_rules(
     decision: str,
 ) -> None:
     tokenless = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=shown(None),
         message="",
         question_answer=answer(None),
     )
     tokened = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=shown(_SHOWN_TOKEN),
         message="",
         question_answer=answer(_SHOWN_TOKEN),
@@ -1133,6 +1168,7 @@ def test_a_token_sent_to_a_showing_from_before_tokens_is_refused(
     # The showing on offer predates tokens, so a token names some other one.
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=shown(None),
             message="",
             question_answer=answer(_SHOWN_TOKEN),
@@ -1155,6 +1191,7 @@ def test_an_answer_to_the_showing_a_question_replaced_is_refused_as_stale() -> N
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=conversation,
             message="",
             question_answer=_structured_answer(_REPLACED_TOKEN),
@@ -1201,6 +1238,7 @@ def test_an_earlier_question_is_re_answered_through_its_latest_showing(
     conversation = _answered_then_moved_on(later)
 
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=conversation,
         message="PDF",
         question_answer=_structured_answer(_SHOWN_TOKEN),
@@ -1213,6 +1251,7 @@ def test_an_earlier_question_is_re_answered_through_its_latest_showing(
     }
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=conversation,
             message="PDF",
             question_answer=_structured_answer(uuid4()),
@@ -1226,6 +1265,7 @@ def test_an_earlier_question_is_re_answered_through_its_latest_showing(
 def test_the_token_binds_the_answer_to_the_question_it_was_shown_with() -> None:
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_shown_question(),
             message="",
             question_answer={
@@ -1250,6 +1290,7 @@ def test_a_card_act_names_the_latest_showing_of_the_same_version() -> None:
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=conversation,
             message="",
             question_answer=_confirmation(_REPLACED_TOKEN),
@@ -1260,6 +1301,7 @@ def test_a_card_act_names_the_latest_showing_of_the_same_version() -> None:
         "decision": "requirements_summary",
     }
     assert prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=conversation,
         message="",
         question_answer=_confirmation(_SHOWN_TOKEN),
@@ -1268,6 +1310,7 @@ def test_a_card_act_names_the_latest_showing_of_the_same_version() -> None:
 
 def test_a_bound_custom_answer_keeps_the_500_character_limit() -> None:
     at_limit = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_shown_custom_question(),
         message="",
         question_answer={**_custom_answer(_SHOWN_TOKEN), "custom_value": "3" * 500},
@@ -1276,6 +1319,7 @@ def test_a_bound_custom_answer_keeps_the_500_character_limit() -> None:
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_shown_custom_question(),
             message="",
             question_answer={
@@ -1300,6 +1344,7 @@ def _reply(token: UUID, question_id: str = "terminal_output") -> dict[str, objec
 
 def test_text_bound_to_the_open_question_is_recorded_as_its_reply() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_shown_question(),
         message="Make it a PDF",
         question_answer=_reply(_SHOWN_TOKEN),
@@ -1319,6 +1364,7 @@ def test_text_saying_nothing_about_itself_under_a_question_with_a_token_is_refus
     # Only a page built before tokens sends that; it is told to reload.
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_shown_question(),
             message="Make it a PDF",
             question_answer=None,
@@ -1334,6 +1380,7 @@ def test_text_saying_nothing_about_itself_under_a_question_with_a_token_is_refus
 
 def test_text_declared_a_new_request_sets_the_open_question_aside() -> None:
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=_shown_question(),
         message="Also summarise the attachments",
         question_answer={"kind": "new_request"},
@@ -1344,6 +1391,7 @@ def test_text_declared_a_new_request_sets_the_open_question_aside() -> None:
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_shown_question(),
             message="  ",
             question_answer={"kind": "new_request"},
@@ -1362,6 +1410,7 @@ def test_text_with_no_question_open_needs_no_declaration() -> None:
     ]
 
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=conversation,
         message="And keep it short",
         question_answer=None,
@@ -1384,6 +1433,7 @@ def test_text_bound_to_a_replaced_question_is_refused_not_given_to_the_new_one()
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=conversation,
             message="Actually, a Word document",
             question_answer=_reply(_REPLACED_TOKEN, "post_processing_goal"),
@@ -1395,6 +1445,7 @@ def test_text_bound_to_a_replaced_question_is_refused_not_given_to_the_new_one()
 
     with pytest.raises(AIBuilderBadRequestException) as bare_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=conversation,
             message="Actually, a Word document",
             question_answer=None,
@@ -1408,6 +1459,7 @@ def test_text_bound_to_a_replaced_question_is_refused_not_given_to_the_new_one()
 def test_a_reply_carries_words() -> None:
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_shown_question(),
             message="  ",
             question_answer=_reply(_SHOWN_TOKEN),
@@ -1457,6 +1509,7 @@ def test_typed_words_never_re_answer_an_earlier_question() -> None:
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=conversation,
             message="A PDF after all",
             question_answer=_reply(_SHOWN_TOKEN),
@@ -1475,6 +1528,7 @@ def test_a_retried_turn_replies_to_the_question_its_own_message_answered() -> No
     conversation = [*_shown_question(), failed]
 
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=conversation,
         message="A PDF, one per case",
         question_answer=_reply(_SHOWN_TOKEN),
@@ -1486,6 +1540,7 @@ def test_a_retried_turn_replies_to_the_question_its_own_message_answered() -> No
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=conversation,
             message="A PDF, one per case",
             question_answer=_reply(_SHOWN_TOKEN),
@@ -1534,6 +1589,7 @@ def test_new_request_is_only_accepted_where_the_declaration_can_be_kept() -> Non
     # declared new request apart from its answer, so none is accepted there.
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
+            is_edit_mode=False,
             conversation=_shown_question(None),
             message="Also summarise the attachments",
             question_answer={"kind": "new_request"},
@@ -1545,6 +1601,7 @@ def test_new_request_is_only_accepted_where_the_declaration_can_be_kept() -> Non
         ConversationMessage(role="user", content="PDF"),
     ]
     prepared = prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=answered,
         message="Also summarise the attachments",
         question_answer={"kind": "new_request"},
@@ -1571,6 +1628,7 @@ def _admit(
     request: SendMessageRequest, conversation: list[ConversationMessage]
 ) -> object:
     return prepare_user_question_metadata(
+        is_edit_mode=False,
         conversation=conversation,
         message=request.message,
         question_answer=request.question_answer,

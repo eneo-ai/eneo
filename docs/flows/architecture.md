@@ -312,7 +312,35 @@ them first) from `prepare_planner_request` until it is answered with use or
 don't use; until a use answer the create step schema offers no `tool_use` and
 the prompt lists no tools (`AIBuilderToolCatalogNotOffered`). A create session
 whose space has only refused tools is not asked and keeps the listing of the
-refused ones, and an edit always offers the tools. A draft's tool uses are then
+refused ones, and an edit always offers the tools. After a use answer the
+run-input question (`primary_runtime_input`) also offers `no_run_input`:
+nothing is uploaded or pasted, and the tools' arguments come from run-form
+fields or fixed values. `offers_no_run_input` in `ai_builder_tool_answers.py`
+(which reads the answers to the tool questions, for `fold_tool_decisions`
+too) holds only in a create session whose latest `tool_relevance` answer is
+use and whose person has not chosen no tool for every use they decided.
+`situate_question` drops the option wherever it does not hold, the answer
+intake refuses the value there (`unsupported_question_value`), the slot
+classifier is never offered it, and the planning-state fold (`_resolve_slots`)
+ignores a stored no_run_input answer once the predicate no longer holds, so
+the question is asked again without the option. The space's catalogue is not
+one of the predicate's inputs: the turn's commit (`commit_turn`) rebuilds the
+slots from the conversation alone. A commit that reads no run input
+(`ArchitectureCommit.reads_run_input` false) is checked on the final create
+spec (`_require_no_run_input_read`, the last stage of
+`compile_create_intent_to_spec`): a first step that does not read an MCP tool,
+or any step that reads the run input other than through the run form's
+declared fields, is sent back to the model with the steps named
+(`run_input_read_without_run_input`). A plan whose first step reads a tool
+gets no main-text field, so a plan that passes has none; the planner prompt of
+a create session says the first step reads an MCP tool. A created template-fill
+DOCX flow takes no tool step, so in a create session the action policy's
+compatibility check (`_architecture_refusal_code`) refuses such a commit before
+planning with `unsupported_architecture`, the user-action answer; an edit of a
+saved tool flow that fills a template is not refused. An edit reads the value off the saved flow
+(`steps_reading_run_input` with the form's declared field names), so a saved
+tool flow whose arguments read form fields is not asked about its run
+input. A draft's tool uses are then
 settled against the decisions before compile (`settle_tool_uses` in
 `ai_builder_tool_questions.py`), in create and edit alike: more than 20 uses
 end the turn with an answer (`too_many_tool_uses`); a use_ref given twice, or a
