@@ -12002,6 +12002,7 @@ export interface components {
      */
     AIBuilderClientErrorPresentation:
       | "provider_outcome_unknown"
+      | "provider_timeout"
       | "failed_before_provider"
       | "network_loss"
       | "provider_rejected"

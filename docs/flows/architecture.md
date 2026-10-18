@@ -438,7 +438,9 @@ Eneo and the provider that closes idle connections must allow at least this
 silence, and for a call that may think the whole-call ceiling for its first
 output; see the failure telemetry above for how such a
 timeout is recognised (`local_deadline` names the timer that expired, silence
-or ceiling, when one did).
+or ceiling, when one did). The same two facts, with the limit in seconds as
+`deadline_seconds`, are in the details of the public error the user receives, so
+the Builder can say that the model took too long and which limit to change.
 
 A turn that no longer owns its session stops its provider work at once. The
 send lease mints one gate per turn that every provider call of the turn goes

@@ -484,6 +484,7 @@ class AIBuilderClientErrorPresentation(enum.StrEnum):
     """
 
     PROVIDER_OUTCOME_UNKNOWN = "provider_outcome_unknown"
+    PROVIDER_TIMEOUT = "provider_timeout"
     FAILED_BEFORE_PROVIDER = "failed_before_provider"
     NETWORK_LOSS = "network_loss"
     PROVIDER_REJECTED = "provider_rejected"

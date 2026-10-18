@@ -6,7 +6,8 @@ import {
   aiBuilderErrorText,
   AIBuilderClientRefusal,
   isStaleApplyError,
-  parseAIBuilderError
+  parseAIBuilderError,
+  providerTimeoutCause
 } from "./aiBuilderError";
 import type { AIBuilderError } from "./protocol";
 
@@ -60,6 +61,21 @@ describe("aiBuilderErrorText", () => {
     const error = serverError(code, details);
     expect(aiBuilderErrorText(error)).toBe(expected);
     expect(aiBuilderErrorText(error)).not.toContain(ENGLISH_SERVER_MESSAGE);
+  });
+
+  it("tells an unknown outcome that came from a timeout with its wait on every surface", () => {
+    // Mutant: only the failure card reads the typed deadline; the other
+    // surfaces that render this code keep the generic words.
+    const timeout = serverError("session_turn_provider_outcome_unknown", {
+      local_deadline: "ceiling",
+      deadline_seconds: 1800
+    });
+    expect(aiBuilderErrorText(timeout)).toBe(
+      providerTimeoutCause({ deadline: "ceiling", seconds: 1800 })
+    );
+    expect(aiBuilderErrorText(serverError("session_turn_provider_outcome_unknown"))).toBe(
+      m.ai_builder_failure_cause_provider_outcome_unknown()
+    );
   });
 
   it("falls back to the failed operation's sentence, never the server's prose", () => {
@@ -223,5 +239,40 @@ describe("parseAIBuilderError", () => {
       status: 400,
       original_code: "legacy_code"
     });
+  });
+});
+
+describe("providerTimeoutCause", () => {
+  // Locale-neutral: the number and its unit stem read the same in sv and en.
+  it.each([
+    [300, /\b5 min/],
+    [1800, /\b30 min/],
+    [5400, /\b90 min/],
+    [90, /\b90 (sek|sec)/],
+    [0.05, /\b0[.,]05 (sek|sec)/]
+  ])("states a wait of %s seconds as it was given", (seconds, wait) => {
+    // Mutants: a whole number of minutes is shown as seconds or rounded to
+    // hours; 90 seconds is rounded to minutes; a sub-second wait becomes 0.
+    expect(providerTimeoutCause({ deadline: "silence", seconds })).toMatch(wait);
+  });
+
+  it.each(["sv", "en"] as const)("gives %s advice that can be followed everywhere", (locale) => {
+    // Mutants: the advice to pick a lower reasoning level (the retry keeps the
+    // retained effort) or the claim that trying again is accepted (not every
+    // surface has that button) comes back; the path uses other labels than the UI.
+    const path = [
+      m.admin({}, { locale }),
+      m.flow_settings_title({}, { locale }),
+      m.flow_settings_tab_builder({}, { locale }),
+      m.ai_builder_timing_group({}, { locale })
+    ].join(" > ");
+    for (const text of [
+      m.ai_builder_failure_cause_provider_timeout_silence({ wait: "X" }, { locale }),
+      m.ai_builder_failure_cause_provider_timeout_ceiling({ wait: "X" }, { locale })
+    ]) {
+      expect(text).toContain(path);
+      expect(text).not.toMatch(/lower reasoning|lägre resonemangsnivå/i);
+      expect(text).not.toMatch(/accept that cost|godkänner den kostnaden/i);
+    }
   });
 });

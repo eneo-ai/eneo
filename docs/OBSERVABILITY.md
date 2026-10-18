@@ -157,6 +157,14 @@ exceptions remain `provider_outcome_unknown`. They require explicit
 duplicate-spend acknowledgement before the exact same turn can call the provider
 again. Neither disposition enables automatic retry.
 
+When one of Eneo's own timers ended the call, the public error's `details` also
+carry `local_deadline` (`silence` or `ceiling`) and `deadline_seconds` (the limit
+that fired), and its message starts with "The AI model did not answer within N
+seconds." (silence) or "The AI model did not finish within N seconds."
+(ceiling). No other failure carries these two keys; an SDK or gateway timeout does
+not say which limit applied. The `details` stay the bounded scalar map described
+in the error contract, so the keys are not a separately typed schema.
+
 The bounded fields are:
 
 | Field | Allowed values or shape | Aggregation guidance |

@@ -4,6 +4,7 @@ import json
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import StrEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, TypeAlias, TypeGuard, cast
@@ -28,10 +29,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
 from eneo.flows.ai_builder.ai_builder_provider_call import (
     PROVIDER_ERROR_PARAMETERS,
-    ProviderCallCeilingExpired,
     ProviderCallTiming,
+    ProviderDeadlineExpired,
+    ProviderDeadlineKind,
     ProviderRejection,
-    ProviderSilenceExpired,
     ProviderStreamIncomplete,
     ProviderWorkGate,
     provider_error_fields,
@@ -77,7 +78,7 @@ AIBuilderProviderFailureStage = Literal[
 AIBuilderProviderTurnState = Literal["committed", "provider_outcome_unknown"]
 # Which of Eneo's own provider-call timers expired; None when none did (an SDK
 # or gateway timeout included).
-AIBuilderLocalDeadline = Literal["silence", "ceiling"]
+AIBuilderLocalDeadline = ProviderDeadlineKind
 # The public error detail a provider failure carries; the measurement receipt
 # accepts exactly these values as provider evidence.
 AIBuilderProviderDisposition = Literal["known_rejection", "provider_outcome_unknown"]
@@ -451,6 +452,7 @@ def classify_ai_builder_provider_failure(
     else:
         kind = "unknown"
 
+    expiry = error if isinstance(error, ProviderDeadlineExpired) else None
     known_rejection = kind in {"rejected", "rate_limited"}
     turn_state: AIBuilderProviderTurnState = (
         "committed" if known_rejection else "provider_outcome_unknown"
@@ -492,16 +494,11 @@ def classify_ai_builder_provider_failure(
                 == "reasoning_effort_unsupported"
                 else None
             ),
+            expiry=expiry,
         ),
         retry_scope=retry_scope,
         another_call_permitted=False,
-        local_deadline=(
-            "silence"
-            if isinstance(error, ProviderSilenceExpired)
-            else "ceiling"
-            if isinstance(error, ProviderCallCeilingExpired)
-            else None
-        ),
+        local_deadline=expiry.kind if expiry is not None else None,
     )
 
 
@@ -735,6 +732,23 @@ def _provider_status_class(
     return "5xx"
 
 
+# Silence means no answer arrived; a ceiling means the answer did not complete.
+_DEADLINE_VERB: dict[AIBuilderLocalDeadline, str] = {
+    "silence": "answer",
+    "ceiling": "finish",
+}
+
+
+def _wait_text(seconds: float) -> str:
+    """The wait as written for a person: no exponent, no float artefacts."""
+
+    if seconds == 1:
+        return "1 second"
+    if seconds.is_integer():
+        return f"{int(seconds)} seconds"
+    return f"{format(Decimal(repr(seconds)), 'f')} seconds"
+
+
 def _provider_public_error(
     *,
     exception_class: AIBuilderProviderExceptionClass,
@@ -742,6 +756,7 @@ def _provider_public_error(
     retry_scope: AIBuilderProviderRetryScope,
     request_id: str | None,
     reason: str | None = None,
+    expiry: ProviderDeadlineExpired | None = None,
 ) -> AIBuilderPublicError:
     disposition: AIBuilderProviderDisposition = (
         "known_rejection" if turn_state == "committed" else "provider_outcome_unknown"
@@ -754,6 +769,11 @@ def _provider_public_error(
     }
     if reason is not None:
         details["reason"] = reason
+    if expiry is not None:
+        # Only Eneo's own timers: an SDK or gateway timeout does not say which
+        # limit applied or how long was waited, so it carries neither.
+        details["local_deadline"] = expiry.kind
+        details["deadline_seconds"] = expiry.seconds
     if turn_state == "committed":
         message = (
             "The AI provider did not accept this request because of a rate limit. "
@@ -765,9 +785,17 @@ def _provider_public_error(
         )
         code = AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR
     else:
+        # Non-web API clients read this text; the web app words the same facts
+        # from `local_deadline` and `deadline_seconds`.
+        waited = (
+            f"The AI model did not {_DEADLINE_VERB[expiry.kind]} within "
+            f"{_wait_text(expiry.seconds)}. "
+            if expiry is not None
+            else ""
+        )
         message = (
-            "The provider outcome is unknown. Explicitly acknowledge possible "
-            "duplicate provider work before retrying this turn."
+            f"{waited}The provider outcome is unknown. Explicitly acknowledge "
+            "possible duplicate provider work before retrying this turn."
         )
         code = AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN
     return build_ai_builder_error(

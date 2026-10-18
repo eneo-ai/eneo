@@ -241,6 +241,79 @@ describe("describeFailure", () => {
     expect(presentation.secondary).toBeNull();
   });
 
+  const timedOut = (details: AIBuilderError["details"]) =>
+    error({
+      code: "session_turn_provider_outcome_unknown",
+      details: { provider_disposition: "provider_outcome_unknown", ...details }
+    });
+
+  it.each(["silence", "ceiling"] as const)(
+    "tells a %s timeout as a timeout and keeps the paid replay",
+    (deadline) => {
+      // Mutant: classification ignores the typed deadline, so the card keeps
+      // the generic unknown-outcome words.
+      // Mutant: both deadlines get the same first sentence.
+      const presentation = present({
+        error: timedOut({ local_deadline: deadline, deadline_seconds: 300 }),
+        latestTurn: turn("provider_outcome_unknown"),
+        capabilities: { ...committed, replay: "provider_outcome_unknown", canStartNewTurn: false },
+        context: generation
+      });
+      const opening = (
+        deadline === "silence"
+          ? m.ai_builder_failure_cause_provider_timeout_silence({ wait: "§" })
+          : m.ai_builder_failure_cause_provider_timeout_ceiling({ wait: "§" })
+      ).split("§")[0];
+
+      expect(presentation.kind).toBe("provider_timeout");
+      expect(presentation.heading).toBe(m.ai_builder_failure_heading_provider_timeout());
+      expect(presentation.consequence.startsWith(opening!)).toBe(true);
+      expect(presentation.primary).toMatchObject({
+        kind: "retry_same_turn_acknowledged",
+        records: "retry_with_acknowledgement_requested"
+      });
+    }
+  );
+
+  it("classifies a timeout the same way with and without a retained turn", () => {
+    const failure = timedOut({ local_deadline: "silence", deadline_seconds: 300 });
+    expect(classifyFailure(failure, null)).toBe("provider_timeout");
+    expect(classifyFailure(failure, turn("provider_outcome_unknown"))).toBe("provider_timeout");
+  });
+
+  it.each([
+    ["a deadline without its seconds", { local_deadline: "silence" }],
+    ["an unknown deadline", { local_deadline: "sdk", deadline_seconds: 300 }],
+    ["a non-numeric limit", { local_deadline: "silence", deadline_seconds: "300" }],
+    ["an infinite limit", { local_deadline: "ceiling", deadline_seconds: Infinity }],
+    ["a zero limit", { local_deadline: "silence", deadline_seconds: 0 }]
+  ])("keeps the generic unknown-outcome words for %s", (_name, details) => {
+    // Mutant: the timeout kind is chosen without validating the typed limit.
+    const presentation = present({
+      error: timedOut(details),
+      latestTurn: turn("provider_outcome_unknown"),
+      capabilities: { ...committed, replay: "provider_outcome_unknown" },
+      context: generation
+    });
+
+    expect(presentation.kind).toBe("provider_outcome_unknown");
+    expect(presentation.heading).toBe(m.ai_builder_failure_heading_provider_outcome_unknown());
+    expect(presentation.consequence).toContain(
+      m.ai_builder_failure_cause_provider_outcome_unknown()
+    );
+  });
+
+  it("does not call a committed provider rejection a timeout because it carries the keys", () => {
+    // Mutant: the timeout kind is chosen from the details alone, before the
+    // outcome-unknown test.
+    const rejection = error({
+      code: "planner_upstream_error",
+      details: { ...rejected, local_deadline: "silence", deadline_seconds: 300 }
+    });
+
+    expect(classifyFailure(rejection, turn("committed"))).toBe("provider_rejected");
+  });
+
   it("offers the safe replay and names the fact that no model was called", () => {
     const presentation = present({
       error: error({ code: "planner_budget_missing", message: "No planner budget." }),

@@ -3,8 +3,12 @@ from __future__ import annotations
 import json
 
 import pytest
+from litellm.exceptions import Timeout
 from pydantic import ValidationError
 
+from eneo.completion_models.infrastructure.stream_collector import (
+    ProviderStreamIncomplete,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     _MAX_DETAILS_JSON_BYTES,  # pyright: ignore[reportPrivateUsage]
     _MAX_DETAILS_KEYS,  # pyright: ignore[reportPrivateUsage]
@@ -19,10 +23,15 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderUnauthorizedException,
     build_ai_builder_error,
     build_ai_builder_error_event,
+    classify_ai_builder_provider_failure,
     split_ai_builder_error_context,
     with_ai_builder_call_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
+from eneo.flows.ai_builder.ai_builder_provider_call import (
+    ProviderCallCeilingExpired,
+    ProviderSilenceExpired,
+)
 from eneo.main.exceptions import ErrorCodes
 
 
@@ -359,3 +368,70 @@ def test_split_ai_builder_error_context_separates_correlation_from_details() -> 
         "published_version": 3,
         "auth_layer": "api_key_scope",
     }
+
+
+_UNKNOWN_OUTCOME_SENTENCE = (
+    "The provider outcome is unknown. Explicitly acknowledge possible "
+    "duplicate provider work before retrying this turn."
+)
+
+
+@pytest.mark.parametrize(
+    ("error", "local_deadline", "seconds", "waited"),
+    [
+        (ProviderSilenceExpired(300.0), "silence", 300.0, "answer within 300 seconds"),
+        (ProviderCallCeilingExpired(1.0), "ceiling", 1.0, "finish within 1 second"),
+        (ProviderSilenceExpired(0.5), "silence", 0.5, "answer within 0.5 seconds"),
+        (
+            ProviderCallCeilingExpired(1234567.0),
+            "ceiling",
+            1234567.0,
+            "finish within 1234567 seconds",
+        ),
+    ],
+)
+def test_an_expired_local_deadline_is_answered_as_a_timeout_with_its_wait(
+    error: Exception, local_deadline: str, seconds: float, waited: str
+) -> None:
+    # Mutants: the silence/ceiling kinds swap or share one verb; the seconds are
+    # dropped from the details or the message; one second is "1 seconds"; a
+    # large or fractional wait prints an exponent or a float artefact; the
+    # unknown-outcome acknowledgement is lost.
+    public_error = classify_ai_builder_provider_failure(
+        error, stage="proposal_completion", request_id="req-1"
+    ).public_error
+
+    assert public_error.code is AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN
+    assert public_error.message == (
+        f"The AI model did not {waited}. {_UNKNOWN_OUTCOME_SENTENCE}"
+    )
+    assert public_error.details == {
+        "another_call_permitted": False,
+        "provider_disposition": "provider_outcome_unknown",
+        "provider_exception_class": "timeout",
+        "retry_scope": "acknowledged_same_turn",
+        "local_deadline": local_deadline,
+        "deadline_seconds": seconds,
+    }
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        Timeout("sdk", model="m", llm_provider="p"),
+        TimeoutError("raised by the SDK"),
+        ProviderStreamIncomplete(),
+    ],
+)
+def test_a_timeout_that_is_not_one_of_our_deadlines_names_no_limit(
+    error: Exception,
+) -> None:
+    # Mutant: every timeout-shaped failure claims a local deadline and a wait.
+    public_error = classify_ai_builder_provider_failure(
+        error, stage="proposal_completion"
+    ).public_error
+
+    assert public_error.message == _UNKNOWN_OUTCOME_SENTENCE
+    assert public_error.details is not None
+    assert "local_deadline" not in public_error.details
+    assert "deadline_seconds" not in public_error.details
