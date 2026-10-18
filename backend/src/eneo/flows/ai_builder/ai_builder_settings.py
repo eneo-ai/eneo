@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from typing import Any
 
 from eneo.completion_models.domain.model_capacity import (
@@ -25,6 +26,11 @@ from eneo.flows.flow_ai_builder_budget_settings import (
     extract_ai_builder_budget_settings,
     parse_ai_builder_budget_token,
     parse_ai_builder_operating_limit,
+    parse_ai_builder_timing_seconds,
+)
+from eneo.main.ai_builder_timing_order import (
+    TimingOrderRule,
+    ai_builder_timing_order_violation,
 )
 from eneo.main.config import (
     AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT,
@@ -283,9 +289,7 @@ class AIBuilderBudgetPolicy:
     # See AIBuilderRequestBudget.answer_reserve_share.
     answer_reserve_share: float = AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT
     # See AIBuilderRequestBudget.ceiling_seconds.
-    provider_call_ceiling_seconds: float = (
-        AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT
-    )
+    call_ceiling_seconds: float = AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT
     # Classification shares the proposal deadline unless deployment policy
     # explicitly gives it a different one.
     classification_timeout_seconds: float | None = None
@@ -296,7 +300,7 @@ class AIBuilderBudgetPolicy:
     classification_reasoning_effort: AIBuilderClassificationReasoningEffort = (
         AI_BUILDER_CLASSIFICATION_REASONING_EFFORT_DEFAULT
     )
-    proposal_timeout_seconds: float = AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS
+    silence_timeout_seconds: float = AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS
     max_attachments: int = AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT
     max_message_chars: int = AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT
     max_template_inspection_uncompressed_bytes: int = (
@@ -312,6 +316,11 @@ class AIBuilderBudgetPolicy:
     review_investigation_evidence_max_tokens: int = (
         AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS
     )
+    # The admin's own deadline settings, None where the field above is
+    # the deployment default. They say which side of an ordering conflict an
+    # admin can change, and what the settings page shows as the override.
+    silence_timeout_override_seconds: int | None = None
+    call_ceiling_override_seconds: int | None = None
 
     def answer_reserve_tokens(
         self,
@@ -346,7 +355,7 @@ class AIBuilderBudgetPolicy:
         timeout_seconds = (
             self.classification_timeout_seconds
             if self.classification_timeout_seconds is not None
-            else self.proposal_timeout_seconds
+            else self.silence_timeout_seconds
         )
         return AIBuilderRequestBudget(
             capacity=capacity,
@@ -357,7 +366,7 @@ class AIBuilderBudgetPolicy:
                 if self.classification_ceiling_seconds is not None
                 else min(
                     (1 + SLOT_CLASSIFICATION_CUT_OFF_REASKS) * timeout_seconds,
-                    self.provider_call_ceiling_seconds,
+                    self.call_ceiling_seconds,
                 )
             ),
             timeout_seconds=timeout_seconds,
@@ -378,8 +387,8 @@ class AIBuilderBudgetPolicy:
             input_cap_tokens=self.review_evidence_max_input_tokens,
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
-            ceiling_seconds=self.provider_call_ceiling_seconds,
-            timeout_seconds=self.proposal_timeout_seconds,
+            ceiling_seconds=self.call_ceiling_seconds,
+            timeout_seconds=self.silence_timeout_seconds,
             request_id=request_id,
         )
 
@@ -399,10 +408,96 @@ class AIBuilderBudgetPolicy:
             ),
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
-            ceiling_seconds=self.provider_call_ceiling_seconds,
-            timeout_seconds=self.proposal_timeout_seconds,
+            ceiling_seconds=self.call_ceiling_seconds,
+            timeout_seconds=self.silence_timeout_seconds,
             request_id=request_id,
         )
+
+
+class AIBuilderTimingOrderError(AIBuilderBadRequestException):
+    """Effective provider-call deadlines that cannot work together."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message,
+            code=AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS,
+        )
+
+
+def _timing_value(seconds: float, *, set_by_admin: bool) -> str:
+    origin = (
+        "set in Admin > Flow settings" if set_by_admin else "the deployment default"
+    )
+    return f"{seconds:g} s, {origin}"
+
+
+_TIMING_ORDER_REFUSALS: dict[TimingOrderRule, str] = {
+    "silence_above_call_ceiling": (
+        "The silence timeout ({value}) is longer than the call ceiling ({bound}). "
+        "Lower the silence timeout or raise the call ceiling."
+    ),
+    "classification_silence_above_call_ceiling": (
+        "The classification silence timeout ({value}) is longer than the call "
+        "ceiling ({bound}). Raise the call ceiling."
+    ),
+    "classification_ceiling_above_call_ceiling": (
+        "The classification call ceiling ({value}) is longer than the call "
+        "ceiling ({bound}). Raise the call ceiling."
+    ),
+    "classification_ceiling_below_classification_silence": (
+        "The classification call ceiling ({value}) is shorter than the "
+        "classification silence timeout ({bound}). Lower the silence timeout."
+    ),
+}
+
+
+def _set_by_admin(
+    rule: TimingOrderRule, policy: AIBuilderBudgetPolicy
+) -> tuple[bool, bool]:
+    """Whether the violating value and the bound it breaks are the admin's."""
+
+    silence = policy.silence_timeout_override_seconds is not None
+    ceiling = policy.call_ceiling_override_seconds is not None
+    if rule == "silence_above_call_ceiling":
+        return silence, ceiling
+    if rule == "classification_ceiling_below_classification_silence":
+        # An unset classification silence is the silence timeout itself.
+        return False, silence and policy.classification_timeout_seconds is None
+    # Only the deployment sets classification deadlines.
+    return False, ceiling
+
+
+def check_ai_builder_timing_order(policy: AIBuilderBudgetPolicy) -> None:
+    """Refuse effective deadlines that the request budget cannot honour.
+
+    The rule itself is ``ai_builder_timing_order_violation``; deployment
+    startup applies it to env values alone. A tenant value can break it against
+    an env value, so the resolver and the settings writer apply it to the
+    effective deadlines and word the refusal with both values and where each
+    comes from, instead of the request budget's bare ValueError.
+    """
+
+    violation = ai_builder_timing_order_violation(
+        silence_seconds=policy.silence_timeout_seconds,
+        call_ceiling_seconds=policy.call_ceiling_seconds,
+        classification_silence_seconds=policy.classification_timeout_seconds,
+        classification_ceiling_seconds=policy.classification_ceiling_seconds,
+    )
+    if violation is None:
+        return
+    value_by_admin, bound_by_admin = _set_by_admin(violation.rule, policy)
+    raise AIBuilderTimingOrderError(
+        _TIMING_ORDER_REFUSALS[violation.rule].format(
+            value=_timing_value(violation.value, set_by_admin=value_by_admin),
+            bound=_timing_value(violation.bound, set_by_admin=bound_by_admin),
+        )
+    )
+
+
+def deployment_ai_builder_budget_policy() -> AIBuilderBudgetPolicy:
+    """The deployment (env) values an absent admin setting inherits."""
+
+    return _default_policy()
 
 
 def _default_policy(defaults: Any | None = None) -> AIBuilderBudgetPolicy:
@@ -421,7 +516,7 @@ def _default_policy(defaults: Any | None = None) -> AIBuilderBudgetPolicy:
                 AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT,
             )
         ),
-        provider_call_ceiling_seconds=float(
+        call_ceiling_seconds=float(
             getattr(
                 source,
                 "ai_builder_provider_call_ceiling_seconds",
@@ -444,7 +539,7 @@ def _default_policy(defaults: Any | None = None) -> AIBuilderBudgetPolicy:
             "ai_builder_classification_reasoning_effort",
             AI_BUILDER_CLASSIFICATION_REASONING_EFFORT_DEFAULT,
         ),
-        proposal_timeout_seconds=float(source.ai_builder_proposal_timeout_seconds),
+        silence_timeout_seconds=float(source.ai_builder_proposal_timeout_seconds),
         max_attachments=AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
         max_message_chars=AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
         max_template_inspection_uncompressed_bytes=(
@@ -470,11 +565,60 @@ def _parse_token_int(
         ) from error
 
 
+def _parse_timing_seconds(value: object, key: str) -> int:
+    try:
+        return parse_ai_builder_timing_seconds(value, key)
+    except ValueError as error:
+        raise AIBuilderBadRequestException(
+            str(error),
+            code=AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS,
+        ) from error
+
+
+def _with_timing_overrides(
+    policy: AIBuilderBudgetPolicy, raw: Mapping[str, object]
+) -> AIBuilderBudgetPolicy:
+    """Apply the tenant's deadline settings to the deployment values in ``policy``."""
+
+    silence = (
+        _parse_timing_seconds(raw["silence_timeout_seconds"], "silence_timeout_seconds")
+        if "silence_timeout_seconds" in raw
+        else None
+    )
+    ceiling = (
+        _parse_timing_seconds(raw["call_ceiling_seconds"], "call_ceiling_seconds")
+        if "call_ceiling_seconds" in raw
+        else None
+    )
+    return replace(
+        policy,
+        silence_timeout_seconds=(
+            policy.silence_timeout_seconds if silence is None else float(silence)
+        ),
+        call_ceiling_seconds=(
+            policy.call_ceiling_seconds if ceiling is None else float(ceiling)
+        ),
+        silence_timeout_override_seconds=silence,
+        call_ceiling_override_seconds=ceiling,
+    )
+
+
 def resolve_ai_builder_budget_policy(
     tenant_flow_settings: dict[str, Any] | None,
     *,
     defaults: Any | None = None,
+    check_timing_order: bool = True,
 ) -> AIBuilderBudgetPolicy:
+    """The effective policy: deployment values, then the tenant's overrides.
+
+    Turns keep ``check_timing_order`` so a conflicting pair is refused with a
+    message before any provider work. Readers that enforce no deadline (the
+    admin page and its audit, the limits endpoint, the model list, the
+    readiness CLI) pass False: the admin must still be able to open the page
+    and repair the conflict (for example after the deployment lowered its call
+    ceiling below a tenant's silence timeout).
+    """
+
     resolved_defaults = _default_policy(defaults)
     raw = extract_ai_builder_budget_settings(tenant_flow_settings)
 
@@ -540,11 +684,11 @@ def resolve_ai_builder_budget_policy(
                 code=AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS,
             ) from error
 
-    return AIBuilderBudgetPolicy(
+    policy = AIBuilderBudgetPolicy(
         conversation_safety_buffer_tokens=safety_buffer,
         minimum_conversation_budget_tokens=minimum_budget,
         answer_reserve_share=resolved_defaults.answer_reserve_share,
-        provider_call_ceiling_seconds=resolved_defaults.provider_call_ceiling_seconds,
+        call_ceiling_seconds=resolved_defaults.call_ceiling_seconds,
         classification_timeout_seconds=(
             resolved_defaults.classification_timeout_seconds
         ),
@@ -557,7 +701,7 @@ def resolve_ai_builder_budget_policy(
         classification_reasoning_effort=(
             resolved_defaults.classification_reasoning_effort
         ),
-        proposal_timeout_seconds=resolved_defaults.proposal_timeout_seconds,
+        silence_timeout_seconds=resolved_defaults.silence_timeout_seconds,
         max_attachments=operating_limits["max_attachments"],
         max_message_chars=operating_limits["max_message_chars"],
         max_template_inspection_uncompressed_bytes=operating_limits[
@@ -567,6 +711,10 @@ def resolve_ai_builder_budget_policy(
         review_evidence_max_input_tokens=review_evidence_cap,
         review_investigation_evidence_max_tokens=investigation_evidence_cap,
     )
+    policy = _with_timing_overrides(policy, raw)
+    if check_timing_order:
+        check_ai_builder_timing_order(policy)
+    return policy
 
 
 def apply_ai_builder_budget_policy_patch(
@@ -580,6 +728,8 @@ def apply_ai_builder_budget_policy_patch(
     max_template_placeholders: int | None = None,
     review_evidence_max_input_tokens: int | None = None,
     review_investigation_evidence_max_tokens: int | None = None,
+    silence_timeout_seconds: int | None = None,
+    call_ceiling_seconds: int | None = None,
     remove_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     result = (
@@ -635,8 +785,26 @@ def apply_ai_builder_budget_policy_patch(
                 field_name,
             )
 
+    timing_updates = {
+        "silence_timeout_seconds": silence_timeout_seconds,
+        "call_ceiling_seconds": call_ceiling_seconds,
+    }
+    for field_name, value in timing_updates.items():
+        if value is not None:
+            next_settings[field_name] = _parse_timing_seconds(value, field_name)
+
     for key in remove_keys or ():
         next_settings.pop(key, None)
+
+    # Only a change of a deadline is held to the ordering rule: an unrelated
+    # edit must not fail because the deployment changed under an old pair.
+    timing_touched = {
+        field_name for field_name, value in timing_updates.items() if value is not None
+    } | (set(remove_keys or ()) & set(timing_updates))
+    if timing_touched:
+        check_ai_builder_timing_order(
+            _with_timing_overrides(_default_policy(), next_settings)
+        )
 
     if next_settings:
         result["ai_builder"] = next_settings

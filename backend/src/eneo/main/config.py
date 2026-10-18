@@ -17,6 +17,10 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from eneo.main.ai_builder_timing_order import (
+    TimingOrderRule,
+    ai_builder_timing_order_violation,
+)
 from eneo.main.removed_env import UPGRADE_GUIDE_URL, check_removed_variables
 from eneo.object_content.configuration import DEFAULT_FILE_UPLOAD_LIMIT_BYTES
 
@@ -33,6 +37,30 @@ _LOCAL_MANIFEST = (
 _PROCESS_STARTED_AT = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 _BUILD_ID_ENV_VARS = ("GIT_COMMIT", "BUILD_ID")
 
+
+# Startup refusals of the ordering rule, worded with the env names an operator
+# sets; the rule itself is ai_builder_timing_order_violation. The two values are
+# the offending one and the one it breaks.
+_AI_BUILDER_TIMING_ORDER_ERRORS: dict[TimingOrderRule, str] = {
+    "silence_above_call_ceiling": (
+        "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS (%s) must not be above "
+        "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS (%s)."
+    ),
+    "classification_silence_above_call_ceiling": (
+        "AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS (%s) must not be above "
+        "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS (%s)."
+    ),
+    "classification_ceiling_above_call_ceiling": (
+        "AI_BUILDER_CLASSIFICATION_CEILING_SECONDS (%s) must not be above "
+        "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS (%s)."
+    ),
+    "classification_ceiling_below_classification_silence": (
+        "AI_BUILDER_CLASSIFICATION_CEILING_SECONDS (%s) must not be below the "
+        "classification silence deadline (%s): "
+        "AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS, or "
+        "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS when that is unset."
+    ),
+}
 
 URL_SIGNING_KEY_MINIMUM_BYTES = 32
 # Absolute upper bound for a login session; a longer-lived captured token
@@ -1055,34 +1083,21 @@ class Settings(BaseSettings):
                     value,
                 )
                 sys.exit(1)
-        longest_silence = max(
-            self.ai_builder_proposal_timeout_seconds,
-            self.ai_builder_classification_timeout_seconds or 0.0,
+        order_violation = ai_builder_timing_order_violation(
+            silence_seconds=self.ai_builder_proposal_timeout_seconds,
+            call_ceiling_seconds=self.ai_builder_provider_call_ceiling_seconds,
+            classification_silence_seconds=(
+                self.ai_builder_classification_timeout_seconds
+            ),
+            classification_ceiling_seconds=(
+                self.ai_builder_classification_ceiling_seconds
+            ),
         )
-        if self.ai_builder_provider_call_ceiling_seconds < longest_silence:
+        if order_violation is not None:
             logging.error(
-                "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS must not be below the "
-                "proposal or classification silence deadline. Current value: %s",
-                self.ai_builder_provider_call_ceiling_seconds,
-            )
-            sys.exit(1)
-        classification_silence = (
-            self.ai_builder_classification_timeout_seconds
-            if self.ai_builder_classification_timeout_seconds is not None
-            else self.ai_builder_proposal_timeout_seconds
-        )
-        classification_ceiling = self.ai_builder_classification_ceiling_seconds
-        # The finite provider ceiling also refuses an infinite or NaN value.
-        if classification_ceiling is not None and not (
-            classification_silence
-            <= classification_ceiling
-            <= self.ai_builder_provider_call_ceiling_seconds
-        ):
-            logging.error(
-                "AI_BUILDER_CLASSIFICATION_CEILING_SECONDS must lie between the "
-                "classification silence deadline and "
-                "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS. Current value: %s",
-                classification_ceiling,
+                _AI_BUILDER_TIMING_ORDER_ERRORS[order_violation.rule],
+                order_violation.value,
+                order_violation.bound,
             )
             sys.exit(1)
         if (

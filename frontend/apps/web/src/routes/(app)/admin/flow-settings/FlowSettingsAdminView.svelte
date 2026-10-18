@@ -135,6 +135,20 @@
     max: initial.aiBuilderBudgetSettings.review_investigation_evidence_ceiling_tokens,
     required: true
   });
+  // The deployment sets the default; an override of the model deadlines is
+  // optional per organization (off = follow the deployment). A value is any
+  // positive whole number of seconds: only the order of the pair can be invalid.
+  const timingBudget = initial.aiBuilderBudgetSettings;
+  const builderSilenceTimeout = new ToggleNumberField({
+    initial: timingBudget.silence_timeout_seconds ?? null,
+    min: 1,
+    suggestion: Math.round(timingBudget.silence_timeout_seconds_default)
+  });
+  const builderCallCeiling = new ToggleNumberField({
+    initial: timingBudget.call_ceiling_seconds ?? null,
+    min: 1,
+    suggestion: Math.round(timingBudget.call_ceiling_seconds_default)
+  });
   const mappedCalls = new ToggleNumberField({
     initial: initial.mappedExecutionPolicy.max_provider_calls_per_mapped_step ?? null,
     min: 2,
@@ -180,6 +194,8 @@
     builderMaxMessageChars,
     builderReviewEvidenceCap,
     builderInvestigationEvidence,
+    builderSilenceTimeout,
+    builderCallCeiling,
     mappedCalls,
     evidenceSources,
     evidencePassages,
@@ -197,8 +213,35 @@
       : null
   );
 
+  // The deadline a field enforces: its override, else the deployment default.
+  // Null while the entry is invalid, which the field's own error already says.
+  function effectiveSeconds(field: ToggleNumberField, deploymentDefault: number): number | null {
+    const value = field.value;
+    return value === undefined ? null : (value ?? deploymentDefault);
+  }
+
+  // Shown whenever the effective pair is out of order, also as loaded: a
+  // deployment change can leave one behind, and the admin must see it to repair it.
+  const timingConflict = $derived.by(() => {
+    const silence = effectiveSeconds(
+      builderSilenceTimeout,
+      timingBudget.silence_timeout_seconds_default
+    );
+    const ceiling = effectiveSeconds(builderCallCeiling, timingBudget.call_ceiling_seconds_default);
+    return silence !== null && ceiling !== null && silence > ceiling ? { silence, ceiling } : null;
+  });
+
+  // The server holds only a changed deadline to the order, so an unrelated edit
+  // saves even beside a pair the deployment left out of order.
+  const timingBlocksSave = $derived(
+    timingConflict !== null && (builderSilenceTimeout.dirty || builderCallCeiling.dirty)
+  );
+
   const blocked = $derived(
-    form.invalid || timeoutOrderError !== null || (runCapacity === 0 && maxConcurrentRuns.dirty)
+    form.invalid ||
+      timeoutOrderError !== null ||
+      timingBlocksSave ||
+      (runCapacity === 0 && maxConcurrentRuns.dirty)
   );
 
   const uploadStatus = $derived.by(() => {
@@ -224,6 +267,21 @@
       });
     }
     return m.flow_runtime_policy_seconds_preview({ value: formatSeconds(field.value) });
+  }
+
+  /** "45 s", or "5 min (300 s)" so the unit the field takes stays visible. */
+  function describeSeconds(value: number): string {
+    return value < 60 ? `${value} s` : `${formatSeconds(value)} (${value} s)`;
+  }
+
+  function timingHint(field: ToggleNumberField, deploymentDefault: number): string[] {
+    const value = field.value;
+    return [
+      ...(typeof value === "number" && value >= 60
+        ? [m.flow_runtime_policy_seconds_preview({ value: formatSeconds(value) })]
+        : []),
+      m.ai_builder_timing_default_hint({ value: describeSeconds(deploymentDefault) })
+    ];
   }
 
   const runtimeLimitsSummary = $derived(
@@ -334,6 +392,11 @@
       builderBudget.review_investigation_evidence_max_tokens =
         builderInvestigationEvidence.value ?? undefined;
     }
+    // null removes the override, so the organization follows the deployment again.
+    if (builderSilenceTimeout.dirty) {
+      builderBudget.silence_timeout_seconds = builderSilenceTimeout.value;
+    }
+    if (builderCallCeiling.dirty) builderBudget.call_ceiling_seconds = builderCallCeiling.value;
 
     const ragEvidence: FlowAdminSettingsUpdates["ragEvidence"] = {};
     if (evidenceSources.dirty) {
@@ -394,6 +457,8 @@
       builderInvestigationEvidence.commit(
         updated.builderBudget.review_investigation_evidence_max_tokens
       );
+      builderSilenceTimeout.commit(updated.builderBudget.silence_timeout_seconds ?? null);
+      builderCallCeiling.commit(updated.builderBudget.call_ceiling_seconds ?? null);
     }
     if (updated.ragEvidence) {
       evidenceSources.commit(updated.ragEvidence.max_sources_with_recorded_passages);
@@ -733,6 +798,53 @@
         </Settings.Group>
 
         <Settings.Group
+          title={m.ai_builder_timing_group()}
+          description={m.ai_builder_timing_group_description()}
+          density="compact"
+        >
+          <Settings.ToggleNumberRow
+            title={m.ai_builder_timing_silence_title()}
+            description={m.ai_builder_timing_silence_description()}
+            toggleLabel={m.ai_builder_timing_silence_label()}
+            valueLabel={m.flow_settings_value_max_label()}
+            unit={m.flow_settings_unit_seconds()}
+            offStatus={m.ai_builder_timing_default_status({
+              value: describeSeconds(timingBudget.silence_timeout_seconds_default)
+            })}
+            info={m.ai_builder_timing_silence_info()}
+            hint={timingHint(builderSilenceTimeout, timingBudget.silence_timeout_seconds_default)}
+            field={builderSilenceTimeout}
+          />
+          <Settings.ToggleNumberRow
+            title={m.ai_builder_timing_call_ceiling_title()}
+            description={m.ai_builder_timing_call_ceiling_description()}
+            toggleLabel={m.ai_builder_timing_call_ceiling_label()}
+            valueLabel={m.flow_settings_value_max_label()}
+            unit={m.flow_settings_unit_seconds()}
+            offStatus={m.ai_builder_timing_default_status({
+              value: describeSeconds(timingBudget.call_ceiling_seconds_default)
+            })}
+            info={m.ai_builder_timing_call_ceiling_info()}
+            hint={timingHint(builderCallCeiling, timingBudget.call_ceiling_seconds_default)}
+            field={builderCallCeiling}
+          />
+          {#if timingConflict}
+            <div class="px-4 lg:px-0.5">
+              <Alert.Root variant="destructive" class="max-w-xl">
+                <TriangleAlert aria-hidden="true" />
+                <Alert.Title>{m.ai_builder_timing_conflict_title()}</Alert.Title>
+                <Alert.Description>
+                  {m.ai_builder_timing_conflict({
+                    silence: describeSeconds(timingConflict.silence),
+                    ceiling: describeSeconds(timingConflict.ceiling)
+                  })}
+                </Alert.Description>
+              </Alert.Root>
+            </div>
+          {/if}
+        </Settings.Group>
+
+        <Settings.Group
           title={m.flow_mapped_execution_group()}
           description={m.flow_mapped_execution_group_description()}
           density="compact"
@@ -849,6 +961,11 @@
           </p>
           {#if timeoutOrderError}
             <p class="text-negative-stronger mt-0.5 text-xs">{timeoutOrderError}</p>
+          {/if}
+          {#if timingBlocksSave}
+            <p class="text-negative-stronger mt-0.5 text-xs">
+              {m.ai_builder_timing_save_blocked()}
+            </p>
           {/if}
         </div>
         <div class="flex items-center gap-2">

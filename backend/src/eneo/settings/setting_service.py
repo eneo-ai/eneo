@@ -20,6 +20,7 @@ from eneo.files.file_reference import file_reference_base_url
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     apply_ai_builder_budget_policy_patch,
+    deployment_ai_builder_budget_policy,
     resolve_ai_builder_budget_policy,
 )
 from eneo.flows.ai_builder.planning_state import PLANNING_STATE_PAYLOAD_CAP_BYTES
@@ -177,6 +178,7 @@ def _rag_evidence_policy_public(
 def _ai_builder_budget_public(
     policy: AIBuilderBudgetPolicy,
 ) -> AIBuilderBudgetSettingsPublic:
+    deployment = deployment_ai_builder_budget_policy()
     return AIBuilderBudgetSettingsPublic(
         conversation_safety_buffer_tokens=policy.conversation_safety_buffer_tokens,
         minimum_conversation_budget_tokens=policy.minimum_conversation_budget_tokens,
@@ -184,6 +186,10 @@ def _ai_builder_budget_public(
         review_investigation_evidence_max_tokens=(
             policy.review_investigation_evidence_max_tokens
         ),
+        silence_timeout_seconds=policy.silence_timeout_override_seconds,
+        silence_timeout_seconds_default=deployment.silence_timeout_seconds,
+        call_ceiling_seconds=policy.call_ceiling_override_seconds,
+        call_ceiling_seconds_default=deployment.call_ceiling_seconds,
         max_attachments=policy.max_attachments,
         max_message_chars=policy.max_message_chars,
         max_template_inspection_uncompressed_bytes=(
@@ -982,10 +988,17 @@ class SettingService:
         return _ai_builder_budget_public(await self.get_ai_builder_budget_policy())
 
     async def get_ai_builder_budget_policy(self) -> AIBuilderBudgetPolicy:
-        """Resolve effective Builder settings for authenticated tenant services."""
+        """Resolve effective Builder settings for authenticated tenant services.
+
+        For the admin page and the limits endpoint: neither enforces the
+        deadlines, and the page must open to let an admin repair a conflicting
+        pair.
+        """
 
         tenant = await self._get_tenant_for_flow_settings()
-        return resolve_ai_builder_budget_policy(getattr(tenant, "flow_settings", None))
+        return resolve_ai_builder_budget_policy(
+            getattr(tenant, "flow_settings", None), check_timing_order=False
+        )
 
     @validate_permissions(Permission.ADMIN)
     async def update_ai_builder_budget_settings(
@@ -1005,10 +1018,10 @@ class SettingService:
             )
         )
         previous = _ai_builder_budget_public(
-            resolve_ai_builder_budget_policy(change.before)
+            resolve_ai_builder_budget_policy(change.before, check_timing_order=False)
         )
         updated = _ai_builder_budget_public(
-            resolve_ai_builder_budget_policy(change.after)
+            resolve_ai_builder_budget_policy(change.after, check_timing_order=False)
         )
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,

@@ -124,6 +124,13 @@ def test_tenant_in_db_validates_ai_builder_flow_settings():
     assert tenant.flow_settings["ai_builder"]["max_template_placeholders"] == 750
 
 
+# Mutant: the stored-shape validator stops parsing deadline values, so a
+# non-positive one loads and every later turn of the tenant fails.
+def test_tenant_in_db_rejects_a_non_positive_deadline():
+    with pytest.raises(ValueError, match="silence_timeout_seconds must be a positive"):
+        _tenant_with_flow_settings({"ai_builder": {"silence_timeout_seconds": 0}})
+
+
 def test_tenant_in_db_rejects_invalid_ai_builder_flow_settings():
     with pytest.raises(ValueError, match="flow_settings.ai_builder"):
         TenantInDB(

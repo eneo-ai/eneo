@@ -643,10 +643,11 @@ def record_ai_builder_provider_failure(
                     "local deadline (%s s of silence, %s s call ceiling) had "
                     "expired: a proxy or gateway between Eneo and the provider "
                     "likely timed out first. Check proxy server timeouts "
-                    "against AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS; a call that "
-                    "may think waits up to the call ceiling "
-                    "(AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS) for its first "
-                    "output.",
+                    "against the silence timeout and, for a call that may think, "
+                    "the call ceiling for its first output (both set in Admin > "
+                    "Flow settings; deployment defaults "
+                    "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS and "
+                    "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS).",
                     failure.status_code,
                     provider_elapsed_ms,
                     request_budget.timeout_seconds,

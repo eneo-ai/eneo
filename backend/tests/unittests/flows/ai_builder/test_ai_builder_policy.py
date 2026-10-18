@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -10,6 +11,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     AIBuilderRequestBudget,
+    AIBuilderTimingOrderError,
     apply_ai_builder_budget_policy_patch,
     resolve_ai_builder_budget_policy,
 )
@@ -233,7 +235,7 @@ def test_classification_uses_model_capacity_and_the_shared_request_deadline(
     policy = AIBuilderBudgetPolicy(
         conversation_safety_buffer_tokens=2_000,
         minimum_conversation_budget_tokens=4_000,
-        proposal_timeout_seconds=240.0,
+        silence_timeout_seconds=240.0,
     )
 
     budget = policy.classification_request_budget(
@@ -313,6 +315,11 @@ def test_classification_ceiling_defaults_to_one_silence_deadline_per_ask(
         # Mutant: a ceiling above the provider call ceiling loads.
         ({"ai_builder_classification_ceiling_seconds": 1_801.0}, False),
         ({"ai_builder_classification_ceiling_seconds": float("inf")}, False),
+        # Mutant: startup stops applying the shared ordering rule to the silence
+        # deadlines.
+        ({"ai_builder_proposal_timeout_seconds": 1_801.0}, False),
+        ({"ai_builder_classification_timeout_seconds": 1_801.0}, False),
+        ({"ai_builder_proposal_timeout_seconds": 1_800.0}, True),
         # Mutant: a zero answer cap loads.
         ({"ai_builder_classification_answer_cap_tokens": 0}, False),
     ],
@@ -339,7 +346,7 @@ def test_classification_honors_an_explicit_deployment_deadline() -> None:
         conversation_safety_buffer_tokens=2_000,
         minimum_conversation_budget_tokens=4_000,
         classification_timeout_seconds=90.0,
-        proposal_timeout_seconds=240.0,
+        silence_timeout_seconds=240.0,
     )
 
     budget = policy.classification_request_budget(
@@ -354,7 +361,7 @@ def test_review_evidence_cap_limits_input_within_the_models_capacity() -> None:
     assert policy.review_evidence_max_input_tokens is None
     budget = policy.review_request_budget(capacity=ModelCapacity(1_000_000, 8_000))
     assert budget.request_budget_tokens == 1_000_000
-    assert budget.timeout_seconds == policy.proposal_timeout_seconds
+    assert budget.timeout_seconds == policy.silence_timeout_seconds
 
     capped = resolve_ai_builder_budget_policy(
         {"ai_builder": {"review_evidence_max_input_tokens": 32_000}}
@@ -560,3 +567,204 @@ def test_two_limit_budget_allocation(
     assert resolved.provider_output_cap_tokens == output_cap
     assert planned.resolve(input_tokens=allowance + 1) is None
     assert budget.plan(required_input_tokens=98) is None
+
+
+def _deployment(**timing: object) -> SimpleNamespace:
+    values: dict[str, object] = {
+        "ai_builder_conversation_safety_buffer_tokens": 2_000,
+        "ai_builder_minimum_conversation_budget_tokens": 4_000,
+        "ai_builder_classification_timeout_seconds": None,
+        "ai_builder_proposal_timeout_seconds": 300.0,
+        "ai_builder_provider_call_ceiling_seconds": 1_800.0,
+    }
+    return SimpleNamespace(**{**values, **timing})
+
+
+@pytest.fixture
+def deployment_timing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The patch applier reads the deployment values itself."""
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_settings.get_settings", _deployment
+    )
+
+
+@pytest.mark.parametrize(
+    ("stored", "silence", "ceiling"),
+    [
+        # Mutant: the deployment default is ignored when the key is absent (the
+        # deployment values differ from the code constants on purpose).
+        ({}, 240.0, 2_400.0),
+        # Mutant: the two tenant keys are mapped onto each other's field.
+        ({"silence_timeout_seconds": 600}, 600.0, 2_400.0),
+        ({"call_ceiling_seconds": 900}, 240.0, 900.0),
+        (
+            {"silence_timeout_seconds": 120, "call_ceiling_seconds": 240},
+            120.0,
+            240.0,
+        ),
+    ],
+)
+def test_tenant_deadlines_override_each_deployment_value_on_their_own(
+    stored: dict[str, int], silence: float, ceiling: float
+) -> None:
+    policy = resolve_ai_builder_budget_policy(
+        {"ai_builder": stored},
+        defaults=_deployment(
+            ai_builder_proposal_timeout_seconds=240.0,
+            ai_builder_provider_call_ceiling_seconds=2_400.0,
+        ),
+    )
+
+    budget = policy.proposal_request_budget(capacity=ModelCapacity(128_000, 16_384))
+    assert (budget.timeout_seconds, budget.ceiling_seconds) == (silence, ceiling)
+    assert policy.silence_timeout_override_seconds == stored.get(
+        "silence_timeout_seconds"
+    )
+    assert policy.call_ceiling_override_seconds == stored.get("call_ceiling_seconds")
+
+
+# Mutant: the classification budget keeps the deployment silence instead of
+# deriving from the effective one.
+def test_a_tenant_silence_timeout_reaches_the_classification_budget() -> None:
+    policy = resolve_ai_builder_budget_policy(
+        {"ai_builder": {"silence_timeout_seconds": 100, "call_ceiling_seconds": 150}},
+        defaults=_deployment(),
+    )
+
+    budget = policy.classification_request_budget(
+        capacity=ModelCapacity(128_000, 32_768)
+    )
+
+    # Derived ceiling: min(2 x silence, call ceiling).
+    assert (budget.timeout_seconds, budget.ceiling_seconds) == (100.0, 150.0)
+
+
+@pytest.mark.parametrize(
+    ("stored", "deployment", "named"),
+    [
+        # Mutant: the resolver does not hold a tenant silence to the deployment
+        # ceiling, so the request budget's bare ValueError fires per turn.
+        (
+            {"silence_timeout_seconds": 2_000},
+            {},
+            ("2000 s, set in Admin > Flow settings", "1800 s, the deployment default"),
+        ),
+        (
+            {"call_ceiling_seconds": 100},
+            {"ai_builder_proposal_timeout_seconds": 300.0},
+            ("300 s, the deployment default", "100 s, set in Admin > Flow settings"),
+        ),
+        # The deployment lowered its ceiling under a stored tenant silence.
+        (
+            {"silence_timeout_seconds": 900},
+            {"ai_builder_provider_call_ceiling_seconds": 600.0},
+            ("900 s, set in Admin > Flow settings", "600 s, the deployment default"),
+        ),
+        # Mutant: the explicit classification ceiling is not held to a tenant's
+        # lowered call ceiling.
+        (
+            {"call_ceiling_seconds": 400},
+            {"ai_builder_classification_ceiling_seconds": 500.0},
+            ("500 s, the deployment default", "400 s, set in Admin > Flow settings"),
+        ),
+        (
+            {"call_ceiling_seconds": 400},
+            {"ai_builder_classification_timeout_seconds": 450.0},
+            ("450 s, the deployment default", "400 s, set in Admin > Flow settings"),
+        ),
+        # Mutant: the classification ceiling's lower bound is not held to a
+        # tenant's raised silence timeout, which the classification inherits.
+        (
+            {"silence_timeout_seconds": 700},
+            {"ai_builder_classification_ceiling_seconds": 600.0},
+            ("600 s, the deployment default", "700 s, set in Admin > Flow settings"),
+        ),
+    ],
+)
+def test_a_conflicting_deadline_pair_is_refused_with_a_message_naming_both(
+    stored: dict[str, int], deployment: dict[str, float], named: tuple[str, str]
+) -> None:
+    defaults = _deployment(**deployment)
+
+    with pytest.raises(AIBuilderTimingOrderError) as exc_info:
+        resolve_ai_builder_budget_policy({"ai_builder": stored}, defaults=defaults)
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS
+    assert all(text in str(exc_info.value) for text in named)
+
+
+@pytest.mark.parametrize(
+    "stored", [{"silence_timeout_seconds": 0}, {"call_ceiling_seconds": True}]
+)
+def test_an_invalid_stored_deadline_is_a_typed_bad_request_at_resolution(
+    stored: dict[str, object],
+) -> None:
+    # Mutant: the resolver trusts the stored value and lets it through.
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        resolve_ai_builder_budget_policy({"ai_builder": stored}, defaults=_deployment())
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS
+
+
+def test_the_patch_applier_stores_deadlines_and_null_removes_them(
+    deployment_timing: None,
+) -> None:
+    stored = apply_ai_builder_budget_policy_patch(
+        {"ai_builder": {"max_attachments": 5}},
+        silence_timeout_seconds=600,
+        call_ceiling_seconds=1_200,
+    )
+    assert stored["ai_builder"] == {
+        "max_attachments": 5,
+        "silence_timeout_seconds": 600,
+        "call_ceiling_seconds": 1_200,
+    }
+
+    # Mutant: remove_keys is ignored for the deadline keys.
+    restored = apply_ai_builder_budget_policy_patch(
+        stored, remove_keys={"silence_timeout_seconds", "call_ceiling_seconds"}
+    )
+    assert restored["ai_builder"] == {"max_attachments": 5}
+
+
+@pytest.mark.parametrize(
+    ("current", "patch"),
+    [
+        # Mutant: the applier does not hold a new silence to the effective
+        # ceiling, so the pair is stored and fails every later turn.
+        ({}, {"silence_timeout_seconds": 3_000}),
+        ({"call_ceiling_seconds": 3_000}, {"call_ceiling_seconds": 200}),
+        # Removing the ceiling override falls back to a ceiling the silence
+        # override exceeds.
+        (
+            {"silence_timeout_seconds": 1_900, "call_ceiling_seconds": 2_000},
+            {"remove_keys": {"call_ceiling_seconds"}},
+        ),
+    ],
+)
+def test_the_patch_applier_refuses_a_conflicting_pair_and_changes_nothing(
+    deployment_timing: None, current: dict[str, int], patch: dict[str, Any]
+) -> None:
+    flow_settings = {"ai_builder": dict(current)}
+    before = {"ai_builder": dict(current)}
+
+    with pytest.raises(AIBuilderTimingOrderError):
+        apply_ai_builder_budget_policy_patch(flow_settings, **patch)
+
+    assert flow_settings == before
+
+
+def test_a_patch_may_repair_a_conflict_and_an_unrelated_patch_is_not_refused(
+    deployment_timing: None,
+) -> None:
+    conflicting = {"ai_builder": {"silence_timeout_seconds": 2_000}}
+
+    # Mutant: the check runs on every patch, locking an admin out of other edits.
+    unrelated = apply_ai_builder_budget_policy_patch(conflicting, max_attachments=7)
+    assert unrelated["ai_builder"]["max_attachments"] == 7
+
+    repaired = apply_ai_builder_budget_policy_patch(
+        conflicting, remove_keys={"silence_timeout_seconds"}
+    )
+    assert "ai_builder" not in repaired

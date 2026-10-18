@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import cast
 
@@ -30,8 +31,13 @@ AI_BUILDER_DEFAULT_MAX_TEMPLATE_PLACEHOLDERS = 1_000
 # overrides needs those rows normalised first: tenant validation rejects an
 # override above the bound. Re-measure before changing this number.
 AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS = 16_000
+# Provider-call deadlines a tenant admin may set, in whole seconds. No range is
+# fixed here: what a model needs is the deployment's and the admin's knowledge,
+# not the code's. The only rules are positive and the ordering below.
+AI_BUILDER_TIMING_FIELDS = ("silence_timeout_seconds", "call_ceiling_seconds")
 AI_BUILDER_BUDGET_FIELDS = frozenset(
     {
+        *AI_BUILDER_TIMING_FIELDS,
         "conversation_safety_buffer_tokens",
         "minimum_conversation_budget_tokens",
         "max_attachments",
@@ -96,6 +102,20 @@ def parse_ai_builder_operating_limit(value: object, field_name: str) -> int:
     return value
 
 
+def parse_ai_builder_timing_seconds(value: object, field_name: str) -> int:
+    """A tenant deadline: a positive whole number of seconds a float can hold."""
+
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer.")
+    try:
+        representable = value >= 1 and math.isfinite(float(value))
+    except OverflowError:
+        representable = False
+    if not representable:
+        raise ValueError(f"{field_name} must be a positive number of seconds.")
+    return value
+
+
 def validate_ai_builder_budget_settings_object(
     value: object,
 ) -> dict[str, object]:
@@ -128,6 +148,12 @@ def validate_ai_builder_budget_settings_object(
     ):
         if field_name in value_dict:
             validated[field_name] = parse_ai_builder_operating_limit(
+                value_dict[field_name],
+                f"flow_settings.ai_builder.{field_name}",
+            )
+    for field_name in AI_BUILDER_TIMING_FIELDS:
+        if field_name in value_dict:
+            validated[field_name] = parse_ai_builder_timing_seconds(
                 value_dict[field_name],
                 f"flow_settings.ai_builder.{field_name}",
             )

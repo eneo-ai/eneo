@@ -6,6 +6,10 @@ export const BUILDER_BUDGET = {
   review_evidence_max_input_tokens: null,
   review_investigation_evidence_max_tokens: 16_000,
   review_investigation_evidence_ceiling_tokens: 16_000,
+  silence_timeout_seconds: null,
+  silence_timeout_seconds_default: 300,
+  call_ceiling_seconds: null,
+  call_ceiling_seconds_default: 1800,
   max_attachments_hard_limit: 100,
   max_message_chars_hard_limit: 50_000
 };

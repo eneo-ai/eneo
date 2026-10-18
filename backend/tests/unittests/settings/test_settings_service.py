@@ -7,6 +7,7 @@ from pydantic import BaseModel, ValidationError
 
 from eneo.flows import flow_runtime_policy
 from eneo.flows.ai_builder import ai_builder_settings
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderTimingOrderError
 from eneo.flows.ai_builder.planning_state import PLANNING_STATE_PAYLOAD_CAP_BYTES
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_evidence_policy import (
@@ -1233,6 +1234,157 @@ async def test_update_ai_builder_budget_settings_persists_and_audits(monkeypatch
     assert calls[0]["metadata"]["changes"]["max_attachments"] == {
         "old": 100,
         "new": 42,
+    }
+
+
+def _timing_service(monkeypatch, tenant_repo, audit_calls, **deployment):
+    """A SettingService whose deployment deadlines are silence 120 s, ceiling 1800 s."""
+
+    async def _capture(*args, **kwargs):
+        audit_calls.append(kwargs)
+
+    audit_service = MockAuditService()
+    audit_service.log_async = _capture
+    monkeypatch.setattr(
+        ai_builder_settings,
+        "get_settings",
+        lambda: SimpleNamespace(
+            ai_builder_conversation_safety_buffer_tokens=2000,
+            ai_builder_minimum_conversation_budget_tokens=4000,
+            ai_builder_classification_timeout_seconds=None,
+            ai_builder_proposal_timeout_seconds=120,
+            **deployment,
+        ),
+    )
+    return SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+
+# Mutant: a JSON boolean or numeric string is coerced into a deadline.
+@pytest.mark.parametrize("value", [0, -5, 2.5, True, False, "30"])
+def test_a_deadline_patch_must_be_a_positive_whole_number(value):
+    # Mutant: the update model accepts zero or a negative deadline.
+    for field in ("silence_timeout_seconds", "call_ceiling_seconds"):
+        with pytest.raises(ValidationError):
+            AIBuilderBudgetSettingsUpdate(**{field: value})
+
+
+async def test_ai_builder_deadlines_are_overrides_with_the_deployment_default_beside_them(
+    monkeypatch,
+):
+    tenant_repo = MockTenantRepo()
+    calls = []
+    service = _timing_service(monkeypatch, tenant_repo, calls)
+
+    inherited = await service.get_ai_builder_budget_settings()
+    assert inherited.silence_timeout_seconds is None
+    assert inherited.silence_timeout_seconds_default == 120.0
+    assert inherited.call_ceiling_seconds is None
+    assert inherited.call_ceiling_seconds_default == 1800.0
+
+    # Mutant: the public model reports the effective value as the override, so
+    # the page cannot tell a pinned value from an inherited one.
+    updated = await service.update_ai_builder_budget_settings(
+        AIBuilderBudgetSettingsUpdate(silence_timeout_seconds=600)
+    )
+    assert updated.silence_timeout_seconds == 600
+    assert updated.silence_timeout_seconds_default == 120.0
+    assert updated.call_ceiling_seconds is None
+
+
+async def test_ai_builder_deadline_changes_are_audited_and_null_restores_inheritance(
+    monkeypatch,
+):
+    tenant_repo = MockTenantRepo()
+    calls = []
+    service = _timing_service(monkeypatch, tenant_repo, calls)
+
+    await service.update_ai_builder_budget_settings(
+        AIBuilderBudgetSettingsUpdate(
+            silence_timeout_seconds=600, call_ceiling_seconds=2400
+        )
+    )
+    restored = await service.update_ai_builder_budget_settings(
+        AIBuilderBudgetSettingsUpdate(silence_timeout_seconds=None)
+    )
+
+    # Mutant: the audit omits the deadline keys or reports the effective value.
+    assert calls[0]["metadata"]["changes"] == {
+        "silence_timeout_seconds": {"old": None, "new": 600},
+        "call_ceiling_seconds": {"old": None, "new": 2400},
+    }
+    assert calls[1]["metadata"]["changes"] == {
+        "silence_timeout_seconds": {"old": 600, "new": None}
+    }
+    # Mutant: null does not remove the stored override.
+    assert restored.silence_timeout_seconds is None
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["ai_builder"] == {"call_ceiling_seconds": 2400}
+
+
+async def test_a_conflicting_deadline_patch_is_refused_and_nothing_is_written(
+    monkeypatch,
+):
+    tenant_repo = MockTenantRepo()
+    calls = []
+    service = _timing_service(monkeypatch, tenant_repo, calls)
+
+    # Mutant: the service skips the applier's ordering check (the pair is stored
+    # and every Builder turn then fails).
+    with pytest.raises(AIBuilderTimingOrderError, match="deployment default"):
+        await service.update_ai_builder_budget_settings(
+            AIBuilderBudgetSettingsUpdate(call_ceiling_seconds=100)
+        )
+
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings == {}
+    assert calls == []
+
+
+async def test_an_admin_can_open_and_repair_a_pair_the_deployment_made_conflicting(
+    monkeypatch,
+):
+    # The deployment lowered its ceiling to 600 s under a stored 900 s silence.
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={"flow_settings": {"ai_builder": {"silence_timeout_seconds": 900}}}
+    )
+    calls = []
+    service = _timing_service(
+        monkeypatch,
+        tenant_repo,
+        calls,
+        ai_builder_provider_call_ceiling_seconds=600.0,
+    )
+
+    # Mutant: the admin read or the audit's before-state resolves with the turn
+    # check and refuses the very page that fixes the conflict.
+    shown = await service.get_ai_builder_budget_settings()
+    assert shown.silence_timeout_seconds == 900
+    assert shown.call_ceiling_seconds_default == 600.0
+
+    # Mutant: the audit's after-state resolves with the turn check, so an
+    # unrelated edit over the stored conflict fails after it was written.
+    unrelated = await service.update_ai_builder_budget_settings(
+        AIBuilderBudgetSettingsUpdate(max_attachments=7)
+    )
+    assert unrelated.max_attachments == 7
+
+    repaired = await service.update_ai_builder_budget_settings(
+        AIBuilderBudgetSettingsUpdate(silence_timeout_seconds=None)
+    )
+    assert repaired.silence_timeout_seconds is None
+    assert calls[1]["metadata"]["changes"] == {
+        "silence_timeout_seconds": {"old": 900, "new": None}
     }
 
 

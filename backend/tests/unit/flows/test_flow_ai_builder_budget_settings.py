@@ -11,6 +11,7 @@ from eneo.flows.flow_ai_builder_budget_settings import (
     extract_ai_builder_budget_settings,
     parse_ai_builder_budget_token,
     parse_ai_builder_operating_limit,
+    parse_ai_builder_timing_seconds,
     validate_ai_builder_budget_settings_object,
 )
 
@@ -100,6 +101,29 @@ def test_operating_limits_use_each_named_closed_hard_limit(
             parse_ai_builder_operating_limit(value, field_name)
 
 
+@pytest.mark.parametrize("field", ["silence_timeout_seconds", "call_ceiling_seconds"])
+def test_timing_seconds_are_any_positive_whole_number_a_float_holds(
+    field: str,
+) -> None:
+    path = f"flow_settings.ai_builder.{field}"
+    # Mutant: a range is enforced again, so a legitimate large value is refused.
+    assert parse_ai_builder_timing_seconds(1, path) == 1
+    assert parse_ai_builder_timing_seconds(10**9, path) == 10**9
+    # Mutant: zero or a negative number is accepted.
+    for non_positive in (0, -1):
+        with pytest.raises(
+            ValueError, match=rf"^{path} must be a positive number of seconds\.$"
+        ):
+            parse_ai_builder_timing_seconds(non_positive, path)
+    # Mutant: an int no float can hold passes (OverflowError instead of a refusal).
+    with pytest.raises(ValueError, match="positive number of seconds"):
+        parse_ai_builder_timing_seconds(10**400, path)
+    # Mutant: bool (an int subclass), a float or a string is accepted.
+    for wrong in (None, True, False, 300.0, "300"):
+        with pytest.raises(ValueError, match=rf"^{path} must be an integer\.$"):
+            parse_ai_builder_timing_seconds(wrong, path)
+
+
 @pytest.mark.parametrize("value", [None, True, False, 1.0, "1"])
 def test_operating_limits_reject_non_integer_values(value: object) -> None:
     field_name = "flow_settings.ai_builder.max_attachments"
@@ -120,6 +144,9 @@ def test_budget_settings_validation_accepts_every_supported_field() -> None:
         "max_template_placeholders": 7,
         "review_evidence_max_input_tokens": 8,
         "review_investigation_evidence_max_tokens": 9_000,
+        # Mutant: a deadline key missing from the allowlist or the validator.
+        "silence_timeout_seconds": 600,
+        "call_ceiling_seconds": 3600,
     }
 
     assert validate_ai_builder_budget_settings_object(value) == value

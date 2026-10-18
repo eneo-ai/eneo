@@ -2478,6 +2478,40 @@ class TestGetSessionModelsEndpoint:
         service.completion_service.resolve_model_route.assert_not_awaited()
 
     @pytest.mark.anyio
+    async def test_lists_models_while_the_deadline_settings_conflict(self):
+        # Mutant: the listing resolves the policy with the deadline check on,
+        # so a conflicting pair refuses a call that uses no deadline.
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        container.ai_builder_service.return_value.get_session.return_value = session
+        # A call ceiling below the deployment's silence timeout.
+        container.tenant_repo.return_value.get.return_value.flow_settings = {
+            "ai_builder": {"call_ceiling_seconds": 1}
+        }
+        model = MagicMock()
+        model.org = None
+        model.provider_name = None
+        model.id = uuid4()
+        model.capacity = ModelCapacity(32_000, 4_000)
+        model.name = "GPT-4"
+        model.nickname = None
+        model.provider_type = "openai"
+        model.reasoning = False
+        model.model_kwargs_capabilities = None
+        model.get_model_route.return_value = "openai/gpt-4"
+        model.supported_model_kwargs = SupportedModelKwargs()
+        _activate_model_provider(container, model)
+        space = container.space_service.return_value.get_space.return_value
+        space.completion_models = [model]
+        _use_real_default_policy(space)
+
+        result = await get_session_models(
+            request=MagicMock(), session_id=session.id, container=container
+        )
+
+        assert [option.id for option in result.models] == [model.id]
+
+    @pytest.mark.anyio
     async def test_lists_only_models_that_clear_the_evidence_floor(self):
         """A conversation that has read run evidence of level 2 runs its next
         turn on a level-2 model whatever the space default is. The listing

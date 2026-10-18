@@ -389,23 +389,36 @@ recorded on the prepared turn is the one sent, and the step schema's
 Every Builder provider call goes through one owner
 (`ai_builder_provider_call.complete_with_silence_deadline`). The answer is
 streamed and rebuilt into the complete completion, so a slow model is
-observable while it works. `AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS` (default 300)
-bounds *silence*: the longest wait for the provider's next yielded chunk once
-the model has produced output. A model that keeps yielding is not cut off by
-that deadline however long its answer takes, while a stalled stream is still
-detected. Before its first output (chunks that carry none, such as a role-only
-opening, do not count) a hung call cannot be told from one that is thinking
-without streaming its reasoning. A call that may think therefore waits for the
-response and that output up to the whole-call ceiling below: it sends a
-reasoning effort other than `none`, or sends no effort on a route that takes one (the
-provider's default then applies, so a reasoning route that is off by default
-waits longer on a hung call too). Any other call waits only the silence
-deadline. The provider SDK's
-own read timeout is set to the ceiling, behind these local deadlines.
-`AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS` (default 1800) bounds the whole
-call, whether it keeps producing or, for a call that may think, never produces;
-it is policy of its own and never below the silence deadline. Neither is the send-lock lease, which the turn renews
-while it works. An explicitly configured
+observable while it works. The silence timeout bounds *silence*: the longest
+wait for the provider's next yielded chunk once the model has produced output. A
+model that keeps yielding is not cut off by that deadline however long its answer
+takes, while a stalled stream is still detected. Before its first output (chunks
+that carry none, such as a role-only opening, do not count) a hung call cannot be
+told from one that is thinking without streaming its reasoning. A call that may
+think therefore waits for the response and that output up to the call ceiling
+below: it sends a reasoning effort other than `none`, or sends no effort on a route
+that takes one (the provider's default then applies, so a reasoning route that is off
+by default waits longer on a hung call too). Any other call waits only the silence
+timeout. The provider SDK's own read timeout is set to the ceiling, behind these
+local deadlines. The call ceiling bounds the whole call, whether it keeps
+producing or, for a call that may think, never produces; it is policy of its own
+and never below the silence timeout. Neither is the send-lock lease, which the
+turn renews while it works.
+The deployment sets the defaults (`AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS`, 300,
+and `AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS`, 1800); an admin overrides
+either in Admin > Flow settings as `flow_settings.ai_builder.silence_timeout_seconds` and
+`call_ceiling_seconds` (each a positive number of whole seconds). An absent key
+follows the deployment default, including a later change of it. Three ordering
+rules hold for the effective values, whichever side set each: the silence
+timeout, and a classification timeout the deployment sets, may not exceed the
+call ceiling, and a classification ceiling the deployment sets lies between the
+classification silence timeout (the silence timeout unless the deployment sets
+one) and the call ceiling. Deployment startup checks them on the env values; the
+settings write refuses a change that breaks one, and a turn whose effective
+values break one (the deployment lowered its ceiling under a tenant's silence
+timeout) is refused until an admin repairs it. The API error names both values and
+where each comes from; the web Builder shows a fixed "settings are invalid"
+sentence, so the values appear only in the API response. An explicitly configured
 `AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS` overrides the silence deadline for
 classification, whose wait before its first output is bounded by its own ceiling
 below only for a call that may think; leaving it unset restores inheritance. Classification has a
@@ -419,10 +432,11 @@ sends a reasoning effort, classification sends the lowest level below it that
 the model offers and the route can send, so it never reasons more than the
 turn, unless `AI_BUILDER_CLASSIFICATION_REASONING_EFFORT=turn` keeps the
 user's. Model
-context capacity does not establish provider processing speed, so deadlines are deployment
-policy. A proxy between Eneo and the provider that closes idle connections must
-allow at least this silence, and for a call that may think the whole-call
-ceiling for its first output; see the failure telemetry above for how such a
+context capacity does not establish provider processing speed, so the deadlines are
+deployment defaults that an admin may override. A proxy between
+Eneo and the provider that closes idle connections must allow at least this
+silence, and for a call that may think the whole-call ceiling for its first
+output; see the failure telemetry above for how such a
 timeout is recognised (`local_deadline` names the timer that expired, silence
 or ceiling, when one did).
 
