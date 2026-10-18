@@ -80,6 +80,7 @@ from eneo.flows.ai_builder.ai_builder_tools import (
 from eneo.flows.ai_builder.planning_state import (
     ConfirmedRuntimeMetadataField,
     PlanningState,
+    RuntimeMetadataFieldPurpose,
 )
 from eneo.flows.application.flow_authoring_snapshot import UnsupportedSavedStepsError
 from eneo.flows.application.flow_draft_materialization import (
@@ -101,7 +102,10 @@ from eneo.flows.flow_authoring_variable_rewriting import (
     flow_step_validation_views_from_draft_spec,
 )
 from eneo.flows.flow_variable_definitions import form_field_reference_expression
-from eneo.flows.input_binding_contract_rules import SourceRefBinding
+from eneo.flows.input_binding_contract_rules import (
+    SourceRefBinding,
+    effective_question_binding,
+)
 from eneo.flows.runtime import tool_argument_check
 from eneo.mcp_servers.application.unattended_tool_use import UnattendedToolRefusal
 from tests.unittests.flows.ai_builder.test_ai_builder_form_field_lifecycle import (
@@ -902,6 +906,55 @@ def test_a_required_argument_is_not_bound_to_an_optional_saved_field() -> None:
         raised.value.log_context["reason"]
         == "tool_argument_run_input_required_mismatch"
     )
+
+
+@pytest.mark.parametrize(
+    ("purposes", "then_write", "query_in_questions"),
+    [
+        # Kills: the tool argument's exception dropped (a tool-only plan refused).
+        ({"query": "interpret_input"}, False, []),
+        # Kills: the exception taken although a step can take the field.
+        ({"query": "interpret_input"}, True, [True]),
+        # Kills: the exception for a field no tool argument reads.
+        ({"query": "interpret_input", "audience": "interpret_input"}, False, None),
+        # Kills: the exception moved before the purpose match (shaping the
+        # result would then need no step).
+        ({"query": "shape_result"}, False, None),
+    ],
+)
+def test_a_tool_argument_reads_an_interpret_input_field_no_step_can_take(
+    purposes: dict[str, RuntimeMetadataFieldPurpose],
+    then_write: bool,
+    query_in_questions: list[bool] | None,
+) -> None:
+    search = _choice_tool(
+        CHOICE_TOOL_A, "search", {"query": {"type": "string"}}, "query"
+    )
+    flow = _run_input_flow((search, {"query": "query"}))
+    if not then_write:
+        flow["steps"].pop()
+    value = DEPARTMENT.value.model_copy(update={"required": True})
+    confirmed = tuple(
+        DEPARTMENT.model_copy(
+            update={
+                "purpose": purpose,
+                "value": value.model_copy(update={"variable_name": name}),
+            }
+        )
+        for name, purpose in purposes.items()
+    )
+    if query_in_questions is None:
+        with pytest.raises(AIBuilderArchitectureError) as raised:
+            _compile_create(flow, _catalog(search), confirmed=confirmed)
+        reason = raised.value.log_context["reason"]
+        assert reason == "form_field_required_semantic_target_missing"
+        return
+    spec = _compile_create(flow, _catalog(search), confirmed=confirmed)
+    assert [
+        "{{ flow_input.query }}"
+        in (effective_question_binding(step.input_bindings) or "")
+        for step in spec.steps[1:]
+    ] == query_in_questions
 
 
 def _saved_flow() -> Flow:

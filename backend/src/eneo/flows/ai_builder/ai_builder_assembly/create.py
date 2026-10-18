@@ -1660,6 +1660,10 @@ def _place_runtime_form_fields(
             match record.purpose:
                 case "interpret_input":
                     if not semantic_target_indexes:
+                        # No step can take the field to understand the input,
+                        # so a tool argument that reads it is its reader.
+                        if name in tool_read_names:
+                            continue
                         return _reject(
                             "form_field_required_semantic_target_missing",
                             detail=(
