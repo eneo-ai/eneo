@@ -239,8 +239,8 @@ def test_a_repair_request_never_offers_the_decline_tool() -> None:
     """
     ctx = _make_context(decline_tool_schema=build_decline_flow_change_tool_schema())
 
-    initial = ctx.completion_request(temperature=0.1)
-    repair = ctx.completion_request(temperature=0.1, counts_as_repair=True)
+    initial = ctx.completion_request()
+    repair = ctx.completion_request(counts_as_repair=True)
 
     assert [schema["function"]["name"] for schema in initial.tool_schemas] == [
         PROPOSE_FLOW_TOOL_NAME,

@@ -79,8 +79,6 @@ class ProposalSelfCorrectionRequest:
     ctx: ProposalTurnContext
     failure: CorrectableFailure
     tool_call: RuntimeToolCall
-    self_correction_temperature: float
-    forced_proposal_temperature: float
     repair_completion: ProposalCompletionFn
     retry_config: ToolRetryConfig
 
@@ -91,7 +89,6 @@ class ForcedToolAfterTextRequest:
     correction_message_groups: tuple[ProposalMessageGroup, ...]
     assistant_text: str
     retry_config: ToolRetryConfig
-    forced_proposal_temperature: float
     repair_completion: ProposalCompletionFn
     error_phase: AIBuilderErrorPhase = AIBuilderErrorPhase.SELF_CORRECTION
 
@@ -459,16 +456,12 @@ def build_proposal_self_correction_request(
     failure: CorrectableFailure,
     tool_call: RuntimeToolCall,
     retry_config: ToolRetryConfig,
-    self_correction_temperature: float,
-    forced_proposal_temperature: float,
     repair_completion: ProposalCompletionFn,
 ) -> ProposalSelfCorrectionRequest:
     return ProposalSelfCorrectionRequest(
         ctx=ctx,
         failure=failure,
         tool_call=tool_call,
-        self_correction_temperature=self_correction_temperature,
-        forced_proposal_temperature=forced_proposal_temperature,
         repair_completion=repair_completion,
         retry_config=retry_config,
     )
@@ -497,7 +490,6 @@ async def run_tool_self_correction(
             response = await request.repair_completion(
                 ctx.completion_request(
                     message_groups=message_groups,
-                    temperature=request.self_correction_temperature,
                     counts_as_repair=True,
                 )
             )
@@ -536,7 +528,6 @@ async def run_tool_self_correction(
             response,
             ctx=ctx,
             retry_config=request.retry_config,
-            forced_proposal_temperature=request.forced_proposal_temperature,
             repair_completion=request.repair_completion,
             message_groups=message_groups,
         )
@@ -571,7 +562,6 @@ async def _repair_call_result(
     *,
     ctx: ProposalTurnContext,
     retry_config: ToolRetryConfig,
-    forced_proposal_temperature: float,
     repair_completion: ProposalCompletionFn,
     message_groups: tuple[ProposalMessageGroup, ...],
 ) -> _RepairCallResult:
@@ -614,7 +604,6 @@ async def _repair_call_result(
             correction_message_groups=message_groups,
             assistant_text=assistant_text,
             retry_config=retry_config,
-            forced_proposal_temperature=forced_proposal_temperature,
             repair_completion=repair_completion,
         )
     )
@@ -698,7 +687,6 @@ async def _execute_forced_tool_retry(
         response = await request.repair_completion(
             ctx.completion_request(
                 message_groups=forced_message_groups,
-                temperature=request.forced_proposal_temperature,
                 counts_as_repair=True,
             )
         )

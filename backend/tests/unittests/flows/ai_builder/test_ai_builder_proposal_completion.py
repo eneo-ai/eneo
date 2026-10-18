@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -19,7 +20,6 @@ from litellm.exceptions import (
     UnprocessableEntityError,
 )
 from litellm.types import utils as litellm_types
-from litellm.utils import get_optional_params
 
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
@@ -125,6 +125,14 @@ def _route(
         ),
         **({"requested_model_kwargs": requested} if requested is not None else {}),
     )
+
+
+_REASONING_AND_TEMPERATURE = SupportedModelKwargs(
+    temperature=ModelKwargCapability(supported=True, control="slider"),
+    reasoning_effort=ModelKwargCapability(
+        supported=True, control="select", options=["low", "medium", "high"]
+    ),
+)
 
 
 def _completion_request(
@@ -282,11 +290,8 @@ def test_proposal_turn_context_forces_sole_prepared_tool_for_every_request() -> 
     }
     ctx = _make_context(proposal_tool_schema=proposal_tool_schema)
 
-    initial_request = ctx.completion_request(temperature=0.2)
-    repair_request = ctx.completion_request(
-        temperature=0.4,
-        counts_as_repair=True,
-    )
+    initial_request = ctx.completion_request()
+    repair_request = ctx.completion_request(counts_as_repair=True)
 
     expected_tool_choice = forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
     assert initial_request.tool_schemas == [proposal_tool_schema]
@@ -294,7 +299,7 @@ def test_proposal_turn_context_forces_sole_prepared_tool_for_every_request() -> 
     assert initial_request.target_kind == TargetKind.CREATE
     assert repair_request.target_kind == TargetKind.CREATE
     assert (
-        _make_context(flow=MagicMock()).completion_request(temperature=0.2).target_kind
+        _make_context(flow=MagicMock()).completion_request().target_kind
         == TargetKind.EDIT
     )
     assert initial_request.tool_choice == expected_tool_choice
@@ -416,7 +421,6 @@ async def test_outbound_proposal_tools_follow_the_route_capability(
                 supports_strict_tool_schema=supports_strict_tool_schema,
             ),
             max_output_tokens=1024,
-            temperature=0.2,
             tool_choice=tool_choice,
             target_kind=target_kind,
             counts_as_repair=counts_as_repair,
@@ -469,7 +473,7 @@ async def test_initial_edit_request_projects_both_tools_strict_on_a_capable_rout
 
     await call_proposal_completion(
         litellm_client=litellm_client,
-        request=ctx.completion_request(temperature=0.2),
+        request=ctx.completion_request(),
     )
     initial_tools = litellm_client.acompletion.await_args.kwargs["tools"]
     assert _nested_key_values(initial_tools, "strict") == [True, True]
@@ -478,7 +482,7 @@ async def test_initial_edit_request_projects_both_tools_strict_on_a_capable_rout
 
     await call_proposal_completion(
         litellm_client=litellm_client,
-        request=ctx.completion_request(temperature=0.2, counts_as_repair=True),
+        request=ctx.completion_request(counts_as_repair=True),
     )
     repair_tools = litellm_client.acompletion.await_args.kwargs["tools"]
     assert _nested_key_values(repair_tools, "strict") == [True]
@@ -508,7 +512,6 @@ async def test_edit_context_repair_stays_native_strict_on_a_capable_route() -> N
     await call_proposal_completion(
         litellm_client=litellm_client,
         request=ctx.completion_request(
-            temperature=0.2,
             counts_as_repair=True,
         ),
     )
@@ -520,57 +523,27 @@ async def test_edit_context_repair_stays_native_strict_on_a_capable_route() -> N
 
 
 @pytest.mark.asyncio
-async def test_proposal_omits_temperature_without_persisted_route_capability() -> None:
-    route = await _resolved_route(None)
-    response = _make_response_with_text("ok")
-    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+async def test_proposal_call_carries_the_turns_own_choices_unchanged() -> None:
+    # Mutant M2: a user-selected effort does not reach the call.
+    litellm_client = SimpleNamespace(
+        acompletion=AsyncMock(return_value=_make_response_with_text("ok"))
+    )
 
     await call_proposal_completion(
         litellm_client=litellm_client,
         request=_completion_request(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            route=route,
+            route=_route(
+                requested=ModelKwargs(reasoning_effort="high"),
+                supported=_REASONING_AND_TEMPERATURE,
+            ),
             max_output_tokens=1024,
-            temperature=0.2,
         ),
     )
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs["model"] == "openai/gpt-test"
-    assert call_kwargs["api_key"] == "test-only"
-    assert "temperature" not in call_kwargs
-
-
-@pytest.mark.asyncio
-async def test_proposal_passes_supported_temperature_unchanged() -> None:
-    route = await _resolved_route(
-        {
-            "temperature": {
-                "supported": True,
-                "control": "slider",
-                "minimum": 0,
-                "maximum": 2,
-                "step": 0.01,
-            }
-        }
-    )
-    response = _make_response_with_text("ok")
-    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
-
-    await call_proposal_completion(
-        litellm_client=litellm_client,
-        request=_completion_request(
-            messages=[{"role": "user", "content": "Build a flow"}],
-            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            route=route,
-            max_output_tokens=1024,
-            temperature=0.27,
-        ),
-    )
-
-    assert litellm_client.acompletion.await_count == 1
-    assert litellm_client.acompletion.await_args.kwargs["temperature"] == 0.27
+    assert call_kwargs["reasoning_effort"] == "high"
 
 
 @pytest.mark.asyncio
@@ -591,7 +564,6 @@ async def test_call_proposal_completion_strips_planner_response_format_kwargs() 
                 }
             ),
             max_output_tokens=1024,
-            temperature=0.2,
         ),
     )
 
@@ -616,7 +588,6 @@ async def test_call_proposal_completion_forces_drop_params_true_on_provider_call
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(kwargs={"drop_params": False}),
             max_output_tokens=1024,
-            temperature=0.2,
         ),
     )
 
@@ -625,39 +596,11 @@ async def test_call_proposal_completion_forces_drop_params_true_on_provider_call
 
 
 @pytest.mark.asyncio
-async def test_proposal_call_uses_explicit_off_reasoning_when_model_supports_it() -> (
-    None
-):
-    route = await _resolved_route(None)
-    litellm_client = SimpleNamespace(
-        acompletion=AsyncMock(return_value=_make_response_with_text("proposal"))
-    )
-
-    with patch(
-        "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
-    ) as mock_litellm:
-        mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
-        mock_litellm.get_model_info.return_value = {
-            "supports_none_reasoning_effort": True
-        }
-        await call_proposal_completion(
-            litellm_client=litellm_client,
-            request=_completion_request(
-                messages=[{"role": "user", "content": "Build a flow"}],
-                tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-                route=route,
-                max_output_tokens=1024,
-                temperature=0.2,
-                tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
-            ),
-        )
-
-    call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs["reasoning_effort"] == "none"
-
-
-@pytest.mark.asyncio
-async def test_luna_proposal_call_uses_real_pinned_reasoning_capability() -> None:
+async def test_a_standard_proposal_call_sends_no_value_of_its_own() -> None:
+    # Mutant M1: the Builder injects a reasoning effort when the user chose
+    # Standard. Mutant M3: the Builder injects a temperature. The route takes
+    # a reasoning effort and offers a temperature, so an injected value would
+    # reach the provider.
     litellm_client = SimpleNamespace(
         acompletion=AsyncMock(return_value=_make_response_with_text("proposal"))
     )
@@ -667,59 +610,33 @@ async def test_luna_proposal_call_uses_real_pinned_reasoning_capability() -> Non
         request=_completion_request(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            route=_route(model="openai/gpt-5.6-luna"),
+            route=_route(supported=_REASONING_AND_TEMPERATURE),
             max_output_tokens=1024,
-            temperature=0.2,
-            tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
         ),
     )
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs["reasoning_effort"] == "none"
-    assert [tool["function"]["name"] for tool in call_kwargs["tools"]] == [
-        PROPOSE_FLOW_TOOL_NAME
-    ]
-
-
-@pytest.mark.asyncio
-async def test_gpt5_mini_proposal_uses_low_when_none_is_not_supported() -> None:
-    litellm_client = SimpleNamespace(
-        acompletion=AsyncMock(return_value=_make_response_with_text("proposal"))
-    )
-
-    await call_proposal_completion(
-        litellm_client=litellm_client,
-        request=_completion_request(
-            messages=[{"role": "user", "content": "Build a flow"}],
-            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            route=_route(model="openai/gpt-5-mini"),
-            max_output_tokens=1024,
-            temperature=0.2,
-            tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
-        ),
-    )
-
-    assert litellm_client.acompletion.await_args.kwargs["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in call_kwargs
+    assert "temperature" not in call_kwargs
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("requested", "provider_type", "route_reasons", "first_output_wait"),
+    ("model", "declared", "first_output_wait"),
     [
-        # Mutant: the call site ignores the effort it actually sends. An OpenAI
-        # route sends "none" on its own when no effort is requested.
-        (None, "openai", True, 180.0),
-        # Mutant: the call site ignores that the route reasons: Azure sends
-        # nothing, so the provider's default (thinking) applies.
-        (None, "azure", True, 1800.0),
-        (None, "azure", False, 180.0),
+        # Standard sends no effort, so a route that reasons by default thinks.
+        # Mutant: the call site ignores that the route reasons.
+        ("azure/gpt-5.4", True, 1800.0),
+        # Mutant: a route LiteLLM sends an effort to, on a row that does not
+        # declare reasoning, waits only the silence deadline.
+        ("openai/gpt-5-mini", False, 1800.0),
+        ("openai/gpt-4o", False, 180.0),
     ],
 )
 async def test_proposal_first_output_wait_follows_the_effort_sent(
     monkeypatch: pytest.MonkeyPatch,
-    requested: str | None,
-    provider_type: str,
-    route_reasons: bool,
+    model: str,
+    declared: bool,
     first_output_wait: float,
 ) -> None:
     provider = AsyncMock(return_value=_make_response_with_text("proposal"))
@@ -729,14 +646,13 @@ async def test_proposal_first_output_wait_follows_the_effort_sent(
         provider,
     )
     route = _route(
-        model=f"{provider_type}/gpt-5.4",
-        provider_type=provider_type,
-        requested=ModelKwargs(reasoning_effort=requested),
+        model=model,
+        provider_type=model.split("/", 1)[0],
         supported=SupportedModelKwargs(
             reasoning_effort=ModelKwargCapability(
-                supported=route_reasons,
-                control="select" if route_reasons else None,
-                options=["low", "high"] if route_reasons else None,
+                supported=declared,
+                control="select" if declared else None,
+                options=["low", "high"] if declared else None,
             )
         ),
     )
@@ -748,7 +664,6 @@ async def test_proposal_first_output_wait_follows_the_effort_sent(
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=route,
             max_output_tokens=1024,
-            temperature=0.2,
             tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
         ),
     )
@@ -758,44 +673,9 @@ async def test_proposal_first_output_wait_follows_the_effort_sent(
     )
 
 
-def test_builder_explicit_off_reasoning_preserves_temperature_in_pinned_litellm() -> (
-    None
-):
-    prepared = _route(model="openai/gpt-5.4").prepare_provider_kwargs(
-        ModelKwargs(temperature=0.0)
-    )
-
-    provider_kwargs = get_optional_params(
-        model="gpt-5.4",
-        custom_llm_provider="openai",
-        drop_params=True,
-        **prepared,
-    )
-
-    assert provider_kwargs["reasoning_effort"] == "none"
-    assert provider_kwargs["temperature"] == 0.0
-
-
-def test_builder_selected_reasoning_effort_is_merged_with_call_parameters() -> None:
-    prepared = _route(
-        requested=ModelKwargs(reasoning_effort="high"),
-        supported=SupportedModelKwargs(
-            temperature=ModelKwargCapability(supported=True, control="slider"),
-            reasoning_effort=ModelKwargCapability(
-                supported=True,
-                control="select",
-                options=["low", "medium", "high"],
-            ),
-        ),
-    ).prepare_provider_kwargs(ModelKwargs(temperature=0.2))
-
-    assert prepared["reasoning_effort"] == "high"
-    assert prepared["temperature"] == 0.2
-
-
 @pytest.mark.asyncio
 async def test_proposal_call_stops_when_capability_lookup_fails() -> None:
-    route = await _resolved_route(None)
+    route = _route(requested=ModelKwargs(reasoning_effort="high"))
     litellm_client = SimpleNamespace(
         acompletion=AsyncMock(return_value=_make_response_with_text("proposal"))
     )
@@ -814,7 +694,6 @@ async def test_proposal_call_stops_when_capability_lookup_fails() -> None:
                     tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
                     route=route,
                     max_output_tokens=1024,
-                    temperature=0.2,
                     tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
                 ),
             )
@@ -928,7 +807,6 @@ async def test_proposal_provider_failure_uses_typed_disposition(
                     tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
                     route=_route(),
                     max_output_tokens=1024,
-                    temperature=0.2,
                 ),
                 usage_tracker=tracker,
                 provider_gate=provider_work_gate(before_provider_call),
@@ -995,9 +873,9 @@ async def test_proposal_enforces_its_deadline_without_repeating_provider_work() 
     request = _completion_request(
         messages=[{"role": "user", "content": "Create a flow"}],
         tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        route=_route(),
+        # A route that does not reason waits the silence deadline from the start.
+        route=_route(model="openai/gpt-4o"),
         max_output_tokens=4096,
-        temperature=0.2,
         request_budget=_request_budget(
             request_budget_tokens=128_000,
             output_tokens=4096,
@@ -1015,16 +893,19 @@ async def test_proposal_enforces_its_deadline_without_repeating_provider_work() 
 
 @pytest.mark.asyncio
 async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> None:
-    route = await _resolved_route(
-        {
-            "temperature": {
-                "supported": True,
-                "control": "slider",
-                "minimum": 0,
-                "maximum": 2,
-                "step": 0.01,
+    route = replace(
+        await _resolved_route(
+            {
+                "temperature": {
+                    "supported": True,
+                    "control": "slider",
+                    "minimum": 0,
+                    "maximum": 2,
+                    "step": 0.01,
+                }
             }
-        }
+        ),
+        requested_model_kwargs=ModelKwargs(temperature=0.27),
     )
     litellm_client = SimpleNamespace(
         acompletion=AsyncMock(
@@ -1057,7 +938,6 @@ async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> Non
                     ],
                     route=route,
                     max_output_tokens=1024,
-                    temperature=0.27,
                 ),
             )
 
@@ -1161,7 +1041,6 @@ async def test_call_proposal_completion_ignores_malformed_usage_shape() -> None:
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(),
             max_output_tokens=1024,
-            temperature=0.2,
         ),
     )
 
@@ -1198,7 +1077,6 @@ async def test_call_proposal_completion_normalizes_mapping_tool_calls() -> None:
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(),
             max_output_tokens=1024,
-            temperature=0.2,
         ),
     )
 
@@ -1238,7 +1116,6 @@ async def test_call_proposal_completion_normalizes_object_tool_calls() -> None:
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(),
             max_output_tokens=1024,
-            temperature=0.2,
         ),
     )
 
@@ -1273,7 +1150,6 @@ async def test_usage_tracked_completion_records_non_repair_usage() -> None:
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(),
             max_output_tokens=1024,
-            temperature=0.2,
             counts_as_repair=False,
         )
     )
@@ -1312,7 +1188,6 @@ async def test_usage_tracked_completion_counts_repair_usage() -> None:
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(),
             max_output_tokens=1024,
-            temperature=0.2,
             counts_as_repair=True,
         )
     )
@@ -1337,7 +1212,6 @@ async def test_the_proposal_is_sent_with_the_selected_models_output_ceiling() ->
             tool_schemas=[],
             route=_route(),
             max_output_tokens=16_000,
-            temperature=0.2,
             request_budget=AIBuilderRequestBudget(
                 capacity=ModelCapacity(100_000, 16_000),
                 safety_buffer_tokens=0,
@@ -1364,7 +1238,6 @@ async def test_a_ceiling_equal_to_the_window_gets_the_room_the_request_leaves() 
             tool_schemas=[],
             route=_route(),
             max_output_tokens=100,
-            temperature=0.2,
             request_budget=_request_budget(
                 request_budget_tokens=100,
                 output_tokens=100,
@@ -1419,7 +1292,7 @@ async def test_protected_only_overflow_rejects_before_provider_work_or_call_slot
     with pytest.raises(AIBuilderKnownProviderRejectionException) as exc_info:
         await call_proposal_completion(
             litellm_client=litellm_client,
-            request=ctx.completion_request(temperature=0.2),
+            request=ctx.completion_request(),
             provider_gate=provider_work_gate(before_provider_call),
         )
 
@@ -1479,7 +1352,7 @@ async def test_final_strict_tool_payload_is_admitted_before_provider_work(
     with pytest.raises(AIBuilderKnownProviderRejectionException) as exc_info:
         await call_proposal_completion(
             litellm_client=litellm_client,
-            request=ctx.completion_request(temperature=0.2),
+            request=ctx.completion_request(),
             provider_gate=provider_work_gate(before_provider_call),
         )
 
@@ -1751,7 +1624,6 @@ async def test_repair_time_overflow_uses_same_completion_boundary_rejection(
         await call_proposal_completion(
             litellm_client=litellm_client,
             request=ctx.completion_request(
-                temperature=0.2,
                 counts_as_repair=True,
             ),
             provider_gate=provider_work_gate(before_provider_call),
@@ -1824,7 +1696,6 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
         await call_proposal_completion(
             litellm_client=litellm_client,
             request=ctx.completion_request(
-                temperature=0.2,
                 message_groups=message_groups,
                 counts_as_repair=counts_as_repair,
             ),
@@ -1835,7 +1706,6 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
         await call_proposal_completion(
             litellm_client=litellm_client,
             request=ctx.completion_request(
-                temperature=0.2,
                 message_groups=second_repair_groups,
                 counts_as_repair=True,
             ),
@@ -1940,7 +1810,6 @@ async def test_turn_usage_aggregates_real_auxiliary_initial_and_repair_calls() -
                 tool_schemas=[],
                 route=_route(),
                 max_output_tokens=100,
-                temperature=0.0,
                 counts_as_repair=counts_as_repair,
                 call_budget=call_budget,
             ),
@@ -2055,124 +1924,6 @@ def test_completion_keeps_the_prepared_allocation_and_only_a_repair_plans_again(
         )
 
 
-def _refusal_of_temperature(*, buffered: bool = False) -> BadRequestError:
-    body = {"error": {"param": "temperature", "code": "unsupported_value"}}
-    return BadRequestError(
-        message="temperature",
-        model="gpt-test",
-        llm_provider="azure",
-        body={} if buffered else body,
-        response=httpx.Response(
-            400, json=body, request=httpx.Request("POST", "https://provider.example")
-        )
-        if buffered
-        else None,
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("buffered", [False, True])
-async def test_a_one_call_budget_admits_no_request_without_the_refused_control(
-    buffered: bool,
-) -> None:
-    client = SimpleNamespace(
-        acompletion=AsyncMock(side_effect=_refusal_of_temperature(buffered=buffered))
-    )
-
-    with pytest.raises(AIBuilderKnownProviderRejectionException):
-        await call_proposal_completion(
-            litellm_client=client,
-            request=_completion_request(
-                messages=[{"role": "user", "content": "Build a flow"}],
-                tool_schemas=[],
-                route=_route(),
-                max_output_tokens=100,
-                temperature=0.0,
-                call_budget=ProposalCallBudget(call_limit=1),
-            ),
-        )
-
-    assert client.acompletion.await_count == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("buffered", [False, True])
-async def test_an_admitted_request_without_the_control_is_its_own_call(
-    buffered: bool,
-) -> None:
-    client = SimpleNamespace(
-        acompletion=AsyncMock(
-            side_effect=[
-                _refusal_of_temperature(buffered=buffered),
-                _make_response_with_text("{}"),
-            ]
-        )
-    )
-    tracker = ProposalTurnTelemetry(
-        request_id="req-retry", model="gpt-test", target_kind=TargetKind.CREATE
-    )
-    call_budget = ProposalCallBudget(call_limit=2)
-
-    await call_proposal_completion(
-        litellm_client=client,
-        usage_tracker=tracker,
-        request=_completion_request(
-            messages=[{"role": "user", "content": "Build a flow"}],
-            tool_schemas=[],
-            route=_route(),
-            max_output_tokens=100,
-            temperature=0.0,
-            call_budget=call_budget,
-        ),
-    )
-
-    assert client.acompletion.await_count == 2
-    assert "temperature" not in client.acompletion.call_args_list[1].kwargs
-    assert call_budget.calls_started == 2
-    assert tracker.llm_calls_made == 2
-    assert tracker.call_records[0].provider_failure_kind == "rejected"
-    assert tracker.call_records[1].provider_failure_kind is None
-
-
-@pytest.mark.asyncio
-async def test_failure_evidence_after_recovery_describes_the_request_sent() -> None:
-    client = SimpleNamespace(
-        acompletion=AsyncMock(
-            side_effect=[_refusal_of_temperature(), _unprocessable_entity_error()]
-        )
-    )
-
-    with (
-        patch.object(error_contract_module.logger, "info") as event_log,
-        pytest.raises(AIBuilderKnownProviderRejectionException),
-    ):
-        await call_proposal_completion(
-            litellm_client=client,
-            request=_completion_request(
-                messages=[{"role": "user", "content": "Build a flow"}],
-                tool_schemas=[],
-                route=_route(),
-                max_output_tokens=100,
-                temperature=0.0,
-                call_budget=ProposalCallBudget(call_limit=2),
-            ),
-        )
-
-    assert client.acompletion.await_count == 2
-    evidence = [
-        call.kwargs["extra"][
-            error_contract_module.AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY
-        ]
-        for call in event_log.call_args_list
-        if call.args and call.args[0] == "ai_builder_provider_incident_evidence"
-    ]
-    assert len(evidence) == 1
-    outgoing = [field["name"] for field in evidence[0]["sdk_input_fields"]]
-    assert set(outgoing) == set(client.acompletion.call_args.kwargs)
-    assert "temperature" not in outgoing
-    assert "max_tokens" in outgoing
-
-
 @pytest.mark.asyncio
 async def test_sdk_inventory_counts_unknown_fields_without_publishing_their_names() -> (
     None
@@ -2191,7 +1942,6 @@ async def test_sdk_inventory_counts_unknown_fields_without_publishing_their_name
                 tool_schemas=[],
                 route=_route(kwargs={"private_field_name": "private_value"}),
                 max_output_tokens=100,
-                temperature=0.0,
             ),
         )
 
@@ -2237,7 +1987,6 @@ async def test_local_reasoning_refusal_preserves_known_rejection_without_startin
             requested=ModelKwargs(reasoning_effort=effort),
         ),
         max_output_tokens=1024,
-        temperature=0.2,
         call_budget=budget,
     )
     completion = make_usage_tracked_proposal_completion(
@@ -2311,7 +2060,7 @@ async def _answers_in_two_chunks():
 
 
 async def _failing_proposal_call(
-    *responses: object, budget: AIBuilderRequestBudget, call_limit: int = 1
+    *responses: object, budget: AIBuilderRequestBudget
 ) -> tuple[ProposalTurnTelemetry, Exception]:
     tracker = ProposalTurnTelemetry(
         request_id="req-terminal", model="gpt-test", target_kind=TargetKind.CREATE
@@ -2328,8 +2077,6 @@ async def _failing_proposal_call(
                     tool_schemas=[],
                     route=_route(),
                     max_output_tokens=100,
-                    temperature=0.0,
-                    call_budget=ProposalCallBudget(call_limit=call_limit),
                     request_budget=budget,
                 ),
             )
@@ -2337,29 +2084,19 @@ async def _failing_proposal_call(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("refused_first", [False, True])
-async def test_a_terminal_provider_failure_finalizes_its_call_and_attempt_once(
-    refused_first: bool,
-) -> None:
-    refusal = [_refusal_of_temperature()] if refused_first else []
-
+async def test_a_terminal_provider_failure_finalizes_its_call_and_attempt_once() -> (
+    None
+):
     tracker, error = await _failing_proposal_call(
-        *refusal,
         _stalls_after_one_chunk(),
         budget=_deadline_budget(timeout_seconds=0.05, ceiling_seconds=5.0),
-        call_limit=2,
     )
 
     # The failure the provider caused is the one raised, never a telemetry error.
     assert isinstance(error, AIBuilderProviderOutcomeUnknownException)
     payload = tracker.build_planner_telemetry()
     records = payload["call_records"]
-    assert [record["attempt"] for record in records] == (
-        [1, 2] if refused_first else [1]
-    )
-    if refused_first:
-        assert records[0]["provider_failure_kind"] == "rejected"
-        assert "local_deadline" not in records[0]
+    assert [record["attempt"] for record in records] == [1]
     failed = records[-1]
     assert failed["provider_failure_kind"] == "timeout"
     assert failed["provider_turn_state"] == "provider_outcome_unknown"
@@ -2417,7 +2154,6 @@ async def test_a_streamed_answer_records_when_it_arrived() -> None:
             tool_schemas=[],
             route=_route(),
             max_output_tokens=100,
-            temperature=0.0,
         ),
     )
 
@@ -2427,45 +2163,6 @@ async def test_a_streamed_answer_records_when_it_arrived() -> None:
     assert record["first_chunk_ms"] >= 0
     assert record["max_gap_ms"] >= 20
     assert record["provider_elapsed_ms"] >= record["max_gap_ms"]
-
-
-@pytest.mark.asyncio
-async def test_a_refused_request_and_its_replacement_each_carry_their_own_timing() -> (
-    None
-):
-    calls = 0
-
-    async def acompletion(**_: object) -> object:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            await asyncio.sleep(0.15)
-            raise _refusal_of_temperature()
-        return _answers_in_two_chunks()
-
-    tracker = ProposalTurnTelemetry(
-        request_id="req-refused-timing", model="gpt-test", target_kind=TargetKind.CREATE
-    )
-
-    await call_proposal_completion(
-        litellm_client=SimpleNamespace(acompletion=acompletion),
-        usage_tracker=tracker,
-        request=_completion_request(
-            messages=[{"role": "user", "content": "Build a flow"}],
-            tool_schemas=[],
-            route=_route(),
-            max_output_tokens=100,
-            temperature=0.0,
-            call_budget=ProposalCallBudget(call_limit=2),
-        ),
-    )
-
-    refused, answered = tracker.build_planner_telemetry()["call_records"]
-    assert refused["provider_failure_kind"] == "rejected"
-    assert refused["provider_elapsed_ms"] >= 140
-    assert "first_chunk_ms" not in refused
-    assert answered["provider_elapsed_ms"] < 100
-    assert answered["first_chunk_ms"] < 100
 
 
 @pytest.mark.asyncio
@@ -2508,7 +2205,6 @@ async def test_a_proposal_call_stopped_by_lost_ownership_ends_as_lease_lost_not_
                     tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
                     route=_route(),
                     max_output_tokens=1024,
-                    temperature=0.2,
                 ),
                 usage_tracker=tracker,
                 call_kind="proposal_initial",
@@ -2540,47 +2236,6 @@ async def test_a_proposal_call_stopped_by_lost_ownership_ends_as_lease_lost_not_
 
 
 @pytest.mark.asyncio
-async def test_ownership_lost_before_a_replacement_request_sends_no_second_request() -> (
-    None
-):
-    """The replacement without a refused control is admitted like the first.
-
-    Ownership is lost while the first request is refused for a sampling
-    control: no second request may be sent and no answer returned.
-    """
-
-    gate = provider_work_gate()
-    answers: list[object] = []
-
-    async def provider(**_: object) -> object:
-        if not answers:
-            answers.append("refused")
-            gate.ownership_lost.set()
-            raise _refusal_of_temperature()
-        return _make_response_with_text("{}")
-
-    client = SimpleNamespace(acompletion=AsyncMock(side_effect=provider))
-
-    with pytest.raises(AIBuilderBadRequestException) as exc_info:
-        await call_proposal_completion(
-            litellm_client=client,
-            request=_completion_request(
-                messages=[{"role": "user", "content": "Build a flow"}],
-                tool_schemas=[],
-                route=_route(),
-                max_output_tokens=100,
-                temperature=0.0,
-                call_budget=ProposalCallBudget(call_limit=2),
-            ),
-            call_kind="proposal_initial",
-            provider_gate=gate,
-        )
-
-    assert exc_info.value.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
-    assert client.acompletion.await_count == 1
-
-
-@pytest.mark.asyncio
 async def test_a_refused_admission_raises_the_turns_own_error_not_a_provider_failure() -> (
     None
 ):
@@ -2603,7 +2258,6 @@ async def test_a_refused_admission_raises_the_turns_own_error_not_a_provider_fai
                     tool_schemas=[],
                     route=_route(),
                     max_output_tokens=100,
-                    temperature=0.0,
                 ),
                 provider_gate=provider_work_gate(AsyncMock(side_effect=lost)),
             )
@@ -2635,7 +2289,7 @@ def _slow_admission(
 
 
 async def _admitted_proposal_call(
-    *responses: object, admit: Any, call_limit: int = 1
+    *responses: object, admit: Any
 ) -> tuple[ProposalTurnTelemetry, Any, Any]:
     tracker = ProposalTurnTelemetry(
         request_id="req-admission", model="gpt-test", target_kind=TargetKind.CREATE
@@ -2651,8 +2305,6 @@ async def _admitted_proposal_call(
                     tool_schemas=[],
                     route=_route(),
                     max_output_tokens=100,
-                    temperature=0.0,
-                    call_budget=ProposalCallBudget(call_limit=call_limit),
                     request_budget=_deadline_budget(
                         timeout_seconds=0.05, ceiling_seconds=0.05
                     ),
@@ -2670,91 +2322,67 @@ async def _admitted_proposal_call(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("replacement", [False, True], ids=["first", "replacement"])
-async def test_an_admission_longer_than_the_ceiling_is_not_the_providers_time(
-    replacement: bool,
-) -> None:
+async def test_an_admission_longer_than_the_ceiling_is_not_the_providers_time() -> None:
     """The admission is the turn's wait: no provider ceiling or timing runs."""
 
-    refusal = [_refusal_of_temperature()] if replacement else []
     admit, admissions = _slow_admission(0.12)
 
     tracker, client, outcome = await _admitted_proposal_call(
-        *refusal, _make_response_with_text("{}"), admit=admit, call_limit=2
+        _make_response_with_text("{}"), admit=admit
     )
 
     assert not isinstance(outcome, Exception), outcome
-    assert admissions == ([1, 2] if replacement else [1])
-    assert client.acompletion.await_count == len(refusal) + 1
+    assert admissions == [1]
+    assert client.acompletion.await_count == 1
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("replacement", [False, True], ids=["first", "replacement"])
-async def test_a_slow_admission_that_is_refused_sends_nothing_and_is_no_provider_failure(
-    replacement: bool,
-) -> None:
-    refusal = [_refusal_of_temperature()] if replacement else []
-    admit, _ = _slow_admission(0.12, refuse_on=2 if replacement else 1)
+async def test_a_slow_admission_that_is_refused_sends_nothing_and_is_no_provider_failure() -> (
+    None
+):
+    admit, _ = _slow_admission(0.12, refuse_on=1)
 
     tracker, client, outcome = await _admitted_proposal_call(
-        *refusal, _make_response_with_text("{}"), admit=admit, call_limit=2
+        _make_response_with_text("{}"), admit=admit
     )
 
     assert isinstance(outcome, AIBuilderBadRequestException)
     assert outcome.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
     assert not isinstance(outcome, AIBuilderProviderOutcomeUnknownException)
-    assert client.acompletion.await_count == len(refusal)
+    assert client.acompletion.await_count == 0
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("replacement", [False, True], ids=["first", "replacement"])
-async def test_provider_elapsed_time_excludes_the_admission(replacement: bool) -> None:
-    refusal = [_refusal_of_temperature()] if replacement else []
+async def test_provider_elapsed_time_excludes_the_admission() -> None:
     admit, _ = _slow_admission(0.06)
 
     tracker, _, outcome = await _admitted_proposal_call(
-        *refusal, _make_response_with_text("{}"), admit=admit, call_limit=2
+        _make_response_with_text("{}"), admit=admit
     )
 
     assert not isinstance(outcome, Exception), outcome
     answered = tracker.build_planner_telemetry()["call_records"][-1]
     assert answered["provider_elapsed_ms"] < 30
-    if replacement:
-        refused = tracker.build_planner_telemetry()["call_records"][0]
-        assert refused["provider_elapsed_ms"] < 30
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("replacement", [False, True], ids=["first", "replacement"])
-async def test_an_admission_interrupted_by_lost_ownership_publishes_no_provider_time_for_it(
-    replacement: bool,
-) -> None:
-    """Provider timing exists only from a dispatch.
-
-    The stop trace names the last request actually sent: none for an
-    interrupted first admission, the refused first request for an
-    interrupted replacement admission, never the admission wait.
-    """
+async def test_an_admission_interrupted_by_lost_ownership_publishes_no_provider_time_for_it() -> (
+    None
+):
+    """Provider timing exists only from a dispatch: an interrupted admission
+    sent nothing, so the stop trace carries no provider time."""
 
     gate = provider_work_gate()
-    admissions = 0
 
     async def admit() -> None:
-        nonlocal admissions
-        admissions += 1
-        if admissions == (2 if replacement else 1):
-            # The admission takes its time, and the loss is confirmed while it
-            # runs; its wait must never read as provider time.
-            await asyncio.sleep(0.06)
-            gate.ownership_lost.set()
+        # The admission takes its time, and the loss is confirmed while it
+        # runs; its wait must never read as provider time.
+        await asyncio.sleep(0.06)
+        gate.ownership_lost.set()
 
     gate = provider_work_gate(admit, ownership_lost=gate.ownership_lost)
     client = SimpleNamespace(
-        acompletion=AsyncMock(
-            side_effect=[_refusal_of_temperature(), _make_response_with_text("{}")]
-            if replacement
-            else [_make_response_with_text("{}")]
-        )
+        acompletion=AsyncMock(side_effect=[_make_response_with_text("{}")])
     )
 
     with patch.object(error_contract_module.logger, "warning") as stop_log:
@@ -2766,23 +2394,16 @@ async def test_an_admission_interrupted_by_lost_ownership_publishes_no_provider_
                     tool_schemas=[],
                     route=_route(),
                     max_output_tokens=100,
-                    temperature=0.0,
-                    call_budget=ProposalCallBudget(call_limit=2),
                 ),
                 call_kind="proposal_initial",
                 provider_gate=gate,
             )
 
     assert exc_info.value.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
-    assert client.acompletion.await_count == (1 if replacement else 0)
+    assert client.acompletion.await_count == 0
     [stopped] = [
         call.kwargs["extra"]
         for call in stop_log.call_args_list
         if call.args == ("ai_builder_provider_call_stopped",)
     ]
-    if replacement:
-        # The refused first request's own, near-instant time.
-        assert isinstance(stopped["provider_elapsed_ms"], int)
-        assert stopped["provider_elapsed_ms"] < 30
-    else:
-        assert stopped["provider_elapsed_ms"] is None
+    assert stopped["provider_elapsed_ms"] is None

@@ -648,9 +648,9 @@ class AIBuilderBudgetSettingsPublic(BaseModel):
     review_investigation_evidence_max_tokens: int
     # The longest wait for the provider's next chunk once it has started
     # answering. The tenant's own value in whole seconds, None while the
-    # deployment default applies. A call that sends a reasoning effort above
-    # minimal may think before its first chunk and is bounded by the call
-    # ceiling there.
+    # deployment default applies. A call that may think (it sends a reasoning
+    # effort other than "none", or sends no effort on a route that reasons by
+    # default) is bounded by the call ceiling before its first output.
     silence_timeout_seconds: int | None
     silence_timeout_seconds_default: float
     # The longest a whole provider call may take, however much it keeps
@@ -674,11 +674,7 @@ class AIBuilderBudgetSettingsPublic(BaseModel):
 
 AI_BUILDER_TIMING_ORDER_DESCRIPTION = (
     "A change is refused with a 400 naming both values when it would break "
-    "the ordering: the silence timeout, and any classification silence timeout "
-    "the deployment sets, may not exceed the call ceiling; a classification "
-    "call ceiling the deployment sets must lie between the classification "
-    "silence timeout (the silence timeout unless the deployment sets one) and "
-    "the call ceiling."
+    "the ordering: the silence timeout may not exceed the call ceiling."
 )
 
 

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import subprocess
-import sys
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -577,31 +575,21 @@ async def test_the_first_output_may_wait_longer_than_a_gap_after_it(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("refused_first", [False, True])
-async def test_the_wait_for_the_response_headers_uses_the_first_output_deadline(
-    refused_first: bool,
-) -> None:
-    # Mutant: the header wait of the first dispatch (or of the dispatch sent
-    # again without a refused control) uses the silence deadline.
-    calls = 0
-
+async def test_the_wait_for_the_response_headers_uses_the_first_output_deadline() -> (
+    None
+):
+    # Mutant: the header wait uses the silence deadline.
     async def acompletion(**_: object) -> object:
-        nonlocal calls
-        calls += 1
-        if refused_first and calls == 1:
-            raise _rejection(_UNSUPPORTED_TEMPERATURE)
         await asyncio.sleep(0.2)
         return _after([0.0, 0.0])
 
     response = await _complete_at_silence(
         SimpleNamespace(acompletion=acompletion),
-        request={**_REQUEST, "temperature": 0.0},
-        retry_without_refused_control=_admit,
+        request=_REQUEST,
         **_FIRST_OUTPUT_DEADLINES,
     )
 
     assert response.choices[0].finish_reason == "tool_calls"
-    assert calls == (2 if refused_first else 1)
 
 
 @pytest.mark.parametrize("first_output_deadline", [0.01, 10.0, float("nan")])
@@ -980,17 +968,6 @@ async def test_a_provider_finish_reason_and_usage_come_through_the_wrapper(
     assert (response.usage.prompt_tokens, response.usage.completion_tokens) == (12, 3)
 
 
-_UNSUPPORTED_TEMPERATURE = {
-    "error": {
-        "message": "Unsupported value: 'temperature' does not support 0.0 with "
-        "this model. Only the default (1) value is supported.",
-        "type": "invalid_request_error",
-        "param": "temperature",
-        "code": "unsupported_value",
-    }
-}
-
-
 def _rejection(body: dict[str, object]) -> BadRequestError:
     return BadRequestError(
         message=str(body["error"]),
@@ -998,236 +975,6 @@ def _rejection(body: dict[str, object]) -> BadRequestError:
         llm_provider="azure",
         body=body,
     )
-
-
-def _admit(_control: str, _error: Exception, _timing: ProviderCallTiming) -> bool:
-    return True
-
-
-@pytest.mark.asyncio
-async def test_without_admission_a_refusal_is_raised() -> None:
-    client = SimpleNamespace(
-        acompletion=AsyncMock(side_effect=_rejection(_UNSUPPORTED_TEMPERATURE))
-    )
-
-    with pytest.raises(BadRequestError):
-        await _complete_at_silence(
-            client,
-            silence_deadline_seconds=5.0,
-            ceiling_seconds=10.0,
-            request={**_REQUEST, "temperature": 0.0},
-        )
-
-    assert client.acompletion.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_the_caller_can_refuse_the_second_request() -> None:
-    client = SimpleNamespace(
-        acompletion=AsyncMock(side_effect=_rejection(_UNSUPPORTED_TEMPERATURE))
-    )
-    asked: list[str] = []
-
-    def refuse(control: str, _error: Exception, _timing: ProviderCallTiming) -> bool:
-        asked.append(control)
-        return False
-
-    with pytest.raises(BadRequestError):
-        await _complete_at_silence(
-            client,
-            silence_deadline_seconds=5.0,
-            ceiling_seconds=10.0,
-            request={**_REQUEST, "temperature": 0.0},
-            retry_without_refused_control=refuse,
-        )
-
-    assert asked == ["temperature"]
-    assert client.acompletion.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_a_refusal_after_the_stream_started_is_not_retried() -> None:
-    # A 4xx the provider raises mid-stream may follow generation; the owner
-    # never sends the request again on its own.
-    async def refused_midstream():
-        yield _tool_chunk('{"name": "x"}', first=True, finish=None)
-        raise _rejection(_UNSUPPORTED_TEMPERATURE)
-
-    client = SimpleNamespace(acompletion=AsyncMock(return_value=refused_midstream()))
-    asked: list[str] = []
-
-    def admit(control: str, _error: Exception, _timing: ProviderCallTiming) -> bool:
-        asked.append(control)
-        return True
-
-    with pytest.raises(BadRequestError):
-        await _complete_at_silence(
-            client,
-            silence_deadline_seconds=5.0,
-            ceiling_seconds=10.0,
-            request={**_REQUEST, "temperature": 0.0},
-            retry_without_refused_control=admit,
-        )
-
-    assert asked == []
-    assert client.acompletion.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_both_requests_share_one_ceiling() -> None:
-    requests = 0
-
-    async def slow_provider(**_kwargs: object) -> object:
-        nonlocal requests
-        requests += 1
-        await asyncio.sleep(0.08)
-        if requests == 1:
-            raise _rejection(_UNSUPPORTED_TEMPERATURE)
-        return SimpleNamespace(choices=[], usage=None)
-
-    client = SimpleNamespace(acompletion=slow_provider)
-
-    with pytest.raises(ProviderCallCeilingExpired):
-        await _complete_at_silence(
-            client,
-            silence_deadline_seconds=0.1,
-            ceiling_seconds=0.12,
-            request={**_REQUEST, "temperature": 0.0},
-            retry_without_refused_control=_admit,
-        )
-
-
-@pytest.mark.asyncio
-async def test_an_odd_error_code_shape_keeps_the_refusal() -> None:
-    body = {"error": {"param": "temperature", "code": []}}
-    client = SimpleNamespace(acompletion=AsyncMock(side_effect=_rejection(body)))
-
-    with pytest.raises(BadRequestError):
-        await _complete_at_silence(
-            client,
-            silence_deadline_seconds=5.0,
-            ceiling_seconds=10.0,
-            request={**_REQUEST, "temperature": 0.0},
-            retry_without_refused_control=_admit,
-        )
-
-    assert client.acompletion.await_count == 1
-
-
-def test_the_owner_imports_in_a_fresh_process() -> None:
-    # The capability snapshot's package imports the Builder's error contract,
-    # which imports this owner; the owner must not import it at load time.
-    completed = subprocess.run(
-        [sys.executable, "-c", "import eneo.flows.ai_builder.ai_builder_provider_call"],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    assert completed.returncode == 0, completed.stderr[-2000:]
-
-
-@pytest.mark.asyncio
-async def test_a_refused_sampling_control_is_dropped_once() -> None:
-    answer = SimpleNamespace(choices=[], usage=None)
-    client = SimpleNamespace(
-        acompletion=AsyncMock(
-            side_effect=[_rejection(_UNSUPPORTED_TEMPERATURE), answer]
-        )
-    )
-
-    response = await _complete_at_silence(
-        client,
-        silence_deadline_seconds=5.0,
-        ceiling_seconds=10.0,
-        request={**_REQUEST, "temperature": 0.0, "max_tokens": 50},
-        retry_without_refused_control=_admit,
-    )
-
-    assert response is answer
-    first, second = (call.kwargs for call in client.acompletion.call_args_list)
-    assert first["temperature"] == 0.0
-    assert "temperature" not in second
-    assert second["max_tokens"] == 50 and second["stream"] is True
-
-
-@pytest.mark.asyncio
-async def test_a_refusal_of_anything_else_is_not_retried() -> None:
-    body = {"error": {"param": "messages", "code": "unsupported_value"}}
-    client = SimpleNamespace(acompletion=AsyncMock(side_effect=_rejection(body)))
-
-    with pytest.raises(BadRequestError):
-        await _complete_at_silence(
-            client,
-            silence_deadline_seconds=5.0,
-            ceiling_seconds=10.0,
-            request={**_REQUEST, "temperature": 0.0},
-            retry_without_refused_control=_admit,
-        )
-
-    assert client.acompletion.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_a_second_refusal_is_raised() -> None:
-    client = SimpleNamespace(
-        acompletion=AsyncMock(
-            side_effect=[
-                _rejection(_UNSUPPORTED_TEMPERATURE),
-                _rejection({"error": {"param": "top_p", "code": "unsupported_value"}}),
-            ]
-        )
-    )
-
-    with pytest.raises(BadRequestError):
-        await _complete_at_silence(
-            client,
-            silence_deadline_seconds=5.0,
-            ceiling_seconds=10.0,
-            request={**_REQUEST, "temperature": 0.0, "top_p": 0.5},
-            retry_without_refused_control=_admit,
-        )
-
-    assert client.acompletion.await_count == 2
-
-
-@pytest.mark.filterwarnings("ignore::pydantic.warnings.PydanticDeprecatedSince211")
-@pytest.mark.asyncio
-async def test_a_provider_refusing_temperature_gets_the_call_without_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Azure GPT-5-class deployments accept only the default temperature; the
-    # capability snapshot said it was tunable, so the first request carries it.
-    sent: list[dict[str, object]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        sent.append(json.loads(request.content))
-        if "temperature" in sent[-1]:
-            return httpx.Response(400, json=_UNSUPPORTED_TEMPERATURE)
-        return httpx.Response(
-            200,
-            content=_sse([_delta("Hej", None), _delta(None, "stop")]),
-            headers={"content-type": "text/event-stream"},
-        )
-
-    monkeypatch.setattr(
-        AsyncHTTPHandler,
-        "_create_async_transport",
-        staticmethod(lambda **_kwargs: httpx.MockTransport(handler)),
-    )
-    monkeypatch.setattr(litellm, "in_memory_llm_clients_cache", LLMClientCache())
-    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
-    monkeypatch.setattr(litellm, "num_retries", 0)
-
-    response = await _complete_at_silence(
-        litellm,
-        silence_deadline_seconds=5.0,
-        ceiling_seconds=10.0,
-        request={**_WRAPPED_REQUEST, "temperature": 0.0},
-        retry_without_refused_control=_admit,
-    )
-
-    assert response.choices[0].message.content == "Hej"
-    assert [("temperature" in body) for body in sent] == [True, False]
 
 
 _BRIDGED_AZURE_TOOL_REQUEST = {
@@ -1261,12 +1008,7 @@ async def test_a_bridged_azure_tool_call_refusal_keeps_its_envelope(
     # LiteLLM sends Azure gpt-5.4+ requests with function tools over its
     # Responses-API bridge, where a provider 400 surfaces with the envelope
     # only in the exception message. The classifier (no tools) stays on Chat
-    # Completions, so only the proposal turn used to lose the envelope. Since
-    # litellm 1.101 a recognised gpt-5.x name never carries temperature over
-    # the bridge (drop_params removes it before the request), so the refused
-    # control here is the tools parameter itself; the temperature retry for a
-    # deployment name litellm does not recognise stays covered by
-    # test_a_provider_refusing_temperature_gets_the_call_without_it.
+    # Completions, so only a proposal call can lose the envelope there.
     sent: list[dict[str, object]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1289,15 +1031,12 @@ async def test_a_bridged_azure_tool_call_refusal_keeps_its_envelope(
             litellm,
             silence_deadline_seconds=5.0,
             ceiling_seconds=10.0,
-            request={**_BRIDGED_AZURE_TOOL_REQUEST, "temperature": 0.4},
-            retry_without_refused_control=_admit,
+            request=_BRIDGED_AZURE_TOOL_REQUEST,
         )
 
-    # One request went over the bridge (Responses wire shape) without the
-    # dropped control, and its refusal envelope survived the bridge.
-    assert [("temperature" in body, "input" in body) for body in sent] == [
-        (False, True),
-    ]
+    # One request went over the bridge (Responses wire shape), and its refusal
+    # envelope survived the bridge.
+    assert [("input" in body) for body in sent] == [True]
     rejection = provider_error_fields(raised.value)
     assert rejection.parameter == "tools"
     assert rejection.source == "message.error"
@@ -1490,22 +1229,19 @@ def test_non_finite_durations_are_refused(ceiling: float) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("code", ["unsupported_parameter", "unsupported_value"])
-async def test_explicit_reasoning_rejection_is_not_retried_without_effort(code):
+async def test_a_refused_reasoning_effort_is_raised_without_a_second_request(code):
+    # Mutant: the owner sends a refused request again (without the control).
     error = _rejection({"error": {"param": "reasoning_effort", "code": code}})
     client = SimpleNamespace(acompletion=AsyncMock(side_effect=error))
-    retry = MagicMock(return_value=True)
     with pytest.raises(BadRequestError) as raised:
         await _complete_at_silence(
             client,
             silence_deadline_seconds=5.0,
             ceiling_seconds=10.0,
             request={**_REQUEST, "reasoning_effort": "high", "max_tokens": 50},
-            retry_without_refused_control=retry,
         )
     assert raised.value is error
     client.acompletion.assert_awaited_once()
-    assert client.acompletion.await_args.kwargs["reasoning_effort"] == "high"
-    retry.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1586,45 +1322,6 @@ async def test_a_whole_answer_or_a_refused_request_has_no_chunk_timing() -> None
         (None, None),
     ]
     assert all(t.provider_elapsed_ms >= 0 for t in timings)
-
-
-@pytest.mark.asyncio
-async def test_each_request_of_a_retried_call_is_timed_on_its_own() -> None:
-    # The refused request's wait is reported to the caller that decides on the
-    # retry; the replacement's timing starts when it is sent.
-    calls = 0
-
-    async def acompletion(**_: object) -> object:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            await asyncio.sleep(0.15)
-            raise _rejection(_UNSUPPORTED_TEMPERATURE)
-        return _stream([_tool_chunk('{"name": "A"}', first=True, finish="tool_calls")])
-
-    refused: list[ProviderCallTiming] = []
-
-    def admit(_control: str, _error: Exception, timing: ProviderCallTiming) -> bool:
-        refused.append(timing)
-        return True
-
-    observed = ObservedTiming()
-    await _complete_at_silence(
-        SimpleNamespace(acompletion=acompletion),
-        silence_deadline_seconds=5.0,
-        ceiling_seconds=10.0,
-        request={**_REQUEST, "temperature": 0.0},
-        retry_without_refused_control=admit,
-        observe_timing=observed,
-    )
-
-    [refusal] = refused
-    assert refusal.provider_elapsed_ms >= 140
-    assert refusal.first_chunk_ms is None
-    assert observed.value is not None
-    assert observed.value.provider_elapsed_ms < 100
-    assert observed.value.first_chunk_ms is not None
-    assert observed.value.first_chunk_ms < 100
 
 
 # The turn's stop signal: ownership of the turn was confirmed lost, so the
@@ -1757,40 +1454,6 @@ async def test_an_unset_stop_signal_leaves_the_deadlines_naming_their_own_expiry
         gate=provider_work_gate(),
     )
     assert response is whole
-
-
-@pytest.mark.asyncio
-async def test_every_request_is_admitted_right_before_it_is_sent() -> None:
-    """A replacement without a refused control is admitted like the first."""
-
-    sent: list[str] = []
-    admitted: list[int] = []
-
-    async def admit() -> None:
-        admitted.append(len(sent))
-
-    async def provider(**kwargs: object) -> object:
-        sent.append("temperature" if "temperature" in kwargs else "replacement")
-        if len(sent) == 1:
-            raise _rejection(
-                {"error": {"param": "temperature", "code": "unsupported_value"}}
-            )
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
-        )
-
-    await _complete_at_silence(
-        SimpleNamespace(acompletion=AsyncMock(side_effect=provider)),
-        silence_deadline_seconds=1.0,
-        ceiling_seconds=5.0,
-        request={**_REQUEST, "temperature": 0.2},
-        retry_without_refused_control=_admit,
-        gate=provider_work_gate(admit),
-    )
-
-    assert sent == ["temperature", "replacement"]
-    # Each admission happened with nothing yet sent for that request.
-    assert admitted == [0, 1]
 
 
 @pytest.mark.asyncio

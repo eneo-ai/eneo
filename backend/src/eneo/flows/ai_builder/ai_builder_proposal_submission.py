@@ -193,15 +193,11 @@ class ProposalSubmissionOwner:
         *,
         repo: AIBuilderRepository,
         litellm_client: Any,
-        self_correction_temperature: float,
-        forced_proposal_temperature: float,
         quality_retry_warning_codes: frozenset[str],
         compiled_proposal_finalizer: CompiledProposalFinalizer | None = None,
     ) -> None:
         self.repo = repo
         self.litellm_client = litellm_client
-        self.self_correction_temperature = self_correction_temperature
-        self.forced_proposal_temperature = forced_proposal_temperature
         self._compiled_proposal_finalizer = (
             compiled_proposal_finalizer
             or CompiledProposalFinalizer(
@@ -238,7 +234,6 @@ class ProposalSubmissionOwner:
         resource_catalog: AIBuilderResourceCatalog,
         proposal_tool_schema: ProposalToolSchema,
         decline_tool_schema: ProposalToolSchema | None = None,
-        proposal_temperature: float,
         request_id: str,
         usage_tracker: ProposalTurnTelemetry,
         flow: "Flow | None" = None,
@@ -284,9 +279,7 @@ class ProposalSubmissionOwner:
                 litellm_client=self.litellm_client,
                 usage_tracker=usage_tracker,
                 call_kind="proposal_initial",
-                request=ctx.completion_request(
-                    temperature=proposal_temperature,
-                ),
+                request=ctx.completion_request(),
                 provider_gate=provider_gate,
             )
         except ProposalCallBudgetExhausted as error:
@@ -723,8 +716,6 @@ class ProposalSubmissionOwner:
             failure=failure,
             tool_call=tool_call,
             retry_config=retry_config,
-            self_correction_temperature=self.self_correction_temperature,
-            forced_proposal_temperature=self.forced_proposal_temperature,
             repair_completion=make_usage_tracked_proposal_completion(
                 litellm_client=self.litellm_client,
                 usage_tracker=ctx.usage_tracker,
@@ -1019,7 +1010,6 @@ class ProposalSubmissionOwner:
                 correction_message_groups=correction_message_groups,
                 assistant_text=assistant_text,
                 retry_config=retry_config,
-                forced_proposal_temperature=self.forced_proposal_temperature,
                 repair_completion=make_usage_tracked_proposal_completion(
                     litellm_client=self.litellm_client,
                     usage_tracker=ctx.usage_tracker,

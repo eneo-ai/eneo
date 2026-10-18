@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Literal
+from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -34,7 +34,6 @@ from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
-    resolve_supported_model_kwargs,
 )
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionService,
@@ -68,7 +67,6 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderOutcomeUnknownException,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
-from eneo.flows.ai_builder.ai_builder_provider_call import ProviderCallTiming
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_declared_schema_candidate,
 )
@@ -138,6 +136,7 @@ async def classify_slots(**kwargs: Any):
 
 
 def slot_classification_prompt_hash(**kwargs: Any) -> str:
+    kwargs.setdefault("requested_model_kwargs", ModelKwargs())
     kwargs.setdefault(
         "structured_output_mode",
         StructuredOutputMode.STRICT_JSON_SCHEMA,
@@ -1522,7 +1521,7 @@ async def test_a_classification_cut_off_at_the_cap_is_logged_with_its_budget(
                 monkeypatch,
                 turn_effort="high",
                 offered=["high", "low"],
-                confirmed_levels=("low",),
+                confirmed_levels=("high",),
             ),
             classification_input=_classification_input(f"Summarize {uuid4()}"),
             allowed_slot_values={},
@@ -1530,8 +1529,7 @@ async def test_a_classification_cut_off_at_the_cap_is_logged_with_its_budget(
         )
 
     assert attempt.outcome == "output_limit_exceeded"
-    # Both asks are cut off, and each leaves its own line.
-    assert warning_log.call_count == 2
+    warning_log.assert_called_once()
     message = warning_log.call_args.args[0]
     extra = warning_log.call_args.kwargs["extra"]
     assert message == "AI Builder slot classification reply carried no reading"
@@ -1539,7 +1537,7 @@ async def test_a_classification_cut_off_at_the_cap_is_logged_with_its_budget(
     assert extra["finish_reason"] == "length"
     assert extra["max_tokens"] == client.acompletion.await_args.kwargs["max_tokens"]
     # Mutant: leave the effort out of the log line.
-    assert extra["reasoning_effort"] == "low"
+    assert extra["reasoning_effort"] == "high"
     assert (
         extra["reasoning_effort"]
         == (client.acompletion.await_args.kwargs["reasoning_effort"])
@@ -1563,12 +1561,11 @@ async def test_truncated_classification_is_not_accepted_or_cached() -> None:
     attempt = await classify_slots(**kwargs)
     assert attempt.outcome == "output_limit_exceeded"
     assert attempt.result is None
-    # An unread reply is asked once more; this provider cuts both off.
-    assert client.acompletion.await_count == 2
+    assert client.acompletion.await_count == 1
 
     response.choices[0].finish_reason = "stop"
     assert (await classify_slots(**kwargs)).outcome == "resolved"
-    assert client.acompletion.await_count == 3
+    assert client.acompletion.await_count == 2
 
 
 def _cut_off_response() -> MagicMock:
@@ -1577,9 +1574,9 @@ def _cut_off_response() -> MagicMock:
     return response
 
 
-def _reask_tracker() -> ProposalTurnTelemetry:
+def _classification_tracker() -> ProposalTurnTelemetry:
     return ProposalTurnTelemetry(
-        request_id="req-classifier-reask",
+        request_id="req-classifier",
         model="private-model",
         target_kind=TargetKind.CREATE,
     )
@@ -1590,52 +1587,24 @@ def _classification_outcomes(tracker: ProposalTurnTelemetry) -> list[str | None]
 
 
 @pytest.mark.asyncio
-async def test_a_reply_cut_off_at_the_output_cap_is_asked_once_more() -> None:
-    client = AsyncMock()
-    client.acompletion.side_effect = [
-        _cut_off_response(),
-        _make_response(json.dumps(_VALID_CLASSIFICATION_RESPONSE)),
-    ]
-    tracker = _reask_tracker()
-
-    attempt = await classify_slots(
-        litellm_client=client,
-        completion_model_route=_route(),
-        classification_input=_classification_input(f"Summarize {uuid4()}"),
-        allowed_slot_values={},
-        tenant_id=uuid4(),
-        usage_tracker=tracker,
-    )
-
-    assert attempt.outcome == "resolved"
-    assert client.acompletion.await_count == 2
-    first, second = client.acompletion.await_args_list
-    assert first.kwargs == second.kwargs
-    assert [record.call_kind for record in tracker.call_records] == [
-        "slot_classification",
-        "slot_classification",
-    ]
-    assert _classification_outcomes(tracker) == ["output_limit_exceeded", "resolved"]
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("first_reply", "first_outcome"),
     [
         (lambda: _make_response(""), "no_content"),
         (lambda: _make_response("{not-json"), "parse_failed"),
+        # Mutant: a reply cut off at the output limit is sent again.
+        (_cut_off_response, "output_limit_exceeded"),
     ],
 )
-async def test_an_empty_or_unparsable_reply_is_not_asked_again(
+async def test_a_reply_without_a_reading_is_not_sent_again(
     first_reply: Any, first_outcome: str
 ) -> None:
-    # The identical request at temperature 0 would most likely repeat it.
     client = AsyncMock()
     client.acompletion.side_effect = [
         first_reply(),
         _make_response(json.dumps(_VALID_CLASSIFICATION_RESPONSE)),
     ]
-    tracker = _reask_tracker()
+    tracker = _classification_tracker()
 
     attempt = await classify_slots(
         litellm_client=client,
@@ -1649,30 +1618,6 @@ async def test_an_empty_or_unparsable_reply_is_not_asked_again(
     assert attempt.outcome == first_outcome
     assert client.acompletion.await_count == 1
     assert _classification_outcomes(tracker) == [first_outcome]
-
-
-@pytest.mark.asyncio
-async def test_a_classification_cut_off_twice_ends_unread_after_two_asks() -> None:
-    client = AsyncMock()
-    client.acompletion.return_value = _cut_off_response()
-    tracker = _reask_tracker()
-    kwargs = dict(
-        litellm_client=client,
-        completion_model_route=_route(),
-        classification_input=_classification_input(f"Summarize {uuid4()}"),
-        allowed_slot_values={},
-        tenant_id=uuid4(),
-        usage_tracker=tracker,
-    )
-
-    attempt = await classify_slots(**kwargs)
-
-    assert attempt == SlotClassificationAttempt(outcome="output_limit_exceeded")
-    assert client.acompletion.await_count == 2
-    assert _classification_outcomes(tracker) == ["output_limit_exceeded"] * 2
-    # Nothing unread is cached: the next turn asks the provider again.
-    await classify_slots(**kwargs)
-    assert client.acompletion.await_count == 4
 
 
 def _connection_reset() -> APIConnectionError:
@@ -1689,7 +1634,7 @@ async def test_a_failed_first_classification_call_is_not_asked_again() -> None:
         failure,
         _make_response(json.dumps(_VALID_CLASSIFICATION_RESPONSE)),
     ]
-    tracker = _reask_tracker()
+    tracker = _classification_tracker()
 
     with pytest.raises(Exception) as raised:
         await classify_slots(
@@ -1704,116 +1649,6 @@ async def test_a_failed_first_classification_call_is_not_asked_again() -> None:
     assert raised.value.__cause__ is failure
     assert client.acompletion.await_count == 1
     assert _classification_outcomes(tracker) == [None]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "reask_failure",
-    [_connection_reset, lambda: Timeout("slow", model="gpt-test", llm_provider="x")],
-)
-async def test_a_failed_re_ask_keeps_the_first_reply_unread(reask_failure: Any) -> None:
-    client = AsyncMock()
-    client.acompletion.side_effect = [
-        _cut_off_response(),
-        reask_failure(),
-        _make_response(json.dumps(_VALID_CLASSIFICATION_RESPONSE)),
-    ]
-    tracker = _reask_tracker()
-
-    attempt = await classify_slots(
-        litellm_client=client,
-        completion_model_route=_route(),
-        classification_input=_classification_input(f"Summarize {uuid4()}"),
-        allowed_slot_values={},
-        tenant_id=uuid4(),
-        usage_tracker=tracker,
-    )
-
-    # The user is asked to send the message again, as without the re-ask.
-    assert attempt == SlotClassificationAttempt(outcome="output_limit_exceeded")
-    assert client.acompletion.await_count == 2
-    first, second = tracker.call_records
-    assert (first.classification_outcome, first.provider_failure_kind) == (
-        "output_limit_exceeded",
-        None,
-    )
-    assert second.classification_outcome is None
-    assert second.provider_failure_kind is not None
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("first_ask_elapsed_ms", "expected_ceilings"),
-    [
-        ((700_000,), [1000.0, 300.0]),
-        # A request refused for one control and sent again without it: both
-        # requests of the first ask are its provider time.
-        ((200_000, 500_000), [1000.0, 300.0]),
-        ((950_000,), [1000.0]),
-        ((400_000, 550_000), [1000.0]),
-    ],
-)
-async def test_the_second_ask_gets_only_the_remaining_call_ceiling(
-    monkeypatch: pytest.MonkeyPatch,
-    first_ask_elapsed_ms: tuple[int, ...],
-    expected_ceilings: list[float],
-) -> None:
-    ceilings: list[float] = []
-    first_outputs: list[float] = []
-
-    def timing(elapsed_ms: int) -> ProviderCallTiming:
-        return ProviderCallTiming(
-            provider_elapsed_ms=elapsed_ms, first_chunk_ms=None, max_gap_ms=None
-        )
-
-    async def provider(
-        _client: object,
-        *,
-        ceiling_seconds: float,
-        first_output_deadline_seconds: float,
-        observe_timing: Any,
-        retry_without_refused_control: Any,
-        **_kwargs: object,
-    ) -> MagicMock:
-        ceilings.append(ceiling_seconds)
-        first_outputs.append(first_output_deadline_seconds)
-        *refused, last = first_ask_elapsed_ms
-        for elapsed_ms in refused:
-            assert retry_without_refused_control(
-                "temperature", ValueError("refused"), timing(elapsed_ms)
-            )
-        observe_timing(timing(last))
-        return _cut_off_response()
-
-    monkeypatch.setattr(classifier, "complete_with_silence_deadline", provider)
-
-    attempt = await classify_slots(
-        litellm_client=AsyncMock(),
-        # A route that reasons and is sent no effort may think, so each ask
-        # waits for its first output as long as its ceiling allows.
-        completion_model_route=_reasoning_route(
-            monkeypatch,
-            turn_effort=None,
-            offered=["none", "low"],
-            confirmed_levels=("low",),
-        ),
-        classification_input=_classification_input(f"Summarize {uuid4()}"),
-        allowed_slot_values={},
-        tenant_id=uuid4(),
-        budget_policy=AIBuilderBudgetPolicy(
-            conversation_safety_buffer_tokens=0,
-            minimum_conversation_budget_tokens=0,
-            classification_timeout_seconds=100.0,
-            classification_ceiling_seconds=1000.0,
-            call_ceiling_seconds=1000.0,
-        ),
-    )
-
-    assert attempt.outcome == "output_limit_exceeded"
-    assert ceilings == pytest.approx(expected_ceilings)
-    # Mutant: the re-ask passes the budget's full first-output wait (1000 s)
-    # although the seam validates it against the seconds the first ask left.
-    assert first_outputs == pytest.approx(expected_ceilings)
 
 
 @pytest.mark.asyncio
@@ -3716,7 +3551,8 @@ async def test_classifier_enforces_the_deadline_when_the_client_keeps_waiting() 
                 budget_policy=AIBuilderBudgetPolicy(
                     conversation_safety_buffer_tokens=0,
                     minimum_conversation_budget_tokens=0,
-                    classification_timeout_seconds=0.01,
+                    silence_timeout_seconds=0.01,
+                    call_ceiling_seconds=0.01,
                 ),
             )
 
@@ -5496,9 +5332,13 @@ async def test_classification_cache_ignores_credential_only_differences() -> Non
 
 
 @pytest.mark.asyncio
-async def test_classification_cache_separates_effective_optional_kwargs() -> None:
+async def test_classification_cache_keys_the_turns_reasoning_choice() -> None:
+    # Mutant M4: the cache answers a turn with a different reasoning choice.
+    # Mutant M1: the Builder injects a reasoning effort when the user chose
+    # Standard. Mutant M3: the Builder injects a temperature. The OpenAI route
+    # takes an effort and offers a temperature, so an injected value is sent.
     litellm_client = AsyncMock()
-    text = f"optional-kwargs-{uuid4()}"
+    text = f"reasoning-choice-{uuid4()}"
     litellm_client.acompletion.return_value = _make_response(
         json.dumps(
             {
@@ -5515,72 +5355,39 @@ async def test_classification_cache_separates_effective_optional_kwargs() -> Non
             }
         )
     )
-    supported_temperature = SupportedModelKwargs(
-        temperature=ModelKwargCapability(supported=True, control="slider")
-    )
-
-    first = await classify_slots(
-        litellm_client=litellm_client,
-        completion_model_route=_route(
-            model="openai/gpt-test",
-            supported=SupportedModelKwargs(),
+    route = _route(
+        model="openai/gpt-5.4",
+        supported=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True, control="slider"),
+            reasoning_effort=ModelKwargCapability(
+                supported=True, control="select", options=["low", "high"]
+            ),
         ),
-        classification_input=_classification_input(text),
-        allowed_slot_values={"terminal_output": {"pdf_document"}},
-        tenant_id=uuid4(),
-    )
-    second = await classify_slots(
-        litellm_client=litellm_client,
-        completion_model_route=_route(
-            model="openai/gpt-test",
-            supported=supported_temperature,
-        ),
-        classification_input=_classification_input(text),
-        allowed_slot_values={"terminal_output": {"pdf_document"}},
-        tenant_id=uuid4(),
     )
 
-    assert first is not None
-    assert second is not None
-    assert first.result is not None
-    assert second.result is not None
-    assert first.result.cached is False
-    assert second.result.cached is False
-    assert litellm_client.acompletion.await_count == 2
-    assert "temperature" not in litellm_client.acompletion.await_args_list[0].kwargs
-    assert litellm_client.acompletion.await_args_list[1].kwargs["temperature"] == 0.0
-
-
-@pytest.mark.asyncio
-async def test_luna_classification_uses_explicit_reasoning_control() -> None:
-    litellm_client = AsyncMock()
-    litellm_client.acompletion.return_value = _make_response(
-        json.dumps(
-            {
-                "slots": [
-                    {
-                        "slot_name": "terminal_output",
-                        "value": "pdf_document",
-                        "confidence": "high",
-                        "reason": "PDF report requested",
-                        "evidence": [_evidence("luna-pdf")],
-                        "evidence_level": "explicit",
-                    }
-                ]
-            }
+    readings = [
+        await classify_slots(
+            litellm_client=litellm_client,
+            completion_model_route=replace(
+                route, requested_model_kwargs=ModelKwargs(reasoning_effort=effort)
+            ),
+            classification_input=_classification_input(text),
+            allowed_slot_values={"terminal_output": {"pdf_document"}},
+            tenant_id=uuid4(),
         )
-    )
+        for effort in (None, "high")
+    ]
 
-    await classify_slots(
-        litellm_client=litellm_client,
-        completion_model_route=_route(model="openai/gpt-5.6-luna"),
-        classification_input=_classification_input("luna-pdf"),
-        allowed_slot_values={"terminal_output": {"pdf_document"}},
-        tenant_id=uuid4(),
+    assert [
+        reading is not None and reading.result is not None and reading.result.cached
+        for reading in readings
+    ] == [False, False]
+    standard, high = (
+        call.kwargs for call in litellm_client.acompletion.await_args_list
     )
-
-    call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs["reasoning_effort"] == "none"
+    assert "reasoning_effort" not in standard
+    assert "temperature" not in standard
+    assert high["reasoning_effort"] == "high"
 
 
 @pytest.mark.asyncio
@@ -5662,68 +5469,7 @@ def _reasoning_route(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("setting", "turn_effort", "offered", "confirmed_levels", "sent"),
-    [
-        # Mutant: send the turn's effort instead of the lowest level below it.
-        (None, "high", ["high", "none", "low"], ("none", "low"), "none"),
-        # Mutant: pin an offered level the route refuses to send ("none"
-        # unconfirmed), which fails the classification before any call.
-        (None, "high", ["high", "none", "low"], ("low",), "low"),
-        # Mutant: pick the lowest level although the turn sends no effort,
-        # which adds reasoning the turn never had.
-        (None, None, ["none", "low"], ("low",), None),
-        # Mutant: treat an effort the scale does not place as above every level.
-        (None, "deep", ["deep", "none", "low"], ("none", "low"), "deep"),
-        # Mutant: choose among levels at or above the turn's when none below it
-        # is offered, which reasons more than the turn.
-        (None, "low", ["medium", "high"], (), "low"),
-        # Mutant: pin the lowest although the operator keeps the turn's.
-        ("turn", "high", ["high", "none", "low"], ("none", "low"), "high"),
-    ],
-)
-async def test_classification_never_reasons_more_than_the_turn(
-    monkeypatch: pytest.MonkeyPatch,
-    setting: Literal["turn"] | None,
-    turn_effort: str | None,
-    offered: list[str],
-    confirmed_levels: tuple[str, ...],
-    sent: str | None,
-) -> None:
-    litellm_client = AsyncMock()
-    litellm_client.acompletion.return_value = _make_response(
-        json.dumps(_VALID_CLASSIFICATION_RESPONSE)
-    )
-    # The default setting is the lowest; only "turn" is passed explicitly.
-    policy_overrides: dict[str, Any] = (
-        {} if setting is None else {"classification_reasoning_effort": setting}
-    )
-
-    await classify_slots(
-        litellm_client=litellm_client,
-        completion_model_route=_reasoning_route(
-            monkeypatch,
-            turn_effort=turn_effort,
-            offered=offered,
-            confirmed_levels=confirmed_levels,
-        ),
-        classification_input=_classification_input(f"Summarize {uuid4()}"),
-        allowed_slot_values={"terminal_output": {"structured_json"}},
-        tenant_id=uuid4(),
-        budget_policy=AIBuilderBudgetPolicy(
-            conversation_safety_buffer_tokens=0,
-            minimum_conversation_budget_tokens=0,
-            **policy_overrides,
-        ),
-    )
-
-    assert litellm_client.acompletion.await_args.kwargs.get("reasoning_effort") == sent
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
     ("turn_effort", "route_reasons", "first_output_wait"),
-    # The turn's own effort is sent (setting "turn") so that the sent level is
-    # known.
     [
         # Mutant: the call site ignores the effort it actually sends.
         ("none", True, 100.0),
@@ -5751,7 +5497,13 @@ async def test_classification_first_output_wait_follows_the_effort_sent(
         confirmed_levels=("none", "low", "high"),
     )
     if not route_reasons:
+        # Neither the row nor LiteLLM knows the route takes an effort.
         route = replace(route, supported_model_kwargs=SupportedModelKwargs())
+        monkeypatch.setattr(
+            "eneo.completion_models.infrastructure.tenant_model_capabilities"
+            ".get_supported_openai_params",
+            lambda **_kwargs: [],
+        )
 
     await classify_slots(
         litellm_client=AsyncMock(),
@@ -5762,15 +5514,18 @@ async def test_classification_first_output_wait_follows_the_effort_sent(
         budget_policy=AIBuilderBudgetPolicy(
             conversation_safety_buffer_tokens=0,
             minimum_conversation_budget_tokens=0,
-            classification_reasoning_effort="turn",
-            classification_timeout_seconds=100.0,
-            classification_ceiling_seconds=1000.0,
+            silence_timeout_seconds=100.0,
             call_ceiling_seconds=1000.0,
         ),
     )
 
-    assert (
-        provider.await_args.kwargs["first_output_deadline_seconds"] == first_output_wait
+    sent = provider.await_args.kwargs
+    assert sent["first_output_deadline_seconds"] == first_output_wait
+    # Mutant: classification bounds its call by deadlines other than the
+    # admin's silence timeout and call ceiling.
+    assert (sent["silence_deadline_seconds"], sent["ceiling_seconds"]) == (
+        100.0,
+        1000.0,
     )
 
 
@@ -6308,17 +6063,14 @@ async def test_classify_slots_sends_the_room_the_request_leaves_below_the_ceilin
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("model_output_tokens", "answer_cap_tokens", "sent_max_tokens"),
+    "model_output_tokens",
     [
-        (16_000, None, 16_000),
-        # Mutant: a fixed classification answer cap the operator did not set.
-        (32_768, None, 32_768),
-        # Mutant: the operator's cost cap is not applied.
-        (32_768, 16_384, 16_384),
+        # Mutant: a fixed classification answer cap below the model's limit.
+        32_768,
     ],
 )
-async def test_classify_slots_sends_the_models_ceiling_up_to_the_answer_cap(
-    model_output_tokens: int, answer_cap_tokens: int | None, sent_max_tokens: int
+async def test_classify_slots_sends_the_models_output_ceiling(
+    model_output_tokens: int,
 ) -> None:
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
@@ -6344,13 +6096,12 @@ async def test_classify_slots_sends_the_models_ceiling_up_to_the_answer_cap(
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=100,
                 minimum_conversation_budget_tokens=0,
-                classification_answer_cap_tokens=answer_cap_tokens,
             ),
         )
 
     assert attempt.outcome == "resolved"
     assert litellm_client.acompletion.await_args.kwargs["max_tokens"] == (
-        sent_max_tokens
+        model_output_tokens
     )
 
 
@@ -6511,104 +6262,6 @@ async def test_classify_slots_uses_selected_response_schema_mode() -> None:
     response_format = litellm_client.acompletion.await_args.kwargs["response_format"]
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["strict"] is False
-
-
-@pytest.mark.asyncio
-async def test_classify_slots_omits_unsupported_temperature_but_keeps_schema() -> None:
-    litellm_client = AsyncMock()
-    litellm_client.acompletion.return_value = _make_response(
-        json.dumps(
-            {
-                "slots": [],
-                "file_roles": [],
-                "checkpoint_updates": [],
-                "form_intake": None,
-                "secondary_obligations": [],
-            }
-        )
-    )
-
-    await classify_slots(
-        litellm_client=litellm_client,
-        completion_model_route=_route(
-            model="openai/gpt-test",
-            supported=resolve_supported_model_kwargs(
-                model_kwargs_capabilities={"temperature": {"supported": False}},
-                reasoning=True,
-            ),
-        ),
-        classification_input=_classification_input(f"unsupported-temp-{uuid4()}"),
-        allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
-        tenant_id=uuid4(),
-        structured_output_mode=StructuredOutputMode.JSON_OBJECT,
-    )
-
-    call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert litellm_client.acompletion.await_count == 1
-    assert "temperature" not in call_kwargs
-    assert call_kwargs["response_format"]["type"] == "json_object"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("minimum", "sent"),
-    [(1.0, None), (0.0, 0.0)],
-    ids=["temperature-minimum-1", "temperature-minimum-0"],
-)
-async def test_classify_slots_leaves_out_a_temperature_the_route_does_not_offer(
-    minimum: float, sent: float | None
-) -> None:
-    # The classifier's temperature 0.0 is the Builder's own choice. A route
-    # whose slider starts at 1 does not offer it: it is left out (provider
-    # default) and one warning names the route and value.
-    litellm_client = AsyncMock()
-    litellm_client.acompletion.return_value = _make_response(
-        json.dumps(
-            {
-                "slots": [],
-                "file_roles": [],
-                "checkpoint_updates": [],
-                "form_intake": None,
-                "secondary_obligations": [],
-            }
-        )
-    )
-    route = _route(
-        model="openai/gpt-test",
-        supported=SupportedModelKwargs(
-            temperature=ModelKwargCapability(
-                supported=True, control="slider", minimum=minimum, maximum=2
-            )
-        ),
-    )
-
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_error_contract.logger"
-    ) as contract_logger:
-        await classify_slots(
-            litellm_client=litellm_client,
-            completion_model_route=route,
-            classification_input=_classification_input(f"temp-range-{uuid4()}"),
-            allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
-            tenant_id=uuid4(),
-            structured_output_mode=StructuredOutputMode.JSON_OBJECT,
-        )
-
-    call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs.get("temperature") == sent
-    warnings = [
-        call
-        for call in contract_logger.warning.call_args_list
-        if call.args[0] == "ai_builder_sampling_value_not_offered_by_route"
-    ]
-    if sent is None:
-        assert len(warnings) == 1
-        extra = warnings[0].kwargs["extra"]
-        assert extra["litellm_model"] == "openai/gpt-test"
-        assert (extra["parameter"], extra["value"]) == ("temperature", 0.0)
-        assert extra["stage"] == "slot_classification"
-    else:
-        assert warnings == []
 
 
 @pytest.mark.asyncio
@@ -7417,8 +7070,8 @@ async def test_classification_forwards_capacity():
     client.acompletion.return_value = _make_response("{}")
     with patch.object(
         AIBuilderBudgetPolicy,
-        "classification_request_budget",
-        wraps=policy.classification_request_budget,
+        "proposal_request_budget",
+        wraps=policy.proposal_request_budget,
     ) as factory:
         await classify_slots(
             litellm_client=client,
@@ -7851,12 +7504,7 @@ async def test_strict_classifier_failed_response_is_recorded_and_not_cached(
             "empty_object": "{}",
         }[case]
     client = AsyncMock()
-    # A reply cut off at the output cap is asked once more; it is cut off again.
-    asks = 2 if case == "truncated" else 1
-    client.acompletion.side_effect = [
-        *[response] * asks,
-        _classification_tool_response(valid),
-    ]
+    client.acompletion.side_effect = [response, _classification_tool_response(valid)]
     tracker = ProposalTurnTelemetry(
         request_id="strict-failure", model="gpt-test", target_kind=TargetKind.CREATE
     )
@@ -7879,11 +7527,11 @@ async def test_strict_classifier_failed_response_is_recorded_and_not_cached(
         assert parser.call_count == (
             1 if case in {"invalid_json", "empty_object"} else 0
         )
-    assert tracker.llm_calls_made == asks
-    assert len(tracker.token_usages) == asks
+    assert tracker.llm_calls_made == 1
+    assert len(tracker.token_usages) == 1
     # Nothing unread was cached, so the next turn reads the valid reply.
     assert (await classify_slots(**kwargs)).outcome == "resolved"
-    assert client.acompletion.await_count == asks + 1
+    assert client.acompletion.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -8315,44 +7963,6 @@ async def test_a_classification_stopped_by_lost_ownership_ends_as_lease_lost_not
     assert stopped["call_kind"] == "slot_classification"
     assert stopped["model"] == "private-model"
     assert isinstance(stopped["provider_elapsed_ms"], int)
-
-
-@pytest.mark.asyncio
-async def test_ownership_lost_before_a_classifier_replacement_request_sends_no_second_request() -> (
-    None
-):
-    from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
-
-    from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
-
-    gate = provider_work_gate()
-    body = {"error": {"param": "temperature", "code": "unsupported_value"}}
-
-    async def provider(**kwargs: object) -> object:
-        assert "temperature" in kwargs, "only the first request carries it"
-        gate.ownership_lost.set()
-        raise LiteLLMBadRequestError(
-            message="temperature",
-            model="gpt-test",
-            llm_provider="azure",
-            body=body,
-        )
-
-    litellm_client = MagicMock()
-    litellm_client.acompletion = AsyncMock(side_effect=provider)
-
-    with pytest.raises(AIBuilderBadRequestException) as exc_info:
-        await classify_slots(
-            litellm_client=litellm_client,
-            completion_model_route=_route(),
-            classification_input=_classification_input(f"text-{uuid4()}"),
-            allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
-            tenant_id=uuid4(),
-            provider_gate=gate,
-        )
-
-    assert exc_info.value.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
-    assert litellm_client.acompletion.await_count == 1
 
 
 @pytest.mark.asyncio

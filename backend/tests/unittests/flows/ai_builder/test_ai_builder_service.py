@@ -2080,64 +2080,6 @@ class TestSendMessageToolCall:
         repo.create_plan.assert_not_called()
 
     @pytest.mark.anyio
-    async def test_primary_planner_call_uses_lower_temperature(
-        self, unset_mapped_deployment_default: None
-    ):
-        user = _make_user()
-        repo = _make_repo_mock()
-        session = _make_session(
-            status=SessionStatus.CHATTING,
-            tenant_id=user.tenant_id,
-            conversation=_make_confirmed_requirements_conversation(),
-        )
-        repo.get_session.return_value = session
-
-        good_tc = _make_tool_call(
-            arguments={
-                "flow_name": "Temperature test",
-                "steps": [
-                    {
-                        "plan_step_ref": "step_a",
-                        "name": "Extrahera",
-                        "assistant_spec": {"instructions": "Extrahera information."},
-                        "input_source": "flow_input",
-                    }
-                ],
-            }
-        )
-        repo.create_plan.return_value = _make_plan(
-            session_id=session.id, tenant_id=user.tenant_id
-        )
-        service = _make_service(user=user, repo=repo)
-        repo.load_planning_state.return_value = _make_committed_planning_state()
-
-        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
-            mock_litellm.acompletion = AsyncMock(
-                return_value=_make_llm_response(content=None, tool_calls=[good_tc])
-            )
-            await _collect_events(
-                service.send_message(
-                    acts_on_review=False,
-                    session_id=session.id,
-                    client_turn_id=_TEST_CLIENT_TURN_ID,
-                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-                    request_snapshot=_test_request_snapshot(""),
-                    message="",
-                    question_answer=_make_requirements_confirmation(),
-                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    capacity=ModelCapacity(128_000, 16_384),
-                )
-            )
-
-        proposal_calls = [
-            call
-            for call in mock_litellm.acompletion.await_args_list
-            if call.kwargs.get("tools")
-        ]
-        assert proposal_calls
-        assert proposal_calls[0].kwargs["temperature"] == 0.4
-
-    @pytest.mark.anyio
     async def test_self_correction_bail_without_question_mark_emits_error_not_text(
         self,
         unset_mapped_deployment_default: None,
@@ -2576,10 +2518,7 @@ class TestUnreadMessage:
         assert not [
             call for call in acompletion.await_args_list if call.kwargs.get("tools")
         ]
-        # Only a reply cut off at the output cap is asked once more.
-        assert acompletion.await_count == (
-            2 if outcome == "output_limit_exceeded" else 1
-        )
+        assert acompletion.await_count == 1
         committed = repo.commit_turn.await_args.kwargs
         user_message, answer = committed["new_messages"]
         assert user_message.content == _NAMING_REQUEST
@@ -2592,50 +2531,6 @@ class TestUnreadMessage:
         committed_slots = committed["planning_state"].resolved_slots
         for name, slot in _make_committed_planning_state().resolved_slots.items():
             assert committed_slots[name].value == slot.value
-
-    @pytest.mark.anyio
-    async def test_a_reading_cut_off_once_is_asked_again_and_the_turn_proposes(
-        self, unset_mapped_deployment_default: None
-    ) -> None:
-        readings = iter(
-            [
-                _output_limit_response(),
-                _make_llm_response(
-                    content=json.dumps(
-                        {
-                            "slots": [],
-                            "file_roles": [],
-                            "checkpoint_updates": [],
-                            "form_intake": None,
-                            "named_result_evidence": None,
-                            "example_output_constraints": None,
-                            "schema_direction": None,
-                            "secondary_obligations": [],
-                        }
-                    )
-                ),
-            ]
-        )
-        proposal = _classifier_or_proposal_responses(_parse_failed_response())
-
-        async def respond(**kwargs: Any) -> MagicMock:
-            if kwargs.get("tools"):
-                return await proposal(**kwargs)
-            return next(readings)
-
-        events, repo = await self._send(
-            conversation=_make_post_plan_conversation(),
-            acompletion=AsyncMock(side_effect=respond),
-            message="Gör sammanfattningen kortare.",
-            planning_state=_make_committed_planning_state(),
-        )
-
-        repo.create_plan.assert_awaited_once()
-        assert SSE_EVENT_PLAN in [event["event"] for event in events]
-        user_message = repo.commit_turn.await_args.kwargs["new_messages"][0]
-        classification = slot_classification_from_metadata(user_message.metadata)
-        assert classification is not None
-        assert classification.outcome == "resolved"
 
     @pytest.mark.anyio
     async def test_an_unread_first_message_is_answered_instead_of_questioned(

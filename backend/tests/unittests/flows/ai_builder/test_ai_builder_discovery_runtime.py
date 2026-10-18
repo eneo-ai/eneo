@@ -4674,8 +4674,8 @@ async def test_discovery_forwards_capacity_to_admission_and_classification(monke
     monkeypatch.setattr(runtime, "classify_slots", classify)
     with patch.object(
         type(policy),
-        "classification_request_budget",
-        wraps=policy.classification_request_budget,
+        "proposal_request_budget",
+        wraps=policy.proposal_request_budget,
     ) as factory:
         await build_runtime_discovery_context(
             [

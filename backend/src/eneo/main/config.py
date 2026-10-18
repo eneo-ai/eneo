@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Optional
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -17,10 +17,7 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from eneo.main.ai_builder_timing_order import (
-    TimingOrderRule,
-    ai_builder_timing_order_violation,
-)
+from eneo.main.ai_builder_timing_order import ai_builder_timing_order_violation
 from eneo.main.removed_env import UPGRADE_GUIDE_URL, check_removed_variables
 from eneo.object_content.configuration import DEFAULT_FILE_UPLOAD_LIMIT_BYTES
 
@@ -37,30 +34,6 @@ _LOCAL_MANIFEST = (
 _PROCESS_STARTED_AT = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 _BUILD_ID_ENV_VARS = ("GIT_COMMIT", "BUILD_ID")
 
-
-# Startup refusals of the ordering rule, worded with the env names an operator
-# sets; the rule itself is ai_builder_timing_order_violation. The two values are
-# the offending one and the one it breaks.
-_AI_BUILDER_TIMING_ORDER_ERRORS: dict[TimingOrderRule, str] = {
-    "silence_above_call_ceiling": (
-        "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS (%s) must not be above "
-        "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS (%s)."
-    ),
-    "classification_silence_above_call_ceiling": (
-        "AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS (%s) must not be above "
-        "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS (%s)."
-    ),
-    "classification_ceiling_above_call_ceiling": (
-        "AI_BUILDER_CLASSIFICATION_CEILING_SECONDS (%s) must not be above "
-        "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS (%s)."
-    ),
-    "classification_ceiling_below_classification_silence": (
-        "AI_BUILDER_CLASSIFICATION_CEILING_SECONDS (%s) must not be below the "
-        "classification silence deadline (%s): "
-        "AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS, or "
-        "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS when that is unset."
-    ),
-}
 
 URL_SIGNING_KEY_MINIMUM_BYTES = 32
 # Absolute upper bound for a login session; a longer-lived captured token
@@ -288,10 +261,6 @@ AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT = 0.5
 # wait of a call that may think for its first output.
 # Independent of the send-lock lease, which the turn renews while it works.
 AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT = 1800.0
-# Which reasoning effort the slot classification call sends: the lowest level
-# below the turn's that the route offers and can send, or the turn's own.
-AIBuilderClassificationReasoningEffort = Literal["lowest", "turn"]
-AI_BUILDER_CLASSIFICATION_REASONING_EFFORT_DEFAULT: AIBuilderClassificationReasoningEffort = "lowest"
 
 
 class Settings(BaseSettings):
@@ -523,26 +492,11 @@ class Settings(BaseSettings):
     # that may think (it sends any effort but "none", or no effort on a route
     # that takes one) waits up to the whole-call ceiling instead. The whole
     # call is bounded by AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS, policy of
-    # its own. Unset classification follows the proposal deadline; a value
-    # preserves an explicit override.
-    ai_builder_classification_timeout_seconds: float | None = None
+    # its own. Every Builder call, classification included, uses these two.
     ai_builder_proposal_timeout_seconds: float = 300.0
     ai_builder_provider_call_ceiling_seconds: float = (
         AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT
     )
-    # Classification reads the user's text before the turn can plan, so a
-    # runaway one must not hold the turn for the whole provider call ceiling.
-    # Unset, its asks together get one classification silence deadline per
-    # ask, within that ceiling; a value lies between the classification
-    # silence deadline and the provider call ceiling.
-    ai_builder_classification_ceiling_seconds: float | None = None
-    # Unset, a classification answer is bounded by the model's output limit
-    # and the room its request leaves, like every other Builder call; a value
-    # is a cost guard below that.
-    ai_builder_classification_answer_cap_tokens: int | None = None
-    # Reading the user's text into slots is a small extraction: by default it
-    # does not spend the reasoning effort the turn plans with.
-    ai_builder_classification_reasoning_effort: AIBuilderClassificationReasoningEffort = AI_BUILDER_CLASSIFICATION_REASONING_EFFORT_DEFAULT
     ai_builder_send_lock_lease_seconds: int = 900
 
     crawl_heartbeat_interval_seconds: int = (
@@ -1052,16 +1006,6 @@ class Settings(BaseSettings):
                 )
                 sys.exit(1)
 
-        if (
-            self.ai_builder_classification_timeout_seconds is not None
-            and self.ai_builder_classification_timeout_seconds <= 0
-        ):
-            logging.error(
-                "AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
-                self.ai_builder_classification_timeout_seconds,
-            )
-            sys.exit(1)
-
         silence_settings = {
             "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS": (
                 self.ai_builder_proposal_timeout_seconds
@@ -1070,10 +1014,6 @@ class Settings(BaseSettings):
                 self.ai_builder_provider_call_ceiling_seconds
             ),
         }
-        if self.ai_builder_classification_timeout_seconds is not None:
-            silence_settings["AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS"] = (
-                self.ai_builder_classification_timeout_seconds
-            )
         for name, value in silence_settings.items():
             if not (math.isfinite(value) and value > 0):
                 logging.error(
@@ -1086,28 +1026,13 @@ class Settings(BaseSettings):
         order_violation = ai_builder_timing_order_violation(
             silence_seconds=self.ai_builder_proposal_timeout_seconds,
             call_ceiling_seconds=self.ai_builder_provider_call_ceiling_seconds,
-            classification_silence_seconds=(
-                self.ai_builder_classification_timeout_seconds
-            ),
-            classification_ceiling_seconds=(
-                self.ai_builder_classification_ceiling_seconds
-            ),
         )
         if order_violation is not None:
             logging.error(
-                _AI_BUILDER_TIMING_ORDER_ERRORS[order_violation.rule],
+                "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS (%s) must not be above "
+                "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS (%s).",
                 order_violation.value,
                 order_violation.bound,
-            )
-            sys.exit(1)
-        if (
-            self.ai_builder_classification_answer_cap_tokens is not None
-            and self.ai_builder_classification_answer_cap_tokens < 1
-        ):
-            logging.error(
-                "AI_BUILDER_CLASSIFICATION_ANSWER_CAP_TOKENS must be greater than "
-                "zero. Current value: %s",
-                self.ai_builder_classification_answer_cap_tokens,
             )
             sys.exit(1)
 

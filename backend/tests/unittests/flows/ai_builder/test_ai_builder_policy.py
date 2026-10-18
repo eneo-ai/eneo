@@ -37,7 +37,6 @@ def test_ai_builder_policy_resolves_admin_owned_operating_limits() -> None:
         defaults=SimpleNamespace(
             ai_builder_conversation_safety_buffer_tokens=2_000,
             ai_builder_minimum_conversation_budget_tokens=4_000,
-            ai_builder_classification_timeout_seconds=60.0,
             ai_builder_proposal_timeout_seconds=180.0,
         ),
     )
@@ -73,7 +72,6 @@ def test_ai_builder_policy_rejects_operating_limits_above_system_ceiling(
             defaults=SimpleNamespace(
                 ai_builder_conversation_safety_buffer_tokens=2_000,
                 ai_builder_minimum_conversation_budget_tokens=4_000,
-                ai_builder_classification_timeout_seconds=60.0,
                 ai_builder_proposal_timeout_seconds=180.0,
             ),
         )
@@ -89,9 +87,7 @@ def _policy(**overrides: object) -> AIBuilderBudgetPolicy:
     )
 
 
-# Mutant (classification): a fixed classification answer cap the operator did
-# not set.
-@pytest.mark.parametrize("operation", ["classification", "proposal", "review"])
+@pytest.mark.parametrize("operation", ["proposal", "review"])
 @pytest.mark.parametrize(
     ("context_window", "output_ceiling"),
     [(1_000_000, 128_000), (128_000, 16_384)],
@@ -190,7 +186,6 @@ def test_the_share_is_deployment_policy_read_once() -> None:
             ai_builder_conversation_safety_buffer_tokens=2_000,
             ai_builder_minimum_conversation_budget_tokens=4_000,
             ai_builder_answer_reserve_share=0.25,
-            ai_builder_classification_timeout_seconds=None,
             ai_builder_proposal_timeout_seconds=180.0,
         ),
     )
@@ -228,110 +223,21 @@ def test_the_answer_reserve_for_a_packer_stands_in_for_unmeasured_input() -> Non
     )
 
 
-@pytest.mark.parametrize("context_window", [128_000, 1_000_000])
-def test_classification_uses_model_capacity_and_the_shared_request_deadline(
-    context_window: int,
-) -> None:
-    policy = AIBuilderBudgetPolicy(
-        conversation_safety_buffer_tokens=2_000,
-        minimum_conversation_budget_tokens=4_000,
-        silence_timeout_seconds=240.0,
-    )
-
-    budget = policy.classification_request_budget(
-        capacity=ModelCapacity(context_window, 8_000)
-    )
-    resolved = budget.resolve_whole(input_tokens=20_000)
-
-    assert budget.request_budget_tokens == context_window
-    assert budget.timeout_seconds == 240.0
-    assert resolved is not None
-    assert resolved.model_output_ceiling_tokens == 8_000
-    assert resolved.provider_output_cap_tokens == 8_000
-
-
-@pytest.mark.parametrize(
-    (
-        "classification_timeout",
-        "provider_ceiling",
-        "classification_ceiling",
-        "expected",
-    ),
-    [
-        # Mutant: classification keeps the provider call ceiling.
-        (None, 1_800.0, None, 600.0),
-        # Mutant: the default follows the proposal deadline, not classification's.
-        (100.0, 1_800.0, None, 200.0),
-        # Mutant: the default may exceed the provider call ceiling.
-        (None, 400.0, None, 400.0),
-        # Mutant: the operator's ceiling is not read.
-        (None, 1_800.0, 900.0, 900.0),
-    ],
-)
-def test_classification_ceiling_defaults_to_one_silence_deadline_per_ask(
-    classification_timeout: float | None,
-    provider_ceiling: float,
-    classification_ceiling: float | None,
-    expected: float,
-) -> None:
-    policy = resolve_ai_builder_budget_policy(
-        None,
-        defaults=SimpleNamespace(
-            ai_builder_conversation_safety_buffer_tokens=2_000,
-            ai_builder_minimum_conversation_budget_tokens=4_000,
-            ai_builder_proposal_timeout_seconds=300.0,
-            ai_builder_classification_timeout_seconds=classification_timeout,
-            ai_builder_provider_call_ceiling_seconds=provider_ceiling,
-            ai_builder_classification_ceiling_seconds=classification_ceiling,
-            ai_builder_classification_answer_cap_tokens=4_096,
-            ai_builder_classification_reasoning_effort="turn",
-        ),
-    )
-
-    budget = policy.classification_request_budget(
-        capacity=ModelCapacity(128_000, 32_768)
-    )
-
-    assert budget.ceiling_seconds == expected
-    # Mutant: the operator's answer cap or effort choice is not read.
-    assert budget.answer_ceiling_tokens == 4_096
-    assert policy.classification_reasoning_effort == "turn"
-
-
 @pytest.mark.parametrize(
     ("overrides", "loads"),
     [
-        # Mutant: a ceiling below the classification silence deadline loads.
-        (
-            {
-                "ai_builder_classification_timeout_seconds": 240.0,
-                "ai_builder_classification_ceiling_seconds": 200.0,
-            },
-            False,
-        ),
-        # Mutant: the check ignores the deadline classification inherits.
-        ({"ai_builder_classification_ceiling_seconds": 299.0}, False),
-        ({"ai_builder_classification_ceiling_seconds": 300.0}, True),
-        # Mutant: a ceiling above the provider call ceiling loads.
-        ({"ai_builder_classification_ceiling_seconds": 1_801.0}, False),
-        ({"ai_builder_classification_ceiling_seconds": float("inf")}, False),
-        # Mutant: startup stops applying the shared ordering rule to the silence
-        # deadlines.
+        # Mutant: startup stops applying the shared ordering rule.
         ({"ai_builder_proposal_timeout_seconds": 1_801.0}, False),
-        ({"ai_builder_classification_timeout_seconds": 1_801.0}, False),
         ({"ai_builder_proposal_timeout_seconds": 1_800.0}, True),
-        # Mutant: a zero answer cap loads.
-        ({"ai_builder_classification_answer_cap_tokens": 0}, False),
     ],
 )
-def test_classification_settings_are_checked_when_settings_load(
+def test_builder_deadlines_are_checked_when_settings_load(
     overrides: dict[str, float], loads: bool
 ) -> None:
     values = {
         **get_settings().model_dump(),
         "ai_builder_proposal_timeout_seconds": 300.0,
         "ai_builder_provider_call_ceiling_seconds": 1_800.0,
-        "ai_builder_classification_timeout_seconds": None,
         **overrides,
     }
     if loads:
@@ -339,21 +245,6 @@ def test_classification_settings_are_checked_when_settings_load(
     else:
         with pytest.raises(SystemExit):
             Settings.model_validate(values)
-
-
-def test_classification_honors_an_explicit_deployment_deadline() -> None:
-    policy = AIBuilderBudgetPolicy(
-        conversation_safety_buffer_tokens=2_000,
-        minimum_conversation_budget_tokens=4_000,
-        classification_timeout_seconds=90.0,
-        silence_timeout_seconds=240.0,
-    )
-
-    budget = policy.classification_request_budget(
-        capacity=ModelCapacity(1_000_000, 32_000)
-    )
-
-    assert budget.timeout_seconds == 90.0
 
 
 def test_review_evidence_cap_limits_input_within_the_models_capacity() -> None:
@@ -505,7 +396,6 @@ def test_the_call_ceiling_is_policy_of_its_own_and_never_below_the_silence_deadl
             ai_builder_minimum_conversation_budget_tokens=4_000,
             ai_builder_proposal_timeout_seconds=300.0,
             ai_builder_provider_call_ceiling_seconds=2_400.0,
-            ai_builder_classification_timeout_seconds=None,
         ),
     )
     budget = policy.proposal_request_budget(capacity=ModelCapacity(128_000, 16_384))
@@ -573,7 +463,6 @@ def _deployment(**timing: object) -> SimpleNamespace:
     values: dict[str, object] = {
         "ai_builder_conversation_safety_buffer_tokens": 2_000,
         "ai_builder_minimum_conversation_budget_tokens": 4_000,
-        "ai_builder_classification_timeout_seconds": None,
         "ai_builder_proposal_timeout_seconds": 300.0,
         "ai_builder_provider_call_ceiling_seconds": 1_800.0,
     }
@@ -624,22 +513,6 @@ def test_tenant_deadlines_override_each_deployment_value_on_their_own(
     assert policy.call_ceiling_override_seconds == stored.get("call_ceiling_seconds")
 
 
-# Mutant: the classification budget keeps the deployment silence instead of
-# deriving from the effective one.
-def test_a_tenant_silence_timeout_reaches_the_classification_budget() -> None:
-    policy = resolve_ai_builder_budget_policy(
-        {"ai_builder": {"silence_timeout_seconds": 100, "call_ceiling_seconds": 150}},
-        defaults=_deployment(),
-    )
-
-    budget = policy.classification_request_budget(
-        capacity=ModelCapacity(128_000, 32_768)
-    )
-
-    # Derived ceiling: min(2 x silence, call ceiling).
-    assert (budget.timeout_seconds, budget.ceiling_seconds) == (100.0, 150.0)
-
-
 @pytest.mark.parametrize(
     ("stored", "deployment", "named"),
     [
@@ -660,25 +533,6 @@ def test_a_tenant_silence_timeout_reaches_the_classification_budget() -> None:
             {"silence_timeout_seconds": 900},
             {"ai_builder_provider_call_ceiling_seconds": 600.0},
             ("900 s, set in Admin > Flow settings", "600 s, the deployment default"),
-        ),
-        # Mutant: the explicit classification ceiling is not held to a tenant's
-        # lowered call ceiling.
-        (
-            {"call_ceiling_seconds": 400},
-            {"ai_builder_classification_ceiling_seconds": 500.0},
-            ("500 s, the deployment default", "400 s, set in Admin > Flow settings"),
-        ),
-        (
-            {"call_ceiling_seconds": 400},
-            {"ai_builder_classification_timeout_seconds": 450.0},
-            ("450 s, the deployment default", "400 s, set in Admin > Flow settings"),
-        ),
-        # Mutant: the classification ceiling's lower bound is not held to a
-        # tenant's raised silence timeout, which the classification inherits.
-        (
-            {"silence_timeout_seconds": 700},
-            {"ai_builder_classification_ceiling_seconds": 600.0},
-            ("600 s, the deployment default", "700 s, set in Admin > Flow settings"),
         ),
     ],
 )

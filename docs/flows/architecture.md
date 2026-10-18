@@ -143,16 +143,11 @@ start of that call's own request; absent for a whole, non-streamed answer),
 `max_gap_ms` (the longest wait between chunks, the wait the call ended on
 included), `provider_elapsed_ms`, and, on a failed call, `local_deadline`
 (`silence` or `ceiling` when Eneo's own timer expired, absent for an SDK or
-gateway timeout). A request refused for one sampling control and sent again
-without it is two call records, each timed from its own request; the shared
-ceiling still bounds both. A requirement-classification call record also carries
+gateway timeout). A requirement-classification call record also carries
 `classification_outcome`, what its reply was (`resolved`, `no_content`,
-`parse_failed`, `output_limit_exceeded`). A reply cut off at the output cap is
-asked once more with the identical request, as a second call record, under what
-the first ask left of the same ceiling (every request of the first ask counted);
-when the re-ask fails at the provider, its failure stays on that record and the
-turn keeps the first reply's outcome, so the user is asked to send the message
-again. Empty and unparsable replies are not asked again. One owner ends an attempt on a provider failure: it
+`parse_failed`, `output_limit_exceeded`). A reply cut off at the output cap,
+empty or unparsable is not sent again: the turn continues without that reading.
+One owner ends an attempt on a provider failure: it
 records the failure on the pending call and closes the attempt in the same step,
 so a failed call is never completed afterwards, and it refuses to fail a turn
 that has no open attempt. A cancelled turn is not persisted and its open call is
@@ -425,7 +420,8 @@ that carry none, such as a role-only opening, do not count) a hung call cannot b
 told from one that is thinking without streaming its reasoning. A call that may
 think therefore waits for the response and that output up to the call ceiling
 below: it sends a reasoning effort other than `none`, or sends no effort on a route
-that takes one (the provider's default then applies, so a reasoning route that is off
+that takes one, by the model row's declared capability or by LiteLLM's route
+metadata (the provider's default then applies, so a reasoning route that is off
 by default waits longer on a hung call too). Any other call waits only the silence
 timeout. The provider SDK's own read timeout is set to the ceiling, behind these
 local deadlines. The call ceiling bounds the whole call, whether it keeps
@@ -436,30 +432,21 @@ The deployment sets the defaults (`AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS`, 300,
 and `AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS`, 1800); an admin overrides
 either in Admin > Flow settings as `flow_settings.ai_builder.silence_timeout_seconds` and
 `call_ceiling_seconds` (each a positive number of whole seconds). An absent key
-follows the deployment default, including a later change of it. Three ordering
-rules hold for the effective values, whichever side set each: the silence
-timeout, and a classification timeout the deployment sets, may not exceed the
-call ceiling, and a classification ceiling the deployment sets lies between the
-classification silence timeout (the silence timeout unless the deployment sets
-one) and the call ceiling. Deployment startup checks them on the env values; the
-settings write refuses a change that breaks one, and a turn whose effective
-values break one (the deployment lowered its ceiling under a tenant's silence
-timeout) is refused until an admin repairs it. The API error names both values and
+follows the deployment default, including a later change of it. One ordering
+rule holds for the effective values, whichever side set each: the silence
+timeout may not exceed the call ceiling. Deployment startup checks it on the env
+values; the settings write refuses a change that breaks it, and a turn whose
+effective values break it (the deployment lowered its ceiling under a tenant's
+silence timeout) is refused until an admin repairs it. The API error names both values and
 where each comes from; the web Builder shows a fixed "settings are invalid"
-sentence, so the values appear only in the API response. An explicitly configured
-`AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS` overrides the silence deadline for
-classification, whose wait before its first output is bounded by its own ceiling
-below only for a call that may think; leaving it unset restores inheritance. Classification has a
-whole-call ceiling of its own, shared by its ask and its one re-ask after a
-cut-off answer: `AI_BUILDER_CLASSIFICATION_CEILING_SECONDS`, by default twice
-its silence deadline and never above `AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS`.
-A classification answer is bounded by the model's output limit and the room its
-request leaves, like every other Builder call, unless
-`AI_BUILDER_CLASSIFICATION_ANSWER_CAP_TOKENS` sets a cost cap. When the turn
-sends a reasoning effort, classification sends the lowest level below it that
-the model offers and the route can send, so it never reasons more than the
-turn, unless `AI_BUILDER_CLASSIFICATION_REASONING_EFFORT=turn` keeps the
-user's. Model
+sentence, so the values appear only in the API response. Requirement
+classification uses the same silence timeout and call ceiling as every other
+Builder call, and its answer is bounded by the model's output limit and the
+room its request leaves, like theirs. A Builder call (classification,
+proposal, repair or review suggestions) sends no sampling or reasoning value of
+its own: it sends the reasoning effort the user selected, or no effort when
+the user kept Standard, and the model's defaults apply to every
+control it does not send. Model
 context capacity does not establish provider processing speed, so the deadlines are
 deployment defaults that an admin may override. A proxy between
 Eneo and the provider that closes idle connections must allow at least this
@@ -497,8 +484,7 @@ apart:
   cancel healthy work, but probes that keep failing give no finite detection
   guarantee: only a refresh that finds the row gone confirms the loss then.
   The turn's first probe failure is logged in full, later ones as a summary at
-  most once a minute. Each outbound request, a replacement sent without a
-  refused sampling control included, is admitted through the gate right
+  most once a minute. Each outbound request is admitted through the gate right
   before it is sent, so no request leaves after the loss is known; the
   admission is the turn's own wait, so the silence deadline, the call
   ceiling and the call's timing start only once a request is admitted, and
@@ -534,19 +520,10 @@ its first event and output tokens in its last), and none when the provider
 sent none, so the existing estimate contract applies; the SDK's own recount
 never passes as the provider's.
 
-A provider that refuses the request while it is being established, before
-any stream is acquired, because of one optional sampling control (a 400 naming
-`temperature`, `top_p`, `reasoning_effort` or another control from the
-capability snapshot as unsupported) has done no work. When the caller admits
-one more request, the owner sends the call once more without that control,
-which is the provider's default, under the same ceiling, and logs the refusal
-as evidence that the persisted capability snapshot is wider than the route
-(LiteLLM's discovery lists the controls it maps, not the values a deployment
-accepts; the observed case is an Azure `gpt-5.6` deployment that accepts only
-the default temperature and for which LiteLLM's `drop_params` keeps the
-value). The caller charges the second request to its own call budget and
-records the refused one as a failed call. A refusal after a stream was
-acquired, a refusal of anything else, or a second refusal is raised.
+A provider refusal is raised and recorded as the typed provider failure; the
+owner never sends the request again. A Builder call carries no sampling control
+of its own, only the reasoning effort the user selected, so there is no
+control the owner could leave out and send again without.
 
 Expiry stops the local wait and closes the stream; remote work may continue.
 SDK retries are disabled, so nothing repeats provider work. The turn retains

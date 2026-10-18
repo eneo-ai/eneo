@@ -132,7 +132,8 @@ def _route():
         litellm_model="openai/gpt-test",
         provider_type="openai",
         supported_model_kwargs=SupportedModelKwargs(),
-        prepare_provider_kwargs=lambda kwargs: {},
+        prepare_provider_kwargs=lambda: {},
+        may_reason_by_default=lambda: False,
     )
 
 
@@ -229,9 +230,10 @@ async def test_review_first_output_wait_follows_the_effort_sent(
     route.supported_model_kwargs = snapshot_supported_model_kwargs(
         None, reasoning=route_reasons
     )
-    route.prepare_provider_kwargs = lambda kwargs: (
+    route.prepare_provider_kwargs = lambda: (
         {} if effort is None else {"reasoning_effort": effort}
     )
+    route.may_reason_by_default = lambda: route_reasons
 
     await generate_review_suggestions(
         sample=_sample(),

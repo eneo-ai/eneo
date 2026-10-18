@@ -180,20 +180,6 @@ def _reasoning_effort_select() -> ModelKwargCapability:
     )
 
 
-# The known reasoning-effort levels, least reasoning first. An admin may
-# declare a route's levels in any order, so which level reasons less is read
-# from this scale, never from the declared order.
-REASONING_EFFORT_SCALE: tuple[str, ...] = (
-    "none",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-)
-
-
 def request_may_think(*, reasoning_effort: object, route_reasons: bool) -> bool:
     """Whether a request may think, given the effort it sent and its route.
 
@@ -203,11 +189,11 @@ def request_may_think(*, reasoning_effort: object, route_reasons: bool) -> bool:
     may legitimately be quiet. Waiting too long for a hung call is the safer
     error than failing a call that was still working, so an effort that was
     sent decides and only "none" asks the model not to think: "minimal" still
-    thinks (LiteLLM maps it to a positive Gemini thinking budget), and a level
-    this scale does not know is assumed to think. When no effort was sent the
-    provider keeps its own default, which is on for a reasoning model, so the
-    route's declared capability decides: ``route_reasons`` is whether the
-    route takes a reasoning effort at all. The accepted trade-off: a reasoning
+    thinks (LiteLLM maps it to a positive Gemini thinking budget), and any
+    other level is assumed to think. When no effort was sent the provider
+    keeps its own default, which is on for a reasoning model, so the route
+    decides: ``route_reasons`` is whether the route takes a reasoning effort
+    at all (``ResolvedCompletionModelRoute.may_reason_by_default``). The accepted trade-off: a reasoning
     route that is off by default (Anthropic without thinking, for one) waits
     longer on a HUNG call.
     """

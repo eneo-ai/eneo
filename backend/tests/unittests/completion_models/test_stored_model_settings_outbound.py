@@ -496,6 +496,7 @@ def test_a_fresh_ai_builder_selection_is_still_refused(reasoning_params: bool) -
         provider_type="openai",
         litellm_kwargs={},
         supported_model_kwargs=SupportedModelKwargs(reasoning_effort=_LOW_MEDIUM_HIGH),
+        requested_model_kwargs=ModelKwargs(reasoning_effort="none"),
     )
     params = ["reasoning_effort"] if reasoning_params else []
 
@@ -507,7 +508,7 @@ def test_a_fresh_ai_builder_selection_is_still_refused(reasoning_params: bool) -
         ),
         pytest.raises(ProviderRejectedRequestException),
     ):
-        route.prepare_provider_kwargs(ModelKwargs(reasoning_effort="none"))
+        route.prepare_provider_kwargs()
 
 
 # The stored model offers xhigh and temperature; the model a personal-chat
@@ -638,59 +639,14 @@ def test_a_route_refuses_a_request_value_outside_its_offered_range() -> None:
                 supported=True, control="slider", minimum=1, maximum=2
             )
         ),
+        requested_model_kwargs=ModelKwargs(temperature=0.4),
     )
 
     with (
         patch(f"{_CAPABILITIES}.get_supported_openai_params", return_value=[]),
         pytest.raises(ProviderRejectedRequestException),
     ):
-        route.prepare_provider_kwargs(ModelKwargs(temperature=0.4))
-
-
-@pytest.mark.parametrize(
-    ("minimum", "expected"),
-    [(1.0, {}), (0.0, {"temperature": 0.4})],
-    ids=["temperature-minimum-1", "temperature-minimum-0"],
-)
-def test_the_ai_builder_leaves_out_its_own_temperature_when_the_route_does_not_offer_it(
-    minimum: float, expected: dict[str, object]
-) -> None:
-    # The planner's 0.4 is the Builder's choice, not a user's: on a route
-    # whose slider starts at 1 it is left out and one warning names the route.
-    from eneo.flows.ai_builder.ai_builder_error_contract import (
-        prepare_ai_builder_provider_kwargs,
-    )
-    from eneo.flows.ai_builder.ai_builder_service import PLANNER_TEMPERATURE
-
-    route = ResolvedCompletionModelRoute(
-        litellm_model="openai/gpt-5-mini",
-        provider_type="openai",
-        litellm_kwargs={},
-        supported_model_kwargs=SupportedModelKwargs(
-            temperature=ModelKwargCapability(
-                supported=True, control="slider", minimum=minimum, maximum=2
-            )
-        ),
-    )
-
-    with (
-        patch(f"{_CAPABILITIES}.get_supported_openai_params", return_value=[]),
-        patch("eneo.flows.ai_builder.ai_builder_error_contract.logger") as logger,
-    ):
-        sent = prepare_ai_builder_provider_kwargs(
-            route,
-            ModelKwargs(temperature=PLANNER_TEMPERATURE),
-            stage="proposal_completion",
-        )
-
-    assert sent == expected
-    if expected:
-        logger.warning.assert_not_called()
-    else:
-        logger.warning.assert_called_once()
-        extra = logger.warning.call_args.kwargs["extra"]
-        assert extra["litellm_model"] == "openai/gpt-5-mini"
-        assert (extra["parameter"], extra["value"]) == ("temperature", 0.4)
+        route.prepare_provider_kwargs()
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])

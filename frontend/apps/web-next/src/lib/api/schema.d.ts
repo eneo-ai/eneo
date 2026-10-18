@@ -11939,7 +11939,7 @@ export interface components {
     AIBuilderBudgetSettingsUpdate: {
       /**
        * Call Ceiling Seconds
-       * @description Seconds one whole provider call may take, thinking included. Send null to restore the deployment default. A change is refused with a 400 naming both values when it would break the ordering: the silence timeout, and any classification silence timeout the deployment sets, may not exceed the call ceiling; a classification call ceiling the deployment sets must lie between the classification silence timeout (the silence timeout unless the deployment sets one) and the call ceiling.
+       * @description Seconds one whole provider call may take, thinking included. Send null to restore the deployment default. A change is refused with a 400 naming both values when it would break the ordering: the silence timeout may not exceed the call ceiling.
        */
       call_ceiling_seconds?: number | null;
       /** Conversation Safety Buffer Tokens */
@@ -11966,7 +11966,7 @@ export interface components {
       review_investigation_evidence_max_tokens?: number | null;
       /**
        * Silence Timeout Seconds
-       * @description Seconds the Builder waits for the provider's next chunk once it has started answering. Send null to restore the deployment default. A change is refused with a 400 naming both values when it would break the ordering: the silence timeout, and any classification silence timeout the deployment sets, may not exceed the call ceiling; a classification call ceiling the deployment sets must lie between the classification silence timeout (the silence timeout unless the deployment sets one) and the call ceiling.
+       * @description Seconds the Builder waits for the provider's next chunk once it has started answering. Send null to restore the deployment default. A change is refused with a 400 naming both values when it would break the ordering: the silence timeout may not exceed the call ceiling.
        */
       silence_timeout_seconds?: number | null;
     };

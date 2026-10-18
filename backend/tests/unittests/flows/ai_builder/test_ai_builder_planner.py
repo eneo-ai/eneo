@@ -323,9 +323,6 @@ def _make_planner() -> AIBuilderPlanner:
         user=MagicMock(tenant_id=uuid4()),
         repo=AsyncMock(),
         litellm_client=litellm_client,
-        planner_temperature=0.1,
-        self_correction_temperature=0.1,
-        forced_proposal_temperature=0.1,
         quality_retry_warning_codes=set(),
     )
 
@@ -6959,7 +6956,6 @@ async def test_saved_step_provider_request_contains_focused_data_and_permissions
             message_groups=prepared.message_groups,
             tool_schemas=[cast(dict[str, Any], prepared.proposal_tool_schema)],
             tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
-            temperature=0.1,
             request_budget=prepared.request_budget,
             target_kind=TargetKind.EDIT,
         ),

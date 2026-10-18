@@ -759,6 +759,7 @@ async def build_runtime_discovery_context(
         litellm_model=completion_model_route.litellm_model,
         provider=provider,
         supported_model_kwargs=completion_model_route.supported_model_kwargs,
+        requested_model_kwargs=completion_model_route.requested_model_kwargs,
         bias=bias,
         capacity=capacity,
         safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,

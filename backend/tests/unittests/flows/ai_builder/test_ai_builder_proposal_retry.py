@@ -253,8 +253,6 @@ def _make_self_correction_request(
         ctx=ctx,
         failure=failure or _correctable("original invalid"),
         tool_call=tool_call or _original_tool_call(),
-        self_correction_temperature=0.35,
-        forced_proposal_temperature=0.1,
         repair_completion=_budgeted(repair_completion, ctx),
         retry_config=ToolRetryConfig(
             forced_tool_prompt=forced_tool_prompt,
@@ -298,7 +296,6 @@ def _make_forced_tool_after_text_request(
             forced_tool_prompt=forced_tool_prompt,
             process_tool_invocation=process_tool_invocation,
         ),
-        forced_proposal_temperature=0.1,
         repair_completion=_budgeted(repair_completion, ctx),
     )
 

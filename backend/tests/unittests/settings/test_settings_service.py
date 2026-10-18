@@ -1080,7 +1080,6 @@ async def test_get_ai_builder_budget_settings_reads_tenant_override(monkeypatch)
         lambda: SimpleNamespace(
             ai_builder_conversation_safety_buffer_tokens=2000,
             ai_builder_minimum_conversation_budget_tokens=4000,
-            ai_builder_classification_timeout_seconds=30,
             ai_builder_proposal_timeout_seconds=120,
         ),
     )
@@ -1133,7 +1132,6 @@ async def test_investigation_evidence_bound_restores_inheritance_through_the_ser
         lambda: SimpleNamespace(
             ai_builder_conversation_safety_buffer_tokens=2000,
             ai_builder_minimum_conversation_budget_tokens=4000,
-            ai_builder_classification_timeout_seconds=30,
             ai_builder_proposal_timeout_seconds=120,
         ),
     )
@@ -1197,7 +1195,6 @@ async def test_update_ai_builder_budget_settings_persists_and_audits(monkeypatch
         lambda: SimpleNamespace(
             ai_builder_conversation_safety_buffer_tokens=2000,
             ai_builder_minimum_conversation_budget_tokens=4000,
-            ai_builder_classification_timeout_seconds=30,
             ai_builder_proposal_timeout_seconds=120,
         ),
     )
@@ -1251,7 +1248,6 @@ def _timing_service(monkeypatch, tenant_repo, audit_calls, **deployment):
         lambda: SimpleNamespace(
             ai_builder_conversation_safety_buffer_tokens=2000,
             ai_builder_minimum_conversation_budget_tokens=4000,
-            ai_builder_classification_timeout_seconds=None,
             ai_builder_proposal_timeout_seconds=120,
             **deployment,
         ),

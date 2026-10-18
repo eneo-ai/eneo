@@ -258,6 +258,43 @@ async def test_model_route_preserves_explicit_admin_reasoning_capability():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reasoning", [True, False])
+async def test_a_reasoning_row_may_think_without_effort_metadata(reasoning: bool):
+    # Mutant: route resolution drops the row's reasoning flag, so a reasoning
+    # model on a deployment LiteLLM does not know waits only the silence
+    # deadline for its first output.
+    completion_model = _make_completion_model(
+        supported_model_kwargs=SupportedModelKwargs()
+    )
+    completion_model.reasoning = reasoning
+    adapter = MagicMock()
+    adapter.provider_type = "azure"
+    adapter.resolve_litellm_params.return_value = ("azure/our-deployment", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.resolve_reasoning_effort_options",
+            return_value=(),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.route_takes_reasoning_effort",
+            return_value=False,
+        ),
+    ):
+        route = await service.resolve_model_route(completion_model)
+        may_reason = route.may_reason_by_default()
+
+    assert route.supported_model_kwargs.reasoning_effort.supported is False
+    assert may_reason is reasoning
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("supports_strict_tool_schema", [True, False])
 async def test_model_route_carries_the_supports_strict_tool_schema_capability(
     supports_strict_tool_schema: bool,

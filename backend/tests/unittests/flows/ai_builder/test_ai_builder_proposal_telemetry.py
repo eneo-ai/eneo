@@ -1199,9 +1199,9 @@ def test_persisted_call_records_read_back_through_the_typed_model() -> None:
     assert read.skipped == 0
 
 
-def test_a_reasked_classification_persists_the_outcome_of_each_ask() -> None:
+def test_each_classification_call_persists_its_own_outcome() -> None:
     telemetry = ProposalTurnTelemetry(
-        request_id="req-reask", model="private-model", target_kind=TargetKind.CREATE
+        request_id="req-class", model="private-model", target_kind=TargetKind.CREATE
     )
     for outcome in ("output_limit_exceeded", "resolved"):
         call = telemetry.begin_call(call_kind="slot_classification")
@@ -1223,7 +1223,7 @@ def test_a_reasked_classification_persists_the_outcome_of_each_ask() -> None:
 
 def test_a_classification_outcome_belongs_to_a_classification_call_only() -> None:
     telemetry = ProposalTurnTelemetry(
-        request_id="req-reask", model="private-model", target_kind=TargetKind.CREATE
+        request_id="req-class", model="private-model", target_kind=TargetKind.CREATE
     )
     call = telemetry.begin_call(call_kind="proposal_initial")
 
@@ -1390,30 +1390,6 @@ def test_a_503_before_the_deadline_is_an_upstream_failure_not_a_timeout() -> Non
     assert safe_detail["deadline_reached"] is False
     assert "upstream_timeout_suspected" not in safe_detail
     event_logger.warning.assert_not_called()
-
-
-def test_a_refused_request_is_a_failed_call_and_its_replacement() -> None:
-    tracker = ProposalTurnTelemetry(
-        request_id="req-retry", model="gpt-test", target_kind=TargetKind.CREATE
-    )
-    refused = tracker.begin_call(call_kind="slot_classification")
-    failure = classify_ai_builder_provider_failure(
-        BadRequestError(
-            message="temperature",
-            model="gpt-test",
-            llm_provider="azure",
-            body={"error": {"param": "temperature", "code": "unsupported_value"}},
-        ),
-        stage="slot_classification",
-    )
-
-    replacement = tracker.retry_call(call=refused, failure=failure)
-
-    assert tracker.llm_calls_made == 2
-    assert tracker.call_records[0].provider_failure_kind == "rejected"
-    assert tracker.call_records[0].provider_status_class == "4xx"
-    assert replacement.attempt == 2
-    assert replacement.call_kind == "slot_classification"
 
 
 def _failed_turn_tracker() -> tuple[
@@ -1960,28 +1936,6 @@ def _rate_limited() -> AIBuilderProviderFailure:
         RateLimitError("limited", model="gpt-test", llm_provider="azure"),
         stage="proposal_completion",
     )
-
-
-def test_a_refused_request_keeps_the_timing_of_its_own_request() -> None:
-    tracker = ProposalTurnTelemetry(
-        request_id="req-retry-timing", model="gpt-test", target_kind=TargetKind.CREATE
-    )
-    tracker.start_attempt(counts_as_repair=False)
-
-    tracker.retry_call(
-        failure=_rate_limited(), timing=ProviderCallTiming(provider_elapsed_ms=400)
-    )
-    tracker.record_response(
-        finish_reason="stop",
-        usage=CompletionTokenUsage(1, 1, 2, source="provider"),
-        timing=ProviderCallTiming(
-            provider_elapsed_ms=30, first_chunk_ms=10, max_gap_ms=5
-        ),
-    )
-
-    refused, replacement = tracker.call_records
-    assert (refused.provider_elapsed_ms, refused.first_chunk_ms) == (400, None)
-    assert (replacement.provider_elapsed_ms, replacement.first_chunk_ms) == (30, 10)
 
 
 def test_a_failure_without_an_open_attempt_changes_no_recorded_attempt(

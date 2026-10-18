@@ -164,15 +164,11 @@ class AIBuilderPlanner:
         user: "UserInDB",
         repo: AIBuilderRepository,
         litellm_client: Any,
-        planner_temperature: float = 0.4,
-        self_correction_temperature: float = 0.35,
-        forced_proposal_temperature: float = 0.1,
         quality_retry_warning_codes: set[str],
     ) -> None:
         self.user = user
         self.repo = repo
         self.litellm_client = litellm_client
-        self.planner_temperature = planner_temperature
         quality_retry_warning_code_set = frozenset(quality_retry_warning_codes)
         self._compiled_proposal_finalizer = CompiledProposalFinalizer(
             repo=repo,
@@ -181,8 +177,6 @@ class AIBuilderPlanner:
         self._proposal_submission = ProposalSubmissionOwner(
             repo=repo,
             litellm_client=litellm_client,
-            self_correction_temperature=self_correction_temperature,
-            forced_proposal_temperature=forced_proposal_temperature,
             quality_retry_warning_codes=quality_retry_warning_code_set,
             compiled_proposal_finalizer=self._compiled_proposal_finalizer,
         )
@@ -260,7 +254,6 @@ class AIBuilderPlanner:
                 proposal_tool_schema=proposal_request.proposal_tool_schema,
                 decline_tool_schema=proposal_request.decline_tool_schema,
                 obligation_projection=proposal_request.obligation_projection,
-                proposal_temperature=self.planner_temperature,
                 request_id=request_id,
                 usage_tracker=usage_tracker,
                 flow=flow,

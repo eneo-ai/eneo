@@ -42,6 +42,7 @@ from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     enrich_reasoning_effort_capability,
     filter_request_model_kwargs,
     normalize_reasoning_effort,
+    route_takes_reasoning_effort,
 )
 from eneo.files.file_models import File
 from eneo.files.file_reference import (
@@ -192,31 +193,47 @@ class ResolvedCompletionModelRoute:
     # Effective strict-tool-schema capability of this route. Callers that build
     # tool schemas read it here instead of inspecting the model or provider.
     supports_strict_tool_schema: bool = False
+    # The model row's own reasoning flag; it holds without effort metadata
+    # (a deployment name LiteLLM does not know).
+    declares_reasoning: bool = False
 
-    def prepare_provider_kwargs(
-        self,
-        requested: ModelKwargs,
-    ) -> dict[str, object]:
+    def prepare_provider_kwargs(self) -> dict[str, object]:
         provider_kwargs = {
             key: value
             for key, value in self.litellm_kwargs.items()
             if key not in SupportedModelKwargs.model_fields
         }
-        effective_request = self.requested_model_kwargs.model_copy(
-            update=requested.model_dump(exclude_none=True)
-        )
         provider_kwargs.update(
             filter_request_model_kwargs(
-                effective_request, self.supported_model_kwargs
+                self.requested_model_kwargs, self.supported_model_kwargs
             ).model_dump(exclude_none=True)
         )
         provider_kwargs = normalize_reasoning_effort(
             litellm_model=self.litellm_model,
             provider_type=self.provider_type,
             model_kwargs=provider_kwargs,
-            openai_absent_effort="none",
+            # The Builder's "Standard" reasoning is the model's own default.
+            openai_absent_effort=None,
         )
         return provider_kwargs
+
+    def may_reason_by_default(self) -> bool:
+        """Whether the provider may think when the request sends no effort.
+
+        The row's reasoning flag, its effort capability and LiteLLM's route
+        metadata can each be missing while the model reasons at its own
+        default: a row flagged reasoning on a deployment name LiteLLM does not
+        know, or a row without the flag on a route LiteLLM sends an effort to
+        (OpenAI gpt-5-mini). Any source makes the route one that may think; a
+        failed metadata lookup is raised, not read as "no".
+        """
+        if self.declares_reasoning:
+            return True
+        return self.supported_model_kwargs.reasoning_effort.supported or (
+            route_takes_reasoning_effort(
+                litellm_model=self.litellm_model, provider_type=self.provider_type
+            )
+        )
 
     def incident_evidence(self) -> CompletionRouteEvidence:
         configuration_fields: list[CompletionEvidenceField] = []
@@ -480,6 +497,7 @@ class CompletionService:
             provider_type=adapter.provider_type,
             resolved_model_id=model.id,
             supports_strict_tool_schema=sends_strict_tool_schemas(model),
+            declares_reasoning=model.reasoning,
         )
 
     async def resolve_structured_output_capability(

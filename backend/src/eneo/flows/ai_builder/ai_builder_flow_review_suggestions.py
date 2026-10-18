@@ -23,7 +23,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
@@ -741,10 +740,11 @@ async def generate_review_suggestions(
         )
     completion_kwargs = prepare_ai_builder_provider_kwargs(
         completion_model_route,
-        ModelKwargs(temperature=0.0),
         stage="review_suggestions",
         tenant_id=tenant_id,
     )
+    # Read before the call starts: a failed metadata lookup is no provider failure.
+    route_may_reason = completion_model_route.may_reason_by_default()
     if response_format:
         completion_kwargs["response_format"] = response_format
     completion_kwargs.pop("timeout", None)
@@ -760,9 +760,7 @@ async def generate_review_suggestions(
             ceiling_seconds=resolved_budget.ceiling_seconds,
             first_output_deadline_seconds=resolved_budget.first_output_timeout_seconds(
                 reasoning_effort=completion_kwargs.get("reasoning_effort"),
-                route_reasons=(
-                    completion_model_route.supported_model_kwargs.reasoning_effort.supported
-                ),
+                route_reasons=route_may_reason,
             ),
             request={
                 "model": litellm_model,
@@ -770,9 +768,6 @@ async def generate_review_suggestions(
                 "drop_params": True,
                 **completion_kwargs,
             },
-            # A review makes one call and keeps no call budget; a request
-            # without the refused control is always admitted.
-            retry_without_refused_control=lambda _control, _error, _timing: True,
             observe_timing=timing,
         )
     except Exception as error:

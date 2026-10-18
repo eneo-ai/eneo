@@ -28,24 +28,14 @@ from eneo.flows.flow_ai_builder_budget_settings import (
     parse_ai_builder_operating_limit,
     parse_ai_builder_timing_seconds,
 )
-from eneo.main.ai_builder_timing_order import (
-    TimingOrderRule,
-    ai_builder_timing_order_violation,
-)
+from eneo.main.ai_builder_timing_order import ai_builder_timing_order_violation
 from eneo.main.config import (
     AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT,
-    AI_BUILDER_CLASSIFICATION_REASONING_EFFORT_DEFAULT,
     AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT,
-    AIBuilderClassificationReasoningEffort,
     get_settings,
 )
 
 AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS = 300.0
-
-# How often a classification reply cut off at the output cap is asked again
-# with the identical request: runaway replies come per call, not per input, and
-# a bounded retry is an invariant, not a tunable.
-SLOT_CLASSIFICATION_CUT_OFF_REASKS = 1
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -58,8 +48,7 @@ class AIBuilderRequestBudget:
     required input leaves, otherwise that share, so optional input never
     crowds the answer out and the answer never crowds optional input out.
     ``resolve`` then measures the packed request whole and sends the model the
-    most it may write in the room that remains, never a fixed number, unless
-    the call's answer has a known bound of its own (``answer_cap_tokens``).
+    most it may write in the room that remains, never a fixed number.
     """
 
     capacity: ModelCapacity
@@ -75,9 +64,6 @@ class AIBuilderRequestBudget:
     request_id: str | None = None
     # Bounds the complete input only; the answer is never charged to it.
     input_cap_tokens: int | None = None
-    # The most this kind of call's answer can need, below the model's own
-    # ceiling. None leaves the answer bounded by the model alone.
-    answer_cap_tokens: int | None = None
 
     def __post_init__(self) -> None:
         missing = self.capacity.missing_dimensions()
@@ -85,8 +71,6 @@ class AIBuilderRequestBudget:
             raise UnknownModelCapacityError(missing)
         if self.input_cap_tokens is not None and self.input_cap_tokens < 1:
             raise ValueError("AI Builder input cap must be positive")
-        if self.answer_cap_tokens is not None and self.answer_cap_tokens < 1:
-            raise ValueError("AI Builder answer cap must be positive")
         if self.safety_buffer_tokens < 0:
             raise ValueError("AI Builder safety buffer cannot be negative")
         if not (
@@ -132,14 +116,6 @@ class AIBuilderRequestBudget:
         return self.capacity.require_output_tokens()
 
     @property
-    def answer_ceiling_tokens(self) -> int:
-        """The most the answer may take: the model's ceiling or the call's cap."""
-
-        if self.answer_cap_tokens is None:
-            return self.model_output_ceiling_tokens
-        return min(self.model_output_ceiling_tokens, self.answer_cap_tokens)
-
-    @property
     def usable_request_budget_tokens(self) -> int:
         """What input and answer share once the safety buffer is set aside."""
 
@@ -166,7 +142,7 @@ class AIBuilderRequestBudget:
         if room < 1:
             return None
         reserved_output_tokens = min(
-            self.answer_ceiling_tokens,
+            self.model_output_ceiling_tokens,
             math.ceil(room * self.answer_reserve_share),
         )
         available_input_tokens = self.capacity.input_allowance(
@@ -183,7 +159,6 @@ class AIBuilderRequestBudget:
             timeout_seconds=self.timeout_seconds,
             request_id=self.request_id,
             input_cap_tokens=self.input_cap_tokens,
-            answer_cap_tokens=self.answer_cap_tokens,
             required_input_tokens=required_input_tokens,
             reserved_output_tokens=reserved_output_tokens,
             available_input_tokens=available_input_tokens,
@@ -237,7 +212,6 @@ class AIBuilderPlannedRequestBudget(AIBuilderRequestBudget):
             timeout_seconds=self.timeout_seconds,
             request_id=self.request_id,
             input_cap_tokens=self.input_cap_tokens,
-            answer_cap_tokens=self.answer_cap_tokens,
         )
 
     def resolve(self, *, input_tokens: int) -> AIBuilderResolvedRequestBudget | None:
@@ -255,7 +229,6 @@ class AIBuilderPlannedRequestBudget(AIBuilderRequestBudget):
         provider_output_cap_tokens = self.capacity.resolve_output_cap(
             input_tokens=input_tokens,
             safety_tokens=self.safety_buffer_tokens,
-            caller_cap=self.answer_cap_tokens,
         )
         if isinstance(provider_output_cap_tokens, ModelCapacityNoFit):
             return None
@@ -267,7 +240,6 @@ class AIBuilderPlannedRequestBudget(AIBuilderRequestBudget):
             timeout_seconds=self.timeout_seconds,
             request_id=self.request_id,
             input_cap_tokens=self.input_cap_tokens,
-            answer_cap_tokens=self.answer_cap_tokens,
             required_input_tokens=self.required_input_tokens,
             reserved_output_tokens=self.reserved_output_tokens,
             available_input_tokens=self.available_input_tokens,
@@ -290,16 +262,6 @@ class AIBuilderBudgetPolicy:
     answer_reserve_share: float = AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT
     # See AIBuilderRequestBudget.ceiling_seconds.
     call_ceiling_seconds: float = AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT
-    # Classification shares the proposal deadline unless deployment policy
-    # explicitly gives it a different one.
-    classification_timeout_seconds: float | None = None
-    # See Settings.ai_builder_classification_ceiling_seconds.
-    classification_ceiling_seconds: float | None = None
-    # See Settings.ai_builder_classification_answer_cap_tokens.
-    classification_answer_cap_tokens: int | None = None
-    classification_reasoning_effort: AIBuilderClassificationReasoningEffort = (
-        AI_BUILDER_CLASSIFICATION_REASONING_EFFORT_DEFAULT
-    )
     silence_timeout_seconds: float = AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS
     max_attachments: int = AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT
     max_message_chars: int = AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT
@@ -346,34 +308,6 @@ class AIBuilderBudgetPolicy:
             else planned.reserved_output_tokens
         )
 
-    def classification_request_budget(
-        self,
-        *,
-        capacity: ModelCapacity,
-        request_id: str | None = None,
-    ) -> AIBuilderRequestBudget:
-        timeout_seconds = (
-            self.classification_timeout_seconds
-            if self.classification_timeout_seconds is not None
-            else self.silence_timeout_seconds
-        )
-        return AIBuilderRequestBudget(
-            capacity=capacity,
-            safety_buffer_tokens=self.conversation_safety_buffer_tokens,
-            answer_reserve_share=self.answer_reserve_share,
-            ceiling_seconds=(
-                self.classification_ceiling_seconds
-                if self.classification_ceiling_seconds is not None
-                else min(
-                    (1 + SLOT_CLASSIFICATION_CUT_OFF_REASKS) * timeout_seconds,
-                    self.call_ceiling_seconds,
-                )
-            ),
-            timeout_seconds=timeout_seconds,
-            request_id=request_id,
-            answer_cap_tokens=self.classification_answer_cap_tokens,
-        )
-
     def review_request_budget(
         self,
         *,
@@ -399,6 +333,8 @@ class AIBuilderBudgetPolicy:
         request_id: str | None = None,
         carries_review_evidence: bool = False,
     ) -> AIBuilderRequestBudget:
+        """The budget of a turn's provider calls, slot classification included."""
+
         return AIBuilderRequestBudget(
             capacity=capacity,
             input_cap_tokens=(
@@ -431,42 +367,6 @@ def _timing_value(seconds: float, *, set_by_admin: bool) -> str:
     return f"{seconds:g} s, {origin}"
 
 
-_TIMING_ORDER_REFUSALS: dict[TimingOrderRule, str] = {
-    "silence_above_call_ceiling": (
-        "The silence timeout ({value}) is longer than the call ceiling ({bound}). "
-        "Lower the silence timeout or raise the call ceiling."
-    ),
-    "classification_silence_above_call_ceiling": (
-        "The classification silence timeout ({value}) is longer than the call "
-        "ceiling ({bound}). Raise the call ceiling."
-    ),
-    "classification_ceiling_above_call_ceiling": (
-        "The classification call ceiling ({value}) is longer than the call "
-        "ceiling ({bound}). Raise the call ceiling."
-    ),
-    "classification_ceiling_below_classification_silence": (
-        "The classification call ceiling ({value}) is shorter than the "
-        "classification silence timeout ({bound}). Lower the silence timeout."
-    ),
-}
-
-
-def _set_by_admin(
-    rule: TimingOrderRule, policy: AIBuilderBudgetPolicy
-) -> tuple[bool, bool]:
-    """Whether the violating value and the bound it breaks are the admin's."""
-
-    silence = policy.silence_timeout_override_seconds is not None
-    ceiling = policy.call_ceiling_override_seconds is not None
-    if rule == "silence_above_call_ceiling":
-        return silence, ceiling
-    if rule == "classification_ceiling_below_classification_silence":
-        # An unset classification silence is the silence timeout itself.
-        return False, silence and policy.classification_timeout_seconds is None
-    # Only the deployment sets classification deadlines.
-    return False, ceiling
-
-
 def check_ai_builder_timing_order(policy: AIBuilderBudgetPolicy) -> None:
     """Refuse effective deadlines that the request budget cannot honour.
 
@@ -480,17 +380,20 @@ def check_ai_builder_timing_order(policy: AIBuilderBudgetPolicy) -> None:
     violation = ai_builder_timing_order_violation(
         silence_seconds=policy.silence_timeout_seconds,
         call_ceiling_seconds=policy.call_ceiling_seconds,
-        classification_silence_seconds=policy.classification_timeout_seconds,
-        classification_ceiling_seconds=policy.classification_ceiling_seconds,
     )
     if violation is None:
         return
-    value_by_admin, bound_by_admin = _set_by_admin(violation.rule, policy)
+    silence = _timing_value(
+        violation.value,
+        set_by_admin=policy.silence_timeout_override_seconds is not None,
+    )
+    ceiling = _timing_value(
+        violation.bound,
+        set_by_admin=policy.call_ceiling_override_seconds is not None,
+    )
     raise AIBuilderTimingOrderError(
-        _TIMING_ORDER_REFUSALS[violation.rule].format(
-            value=_timing_value(violation.value, set_by_admin=value_by_admin),
-            bound=_timing_value(violation.bound, set_by_admin=bound_by_admin),
-        )
+        f"The silence timeout ({silence}) is longer than the call ceiling "
+        f"({ceiling}). Lower the silence timeout or raise the call ceiling."
     )
 
 
@@ -522,22 +425,6 @@ def _default_policy(defaults: Any | None = None) -> AIBuilderBudgetPolicy:
                 "ai_builder_provider_call_ceiling_seconds",
                 AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT,
             )
-        ),
-        classification_timeout_seconds=(
-            float(source.ai_builder_classification_timeout_seconds)
-            if source.ai_builder_classification_timeout_seconds is not None
-            else None
-        ),
-        classification_ceiling_seconds=getattr(
-            source, "ai_builder_classification_ceiling_seconds", None
-        ),
-        classification_answer_cap_tokens=getattr(
-            source, "ai_builder_classification_answer_cap_tokens", None
-        ),
-        classification_reasoning_effort=getattr(
-            source,
-            "ai_builder_classification_reasoning_effort",
-            AI_BUILDER_CLASSIFICATION_REASONING_EFFORT_DEFAULT,
         ),
         silence_timeout_seconds=float(source.ai_builder_proposal_timeout_seconds),
         max_attachments=AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
@@ -689,18 +576,6 @@ def resolve_ai_builder_budget_policy(
         minimum_conversation_budget_tokens=minimum_budget,
         answer_reserve_share=resolved_defaults.answer_reserve_share,
         call_ceiling_seconds=resolved_defaults.call_ceiling_seconds,
-        classification_timeout_seconds=(
-            resolved_defaults.classification_timeout_seconds
-        ),
-        classification_ceiling_seconds=(
-            resolved_defaults.classification_ceiling_seconds
-        ),
-        classification_answer_cap_tokens=(
-            resolved_defaults.classification_answer_cap_tokens
-        ),
-        classification_reasoning_effort=(
-            resolved_defaults.classification_reasoning_effort
-        ),
         silence_timeout_seconds=resolved_defaults.silence_timeout_seconds,
         max_attachments=operating_limits["max_attachments"],
         max_message_chars=operating_limits["max_message_chars"],

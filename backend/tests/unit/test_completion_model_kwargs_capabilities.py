@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -318,8 +319,10 @@ def test_unknown_reasoning_levels_send_what_unsupported_ones_send(reasoning: boo
                 supported.reasoning_effort, max_length=32
             ),
             supported.reasoning_effort.accepts("low"),
-            route.prepare_provider_kwargs(ModelKwargs()),
-            route.prepare_provider_kwargs(ModelKwargs(reasoning_effort="medium")),
+            route.prepare_provider_kwargs(),
+            replace(
+                route, requested_model_kwargs=ModelKwargs(reasoning_effort="medium")
+            ).prepare_provider_kwargs(),
         )
 
     assert outbound(ModelKwargCapability(unknown=True)) == outbound(

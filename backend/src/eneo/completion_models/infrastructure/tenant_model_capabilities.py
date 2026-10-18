@@ -407,7 +407,8 @@ def validate_model_kwargs_update(
         )
 
 
-def _route_takes_reasoning_effort(*, litellm_model: str, provider_type: str) -> bool:
+def route_takes_reasoning_effort(*, litellm_model: str, provider_type: str) -> bool:
+    """Whether LiteLLM knows this route takes a reasoning effort at all."""
     supported_params = get_supported_openai_params(
         model=litellm_model.removeprefix(f"{provider_type}/"),
         custom_llm_provider=provider_type,
@@ -426,7 +427,7 @@ def route_sends_reasoning_effort(
     A level a route offers can still be refused here: LiteLLM does not know
     the route takes a reasoning effort, or `none` is not a level it confirms.
     """
-    if not _route_takes_reasoning_effort(
+    if not route_takes_reasoning_effort(
         litellm_model=litellm_model, provider_type=provider_type
     ):
         return False
@@ -441,17 +442,16 @@ def normalize_reasoning_effort(
     litellm_model: str,
     provider_type: str,
     model_kwargs: Mapping[str, object],
-    openai_absent_effort: Literal["none", "low"],
+    openai_absent_effort: Literal["low"] | None,
 ) -> dict[str, object]:
     """Return explicit provider-safe reasoning controls for one request.
 
-    OpenAI reasoning models restore a provider default when effort is omitted.
-    Callers therefore choose the explicit absent-effort policy for their use
-    case. This transport policy is intentionally independent of the persisted
-    user-facing reasoning controls. Other providers use absence as the off
-    signal. Parameter-capability errors propagate before provider I/O. Missing
-    value-level metadata uses the existing low-effort fallback instead of
-    emitting an unverified `none` value.
+    OpenAI reasoning models apply their own default effort when none is sent.
+    A caller with its own policy for that case passes it as
+    `openai_absent_effort`; None leaves the effort out, so the provider's
+    default applies. This transport policy is intentionally independent of the
+    persisted user-facing reasoning controls. Other providers use absence as
+    the off signal. Parameter-capability errors propagate before provider I/O.
     """
 
     normalized = dict(model_kwargs)
@@ -470,46 +470,14 @@ def normalize_reasoning_effort(
         return normalized
 
     normalized.pop("reasoning_effort", None)
-    if (
-        _route_takes_reasoning_effort(
+    if openai_absent_effort is not None and (
+        route_takes_reasoning_effort(
             litellm_model=litellm_model, provider_type=provider_type
         )
         and provider_type == "openai"
     ):
-        normalized["reasoning_effort"] = _resolve_openai_absent_effort(
-            litellm_model=litellm_model,
-            provider_type=provider_type,
-            requested=openai_absent_effort,
-        )
+        normalized["reasoning_effort"] = openai_absent_effort
     return normalized
-
-
-def _resolve_openai_absent_effort(
-    *,
-    litellm_model: str,
-    provider_type: str,
-    requested: Literal["none", "low"],
-) -> Literal["none", "low"]:
-    if requested == "low":
-        return "low"
-    try:
-        model_info = cast(
-            Mapping[str, object],
-            getattr(litellm, "get_model_info")(
-                model=litellm_model,
-                custom_llm_provider=provider_type,
-            ),
-        )
-    except Exception:
-        logger.warning(
-            "LiteLLM model metadata unavailable; using low reasoning fallback",
-            extra={
-                "litellm_model": litellm_model,
-                "provider_type": provider_type,
-            },
-        )
-        return "low"
-    return "none" if model_info.get("supports_none_reasoning_effort") is True else "low"
 
 
 def supports_response_schema(
@@ -582,6 +550,7 @@ __all__ = [
     "resolve_reasoning_effort_options",
     "resolve_structured_output_capability",
     "route_sends_reasoning_effort",
+    "route_takes_reasoning_effort",
     "schema_response_format",
     "selectable_reasoning_effort_options",
     "stored_request_model_kwargs",

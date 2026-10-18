@@ -3661,9 +3661,6 @@ class TestPlannerDiscoveryQuestionDispatch:
             user=MagicMock(tenant_id=uuid4()),
             repo=repo,
             litellm_client=_classifier_reading_nothing(),
-            planner_temperature=0.1,
-            self_correction_temperature=0.1,
-            forced_proposal_temperature=0.1,
             quality_retry_warning_codes=set(),
         )
 
@@ -3722,9 +3719,6 @@ class TestPlannerDiscoveryQuestionDispatch:
             user=MagicMock(tenant_id=uuid4()),
             repo=repo,
             litellm_client=_classifier_reading_nothing(),
-            planner_temperature=0.1,
-            self_correction_temperature=0.1,
-            forced_proposal_temperature=0.1,
             quality_retry_warning_codes=set(),
         )
 

@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
-from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionEvidenceField,
     CompletionEvidenceFieldDomain,
@@ -15,7 +14,6 @@ from eneo.completion_models.infrastructure.completion_service import (
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderRequestEvidence,
-    classify_ai_builder_provider_failure,
     prepare_ai_builder_provider_kwargs,
     provider_call_stopped_error,
     record_ai_builder_provider_failure,
@@ -35,7 +33,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 from eneo.flows.ai_builder.ai_builder_provider_call import (
     ObservedTiming,
     ProviderCallStopped,
-    ProviderCallTiming,
     ProviderRequestNotAdmitted,
     ProviderWorkGate,
     complete_with_silence_deadline,
@@ -105,10 +102,11 @@ async def call_proposal_completion(
     messages = flatten_proposal_message_groups(fitted_message_groups)
     provider_kwargs = prepare_ai_builder_provider_kwargs(
         request.route,
-        ModelKwargs(temperature=request.temperature),
         stage="proposal_completion",
         request_id=usage_tracker.request_id if usage_tracker is not None else None,
     )
+    # Read before the call starts: a failed metadata lookup is no provider failure.
+    route_may_reason = request.route.may_reason_by_default()
     if not request.call_budget.try_start_call():
         raise ProposalCallBudgetExhausted
     provider_kwargs.pop("drop_params", None)
@@ -133,24 +131,6 @@ async def call_proposal_completion(
             request=request, sdk_input=sdk_input
         )
 
-    def admit_request_without_refused_control(
-        _control: str, error: Exception, refused_timing: ProviderCallTiming
-    ) -> bool:
-        # One more request costs one call of the turn's budget and is its own
-        # call record; the refused one is recorded as failed, with its own timing.
-        if not request.call_budget.try_start_call():
-            return False
-        if usage_tracker is not None:
-            usage_tracker.retry_call(
-                failure=classify_ai_builder_provider_failure(
-                    error,
-                    stage="proposal_completion",
-                    request_id=usage_tracker.request_id,
-                ),
-                timing=refused_timing,
-            )
-        return True
-
     try:
         raw_response = await complete_with_silence_deadline(
             litellm_client,
@@ -158,9 +138,7 @@ async def call_proposal_completion(
             ceiling_seconds=request_budget.ceiling_seconds,
             first_output_deadline_seconds=request_budget.first_output_timeout_seconds(
                 reasoning_effort=provider_kwargs.get("reasoning_effort"),
-                route_reasons=(
-                    request.route.supported_model_kwargs.reasoning_effort.supported
-                ),
+                route_reasons=route_may_reason,
             ),
             request={
                 "model": request.route.litellm_model,
@@ -172,7 +150,6 @@ async def call_proposal_completion(
                 "max_tokens": request_budget.provider_output_cap_tokens,
                 **provider_kwargs,
             },
-            retry_without_refused_control=admit_request_without_refused_control,
             observe_sdk_input=observe_sdk_input,
             observe_timing=timing,
             gate=provider_gate,

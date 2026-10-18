@@ -14,6 +14,7 @@ route is observed separately (test_tenant_model_service.py, the probe).
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from uuid import UUID, uuid4
 
 import pytest
@@ -210,7 +211,9 @@ async def _final_provider_kwargs(
         sendable = stored_request_model_kwargs(
             stored, route.supported_model_kwargs, completion_model_id=model.id
         )
-        via_route = route.prepare_provider_kwargs(sendable)
+        via_route = replace(
+            route, requested_model_kwargs=sendable
+        ).prepare_provider_kwargs()
         via_adapter = adapter._prepare_kwargs(model_kwargs=sendable)
     return (
         {key: value for key, value in via_route.items() if key in sent},
@@ -277,6 +280,10 @@ async def test_recording_unknown_levels_sends_what_origin_sends(
     )
 
     assert now == on_origin
-    # The stored effort is not offered either way; what is sent besides the
-    # stored temperature is the transport's own absent-effort value.
-    assert now == ({"reasoning_effort": "low", "temperature": 0.2},) * 2
+    # The stored effort is not offered either way. Besides the stored
+    # temperature, the Builder's route sends no effort (the model's default)
+    # and the chat adapter sends its own absent-effort value.
+    assert now == (
+        {"temperature": 0.2},
+        {"reasoning_effort": "low", "temperature": 0.2},
+    )

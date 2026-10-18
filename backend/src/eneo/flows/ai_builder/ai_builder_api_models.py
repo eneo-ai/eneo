@@ -397,8 +397,7 @@ class AIBuilderProviderCallDiagnostic(BaseModel):
     first_chunk_ms: int | None = None
     max_gap_ms: int | None = None
     provider_elapsed_ms: int | None = None
-    # A classification call's reply; an unread one followed by another
-    # classification call in the same turn is a re-ask.
+    # A classification call's reply.
     classification_outcome: SlotClassificationReplyOutcome | None = None
 
 

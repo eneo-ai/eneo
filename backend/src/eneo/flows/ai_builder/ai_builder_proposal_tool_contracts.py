@@ -372,7 +372,6 @@ class ProposalCompletionRequest:
     route: ResolvedCompletionModelRoute
     target_kind: TargetKind
     request_budget: AIBuilderRequestBudget
-    temperature: float
     tool_choice: ProposalToolChoiceParam = field(
         default_factory=lambda: forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
     )
@@ -656,7 +655,6 @@ class ProposalTurnContext:
     def completion_request(
         self,
         *,
-        temperature: float,
         message_groups: tuple[ProposalMessageGroup, ...] | None = None,
         counts_as_repair: bool = False,
     ) -> ProposalCompletionRequest:
@@ -673,7 +671,6 @@ class ProposalTurnContext:
             route=self.route,
             target_kind=self.target_kind,
             request_budget=self.proposal_request_budget,
-            temperature=temperature,
             tool_choice=(
                 "required"
                 if self.decline_tool_schema is not None and not counts_as_repair

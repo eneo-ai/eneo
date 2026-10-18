@@ -28,15 +28,8 @@ response and for each chunk, ends at once, the stream is closed, and
 ``ProviderCallStopped`` is raised. It is not a timeout and not a provider
 failure; the caller reports it as the lost lease it is.
 
-A provider that refuses the request while it is being established, because
-of one optional sampling control (temperature, top_p, reasoning_effort, ...),
-has done no work; when the caller admits another request, the call is sent
-once more without that control, which is the provider's default, under the
-same ceiling. A refusal after a stream was acquired is never retried here: the
-provider may have generated. The persisted capability snapshot said the
-control was accepted, so the refusal is logged as evidence that the snapshot
-is wider than the route. The refusal's envelope is read from wherever the
-SDK left it: LiteLLM's Responses-API bridge (which carries Azure and OpenAI
+A provider refusal is raised as it is; nothing is sent again here. Its
+envelope is read from wherever the SDK left it: LiteLLM's Responses-API bridge (which carries Azure and OpenAI
 gpt-5.4+ requests with function tools) re-raises a provider 400 with only
 the envelope text in the exception message, no body and a placeholder
 response, so the message is the last source tried.
@@ -55,7 +48,6 @@ from dataclasses import dataclass, replace
 from typing import Any, ClassVar, Literal, Protocol, cast
 
 import httpx
-from litellm.exceptions import BadRequestError
 
 from eneo.completion_models.infrastructure.stream_collector import (
     ProviderStreamCollector,
@@ -63,13 +55,8 @@ from eneo.completion_models.infrastructure.stream_collector import (
 from eneo.completion_models.infrastructure.stream_collector import (
     ProviderStreamIncomplete as ProviderStreamIncomplete,
 )
-from eneo.main.logging import get_logger
-
-logger = get_logger(__name__)
 
 _MAX_PROVIDER_ERROR_BODY_BYTES = 65_536
-# Provider error codes that state one named request field was refused.
-_UNSUPPORTED_PARAMETER_CODES = frozenset({"unsupported_parameter", "unsupported_value"})
 _MAX_PROVIDER_FACT_LENGTH = 64
 # A sanitized parameter must fit one public error detail string, and a
 # correlation id the length a request id may have.
@@ -188,8 +175,7 @@ class ProviderRequestNotAdmitted(Exception):
 class ProviderWorkGate:
     """What a send turn's provider work answers to; the send lease mints it.
 
-    The provider-call seam owns its use: before every outbound request, a
-    replacement sent without a refused control included, it checks
+    The provider-call seam owns its use: before the outbound request it checks
     ``ownership_lost`` and awaits ``admit``, a lease-guarded write that raises
     ``session_send_lease_lost`` once the turn no longer owns its session. The
     two signals mean different things: ``ownership_lost`` is set only when the
@@ -257,9 +243,6 @@ class _StopRace:
 class ProviderCallTiming:
     """When the provider's answer arrived, measured from sending the request.
 
-    Each request of a call that is sent again without a refused control is
-    timed from its own start.
-
     ``first_chunk_ms`` and ``max_gap_ms`` are None when no chunk arrived (a
     whole, non-streamed answer included). ``max_gap_ms`` is the longest wait
     for a chunk after the first one, the wait the call ended on included, so
@@ -269,12 +252,6 @@ class ProviderCallTiming:
     provider_elapsed_ms: int
     first_chunk_ms: int | None = None
     max_gap_ms: int | None = None
-
-
-# Whether the caller admits one more request without the refused control,
-# given the refused request's own timing; the caller charges it to its own call
-# budget and telemetry.
-RetryAdmission = Callable[[str, Exception, ProviderCallTiming], bool]
 
 
 @dataclass(slots=True)
@@ -315,36 +292,24 @@ class _ChunkClock:
         )
 
 
-class _DispatchedRequests:
-    """Provider timing of a call's requests; it exists only from a dispatch.
+class _DispatchedRequest:
+    """Provider timing of a call's request; it exists only from its dispatch.
 
-    No clock runs while the turn admits a request: a request's clock starts
-    when it is sent, and ends (frozen into its own measurement) before the
-    next request is admitted. A call that sent nothing has no provider timing.
+    No clock runs while the turn admits the request: its clock starts when it
+    is sent. A call that sent nothing has no provider timing.
     """
 
     def __init__(self) -> None:
-        self._current: _ChunkClock | None = None
-        self._finished: ProviderCallTiming | None = None
+        self._clock: _ChunkClock | None = None
 
     def dispatch(self) -> _ChunkClock:
-        self._current = _ChunkClock()
-        return self._current
+        self._clock = _ChunkClock()
+        return self._clock
 
-    def end_request(self) -> ProviderCallTiming | None:
-        """Freeze the request in flight into its own measurement."""
+    def timing(self) -> ProviderCallTiming | None:
+        """The request's timing, or None when nothing was sent."""
 
-        if self._current is not None:
-            self._finished = self._current.timing()
-            self._current = None
-        return self._finished
-
-    def last(self) -> ProviderCallTiming | None:
-        """The timing of the last request sent, or None when none was sent."""
-
-        if self._current is not None:
-            return self._current.timing()
-        return self._finished
+        return self._clock.timing() if self._clock is not None else None
 
 
 def _ms(seconds: float) -> int:
@@ -389,7 +354,6 @@ async def complete_with_silence_deadline(
     ceiling_seconds: float,
     first_output_deadline_seconds: float,
     request: Mapping[str, Any],
-    retry_without_refused_control: RetryAdmission | None = None,
     observe_sdk_input: Callable[[Mapping[str, Any]], None] | None = None,
     observe_timing: Callable[[ProviderCallTiming], None] | None = None,
     gate: ProviderWorkGate | None = None,
@@ -403,25 +367,19 @@ async def complete_with_silence_deadline(
     ``silence_deadline_seconds`` and ``ceiling_seconds``. A request that is thinking is silent until its first
     output, even when the provider sent chunks without output before it, and
     that cannot be told from a hung one, so its caller may allow that wait up
-    to the ceiling. A request sent again without a refused control waits for
-    its own first output anew. ``ceiling_seconds``
-    bounds the provider's time on the whole call, a retried request
-    included; the SDK is given the ceiling as its own read timeout, only a
-    backstop behind these local deadlines. Waits for the turn to admit a request are not
-    the provider's time and run under neither deadline nor the timing. Each
-    expiry raises its own ``TimeoutError`` subclass, which the
-    failure classifier records as a timeout with an unknown provider outcome.
-    The stream is closed on every exit, within a bounded wait that never
-    hides the original error. ``retry_without_refused_control`` is asked, with
-    the refused control's name, the provider's error and the refused request's
-    own timing, whether one more request without that control may be sent;
-    without it every refusal is raised. ``observe_timing`` receives the timing
-    of the last request sent, once, however the call ends, before the stream
-    is closed, and is not called when no request was sent; a refused
-    request's timing goes to the admission callback only, and the replacement
-    is timed from its own dispatch. ``gate`` is the
-    owning turn's: every request is admitted through it right before it is
-    sent (a refusal ends the call with ``ProviderRequestNotAdmitted``), and
+    to the ceiling. ``ceiling_seconds`` bounds the provider's time on the
+    whole call; the SDK is given the ceiling as its own read timeout, only a
+    backstop behind these local deadlines. The wait for the turn to admit the
+    request is not the provider's time and runs under neither deadline nor
+    the timing. Each expiry raises its own ``TimeoutError`` subclass, which
+    the failure classifier records as a timeout with an unknown provider
+    outcome. The stream is closed on every exit, within a bounded wait that
+    never hides the original error. A provider refusal is raised.
+    ``observe_timing`` receives the request's timing, once, however the call
+    ends, before the stream is closed, and is not called when no request was
+    sent. ``gate`` is the owning turn's: the request is admitted through it
+    right before it is sent (a refusal ends the call with
+    ``ProviderRequestNotAdmitted``), and
     once its ``ownership_lost`` is set the call ends with
     ``ProviderCallStopped``.
     """
@@ -453,79 +411,26 @@ async def complete_with_silence_deadline(
         # classified as an ambiguous transport failure with no local deadline.
         "timeout": ceiling_seconds,
     }
-    response: Any = None
     loop = asyncio.get_running_loop()
-    # The ceiling and the timing are the provider's: they run only while a
-    # request is the provider's, never while the turn admits one.
     ceiling = asyncio.timeout(None)
-    provider_seconds_left = ceiling_seconds
-    requests = _DispatchedRequests()
-
-    async def admit_and_dispatch() -> _ChunkClock:
-        """Admit the next request, then start the provider's ceiling and clock."""
-
-        nonlocal provider_seconds_left
-        deadline = ceiling.when()
-        if deadline is not None:
-            provider_seconds_left = max(0.0, deadline - loop.time())
-        ceiling.reschedule(None)
-        await _admit(gate)
-        ceiling.reschedule(loop.time() + provider_seconds_left)
-        return requests.dispatch()
+    dispatched = _DispatchedRequest()
 
     async with ProviderStreamCollector() as collector:
         try:
             async with _StopRace(gate), ceiling:
-                try:
-                    clock = await admit_and_dispatch()
-                    if observe_sdk_input is not None:
-                        observe_sdk_input(outbound)
-                    response = await _under_silence(
-                        litellm_client.acompletion(**outbound),
-                        first_output_deadline_seconds,
-                    )
-                except BadRequestError as error:
-                    rejection = provider_error_fields(error)
-                    parameter = rejected_sampling_parameter(rejection)
-                    refused_timing = requests.end_request()
-                    if (
-                        parameter is None
-                        or parameter not in outbound
-                        or retry_without_refused_control is None
-                        or refused_timing is None
-                        or not retry_without_refused_control(
-                            parameter, error, refused_timing
-                        )
-                    ):
-                        raise
-                    logger.warning(
-                        "ai_builder_provider_sampling_parameter_rejected",
-                        extra={
-                            "parameter": parameter,
-                            "model": outbound.get("model"),
-                            "provider_error_code": rejection.code,
-                            "provider_extraction_source": rejection.source,
-                            "provider_extraction_status": rejection.status,
-                            "provider_correlation_id": rejection.correlation_id,
-                            "provider_correlation_source": rejection.correlation_source,
-                        },
-                    )
-                    outbound = {
-                        key: value
-                        for key, value in outbound.items()
-                        if key != parameter
-                    }
-                    clock = await admit_and_dispatch()
-                    if observe_sdk_input is not None:
-                        observe_sdk_input(outbound)
-                    response = await _under_silence(
-                        litellm_client.acompletion(**outbound),
-                        first_output_deadline_seconds,
-                    )
-
-                # Per request: a request sent again is again waiting for its
-                # first output. Chunks without output (a role-only delta, a
-                # prompt-filter notice) do not end the wait for it.
+                # The ceiling and the timing are the provider's: they start
+                # once the turn has admitted the request.
+                await _admit(gate)
+                ceiling.reschedule(loop.time() + ceiling_seconds)
+                clock = dispatched.dispatch()
+                if observe_sdk_input is not None:
+                    observe_sdk_input(outbound)
+                response = await _under_silence(
+                    litellm_client.acompletion(**outbound),
+                    first_output_deadline_seconds,
+                )
+                # Chunks without output (a role-only delta, a prompt-filter
+                # notice) do not end the wait for the first output.
                 first_output_pending = True
 
                 async def next_chunk(stream: AsyncIterator[Any]) -> Any:
@@ -555,34 +460,9 @@ async def complete_with_silence_deadline(
                 raise ProviderCallCeilingExpired(ceiling_seconds) from error
             raise
         finally:
-            timing = requests.last()
+            timing = dispatched.timing()
             if observe_timing is not None and timing is not None:
                 observe_timing(timing)
-
-
-def rejected_sampling_parameter(rejection: ProviderRejection) -> str | None:
-    """The optional sampling control a 400 refused by name, or None."""
-
-    if rejection.code not in _UNSUPPORTED_PARAMETER_CODES:
-        return None
-    parameter = rejection.parameter
-    if parameter in _sampling_controls():
-        return parameter
-    return None
-
-
-def _sampling_controls() -> frozenset[str]:
-    """The optional sampling controls the capability snapshot owns.
-
-    Imported when asked, not at module load: the capability module's package
-    imports the Builder's error contract, which imports this owner.
-    """
-
-    from eneo.completion_models.domain.model_kwargs_capabilities import (
-        SupportedModelKwargs,
-    )
-
-    return frozenset(SupportedModelKwargs.model_fields) - {"reasoning_effort"}
 
 
 def provider_error_fields(error: BaseException) -> ProviderRejection:

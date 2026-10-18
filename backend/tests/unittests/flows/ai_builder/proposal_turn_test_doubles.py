@@ -27,8 +27,6 @@ def _make_submission(**overrides: object) -> ProposalSubmissionOwner:
     defaults = {
         "repo": AsyncMock(),
         "litellm_client": AsyncMock(),
-        "self_correction_temperature": 0.2,
-        "forced_proposal_temperature": 0.3,
         "quality_retry_warning_codes": frozenset(),
     }
     defaults.update(overrides)

@@ -51,7 +51,6 @@ from eneo.observability.failure_events import (
 )
 
 if TYPE_CHECKING:
-    from eneo.ai_models.completion_models.completion_model import ModelKwargs
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionEvidenceField,
         CompletionRouteEvidence,
@@ -504,7 +503,6 @@ def classify_ai_builder_provider_failure(
 
 def prepare_ai_builder_provider_kwargs(
     route: ResolvedCompletionModelRoute,
-    model_kwargs: ModelKwargs,
     *,
     stage: AIBuilderProviderFailureStage,
     request_id: str | None = None,
@@ -512,39 +510,13 @@ def prepare_ai_builder_provider_kwargs(
 ) -> dict[str, object]:
     """Translate preparation refusals before a provider attempt is started.
 
-    `model_kwargs` are the AI Builder's own sampling choices (its fixed
-    temperatures), not a user's. When the route offers a control but not the
-    Builder's value (a temperature below the route's advertised minimum),
-    the Builder leaves it out, so the provider default applies, and logs
-    one warning naming the route and value. A user's reasoning effort, held
-    by the route, stays strict. Slot classification passes an effort of its
-    own, one the route offers and can send, which replaces the user's for
-    that call only.
+    The Builder adds no sampling values of its own: the call carries only the
+    route's requested choices (the user's reasoning effort), so every other
+    control stays at the model's default. A choice the route refuses stays a
+    typed refusal.
     """
-    supported = route.supported_model_kwargs
-    not_offered: dict[str, None] = {}
-    for name, value in model_kwargs.model_dump(exclude_none=True).items():
-        if name not in type(supported).model_fields:
-            continue
-        capability = getattr(supported, name)
-        if capability.supported and not capability.accepts(value):
-            not_offered[name] = None
-            logger.warning(
-                "ai_builder_sampling_value_not_offered_by_route",
-                extra={
-                    "stage": stage,
-                    "request_id": request_id,
-                    "litellm_model": route.litellm_model,
-                    "parameter": name,
-                    "value": value,
-                    "minimum": capability.minimum,
-                    "maximum": capability.maximum,
-                },
-            )
     try:
-        return route.prepare_provider_kwargs(
-            model_kwargs.model_copy(update=not_offered)
-        )
+        return route.prepare_provider_kwargs()
     except ProviderRejectedRequestException as error:
         failure = record_ai_builder_provider_failure(
             error,

@@ -536,7 +536,6 @@ def _decision_report_attempt_kwargs(
             resource_catalog=resource_catalog
         ),
         proposal_request_budget=_proposal_request_budget(8_192),
-        proposal_temperature=0.2,
         request_id=request_id,
         usage_tracker=usage_tracker,
         provider_gate=provider_work_gate(),
@@ -1317,7 +1316,6 @@ async def test_an_edit_only_the_user_can_fix_is_answered_after_one_provider_call
                     proposal_tool_schema=_proposal_tool_schema_double(),
                     proposal_request_budget=_proposal_request_budget(8_192),
                     provider_gate=provider_work_gate(),
-                    proposal_temperature=0.2,
                     request_id="req-shadow",
                     usage_tracker=usage_tracker,
                     flow=_edit_flow(

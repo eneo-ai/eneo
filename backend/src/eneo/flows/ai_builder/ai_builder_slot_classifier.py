@@ -14,13 +14,10 @@ from uuid import UUID
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
-    REASONING_EFFORT_SCALE,
     SupportedModelKwargs,
 )
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputMode,
-    route_sends_reasoning_effort,
-    selectable_reasoning_effort_options,
 )
 from eneo.flows.ai_builder import (
     ai_builder_slot_classification_contract as slot_classification_contract,
@@ -33,7 +30,6 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderKnownProviderRejectionException,
     build_ai_builder_request_budget_exhausted_error,
-    classify_ai_builder_provider_failure,
     prepare_ai_builder_provider_kwargs,
     provider_call_stopped_error,
     record_ai_builder_provider_failure,
@@ -49,7 +45,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 from eneo.flows.ai_builder.ai_builder_provider_call import (
     ObservedTiming,
     ProviderCallStopped,
-    ProviderCallTiming,
     ProviderRequestNotAdmitted,
     ProviderWorkGate,
     complete_with_silence_deadline,
@@ -60,7 +55,6 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     project_schema_fields,
 )
 from eneo.flows.ai_builder.ai_builder_settings import (
-    SLOT_CLASSIFICATION_CUT_OFF_REASKS,
     AIBuilderBudgetPolicy,
     AIBuilderResolvedRequestBudget,
 )
@@ -247,6 +241,7 @@ async def classify_slots(
         litellm_model=litellm_model,
         provider=provider,
         supported_model_kwargs=completion_model_route.supported_model_kwargs,
+        requested_model_kwargs=completion_model_route.requested_model_kwargs,
         bias=bias,
         capacity=capacity,
         safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
@@ -272,16 +267,12 @@ async def classify_slots(
     started_at = time.perf_counter()
     completion_kwargs = prepare_ai_builder_provider_kwargs(
         completion_model_route,
-        ModelKwargs(
-            temperature=0.0,
-            reasoning_effort=_classification_reasoning_effort(
-                completion_model_route, budget_policy=budget_policy
-            ),
-        ),
         stage="slot_classification",
         request_id=usage_tracker.request_id if usage_tracker is not None else None,
         tenant_id=tenant_id,
     )
+    # Read before the call starts: a failed metadata lookup is no provider failure.
+    route_may_reason = completion_model_route.may_reason_by_default()
     if transport is SlotClassificationTransport.STRICT_TOOL:
         completion_kwargs.pop("response_format", None)
     completion_kwargs.update(request_format)
@@ -314,156 +305,151 @@ async def classify_slots(
         )
     completion_kwargs["max_tokens"] = request_budget.provider_output_cap_tokens
 
-    async def ask(
-        ceiling_seconds: float,
-        *,
-        kept_on_failure: SlotClassificationAttempt | None = None,
-    ) -> tuple[SlotClassificationAttempt, float | None]:
-        """One ask under ``ceiling_seconds``: its reply and its provider seconds.
-
-        A provider failure raises, unless ``kept_on_failure`` is given: a re-ask
-        that fails is recorded and that earlier reply is returned instead.
-        """
-
-        call = (
-            usage_tracker.begin_call(
-                call_kind="slot_classification",
-                request_budget=request_budget,
-            )
-            if usage_tracker is not None
-            else None
+    call = (
+        usage_tracker.begin_call(
+            call_kind="slot_classification",
+            request_budget=request_budget,
         )
-        timing = ObservedTiming()
-        refused_ms = 0
+        if usage_tracker is not None
+        else None
+    )
+    timing = ObservedTiming()
 
-        def admit_request_without_refused_control(
-            _control: str, error: Exception, refused_timing: ProviderCallTiming
-        ) -> bool:
-            # The refused request is its own failed call record, with its own
-            # timing; the one sent without the control replaces it.
-            nonlocal call, refused_ms
-            refused_ms += refused_timing.provider_elapsed_ms
-            if call is not None and usage_tracker is not None:
-                call = usage_tracker.retry_call(
-                    call=call,
-                    failure=classify_ai_builder_provider_failure(
-                        error,
-                        stage="slot_classification",
-                        request_id=usage_tracker.request_id,
-                    ),
-                    timing=refused_timing,
-                )
-            return True
-
-        try:
-            response = await complete_with_silence_deadline(
-                litellm_client,
-                silence_deadline_seconds=request_budget.timeout_seconds,
-                ceiling_seconds=ceiling_seconds,
-                # The re-ask gets only the seconds the first ask left.
-                first_output_deadline_seconds=min(
-                    request_budget.first_output_timeout_seconds(
-                        reasoning_effort=completion_kwargs.get("reasoning_effort"),
-                        route_reasons=(
-                            completion_model_route.supported_model_kwargs.reasoning_effort.supported
-                        ),
-                    ),
-                    ceiling_seconds,
-                ),
-                request={
-                    "model": litellm_model,
-                    "messages": messages,
-                    "drop_params": True,
-                    **completion_kwargs,
-                },
-                retry_without_refused_control=admit_request_without_refused_control,
-                observe_timing=timing,
-                gate=provider_gate,
-            )
-        except ProviderRequestNotAdmitted as not_admitted:
-            raise not_admitted.error
-        except ProviderCallStopped as stopped:
-            assert provider_gate is not None
-            raise provider_call_stopped_error(
-                provider_gate,
-                call_kind="slot_classification",
-                model=litellm_model,
-                timing=timing.value,
-            ) from stopped
-        except Exception as error:
-            failure = record_ai_builder_provider_failure(
-                error,
-                stage="slot_classification",
-                tenant_id=tenant_id,
-                request_id=usage_tracker.request_id
-                if usage_tracker is not None
-                else None,
-                request_budget=request_budget,
-                timing=timing.value,
-            )
-            if call is not None and usage_tracker is not None:
-                usage_tracker.fail_call(call=call, failure=failure, timing=timing.value)
-            if kept_on_failure is not None:
-                return kept_on_failure, None
-            raise failure.as_exception() from error
-
-        content = response.choices[0].message.content if response.choices else None
-        if call is not None and usage_tracker is not None:
-            usage = completion_token_usage_from_response(
-                response,
-                model_name=litellm_model,
-                messages=messages,
-                completion_text=content if isinstance(content, str) else None,
-                completion_messages=(
-                    completion_messages_for_usage(
-                        normalize_litellm_completion_response(response)
-                    )
-                    if transport is SlotClassificationTransport.STRICT_TOOL
-                    else None
-                ),
-            )
-            if usage.estimated and transport is SlotClassificationTransport.STRICT_TOOL:
-                prompt_tokens = measure_provider_input_tokens(
-                    messages, request_format.get("tools", []), litellm_model
-                ).tokens
-                usage = replace(
-                    usage,
-                    prompt_tokens=prompt_tokens,
-                    total_tokens=prompt_tokens + (usage.completion_tokens or 0),
-                )
-            usage_tracker.complete_call(call=call, usage=usage, timing=timing.value)
-
-        finish_reason = response.choices[0].finish_reason if response.choices else None
-        refused: SlotClassificationAttempt | None = None
-        if transport is SlotClassificationTransport.STRICT_TOOL and response.choices:
-            arguments = _slot_classification_tool_arguments(response.choices[0].message)
-            if isinstance(arguments, SlotClassificationAttempt):
-                refused = arguments
-            else:
-                content = arguments
-        text = content if isinstance(content, str) else ""
-        if finish_reason == "length":
-            refused = SlotClassificationAttempt(outcome="output_limit_exceeded")
-        elif refused is None and not text.strip():
-            refused = SlotClassificationAttempt(
-                outcome="no_content"
-                if content is None or isinstance(content, str)
-                else "parse_failed"
-            )
-
-        _capture_raw_classifier_response(
-            text,
-            slot_names=slot_names,
+    try:
+        response = await complete_with_silence_deadline(
+            litellm_client,
+            silence_deadline_seconds=request_budget.timeout_seconds,
+            ceiling_seconds=request_budget.ceiling_seconds,
+            first_output_deadline_seconds=request_budget.first_output_timeout_seconds(
+                reasoning_effort=completion_kwargs.get("reasoning_effort"),
+                route_reasons=route_may_reason,
+            ),
+            request={
+                "model": litellm_model,
+                "messages": messages,
+                "drop_params": True,
+                **completion_kwargs,
+            },
+            observe_timing=timing,
+            gate=provider_gate,
+        )
+    except ProviderRequestNotAdmitted as not_admitted:
+        raise not_admitted.error
+    except ProviderCallStopped as stopped:
+        assert provider_gate is not None
+        raise provider_call_stopped_error(
+            provider_gate,
+            call_kind="slot_classification",
             model=litellm_model,
-            outcome=refused.outcome if refused is not None else None,
-            finish_reason=finish_reason if isinstance(finish_reason, str) else None,
+            timing=timing.value,
+        ) from stopped
+    except Exception as error:
+        failure = record_ai_builder_provider_failure(
+            error,
+            stage="slot_classification",
+            tenant_id=tenant_id,
+            request_id=usage_tracker.request_id if usage_tracker is not None else None,
+            request_budget=request_budget,
+            timing=timing.value,
         )
-        if refused is not None:
-            attempt = refused
-            # A reply with no reading leaves the user's text unread, so a
-            # runaway or empty one must say so beyond the persisted outcome.
+        if call is not None and usage_tracker is not None:
+            usage_tracker.fail_call(call=call, failure=failure, timing=timing.value)
+        raise failure.as_exception() from error
+
+    content = response.choices[0].message.content if response.choices else None
+    if call is not None and usage_tracker is not None:
+        usage = completion_token_usage_from_response(
+            response,
+            model_name=litellm_model,
+            messages=messages,
+            completion_text=content if isinstance(content, str) else None,
+            completion_messages=(
+                completion_messages_for_usage(
+                    normalize_litellm_completion_response(response)
+                )
+                if transport is SlotClassificationTransport.STRICT_TOOL
+                else None
+            ),
+        )
+        if usage.estimated and transport is SlotClassificationTransport.STRICT_TOOL:
+            prompt_tokens = measure_provider_input_tokens(
+                messages, request_format.get("tools", []), litellm_model
+            ).tokens
+            usage = replace(
+                usage,
+                prompt_tokens=prompt_tokens,
+                total_tokens=prompt_tokens + (usage.completion_tokens or 0),
+            )
+        usage_tracker.complete_call(call=call, usage=usage, timing=timing.value)
+
+    finish_reason = response.choices[0].finish_reason if response.choices else None
+    refused: SlotClassificationAttempt | None = None
+    if transport is SlotClassificationTransport.STRICT_TOOL and response.choices:
+        arguments = _slot_classification_tool_arguments(response.choices[0].message)
+        if isinstance(arguments, SlotClassificationAttempt):
+            refused = arguments
+        else:
+            content = arguments
+    text = content if isinstance(content, str) else ""
+    if finish_reason == "length":
+        refused = SlotClassificationAttempt(outcome="output_limit_exceeded")
+    elif refused is None and not text.strip():
+        refused = SlotClassificationAttempt(
+            outcome="no_content"
+            if content is None or isinstance(content, str)
+            else "parse_failed"
+        )
+
+    _capture_raw_classifier_response(
+        text,
+        slot_names=slot_names,
+        model=litellm_model,
+        outcome=refused.outcome if refused is not None else None,
+        finish_reason=finish_reason if isinstance(finish_reason, str) else None,
+    )
+    if refused is not None:
+        attempt = refused
+        # A reply with no reading leaves the user's text unread, so a
+        # runaway or empty one must say so beyond the persisted outcome.
+        logger.warning(
+            "AI Builder slot classification reply carried no reading",
+            extra={
+                **_log_context(
+                    tenant_id=tenant_id,
+                    model=litellm_model,
+                    slot_names=slot_names,
+                    cached=False,
+                ),
+                "outcome": refused.outcome,
+                "finish_reason": finish_reason
+                if isinstance(finish_reason, str)
+                else None,
+                "content_chars": len(text),
+                "max_tokens": completion_kwargs["max_tokens"],
+                "reasoning_effort": completion_kwargs.get("reasoning_effort"),
+            },
+        )
+    else:
+        reject_reasons: list[SlotClassificationRejectReason] = []
+        result = slot_classification_contract.parse_slot_classification_response(
+            text,
+            allowed_slot_values=slot_values,
+            classification_input=classification_input,
+            schema_candidate_fingerprints=schema_candidate_fingerprints,
+            schema_sent=transport
+            in {
+                SlotClassificationTransport.STRICT_TOOL,
+                SlotClassificationTransport.STRICT_JSON_SCHEMA,
+            },
+            read_declarations=read_declarations,
+            on_reject=reject_reasons.append,
+        )
+        if result is None:
+            # The turn continues without this reading (discovery asks
+            # instead), so the model's unreadable reply must at least
+            # leave a trace.
             logger.warning(
-                "AI Builder slot classification reply carried no reading",
+                "AI Builder slot classification response did not parse",
                 extra={
                     **_log_context(
                         tenant_id=tenant_id,
@@ -471,74 +457,22 @@ async def classify_slots(
                         slot_names=slot_names,
                         cached=False,
                     ),
-                    "outcome": refused.outcome,
-                    "finish_reason": finish_reason
-                    if isinstance(finish_reason, str)
-                    else None,
                     "content_chars": len(text),
-                    "max_tokens": completion_kwargs["max_tokens"],
+                    "reject_reason": reject_reasons[0] if reject_reasons else None,
                     "reasoning_effort": completion_kwargs.get("reasoning_effort"),
+                    "held_unread_user_messages": len(
+                        classification_input.unread_user_message_ids
+                    ),
                 },
             )
+            attempt = SlotClassificationAttempt(outcome="parse_failed")
         else:
-            reject_reasons: list[SlotClassificationRejectReason] = []
-            result = slot_classification_contract.parse_slot_classification_response(
-                text,
-                allowed_slot_values=slot_values,
-                classification_input=classification_input,
-                schema_candidate_fingerprints=schema_candidate_fingerprints,
-                schema_sent=transport
-                in {
-                    SlotClassificationTransport.STRICT_TOOL,
-                    SlotClassificationTransport.STRICT_JSON_SCHEMA,
-                },
-                read_declarations=read_declarations,
-                on_reject=reject_reasons.append,
-            )
-            if result is None:
-                # The turn continues without this reading (discovery asks
-                # instead), so the model's unreadable reply must at least
-                # leave a trace.
-                logger.warning(
-                    "AI Builder slot classification response did not parse",
-                    extra={
-                        **_log_context(
-                            tenant_id=tenant_id,
-                            model=litellm_model,
-                            slot_names=slot_names,
-                            cached=False,
-                        ),
-                        "content_chars": len(text),
-                        "reject_reason": reject_reasons[0] if reject_reasons else None,
-                        "reasoning_effort": completion_kwargs.get("reasoning_effort"),
-                        "held_unread_user_messages": len(
-                            classification_input.unread_user_message_ids
-                        ),
-                    },
-                )
-                attempt = SlotClassificationAttempt(outcome="parse_failed")
-            else:
-                attempt = SlotClassificationAttempt(outcome="resolved", result=result)
-        if call is not None and usage_tracker is not None:
-            usage_tracker.record_classification_outcome(
-                attempt=call.attempt, outcome=_reply_outcome(attempt)
-            )
-        if timing.value is None:
-            return attempt, None
-        return attempt, (refused_ms + timing.value.provider_elapsed_ms) / 1000
-
-    attempt, provider_seconds = await ask(request_budget.ceiling_seconds)
-    # Both asks share the call's ceiling: the second gets what the first left.
-    provider_seconds_left = request_budget.ceiling_seconds
-    for _ in range(SLOT_CLASSIFICATION_CUT_OFF_REASKS):
-        if attempt.outcome != "output_limit_exceeded" or provider_seconds is None:
-            break
-        provider_seconds_left -= provider_seconds
-        if provider_seconds_left < request_budget.timeout_seconds:
-            break
-        attempt, provider_seconds = await ask(
-            provider_seconds_left, kept_on_failure=attempt
+            attempt = SlotClassificationAttempt(outcome="resolved", result=result)
+    if call is not None and usage_tracker is not None:
+        usage_tracker.record_classification_outcome(
+            attempt=call.attempt, outcome=_reply_outcome(attempt)
         )
+
     result = attempt.result
     if result is None:
         return attempt
@@ -641,48 +575,6 @@ def _protected_slot_classification_input(
     )
 
 
-def _classification_reasoning_effort(
-    route: ResolvedCompletionModelRoute,
-    *,
-    budget_policy: AIBuilderBudgetPolicy,
-) -> str | None:
-    """The effort classification sends instead of the turn's; None keeps it.
-
-    Reading the user's text into slots is a small extraction, so unless the
-    operator keeps the turn's effort it runs at the lowest level below the
-    turn's that the route offers and can send. It never reasons more than the
-    turn: a turn without an effort already sends the route's off or lowest
-    default, and nothing is known to reason less than a level off the scale.
-    """
-    turn_effort = route.requested_model_kwargs.reasoning_effort
-    if (
-        budget_policy.classification_reasoning_effort == "turn"
-        or turn_effort is None
-        or turn_effort not in REASONING_EFFORT_SCALE
-    ):
-        return None
-    # Only scale levels are looked up, so the longest of them bounds the options.
-    offered = selectable_reasoning_effort_options(
-        route.supported_model_kwargs.reasoning_effort,
-        max_length=max(map(len, REASONING_EFFORT_SCALE)),
-    )
-    return next(
-        (
-            level
-            for level in REASONING_EFFORT_SCALE[
-                : REASONING_EFFORT_SCALE.index(turn_effort)
-            ]
-            if level in offered
-            and route_sends_reasoning_effort(
-                litellm_model=route.litellm_model,
-                provider_type=route.provider_type,
-                effort=level,
-            )
-        ),
-        None,
-    )
-
-
 def _resolve_slot_classification_request_budget(
     *,
     messages: list[dict[str, Any]],
@@ -699,7 +591,7 @@ def _resolve_slot_classification_request_budget(
     packed against; the packed request is then measured whole.
     """
 
-    planned = budget_policy.classification_request_budget(
+    planned = budget_policy.proposal_request_budget(
         capacity=capacity,
     ).plan(
         required_input_tokens=_slot_classification_request_tokens(
@@ -767,7 +659,7 @@ def admit_slot_classification_input(
             litellm_model=litellm_model,
         )
 
-    request_budget = budget_policy.classification_request_budget(
+    request_budget = budget_policy.proposal_request_budget(
         capacity=capacity,
     )
 
@@ -1031,6 +923,7 @@ def slot_classification_prompt_hash(
     litellm_model: str,
     provider: str,
     supported_model_kwargs: SupportedModelKwargs,
+    requested_model_kwargs: ModelKwargs,
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
     active_checkpoint_producers: tuple[CheckpointProducerKind, ...] = (),
     bias: SlotClassificationBias | None = None,
@@ -1050,7 +943,9 @@ def slot_classification_prompt_hash(
             provider=provider,
             effective_optional_kwargs_fingerprint=(
                 _effective_optional_kwargs_fingerprint(
-                    _effective_slot_classification_model_kwargs(supported_model_kwargs)
+                    _effective_slot_classification_model_kwargs(
+                        supported_model_kwargs, requested_model_kwargs
+                    )
                 )
             ),
             bias=bias,
@@ -1538,8 +1433,11 @@ def _classification_cache_payload(
 
 def _effective_slot_classification_model_kwargs(
     supported_model_kwargs: SupportedModelKwargs,
+    requested_model_kwargs: ModelKwargs,
 ) -> ModelKwargs:
-    return ModelKwargs(temperature=0.0).filter_unsupported(supported_model_kwargs)
+    # The turn's own choices (its reasoning effort) shape the reading, so a
+    # cached reading made under another choice must not answer this one.
+    return requested_model_kwargs.filter_unsupported(supported_model_kwargs)
 
 
 def _effective_optional_kwargs_fingerprint(model_kwargs: ModelKwargs) -> str:

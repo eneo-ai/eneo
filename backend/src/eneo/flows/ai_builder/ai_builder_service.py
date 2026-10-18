@@ -140,9 +140,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-PLANNER_TEMPERATURE = 0.4  # Lower for precise proposal generation
-SELF_CORRECTION_TEMPERATURE = 0.35
-FORCED_PROPOSAL_TEMPERATURE = 0.1
 QUALITY_RETRY_WARNING_CODES = {
     "json_output_no_contract",
 }
@@ -995,9 +992,6 @@ class AIBuilderService:
             user=self.user,
             repo=self.repo,
             litellm_client=litellm,
-            planner_temperature=PLANNER_TEMPERATURE,
-            self_correction_temperature=SELF_CORRECTION_TEMPERATURE,
-            forced_proposal_temperature=FORCED_PROPOSAL_TEMPERATURE,
             quality_retry_warning_codes=QUALITY_RETRY_WARNING_CODES,
         )
 

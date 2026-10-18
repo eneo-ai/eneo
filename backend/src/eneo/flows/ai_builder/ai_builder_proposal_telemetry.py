@@ -442,30 +442,6 @@ class ProposalTurnTelemetry:
             raise ValueError("Only a classification call has a classification outcome")
         self.call_records[index] = replace(record, classification_outcome=outcome)
 
-    def retry_call(
-        self,
-        *,
-        failure: AIBuilderProviderFailure,
-        timing: ProviderCallTiming | None = None,
-        call: ProposalCallRecord | None = None,
-    ) -> ProposalCallRecord:
-        """Record a refused request as a failed call and begin its replacement.
-
-        The refused call carries its own request's ``timing``. The replacement
-        keeps the refused call's kind and budget; without ``call`` the
-        attempt's pending call is the one refused.
-        """
-        refused = call if call is not None else self._pending_call
-        if refused is None:
-            raise ValueError("No provider call to retry")
-        self.fail_call(call=refused, failure=failure, timing=timing)
-        replacement = self.begin_call(
-            call_kind=refused.call_kind, request_budget=refused.request_budget
-        )
-        if call is None:
-            self._pending_call = replacement
-        return replacement
-
     def start_attempt(
         self,
         *,
