@@ -702,6 +702,62 @@ async def test_gpt5_mini_proposal_uses_low_when_none_is_not_supported() -> None:
     assert litellm_client.acompletion.await_args.kwargs["reasoning_effort"] == "low"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requested", "provider_type", "route_reasons", "first_output_wait"),
+    [
+        # Mutant: the call site ignores the effort it actually sends. An OpenAI
+        # route sends "none" on its own when no effort is requested.
+        (None, "openai", True, 180.0),
+        # Mutant: the call site ignores that the route reasons: Azure sends
+        # nothing, so the provider's default (thinking) applies.
+        (None, "azure", True, 1800.0),
+        (None, "azure", False, 180.0),
+    ],
+)
+async def test_proposal_first_output_wait_follows_the_effort_sent(
+    monkeypatch: pytest.MonkeyPatch,
+    requested: str | None,
+    provider_type: str,
+    route_reasons: bool,
+    first_output_wait: float,
+) -> None:
+    provider = AsyncMock(return_value=_make_response_with_text("proposal"))
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_litellm_completion"
+        ".complete_with_silence_deadline",
+        provider,
+    )
+    route = _route(
+        model=f"{provider_type}/gpt-5.4",
+        provider_type=provider_type,
+        requested=ModelKwargs(reasoning_effort=requested),
+        supported=SupportedModelKwargs(
+            reasoning_effort=ModelKwargCapability(
+                supported=route_reasons,
+                control="select" if route_reasons else None,
+                options=["low", "high"] if route_reasons else None,
+            )
+        ),
+    )
+
+    await call_proposal_completion(
+        litellm_client=SimpleNamespace(),
+        request=_completion_request(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+            route=route,
+            max_output_tokens=1024,
+            temperature=0.2,
+            tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
+        ),
+    )
+
+    assert (
+        provider.await_args.kwargs["first_output_deadline_seconds"] == first_output_wait
+    )
+
+
 def test_builder_explicit_off_reasoning_preserves_temperature_in_pinned_litellm() -> (
     None
 ):
@@ -904,7 +960,7 @@ async def test_proposal_provider_failure_uses_typed_disposition(
     }
     before_provider_call.assert_awaited_once_with()
     assert litellm_client.acompletion.await_count == 1
-    assert litellm_client.acompletion.await_args.kwargs["timeout"] == 180.0
+    assert litellm_client.acompletion.await_args.kwargs["timeout"] == 1800.0
     failure_calls = [
         call for call in event_log.call_args_list if call.args == ("failure_event",)
     ]

@@ -194,6 +194,29 @@ REASONING_EFFORT_SCALE: tuple[str, ...] = (
 )
 
 
+def request_may_think(*, reasoning_effort: object, route_reasons: bool) -> bool:
+    """Whether a request may think, given the effort it sent and its route.
+
+    A thinking call may yield no output while it thinks (providers that stream
+    their reasoning do yield it), and a caller cannot tell that quiet from a
+    hung call, so a caller that bounds silence needs to know which requests
+    may legitimately be quiet. Waiting too long for a hung call is the safer
+    error than failing a call that was still working, so an effort that was
+    sent decides and only "none" asks the model not to think: "minimal" still
+    thinks (LiteLLM maps it to a positive Gemini thinking budget), and a level
+    this scale does not know is assumed to think. When no effort was sent the
+    provider keeps its own default, which is on for a reasoning model, so the
+    route's declared capability decides: ``route_reasons`` is whether the
+    route takes a reasoning effort at all. The accepted trade-off: a reasoning
+    route that is off by default (Anthropic without thinking, for one) waits
+    longer on a HUNG call.
+    """
+
+    if isinstance(reasoning_effort, str) and reasoning_effort != "":
+        return reasoning_effort != "none"
+    return route_reasons
+
+
 def reasoning_effort_options_from_model_info(
     model_info: Mapping[str, object],
 ) -> list[str]:

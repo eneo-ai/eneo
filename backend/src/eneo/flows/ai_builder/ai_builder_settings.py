@@ -9,6 +9,9 @@ from eneo.completion_models.domain.model_capacity import (
     ModelCapacityNoFit,
     UnknownModelCapacityError,
 )
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    request_may_think,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -60,7 +63,8 @@ class AIBuilderRequestBudget:
     # The share of the room after the required input that packing keeps free
     # for the answer. Dimensionless deployment policy, never a token count.
     answer_reserve_share: float = AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT
-    # The whole call's bound, however much it keeps producing.
+    # The whole call's bound: whether it keeps producing or, for a call that
+    # may think, never produces.
     ceiling_seconds: float = AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT
     request_id: str | None = None
     # Bounds the complete input only; the answer is never charged to it.
@@ -93,6 +97,25 @@ class AIBuilderRequestBudget:
             raise ValueError(
                 "AI Builder call ceiling must be finite and not below the silence deadline"
             )
+
+    def first_output_timeout_seconds(
+        self, *, reasoning_effort: object, route_reasons: bool
+    ) -> float:
+        """The longest wait before the model's first output for this request.
+
+        A call that thinks may yield no output while it does (providers that
+        stream their reasoning do yield it), and that is not different from a
+        hung call until output arrives, so a request that may think waits for
+        the whole-call ceiling; any other request waits only the silence
+        deadline. Once output has started a stall is detectable and the
+        silence deadline applies again.
+        """
+
+        if request_may_think(
+            reasoning_effort=reasoning_effort, route_reasons=route_reasons
+        ):
+            return self.ceiling_seconds
+        return self.timeout_seconds
 
     @property
     def request_budget_tokens(self) -> int:

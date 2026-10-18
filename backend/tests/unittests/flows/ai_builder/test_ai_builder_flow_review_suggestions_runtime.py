@@ -10,7 +10,10 @@ from uuid import uuid4
 import pytest
 
 from eneo.completion_models.domain.model_capacity import ModelCapacity
-from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+    snapshot_supported_model_kwargs,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -187,6 +190,64 @@ async def test_a_sourced_answer_becomes_suggestions_with_the_sample_floor():
     assert call["num_retries"] == 0
     assert call["max_retries"] == 0
     assert call["messages"][0]["role"] == "system"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("effort", "route_reasons", "first_output_wait"),
+    [
+        # Mutant: the call site ignores the effort it actually sends.
+        ("none", True, 300.0),
+        # Mutant: the call site ignores that the route reasons (no effort sent
+        # leaves the provider's default).
+        (None, True, 1800.0),
+        (None, False, 300.0),
+    ],
+)
+async def test_review_first_output_wait_follows_the_effort_sent(
+    monkeypatch: pytest.MonkeyPatch,
+    effort: str | None,
+    route_reasons: bool,
+    first_output_wait: float,
+) -> None:
+    provider = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps({"suggestions": []})),
+                    finish_reason="stop",
+                )
+            ]
+        )
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_flow_review_suggestions"
+        ".complete_with_silence_deadline",
+        provider,
+    )
+    route = _route()
+    route.supported_model_kwargs = snapshot_supported_model_kwargs(
+        None, reasoning=route_reasons
+    )
+    route.prepare_provider_kwargs = lambda kwargs: (
+        {} if effort is None else {"reasoning_effort": effort}
+    )
+
+    await generate_review_suggestions(
+        sample=_sample(),
+        litellm_client=_Client(),
+        completion_model_route=route,
+        model_id=uuid4(),
+        model_name="gpt-test",
+        capacity=ModelCapacity(100_000, 4000),
+        budget_policy=resolve_ai_builder_budget_policy(None),
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+
+    assert (
+        provider.await_args.kwargs["first_output_deadline_seconds"] == first_output_wait
+    )
 
 
 @pytest.mark.asyncio

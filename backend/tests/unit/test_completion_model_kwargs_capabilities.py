@@ -26,6 +26,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
     reasoning_effort_options_from_model_info,
+    request_may_think,
     snapshot_supported_model_kwargs,
 )
 from eneo.completion_models.presentation.completion_model_assembler import (
@@ -955,3 +956,38 @@ def test_the_declaration_rule_follows_the_model_setting_types():
             assert "int" in annotation
         else:
             assert "float" in annotation
+
+
+@pytest.mark.parametrize(
+    ("reasoning_model", "effort", "may_think"),
+    [
+        # Mutant: a reasoning route that sent no effort counts as not thinking
+        # (the provider's default applies).
+        (True, None, True),
+        (False, "", False),
+        # Mutant: a value that is not a string counts as a sent effort.
+        (False, 3, False),
+        # Mutant: a route that takes no effort counts as thinking when none
+        # was sent.
+        (False, None, False),
+        # Mutant: the route overrides an effort that was sent; "none" is the
+        # only level that does not think.
+        (True, "none", False),
+        (False, "high", True),
+        # Mutant: "minimal" (or a level the scale does not know) counts as
+        # not thinking.
+        (False, "minimal", True),
+        (False, "deep", True),
+    ],
+)
+def test_a_request_thinks_unless_it_sent_none_or_sent_nothing_to_a_plain_route(
+    reasoning_model: bool, effort: object, may_think: bool
+) -> None:
+    route_reasons = snapshot_supported_model_kwargs(
+        ["temperature"], reasoning=reasoning_model
+    ).reasoning_effort.supported
+
+    assert (
+        request_may_think(reasoning_effort=effort, route_reasons=route_reasons)
+        is may_think
+    )

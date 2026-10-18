@@ -758,6 +758,12 @@ async def generate_review_suggestions(
             litellm_client,
             silence_deadline_seconds=resolved_budget.timeout_seconds,
             ceiling_seconds=resolved_budget.ceiling_seconds,
+            first_output_deadline_seconds=resolved_budget.first_output_timeout_seconds(
+                reasoning_effort=completion_kwargs.get("reasoning_effort"),
+                route_reasons=(
+                    completion_model_route.supported_model_kwargs.reasoning_effort.supported
+                ),
+            ),
             request={
                 "model": litellm_model,
                 "messages": messages,
