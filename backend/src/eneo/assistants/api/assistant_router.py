@@ -63,7 +63,7 @@ from eneo.sessions.session_protocol import (
 from eneo.skills.presentation.skill_assembler import (
     skill_binding_audit_entries,
 )
-from eneo.spaces.api.space_models import TransferApplicationRequest
+from eneo.spaces.api.space_models import TransferRequest
 
 if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
@@ -1152,7 +1152,7 @@ async def leave_feedback(
 )
 async def transfer_assistant_to_space(
     id: UUID,
-    transfer_req: TransferApplicationRequest,
+    transfer_req: TransferRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     # Get assistant info BEFORE transfer to capture source space
@@ -1175,7 +1175,6 @@ async def transfer_assistant_to_space(
     await service.move_assistant_to_space(
         assistant_id=id,
         space_id=transfer_req.target_space_id,
-        move_resources=transfer_req.move_resources,
     )
 
     # Get target space info
@@ -1195,7 +1194,6 @@ async def transfer_assistant_to_space(
             "source_space_name": source_space.name if source_space else None,
             "target_space_id": str(transfer_req.target_space_id),
             "target_space_name": target_space.name if target_space else None,
-            "move_resources": transfer_req.move_resources,
         },
     }
 

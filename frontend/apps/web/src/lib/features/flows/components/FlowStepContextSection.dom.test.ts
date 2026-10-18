@@ -105,7 +105,7 @@ describe("FlowStepContextSection published mode", () => {
   it("offers every mutator on an editable draft", () => {
     renderSection(false);
 
-    expect(screen.queryAllByTestId("select-knowledge-stub")).toHaveLength(2);
+    expect(screen.queryAllByTestId("select-knowledge-stub")).toHaveLength(1);
     expect(screen.getByRole("button", { name: m.remove() })).toBeTruthy();
     expect(screen.getByText(m.upload_dropzone_prompt())).toBeTruthy();
     expect(screen.getByRole("button", { name: m.cancel() })).toBeTruthy();

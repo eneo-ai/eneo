@@ -165,13 +165,7 @@
         {/if}
       {:else}
         <SelectKnowledge
-          originMode="personal"
-          bind:selectedWebsites
-          bind:selectedCollections={selectedGroups}
-          bind:selectedIntegrationKnowledge
-        />
-        <SelectKnowledge
-          originMode="organization"
+          showHeadings
           bind:selectedWebsites
           bind:selectedCollections={selectedGroups}
           bind:selectedIntegrationKnowledge

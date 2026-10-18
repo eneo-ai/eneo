@@ -847,6 +847,9 @@ class SpaceAssembler:
             skill_permissions=self._get_skill_permissions(space),
             personal=space.is_personal(),
             organization=space.is_organization(),
+            organization_space_id=(
+                space.id if space.is_organization() else space.tenant_space_id
+            ),
             permissions=self._cap_space_permissions(self._get_space_permissions(space)),
             available_roles=available_roles,
             security_classification=security_classification,

@@ -7,11 +7,9 @@ from sqlalchemy.orm import selectinload
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
-from eneo.database.tables.assistant_table import AssistantsGroups
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.groups_spaces_table import GroupsSpaces
 from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
-from eneo.database.tables.service_table import ServicesGroups
 from eneo.database.tables.users_table import Users
 from eneo.groups_legacy.api.group_models import Group, GroupCreate, GroupUpdate
 
@@ -76,43 +74,6 @@ class GroupRepository:
         )
         return affected_row_count(result)
 
-    async def move_group_owner(
-        self, group_id: UUID, new_owner_space_id: UUID
-    ) -> Group | None:
-        query = (
-            sa.update(CollectionsTable)
-            .where(CollectionsTable.id == group_id)
-            .values(space_id=new_owner_space_id)
-            .returning(CollectionsTable)
-        )
-        return await self.delegate.get_model_from_query(query)
-
-    async def remove_group_from_all_assistants(
-        self, group_id: UUID, assistant_ids: list[UUID]
-    ):
-        stmt = (
-            sa.delete(AssistantsGroups)
-            .where(AssistantsGroups.group_id == group_id)
-            .where(
-                AssistantsGroups.assistant_id.not_in(assistant_ids),
-            )
-        )
-
-        await self.session.execute(stmt)
-
-    async def remove_group_from_all_services(
-        self, group_id: UUID, service_ids: list[UUID]
-    ):
-        stmt = (
-            sa.delete(ServicesGroups)
-            .where(ServicesGroups.group_id == group_id)
-            .where(
-                ServicesGroups.service_id.not_in(service_ids),
-            )
-        )
-
-        await self.session.execute(stmt)
-
     async def get_groups_by_space(self, space_id: UUID) -> list[Group]:
         query = (
             sa.select(CollectionsTable)
@@ -146,7 +107,3 @@ class GroupRepository:
         )
         result = await self.session.execute(query)
         return [row[0] for row in result.all()]
-
-    async def unlink_group_from_all_spaces(self, group_id: UUID) -> None:
-        stmt = sa.delete(GroupsSpaces).where(GroupsSpaces.collection_id == group_id)
-        await self.session.execute(stmt)

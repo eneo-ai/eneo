@@ -69,10 +69,6 @@ class TransferRequest(BaseModel):
     target_space_id: UUID
 
 
-class TransferApplicationRequest(TransferRequest):
-    move_resources: bool = False
-
-
 def _empty_mcp_server_public_dict_list() -> list[MCPServerPublicDict]:
     return []
 
@@ -285,6 +281,9 @@ class SpaceLinkedModels(BaseModel):
 
 
 class SpacePublic(SpaceDashboard):
+    organization_space_id: UUID | None = Field(
+        description="Organization space identity, independent of the caller's membership."
+    )
     enabled_capabilities: list[CapabilityPurpose] = Field(
         default_factory=list[CapabilityPurpose]
     )
