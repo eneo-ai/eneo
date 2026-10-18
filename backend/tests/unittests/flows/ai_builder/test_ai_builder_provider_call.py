@@ -502,6 +502,15 @@ async def test_silence_after_the_first_bytes_expires_the_deadline() -> None:
         )
 
 
+@pytest.mark.parametrize("seconds", [float("inf"), 0.0])
+def test_a_deadline_that_is_not_a_finite_positive_number_is_refused(
+    seconds: float,
+) -> None:
+    # Mutant: the expiry accepts any number, so Infinity could reach the wire.
+    with pytest.raises(ValueError):
+        ProviderSilenceExpired(seconds)
+
+
 @pytest.mark.asyncio
 async def test_silence_before_the_first_byte_expires_the_deadline() -> None:
     async def never(**_kwargs: object) -> object:
@@ -539,18 +548,19 @@ _FIRST_OUTPUT_DEADLINES = {
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("delays", "first_output", "expires"),
+    ("delays", "first_output", "fired_limit"),
     [
         # Mutant: the wait for the first output uses the silence deadline.
-        ([0.2, 0.0], 0.6, False),
+        ([0.2, 0.0], 0.6, None),
         # Mutant: gaps after the first output keep the first-output deadline.
-        ([0.0, 0.3], 0.6, True),
+        ([0.0, 0.3], 0.6, 0.05),
         # Mutant: the first output is waited for without a bound.
-        ([2.0, 0.0], 0.1, True),
+        # Mutant: the expiry reports the gap limit instead of the limit that fired.
+        ([2.0, 0.0], 0.1, 0.1),
     ],
 )
 async def test_the_first_output_may_wait_longer_than_a_gap_after_it(
-    delays: list[float], first_output: float, expires: bool
+    delays: list[float], first_output: float, fired_limit: float | None
 ) -> None:
     call = _complete_at_silence(
         _stream_client(_after(delays)),
@@ -558,11 +568,12 @@ async def test_the_first_output_may_wait_longer_than_a_gap_after_it(
         **{**_FIRST_OUTPUT_DEADLINES, "first_output_deadline_seconds": first_output},
     )
 
-    if expires:
-        with pytest.raises(ProviderSilenceExpired):
-            await call
-    else:
+    if fired_limit is None:
         assert (await call).choices[0].finish_reason == "tool_calls"
+    else:
+        with pytest.raises(ProviderSilenceExpired) as expired:
+            await call
+        assert expired.value.seconds == fired_limit
 
 
 @pytest.mark.asyncio
@@ -733,13 +744,20 @@ async def test_the_ceiling_bounds_an_answer_that_never_ends() -> None:
             yield _tool_chunk("a", first=False, finish=None)
 
     client = SimpleNamespace(acompletion=AsyncMock(return_value=endless()))
-    with pytest.raises(ProviderCallCeilingExpired):
+    # Mutant: the ceiling expiry reports the silence limit as its wait, or the
+    # seam's expiry does not carry its limit to the public error.
+    with pytest.raises(ProviderCallCeilingExpired) as expired:
         await _complete_at_silence(
             client,
             silence_deadline_seconds=0.05,
             ceiling_seconds=0.1,
             request=_REQUEST,
         )
+
+    error = classify_ai_builder_provider_failure(
+        expired.value, stage="proposal_completion"
+    ).public_error
+    assert (error.details or {})["deadline_seconds"] == 0.1
 
 
 @pytest.mark.asyncio

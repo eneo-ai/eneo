@@ -241,6 +241,54 @@ describe("describeFailure", () => {
     expect(presentation.secondary).toBeNull();
   });
 
+  const timedOut = (details: AIBuilderError["details"]) =>
+    error({
+      code: "session_turn_provider_outcome_unknown",
+      details: { provider_disposition: "provider_outcome_unknown", ...details }
+    });
+
+  it.each(["silence", "ceiling"] as const)("tells a %s timeout as a timeout", (deadline) => {
+    // Mutants: the deadline is ignored (also without a retained turn); both
+    // deadlines share one opening; the paid replay is lost.
+    const failure = timedOut({ local_deadline: deadline, deadline_seconds: 300 });
+    const presentation = present({
+      error: failure,
+      latestTurn: turn("provider_outcome_unknown"),
+      capabilities: { ...committed, replay: "provider_outcome_unknown", canStartNewTurn: false },
+      context: generation
+    });
+    const cause =
+      deadline === "silence"
+        ? m.ai_builder_failure_cause_provider_timeout_silence
+        : m.ai_builder_failure_cause_provider_timeout_ceiling;
+
+    expect(classifyFailure(failure, null)).toBe("provider_timeout");
+    expect(presentation.kind).toBe("provider_timeout");
+    expect(presentation.heading).toBe(m.ai_builder_failure_heading_provider_timeout());
+    expect(presentation.consequence.startsWith(cause({ wait: "§" }).split("§")[0]!)).toBe(true);
+    expect(presentation.primary?.kind).toBe("retry_same_turn_acknowledged");
+  });
+
+  it.each([
+    [timedOut({ local_deadline: "sdk", deadline_seconds: 300 }), "provider_outcome_unknown"],
+    [
+      timedOut({ local_deadline: "ceiling", deadline_seconds: Infinity }),
+      "provider_outcome_unknown"
+    ],
+    [timedOut({ local_deadline: "silence", deadline_seconds: 0 }), "provider_outcome_unknown"],
+    [
+      error({
+        code: "planner_upstream_error",
+        details: { ...rejected, local_deadline: "silence", deadline_seconds: 300 }
+      }),
+      "provider_rejected"
+    ]
+  ] as const)("does not call %o a timeout", (failure, kind) => {
+    // Mutants: the typed limit is not validated; the kind comes from the details alone.
+    const state = kind === "provider_rejected" ? "committed" : "provider_outcome_unknown";
+    expect(classifyFailure(failure, turn(state))).toBe(kind);
+  });
+
   it("offers the safe replay and names the fact that no model was called", () => {
     const presentation = present({
       error: error({ code: "planner_budget_missing", message: "No planner budget." }),

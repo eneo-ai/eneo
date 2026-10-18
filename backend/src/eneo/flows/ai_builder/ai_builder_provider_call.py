@@ -52,7 +52,7 @@ import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Literal, Protocol, cast
+from typing import Any, ClassVar, Literal, Protocol, cast
 
 import httpx
 from litellm.exceptions import BadRequestError
@@ -129,16 +129,43 @@ class CompletionClient(Protocol):
     async def acompletion(self, **kwargs: Any) -> Any: ...
 
 
-class ProviderSilenceExpired(TimeoutError):
+# Which of Eneo's own provider-call timers expired.
+ProviderDeadlineKind = Literal["silence", "ceiling"]
+
+
+class ProviderDeadlineExpired(TimeoutError):
+    """One of Eneo's own provider-call timers expired.
+
+    ``seconds`` is the limit that fired (the first-output allowance or the gap
+    limit for silence, the call ceiling for a ceiling) and ``kind`` names the
+    timer, so a caller reports both without reading the exception text. A
+    limit that is not a finite positive number is a programming error: it
+    would reach the public error as a wait nobody could have been given.
+    """
+
+    kind: ClassVar[ProviderDeadlineKind]
+
+    def __init__(self, seconds: float) -> None:
+        if not (math.isfinite(seconds) and seconds > 0):
+            raise ValueError(f"a deadline is a finite positive number, got {seconds}")
+        super().__init__(seconds)
+        self.seconds = float(seconds)
+
+
+class ProviderSilenceExpired(ProviderDeadlineExpired):
     """No chunk arrived from the provider within the silence deadline."""
 
+    kind: ClassVar[ProviderDeadlineKind] = "silence"
 
-class ProviderCallCeilingExpired(TimeoutError):
+
+class ProviderCallCeilingExpired(ProviderDeadlineExpired):
     """The whole provider call exceeded its ceiling.
 
     Either an answer that kept producing, or a call that may think and produced
     no output at all: the ceiling is its wait before the first output.
     """
+
+    kind: ClassVar[ProviderDeadlineKind] = "ceiling"
 
 
 class ProviderCallStopped(Exception):

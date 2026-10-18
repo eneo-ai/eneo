@@ -6,7 +6,8 @@ import {
   aiBuilderErrorText,
   AIBuilderClientRefusal,
   isStaleApplyError,
-  parseAIBuilderError
+  parseAIBuilderError,
+  providerTimeoutCause
 } from "./aiBuilderError";
 import type { AIBuilderError } from "./protocol";
 
@@ -60,6 +61,14 @@ describe("aiBuilderErrorText", () => {
     const error = serverError(code, details);
     expect(aiBuilderErrorText(error)).toBe(expected);
     expect(aiBuilderErrorText(error)).not.toContain(ENGLISH_SERVER_MESSAGE);
+  });
+
+  it("words a timeout's unknown outcome on every surface that renders the code", () => {
+    // Mutant: only the failure card reads the typed deadline.
+    const details = { local_deadline: "ceiling", deadline_seconds: 1800 };
+    expect(aiBuilderErrorText(serverError("session_turn_provider_outcome_unknown", details))).toBe(
+      providerTimeoutCause({ deadline: "ceiling", seconds: 1800 })
+    );
   });
 
   it("falls back to the failed operation's sentence, never the server's prose", () => {
@@ -223,5 +232,38 @@ describe("parseAIBuilderError", () => {
       status: 400,
       original_code: "legacy_code"
     });
+  });
+});
+
+describe("providerTimeoutCause", () => {
+  // Locale-neutral: the number and its unit stem read the same in sv and en.
+  it.each([
+    [300, /\b5 min/],
+    [5400, /\b90 min/],
+    [90, /\b90 (sek|sec)/],
+    [0.0001, /\b0[.,]0001 (sek|sec)/],
+    [1e-21, /\b0[.,]0{20}1 (sek|sec)/]
+  ])("states a wait of %s seconds as it was given", (seconds, wait) => {
+    // Mutants: minutes as seconds or hours; 90 s as minutes; a small wait as 0.
+    expect(providerTimeoutCause({ deadline: "silence", seconds })).toMatch(wait);
+  });
+
+  it.each(["sv", "en"] as const)("gives %s advice that can be followed everywhere", (locale) => {
+    // Mutants: unactionable advice returns; other labels; no deployment hint.
+    const path = [
+      m.admin({}, { locale }),
+      m.flow_settings_title({}, { locale }),
+      m.flow_settings_tab_builder({}, { locale }),
+      m.ai_builder_timing_group({}, { locale })
+    ].join(" > ");
+    for (const cause of [
+      m.ai_builder_failure_cause_provider_timeout_silence,
+      m.ai_builder_failure_cause_provider_timeout_ceiling
+    ]) {
+      const text = cause({ wait: "X" }, { locale });
+      expect(text).toContain(path);
+      expect(text).toMatch(/deployment|driftmiljön/);
+      expect(text).not.toMatch(/lower reasoning|lägre resonemangsnivå|accept that cost|godkänner/i);
+    }
   });
 });

@@ -1,3 +1,4 @@
+import { intlLocale } from "$lib/core/formatting/dateTime";
 import { m } from "$lib/paraglide/messages";
 
 import type {
@@ -176,6 +177,44 @@ function detailNumber(error: AIBuilderError, key: string): string | null {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : null;
 }
 
+export interface ProviderTimeout {
+  /** Which Eneo timer fired: silence says no answer came, a ceiling that it did not finish. */
+  deadline: "silence" | "ceiling";
+  seconds: number;
+}
+
+/** The limit a provider timeout names: the Eneo timer that fired and its
+ *  seconds, from the server's typed `local_deadline` and `deadline_seconds`.
+ *  Null for every other failure, including an SDK or gateway timeout, which
+ *  names no limit; a malformed value is not a limit either. */
+export function providerTimeout(error: AIBuilderError): ProviderTimeout | null {
+  const { local_deadline: deadline, deadline_seconds: seconds } = error.details;
+  if (deadline !== "silence" && deadline !== "ceiling") return null;
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return null;
+  return { deadline, seconds };
+}
+
+// A whole number of minutes reads in minutes ("90 minutes"), anything else in
+// seconds as given: `formatDuration` rounds to its largest unit, which would
+// state a wait that was never configured. A fraction keeps three significant
+// digits below one second, so a small wait never reads as 0.
+function waitText(seconds: number): string {
+  const wholeMinutes = Number.isInteger(seconds) && seconds % 60 === 0;
+  return new Intl.NumberFormat(intlLocale(), {
+    style: "unit",
+    unit: wholeMinutes ? "minute" : "second",
+    unitDisplay: "long",
+    ...(seconds < 1 ? { maximumSignificantDigits: 3 } : { maximumFractionDigits: 3 })
+  }).format(wholeMinutes ? seconds / 60 : seconds);
+}
+
+export function providerTimeoutCause({ deadline, seconds }: ProviderTimeout): string {
+  const wait = waitText(seconds);
+  return deadline === "silence"
+    ? m.ai_builder_failure_cause_provider_timeout_silence({ wait })
+    : m.ai_builder_failure_cause_provider_timeout_ceiling({ wait });
+}
+
 type ErrorCopy = ((error: AIBuilderError) => string | null) | null;
 
 const serverLimitation = () => m.ai_builder_error_server_limitation();
@@ -288,8 +327,12 @@ const ERROR_COPY: Record<AIBuilderErrorCode, ErrorCopy> = {
   session_send_in_progress: requestInProgress,
   session_send_lease_lost: changedConcurrently,
   session_turn_idempotency_conflict: null,
-  session_turn_provider_outcome_unknown: () =>
-    m.ai_builder_failure_cause_provider_outcome_unknown(),
+  session_turn_provider_outcome_unknown: (error) => {
+    const timeout = providerTimeout(error);
+    return timeout === null
+      ? m.ai_builder_failure_cause_provider_outcome_unknown()
+      : providerTimeoutCause(timeout);
+  },
   stale_plan_revision: () => m.ai_builder_error_plan_changed(),
   stale_revision: () => m.ai_builder_error_flow_changed(),
   template_attachment_selection_invalid: () =>

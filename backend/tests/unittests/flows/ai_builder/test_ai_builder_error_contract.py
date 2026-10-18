@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from litellm.exceptions import Timeout
 from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_error_contract import (
@@ -19,10 +20,16 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderUnauthorizedException,
     build_ai_builder_error,
     build_ai_builder_error_event,
+    classify_ai_builder_provider_failure,
     split_ai_builder_error_context,
     with_ai_builder_call_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
+from eneo.flows.ai_builder.ai_builder_provider_call import (
+    ProviderCallCeilingExpired,
+    ProviderDeadlineExpired,
+    ProviderSilenceExpired,
+)
 from eneo.main.exceptions import ErrorCodes
 
 
@@ -358,4 +365,45 @@ def test_split_ai_builder_error_context_separates_correlation_from_details() -> 
     assert details == {
         "published_version": 3,
         "auth_layer": "api_key_scope",
+    }
+
+
+@pytest.mark.parametrize(
+    ("error", "kind", "opening"),
+    [
+        (ProviderSilenceExpired(300.0), "silence", "answer within 300 seconds"),
+        (ProviderCallCeilingExpired(1.0), "ceiling", "finish within 1 second"),
+        (ProviderSilenceExpired(0.00001), "silence", "answer within 0.00001 seconds"),
+        (
+            ProviderCallCeilingExpired(1234567),
+            "ceiling",
+            "finish within 1234567 seconds",
+        ),
+        (TimeoutError("raised by the SDK"), None, None),
+        (Timeout("sdk", model="m", llm_provider="p"), None, None),
+    ],
+)
+def test_only_our_own_deadlines_are_answered_as_a_timeout_with_their_wait(
+    error: Exception, kind: str | None, opening: str | None
+) -> None:
+    # Mutants: kinds swap or share a verb; seconds dropped; "1 seconds"; an
+    # exponent, float artefact or 0 in the wait; an SDK timeout claims a limit.
+    public_error = classify_ai_builder_provider_failure(
+        error, stage="proposal_completion"
+    ).public_error
+    limit = {}
+    if isinstance(error, ProviderDeadlineExpired):
+        limit = {"local_deadline": kind, "deadline_seconds": error.seconds}
+
+    assert public_error.message.startswith(
+        f"The AI model did not {opening}. "
+        if opening
+        else "The provider outcome is unknown."
+    )
+    assert public_error.details == {
+        "another_call_permitted": False,
+        "provider_disposition": "provider_outcome_unknown",
+        "provider_exception_class": "timeout",
+        "retry_scope": "acknowledged_same_turn",
+        **limit,
     }

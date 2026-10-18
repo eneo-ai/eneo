@@ -1,6 +1,6 @@
 import { m } from "$lib/paraglide/messages";
 
-import { aiBuilderErrorText } from "./aiBuilderError";
+import { aiBuilderErrorText, providerTimeout, providerTimeoutCause } from "./aiBuilderError";
 
 import type {
   AIBuilderClientErrorFirstAction,
@@ -162,15 +162,16 @@ export function classifyFailure(
   latestTurn: AIBuilderLatestTurn | null
 ): FailureKind {
   const state = latestTurn?.state ?? null;
-  if (state === "provider_outcome_unknown") return "provider_outcome_unknown";
-  if (state === "failed_before_provider") return "failed_before_provider";
-  if (
-    state === null &&
-    (error.code === "session_turn_provider_outcome_unknown" ||
-      error.details.provider_disposition === "provider_outcome_unknown")
-  ) {
-    return "provider_outcome_unknown";
+  const outcomeUnknown =
+    state === "provider_outcome_unknown" ||
+    (state === null &&
+      (error.code === "session_turn_provider_outcome_unknown" ||
+        error.details.provider_disposition === "provider_outcome_unknown"));
+  // A timeout is an unknown outcome that also names the limit that was hit.
+  if (outcomeUnknown) {
+    return providerTimeout(error) === null ? "provider_outcome_unknown" : "provider_timeout";
   }
+  if (state === "failed_before_provider") return "failed_before_provider";
   if (error.category === "network") return "network_loss";
   if (error.details.provider_disposition === "known_rejection") return "provider_rejected";
   if (error.code === "planner_context_limit_exceeded") return "request_budget_exhausted";
@@ -236,6 +237,8 @@ function heading(kind: FailureKind, surface: FailureSurface): string {
   switch (kind) {
     case "provider_outcome_unknown":
       return m.ai_builder_failure_heading_provider_outcome_unknown();
+    case "provider_timeout":
+      return m.ai_builder_failure_heading_provider_timeout();
     case "failed_before_provider":
       return m.ai_builder_turn_failed_before_provider_title();
     case "network_loss":
@@ -269,6 +272,12 @@ function cause(
   switch (kind) {
     case "provider_outcome_unknown":
       return m.ai_builder_failure_cause_provider_outcome_unknown();
+    case "provider_timeout": {
+      const timeout = error ? providerTimeout(error) : null;
+      return timeout === null
+        ? m.ai_builder_failure_cause_provider_outcome_unknown()
+        : providerTimeoutCause(timeout);
+    }
     case "failed_before_provider":
       // The fact that nothing was spent stands alone; the code is in the
       // technical line and the server's words in the diagnostic report.
@@ -403,6 +412,7 @@ function actionsFor(
     case "invalid_proposal":
       return { primary: action.clarify(kind), secondary: action.retryNewTurn() };
     case "provider_outcome_unknown":
+    case "provider_timeout":
     case "failed_before_provider":
     case "network_loss":
     case "provider_rejected":
