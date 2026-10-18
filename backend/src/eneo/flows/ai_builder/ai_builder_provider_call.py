@@ -2,9 +2,12 @@
 
 A provider answer is streamed so that a slow model is observable while it
 works: the deadline bounds *silence*, the wait for the next yielded chunk
-(the first one included), not the whole answer, so a model that keeps
+once a chunk that carries output has arrived, not the whole answer, so a model that keeps
 producing is not cut off by that deadline however long it takes, while a
-dead connection is still detected. A separate, longer ceiling bounds the
+stalled stream is still detected. Before the first chunk that carries output
+a thinking call cannot be told from a hung one (a provider may send chunks
+without output first), so its caller may allow that wait up to the ceiling.
+A separate, longer ceiling bounds the
 whole call; it is deployment policy of its own, not the send-lock lease,
 which the turn renews while it works. The chunks are rebuilt into the
 complete completion LiteLLM would have returned, so everything after the
@@ -131,7 +134,11 @@ class ProviderSilenceExpired(TimeoutError):
 
 
 class ProviderCallCeilingExpired(TimeoutError):
-    """The whole provider call exceeded its ceiling while still producing."""
+    """The whole provider call exceeded its ceiling.
+
+    Either an answer that kept producing, or a call that may think and produced
+    no output at all: the ceiling is its wait before the first output.
+    """
 
 
 class ProviderCallStopped(Exception):
@@ -317,11 +324,43 @@ def _ms(seconds: float) -> int:
     return max(0, int(seconds * 1000))
 
 
+def _chunk_carries_output(chunk: Any) -> bool:
+    """Whether a streamed chunk is the model's output, not only the stream's start.
+
+    A provider may open a stream with chunks that carry nothing the model
+    produced (a role-only delta, a prompt-filter notice with no choices) while
+    the model is still thinking; those must not end the wait that a thinking
+    call is allowed. Reasoning text counts as output: a stream that reasons
+    aloud is alive and is held to the silence deadline.
+    """
+
+    if getattr(chunk, "usage", None) is not None:
+        return True
+    for choice in getattr(chunk, "choices", None) or ():
+        if getattr(choice, "finish_reason", None):
+            return True
+        delta = getattr(choice, "delta", None)
+        if any(
+            getattr(delta, field, None)
+            for field in (
+                "content",
+                "tool_calls",
+                "function_call",
+                "reasoning_content",
+                "thinking_blocks",
+                "audio",
+            )
+        ):
+            return True
+    return False
+
+
 async def complete_with_silence_deadline(
     litellm_client: CompletionClient,
     *,
     silence_deadline_seconds: float,
     ceiling_seconds: float,
+    first_output_deadline_seconds: float,
     request: Mapping[str, Any],
     retry_without_refused_control: RetryAdmission | None = None,
     observe_sdk_input: Callable[[Mapping[str, Any]], None] | None = None,
@@ -331,8 +370,17 @@ async def complete_with_silence_deadline(
     """The provider's complete answer, streamed under a silence deadline.
 
     ``silence_deadline_seconds`` is the longest wait for the next yielded
-    chunk; ``ceiling_seconds`` bounds the provider's time on the whole call, a
-    retried request included; waits for the turn to admit a request are not
+    chunk once a chunk that carries output has arrived.
+    ``first_output_deadline_seconds`` is the longest wait for the response
+    headers and for each chunk before that first output, between
+    ``silence_deadline_seconds`` and ``ceiling_seconds``. A request that is thinking is silent until its first
+    output, even when the provider sent chunks without output before it, and
+    that cannot be told from a hung one, so its caller may allow that wait up
+    to the ceiling. A request sent again without a refused control waits for
+    its own first output anew. ``ceiling_seconds``
+    bounds the provider's time on the whole call, a retried request
+    included; the SDK is given the ceiling as its own read timeout, only a
+    backstop behind these local deadlines. Waits for the turn to admit a request are not
     the provider's time and run under neither deadline nor the timing. Each
     expiry raises its own ``TimeoutError`` subclass, which the
     failure classifier records as a timeout with an unknown provider outcome.
@@ -359,13 +407,24 @@ async def complete_with_silence_deadline(
         raise ValueError(
             "AI Builder call ceiling must be finite and not below the silence deadline"
         )
+    # The bounds are finite, so a NaN or infinite deadline fails this too.
+    if not (
+        silence_deadline_seconds <= first_output_deadline_seconds <= ceiling_seconds
+    ):
+        raise ValueError(
+            "AI Builder first-output deadline must lie between the silence "
+            "deadline and the call ceiling"
+        )
     outbound = {
         **request,
         "stream": True,
         # Usage arrives in the final chunk where the provider supports it;
         # drop_params removes the option elsewhere.
         "stream_options": {"include_usage": True},
-        "timeout": silence_deadline_seconds,
+        # The local timers own every deadline. A SDK read timeout equal to
+        # one of them raced it, and an expiry the SDK fired first was
+        # classified as an ambiguous transport failure with no local deadline.
+        "timeout": ceiling_seconds,
     }
     response: Any = None
     loop = asyncio.get_running_loop()
@@ -395,7 +454,8 @@ async def complete_with_silence_deadline(
                     if observe_sdk_input is not None:
                         observe_sdk_input(outbound)
                     response = await _under_silence(
-                        litellm_client.acompletion(**outbound), silence_deadline_seconds
+                        litellm_client.acompletion(**outbound),
+                        first_output_deadline_seconds,
                     )
                 except BadRequestError as error:
                     rejection = provider_error_fields(error)
@@ -432,17 +492,29 @@ async def complete_with_silence_deadline(
                     if observe_sdk_input is not None:
                         observe_sdk_input(outbound)
                     response = await _under_silence(
-                        litellm_client.acompletion(**outbound), silence_deadline_seconds
+                        litellm_client.acompletion(**outbound),
+                        first_output_deadline_seconds,
                     )
 
+                # Per request: a request sent again is again waiting for its
+                # first output. Chunks without output (a role-only delta, a
+                # prompt-filter notice) do not end the wait for it.
+                first_output_pending = True
+
                 async def next_chunk(stream: AsyncIterator[Any]) -> Any:
+                    nonlocal first_output_pending
                     try:
                         chunk = await _under_silence(
-                            anext(stream), silence_deadline_seconds
+                            anext(stream),
+                            first_output_deadline_seconds
+                            if first_output_pending
+                            else silence_deadline_seconds,
                         )
                     except BaseException:
                         clock.wait_ended(chunk_arrived=False)
                         raise
+                    if _chunk_carries_output(chunk):
+                        first_output_pending = False
                     clock.wait_ended(chunk_arrived=True)
                     return chunk
 

@@ -156,6 +156,12 @@ async def call_proposal_completion(
             litellm_client,
             silence_deadline_seconds=request_budget.timeout_seconds,
             ceiling_seconds=request_budget.ceiling_seconds,
+            first_output_deadline_seconds=request_budget.first_output_timeout_seconds(
+                reasoning_effort=provider_kwargs.get("reasoning_effort"),
+                route_reasons=(
+                    request.route.supported_model_kwargs.reasoning_effort.supported
+                ),
+            ),
             request={
                 "model": request.route.litellm_model,
                 "messages": messages,

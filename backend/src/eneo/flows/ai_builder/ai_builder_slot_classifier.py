@@ -360,6 +360,16 @@ async def classify_slots(
                 litellm_client,
                 silence_deadline_seconds=request_budget.timeout_seconds,
                 ceiling_seconds=ceiling_seconds,
+                # The re-ask gets only the seconds the first ask left.
+                first_output_deadline_seconds=min(
+                    request_budget.first_output_timeout_seconds(
+                        reasoning_effort=completion_kwargs.get("reasoning_effort"),
+                        route_reasons=(
+                            completion_model_route.supported_model_kwargs.reasoning_effort.supported
+                        ),
+                    ),
+                    ceiling_seconds,
+                ),
                 request={
                     "model": litellm_model,
                     "messages": messages,

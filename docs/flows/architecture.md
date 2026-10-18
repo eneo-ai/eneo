@@ -390,17 +390,25 @@ Every Builder provider call goes through one owner
 (`ai_builder_provider_call.complete_with_silence_deadline`). The answer is
 streamed and rebuilt into the complete completion, so a slow model is
 observable while it works. `AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS` (default 300)
-bounds *silence*: the longest wait for the provider's next yielded chunk, the
-first one included. A model that keeps yielding is not cut off by that
-deadline however long its answer takes, while a dead connection is still
-detected; reasoning models can be silent for minutes on large prompts before
-their first token, which is what the default allows for.
+bounds *silence*: the longest wait for the provider's next yielded chunk once
+the model has produced output. A model that keeps yielding is not cut off by
+that deadline however long its answer takes, while a stalled stream is still
+detected. Before its first output (chunks that carry none, such as a role-only
+opening, do not count) a hung call cannot be told from one that is thinking
+without streaming its reasoning. A call that may think therefore waits for the
+response and that output up to the whole-call ceiling below: it sends a
+reasoning effort other than `none`, or sends no effort on a route that takes one (the
+provider's default then applies, so a reasoning route that is off by default
+waits longer on a hung call too). Any other call waits only the silence
+deadline. The provider SDK's
+own read timeout is set to the ceiling, behind these local deadlines.
 `AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS` (default 1800) bounds the whole
-call, however much it keeps producing; it is policy of its own and never below
-the silence deadline. Neither is the send-lock lease, which the turn renews
+call, whether it keeps producing or, for a call that may think, never produces;
+it is policy of its own and never below the silence deadline. Neither is the send-lock lease, which the turn renews
 while it works. An explicitly configured
 `AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS` overrides the silence deadline for
-classification; leaving it unset restores inheritance. Classification has a
+classification, whose wait before its first output is bounded by its own ceiling
+below only for a call that may think; leaving it unset restores inheritance. Classification has a
 whole-call ceiling of its own, shared by its ask and its one re-ask after a
 cut-off answer: `AI_BUILDER_CLASSIFICATION_CEILING_SECONDS`, by default twice
 its silence deadline and never above `AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS`.
@@ -413,7 +421,8 @@ turn, unless `AI_BUILDER_CLASSIFICATION_REASONING_EFFORT=turn` keeps the
 user's. Model
 context capacity does not establish provider processing speed, so deadlines are deployment
 policy. A proxy between Eneo and the provider that closes idle connections must
-allow at least this silence; see the failure telemetry above for how such a
+allow at least this silence, and for a call that may think the whole-call
+ceiling for its first output; see the failure telemetry above for how such a
 timeout is recognised (`local_deadline` names the timer that expired, silence
 or ceiling, when one did).
 

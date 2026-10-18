@@ -640,13 +640,17 @@ def record_ai_builder_provider_failure(
                 safe_detail["upstream_timeout_suspected"] = True
                 event_logger.warning(
                     "AI Builder provider call answered %s after %s ms while no "
-                    "local deadline (%s s of silence) had expired: a proxy or "
-                    "gateway between Eneo and the provider likely timed out "
-                    "first. Check proxy server timeouts against "
-                    "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS.",
+                    "local deadline (%s s of silence, %s s call ceiling) had "
+                    "expired: a proxy or gateway between Eneo and the provider "
+                    "likely timed out first. Check proxy server timeouts "
+                    "against AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS; a call that "
+                    "may think waits up to the call ceiling "
+                    "(AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS) for its first "
+                    "output.",
                     failure.status_code,
                     provider_elapsed_ms,
                     request_budget.timeout_seconds,
+                    request_budget.ceiling_seconds,
                     extra={
                         "operation": failure.stage,
                         "failure_fingerprint": failure.fingerprint,

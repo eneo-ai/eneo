@@ -4,6 +4,7 @@ import asyncio
 import subprocess
 import sys
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -23,6 +24,7 @@ from eneo.flows.ai_builder.ai_builder_provider_call import (
     ProviderCallTiming,
     ProviderSilenceExpired,
     ProviderStreamIncomplete,
+    _chunk_carries_output,
     complete_with_silence_deadline,
     provider_error_fields,
 )
@@ -32,6 +34,29 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (  # noqa: E
 
 _MESSAGES = [{"role": "user", "content": "Propose a flow."}]
 _REQUEST = {"model": "gpt-test", "messages": _MESSAGES}
+
+
+async def _complete_at_silence(
+    client: Any,
+    *,
+    first_output_deadline_seconds: float | None = None,
+    **deadlines: Any,
+) -> Any:
+    """The seam, with the first-output wait defaulting to the silence deadline.
+
+    Most tests do not exercise the first-output wait; the seam itself has no
+    default for it.
+    """
+
+    return await complete_with_silence_deadline(
+        client,
+        first_output_deadline_seconds=(
+            deadlines["silence_deadline_seconds"]
+            if first_output_deadline_seconds is None
+            else first_output_deadline_seconds
+        ),
+        **deadlines,
+    )
 
 
 @pytest.mark.parametrize("buffered", [True, False])
@@ -319,7 +344,7 @@ async def test_a_streamed_tool_call_is_rebuilt_whole_with_its_usage() -> None:
         )
     )
 
-    response = await complete_with_silence_deadline(
+    response = await _complete_at_silence(
         client,
         silence_deadline_seconds=1.0,
         ceiling_seconds=5.0,
@@ -329,7 +354,9 @@ async def test_a_streamed_tool_call_is_rebuilt_whole_with_its_usage() -> None:
     sent = client.acompletion.await_args.kwargs
     assert sent["stream"] is True
     assert sent["stream_options"] == {"include_usage": True}
-    assert sent["timeout"] == 1.0
+    # Mutant: the SDK read timeout equals the silence deadline and races the
+    # local timer (an SDK-fired expiry carries no local deadline).
+    assert sent["timeout"] == 5.0
     assert sent["max_tokens"] == 50
     choice = response.choices[0]
     assert choice.finish_reason == "tool_calls"
@@ -349,8 +376,11 @@ async def test_a_slow_answer_that_keeps_flowing_is_never_cut_off() -> None:
         acompletion=AsyncMock(return_value=_stream(chunks, delay=0.03))
     )
 
-    response = await complete_with_silence_deadline(
-        client, silence_deadline_seconds=0.1, ceiling_seconds=5.0, request=_REQUEST
+    response = await _complete_at_silence(
+        client,
+        silence_deadline_seconds=0.1,
+        ceiling_seconds=5.0,
+        request=_REQUEST,
     )
 
     assert (
@@ -393,7 +423,7 @@ async def test_a_stream_that_ends_without_a_finish_reason_is_incomplete() -> Non
         [_tool_chunk('{"name": "A"}', first=True, finish=None)], closed
     )
     with pytest.raises(ProviderStreamIncomplete):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             _stream_client(stream),
             silence_deadline_seconds=1.0,
             ceiling_seconds=5.0,
@@ -414,7 +444,7 @@ async def test_silence_expiry_closes_the_stream_and_names_itself() -> None:
         stall_after=1,
     )
     with pytest.raises(ProviderSilenceExpired):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             _stream_client(stream),
             silence_deadline_seconds=0.05,
             ceiling_seconds=5.0,
@@ -433,7 +463,7 @@ async def test_absent_provider_usage_stays_absent_after_rebuilding() -> None:
         ],
         closed,
     )
-    response = await complete_with_silence_deadline(
+    response = await _complete_at_silence(
         _stream_client(stream),
         silence_deadline_seconds=1.0,
         ceiling_seconds=5.0,
@@ -446,7 +476,7 @@ async def test_absent_provider_usage_stays_absent_after_rebuilding() -> None:
 def test_the_ceiling_cannot_be_below_the_silence_deadline() -> None:
     with pytest.raises(ValueError):
         asyncio.run(
-            complete_with_silence_deadline(
+            _complete_at_silence(
                 SimpleNamespace(acompletion=AsyncMock()),
                 silence_deadline_seconds=10,
                 ceiling_seconds=5,
@@ -464,8 +494,11 @@ async def test_silence_after_the_first_bytes_expires_the_deadline() -> None:
 
     client = SimpleNamespace(acompletion=AsyncMock(return_value=stalls()))
     with pytest.raises(ProviderSilenceExpired):
-        await complete_with_silence_deadline(
-            client, silence_deadline_seconds=0.05, ceiling_seconds=5.0, request=_REQUEST
+        await _complete_at_silence(
+            client,
+            silence_deadline_seconds=0.05,
+            ceiling_seconds=5.0,
+            request=_REQUEST,
         )
 
 
@@ -477,9 +510,219 @@ async def test_silence_before_the_first_byte_expires_the_deadline() -> None:
 
     client = SimpleNamespace(acompletion=AsyncMock(side_effect=never))
     with pytest.raises(ProviderSilenceExpired):
-        await complete_with_silence_deadline(
-            client, silence_deadline_seconds=0.05, ceiling_seconds=5.0, request=_REQUEST
+        await _complete_at_silence(
+            client,
+            silence_deadline_seconds=0.05,
+            ceiling_seconds=5.0,
+            request=_REQUEST,
         )
+
+
+async def _after(delays: list[float]):
+    """A two-chunk answer whose chunks each arrive after the given delay."""
+
+    chunks = [
+        _tool_chunk('{"name": "A', first=True, finish=None),
+        _tool_chunk('"}', first=False, finish="tool_calls"),
+    ]
+    for delay, chunk in zip(delays, chunks):
+        await asyncio.sleep(delay)
+        yield chunk
+
+
+_FIRST_OUTPUT_DEADLINES = {
+    "silence_deadline_seconds": 0.05,
+    "first_output_deadline_seconds": 0.6,
+    "ceiling_seconds": 5.0,
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("delays", "first_output", "expires"),
+    [
+        # Mutant: the wait for the first output uses the silence deadline.
+        ([0.2, 0.0], 0.6, False),
+        # Mutant: gaps after the first output keep the first-output deadline.
+        ([0.0, 0.3], 0.6, True),
+        # Mutant: the first output is waited for without a bound.
+        ([2.0, 0.0], 0.1, True),
+    ],
+)
+async def test_the_first_output_may_wait_longer_than_a_gap_after_it(
+    delays: list[float], first_output: float, expires: bool
+) -> None:
+    call = _complete_at_silence(
+        _stream_client(_after(delays)),
+        request=_REQUEST,
+        **{**_FIRST_OUTPUT_DEADLINES, "first_output_deadline_seconds": first_output},
+    )
+
+    if expires:
+        with pytest.raises(ProviderSilenceExpired):
+            await call
+    else:
+        assert (await call).choices[0].finish_reason == "tool_calls"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refused_first", [False, True])
+async def test_the_wait_for_the_response_headers_uses_the_first_output_deadline(
+    refused_first: bool,
+) -> None:
+    # Mutant: the header wait of the first dispatch (or of the dispatch sent
+    # again without a refused control) uses the silence deadline.
+    calls = 0
+
+    async def acompletion(**_: object) -> object:
+        nonlocal calls
+        calls += 1
+        if refused_first and calls == 1:
+            raise _rejection(_UNSUPPORTED_TEMPERATURE)
+        await asyncio.sleep(0.2)
+        return _after([0.0, 0.0])
+
+    response = await _complete_at_silence(
+        SimpleNamespace(acompletion=acompletion),
+        request={**_REQUEST, "temperature": 0.0},
+        retry_without_refused_control=_admit,
+        **_FIRST_OUTPUT_DEADLINES,
+    )
+
+    assert response.choices[0].finish_reason == "tool_calls"
+    assert calls == (2 if refused_first else 1)
+
+
+@pytest.mark.parametrize("first_output_deadline", [0.01, 10.0, float("nan")])
+def test_the_first_output_deadline_lies_between_the_silence_and_the_ceiling(
+    first_output_deadline: float,
+) -> None:
+    # Mutant: the first-output deadline is not validated against both bounds.
+    with pytest.raises(ValueError):
+        asyncio.run(
+            _complete_at_silence(
+                SimpleNamespace(acompletion=AsyncMock()),
+                silence_deadline_seconds=0.05,
+                first_output_deadline_seconds=first_output_deadline,
+                ceiling_seconds=5.0,
+                request=_REQUEST,
+            )
+        )
+
+
+def _no_output_chunk() -> object:
+    # A chunk with no choices, which the model did not produce.
+    return litellm_types.ModelResponseStream(choices=[])
+
+
+@pytest.mark.asyncio
+async def test_a_stream_of_chunks_without_output_is_still_bounded_by_the_ceiling() -> (
+    None
+):
+    # Mutant: the ceiling is ignored while the first output is pending.
+    async def endless():
+        while True:
+            await asyncio.sleep(0.01)
+            yield _no_output_chunk()
+
+    with pytest.raises(ProviderCallCeilingExpired):
+        await asyncio.wait_for(
+            _complete_at_silence(
+                _stream_client(endless()),
+                silence_deadline_seconds=0.05,
+                first_output_deadline_seconds=0.2,
+                ceiling_seconds=0.4,
+                request=_REQUEST,
+            ),
+            timeout=3,
+        )
+
+
+class _SlowBody(httpx.AsyncByteStream):
+    def __init__(self, events: list[tuple[float, dict[str, object]]]) -> None:
+        self._events = events
+
+    async def __aiter__(self):
+        for pause, event in self._events:
+            await asyncio.sleep(pause)
+            yield f"data: {json.dumps(event)}\n\n".encode()
+        yield b"data: [DONE]\n\n"
+
+
+@pytest.mark.asyncio
+async def test_a_role_only_opening_through_litellm_does_not_end_the_wait_for_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Through the real wrapper: LiteLLM 1.104.2 yields a role-only first delta
+    # to the seam (run against it, with the include_usage option the seam sends).
+    # Mutant: the first-output wait ends at the first chunk that is yielded.
+    events = [
+        (0.0, _delta("", None)),
+        (0.4, _delta("Hej", None)),
+        (0.0, _delta(None, "stop")),
+    ]
+    _serve(monkeypatch, _SlowBody(events))
+
+    response = await _complete_at_silence(
+        litellm,
+        silence_deadline_seconds=0.15,
+        first_output_deadline_seconds=3.0,
+        ceiling_seconds=5.0,
+        request=_WRAPPED_REQUEST,
+    )
+
+    assert response.choices[0].message.content == "Hej"
+
+
+def _stream_chunk(
+    *,
+    finish: str | None = None,
+    usage: litellm_types.Usage | None = None,
+    **delta: object,
+) -> object:
+    return litellm_types.ModelResponseStream(
+        choices=[
+            litellm_types.StreamingChoices(
+                finish_reason=finish, delta=litellm_types.Delta(**delta)
+            )
+        ],
+        **({"usage": usage} if usage is not None else {}),
+    )
+
+
+@pytest.mark.parametrize(
+    ("chunk", "carries_output"),
+    [
+        # Mutant: a chunk the model produced counts as no output.
+        (_stream_chunk(content="Hej"), True),
+        (_stream_chunk(reasoning_content="Let me think"), True),
+        (_stream_chunk(finish="stop"), True),
+        (_tool_chunk('{"a"', first=True, finish=None), True),
+        (
+            _stream_chunk(
+                function_call=litellm_types.FunctionCall(name="f", arguments="{}")
+            ),
+            True,
+        ),
+        (
+            _stream_chunk(
+                thinking_blocks=[
+                    {"type": "thinking", "thinking": "hm", "signature": "s"}
+                ]
+            ),
+            True,
+        ),
+        (_stream_chunk(audio={"id": "a", "data": "AA==", "transcript": "x"}), True),
+        (_usage_chunk(), True),
+        # Mutant: a stream opening without output counts as output.
+        (_stream_chunk(role="assistant", content=""), False),
+        (_no_output_chunk(), False),
+    ],
+)
+def test_only_a_chunk_that_carries_output_ends_the_wait_for_it(
+    chunk: object, carries_output: bool
+) -> None:
+    assert _chunk_carries_output(chunk) is carries_output
 
 
 @pytest.mark.asyncio
@@ -491,8 +734,11 @@ async def test_the_ceiling_bounds_an_answer_that_never_ends() -> None:
 
     client = SimpleNamespace(acompletion=AsyncMock(return_value=endless()))
     with pytest.raises(ProviderCallCeilingExpired):
-        await complete_with_silence_deadline(
-            client, silence_deadline_seconds=0.05, ceiling_seconds=0.1, request=_REQUEST
+        await _complete_at_silence(
+            client,
+            silence_deadline_seconds=0.05,
+            ceiling_seconds=0.1,
+            request=_REQUEST,
         )
 
 
@@ -503,8 +749,11 @@ async def test_a_whole_answer_is_accepted_as_it_is() -> None:
     )
     client = SimpleNamespace(acompletion=AsyncMock(return_value=whole))
 
-    response = await complete_with_silence_deadline(
-        client, silence_deadline_seconds=1.0, ceiling_seconds=5.0, request=_REQUEST
+    response = await _complete_at_silence(
+        client,
+        silence_deadline_seconds=1.0,
+        ceiling_seconds=5.0,
+        request=_REQUEST,
     )
 
     assert response is whole
@@ -515,15 +764,18 @@ async def test_an_empty_stream_is_incomplete() -> None:
     client = SimpleNamespace(acompletion=AsyncMock(return_value=_stream([])))
 
     with pytest.raises(ProviderStreamIncomplete):
-        await complete_with_silence_deadline(
-            client, silence_deadline_seconds=1.0, ceiling_seconds=5.0, request=_REQUEST
+        await _complete_at_silence(
+            client,
+            silence_deadline_seconds=1.0,
+            ceiling_seconds=5.0,
+            request=_REQUEST,
         )
 
 
 def test_the_silence_deadline_must_be_positive() -> None:
     with pytest.raises(ValueError):
         asyncio.run(
-            complete_with_silence_deadline(
+            _complete_at_silence(
                 SimpleNamespace(acompletion=AsyncMock()),
                 silence_deadline_seconds=0,
                 ceiling_seconds=5,
@@ -660,10 +912,14 @@ def _usage_event(prompt: int, completion: int) -> dict[str, object]:
     }
 
 
-def _serve(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
+def _serve(
+    monkeypatch: pytest.MonkeyPatch, body: bytes | httpx.AsyncByteStream
+) -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
-            200, content=body, headers={"content-type": "text/event-stream"}
+            200,
+            headers={"content-type": "text/event-stream"},
+            **({"content": body} if isinstance(body, bytes) else {"stream": body}),
         )
 
     monkeypatch.setattr(
@@ -694,7 +950,7 @@ async def test_a_provider_finish_reason_and_usage_come_through_the_wrapper(
 ) -> None:
     _serve(monkeypatch, _sse(events))
 
-    response = await complete_with_silence_deadline(
+    response = await _complete_at_silence(
         litellm,
         silence_deadline_seconds=5.0,
         ceiling_seconds=10.0,
@@ -737,7 +993,7 @@ async def test_without_admission_a_refusal_is_raised() -> None:
     )
 
     with pytest.raises(BadRequestError):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             client,
             silence_deadline_seconds=5.0,
             ceiling_seconds=10.0,
@@ -759,7 +1015,7 @@ async def test_the_caller_can_refuse_the_second_request() -> None:
         return False
 
     with pytest.raises(BadRequestError):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             client,
             silence_deadline_seconds=5.0,
             ceiling_seconds=10.0,
@@ -787,7 +1043,7 @@ async def test_a_refusal_after_the_stream_started_is_not_retried() -> None:
         return True
 
     with pytest.raises(BadRequestError):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             client,
             silence_deadline_seconds=5.0,
             ceiling_seconds=10.0,
@@ -814,7 +1070,7 @@ async def test_both_requests_share_one_ceiling() -> None:
     client = SimpleNamespace(acompletion=slow_provider)
 
     with pytest.raises(ProviderCallCeilingExpired):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             client,
             silence_deadline_seconds=0.1,
             ceiling_seconds=0.12,
@@ -829,7 +1085,7 @@ async def test_an_odd_error_code_shape_keeps_the_refusal() -> None:
     client = SimpleNamespace(acompletion=AsyncMock(side_effect=_rejection(body)))
 
     with pytest.raises(BadRequestError):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             client,
             silence_deadline_seconds=5.0,
             ceiling_seconds=10.0,
@@ -861,7 +1117,7 @@ async def test_a_refused_sampling_control_is_dropped_once() -> None:
         )
     )
 
-    response = await complete_with_silence_deadline(
+    response = await _complete_at_silence(
         client,
         silence_deadline_seconds=5.0,
         ceiling_seconds=10.0,
@@ -882,7 +1138,7 @@ async def test_a_refusal_of_anything_else_is_not_retried() -> None:
     client = SimpleNamespace(acompletion=AsyncMock(side_effect=_rejection(body)))
 
     with pytest.raises(BadRequestError):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             client,
             silence_deadline_seconds=5.0,
             ceiling_seconds=10.0,
@@ -905,7 +1161,7 @@ async def test_a_second_refusal_is_raised() -> None:
     )
 
     with pytest.raises(BadRequestError):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             client,
             silence_deadline_seconds=5.0,
             ceiling_seconds=10.0,
@@ -944,7 +1200,7 @@ async def test_a_provider_refusing_temperature_gets_the_call_without_it(
     monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
     monkeypatch.setattr(litellm, "num_retries", 0)
 
-    response = await complete_with_silence_deadline(
+    response = await _complete_at_silence(
         litellm,
         silence_deadline_seconds=5.0,
         ceiling_seconds=10.0,
@@ -1011,7 +1267,7 @@ async def test_a_bridged_azure_tool_call_refusal_keeps_its_envelope(
     monkeypatch.setattr(litellm, "num_retries", 0)
 
     with pytest.raises(BadRequestError) as raised:
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             litellm,
             silence_deadline_seconds=5.0,
             ceiling_seconds=10.0,
@@ -1101,7 +1357,7 @@ async def test_usage_split_across_provider_events_is_combined(
     ).encode()
     _serve(monkeypatch, body)
 
-    response = await complete_with_silence_deadline(
+    response = await _complete_at_silence(
         litellm,
         silence_deadline_seconds=5.0,
         ceiling_seconds=10.0,
@@ -1125,7 +1381,7 @@ async def test_a_wrapped_stream_without_a_provider_finish_reason_is_incomplete(
     _serve(monkeypatch, _sse([_delta('{"suggestions": []}', None)]))
 
     with pytest.raises(ProviderStreamIncomplete):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             litellm,
             silence_deadline_seconds=5.0,
             ceiling_seconds=10.0,
@@ -1139,7 +1395,7 @@ async def test_usage_the_wrapper_made_up_is_not_the_providers(
 ) -> None:
     _serve(monkeypatch, _sse([_delta("Hej", None), _delta(None, "stop")]))
 
-    response = await complete_with_silence_deadline(
+    response = await _complete_at_silence(
         litellm,
         silence_deadline_seconds=5.0,
         ceiling_seconds=10.0,
@@ -1155,7 +1411,7 @@ async def test_a_timeout_the_client_raises_itself_is_not_local_silence() -> None
     client = SimpleNamespace(acompletion=AsyncMock(side_effect=TimeoutError("sdk")))
 
     with pytest.raises(TimeoutError) as raised:
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             client,
             silence_deadline_seconds=10.0,
             ceiling_seconds=20.0,
@@ -1192,7 +1448,7 @@ async def test_cleanup_finishes_even_when_the_ceiling_interrupts_it() -> None:
     stream = _SlowToClose()
 
     with pytest.raises(ProviderSilenceExpired):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             _stream_client(stream),
             silence_deadline_seconds=0.05,
             ceiling_seconds=0.08,
@@ -1205,7 +1461,7 @@ async def test_cleanup_finishes_even_when_the_ceiling_interrupts_it() -> None:
 def test_non_finite_durations_are_refused(ceiling: float) -> None:
     with pytest.raises(ValueError):
         asyncio.run(
-            complete_with_silence_deadline(
+            _complete_at_silence(
                 SimpleNamespace(acompletion=AsyncMock()),
                 silence_deadline_seconds=1.0,
                 ceiling_seconds=ceiling,
@@ -1221,7 +1477,7 @@ async def test_explicit_reasoning_rejection_is_not_retried_without_effort(code):
     client = SimpleNamespace(acompletion=AsyncMock(side_effect=error))
     retry = MagicMock(return_value=True)
     with pytest.raises(BadRequestError) as raised:
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             client,
             silence_deadline_seconds=5.0,
             ceiling_seconds=10.0,
@@ -1247,7 +1503,7 @@ async def test_a_stall_reports_the_first_chunk_and_the_silence_it_ended_on() -> 
     )
 
     with pytest.raises(ProviderSilenceExpired):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             _stream_client(stream),
             silence_deadline_seconds=0.05,
             ceiling_seconds=5.0,
@@ -1270,7 +1526,7 @@ async def test_a_flowing_answer_reports_its_longest_wait_between_chunks() -> Non
         acompletion=AsyncMock(return_value=_stream(chunks, delay=0.03))
     )
 
-    await complete_with_silence_deadline(
+    await _complete_at_silence(
         client,
         silence_deadline_seconds=1.0,
         ceiling_seconds=5.0,
@@ -1291,7 +1547,7 @@ async def test_a_whole_answer_or_a_refused_request_has_no_chunk_timing() -> None
     )
     timings: list[ProviderCallTiming] = []
 
-    await complete_with_silence_deadline(
+    await _complete_at_silence(
         SimpleNamespace(acompletion=AsyncMock(return_value=whole)),
         silence_deadline_seconds=1.0,
         ceiling_seconds=5.0,
@@ -1299,7 +1555,7 @@ async def test_a_whole_answer_or_a_refused_request_has_no_chunk_timing() -> None
         observe_timing=timings.append,
     )
     with pytest.raises(TimeoutError):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             SimpleNamespace(acompletion=AsyncMock(side_effect=TimeoutError("sdk"))),
             silence_deadline_seconds=1.0,
             ceiling_seconds=5.0,
@@ -1335,7 +1591,7 @@ async def test_each_request_of_a_retried_call_is_timed_on_its_own() -> None:
         return True
 
     observed = ObservedTiming()
-    await complete_with_silence_deadline(
+    await _complete_at_silence(
         SimpleNamespace(acompletion=acompletion),
         silence_deadline_seconds=5.0,
         ceiling_seconds=10.0,
@@ -1380,7 +1636,7 @@ async def test_the_stop_signal_ends_a_wait_for_the_first_response() -> None:
     client = _hangs_before_answering(started, cancelled)
 
     call = asyncio.create_task(
-        complete_with_silence_deadline(
+        _complete_at_silence(
             client,
             silence_deadline_seconds=60.0,
             ceiling_seconds=120.0,
@@ -1421,7 +1677,7 @@ async def test_the_stop_signal_ends_an_answer_that_keeps_flowing_and_closes_it()
             closed.closed = True
 
     call = asyncio.create_task(
-        complete_with_silence_deadline(
+        _complete_at_silence(
             _stream_client(endless()),
             silence_deadline_seconds=60.0,
             ceiling_seconds=120.0,
@@ -1446,7 +1702,7 @@ async def test_a_stop_signalled_before_the_call_sends_nothing() -> None:
     client = SimpleNamespace(acompletion=AsyncMock())
 
     with pytest.raises(ProviderCallStopped):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             client,
             silence_deadline_seconds=1.0,
             ceiling_seconds=5.0,
@@ -1468,14 +1724,14 @@ async def test_an_unset_stop_signal_leaves_the_deadlines_naming_their_own_expiry
         choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
     )
     with pytest.raises(ProviderSilenceExpired):
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             SimpleNamespace(acompletion=AsyncMock(side_effect=never)),
             silence_deadline_seconds=0.05,
             ceiling_seconds=5.0,
             request=_REQUEST,
             gate=provider_work_gate(),
         )
-    response = await complete_with_silence_deadline(
+    response = await _complete_at_silence(
         SimpleNamespace(acompletion=AsyncMock(return_value=whole)),
         silence_deadline_seconds=1.0,
         ceiling_seconds=5.0,
@@ -1505,7 +1761,7 @@ async def test_every_request_is_admitted_right_before_it_is_sent() -> None:
             choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
         )
 
-    await complete_with_silence_deadline(
+    await _complete_at_silence(
         SimpleNamespace(acompletion=AsyncMock(side_effect=provider)),
         silence_deadline_seconds=1.0,
         ceiling_seconds=5.0,
@@ -1529,7 +1785,7 @@ async def test_a_refused_admission_sends_nothing_and_carries_the_turns_error() -
     client = SimpleNamespace(acompletion=AsyncMock())
 
     with pytest.raises(ProviderRequestNotAdmitted) as raised:
-        await complete_with_silence_deadline(
+        await _complete_at_silence(
             client,
             silence_deadline_seconds=1.0,
             ceiling_seconds=5.0,

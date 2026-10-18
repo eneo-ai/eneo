@@ -35,6 +35,7 @@ async def test_lazy_native_stream_setup_keeps_the_builder_silence_deadline():
         await complete_with_silence_deadline(
             SimpleNamespace(acompletion=AsyncMock(return_value=response)),
             silence_deadline_seconds=0.01,
+            first_output_deadline_seconds=0.01,
             ceiling_seconds=0.1,
             request={"model": "gpt-test", "messages": []},
         )
@@ -63,6 +64,7 @@ async def test_native_json_completion_aborts_a_whitespace_run(response_format):
         await complete_with_silence_deadline(
             client,
             silence_deadline_seconds=1,
+            first_output_deadline_seconds=1,
             ceiling_seconds=5,
             request={
                 "model": "openai/test",

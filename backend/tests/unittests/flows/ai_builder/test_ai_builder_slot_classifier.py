@@ -1759,6 +1759,7 @@ async def test_the_second_ask_gets_only_the_remaining_call_ceiling(
     expected_ceilings: list[float],
 ) -> None:
     ceilings: list[float] = []
+    first_outputs: list[float] = []
 
     def timing(elapsed_ms: int) -> ProviderCallTiming:
         return ProviderCallTiming(
@@ -1769,11 +1770,13 @@ async def test_the_second_ask_gets_only_the_remaining_call_ceiling(
         _client: object,
         *,
         ceiling_seconds: float,
+        first_output_deadline_seconds: float,
         observe_timing: Any,
         retry_without_refused_control: Any,
         **_kwargs: object,
     ) -> MagicMock:
         ceilings.append(ceiling_seconds)
+        first_outputs.append(first_output_deadline_seconds)
         *refused, last = first_ask_elapsed_ms
         for elapsed_ms in refused:
             assert retry_without_refused_control(
@@ -1786,7 +1789,14 @@ async def test_the_second_ask_gets_only_the_remaining_call_ceiling(
 
     attempt = await classify_slots(
         litellm_client=AsyncMock(),
-        completion_model_route=_route(),
+        # A route that reasons and is sent no effort may think, so each ask
+        # waits for its first output as long as its ceiling allows.
+        completion_model_route=_reasoning_route(
+            monkeypatch,
+            turn_effort=None,
+            offered=["none", "low"],
+            confirmed_levels=("low",),
+        ),
         classification_input=_classification_input(f"Summarize {uuid4()}"),
         allowed_slot_values={},
         tenant_id=uuid4(),
@@ -1801,6 +1811,9 @@ async def test_the_second_ask_gets_only_the_remaining_call_ceiling(
 
     assert attempt.outcome == "output_limit_exceeded"
     assert ceilings == pytest.approx(expected_ceilings)
+    # Mutant: the re-ask passes the budget's full first-output wait (1000 s)
+    # although the seam validates it against the seconds the first ask left.
+    assert first_outputs == pytest.approx(expected_ceilings)
 
 
 @pytest.mark.asyncio
@@ -5704,6 +5717,61 @@ async def test_classification_never_reasons_more_than_the_turn(
     )
 
     assert litellm_client.acompletion.await_args.kwargs.get("reasoning_effort") == sent
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("turn_effort", "route_reasons", "first_output_wait"),
+    # The turn's own effort is sent (setting "turn") so that the sent level is
+    # known.
+    [
+        # Mutant: the call site ignores the effort it actually sends.
+        ("none", True, 100.0),
+        # Mutant: the call site ignores that the route reasons (no effort sent
+        # leaves the provider's default).
+        (None, True, 1000.0),
+        (None, False, 100.0),
+    ],
+)
+async def test_classification_first_output_wait_follows_the_effort_sent(
+    monkeypatch: pytest.MonkeyPatch,
+    turn_effort: str | None,
+    route_reasons: bool,
+    first_output_wait: float,
+) -> None:
+    provider = AsyncMock(
+        return_value=_make_response(json.dumps(_VALID_CLASSIFICATION_RESPONSE))
+    )
+    monkeypatch.setattr(classifier, "complete_with_silence_deadline", provider)
+
+    route = _reasoning_route(
+        monkeypatch,
+        turn_effort=turn_effort,
+        offered=["none", "low", "high"],
+        confirmed_levels=("none", "low", "high"),
+    )
+    if not route_reasons:
+        route = replace(route, supported_model_kwargs=SupportedModelKwargs())
+
+    await classify_slots(
+        litellm_client=AsyncMock(),
+        completion_model_route=route,
+        classification_input=_classification_input(f"Summarize {uuid4()}"),
+        allowed_slot_values={"terminal_output": {"structured_json"}},
+        tenant_id=uuid4(),
+        budget_policy=AIBuilderBudgetPolicy(
+            conversation_safety_buffer_tokens=0,
+            minimum_conversation_budget_tokens=0,
+            classification_reasoning_effort="turn",
+            classification_timeout_seconds=100.0,
+            classification_ceiling_seconds=1000.0,
+            provider_call_ceiling_seconds=1000.0,
+        ),
+    )
+
+    assert (
+        provider.await_args.kwargs["first_output_deadline_seconds"] == first_output_wait
+    )
 
 
 def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:

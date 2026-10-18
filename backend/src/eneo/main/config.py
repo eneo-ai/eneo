@@ -256,7 +256,8 @@ _SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = _DEVELOPMENT_ENVIRONMENTS | {"test"}
 FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS = 24 * 60 * 60
 AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT = 0.5
 # The whole of one AI Builder provider call, whatever it keeps producing; the
-# silence deadline is what detects a dead call, this only bounds a runaway one.
+# silence deadline detects a stalled stream, this bounds a runaway one and the
+# wait of a call that may think for its first output.
 # Independent of the send-lock lease, which the turn renews while it works.
 AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT = 1800.0
 # Which reasoning effort the slot classification call sends: the lowest level
@@ -487,13 +488,15 @@ class Settings(BaseSettings):
     ai_builder_minimum_conversation_budget_tokens: int = 4_000
     ai_builder_answer_reserve_share: float = AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT
     # Provider-call deadlines bound *silence*: the longest wait for the
-    # provider's next yielded chunk (the first one included), not the whole
-    # answer, so a model that keeps yielding is not cut off by this deadline
-    # while a dead connection is. Reasoning models are silent for minutes on
-    # large prompts before their first token. The whole call is bounded by
-    # AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS, policy of its own. Unset
-    # classification follows the proposal deadline; a value preserves an
-    # explicit override.
+    # provider's next yielded chunk once the model has produced output, not
+    # the whole answer, so a model that keeps yielding is not cut off by this
+    # deadline while a stalled stream is. A model that does not stream its
+    # reasoning is silent while it thinks, so before its first output a call
+    # that may think (it sends any effort but "none", or no effort on a route
+    # that takes one) waits up to the whole-call ceiling instead. The whole
+    # call is bounded by AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS, policy of
+    # its own. Unset classification follows the proposal deadline; a value
+    # preserves an explicit override.
     ai_builder_classification_timeout_seconds: float | None = None
     ai_builder_proposal_timeout_seconds: float = 300.0
     ai_builder_provider_call_ceiling_seconds: float = (
