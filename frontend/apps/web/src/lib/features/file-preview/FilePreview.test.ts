@@ -428,3 +428,32 @@ it("a save settles a question about discarding edits that was still open", async
   expect(preview.pendingDiscard).toBeNull();
   expect(preview.shown).toBe(true);
 });
+
+it("shows the document being written again when the reader asks, after closing it", () => {
+  const preview = panel();
+  preview.besideConversation = true;
+  preview.write(draft);
+  expect(preview.draft?.callId).toBe("one");
+  preview.close();
+  preview.write({ ...draft, text: "More" });
+  expect(preview.shown).toBe(false);
+
+  preview.showDraft({ ...draft, text: "More" });
+
+  expect(preview.draft?.text).toBe("More");
+  // The rest of the document follows into the panel again.
+  preview.write({ ...draft, text: "More still" });
+  expect(preview.draft?.text).toBe("More still");
+});
+
+it("shows the document being written on a narrow screen when the reader asks", () => {
+  const preview = panel();
+  preview.besideConversation = false;
+  preview.write(draft);
+  expect(preview.shown).toBe(false);
+
+  preview.showDraft(draft);
+
+  expect(preview.shown).toBe(true);
+  expect(preview.draft?.callId).toBe("one");
+});

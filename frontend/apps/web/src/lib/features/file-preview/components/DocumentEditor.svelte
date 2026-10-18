@@ -309,7 +309,9 @@
     text-underline-offset: 0.15em;
   }
 
+  /* Not part of the text: a selection over it must not seem to take it. */
   .document-editor :global(.change-removed) {
+    user-select: none;
     margin-right: 0.25em;
     background-color: color-mix(in oklab, var(--negative-default) 22%, transparent);
     border-radius: 0.15em;

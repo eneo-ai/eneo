@@ -3952,6 +3952,7 @@
   "file_preview_discard_edits": "Discard changes",
   "file_preview_newer_version_while_editing": "A newer version exists. Save or discard your changes to show it.",
   "tool_document_writing": "Writing {name}",
+  "tool_step_show_draft": "Show {name} while it is being written",
   "tool_document_created": "Created {name}",
   "tool_document_updated": "Updated {name}",
   "tool_document_updating": "Updating {name}",

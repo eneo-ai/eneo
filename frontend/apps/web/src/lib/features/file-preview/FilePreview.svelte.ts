@@ -376,6 +376,29 @@ export class FilePreview {
       this.openedByItself = true;
       this.cover?.leave();
     }
+    this.#takeDraft(draft);
+  }
+
+  /**
+   * Shows the document being written because the reader asked for it: after
+   * closing the panel on it, or on a narrow screen, where it does not open
+   * by itself. A loaded document gives way; unsaved edits ask first.
+   */
+  showDraft(draft: PreviewDraft) {
+    if (this.#finishedDrafts.has(draft.callId)) return;
+    this.#guarded(() => {
+      if (this.#leftDraft === draft.callId) this.#leftDraft = null;
+      this.openedByItself = false;
+      this.cover?.leave();
+      this.#abort?.abort();
+      this.#clearReplacement();
+      this.file = null;
+      this.content = null;
+      this.#takeDraft(draft);
+    });
+  }
+
+  #takeDraft(draft: PreviewDraft) {
     if (this.draft?.callId !== draft.callId) {
       this.#abort?.abort();
       this.#clearReplacement();
