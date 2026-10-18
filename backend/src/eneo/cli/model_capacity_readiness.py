@@ -142,7 +142,7 @@ async def report_tenant(source: ReadinessSource, owner: TenantInDB) -> TenantRea
     records: dict[UUID, ModelReadiness] = {}
     seen: set[tuple[UUID, UseKind, UUID]] = set()
     safety = resolve_ai_builder_budget_policy(
-        owner.flow_settings
+        owner.flow_settings, check_timing_order=False
     ).conversation_safety_buffer_tokens
     active = await source.active_provider_ids(owner)
     async for space in source.builder_spaces(owner):

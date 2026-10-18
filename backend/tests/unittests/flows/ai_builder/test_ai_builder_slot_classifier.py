@@ -1805,7 +1805,7 @@ async def test_the_second_ask_gets_only_the_remaining_call_ceiling(
             minimum_conversation_budget_tokens=0,
             classification_timeout_seconds=100.0,
             classification_ceiling_seconds=1000.0,
-            provider_call_ceiling_seconds=1000.0,
+            call_ceiling_seconds=1000.0,
         ),
     )
 
@@ -5765,7 +5765,7 @@ async def test_classification_first_output_wait_follows_the_effort_sent(
             classification_reasoning_effort="turn",
             classification_timeout_seconds=100.0,
             classification_ceiling_seconds=1000.0,
-            provider_call_ceiling_seconds=1000.0,
+            call_ceiling_seconds=1000.0,
         ),
     )
 

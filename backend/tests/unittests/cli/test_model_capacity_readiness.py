@@ -571,3 +571,18 @@ async def test_structural_usability_uses_tenant_safety_and_runtime_zero():
     small.max_input_tokens = 12
     report = await report_tenant(repository, owner)
     assert report["summary"]["usable_models"] == 1
+
+
+# Mutant: the report resolves the policy with the deadline check on, so one
+# tenant whose deadlines conflict aborts a report that reads only the buffer.
+@pytest.mark.asyncio
+async def test_a_conflicting_deadline_pair_does_not_stop_the_report():
+    from eneo.cli.model_capacity_readiness import report_tenant
+
+    owner = tenant()
+    owner.flow_settings = {"ai_builder": {"call_ceiling_seconds": 1}}
+    repository = Repository([owner], [space(owner, [model(owner)])])
+
+    result = await report_tenant(repository, owner)
+
+    assert len(result["models"]) == 1

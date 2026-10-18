@@ -2156,8 +2156,10 @@ async def get_session_models(
     # model and the turn silently runs another.
     floor = max(conversation_evidence_floor(session.conversation), evidence_level)
     tenant = await container.tenant_repo().get(container.user().tenant_id)
+    # The model list uses token capacity only, so a deadline conflict is no
+    # reason to refuse it; the turn that would use the deadlines refuses.
     budget_policy = resolve_ai_builder_budget_policy(
-        tenant.flow_settings if tenant else None
+        tenant.flow_settings if tenant else None, check_timing_order=False
     )
     active_provider_ids = await _active_provider_ids(container)
     models = eligible_planner_models(

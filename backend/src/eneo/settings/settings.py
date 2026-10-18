@@ -646,6 +646,17 @@ class AIBuilderBudgetSettingsPublic(BaseModel):
     # Evidence share of a review-backed proposal prompt: the system bound or
     # a tenant's lower value.
     review_investigation_evidence_max_tokens: int
+    # The longest wait for the provider's next chunk once it has started
+    # answering. The tenant's own value in whole seconds, None while the
+    # deployment default applies. A call that sends a reasoning effort above
+    # minimal may think before its first chunk and is bounded by the call
+    # ceiling there.
+    silence_timeout_seconds: int | None
+    silence_timeout_seconds_default: float
+    # The longest a whole provider call may take, however much it keeps
+    # producing. Same override convention as the silence timeout.
+    call_ceiling_seconds: int | None
+    call_ceiling_seconds_default: float
     max_attachments: int
     max_message_chars: int
     max_template_inspection_uncompressed_bytes: int
@@ -659,6 +670,16 @@ class AIBuilderBudgetSettingsPublic(BaseModel):
     max_template_uncompressed_bytes_per_file_hard_limit: int
     max_planning_state_payload_bytes_hard_limit: int
     budget_token_hard_limit: int
+
+
+AI_BUILDER_TIMING_ORDER_DESCRIPTION = (
+    "A change is refused with a 400 naming both values when it would break "
+    "the ordering: the silence timeout, and any classification silence timeout "
+    "the deployment sets, may not exceed the call ceiling; a classification "
+    "call ceiling the deployment sets must lie between the classification "
+    "silence timeout (the silence timeout unless the deployment sets one) and "
+    "the call ceiling."
+)
 
 
 class AIBuilderBudgetSettingsUpdate(BaseModel):
@@ -714,6 +735,24 @@ class AIBuilderBudgetSettingsUpdate(BaseModel):
             "conservative system bound in "
             "review_investigation_evidence_ceiling_tokens. Null, or the bound "
             "itself, removes the tenant override so the tenant follows the bound."
+        ),
+    )
+    silence_timeout_seconds: StrictInt | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Seconds the Builder waits for the provider's next chunk once it has "
+            "started answering. Send null to restore the deployment default. "
+            + AI_BUILDER_TIMING_ORDER_DESCRIPTION
+        ),
+    )
+    call_ceiling_seconds: StrictInt | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Seconds one whole provider call may take, thinking included. Send "
+            "null to restore the deployment default. "
+            + AI_BUILDER_TIMING_ORDER_DESCRIPTION
         ),
     )
 

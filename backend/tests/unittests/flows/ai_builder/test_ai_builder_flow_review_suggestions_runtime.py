@@ -327,7 +327,7 @@ async def test_review_enforces_its_deadline_without_repeating_provider_work():
                 budget_policy=AIBuilderBudgetPolicy(
                     conversation_safety_buffer_tokens=0,
                     minimum_conversation_budget_tokens=0,
-                    proposal_timeout_seconds=0.01,
+                    silence_timeout_seconds=0.01,
                 ),
             )
 

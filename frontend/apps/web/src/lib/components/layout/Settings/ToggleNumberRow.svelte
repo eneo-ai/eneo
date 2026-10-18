@@ -29,7 +29,8 @@
     unit?: string;
     /** Status line shown when the switch is off, stating the consequence. */
     offStatus: string;
-    hint?: string;
+    // One fact per line, as on NumberRow: a sentence never breaks across two facts.
+    hint?: string | string[];
     info?: string;
   } = $props();
 
@@ -89,7 +90,9 @@
           {/if}
         </InputGroup.Root>
         {#if hint}
-          <p id={hintId} class="text-secondary text-xs">{hint}</p>
+          <p id={hintId} class="text-secondary text-xs">
+            {#each [hint].flat() as line (line)}<span class="block">{line}</span>{/each}
+          </p>
         {/if}
         {#if field.error}
           <Field.Error id={errorId} class="text-xs">{field.error}</Field.Error>

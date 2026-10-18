@@ -11914,6 +11914,10 @@ export interface components {
     AIBuilderBudgetSettingsPublic: {
       /** Budget Token Hard Limit */
       budget_token_hard_limit: number;
+      /** Call Ceiling Seconds */
+      call_ceiling_seconds: number | null;
+      /** Call Ceiling Seconds Default */
+      call_ceiling_seconds_default: number;
       /** Conversation Safety Buffer Tokens */
       conversation_safety_buffer_tokens: number;
       /** Max Attachments */
@@ -11946,9 +11950,18 @@ export interface components {
       review_investigation_evidence_ceiling_tokens: number;
       /** Review Investigation Evidence Max Tokens */
       review_investigation_evidence_max_tokens: number;
+      /** Silence Timeout Seconds */
+      silence_timeout_seconds: number | null;
+      /** Silence Timeout Seconds Default */
+      silence_timeout_seconds_default: number;
     };
     /** AIBuilderBudgetSettingsUpdate */
     AIBuilderBudgetSettingsUpdate: {
+      /**
+       * Call Ceiling Seconds
+       * @description Seconds one whole provider call may take, thinking included. Send null to restore the deployment default. A change is refused with a 400 naming both values when it would break the ordering: the silence timeout, and any classification silence timeout the deployment sets, may not exceed the call ceiling; a classification call ceiling the deployment sets must lie between the classification silence timeout (the silence timeout unless the deployment sets one) and the call ceiling.
+       */
+      call_ceiling_seconds?: number | null;
       /** Conversation Safety Buffer Tokens */
       conversation_safety_buffer_tokens?: number | null;
       /** Max Attachments */
@@ -11971,6 +11984,11 @@ export interface components {
        * @description Tokens of review evidence (facts, scopes, run and step metadata, excerpts) a review-backed proposal prompt may carry, at most the conservative system bound in review_investigation_evidence_ceiling_tokens. Null, or the bound itself, removes the tenant override so the tenant follows the bound.
        */
       review_investigation_evidence_max_tokens?: number | null;
+      /**
+       * Silence Timeout Seconds
+       * @description Seconds the Builder waits for the provider's next chunk once it has started answering. Send null to restore the deployment default. A change is refused with a 400 naming both values when it would break the ordering: the silence timeout, and any classification silence timeout the deployment sets, may not exceed the call ceiling; a classification call ceiling the deployment sets must lie between the classification silence timeout (the silence timeout unless the deployment sets one) and the call ceiling.
+       */
+      silence_timeout_seconds?: number | null;
     };
     /**
      * AIBuilderClientErrorFirstAction
