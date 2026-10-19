@@ -370,8 +370,7 @@
                           >
                           <span class="min-w-0 break-all">
                             <span class="text-primary">{detail.file}</span>
-                            <span class="text-secondary">– {describeSkipReason(detail)}</span
-                            >
+                            <span class="text-secondary">– {describeSkipReason(detail)}</span>
                           </span>
                         </li>
                       {/each}

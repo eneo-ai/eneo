@@ -1,6 +1,8 @@
 <script lang="ts">
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { getJobManager } from "$lib/features/jobs/JobManager";
+  import { trackSyncs } from "$lib/features/integrations/pendingSyncs";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
@@ -21,11 +23,22 @@
     items?: IntegrationKnowledge[];
     canEdit: boolean;
     canDelete: boolean;
+    /** A sync of one of the items is queued or running. */
+    syncActive?: boolean;
   }
 
-  let { wrapperId, wrapperName, itemCount, items = [], canEdit, canDelete }: Props = $props();
+  let {
+    wrapperId,
+    wrapperName,
+    itemCount,
+    items = [],
+    canEdit,
+    canDelete,
+    syncActive = false
+  }: Props = $props();
 
   const eneo = getEneo();
+  const { addJob, startFastUpdatePolling } = getJobManager();
   const {
     refreshCurrentSpace,
     state: { currentSpace }
@@ -51,6 +64,13 @@
         eneo.integrations.knowledge.triggerFullSync({ knowledge, space: $currentSpace })
       )
     );
+    const queued = resyncableItems.flatMap((item, index) => {
+      const result = results[index];
+      return result.status === "fulfilled" ? [{ item, job: result.value }] : [];
+    });
+    for (const { job } of queued) addJob(job);
+    trackSyncs(queued.map(({ item, job }) => ({ jobId: job.id, knowledgeId: item.id })));
+    if (queued.length > 0) void startFastUpdatePolling();
     // Awaited so the dialog closes on statuses that already show the queued syncs.
     await refreshCurrentSpace();
     const failedNames = resyncableItems
@@ -103,8 +123,10 @@
         </DropdownMenu.Item>
       {/if}
       {#if canResync}
-        <DropdownMenu.Item onSelect={() => (showResyncDialog = true)}>
-          <IconRefresh size="sm" />{m.resync_all_wrapper()}
+        <DropdownMenu.Item disabled={syncActive} onSelect={() => (showResyncDialog = true)}>
+          <IconRefresh size="sm" />{syncActive
+            ? m.integration_sync_already_running()
+            : m.resync_all_wrapper()}
         </DropdownMenu.Item>
       {/if}
       {#if canDelete}

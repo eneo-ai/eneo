@@ -9,16 +9,21 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import NameDialog from "$lib/components/NameDialog.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { getJobManager } from "$lib/features/jobs/JobManager";
+  import { trackSyncs } from "$lib/features/integrations/pendingSyncs";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
 
   interface Props {
     knowledgeItem: IntegrationKnowledge;
+    /** A sync of the item is queued or running: starting another would only queue a second. */
+    syncActive?: boolean;
   }
 
-  let { knowledgeItem }: Props = $props();
+  let { knowledgeItem, syncActive = false }: Props = $props();
 
   const eneo = getEneo();
+  const { addJob, startFastUpdatePolling } = getJobManager();
   const {
     refreshCurrentSpace,
     state: { currentSpace }
@@ -42,10 +47,14 @@
   }
 
   async function triggerFullSync() {
-    await eneo.integrations.knowledge.triggerFullSync({
+    const job = await eneo.integrations.knowledge.triggerFullSync({
       knowledge: knowledgeItem,
       space: $currentSpace
     });
+    // The item reads as queued until the worker reports on it or the job ends.
+    addJob(job);
+    trackSyncs([{ jobId: job.id, knowledgeId: knowledgeItem.id }]);
+    void startFastUpdatePolling();
     refreshCurrentSpace();
   }
 
@@ -69,8 +78,10 @@
       </DropdownMenu.Item>
     {/if}
     {#if knowledgeItem.integration_type === "sharepoint" && knowledgeItem.permissions?.includes("edit")}
-      <DropdownMenu.Item onSelect={() => (showSyncDialog = true)}>
-        <IconRefresh size="sm" />{m.trigger_full_sync()}
+      <DropdownMenu.Item disabled={syncActive} onSelect={() => (showSyncDialog = true)}>
+        <IconRefresh size="sm" />{syncActive
+          ? m.integration_sync_already_running()
+          : m.trigger_full_sync()}
       </DropdownMenu.Item>
     {/if}
     {#if knowledgeItem.permissions?.includes("delete")}

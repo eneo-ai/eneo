@@ -50,7 +50,7 @@ vi.mock("$lib/core/AppContext", () => ({
 }));
 vi.mock("$lib/features/jobs/JobManager", () => ({
   jobCompletionEvents: writable(null),
-  getJobManager: () => ({ startFastUpdatePolling: vi.fn() })
+  getJobManager: () => ({ addJob: vi.fn(), startFastUpdatePolling: vi.fn() })
 }));
 
 const CREDENTIALS =
@@ -271,6 +271,44 @@ describe("source page", () => {
       .element(page.getByText(m.integration_progress_readable({ count: 7 })))
       .toBeVisible();
     await expect.element(page.getByText("8/20")).toBeVisible();
+  });
+
+  it("keeps keyboard focus on the folder links it navigates by", async () => {
+    showWrapper();
+    await expect
+      .element(page.getByRole("navigation", { name: m.integration_source_folders() }))
+      .toBeVisible();
+
+    // SvelteKit moves focus to the body after a navigation unless the link keeps it.
+    const folderLinks = [...document.querySelectorAll("a[data-sveltekit-replacestate]")];
+    // The nav's "all folders" and two folders, and the overview's two folders.
+    expect(folderLinks).toHaveLength(5);
+    for (const link of folderLinks) {
+      expect(link.hasAttribute("data-sveltekit-keepfocus"), link.textContent ?? "").toBe(true);
+    }
+  });
+
+  it("speaks a folder's sync starting and finishing in a polite live region", async () => {
+    showWrapper();
+    await expect
+      .element(page.getByRole("navigation", { name: m.integration_source_folders() }))
+      .toBeVisible();
+    const live = () =>
+      document.querySelector('[role="status"][aria-live="polite"]')?.textContent?.trim();
+    expect(live()).toBe("");
+
+    // A changed space makes the page look for progress at once.
+    api.getSyncProgress.mockResolvedValue({ items: [progressFor("ik-a")] });
+    currentSpace.set({ ...space });
+    await expect.poll(live).toBe(m.integration_announce_sync_started({ name: "Kommunstyrelsen" }));
+
+    api.getSyncProgress.mockResolvedValue({ items: [] });
+    currentSpace.set({ ...space });
+    await expect
+      .poll(live)
+      .toBe(
+        m.integration_announce_sync_finished({ name: "Kommunstyrelsen", indexed: 7, skipped: 1 })
+      );
   });
 
   it("lists the problems by cause on the problems tab", async () => {

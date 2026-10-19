@@ -12,7 +12,9 @@ import type {
 
 const api = vi.hoisted(() => ({
   listDocuments: vi.fn(),
-  getInfoBlob: vi.fn()
+  getInfoBlob: vi.fn(),
+  addJob: vi.fn(),
+  startFastUpdatePolling: vi.fn()
 }));
 
 vi.mock("$lib/core/Eneo", () => ({
@@ -31,6 +33,13 @@ vi.mock("$lib/features/spaces/SpacesManager", async () => {
     })
   };
 });
+
+vi.mock("$lib/features/jobs/JobManager", () => ({
+  getJobManager: () => ({
+    addJob: api.addJob,
+    startFastUpdatePolling: api.startFastUpdatePolling
+  })
+}));
 
 import FolderDocuments from "./FolderDocuments.svelte";
 

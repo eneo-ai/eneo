@@ -22,6 +22,11 @@
         : m.integration_progress_syncing_of_total({ done: progress.done, total: progress.total })}
     </span>
     <SyncProgressBar {progress} label={m.integration_progress_label({ name: sourceName })} />
+    {#if progress.skipped > 0}
+      <span class="text-warning-stronger">
+        {m.integration_progress_skipped({ count: progress.skipped })}
+      </span>
+    {/if}
     {#if summary.failedItems.length > 0}
       <SourceStateBadge state="attention" class="w-fit" />
     {/if}
@@ -29,6 +34,9 @@
 {:else}
   <div class="flex flex-col items-start gap-1">
     <SourceStateBadge state={summary.state} />
+    {#if summary.state === "queued" && summary.failedItems.length > 0}
+      <SourceStateBadge state="attention" />
+    {/if}
     <!-- A source where only some folders wait reads as up to date by its badge alone. -->
     {#if summary.waitingItems > 0 && summary.state !== "never"}
       <span class="text-secondary text-xs">

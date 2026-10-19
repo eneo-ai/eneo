@@ -18,12 +18,18 @@
   import { safeExternalUrl } from "$lib/features/integrations/externalUrl";
   import { buildSourceProblems } from "$lib/features/integrations/sourceProblems";
   import {
+    isSyncActive,
     itemWatchState,
     sourceContentsLabel,
     sourceHref,
     summarizeSource,
     type IntegrationSource
   } from "$lib/features/integrations/sources";
+  import {
+    announceProblemCount,
+    announceSourceChange,
+    type SourceSnapshot
+  } from "$lib/features/integrations/syncAnnouncements";
   import { useSyncProgress } from "$lib/features/integrations/useSyncProgress.svelte";
   import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -65,7 +71,9 @@
   const tab = writable<string>();
 
   let progress = $derived(tracker.byId);
-  let summary = $derived(summarizeSource(source.items, progress));
+  let queued = $derived(tracker.queued);
+  let summary = $derived(summarizeSource(source.items, progress, queued));
+  let syncActive = $derived(isSyncActive(summary));
   let multiple = $derived(source.items.length > 1);
   let singleItem = $derived(multiple ? null : source.items[0]);
   let singleItemUrl = $derived(safeExternalUrl(singleItem?.url));
@@ -135,6 +143,37 @@
   let problems = $derived(skippedLoaded ? buildSourceProblems(source.items, skippedByItem) : null);
   // Before the skipped lists arrive, the failures alone already give the blocking causes.
   let problemCount = $derived((problems ?? buildSourceProblems(source.items, {})).causeCount);
+  // One polite region speaks the sync's course and a changed problem count; the
+  // count while syncing is throttled so a 2 s poll does not talk over the user.
+  let announcement = $state("");
+  let previousSnapshot: SourceSnapshot | null = null;
+  let progressAnnouncedAt = 0;
+  $effect(() => {
+    const next: SourceSnapshot = { state: summary.state, progress: summary.progress };
+    untrack(() => {
+      const now = Date.now();
+      const text = announceSourceChange(
+        source.name,
+        previousSnapshot,
+        next,
+        now - progressAnnouncedAt
+      );
+      previousSnapshot = next;
+      if (!text) return;
+      announcement = text;
+      if (next.progress) progressAnnouncedAt = now;
+    });
+  });
+  let previousProblemCount: number | null = null;
+  $effect(() => {
+    const next = problems ? problemCount : null;
+    untrack(() => {
+      const text = announceProblemCount(previousProblemCount, next);
+      if (next !== null) previousProblemCount = next;
+      if (text) announcement = text;
+    });
+  });
+
   // Counted over the current items: a removed folder's list stays in skippedByItem.
   let skippedTotal = $derived(
     skippedLoaded
@@ -242,15 +281,17 @@
             items={source.items}
             canEdit={permissions.canEdit}
             canDelete={permissions.canDelete}
+            {syncActive}
           />
         {/if}
       {:else if singleItem}
-        <IntegrationActions knowledgeItem={singleItem} />
+        <IntegrationActions knowledgeItem={singleItem} {syncActive} />
       {/if}
     </Page.Flex>
   </Page.Header>
 
   <Page.Main>
+    <p class="sr-only" role="status" aria-live="polite">{announcement}</p>
     <div class="flex flex-col gap-5 py-4 pr-4">
       <div class="text-secondary flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <IntegrationVendorIcon size="sm" type={source.integrationType} />
@@ -289,6 +330,14 @@
             {m.integration_source_show_problems()}
           </Button>
         </div>
+      {/if}
+
+      {#if summary.state === "queued" && !summary.progress}
+        <p
+          class="border-accent-default bg-accent-dimmer/40 text-accent-stronger rounded-lg border px-4 py-3 text-sm"
+        >
+          {m.integration_source_queued_notice()}
+        </p>
       {/if}
 
       {#if summary.progress}
@@ -348,7 +397,13 @@
         {#if multiple}
           <div class="flex flex-wrap items-start gap-6">
             <div class="max-w-72 min-w-0 flex-[1_1_14rem]">
-              <SourceFolderNav items={source.items} {progress} {selectedId} hrefFor={folderHref} />
+              <SourceFolderNav
+                items={source.items}
+                {progress}
+                {queued}
+                {selectedId}
+                hrefFor={folderHref}
+              />
             </div>
             <div class="min-w-0 flex-[999_1_32rem]">
               {#if selectedItem}
@@ -357,6 +412,7 @@
                     knowledge={selectedItem}
                     space={$currentSpace}
                     {progress}
+                    {queued}
                     skipped={skippedLoaded ? (skippedByItem[selectedItem.id] ?? null) : null}
                     problemsHref={problemsHref()}
                   />
@@ -365,6 +421,7 @@
                 <SourceFolderOverview
                   items={source.items}
                   {progress}
+                  {queued}
                   sourceName={source.name}
                   hrefFor={folderHref}
                 />
@@ -377,6 +434,7 @@
               knowledge={singleItem}
               space={$currentSpace}
               {progress}
+              {queued}
               skipped={skippedLoaded ? (skippedByItem[singleItem.id] ?? null) : null}
               problemsHref={problemsHref()}
               showHeader={source.kind === "wrapper"}
