@@ -317,16 +317,18 @@ export function FolderDocuments({
           total: data.total_count
         })
       : null;
-  // What a search led to, once it is in. Astryx's Pagination announces a page
-  // turn itself, and the first load is not a result.
+  // What a search or sort the reader started led to, once it is in. Astryx's
+  // Pagination announces a page turn itself; the first load and a reload after
+  // a sync are not results.
   const resultText = rangeText ?? (q !== "" ? emptyText : null);
   const settled = data !== undefined && !documents.isFetching && !pastTheEnd;
-  const announcedSearch = useRef(q);
+  const asked = `${q}|${active?.sortKey ?? ""}|${active?.direction ?? ""}`;
+  const announcedView = useRef(asked);
   useEffect(() => {
-    if (!settled || announcedSearch.current === q) return;
-    announcedSearch.current = q;
+    if (!settled || announcedView.current === asked) return;
+    announcedView.current = asked;
     if (resultText !== null) announce(resultText);
-  }, [announce, q, resultText, settled]);
+  }, [announce, asked, resultText, settled]);
 
   const columns: TableColumn<DocumentRow>[] = [
     {

@@ -1010,6 +1010,38 @@ describe("WrapperDetail documents", () => {
     expect(announcements.said).toEqual(["Sida 2 av 2"]);
   });
 
+  it("announces what a sort shows once it is in, and not a reload after a sync", async () => {
+    state.documents.i1 = documentPages(() => 60);
+    const { queryClient } = show(
+      [mall, protokoll],
+      "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i1"
+    );
+    await screen.findByRole("button", { name: /Dokument 1\.docx/ });
+    const announcements = recordAnnouncements();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sortera efter Storlek" }));
+    await waitFor(() => expect(announcements.said).toEqual(["Visar 1–50 av 60"]));
+
+    // A sync wrote a new revision: the rows are replaced without a word.
+    state.space = makeSpace({
+      integrations: [mall, protokoll].map((item) =>
+        makeIntegration({
+          ...folder,
+          ...item,
+          metadata: { ...item.metadata, last_synced_at: "2026-10-19T08:05:00Z" }
+        })
+      )
+    });
+    await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
+    await waitFor(() =>
+      expect(state.requests.filter((request) => request.startsWith("documents i1"))).toHaveLength(3)
+    );
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    announcements.stop();
+    expect(announcements.said).toEqual(["Visar 1–50 av 60"]);
+    expect(screen.queryByText("Läser in dokument...")).toBeNull();
+  });
+
   it("announces what a search finds once it is in", async () => {
     state.documents.i1 = documentPages(() => 60);
     show([mall, protokoll], "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i1");
