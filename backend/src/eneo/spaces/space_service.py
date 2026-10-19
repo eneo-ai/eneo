@@ -1,6 +1,6 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Union, cast
+from typing import TYPE_CHECKING, TypeVar, Union, cast
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -43,7 +43,7 @@ from eneo.spaces.space import SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE, Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_repo import SpaceRepository
-from eneo.spaces.space_update import SpaceUpdate
+from eneo.spaces.space_update import LinkEdit, SpaceUpdate
 from eneo.transcription_models.application.transcription_model_crud_service import (
     TranscriptionModelCRUDService,
 )
@@ -86,6 +86,22 @@ def _empty_mcp_server_list() -> list["MCPServer"]:
 
 def _empty_connection_list() -> list["TranscriptionServiceConnection"]:
     return []
+
+
+Item = TypeVar("Item")
+
+
+def _link_edit(
+    selected: list[Item] | None, shown: Iterable[UUID]
+) -> LinkEdit[Item] | None:
+    """The edit of one link list, scoped to the ids the space showed.
+
+    ``shown`` is the space's list as loaded for this request: the space factory
+    and the space repository own which stored entries it hides, so this reuses
+    their rule instead of restating it."""
+    if selected is None:
+        return None
+    return LinkEdit(tuple(selected), frozenset(shown))
 
 
 def _require_space_read(actor: "SpaceActor") -> None:
@@ -375,6 +391,12 @@ class SpaceService:
         linked_completion = {m.id: m for m in space.linked_completion_models}
         linked_embedding = {m.id: m for m in space.linked_embedding_models}
         linked_transcription = {m.id: m for m in space.linked_transcription_models}
+        # Read before ``space.update``, which replaces ``space.mcp_servers``
+        # with the selection.
+        shown_mcp_servers = [server.id for server in space.mcp_servers]
+        shown_mcp_tools = [
+            tool.id for server in space.mcp_servers for tool in server.tools
+        ]
 
         completion_models: list["CompletionModel"] | None = None
         if completion_model_ids is not None:
@@ -576,13 +598,15 @@ class SpaceService:
                 ),
                 data_retention_days=data_retention_days,
                 icon_id=icon_id,
-                completion_model_ids=completion_model_ids,
-                embedding_model_ids=embedding_model_ids,
-                transcription_model_ids=transcription_model_ids,
+                completion_models=_link_edit(completion_model_ids, linked_completion),
+                embedding_models=_link_edit(embedding_model_ids, linked_embedding),
+                transcription_models=_link_edit(
+                    transcription_model_ids, linked_transcription
+                ),
                 transcription_service_ids=transcription_service_ids,
-                mcp_server_ids=mcp_server_ids,
+                mcp_servers=_link_edit(mcp_server_ids, shown_mcp_servers),
                 enabled_capabilities=enabled_capabilities,
-                mcp_tools=mcp_tool_settings,
+                mcp_tools=_link_edit(mcp_tool_settings, shown_mcp_tools),
             ),
         )
         return await self.get_space(id)

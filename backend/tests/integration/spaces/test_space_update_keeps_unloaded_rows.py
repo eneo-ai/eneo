@@ -43,7 +43,7 @@ from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites
 from eneo.group_chat.domain.entities.group_chat import GroupChatAssistantData
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
-from eneo.spaces.space_update import SpaceUpdate
+from eneo.spaces.space_update import LinkEdit, SpaceUpdate
 from eneo.sysadmin.stored_model_configuration import (
     ConfigurationRepair,
     StoredModelConfigurationRepository,
@@ -160,7 +160,10 @@ async def test_invalid_relationship_rolls_back_settings_in_same_transaction(
         async with db_container() as container:
             await container.space_repo().update_settings(
                 ids["space_id"],
-                SpaceUpdate(name="Must roll back", mcp_tools=[(uuid4(), True)]),
+                SpaceUpdate(
+                    name="Must roll back",
+                    mcp_tools=LinkEdit(((uuid4(), True),), frozenset()),
+                ),
             )
     async with db_container() as container:
         name = await container.session().scalar(

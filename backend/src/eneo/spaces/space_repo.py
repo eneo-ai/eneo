@@ -116,7 +116,7 @@ from eneo.spaces.space_flow_delete_blockers import (
     space_has_active_legal_hold,
     space_has_flow_delete_blockers,
 )
-from eneo.spaces.space_update import SpaceUpdate
+from eneo.spaces.space_update import LinkEdit, SpaceUpdate
 from eneo.spaces.utils.space_utils import effective_space_ids_for
 from eneo.transcription_services.repository import (
     TranscriptionServiceConnectionRepository,
@@ -510,32 +510,35 @@ class SpaceRepository:
             await self.session.execute(
                 sa.update(Spaces).where(Spaces.id == space_id).values(**values)
             )
-        if change.completion_model_ids is not None:
+        if change.completion_models is not None:
             await replace_association_ids(
                 self.session,
                 SpacesCompletionModels,
                 SpacesCompletionModels.space_id,
                 space_id,
                 SpacesCompletionModels.completion_model_id,
-                change.completion_model_ids,
+                change.completion_models.selected,
+                within=change.completion_models.shown,
             )
-        if change.embedding_model_ids is not None:
+        if change.embedding_models is not None:
             await replace_association_ids(
                 self.session,
                 SpacesEmbeddingModels,
                 SpacesEmbeddingModels.space_id,
                 space_id,
                 SpacesEmbeddingModels.embedding_model_id,
-                change.embedding_model_ids,
+                change.embedding_models.selected,
+                within=change.embedding_models.shown,
             )
-        if change.transcription_model_ids is not None:
+        if change.transcription_models is not None:
             await replace_association_ids(
                 self.session,
                 SpacesTranscriptionModels,
                 SpacesTranscriptionModels.space_id,
                 space_id,
                 SpacesTranscriptionModels.transcription_model_id,
-                change.transcription_model_ids,
+                change.transcription_models.selected,
+                within=change.transcription_models.shown,
             )
         if change.transcription_service_ids is not None:
             await replace_association_ids(
@@ -546,14 +549,15 @@ class SpaceRepository:
                 SpacesTranscriptionServiceConnections.connection_id,
                 change.transcription_service_ids,
             )
-        if change.mcp_server_ids is not None:
+        if change.mcp_servers is not None:
             await replace_association_ids(
                 self.session,
                 SpacesMCPServers,
                 SpacesMCPServers.space_id,
                 space_id,
                 SpacesMCPServers.mcp_server_id,
-                change.mcp_server_ids,
+                change.mcp_servers.selected,
+                within=change.mcp_servers.shown,
             )
         if change.enabled_capabilities is not None:
             await replace_association_ids(
@@ -612,6 +616,7 @@ class SpaceRepository:
                     )
                 )
         if change.mcp_tools is not None:
+            switches = dict(change.mcp_tools.selected)
             selected_servers = sa.select(SpacesMCPServers.mcp_server_id).where(
                 SpacesMCPServers.space_id == space_id
             )
@@ -619,13 +624,11 @@ class SpaceRepository:
                 await self.session.scalars(
                     sa.select(MCPServerToolsTable.id).where(
                         MCPServerToolsTable.mcp_server_id.in_(selected_servers),
-                        MCPServerToolsTable.id.in_(
-                            [key for key, _ in change.mcp_tools]
-                        ),
+                        MCPServerToolsTable.id.in_(list(switches)),
                     )
                 )
             )
-            if {key for key, _ in change.mcp_tools} - valid:
+            if switches.keys() - valid:
                 raise BadRequestException(
                     "Tool is not assigned to the space's MCP servers"
                 )
@@ -636,7 +639,8 @@ class SpaceRepository:
                 space_id,
                 SpacesMCPServerTools.mcp_server_tool_id,
                 SpacesMCPServerTools.is_enabled,
-                dict(change.mcp_tools),
+                switches,
+                within=change.mcp_tools.shown,
             )
 
     async def get_stored_tool_settings(
@@ -1513,13 +1517,22 @@ class SpaceRepository:
         assert entry_in_db is not None
         # Creation seeds only Space-owned settings. Child resources have their
         # own create operations, so even initialization cannot reconcile them.
+        # A new space stores no links yet, so the edits are shown none.
         await self.update_settings(
             entry_in_db.id,
             SpaceUpdate(
-                completion_model_ids=[m.id for m in space.completion_models],
-                embedding_model_ids=[m.id for m in space.embedding_models],
-                transcription_model_ids=[m.id for m in space.transcription_models],
-                mcp_server_ids=[server.id for server in space.mcp_servers],
+                completion_models=LinkEdit(
+                    tuple(m.id for m in space.completion_models), frozenset()
+                ),
+                embedding_models=LinkEdit(
+                    tuple(m.id for m in space.embedding_models), frozenset()
+                ),
+                transcription_models=LinkEdit(
+                    tuple(m.id for m in space.transcription_models), frozenset()
+                ),
+                mcp_servers=LinkEdit(
+                    tuple(server.id for server in space.mcp_servers), frozenset()
+                ),
                 enabled_capabilities=space.enabled_capabilities,
             ),
         )

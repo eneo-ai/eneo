@@ -17,6 +17,7 @@ from eneo.security_classifications.domain.entities.security_classification impor
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_service import SpaceService
+from eneo.spaces.space_update import LinkEdit
 from tests.fixtures import TEST_USER
 
 
@@ -174,6 +175,42 @@ async def test_only_a_change_of_level_removes_the_links_below_it(
 
     (_, change), _ = service.repo.update_settings.await_args
     assert change.minimum_security_level == removes_below
+
+
+@pytest.mark.parametrize(
+    ("argument", "loaded", "field"),
+    [
+        ("embedding_model_ids", "linked_embedding_models", "embedding_models"),
+        (
+            "transcription_model_ids",
+            "linked_transcription_models",
+            "transcription_models",
+        ),
+    ],
+)
+async def test_a_link_list_edit_is_scoped_to_the_links_the_space_showed(
+    service: SpaceService, argument: str, loaded: str, field: str
+):
+    """Kills, per list: update_space scopes the edit to the usable models
+    only, to no links, or to another list's, instead of the ones the loaded
+    space shows. The completion and MCP server lists have integration
+    killers (test_explicit_removal_unlinks_the_model, test_space_mcp_audit)."""
+    shown_id = uuid4()
+    space = MagicMock()
+    for name in (
+        "linked_completion_models",
+        "linked_embedding_models",
+        "linked_transcription_models",
+        "mcp_servers",
+    ):
+        setattr(space, name, [MagicMock(id=uuid4())])
+    setattr(space, loaded, [MagicMock(id=shown_id)])
+    service.repo.one.return_value = space
+
+    await service.update_space(uuid4(), **{argument: []})
+
+    (_, change), _ = service.repo.update_settings.await_args
+    assert getattr(change, field) == LinkEdit((), frozenset({shown_id}))
 
 
 async def test_raise_unauthorized_if_user_can_not_delete(
