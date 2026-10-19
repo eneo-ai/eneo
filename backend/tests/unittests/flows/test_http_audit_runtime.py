@@ -15,6 +15,7 @@ from eneo.audit.domain.outcome import Outcome
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.http_audit import HttpAuditDeps, audit_http_outbound
 from eneo.users.user import UserInDB
+from tests.unittests.flows.async_test_support import until_task_reaches
 
 
 @dataclass
@@ -221,7 +222,7 @@ async def test_a_read_audit_whose_write_will_not_unwind_ends_within_its_limit(
             await unwound.wait()
 
     read = asyncio.create_task(http_audit.await_read_audit(write()))
-    await queueing.wait()
+    await until_task_reaches(queueing, read)
     if stopped:
         read.cancel()
 

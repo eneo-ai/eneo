@@ -21,6 +21,7 @@ from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 from eneo.settings.encryption_service import EncryptionService
+from tests.unittests.flows.async_test_support import until_task_reaches
 
 
 @dataclass
@@ -387,7 +388,7 @@ async def test_an_http_input_read_is_audited_once_however_it_ends(
         )
     )
     if ending == "cancelled":
-        await entered.wait()
+        await until_task_reaches(entered, read)
         read.cancel()
     with pytest.raises(BaseException):
         await read
@@ -455,7 +456,7 @@ async def test_an_http_input_read_waits_little_for_its_one_audit(
         )
     )
     if stop_while is not None:
-        await reached[stop_while].wait()
+        await until_task_reaches(reached[stop_while], read)
         read.cancel()
     if queue_answers:
         answered.set()

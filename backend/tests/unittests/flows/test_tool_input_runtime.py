@@ -80,6 +80,7 @@ from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
     MCPProxySessionFactory,
 )
 from tests.unit.mcp_test_server import one_tool_app, serve_test_app, tool_result
+from tests.unittests.flows.async_test_support import until_task_reaches
 from tests.unittests.flows.test_flow_executor_runtime import (
     _claimed_step_result,
     _empty_execution_state,
@@ -1756,7 +1757,7 @@ async def test_a_read_that_ends_without_a_typed_result_is_audited_once(
 
     read = asyncio.create_task(_read(executor, step, _running(user)))
     if isinstance(caller, _Hanging):
-        await caller.entered.wait()
+        await until_task_reaches(caller.entered, read)
         read.cancel()
     with pytest.raises(BaseException) as ended:
         await read
@@ -1811,7 +1812,7 @@ async def test_a_tool_read_releases_the_rows_and_waits_little_for_its_one_audit(
     executor.audit_service.log_async.side_effect = enqueue
     read = asyncio.create_task(_read(executor, _tool_step(facts), _running(user)))
     if ending == "stopped":
-        await queueing.wait()
+        await until_task_reaches(queueing, read)
         read.cancel()
     if queue_answers:
         answered.set()
