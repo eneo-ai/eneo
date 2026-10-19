@@ -40,7 +40,8 @@ const CATEGORY_BY_CODE: Record<SkipReasonCode, FileProblemCategory | null> = {
   missing_item_id: "transient",
   error: "transient",
   unsupported_type: "unsupported",
-  unchanged: null
+  unchanged: null,
+  set_aside: "transient"
 };
 
 const CATEGORY_ORDER: FileProblemCategory[] = [

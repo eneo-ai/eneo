@@ -1993,6 +1993,7 @@
   "skip_reason_scope_path_unavailable": "Den importerade mappens plats i SharePoint är okänd",
   "skip_reason_missing_item_id": "SharePoint gav filen inget id",
   "skip_reason_unchanged": "Redan indexerad och oförändrad",
+  "skip_reason_set_aside": "Lagd åt sidan efter {attempts} misslyckade försök och försöks igen senare: {detail}",
   "skip_reason_detail_database": "databasfel",
   "skip_reason_detail_cache": "cachefel",
   "skip_reason_detail_connection": "anslutningsfel",

@@ -16,6 +16,10 @@ const EXAMPLES: Record<SkipReasonCode, [SkipReason, string]> = {
   ],
   no_text_layer: [{ code: "no_text_layer", params: {} }, m.skip_reason_no_text_layer()],
   unchanged: [{ code: "unchanged", params: {} }, m.skip_reason_unchanged()],
+  set_aside: [
+    { code: "set_aside", params: { attempts: 3, detail: "HTTP 500" } },
+    m.skip_reason_set_aside({ attempts: 3, detail: m.skip_reason_detail_http({ status: 500 }) })
+  ],
   empty_content: [{ code: "empty_content", params: {} }, m.skip_reason_empty_content()],
   file_too_large: [
     { code: "file_too_large", params: { limit_mb: "50" } },

@@ -5071,6 +5071,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/spaces/{id}/knowledge/integrations/sync-details/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Get Integration Sync Details
+     * @description Read bounded sync history windows and latest skipped files for several imports.
+     */
+    post: operations["get_integration_sync_details_api_v1_spaces__id__knowledge_integrations_sync_details__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/": {
     parameters: {
       query?: never;
@@ -7866,16 +7886,12 @@ export interface paths {
     post: operations["configure_sharepoint_app_api_v1_admin_sharepoint_app_post"];
     /**
      * Permanently delete SharePoint app
-     * @description Permanently delete the tenant's SharePoint app configuration and all associated data. WARNING: This action CANNOT be undone. This will cascade delete:
-     *     - All user_integrations using this tenant app (both org and personal)
-     *     - All integration_knowledge (imported SharePoint content)
-     *     - All info_blobs and embeddings (document data and vectors)
-     *     - All sharepoint_subscriptions (webhooks)
-     *     - All oauth_tokens for personal SharePoint integrations
-     *     - All sync_logs
+     * @description Permanently delete the tenant's SharePoint app configuration and the organization-wide SharePoint connection that uses it (app or service account). WARNING: This action CANNOT be undone. In one request it deletes:
+     *     - the organization-wide connections of this app
+     *     - the SharePoint knowledge imported through them, with its documents, embeddings and sync history
+     *     - Eneo's records of their change-notification subscriptions
      *
-     *     Assistants linked to this knowledge will lose their connections.
-     *     Requires admin role.
+     *     Personal SharePoint connections and their imports are kept, but they sign in through this app and stop syncing until an app is configured again. Subscriptions registered at Microsoft are not removed there; they expire on their own. Assistants lose the deleted knowledge. Requires admin role.
      */
     delete: operations["delete_sharepoint_app_api_v1_admin_sharepoint_app_delete"];
     options?: never;
@@ -15801,6 +15817,8 @@ export interface components {
         | "listing_failed"
         | "scope_path_unavailable"
         | "missing_item_id"
+        | "unchanged"
+        | "set_aside"
         | "error";
       /**
        * Params
@@ -15838,6 +15856,32 @@ export interface components {
        * @description When the sync the list comes from finished or started
        */
       synced_at?: string | null;
+    };
+    /** IntegrationSyncDetails */
+    IntegrationSyncDetails: {
+      /**
+       * Integration Knowledge Id
+       * Format: uuid
+       */
+      integration_knowledge_id: string;
+      history: components["schemas"]["PaginatedSyncLogList"];
+      /** @description Latest skipped files on the first page; null on older history pages */
+      skipped: components["schemas"]["IntegrationSkippedDocuments"] | null;
+    };
+    /** IntegrationSyncDetailsList */
+    IntegrationSyncDetailsList: {
+      /** Items */
+      items: components["schemas"]["IntegrationSyncDetails"][];
+    };
+    /** IntegrationSyncDetailsRequest */
+    IntegrationSyncDetailsRequest: {
+      /** Items */
+      items: components["schemas"]["IntegrationSyncWindowRequest"][];
+      /**
+       * Limit
+       * @default 10
+       */
+      limit?: number;
     };
     /**
      * IntegrationSyncProgress
@@ -15948,6 +15992,8 @@ export interface components {
             | "listing_failed"
             | "scope_path_unavailable"
             | "missing_item_id"
+            | "unchanged"
+            | "set_aside"
             | "error"
           )
         | null;
@@ -15969,6 +16015,19 @@ export interface components {
     IntegrationSyncProgressList: {
       /** Items */
       items: components["schemas"]["IntegrationSyncProgress"][];
+    };
+    /** IntegrationSyncWindowRequest */
+    IntegrationSyncWindowRequest: {
+      /**
+       * Integration Knowledge Id
+       * Format: uuid
+       */
+      integration_knowledge_id: string;
+      /**
+       * Offset
+       * @default 0
+       */
+      offset?: number;
     };
     /**
      * IntegrationType
@@ -21780,6 +21839,8 @@ export interface components {
         | "listing_failed"
         | "scope_path_unavailable"
         | "missing_item_id"
+        | "unchanged"
+        | "set_aside"
         | "error";
       /** Params */
       params?: {
@@ -42966,7 +43027,7 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
-      /** @description Bad Request */
+      /** @description Bad request; `code` is `sharepoint_credentials_invalid` when Microsoft refuses the organization's SharePoint credentials, which an administrator must reconnect. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -43275,6 +43336,59 @@ export interface operations {
       };
     };
   };
+  get_integration_sync_details_api_v1_spaces__id__knowledge_integrations_sync_details__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IntegrationSyncDetailsRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IntegrationSyncDetailsList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch: {
     parameters: {
       query?: never;
@@ -43466,7 +43580,7 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
-      /** @description Bad Request */
+      /** @description Bad request; `code` is `sharepoint_credentials_invalid` when Microsoft refuses the organization's SharePoint credentials, which an administrator must reconnect. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -52404,7 +52518,7 @@ export interface operations {
           "application/json": components["schemas"]["TenantSharePointAppPublic"];
         };
       };
-      /** @description Invalid state or auth code */
+      /** @description Invalid state or auth code; `code` is `oauth_code_rejected` when Microsoft refuses the code */
       400: {
         headers: {
           [name: string]: unknown;
@@ -53363,7 +53477,7 @@ export interface operations {
           "application/json": components["schemas"]["UserIntegration"];
         };
       };
-      /** @description Bad Request */
+      /** @description Bad request; `code` is `oauth_code_rejected` when the identity provider refuses the code (expired, already used or issued for another redirect URI). The state is spent; start the sign-in again. */
       400: {
         headers: {
           [name: string]: unknown;

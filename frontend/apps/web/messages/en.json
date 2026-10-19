@@ -1960,6 +1960,7 @@
   "skip_reason_scope_path_unavailable": "The imported folder's place in SharePoint is unknown",
   "skip_reason_missing_item_id": "SharePoint gave the file no id",
   "skip_reason_unchanged": "Already indexed and unchanged",
+  "skip_reason_set_aside": "Set aside after {attempts} failed attempts and tried again later: {detail}",
   "skip_reason_detail_database": "database error",
   "skip_reason_detail_cache": "cache error",
   "skip_reason_detail_connection": "connection error",
