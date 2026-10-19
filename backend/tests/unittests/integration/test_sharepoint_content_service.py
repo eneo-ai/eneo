@@ -4078,7 +4078,7 @@ class TestDeltaFolderScopeOrdering:
         changes = [{"id": "root-1", "name": "root", "root": {}, "folder": {}}]
 
         with patch.object(
-            service, "_enumerate_authoritative_item_ids", AsyncMock()
+            service, "_enumerate_authoritative_items", AsyncMock()
         ) as enumerate_ids:
             _, result = await self._run_delta(
                 service, mock_dependencies, mock_oauth_token, folder_scoped, changes
