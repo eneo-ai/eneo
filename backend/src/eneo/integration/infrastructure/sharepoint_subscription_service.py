@@ -160,6 +160,10 @@ class SharePointSubscriptionService:
         This is the main entry point for integration creation - replaces the old
         per-integration subscription logic.
 
+        The subscription row is written in a transaction of its own, committed
+        before this returns, so Graph and the row agree whatever becomes of
+        the caller's transaction. The caller must hold no lock on the row.
+
         Args:
             user_integration_id: User integration that owns this subscription
             site_id: SharePoint site ID, or OneDrive drive_id if is_onedrive=True
@@ -179,9 +183,25 @@ class SharePointSubscriptionService:
         # Imports and syncs of several folders on one site arrive together
         # ("Resync all" sends a few at once). Each would find the same missing,
         # expired or drifted subscription and create one at Graph, and all but
-        # the last written would be left there unused. Holding the pair until
-        # the caller's transaction ends makes the next caller reuse the result.
-        existing = await self.subscription_repo.lock_user_site(
+        # the last written would be left there unused. The pair is therefore
+        # locked, in a transaction of its own that ends here: held until the
+        # caller's transaction ended, it would also wait on whatever that
+        # transaction waits for (a running sync's row), and a batch over two
+        # sites could deadlock with another taking them in the other order.
+        async with self.subscription_repo.own_transaction() as repo:
+            return await self._ensure(
+                repo, user_integration_id, site_id, token, is_onedrive
+            )
+
+    async def _ensure(
+        self,
+        repo: SharePointSubscriptionRepository,
+        user_integration_id: UUID,
+        site_id: str,
+        token: SharePointTokenProtocol,
+        is_onedrive: bool,
+    ) -> Optional[SharePointSubscription]:
+        existing = await repo.lock_user_site(
             user_integration_id=user_integration_id, site_id=site_id
         )
 
@@ -197,6 +217,7 @@ class SharePointSubscriptionService:
                     subscription=existing,
                     token=token,
                     is_onedrive=is_onedrive,
+                    repo=repo,
                 )
                 if success:
                     logger.info(
@@ -215,7 +236,10 @@ class SharePointSubscriptionService:
                     f"posts to {existing.notification_url}; recreating for {self.notification_url}"
                 )
                 await self.recreate_expired_subscription(
-                    subscription=existing, token=token, is_onedrive=is_onedrive
+                    subscription=existing,
+                    token=token,
+                    is_onedrive=is_onedrive,
+                    repo=repo,
                 )
                 return existing
             logger.info(
@@ -270,12 +294,12 @@ class SharePointSubscriptionService:
         )
 
         try:
-            saved = await self.subscription_repo.add(subscription)
+            saved = await repo.add(subscription)
         except SharePointSubscriptionExists:
             # Lost the race with a concurrent import of the same site: keep the
             # row that won and drop the Graph subscription we just registered,
             # or Graph would post every change twice.
-            winner = await self.subscription_repo.get_by_user_and_site(
+            winner = await repo.get_by_user_and_site(
                 user_integration_id=user_integration_id, site_id=site_id
             )
             logger.info(
@@ -298,6 +322,7 @@ class SharePointSubscriptionService:
         subscription: SharePointSubscription,
         token: SharePointTokenProtocol,
         is_onedrive: bool = False,
+        repo: Optional[SharePointSubscriptionRepository] = None,
     ) -> bool:
         """Recreate an expired subscription in-place.
 
@@ -317,6 +342,7 @@ class SharePointSubscriptionService:
             True if recreation successful, False otherwise
         """
         self.require_webhook_configuration()
+        repo = repo or self.subscription_repo
         logger.info(
             f"Recreating expired subscription {subscription.subscription_id} "
             f"for {_resource_label(subscription.site_id, subscription.drive_id)}"
@@ -343,7 +369,7 @@ class SharePointSubscriptionService:
                 user_visible_error(RECREATE_FAILED_MESSAGE)
             )
             try:
-                await self.subscription_repo.update(subscription)
+                await repo.update(subscription)
             except Exception as exc:
                 logger.warning(
                     "Could not record the failed recreation of subscription %s (%s)",
@@ -364,7 +390,7 @@ class SharePointSubscriptionService:
         # write must not leave the row pointing at a subscription Graph no
         # longer has. The old one may already be gone; a delete that fails
         # leaves an orphan that expires at Graph on its own.
-        await self.subscription_repo.update(subscription)
+        await repo.update(subscription)
         if not await self._delete_graph_subscription(
             subscription_id=old_subscription_id, token=token
         ):

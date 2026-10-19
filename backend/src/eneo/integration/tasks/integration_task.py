@@ -282,7 +282,51 @@ async def _prepare_sharepoint_sync(
     )
     assert knowledge is not None
     await _validate_embedding_provider(container, knowledge)
+    await _link_subscription_if_missing(container, knowledge)
     return knowledge, container.sharepoint_content_service()
+
+
+async def _link_subscription_if_missing(
+    container: "Container", knowledge: "IntegrationKnowledge"
+) -> None:
+    """Point the knowledge at its site's subscription when nothing else could.
+
+    Notifications reach a knowledge row only through this link. An import or
+    resync skips writing it while a sync holds the row; this sync holds it
+    now. A failure here never fails the sync.
+    """
+    if knowledge.sharepoint_subscription_id is not None:
+        return
+    # OneDrive subscriptions store the drive id as their site.
+    resource_id = knowledge.site_id or knowledge.drive_id
+    if not resource_id:
+        return
+    session = cast(AsyncSession, container.session())
+    try:
+        async with session.begin_nested():
+            subscription = (
+                await container.sharepoint_subscription_repo().get_by_user_and_site(
+                    user_integration_id=knowledge.user_integration.id,
+                    site_id=resource_id,
+                )
+            )
+            if subscription is None:
+                return
+            if await container.integration_knowledge_repo().link_subscription(
+                knowledge.id, subscription.id
+            ):
+                knowledge.sharepoint_subscription_id = subscription.id
+                logger.info(
+                    "Linked knowledge %s to SharePoint subscription %s",
+                    knowledge.id,
+                    subscription.subscription_id,
+                )
+    except Exception:
+        logger.warning(
+            "Could not link knowledge %s to its SharePoint subscription",
+            knowledge.id,
+            exc_info=True,
+        )
 
 
 async def _run_delta(

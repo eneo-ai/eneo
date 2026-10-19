@@ -209,8 +209,20 @@ class IntegrationKnowledgeRepoImpl(
         await self._update_columns(ids, wrapper_name=wrapper_name)
 
     @override
-    async def link_subscription(self, id: "UUID", subscription_id: "UUID") -> None:
-        await self._update_columns([id], sharepoint_subscription_id=subscription_id)
+    async def link_subscription(self, id: "UUID", subscription_id: "UUID") -> bool:
+        # A sync holds its row until it commits, which can be hours; a request
+        # (an import's or resync's link) must not wait for it.
+        free = (
+            sa.select(self._db_model.id)
+            .where(self._db_model.id == id)
+            .with_for_update(skip_locked=True)
+        )
+        result = await self.session.execute(
+            sa.update(self._db_model)
+            .where(self._db_model.id.in_(free))
+            .values(sharepoint_subscription_id=subscription_id)
+        )
+        return affected_row_count(result) > 0
 
     async def _update_columns(self, ids: Sequence["UUID"], **values: object) -> None:
         if not ids:

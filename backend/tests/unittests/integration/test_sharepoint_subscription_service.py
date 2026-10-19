@@ -4,6 +4,7 @@ Tests the subscription creation, renewal, recreation, and deletion logic
 for Microsoft Graph webhook subscriptions.
 """
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -35,6 +36,12 @@ def mock_subscription_repo():
         return await repo.get_by_user_and_site(**kwargs)
 
     repo.lock_user_site = AsyncMock(side_effect=lock_user_site)
+
+    @asynccontextmanager
+    async def own_transaction():
+        yield repo
+
+    repo.own_transaction = own_transaction
     repo.add = AsyncMock()
     repo.update = AsyncMock()
     repo.remove = AsyncMock()
@@ -215,8 +222,12 @@ class TestEnsureSubscriptionForSite:
             )
 
         assert result is mock_subscription
+        # In the ensure's own transaction, on its repository.
         recreate.assert_awaited_once_with(
-            subscription=mock_subscription, token=mock_token, is_onedrive=False
+            subscription=mock_subscription,
+            token=mock_token,
+            is_onedrive=False,
+            repo=mock_subscription_repo,
         )
 
     async def test_recreates_expired_subscription(
