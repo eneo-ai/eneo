@@ -4,16 +4,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { IntegrationKnowledge } from "../knowledge";
 
-/** The items a source's server page found, and when it read the space (its `dataUpdatedAt`). */
-export type LoadedItems = { items: IntegrationKnowledge[]; readAt: number };
+/** The items a source's server page found. */
+export type LoadedItems = { items: IntegrationKnowledge[] };
 
 /**
- * The items a source's page shows: `cached`, the source's items in the cached
- * space. That cache can predate the page's server render, such as an item
- * imported since: the items the server found then stand in, and the space is
- * read again. A cache read after the server's (Back to a source deleted since,
- * from the router's cache), or one that has shown the items, is the truth:
- * they are gone once it lacks them.
+ * The cached space owns the source. If it lacks the server's items, show them
+ * only until a successful client reread. Query update counts belong to this
+ * browser; server and browser wall clocks cannot order the two snapshots.
+ * Once seen in the cache, a removed item never falls back to the server copy.
  */
 export function useSourceItems(
   routeId: string,
@@ -21,10 +19,15 @@ export function useSourceItems(
   loaded: LoadedItems
 ): IntegrationKnowledge[] {
   const queryClient = useQueryClient();
+  // Capture the browser's baseline even during hydration, when the external
+  // store first exposes its server snapshot (zero updates since arrival).
+  const [arrivalReads] = useState(
+    () => queryClient.getQueryState(["spaces", routeId])?.dataUpdateCount ?? 0
+  );
   // Followed even when a read returns the same space, which leaves its data as it was.
-  const cacheReadAt = useSyncExternalStore(
+  const reads = useSyncExternalStore(
     useCallback((listener) => queryClient.getQueryCache().subscribe(listener), [queryClient]),
-    () => queryClient.getQueryState(["spaces", routeId])?.dataUpdatedAt ?? 0,
+    () => (queryClient.getQueryState(["spaces", routeId])?.dataUpdateCount ?? 0) - arrivalReads,
     () => 0
   );
   const present = cached.length > 0;
@@ -33,15 +36,12 @@ export function useSourceItems(
   if (present && !seen) setSeen(true);
 
   useEffect(() => {
-    // Joins a read already under way (useSpace refetches a stale space on mount).
+    // Start a read after arrival; an older in-flight response may predate the import.
     if (missingOnArrival) {
-      void queryClient.invalidateQueries(
-        { queryKey: ["spaces", routeId] },
-        { cancelRefetch: false }
-      );
+      void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
     }
   }, [missingOnArrival, queryClient, routeId]);
 
   if (present) return cached;
-  return !seen && cacheReadAt < loaded.readAt ? loaded.items : [];
+  return !seen && reads === 0 ? loaded.items : [];
 }

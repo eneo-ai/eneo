@@ -135,7 +135,7 @@ describe("SourcesList", () => {
       expect(said).toEqual([
         "Synk av Avtal köad",
         "Synk av Avtal har startat",
-        "Synk av Avtal klar: 8 sökbara, 1 kunde inte läsas"
+        "Synk av Avtal pågår inte längre"
       ])
     );
   });

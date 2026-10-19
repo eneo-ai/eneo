@@ -159,13 +159,12 @@ const folder = { wrapper_id: "w1", wrapper_name: "Byggnad" };
 
 const WRAPPER_PAGE = "/spaces/space-1/knowledge/integrations/wrapper/w1";
 
-/** The wrapper's items as the server page found them in `space`, read at `readAt` (default: long ago). */
-function served(space = state.space as Space, readAt = 0): LoadedItems {
+/** The wrapper's items as the server page found them. */
+function served(space = state.space as Space): LoadedItems {
   return {
     items: space.knowledge.integration_knowledge_list.items.filter(
       (item) => item.wrapper_id === "w1"
-    ),
-    readAt
+    )
   };
 }
 
@@ -750,7 +749,7 @@ describe("WrapperDetail navigation", () => {
     const items = [makeIntegration({ ...folder, ...mall })] as IntegrationKnowledge[];
     state.space = makeSpace({ integrations: items });
     // What the server found then, and what the router's cache keeps of it.
-    const before = served(state.space as Space, Date.now() - 1);
+    const before = served(state.space as Space);
     state.onDelete = () => {
       state.space = makeSpace();
     };
@@ -771,7 +770,9 @@ describe("WrapperDetail navigation", () => {
       queryClient: list.queryClient
     });
 
-    expect(screen.getByRole("heading", { level: 1, name: "Inga resultat hittades" })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Inga resultat hittades" })
+    ).toBeTruthy();
   });
 
   it("shows the history of the folder chosen on Activity, and keeps that folder on Contents", async () => {
@@ -1174,9 +1175,7 @@ describe("WrapperDetail sync status", () => {
 
     state.progress = [];
     await refreshProgress(queryClient);
-    await waitFor(() =>
-      expect(said).toContain("Synk av Byggnad klar: 3 sökbara, 1 kunde inte läsas")
-    );
+    await waitFor(() => expect(said).toContain("Synk av Byggnad pågår inte längre"));
     expect(screen.queryByText(QUEUED_NOTICE)).toBeNull();
   });
 
@@ -1255,7 +1254,7 @@ describe("WrapperDetail sync status", () => {
     );
     observer.observe(document.body, { childList: true, subtree: true });
 
-    renderInApp(<WrapperDetail wrapperId="w1" loaded={served(imported, Date.now())} />, {
+    renderInApp(<WrapperDetail wrapperId="w1" loaded={served(imported)} />, {
       queryClient
     });
 
@@ -1282,7 +1281,7 @@ describe("WrapperDetail sync status", () => {
     state.space = makeSpace();
     setRoute(WRAPPER_PAGE);
 
-    renderInApp(<WrapperDetail wrapperId="w1" loaded={served(before, Date.now())} />, {
+    renderInApp(<WrapperDetail wrapperId="w1" loaded={served(before)} />, {
       queryClient
     });
 

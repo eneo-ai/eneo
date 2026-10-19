@@ -18,8 +18,8 @@ import {
 /**
  * A source page's sync course and problem count, spoken as they change: a
  * sync being queued, starting, its count at most every 10 s or on a phase
- * change, its end with its counts, and a changed number of problems (null
- * while the lists load).
+ * change, progress stopping (the job reports the outcome), and changes to the
+ * problem count (null while the lists load).
  */
 export function useSourceAnnouncements(
   name: string,
@@ -30,6 +30,7 @@ export function useSourceAnnouncements(
   const announce = useAnnounce();
   const previous = useRef<SourceSnapshot | null>(null);
   const progressAnnouncedAt = useRef(0);
+  const previousProblems = useRef<number | null>(null);
   const key = JSON.stringify(sourceSnapshot(summary));
 
   useEffect(() => {
@@ -43,20 +44,15 @@ export function useSourceAnnouncements(
       t
     );
     previous.current = next;
-    if (!text) return;
-    announce(text);
-    if (next.progress) progressAnnouncedAt.current = now;
-  }, [announce, key, name, t]);
-
-  const previousProblems = useRef<number | null>(null);
-  useEffect(() => {
-    const text = announceProblemCount(previousProblems.current, problemCount, t);
+    const problems = announceProblemCount(previousProblems.current, problemCount, t);
     if (problemCount !== null) previousProblems.current = problemCount;
-    if (text) announce(text);
-  }, [announce, problemCount, t]);
+    const message = [text, problems].filter(Boolean).join(". ");
+    if (message) announce(message);
+    if (text && next.progress) progressAnnouncedAt.current = now;
+  }, [announce, key, name, problemCount, t]);
 }
 
-/** A list's sources: each one's sync starting, finishing or being queued; counts belong to its page. */
+/** A list's sources: each one's sync starting, stopping or being queued. */
 export function useSourceListAnnouncements(
   sources: readonly { id: string; name: string; summary: SourceSummary }[]
 ) {
@@ -70,15 +66,15 @@ export function useSourceListAnnouncements(
   useEffect(() => {
     const entries = JSON.parse(key) as [string, string, SourceSnapshot][];
     const next: Record<string, SourceSnapshot> = {};
-    let text: string | null = null;
+    const messages: string[] = [];
     for (const [id, name, snapshot] of entries) {
       next[id] = snapshot;
-      text =
-        announceSourceChange(name, previous.current[id] ?? null, snapshot, 0, t, {
-          speakProgress: false
-        }) ?? text;
+      const text = announceSourceChange(name, previous.current[id] ?? null, snapshot, 0, t, {
+        speakProgress: false
+      });
+      if (text) messages.push(text);
     }
     previous.current = next;
-    if (text) announce(text);
+    if (messages.length > 0) announce(messages.join(". "));
   }, [announce, key, t]);
 }

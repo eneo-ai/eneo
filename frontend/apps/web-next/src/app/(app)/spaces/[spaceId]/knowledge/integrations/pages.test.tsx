@@ -4,8 +4,6 @@ import { EneoApiError } from "@/lib/api/errors";
 import type { Space } from "@/features/spaces/space";
 import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
 
-const READ_AT = Date.parse("2026-10-19T08:00:00Z");
-
 const state = vi.hoisted(() => ({
   space: null as unknown,
   error: null as unknown,
@@ -19,8 +17,7 @@ vi.mock("@/lib/api/query", () => ({
       state.requested.push(queryKey);
       if (state.error) throw state.error;
       return state.space;
-    },
-    getQueryState: () => ({ dataUpdatedAt: READ_AT })
+    }
   })
 }));
 // Next's control flow throws; these stand-ins throw something a test can read.
@@ -70,7 +67,7 @@ describe("the item route", () => {
     state.space = spaceWith([item]);
     const page = await itemPage("i1");
     // It stands in while the browser's space predates it (an item imported since).
-    expect(page.props).toEqual({ itemId: "i1", loaded: { items: [item], readAt: READ_AT } });
+    expect(page.props).toEqual({ itemId: "i1", loaded: { items: [item] } });
     expect(state.requested).toEqual([["spaces", "space-1"]]);
   });
 
@@ -103,7 +100,7 @@ describe("the wrapper route", () => {
     const item = makeIntegration({ id: "i1", wrapper_id: "w1", wrapper_name: "Byggnad" });
     state.space = spaceWith([item]);
     const page = await wrapperPage("w1");
-    expect(page.props).toEqual({ wrapperId: "w1", loaded: { items: [item], readAt: READ_AT } });
+    expect(page.props).toEqual({ wrapperId: "w1", loaded: { items: [item] } });
   });
 
   it("is not found for an unknown wrapper, or one only another space's items are in", async () => {

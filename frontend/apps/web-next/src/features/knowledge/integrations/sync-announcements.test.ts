@@ -25,13 +25,13 @@ describe("announceSourceChange", () => {
     expect(announceSourceChange("Avtal", null, syncing(3), 60_000, t)).toBeNull();
   });
 
-  it("speaks a queued, started and finished sync, the last with its counts", () => {
+  it("speaks a queued, started and stopped sync, without inferring an outcome from progress", () => {
     expect(announceSourceChange("Avtal", idle, queued, 0, t)).toBe("Synk av Avtal köad");
     expect(announceSourceChange("Avtal", queued, syncing(1), 0, t)).toBe(
       "Synk av Avtal har startat"
     );
     expect(announceSourceChange("Avtal", syncing(40), idle, 0, t)).toBe(
-      "Synk av Avtal klar: 39 sökbara, 1 kunde inte läsas"
+      "Synk av Avtal pågår inte längre"
     );
     expect(announceSourceChange("Avtal", queued, queued, 0, t)).toBeNull();
   });
@@ -78,3 +78,12 @@ describe("announceProblemCount", () => {
     expect(announceProblemCount(2, 3, t)).toBe("Problem: 3");
   });
 });
+
+it.each(["ok", "attention", "queued"] as const)(
+  "does not invent final counts or success when progress disappears into %s",
+  (state) => {
+    expect(announceSourceChange("Avtal", syncing(8), { state, progress: null }, 1000, t)).toBe(
+      "Synk av Avtal pågår inte längre"
+    );
+  }
+);

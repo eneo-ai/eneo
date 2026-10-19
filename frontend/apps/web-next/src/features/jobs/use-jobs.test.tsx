@@ -29,19 +29,27 @@ vi.mock("@/lib/toast", () => ({ toast }));
 vi.mock("next/navigation", () => import("@/test/navigation"));
 
 const job = { id: "job-1", name: "Avtal.pdf", status: "in progress" } as Job;
-const api = vi.hoisted(() => ({ items: [] as Job[], space: null as unknown }));
+const api = vi.hoisted(() => ({
+  items: [] as Job[],
+  space: null as unknown,
+  spaceError: null as Error | null
+}));
 
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: vi.fn(async (path: string) => ({
-      data: path === "/api/v1/spaces/{id}/" ? api.space : { items: api.items },
-      response: new Response("{}")
-    }))
+    GET: vi.fn(async (path: string) => {
+      if (path === "/api/v1/spaces/{id}/" && api.spaceError) throw api.spaceError;
+      return {
+        data: path === "/api/v1/spaces/{id}/" ? api.space : { items: api.items },
+        response: new Response("{}")
+      };
+    })
   }
 }));
 
 beforeEach(() => {
   api.items = [job];
+  api.spaceError = null;
 });
 
 afterEach(() => {
@@ -391,7 +399,8 @@ describe("an import's first sync", () => {
     expect(sessionStorage.getItem(PENDING_IMPORTS_STORAGE_KEY)).toBeNull();
   });
 
-  it("waits for the status of a sync whose job is complete but wrote none yet", async () => {
+  it("retries an unchanged completed job until its sync status becomes visible", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     sessionStorage.setItem(PENDING_IMPORTS_STORAGE_KEY, JSON.stringify([pending]));
     resetPendingImports();
     api.items = [{ ...imported, status: "complete" }];
@@ -406,6 +415,41 @@ describe("an import's first sync", () => {
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).not.toHaveBeenCalled();
     expect(pendingImports()).toEqual([pending]);
+    api.space = spaceWith(synced);
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    expect(pendingImports()).toEqual([]);
+  });
+
+  it("retries a temporary space-read failure without another job transition", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    sessionStorage.setItem(PENDING_IMPORTS_STORAGE_KEY, JSON.stringify([pending]));
+    resetPendingImports();
+    api.items = [{ ...imported, status: "complete" }];
+    api.space = spaceWith(synced);
+    api.spaceError = new Error("temporary outage");
+    renderInApp(<JobsProvider>{null}</JobsProvider>);
+    await vi.waitFor(() => expect(logged).toHaveBeenCalled());
+    api.spaceError = null;
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    expect(pendingImports()).toEqual([]);
+    logged.mockRestore();
+  });
+
+  it("does not repeat a restored import result after a second reload", async () => {
+    sessionStorage.setItem(PENDING_IMPORTS_STORAGE_KEY, JSON.stringify([pending]));
+    resetPendingImports();
+    api.items = [{ ...imported, status: "complete" }];
+    api.space = spaceWith(synced);
+    const first = renderInApp(<JobsProvider>{null}</JobsProvider>);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    first.unmount();
+    resetPendingImports();
+    const second = renderInApp(<JobsProvider>{null}</JobsProvider>);
+    await waitFor(() => expect(second.queryClient.getQueryData(["jobs"])).toEqual(api.items));
+    expect(toast.success).toHaveBeenCalledTimes(1);
   });
 });
 

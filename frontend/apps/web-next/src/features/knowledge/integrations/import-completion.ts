@@ -44,7 +44,7 @@ type PendingImports = {
 };
 
 /**
- * The pending imports, mirrored into `storage` so a reload or a new tab within
+ * The pending imports, mirrored into `storage` so a reload in the same tab within
  * the job's lifetime still gets the promised notice. Storage failures leave the
  * list in memory only.
  */
@@ -179,12 +179,20 @@ async function report(
     pendingImports().some((candidate) => candidate.jobId === item.jobId)
   );
   for (const routeId of new Set(pending.map((item) => item.spaceRouteId))) {
-    const space = await readSpace(queryClient, routeId);
+    let space: Space | null;
+    try {
+      space = await readSpace(queryClient, routeId);
+    } catch (error) {
+      // One unavailable space must not starve reports for every other space.
+      console.error("Could not read an import's result", error);
+      continue;
+    }
     const reported: string[] = [];
+    const messages: string[] = [];
     const fail = (name: string, error: string | null) => {
       const message = t("integration_import_failed_toast", { name });
       toast.error(message, { description: error || undefined });
-      announce(message);
+      messages.push(message);
     };
     for (const item of pending.filter((candidate) => candidate.spaceRouteId === routeId)) {
       const knowledge = space?.knowledge.integration_knowledge_list.items.find(
@@ -218,9 +226,10 @@ async function report(
         duration: RESULT_TOAST_DURATION_MS,
         action: { label: t("show"), onClick: () => navigate(outcome.href) }
       });
-      announce(message);
+      messages.push(message);
     }
     untrackImports(reported);
+    if (messages.length > 0) announce(messages.join(". "));
   }
 }
 

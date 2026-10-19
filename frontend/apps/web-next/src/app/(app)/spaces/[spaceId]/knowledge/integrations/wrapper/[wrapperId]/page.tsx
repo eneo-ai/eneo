@@ -12,8 +12,8 @@ type Params = Promise<{ spaceId: string; wrapperId: string }>;
 
 /**
  * The space's own items imported under the wrapper, as one source (as on the
- * client). With when the space was read, for the client to tell whether its
- * cached space is older (useSourceItems).
+ * client). The server copy can stand in until the client rereads its space
+ * (useSourceItems).
  */
 async function findWrapper(spaceId: string, wrapperId: string) {
   try {
@@ -24,7 +24,7 @@ async function findWrapper(spaceId: string, wrapperId: string) {
       space.knowledge.integration_knowledge_list.items.filter((item) => item.space_id === space.id),
       wrapperId
     );
-    return { source, readAt: queryClient.getQueryState(options.queryKey)?.dataUpdatedAt ?? 0 };
+    return source;
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();
     throw error;
@@ -34,7 +34,7 @@ async function findWrapper(spaceId: string, wrapperId: string) {
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const { spaceId, wrapperId } = await params;
   return spacePageTitle(async () => {
-    const { source } = await findWrapper(spaceId, wrapperId);
+    const source = await findWrapper(spaceId, wrapperId);
     if (!source) throw new Error(`No integration items in wrapper ${wrapperId}`);
     return source.name;
   }, "integrations");
@@ -43,7 +43,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 /** A SharePoint wrapper as one source; an unknown wrapper (or one whose last item is gone) is a 404. */
 export default async function WrapperPage({ params }: { params: Params }) {
   const { spaceId, wrapperId } = await params;
-  const { source, readAt } = await findWrapper(spaceId, wrapperId);
+  const source = await findWrapper(spaceId, wrapperId);
   if (!source) notFound();
-  return <WrapperDetail wrapperId={wrapperId} loaded={{ items: source.items, readAt }} />;
+  return <WrapperDetail wrapperId={wrapperId} loaded={{ items: source.items }} />;
 }

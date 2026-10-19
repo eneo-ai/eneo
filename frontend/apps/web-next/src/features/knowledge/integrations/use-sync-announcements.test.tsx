@@ -90,7 +90,7 @@ describe("useSourceAnnouncements", () => {
       "Synk av Avtal har startat",
       "Avtal: 12 av 40 lästa",
       "Avtal: 40 av 40 lästa",
-      "Synk av Avtal klar: 39 sökbara, 1 kunde inte läsas"
+      "Synk av Avtal pågår inte längre"
     ]);
   });
 
@@ -135,8 +135,35 @@ describe("useSourceListAnnouncements", () => {
       expect(said).toEqual([
         "Synk av Avtal köad",
         "Synk av Avtal har startat",
-        "Synk av Avtal klar: 39 sökbara, 1 kunde inte läsas"
+        "Synk av Avtal pågår inte längre"
       ])
     );
   });
+});
+
+it("combines simultaneous source transitions instead of losing all but the last", async () => {
+  let summary = idle();
+  const { rerender } = renderHookInApp(() =>
+    useSourceListAnnouncements([
+      { id: "a", name: "Avtal", summary },
+      { id: "b", name: "Policy", summary }
+    ])
+  );
+  await frame();
+  summary = queued();
+  rerender();
+  await frame();
+  expect(liveRegion()).toBe("Synk av Avtal köad. Synk av Policy köad");
+});
+
+it("keeps a source transition and problem change in the same announcement", async () => {
+  let summary = idle();
+  let problems = 0;
+  const { rerender } = renderHookInApp(() => useSourceAnnouncements("Avtal", summary, problems));
+  await frame();
+  summary = queued();
+  problems = 2;
+  rerender();
+  await frame();
+  expect(liveRegion()).toBe("Synk av Avtal köad. Problem: 2");
 });

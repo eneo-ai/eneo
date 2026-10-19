@@ -1,5 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTranslator } from "next-intl";
+import sv from "@/lib/i18n/messages/sv.json";
+import { makeSpace, makeIntegration } from "@/features/spaces/testing/space-fixture";
+import { testQueryClient } from "@/test/render";
 import type { IntegrationKnowledge } from "../knowledge";
 import {
   createPendingImports,
@@ -7,10 +11,16 @@ import {
   PENDING_IMPORTS_STORAGE_KEY,
   pendingImports,
   resetPendingImports,
+  reportImports,
   trackImports,
   untrackImports,
   type PendingImport
 } from "./import-completion";
+
+const api = vi.hoisted(() => ({ GET: vi.fn() }));
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+vi.mock("@/lib/toast", () => ({ toast }));
 
 type Metadata = NonNullable<IntegrationKnowledge["metadata"]>;
 
@@ -47,6 +57,7 @@ function fakeStorage(): Storage {
 }
 
 afterEach(() => {
+  vi.clearAllMocks();
   sessionStorage.clear();
   resetPendingImports();
 });
@@ -153,4 +164,75 @@ describe("describeImportOutcome", () => {
       describeImportOutcome(knowledge({ last_sync_status: "never" }), "space-1")
     ).toMatchObject({ synced: false, error: null });
   });
+});
+
+it("reports other spaces even while one space is unavailable, without duplicate reports", async () => {
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  const waiting = [
+    { ...pending("bad"), spaceRouteId: "bad-space" },
+    { ...pending("good"), spaceRouteId: "good-space" }
+  ];
+  trackImports(waiting);
+  api.GET.mockImplementation(
+    async (_path: string, options: { params: { path: { id: string } } }) => {
+      if (options.params.path.id === "bad-space") throw new Error("unavailable");
+      return {
+        data: makeSpace({
+          overrides: { id: "good-space" },
+          integrations: [
+            makeIntegration({
+              id: "ik-good",
+              space_id: "good-space",
+              metadata: { size: 0, last_sync_status: "success", document_count: 3 }
+            })
+          ]
+        }),
+        response: new Response("{}")
+      };
+    }
+  );
+  const context = {
+    queryClient: testQueryClient(),
+    t: createTranslator({ locale: "sv", messages: sv as Record<string, string> }),
+    announce: vi.fn(),
+    navigate: vi.fn()
+  };
+  const settled = waiting.map((item) => ({ ...item, jobStatus: "complete" as const }));
+  await Promise.all([reportImports(settled, context), reportImports(settled, context)]);
+  expect(toast.success).toHaveBeenCalledTimes(1);
+  expect(context.announce).toHaveBeenCalledTimes(1);
+  expect(pendingImports()).toEqual([waiting[0]]);
+  logged.mockRestore();
+});
+
+it("announces every import finishing in the same space in one message", async () => {
+  const waiting = [pending("a"), pending("b")];
+  trackImports(waiting);
+  api.GET.mockResolvedValue({
+    data: makeSpace({
+      integrations: ["a", "b"].map((id) =>
+        makeIntegration({
+          id: `ik-${id}`,
+          name: id === "a" ? "Avtal" : "Policy",
+          metadata: { size: 0, last_sync_status: "success", document_count: 3 }
+        })
+      )
+    }),
+    response: new Response("{}")
+  });
+  const announce = vi.fn();
+  await reportImports(
+    waiting.map((item) => ({ ...item, jobStatus: "complete" })),
+    {
+      queryClient: testQueryClient(),
+      t: createTranslator({ locale: "sv", messages: sv as Record<string, string> }),
+      announce,
+      navigate: vi.fn()
+    }
+  );
+  expect(toast.success).toHaveBeenCalledTimes(2);
+  expect(announce).toHaveBeenCalledTimes(1);
+  expect(announce.mock.calls[0]?.[0]).toContain("Avtal:");
+  expect(announce.mock.calls[0]?.[0]).toContain("Policy:");
+  expect(pendingImports()).toEqual([]);
 });

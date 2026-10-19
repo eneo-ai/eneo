@@ -30,7 +30,7 @@ export function sourceSnapshot(summary: Pick<SourceSummary, "state" | "progress"
  * `previous` to `next`, or null. The first snapshot of a page is not news.
  * `sinceProgressAnnounced` is the time since the last spoken progress count;
  * a list of many sources passes `speakProgress: false` and says only when
- * syncs start, finish or queue.
+ * syncs start, stop or queue.
  */
 export function announceSourceChange(
   name: string,
@@ -45,11 +45,9 @@ export function announceSourceChange(
   const now = next.progress;
   if (now && !was) return t("integration_announce_sync_started", { name });
   if (!now && was) {
-    return t("integration_announce_sync_finished", {
-      name,
-      indexed: was.indexed,
-      skipped: was.skipped
-    });
+    // Progress can disappear on success, failure or expiry, between polls.
+    // Job feedback owns the outcome; this snapshot cannot prove it or its counts.
+    return t("integration_announce_sync_stopped", { name });
   }
   if (now && was) {
     if (!speakProgress) return null;

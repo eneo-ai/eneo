@@ -164,7 +164,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   // is committed. Polling stays as the safety net: slow while the feed is
   // open, fast while it is down and something is running or was just started.
   const live = useJobEventsConnected();
-  const { data: jobs } = useQuery({
+  const { data: jobs, dataUpdatedAt: jobsUpdatedAt } = useQuery({
     queryKey: JOBS_KEY,
     queryFn: fetchJobs,
     refetchInterval: (query) =>
@@ -198,7 +198,6 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   // queued from a menu stops reading as queued once its job is over. The
   // ledger lives in a ref because it is bookkeeping, not render state.
   const ledger = useRef<JobLedger>(EMPTY_LEDGER);
-  const importsJudged = useRef(false);
   const handleSnapshot = useCallback(
     (loaded: readonly Job[] | undefined) => {
       const snapshot = loaded ?? NO_JOBS;
@@ -226,10 +225,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       if (!loaded) return;
       const over = (jobId: string) => isJobOver(jobId, snapshot, diff.ledger);
       untrackSyncs(pendingSyncs().flatMap((item) => (over(item.jobId) ? [item.jobId] : [])));
-      // Imports kept from an earlier page load are judged by the first list;
-      // one whose item had no status yet is looked at again with the next outcome.
-      if (!changed && importsJudged.current) return;
-      importsJudged.current = true;
+      // Retry pending reports on each successful poll, even when no job changed.
+      // reportImports serialises attempts and removes only reported imports.
       const settled = imports.flatMap((item): SettledImport[] =>
         over(item.jobId)
           ? [
@@ -253,7 +250,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   );
   useEffect(() => {
     handleSnapshot(jobs);
-  }, [handleSnapshot, jobs]);
+  }, [handleSnapshot, jobs, jobsUpdatedAt]);
 
   const trackJob = useCallback(
     (job?: Job | Job[]) => {

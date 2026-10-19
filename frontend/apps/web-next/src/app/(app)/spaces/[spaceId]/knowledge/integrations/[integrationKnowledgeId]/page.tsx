@@ -13,8 +13,8 @@ type SearchParams = Promise<{ tab?: string | string[] }>;
 
 /**
  * The space's own item; one shared in from another space is not opened here
- * (as on the client). With when the space was read, for the client to tell
- * whether its cached space is older (useSourceItems).
+ * (as on the client). The server copy can stand in until the client rereads
+ * its space (useSourceItems).
  */
 async function findItem(spaceId: string, itemId: string) {
   try {
@@ -24,7 +24,7 @@ async function findItem(spaceId: string, itemId: string) {
     const item = space.knowledge.integration_knowledge_list.items.find(
       (entry) => entry.id === itemId && entry.space_id === space.id
     );
-    return { item, readAt: queryClient.getQueryState(options.queryKey)?.dataUpdatedAt ?? 0 };
+    return item;
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();
     throw error;
@@ -34,7 +34,7 @@ async function findItem(spaceId: string, itemId: string) {
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const { spaceId, integrationKnowledgeId } = await params;
   return spacePageTitle(async () => {
-    const { item } = await findItem(spaceId, integrationKnowledgeId);
+    const item = await findItem(spaceId, integrationKnowledgeId);
     if (!item) throw new Error(`No integration item ${integrationKnowledgeId}`);
     return item.name;
   }, "integrations");
@@ -50,7 +50,7 @@ export default async function IntegrationItemPage({
 }) {
   const { spaceId, integrationKnowledgeId } = await params;
   const { tab } = await searchParams;
-  const { item, readAt } = await findItem(spaceId, integrationKnowledgeId);
+  const item = await findItem(spaceId, integrationKnowledgeId);
   if (!item) notFound();
   if (item.wrapper_id && item.integration_type === "sharepoint") {
     redirect(
@@ -61,5 +61,5 @@ export default async function IntegrationItemPage({
       )
     );
   }
-  return <ItemDetail itemId={integrationKnowledgeId} loaded={{ items: [item], readAt }} />;
+  return <ItemDetail itemId={integrationKnowledgeId} loaded={{ items: [item] }} />;
 }
