@@ -1,11 +1,13 @@
 """SharePoint sync tasks: a webhook that loses the lease race is not dropped."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.integration.tasks import integration_task
 
@@ -115,7 +117,10 @@ async def test_delta_blocked_by_a_running_sync_leaves_a_pending_marker(
     assert result.startswith("Skipped")
     service.process_delta_changes.assert_not_called()
     assert fake_redis.store[PENDING_KEY] == "1"
-    assert fake_redis.ttls[PENDING_KEY] == 3600
+    assert (
+        fake_redis.ttls[PENDING_KEY]
+        == integration_task.SHAREPOINT_SYNC_PENDING_TTL_SECONDS
+    )
     assert fake_redis.store[LOCK_KEY] == "someone-else"
     assert fake_redis.closed
 
@@ -189,7 +194,10 @@ async def test_failing_pending_pass_keeps_the_marker_for_the_next_sync(
     service.process_delta_changes.assert_awaited_once()
     assert service.process_delta_changes.await_args.kwargs["record_failure"] is False
     assert fake_redis.store[PENDING_KEY] == "1"
-    assert fake_redis.ttls[PENDING_KEY] == 3600
+    assert (
+        fake_redis.ttls[PENDING_KEY]
+        == integration_task.SHAREPOINT_SYNC_PENDING_TTL_SECONDS
+    )
     assert LOCK_KEY not in fake_redis.store
 
 
@@ -303,3 +311,32 @@ async def test_a_failed_confluence_sync_reports_no_url_to_its_job(monkeypatch):
 
     assert str(caught.value) == "HTTP 403 Forbidden"
     assert caught.value.__cause__ is failure
+
+
+@pytest.mark.parametrize("task", [delta_task, full_task], ids=["delta", "full"])
+@pytest.mark.parametrize("outcome", ["commit", "rollback"])
+async def test_lease_is_held_until_the_tasks_transaction_has_ended(
+    fake_redis, service, container, params, task, outcome
+):
+    """The worker commits after the task returns; the next holder must not
+    read this sync's rows before they are visible."""
+    session = AsyncSession()
+    container.session.return_value = session
+    held_after_return = None
+    try:
+        async with session.begin():
+            await task(params, container)
+            held_after_return = LOCK_KEY in fake_redis.store
+            if outcome == "rollback":
+                raise RuntimeError("commit refused")
+    except RuntimeError:
+        pass
+    for _ in range(5):
+        if LOCK_KEY not in fake_redis.store:
+            break
+        await asyncio.sleep(0)
+    await session.close()
+
+    assert held_after_return is True
+    assert LOCK_KEY not in fake_redis.store
+    assert fake_redis.closed

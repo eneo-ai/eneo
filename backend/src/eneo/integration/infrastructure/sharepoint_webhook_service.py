@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hmac
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import sqlalchemy as sa
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.integration_table import (
@@ -27,6 +28,11 @@ from eneo.integration.infrastructure.content_service.types import (
 from eneo.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
 )
+from eneo.integration.infrastructure.sharepoint_sync_keys import (
+    SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+    sync_lock_key,
+    sync_pending_key,
+)
 from eneo.integration.presentation.models import SharepointContentTaskParam
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_repo import JobRepository
@@ -36,7 +42,22 @@ from eneo.main.logging import get_logger
 from eneo.users.user import UserInDB
 from eneo.users.user_repo import UsersRepository
 
+if TYPE_CHECKING:
+    import redis.asyncio as aioredis
+
 logger = get_logger(__name__)
+
+
+def client_state_matches(expected: str | None, value: object) -> bool:
+    """Constant-time comparison of a notification's clientState with the secret.
+
+    Compared as UTF-8 bytes: ``hmac.compare_digest`` refuses non-ASCII text,
+    which would turn a forged ``clientState`` into a 500 and break every
+    notification for a secret containing one.
+    """
+    if not expected or not isinstance(value, str):
+        return False
+    return hmac.compare_digest(value.encode("utf-8"), expected.encode("utf-8"))
 
 
 class SharepointWebhookService:
@@ -55,6 +76,7 @@ class SharepointWebhookService:
         user_repo: UsersRepository,
         change_key_service: OfficeChangeKeyService,
         sharepoint_subscription_repo: SharePointSubscriptionRepository,
+        redis_client: "aioredis.Redis",
     ) -> None:
         super().__init__()
         self.session = session
@@ -63,13 +85,67 @@ class SharepointWebhookService:
         self.user_repo = user_repo
         self.change_key_service = change_key_service
         self.sharepoint_subscription_repo = sharepoint_subscription_repo
+        self.redis_client = redis_client
         settings = get_settings()
-        self.expected_client_state = settings.sharepoint_webhook_client_state
+        # Stripped once, as the subscription service sends it to Graph; a
+        # trailing newline in the environment must not drop every notification.
+        configured = settings.sharepoint_webhook_client_state
+        self.expected_client_state: str | None = (
+            configured.strip() if configured else None
+        )
+
+    def authenticated_notifications(
+        self, notifications: SharePointWebhookPayload
+    ) -> list[SharePointWebhookNotification]:
+        """The notifications whose ``clientState`` matches the configured secret.
+
+        clientState is the only authentication for this endpoint (it is
+        unauthenticated at the HTTP layer). Fail closed: without a configured
+        secret genuine Graph notifications cannot be told from forged ones, so
+        none is accepted. Elements that are not objects are skipped. The
+        endpoint is public, so rejections are summarised in one log line per
+        call rather than one per element.
+        """
+        values = cast(list[object], notifications.get("value") or [])
+        if not values:
+            logger.debug("SharePoint webhook called without notifications")
+            return []
+        if not self.expected_client_state:
+            logger.error(
+                "Rejecting SharePoint webhook: SHAREPOINT_WEBHOOK_CLIENT_STATE is "
+                "not configured, so notifications cannot be authenticated."
+            )
+            return []
+        accepted: list[SharePointWebhookNotification] = []
+        wrong_client_state = 0
+        not_objects = 0
+        for element in values:
+            if not isinstance(element, dict):
+                not_objects += 1
+                continue
+            notification = cast(SharePointWebhookNotification, element)
+            if not client_state_matches(
+                self.expected_client_state, notification.get("clientState")
+            ):
+                wrong_client_state += 1
+                continue
+            accepted.append(notification)
+        if wrong_client_state or not_objects:
+            logger.warning(
+                "Ignoring %d of %d SharePoint webhook notification(s): %d with an "
+                "unexpected clientState (forged, or SHAREPOINT_WEBHOOK_CLIENT_STATE "
+                "differs from the subscriptions'), %d not objects",
+                wrong_client_state + not_objects,
+                len(values),
+                wrong_client_state,
+                not_objects,
+            )
+        return accepted
 
     async def handle_notifications(
-        self, notifications: SharePointWebhookPayload
+        self, notifications: list[SharePointWebhookNotification]
     ) -> None:
-        """Handle incoming webhook notifications from Microsoft Graph.
+        """Queue syncs for notifications ``authenticated_notifications`` accepted.
 
         Notifications are routed by their ``subscriptionId`` to the stored
         subscription and from there to the knowledge rows referencing it, so a
@@ -77,35 +153,8 @@ class SharepointWebhookService:
         subscription. ChangeKey-based deduplication prevents processing of
         duplicate notifications.
         """
-        values = notifications.get("value")
-        if not values:
-            logger.debug("SharePoint webhook called without notifications")
-            return
-
-        # clientState is the only authentication for this endpoint (it is
-        # unauthenticated at the HTTP layer). Fail closed: without a configured
-        # secret we cannot tell genuine Graph notifications from forged ones, so
-        # reject everything rather than silently accepting unverified payloads.
-        if not self.expected_client_state:
-            logger.error(
-                "Rejecting SharePoint webhook: SHAREPOINT_WEBHOOK_CLIENT_STATE is "
-                "not configured, so notifications cannot be authenticated."
-            )
-            return
-
         by_subscription: dict[str, list[SharePointWebhookNotification]] = {}
-        for notification in values:
-            client_state = notification.get("clientState")
-            # Constant-time compare to avoid leaking the secret via timing.
-            if not isinstance(client_state, str) or not hmac.compare_digest(
-                client_state, self.expected_client_state
-            ):
-                logger.warning(
-                    "Ignoring webhook notification with unexpected clientState. "
-                    "This may indicate a security issue or SHAREPOINT_WEBHOOK_CLIENT_STATE mismatch."
-                )
-                continue
-
+        for notification in notifications:
             subscription_id = notification.get("subscriptionId")
             if not isinstance(subscription_id, str) or not subscription_id:
                 logger.warning("Ignoring webhook notification without subscriptionId")
@@ -252,6 +301,10 @@ class SharepointWebhookService:
                 logger.info(
                     f"Knowledge {knowledge_id_str}: No changes in scope detected. Will NOT queue sync."
                 )
+                continue
+
+            if await self._deferred_to_running_sync(knowledge_id_str):
+                queued_knowledge.add(knowledge_id_str)
                 continue
 
             # Validate that user_integration_db.id is not None before proceeding
@@ -404,6 +457,49 @@ class SharepointWebhookService:
                 f"Queued {task_type.value} task for integration knowledge {knowledge_id_str} "
                 f"({resource_type}_id={resource_id})"
             )
+
+    async def _deferred_to_running_sync(self, knowledge_id: str) -> bool:
+        """Leave the pending marker instead of a job while a sync holds the lease.
+
+        Graph sends several notifications per change and most carry no item
+        id, so each would otherwise queue a job that finds the lease taken and
+        ends as skipped. The marker makes the lease holder run one more delta
+        pass before releasing, which is what the skipped job would have asked
+        for. Without Redis the job is queued as before.
+
+        The lease is checked again after the marker is set: a holder that had
+        already drained the markers and was releasing would otherwise leave
+        this one unread until the next notification. A job queued then takes
+        the lease and drains it.
+        """
+        try:
+            if not await self.redis_client.exists(sync_lock_key(knowledge_id)):
+                return False
+            await self.redis_client.set(
+                sync_pending_key(knowledge_id),
+                "1",
+                ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+            )
+            if not await self.redis_client.exists(sync_lock_key(knowledge_id)):
+                logger.info(
+                    "Sync lease for knowledge %s was released while the pending "
+                    "marker was left; queuing a job to drain it",
+                    knowledge_id,
+                )
+                return False
+        except (RedisError, OSError) as exc:
+            logger.warning(
+                "Could not check the sync lease for knowledge %s (%s); queuing a job",
+                knowledge_id,
+                type(exc).__name__,
+            )
+            return False
+        logger.info(
+            "Knowledge %s is being synced; left a pending marker for the lease "
+            "holder instead of queuing a job",
+            knowledge_id,
+        )
+        return True
 
     async def _get_tenant_admin(self, tenant_id: UUID) -> UserInDB:
         """Get a tenant admin user for creating jobs for tenant_app integrations.

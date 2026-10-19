@@ -8,8 +8,6 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -86,7 +84,6 @@ export function AssistantActions({ assistant }: { assistant: AssistantSparse }) 
   const [showPublish, setShowPublish] = useState(false);
   const [showMove, setShowMove] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
-  const [moveResources, setMoveResources] = useState(false);
 
   const permissions = assistant.permissions ?? [];
 
@@ -109,7 +106,7 @@ export function AssistantActions({ assistant }: { assistant: AssistantSparse }) 
       unwrap(
         browserApi.POST("/api/v1/assistants/{id}/transfer/", {
           params: { path: { id: assistant.id } },
-          body: { target_space_id: targetSpaceId, move_resources: moveResources }
+          body: { target_space_id: targetSpaceId }
         })
       ),
     refresh: invalidate,
@@ -155,16 +152,11 @@ export function AssistantActions({ assistant }: { assistant: AssistantSparse }) 
         open={showMove}
         onOpenChange={setShowMove}
         title={t("move_assistant")}
-        hint={moveResources ? t("move_assistant_hint") : undefined}
+        hint={t("move_assistant_knowledge_hint")}
         confirmLabel={t("move_assistant")}
         pending={move.isPending}
         onMove={(targetSpaceId) => move.mutate(targetSpaceId)}
-      >
-        <Label className="flex items-center justify-between gap-2 py-1 font-normal">
-          {t("include_assistants_knowledge")}
-          <Switch checked={moveResources} onCheckedChange={setMoveResources} />
-        </Label>
-      </MoveResourceDialog>
+      />
       <ConfirmDialogControlled
         open={showDelete}
         onOpenChange={setShowDelete}

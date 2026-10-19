@@ -17,6 +17,8 @@ from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
 
 MAX_ERROR_TEXT_LENGTH = 500
+# Nothing beyond this survives the final cap, so the patterns stop here.
+_MAX_SCANNED_LENGTH = 8 * MAX_ERROR_TEXT_LENGTH
 
 DATABASE_ERROR = "Database error"
 CACHE_ERROR = "Cache service error"
@@ -50,8 +52,14 @@ _HTTPX_STATUS_ERROR = re.compile(
 _URL = re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"<>]*[^\s'\"<>),.;:]")
 _SENSITIVE_PARAMETER = re.compile(
     r"(?i)\b(tempauth|access_token|refresh_token|id_token|client_secret|token"
-    r"|sig|signature|code|password|passwd|secret|api_key|apikey|key)"
+    r"|signature|password|passwd|secret|api_key|apikey)"
     r"=[^\s&'\"),;]+"
+)
+# "code", "key" and "sig" also name plain fields ("status code=429"), so their
+# values are only redacted when shaped like a token: 8+ characters, not all
+# digits.
+_SHORT_SENSITIVE_PARAMETER = re.compile(
+    r"(?i)\b(code|key|sig)=(?!\d+(?:[\s&'\"),;]|$))[^\s&'\"),;]{8,}"
 )
 _AUTHORIZATION = re.compile(r"(?i)\b(authorization['\"]?\s*[:=]\s*['\"]?)[^'\"\n]+")
 _BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{16,}")
@@ -118,6 +126,7 @@ def _http_status(status: int, reason: str | None) -> str:
 
 
 def _clean(text: str) -> str:
+    text = text[:_MAX_SCANNED_LENGTH]
     database = _DATABASE_TEXT.search(text)
     if database is not None:
         text = text[: database.start()] + DATABASE_ERROR
@@ -127,6 +136,7 @@ def _clean(text: str) -> str:
     text = _HTTPX_STATUS_ERROR.sub(r"HTTP \1 \2", text)
     text = _URL.sub(_without_credentials, text)
     text = _SENSITIVE_PARAMETER.sub(rf"\1={_REDACTED}", text)
+    text = _SHORT_SENSITIVE_PARAMETER.sub(rf"\1={_REDACTED}", text)
     text = _AUTHORIZATION.sub(rf"\1{_REDACTED}", text)
     text = _BEARER.sub(f"Bearer {_REDACTED}", text)
     text = _JWT.sub(_REDACTED, text)

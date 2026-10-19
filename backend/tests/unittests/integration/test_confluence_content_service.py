@@ -49,7 +49,6 @@ def token() -> ConfluenceToken:
 def service(user, knowledge, token):
     knowledge_repo = AsyncMock()
     knowledge_repo.one.return_value = knowledge
-    knowledge_repo.update.side_effect = lambda obj: obj
     token_repo = AsyncMock()
     token_repo.one.return_value = token
     info_blob_service = AsyncMock()
@@ -89,14 +88,21 @@ async def test_completed_sync_is_marked_succeeded(service, knowledge, token):
     assert knowledge.last_synced_at is not None
     assert knowledge.last_sync_attempted_at is not None
     assert knowledge.size == 12
-    assert service.integration_knowledge_repo.update.await_args.kwargs["obj"] is (
-        knowledge
-    )
+    written = service.integration_knowledge_repo.update_sync_state
+    service.integration_knowledge_repo.update.assert_not_awaited()
+    assert written.await_args.args == (knowledge.id,)
+    assert written.await_args.kwargs == {
+        "last_sync_status": "success",
+        "last_sync_error": None,
+        "last_synced_at": knowledge.last_synced_at,
+        "last_sync_summary": None,
+        "delta_token": None,
+    }
 
 
 async def test_failed_sync_is_marked_failed_before_reraise(service, knowledge, token):
     get_content = AsyncMock(side_effect=RuntimeError("Confluence unreachable"))
-    update = service.integration_knowledge_repo.update
+    written = service.integration_knowledge_repo.update_sync_state
 
     with patch(_CLIENT, return_value=_client(get_content)):
         with pytest.raises(RuntimeError, match="Confluence unreachable"):
@@ -109,8 +115,11 @@ async def test_failed_sync_is_marked_failed_before_reraise(service, knowledge, t
     assert knowledge.last_sync_status == "error"
     assert knowledge.last_sync_error == "Confluence unreachable"
     assert knowledge.last_synced_at is None
-    assert update.await_args.kwargs["obj"] is knowledge
-    assert update.await_args.kwargs["obj"].last_sync_status == "error"
+    assert written.await_args.args == (knowledge.id,)
+    assert written.await_args.kwargs == {
+        "last_sync_status": "error",
+        "last_sync_error": "Confluence unreachable",
+    }
 
 
 async def test_a_failed_sync_records_no_sql_or_url(service, knowledge, token):
@@ -120,6 +129,7 @@ async def test_a_failed_sync_records_no_sql_or_url(service, knowledge, token):
         Exception('connection to server at "db.internal" failed'),
     )
     get_content = AsyncMock(side_effect=failure)
+    written = service.integration_knowledge_repo.update_sync_state
 
     with patch(_CLIENT, return_value=_client(get_content)):
         with pytest.raises(sa.exc.OperationalError):
@@ -130,3 +140,4 @@ async def test_a_failed_sync_records_no_sql_or_url(service, knowledge, token):
             )
 
     assert knowledge.last_sync_error == "Database error"
+    assert written.await_args.kwargs["last_sync_error"] == "Database error"

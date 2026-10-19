@@ -660,9 +660,10 @@ describe("WrapperDetail navigation", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Starta fullständig synk" }));
 
     await waitFor(() =>
-      expect(toasts.error).toHaveBeenCalledWith("1 av 2 objekt kunde inte köas", {
-        description: "Du saknar behörighet att utföra denna åtgärd."
-      })
+      expect(toasts.error).toHaveBeenCalledWith(
+        `1 av 2 objekt kunde inte köas: ${protokoll.name}`,
+        { description: "Du saknar behörighet att utföra denna åtgärd." }
+      )
     );
     expect(state.synced).toEqual(["i1", "i2"]);
     expect(jobs.trackJob).toHaveBeenCalledWith([job("i1")]);

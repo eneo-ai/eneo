@@ -34,6 +34,7 @@ class WebhookApi:
     subscription_repo: AsyncMock
     subscription: SharePointSubscription
     job_service: AsyncMock
+    redis: AsyncMock
 
 
 @pytest.fixture
@@ -54,6 +55,8 @@ async def api():
     )
     change_keys = AsyncMock()
     change_keys.should_process.return_value = True
+    redis = AsyncMock()
+    redis.exists.return_value = 0
     settings = MagicMock(sharepoint_webhook_client_state=CLIENT_STATE)
     with patch(
         "eneo.integration.infrastructure.sharepoint_webhook_service.get_settings",
@@ -66,6 +69,7 @@ async def api():
             user_repo=AsyncMock(),
             change_key_service=change_keys,
             sharepoint_subscription_repo=subscription_repo,
+            redis_client=redis,
         )
 
     container = MagicMock()
@@ -88,7 +92,13 @@ async def api():
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             yield WebhookApi(
-                client, service, session, subscription_repo, subscription, job_service
+                client,
+                service,
+                session,
+                subscription_repo,
+                subscription,
+                job_service,
+                redis,
             )
 
 
@@ -195,6 +205,41 @@ async def test_bad_bodies_are_refused_before_any_lookup(api, body, headers):
     api.subscription_repo.get_by_subscription_id.assert_not_called()
     api.session.begin.assert_not_called()
     api.session.execute.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "client_state",
+    [
+        pytest.param("not-the-secret", id="wrong"),
+        pytest.param("é", id="non-ascii"),
+        pytest.param(None, id="missing"),
+    ],
+)
+async def test_unauthenticated_notifications_are_acknowledged_without_a_transaction(
+    api, client_state
+):
+    notification = _notification()
+    if client_state is None:
+        del notification["clientState"]
+    else:
+        notification["clientState"] = client_state
+
+    response = await api.client.post(WEBHOOK, json={"value": [notification]})
+
+    assert response.status_code == 202
+    assert response.json() == {"status": "acknowledged"}
+    api.session.begin.assert_not_called()
+    api.session.execute.assert_not_called()
+    api.subscription_repo.get_by_subscription_id.assert_not_called()
+
+
+async def test_elements_that_are_not_objects_are_skipped_without_an_error(api):
+    response = await api.client.post(
+        WEBHOOK, json={"value": [1, "x", None, [], _notification("sub-unknown")]}
+    )
+
+    assert response.status_code == 202
+    api.subscription_repo.get_by_subscription_id.assert_awaited_once_with("sub-unknown")
 
 
 async def test_unknown_subscription_is_acknowledged_but_ignored(api):

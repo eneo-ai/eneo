@@ -380,8 +380,45 @@ async def test_test_credentials_network_error(service, mock_tenant_app):
 
         # Assert
         assert success is False
-        assert error is not None
-        assert "Connection failed" in error
+        assert error == "Connection error"
+
+
+async def test_token_endpoint_refusals_are_logged_without_the_body(
+    service, mock_tenant_app
+):
+    error_response = MagicMock(spec=httpx.Response)
+    error_response.status_code = 401
+    error_response.text = (
+        '{"error_description": "... Trace ID: abc Correlation ID: def"}'
+    )
+    error_response.json.return_value = {
+        "error": "invalid_client",
+        "error_description": "AADSTS7000215: Invalid client secret provided. Trace ID: abc\r\nCorrelation ID: def",
+    }
+    error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Unauthorized", request=MagicMock(), response=error_response
+    )
+
+    with (
+        patch("httpx.AsyncClient") as mock_client_class,
+        patch(
+            "eneo.integration.infrastructure.auth_service.tenant_app_auth_service.logger"
+        ) as log,
+    ):
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.post.return_value = error_response
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await service.get_access_token(mock_tenant_app)
+
+    logged = [str(call.args[0]) % call.args[1:] for call in log.error.call_args_list]
+    assert logged == [
+        f"Failed to acquire token for app {mock_tenant_app.id}: "
+        "AADSTS7000215: Invalid client secret provided."
+    ]
 
 
 async def test_invalid_credentials_raises_error(service, mock_tenant_app):

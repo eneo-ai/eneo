@@ -662,13 +662,11 @@ describe("KnowledgePage", () => {
     );
   });
 
-  it("labels the move dialog's destination picker", async () => {
+  it("offers no move between spaces for a collection", async () => {
     show(makeSpace({ collections: [makeCollection()] }));
     fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Upphandlingspolicy" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Flytta" }));
-    const dialog = await screen.findByRole("dialog", { name: "Flytta samling" });
-    expect(within(dialog).getByRole("combobox", { name: "Destination" })).toBeTruthy();
-    await expectNoAxeViolations(dialog);
+    await screen.findByRole("menuitem", { name: "Ta bort" });
+    expect(screen.queryByRole("menuitem", { name: "Flytta" })).toBeNull();
   });
 
   it("announces how many collections match the filter", async () => {

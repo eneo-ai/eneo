@@ -28,6 +28,8 @@ from eneo.integration.infrastructure.sharepoint_sync_progress import (
 )
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleInDB
 from eneo.server.exception_handlers import add_exception_handlers
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from eneo.spaces.api.space_router import router
@@ -57,6 +59,11 @@ class DocumentsAPI:
         return (
             f"/spaces/{self.space.id}/knowledge/integrations/"
             f"{knowledge_id or self.knowledge.id}/documents/{path}"
+        )
+
+    def change_url(self, route: str, knowledge_id: UUID) -> str:
+        return f"/spaces/{self.space.id}/knowledge/integrations/" + route.format(
+            id=knowledge_id
         )
 
 
@@ -194,6 +201,19 @@ async def _get(api: DocumentsAPI, url: str, **params):
         transport=ASGITransport(app=api.app), base_url="http://test"
     ) as client:
         return await client.get(url, params=params)
+
+
+async def _send(api: DocumentsAPI, method: str, url: str):
+    async with AsyncClient(
+        transport=ASGITransport(app=api.app), base_url="http://test"
+    ) as client:
+        return await client.request(method, url)
+
+
+CHANGE_ROUTES = [
+    pytest.param("DELETE", "remove/{id}/", id="remove"),
+    pytest.param("POST", "{id}/sync/", id="sync"),
+]
 
 
 async def test_documents_page_lists_the_item_with_relative_paths(documents_api):
@@ -347,6 +367,38 @@ async def test_non_member_is_refused_before_the_item_is_looked_up(documents_api,
     assert response.status_code == 403, response.text
     api.info_blobs.get_integration_knowledge_page.assert_not_awaited()
     api.sync_logs.get_by_integration_knowledge.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("method", "route"), CHANGE_ROUTES)
+async def test_non_member_is_refused_before_a_changed_item_is_looked_up(
+    documents_api, method, route
+):
+    api = documents_api
+    api.space.members = {}
+
+    response = await _send(api, method, api.change_url(route, uuid4()))
+
+    assert response.status_code == 403, response.text
+
+
+@pytest.mark.parametrize(("method", "route"), CHANGE_ROUTES)
+async def test_changing_an_item_outside_the_space_is_not_found(
+    documents_api, method, route
+):
+    api = documents_api
+    api.user.roles = [
+        RoleInDB(
+            id=uuid4(),
+            name="Importer",
+            tenant_id=api.user.tenant_id,
+            permissions=[Permission.INTEGRATIONS],
+        )
+    ]
+    api.space.members[api.user.id].role = SpaceRoleValue.ADMIN
+
+    response = await _send(api, method, api.change_url(route, uuid4()))
+
+    assert response.status_code == 404, response.text
 
 
 async def test_distributed_item_is_readable_from_the_receiving_space(documents_api):

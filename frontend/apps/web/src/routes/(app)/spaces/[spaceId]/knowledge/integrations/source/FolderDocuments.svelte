@@ -9,10 +9,12 @@
   import * as Table from "$lib/components/ui/table/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors";
+  import { focusHandoff } from "$lib/core/focus/focusHandoff";
   import { formatDateTime, formatRelativeTime } from "$lib/core/formatting/dateTime";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import {
     DEFAULT_INTEGRATION_DOCUMENTS_QUERY,
+    INTEGRATION_DOCUMENTS_QUERY_MAX_LENGTH,
     documentsPageRange,
     lastPageOffset,
     toggleDocumentsSort,
@@ -59,13 +61,17 @@
   const eneo = getEneo();
   const SEARCH_DEBOUNCE_MS = 300;
 
+  // The query the rows and the sort headers show; a failed request leaves it as it was.
   let query = $state<IntegrationDocumentsQuery>({ ...DEFAULT_INTEGRATION_DOCUMENTS_QUERY });
+  let requestedQuery: IntegrationDocumentsQuery | null = null;
   let documents = $state<IntegrationDocumentsPage | null>(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
   let searchText = $state("");
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   let loadGeneration = 0;
+  let previousButton = $state<HTMLElement | null>(null);
+  let nextButton = $state<HTMLElement | null>(null);
 
   let folderState = $derived(itemState(knowledge, progress));
   let watchState = $derived(itemWatchState(knowledge));
@@ -91,16 +97,17 @@
 
   async function loadDocuments(next: IntegrationDocumentsQuery) {
     const generation = ++loadGeneration;
-    query = next;
+    requestedQuery = next;
     loading = true;
     error = null;
     try {
-      const page = (await eneo.integrations.knowledge.listDocuments({
+      const page = await eneo.integrations.knowledge.listDocuments({
         knowledge,
         space,
         ...next
-      })) as IntegrationDocumentsPage;
+      });
       if (generation !== loadGeneration) return;
+      query = next;
       // Documents deleted while paging can leave this offset past the end.
       const lastOffset = lastPageOffset(page, next.limit);
       if (page.items.length === 0 && next.offset > lastOffset) {
@@ -128,9 +135,15 @@
     void loadDocuments(toggleDocumentsSort(query, column));
   }
 
-  function goToPage(direction: -1 | 1) {
+  async function goToPage(direction: -1 | 1) {
+    // Still clickable from the keyboard while loading: the buttons stay enabled so focus stays put.
+    if (loading) return;
+    const [pressed, other] =
+      direction === 1 ? [nextButton, previousButton] : [previousButton, nextButton];
+    const handoff = focusHandoff(pressed);
     const offset = Math.max(0, (documents?.offset ?? 0) + direction * query.limit);
-    void loadDocuments({ ...query, offset });
+    await loadDocuments({ ...query, offset });
+    await handoff.to(other);
   }
 
   onMount(() => {
@@ -284,6 +297,7 @@
       oninput={onSearchInput}
       aria-label={m.integration_documents_search_label()}
       placeholder={m.integration_documents_search_placeholder()}
+      maxlength={INTEGRATION_DOCUMENTS_QUERY_MAX_LENGTH}
       class="max-w-md"
     />
 
@@ -293,7 +307,7 @@
         role="alert"
       >
         <span>{m.integration_documents_load_failed()}: {error}</span>
-        <Button variant="outline" size="sm" onclick={() => loadDocuments(query)}>
+        <Button variant="outline" size="sm" onclick={() => loadDocuments(requestedQuery ?? query)}>
           {m.retry()}
         </Button>
       </div>
@@ -378,11 +392,16 @@
             · {m.integration_documents_total_size({ size: formatBytes(documents.total_size) })}
           </span>
         </p>
+        <!-- disabled only for a page that does not exist; while loading the buttons stay
+             focusable, since a focused button that turns disabled drops focus to the body. -->
         <div class="flex gap-2">
           <Button
             variant="outline"
             size="sm"
-            disabled={!hasPrevious || loading}
+            bind:ref={previousButton}
+            disabled={!hasPrevious}
+            aria-disabled={loading}
+            class={loading ? "pointer-events-none opacity-50" : undefined}
             onclick={() => goToPage(-1)}
           >
             {m.previous()}
@@ -390,7 +409,10 @@
           <Button
             variant="outline"
             size="sm"
-            disabled={!hasNext || loading}
+            bind:ref={nextButton}
+            disabled={!hasNext}
+            aria-disabled={loading}
+            class={loading ? "pointer-events-none opacity-50" : undefined}
             onclick={() => goToPage(1)}
           >
             {m.next()}

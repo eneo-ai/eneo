@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { conversationUploads } from "../../conversationUploads";
+  import { conversationUploadGroups } from "../../conversationUploads";
   import { opensFilePanel } from "../../toolFileInputs";
   import { getEneo } from "$lib/core/Eneo";
   import {
@@ -49,7 +49,8 @@
   let { children, onNewConversation }: Props = $props();
 
   const chat = getChatService();
-  const uploads = $derived(conversationUploads(chat.currentConversation.messages ?? []));
+  const uploadGroups = $derived(conversationUploadGroups(chat.currentConversation.messages ?? []));
+  const uploads = $derived(uploadGroups.flatMap((group) => group.files));
   const { user } = getAppContext();
 
   // Validate uploads client-side against the backend's per-format size limits
@@ -244,7 +245,7 @@
         open: () => appPane.open(call.tool_call_id)
       })),
     documents: chat.documents.documents,
-    uploads
+    uploads: uploadGroups
   });
 
   let isDragging = $state(false);

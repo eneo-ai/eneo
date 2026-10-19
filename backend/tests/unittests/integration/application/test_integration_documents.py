@@ -18,6 +18,7 @@ from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.integration.domain.entities.sync_log import SyncLog
+from eneo.integration.presentation import models as presentation
 
 SITE = "https://contoso.sharepoint.com/sites/KS"
 FOLDER = f"{SITE}/Shared%20Documents/Protokoll"
@@ -194,6 +195,15 @@ def test_document_items_carry_the_relative_path_and_source_metadata():
     ]
 
 
+@pytest.mark.parametrize(
+    "url", ["javascript:alert(1)", "http://contoso.sharepoint.com/x"]
+)
+def test_documents_only_link_to_https(url):
+    items = document_items([_blob(url=url)], _item())
+
+    assert items[0].url is None
+
+
 def test_confluence_pages_have_no_relative_path():
     item = _item(
         "confluence",
@@ -314,3 +324,31 @@ def test_skipped_documents_reads_the_sync_log(metadata, completed_at, expected):
     )
 
     assert skipped_documents(log).model_dump() == expected
+
+
+def test_served_sync_log_tolerates_a_skipped_item_without_a_name():
+    """Older syncs stored an unnamed item as a null file."""
+    log = presentation.SyncLog(
+        id=uuid4(),
+        integration_knowledge_id=uuid4(),
+        sync_type="full",
+        status="success",
+        metadata={
+            "skipped_details": [
+                {"file": None, "reason": "Missing item id"},
+                {
+                    "file": "a.pdf",
+                    "reason": f"Download failed: {FOLDER}/a.pdf?tempauth=x",
+                },
+            ]
+        },
+        started_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+    )
+
+    assert log.metadata == {
+        "skipped_details": [
+            {"file": "", "reason": "Missing item id"},
+            {"file": "a.pdf", "reason": f"Download failed: {FOLDER}/a.pdf"},
+        ]
+    }

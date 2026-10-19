@@ -106,8 +106,10 @@ async def test_group_editor_can_use_organization_connection(integration_access):
     assert connection.tenant_app is case.app
 
 
-@pytest.mark.parametrize("space_type", ["shared", "organization"])
-@pytest.mark.parametrize("admin", [False, True])
+@pytest.mark.parametrize(
+    ("space_type", "admin"),
+    [("shared", False), ("shared", True), ("organization", True)],
+)
 async def test_personal_connection_is_limited_to_personal_space(
     integration_access, space_type, admin
 ):
@@ -120,6 +122,21 @@ async def test_personal_connection_is_limited_to_personal_space(
         id=case.user.id, email=case.user.email, role=SpaceRoleValue.ADMIN
     )
     with pytest.raises(BadRequestException, match="personal space"):
+        await case.service.get_authorized_integration(
+            case.integration.id, space=case.space
+        )
+
+
+async def test_a_former_admin_cannot_use_the_organization_space(integration_access):
+    """Their membership row outlives the admin role, but grants nothing: the
+    space is not even shown to exist."""
+    case = integration_access
+    case.space.user_id = None
+    case.space.tenant_space_id = None
+    case.space.members[case.user.id] = SpaceMember(
+        id=case.user.id, email=case.user.email, role=SpaceRoleValue.ADMIN
+    )
+    with pytest.raises(NotFoundException, match="Space not found"):
         await case.service.get_authorized_integration(
             case.integration.id, space=case.space
         )
@@ -212,6 +229,7 @@ async def test_new_import_cannot_bypass_connection_owner(integration_access):
         sharepoint_subscription_service=AsyncMock(),
         tenant_sharepoint_app_repo=case.app_repo,
         tenant_app_auth_service=AsyncMock(),
+        org_token_provider=AsyncMock(),
     )
     with pytest.raises(NotFoundException):
         await service.create_space_integration_knowledge(

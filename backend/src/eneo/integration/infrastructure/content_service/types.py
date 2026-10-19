@@ -65,6 +65,10 @@ class SyncStats(TypedDict):
     unchanged_items: int
     skipped_items: int
     skipped_details: list[SkippedDetail]
+    failed_items: NotRequired[int]
+    # Per-pass download counters; never part of a summary.
+    download_attempts: NotRequired[int]
+    download_forbidden: NotRequired[int]
     skipped_total: NotRequired[int]
     skipped_truncated: NotRequired[bool]
     changed_details: NotRequired[list[ChangedDetail]]

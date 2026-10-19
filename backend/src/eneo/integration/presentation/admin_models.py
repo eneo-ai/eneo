@@ -79,6 +79,12 @@ class TenantSharePointAppPublic(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Failures stored before credential errors were cleaned may hold URLs or host names.
+    @field_validator("last_auth_error")
+    @classmethod
+    def _clean_auth_error(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else user_visible_error(value)
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -150,6 +156,13 @@ class SharePointSubscriptionPublic(BaseModel):
     last_webhook_received_at: Optional[datetime] = Field(
         None, description="Most recent valid webhook received for this subscription"
     )
+
+    # Failures stored before renewal errors were cleaned may hold URLs or host names.
+    @field_validator("last_renewal_error")
+    @classmethod
+    def _clean_renewal_error(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else user_visible_error(value)
+
     owner_email: Optional[str] = Field(
         None,
         description="Email of subscription owner (None for organization integrations)",
@@ -157,12 +170,6 @@ class SharePointSubscriptionPublic(BaseModel):
     owner_type: str = Field(..., description="Type of owner: 'user' or 'organization'")
 
     model_config = ConfigDict(from_attributes=True)
-
-    # Failures stored before renewal errors were cleaned may hold URLs or host names.
-    @field_validator("last_renewal_error")
-    @classmethod
-    def _clean_renewal_error(cls, value: Optional[str]) -> Optional[str]:
-        return None if value is None else user_visible_error(value)
 
 
 class SubscriptionRenewalResult(BaseModel):
@@ -234,7 +241,10 @@ class ServiceAccountAuthCallback(BaseModel):
     auth_code: str = Field(
         ..., description="OAuth authorization code from Microsoft callback"
     )
-    state: str = Field(..., description="OAuth state parameter for verification")
+    # The issued state is token_urlsafe(32), 43 characters.
+    state: str = Field(
+        ..., max_length=256, description="OAuth state parameter for verification"
+    )
 
 
 class AdminIntegrationKnowledgeSpace(BaseModel):

@@ -70,11 +70,15 @@ it("updates a subscribed sidebar title and body on argument deltas alone", async
                 ? "export const browser = false"
                 : args.path === "@eneo/eneo-js"
                   ? "export class EneoError extends Error {}"
-                  : "export const toastError = () => {}"
+                  : "export const toastError = () => {}; export const getAnswerFailureMessage = () => undefined"
           }));
-          builder.onResolve({ filter: /^\$lib\// }, (args) => ({
-            path: resolve("src/lib", args.path.slice(5) + (args.path.endsWith(".ts") ? "" : ".ts"))
-          }));
+          // Let esbuild resolve extensions, including generated Paraglide JavaScript.
+          builder.onResolve({ filter: /^\$lib\// }, (args) =>
+            builder.resolve(resolve("src/lib", args.path.slice(5)), {
+              kind: args.kind,
+              resolveDir: args.resolveDir
+            })
+          );
           builder.onLoad({ filter: /\.svelte\.ts$/ }, async (args) => {
             const source = await readFile(args.path, "utf8");
             const js = ts.transpileModule(source, {

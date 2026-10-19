@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createClient, EneoError } from "../client/client.js";
 import { initConversations } from "./conversations.js";
 
 test("turn diagnostics uses the conversation-scoped message endpoint", async () => {
@@ -86,4 +87,58 @@ test("document export availability is a read scoped to the saved document", asyn
       { method: "get", params: { path: { session_id: "s", file_id: "f" } } }
     ]
   ]);
+});
+
+test("a failed answer rejects with the reason the stream gave", async () => {
+  const events = [
+    'event: first_chunk\ndata: {"session_id":"s","answer":""}\n\n',
+    'event: text\ndata: {"session_id":"s","answer":"Hej","references":[]}\n\n',
+    'event: error\ndata: {"session_id":"s","error":"The AI provider could not be reached.",' +
+      '"error_code":503,"code":"provider_unreachable"}\n\n'
+  ];
+  const conversations = initConversations(
+    createClient({
+      baseUrl: "https://eneo.example",
+      fetch: async () =>
+        new Response(events.join(""), { headers: { "Content-Type": "text/event-stream" } })
+    })
+  );
+
+  await assert.rejects(
+    conversations.ask({
+      chatPartner: { id: "assistant-1", type: "assistant" },
+      question: "Hello",
+      files: []
+    }),
+    (error) => {
+      assert.ok(error instanceof EneoError);
+      assert.equal(error.response.code, "provider_unreachable");
+      assert.equal(error.getReadableMessage(), "The AI provider could not be reached.");
+      assert.ok(
+        error.request.endpoint.startsWith("STREAM@https://eneo.example/api/v1/conversations/")
+      );
+      return true;
+    }
+  );
+});
+
+test("a failed answer without a reason is reported as a stream error", async () => {
+  const conversations = initConversations(
+    createClient({
+      baseUrl: "https://eneo.example",
+      fetch: async () =>
+        new Response('event: error\ndata: {"session_id":"s","error":"Boom","error_code":500}\n\n', {
+          headers: { "Content-Type": "text/event-stream" }
+        })
+    })
+  );
+
+  await assert.rejects(
+    conversations.ask({
+      chatPartner: { id: "assistant-1", type: "assistant" },
+      question: "Hello",
+      files: []
+    }),
+    (error) => error instanceof EneoError && error.response.code === "stream_error"
+  );
 });

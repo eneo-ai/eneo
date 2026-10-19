@@ -1,8 +1,10 @@
 """Text extraction for files downloaded from SharePoint.
 
-Office and PDF bytes go through the same ``TextExtractor`` and extraction
-limits as uploads. Every skip reason shown in the sync history is defined
-here so the strings stay stable across the service, the client and tests.
+Office and PDF bytes go through the same sandboxed extractor as uploads and
+crawls: a disposable child process with memory, CPU, archive, output and
+deadline limits (``eneo.files.bounded_extraction``). Every skip reason shown
+in the sync history is defined here so the strings stay stable across the
+service, the client and tests.
 """
 
 import tempfile
@@ -11,6 +13,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Optional
 
+from eneo.files.bounded_extraction import extract_in_process
 from eneo.files.extraction_limits import (
     FileExtractionLimits,
     get_file_extraction_limits,
@@ -21,8 +24,8 @@ from eneo.files.text import (
     ExtractionError,
     ExtractionLimitError,
     PdfPageLimitError,
-    TextExtractor,
     TextSanitizer,
+    UnsupportedFormatError,
 )
 from eneo.integration.infrastructure.content_service.types import SharePointItem
 from eneo.observability.error_text import user_visible_error
@@ -368,28 +371,35 @@ def _decode_text(payload: bytes, charset: Optional[str]) -> str:
     return payload.decode("utf-8", errors="replace")
 
 
-def _parse_with_extractor(
+# The sandboxed worker picks its parser by mimetype. The kind decided here
+# (extension first) wins over the Content-Type header, so the worker is given
+# the canonical type for the kind rather than what SharePoint announced.
+_MIME_BY_KIND: dict[str, str] = {
+    PDF_KIND: "application/pdf",
+    DOCX_KIND: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    XLSX_KIND: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    PPTX_KIND: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+
+
+async def _parse_in_sandbox(
     kind: str, payload: bytes, filename: str, limits: FileExtractionLimits
 ) -> str:
     with tempfile.TemporaryDirectory(prefix="sharepoint-extract-") as tmp:
         # Keep the extension so parsers see the same name shape as uploads.
         path = Path(tmp) / f"download{_extension(filename)}"
         path.write_bytes(payload)
-        if kind == PDF_KIND:
-            return TextExtractor.extract_from_pdf(path, filename, limits=limits)
-        if kind == DOCX_KIND:
-            return TextExtractor.extract_from_docx(path, filename)
-        if kind == XLSX_KIND:
-            text = TextExtractor.extract_from_xlsx(path, filename)
-            # The upload extractor always leads with the file name; a workbook
-            # with nothing else in it must still count as empty.
-            return "" if text.strip() == f"File: {filename}" else text
-        if kind == PPTX_KIND:
-            return TextExtractor.extract_from_pptx(path, filename)
-        raise ValueError(f"No parser for kind {kind!r}")
+        text = await extract_in_process(
+            path, _MIME_BY_KIND[kind], filename, limits=limits
+        )
+    if kind == XLSX_KIND and text.strip() == f"File: {filename}":
+        # The upload extractor always leads with the file name; a workbook
+        # with nothing else in it must still count as empty.
+        return ""
+    return text
 
 
-def extract_sharepoint_content(
+async def extract_sharepoint_content(
     payload: bytes,
     content_type: str,
     filename: str,
@@ -431,32 +441,33 @@ def extract_sharepoint_content(
             )
     else:
         try:
-            text = _parse_with_extractor(kind, payload, filename, limits)
+            text = await _parse_in_sandbox(kind, payload, filename, limits)
         except PdfPageLimitError:
             return ExtractionResult.skipped(
                 extraction_limit_reason(f"{limits.max_pdf_pages} PDF pages"),
                 content_type,
             )
-        except ExtractionLimitError:
+        except ExtractionLimitError as e:
+            # The child exits with one status for memory, CPU, archive and
+            # output caps alike, so the reason names the sandbox's limit.
             return ExtractionResult.skipped(
-                extraction_limit_reason(f"{limits.max_output_bytes} bytes of text"),
-                content_type,
+                extraction_limit_reason(e.limit), content_type
             )
         except EncryptedFileError:
             return ExtractionResult.error("Password-protected file", content_type)
         except CorruptFileError:
             return ExtractionResult.error("Corrupt or malformed file", content_type)
+        except UnsupportedFormatError:
+            label = _extension(filename) or mime or "binary"
+            return ExtractionResult.skipped(
+                unsupported_type_reason(label), content_type
+            )
         except ExtractionError as e:
             return ExtractionResult.error(e.message, content_type)
         except Exception as e:
             logger.error(f"Unexpected extraction error for '{filename}': {e}")
             return ExtractionResult.error(
                 f"{type(e).__name__} while extracting {kind}", content_type
-            )
-        if len(text.encode("utf-8")) > limits.max_output_bytes:
-            return ExtractionResult.skipped(
-                extraction_limit_reason(f"{limits.max_output_bytes} bytes of text"),
-                content_type,
             )
 
     text = TextSanitizer.sanitize(text).strip()

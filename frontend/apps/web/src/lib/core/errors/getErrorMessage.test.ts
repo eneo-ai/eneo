@@ -1,4 +1,4 @@
-import { EneoError } from "@eneo/eneo-js";
+import { EneoError, type EneoErrorCode } from "@eneo/eneo-js";
 import { describe, expect, it, vi } from "vitest";
 import en from "../../../../messages/en.json";
 import sv from "../../../../messages/sv.json";
@@ -6,6 +6,7 @@ import sv from "../../../../messages/sv.json";
 vi.mock("$lib/paraglide/messages", () => ({
   m: {
     eneo_error_9008: () => "Usage quota exceeded.",
+    eneo_error_9010: () => "The AI service is temporarily unavailable.",
     eneo_error_9042: () => "Credential encryption must be configured before saving secrets.",
     eneo_error_9048: () => "Slug taken.",
     eneo_error_9049: () => "Published Skills are kept.",
@@ -19,6 +20,14 @@ vi.mock("$lib/paraglide/messages", () => ({
     eneo_error_9063: () => "Active website sync.",
     eneo_error_9064: () => "Crawler cleanup pending.",
     eneo_error_9069: () => "Deactivate it in the governance first.",
+    chat_answer_failed_internal: () => "An error in Eneo interrupted the answer.",
+    provider_failure_unavailable: () => "The provider is having problems.",
+    provider_failure_timeout: () => "The model did not respond in time.",
+    provider_failure_unreachable: () => "Could not connect to the provider.",
+    provider_failure_connection_lost: () => "The connection was lost.",
+    provider_failure_rate_limited: () => "A usage limit was reached.",
+    provider_failure_model_not_found: () => "The provider does not offer this model.",
+    provider_failure_rejected_request: () => "The provider rejected the request.",
     job_failure_tenant_quota_exceeded: () => "The organization's quota is full.",
     job_failure_user_quota_exceeded: () => "Your quota is full.",
     request_failed: () => "Request failed."
@@ -106,6 +115,70 @@ describe("getErrorMessage", () => {
       "This name is already in use. Choose a different one."
     );
     expect(sv[`eneo_error_${NAME_COLLISION}`]).toBe("Namnet används redan. Välj ett annat namn.");
+  });
+
+  it("tells the user on whose side an answer failed", () => {
+    const httpError = (code: string, eneoCode: EneoErrorCode = 9010) =>
+      new EneoError(
+        "AI service is temporarily unavailable. Please try again later.",
+        "RESPONSE",
+        503,
+        eneoCode,
+        { eneo_error_code: eneoCode, code, details: { reason: code } },
+        { endpoint: "STREAM@/api/v1/conversations/" }
+      );
+    // The stream's error event arrives after HTTP 200 and carries no Eneo code.
+    const streamError = (code: string) =>
+      new EneoError("Backend fallback", "SERVER", 200, 0, { code, message: "Backend fallback" });
+
+    expect(getErrorMessage(httpError("provider_unavailable"))).toBe(
+      "The provider is having problems."
+    );
+    expect(getErrorMessage(httpError("provider_timeout"))).toBe(
+      "The model did not respond in time."
+    );
+    expect(getErrorMessage(httpError("provider_unreachable"))).toBe(
+      "Could not connect to the provider."
+    );
+    expect(getErrorMessage(httpError("provider_rate_limited"))).toBe("A usage limit was reached.");
+    expect(getErrorMessage(httpError("provider_model_not_found"))).toBe(
+      "The provider does not offer this model."
+    );
+    expect(getErrorMessage(httpError("provider_rejected_request", 9041))).toBe(
+      "The provider rejected the request."
+    );
+    expect(getErrorMessage(streamError("provider_connection_lost"))).toBe(
+      "The connection was lost."
+    );
+    expect(getErrorMessage(streamError("stream_error"))).toBe(
+      "An error in Eneo interrupted the answer."
+    );
+    // An unclassified provider failure keeps the general 9010 copy.
+    expect(getErrorMessage(httpError("provider_error"))).toBe(
+      "The AI service is temporarily unavailable."
+    );
+    expect(getErrorMessage(streamError("provider_error"))).toBe(
+      "The AI service is temporarily unavailable."
+    );
+  });
+
+  it("keeps every answer failure message in both catalogues", () => {
+    const keys = [
+      "provider_failure_unavailable",
+      "provider_failure_timeout",
+      "provider_failure_unreachable",
+      "provider_failure_connection_lost",
+      "provider_failure_rate_limited",
+      "provider_failure_model_not_found",
+      "provider_failure_rejected_request",
+      "chat_answer_failed_internal",
+      "chat_answer_failed"
+    ];
+    for (const catalogue of [en, sv] as Record<string, string>[]) {
+      for (const key of keys) {
+        expect(catalogue[key]?.trim(), key).toBeTruthy();
+      }
+    }
   });
 
   it("tells the user which storage quota refused the write", () => {

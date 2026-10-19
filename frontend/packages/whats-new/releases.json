@@ -252,7 +252,7 @@
           },
           "body": {
             "en": "In the import dialog, the folder tree follows the arrow keys, Home, End, Space and Enter. A folder with more items than the list shows says so, and the search still finds the rest.",
-            "sv": "I importdialogen styrs mappträdet med piltangenterna, Home, End, mellanslag och Enter. En mapp med fler objekt än listan visar säger till, och sökningen hittar ändå resten."
+            "sv": "I importdialogen styrs mappträdet med piltangenterna, Home, End, mellanslag och Enter. När en mapp innehåller fler objekt än listan visar får du veta det, och sökningen hittar ändå resten."
           }
         },
         {

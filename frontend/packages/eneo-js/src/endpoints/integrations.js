@@ -301,7 +301,7 @@ export function initIntegrations(client) {
        * @param {number=} args.limit 1..100
        * @param {number=} args.offset
        *
-       * @returns {Promise<any>} An `IntegrationDocumentsPage`
+       * @returns {Promise<import("../types/schema").components["schemas"]["IntegrationDocumentsPage"]>}
        * @throws {EneoError}
        * */
       listDocuments: async ({ knowledge, space, q, sort, order, limit, offset }) => {
@@ -331,7 +331,7 @@ export function initIntegrations(client) {
        * @param {{id: string}} args.knowledge IntegrationKnowledge
        * @param {{id: string}} args.space Space where the knowledge belongs
        *
-       * @returns {Promise<any>} An `IntegrationSkippedDocuments`
+       * @returns {Promise<import("../types/schema").components["schemas"]["IntegrationSkippedDocuments"]>}
        * @throws {EneoError}
        * */
       listSkippedDocuments: async ({ knowledge, space }) => {

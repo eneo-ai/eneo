@@ -1,9 +1,10 @@
 <!--
   What a conversation has to show in the panel, as one list: interactive tool
-  views, documents created in the chat and uploaded files. The panel
-  overview and the switcher in the panel's title both show it. It is the one
-  full list of uploads; a message and the composer only summarise them and
-  open this.
+  views, documents created in the chat and uploaded files, the latter by the
+  question they were sent with. The panel overview and the switcher in the
+  panel's title both show it. It is the one full list of uploads; a message
+  and the composer only summarise them and open this, a message's bundle at
+  its own group.
 -->
 <script lang="ts">
   import { sanitizeLinkHref } from "$lib/components/markdown/index.js";
@@ -13,6 +14,7 @@
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { pickFileIcon } from "$lib/core/formatting/pickFileIcon";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
+  import type { UploadGroup } from "$lib/features/chat/conversationUploads";
   import type { ConversationDocument } from "$lib/features/chat/documentVersions";
   import { m } from "$lib/paraglide/messages";
   import AppWindow from "@lucide/svelte/icons/app-window";
@@ -31,16 +33,19 @@
     views = [],
     fullHeight = false,
     focusSection = null,
+    focusGroup = null,
     onfile,
     onview
   }: {
     preview: FilePreview;
     documents: ConversationDocument[];
-    uploads?: PreviewFile[];
+    uploads?: UploadGroup[];
     views?: PanelView[];
     fullHeight?: boolean;
     /** A section to scroll to and focus when the list opens, e.g. from a file bundle. */
     focusSection?: "uploads" | null;
+    /** The upload group to scroll to and mark instead, by its key: the bundle's own files. */
+    focusGroup?: string | null;
     onfile: (file: PreviewFile) => void;
     onview?: (view: PanelView) => void;
   } = $props();
@@ -62,42 +67,81 @@
       .join(" · ");
   };
 
+  const allUploads = $derived(uploads.flatMap((group) => group.files));
+  // Files from more than one question are listed by the question; one
+  // question's files need no grouping under the section heading.
+  const grouped = $derived(uploads.length > 1);
+
   // A long upload list gets a filter: text on the name, and one type at a time.
   const FILTER_FROM = 8;
   let query = $state("");
   let selectedType = $state<string | null>(null);
-  const filterable = $derived(uploads.length > FILTER_FROM);
+  const filterable = $derived(allUploads.length > FILTER_FROM);
   const typeOf = (file: PreviewFile) => fileExtension(file.name) || m.unknown();
   const types = $derived.by(() => {
     // eslint-disable-next-line svelte/prefer-svelte-reactivity -- a tally, never rendered
     const counts = new Map<string, number>();
-    for (const file of uploads) counts.set(typeOf(file), (counts.get(typeOf(file)) ?? 0) + 1);
+    for (const file of allUploads) counts.set(typeOf(file), (counts.get(typeOf(file)) ?? 0) + 1);
     return [...counts]
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   });
-  const shownUploads = $derived.by(() => {
-    if (!filterable) return uploads;
+  // Every group with a file that passes the filter, with the files that do.
+  const shownGroups = $derived.by(() => {
+    if (!filterable) return uploads.map((group) => ({ ...group, shown: group.files }));
     const needle = query.trim().toLowerCase();
-    return uploads.filter(
-      (file) =>
-        (selectedType === null || typeOf(file) === selectedType) &&
-        (!needle || displayName(file).toLowerCase().includes(needle))
-    );
+    return uploads
+      .map((group) => ({
+        ...group,
+        shown: group.files.filter(
+          (file) =>
+            (selectedType === null || typeOf(file) === selectedType) &&
+            (!needle || displayName(file).toLowerCase().includes(needle))
+        )
+      }))
+      .filter((group) => group.shown.length > 0);
   });
-  const uploadsBytes = $derived(uploads.reduce((sum, file) => sum + bytesOf(file), 0));
+  const bytesOfAll = (files: PreviewFile[]) => files.reduce((sum, file) => sum + bytesOf(file), 0);
+  const uploadsBytes = $derived(bytesOfAll(allUploads));
+
+  // The group a message's bundle opened the list at: marked, and where the
+  // list lands instead of the section heading.
+  const markedGroup = $derived(
+    grouped && uploads.some((group) => group.key === focusGroup) ? focusGroup : null
+  );
+  const groupDetail = (group: (typeof shownGroups)[number]) =>
+    [
+      group.shown.length < group.files.length
+        ? m.conversation_uploads_group_matching({
+            shown: group.shown.length,
+            count: group.files.length
+          })
+        : group.files.length === 1
+          ? m.conversation_uploads_group_files_one({ count: 1 })
+          : m.conversation_uploads_group_files_other({ count: group.files.length }),
+      bytesOfAll(group.files) > 0 ? formatBytes(bytesOfAll(group.files)) : ""
+    ]
+      .filter(Boolean)
+      .join(" · ");
 
   // Opened on the uploads: the list scrolls there and the heading takes the
-  // focus, after the panel's own focus handling has run.
+  // focus, after the panel's own focus handling has run. A marked group is
+  // the destination instead; its heading lands at the top of the list.
   let uploadsHeading = $state<HTMLElement | null>(null);
   $effect(() => {
     const heading = uploadsHeading;
-    if (focusSection !== "uploads" || !heading) return;
+    if (focusSection !== "uploads" || markedGroup !== null || !heading) return;
     void tick().then(() => {
       heading.scrollIntoView({ block: "start" });
       heading.focus();
     });
   });
+  const landOn = (heading: HTMLElement) => {
+    void tick().then(() => {
+      heading.scrollIntoView({ block: "start" });
+      heading.focus();
+    });
+  };
 
   // A row is a ghost button on one line, with the hover of a row instead of
   // the button's; the one on show is marked as the selection.
@@ -106,6 +150,12 @@
   const currentClass = "bg-accent-dimmer hover:bg-accent-dimmer";
   const pillClass =
     "aria-pressed:bg-accent-dimmer aria-pressed:text-accent-stronger h-6 px-2 text-xs font-normal tabular-nums aria-pressed:font-medium";
+  // A group is a bordered block only while marked: the same accent outline as
+  // the bundle that opened it, so the two read as one thing. The rows keep
+  // their own selection.
+  const groupClass = "rounded-lg border p-0.5 transition-colors";
+  const markedClass =
+    "border-accent-default motion-safe:animate-[upload-group-lit_1.2s_cubic-bezier(0.16,1,0.3,1)]";
 </script>
 
 {#snippet row(Icon: typeof AppWindow, name: string, detail: string, current: boolean)}
@@ -211,7 +261,7 @@
         tabindex="-1"
         class="text-muted-foreground px-2 pt-2 pb-1 text-xs font-medium tabular-nums focus-visible:outline-none"
       >
-        {m.conversation_documents_uploads()} · {uploads.length}
+        {m.conversation_documents_uploads()} · {allUploads.length}
         {#if uploadsBytes > 0}
           · {formatBytes(uploadsBytes)}
         {/if}
@@ -238,7 +288,7 @@
               aria-pressed={selectedType === null}
               onclick={() => (selectedType = null)}
             >
-              {m.conversation_uploads_filter_all({ count: uploads.length })}
+              {m.conversation_uploads_filter_all({ count: allUploads.length })}
             </Button>
             {#each types as type (type.name)}
               <Button
@@ -255,17 +305,65 @@
           </div>
         </div>
       {/if}
-      {#if shownUploads.length > 0}
-        <ul class="flex flex-col">
-          {#each shownUploads as file (file.id)}
-            {@render entry(file, [file])}
-          {/each}
-        </ul>
-      {:else}
+      {#if shownGroups.length === 0}
         <p class="text-muted-foreground px-2 py-1.5 text-xs">
           {m.conversation_uploads_filter_empty()}
         </p>
+      {:else if grouped}
+        {#each shownGroups as group (group.key)}
+          {@const marked = group.key === markedGroup}
+          <section
+            aria-label={m.conversation_uploads_group({ ordinal: group.ordinal })}
+            class={[groupClass, marked ? markedClass : "border-transparent"]}
+          >
+            <h4
+              tabindex="-1"
+              class="flex items-center gap-2 px-1.5 pt-1.5 pb-1 text-[11px] tabular-nums focus-visible:outline-none"
+              {@attach (heading) => {
+                if (marked) landOn(heading);
+              }}
+            >
+              <span
+                class={[
+                  "shrink-0",
+                  marked ? "text-accent-stronger font-medium" : "text-muted-foreground"
+                ]}
+              >
+                {m.conversation_uploads_group({ ordinal: group.ordinal })}
+                <span class="font-normal">· {groupDetail(group)}</span>
+              </span>
+              <span
+                class={["h-px min-w-4 flex-1", marked ? "bg-accent-default/40" : "bg-border"]}
+                aria-hidden="true"
+              ></span>
+            </h4>
+            <ul class="flex flex-col">
+              {#each group.shown as file (file.id)}
+                {@render entry(file, [file])}
+              {/each}
+            </ul>
+          </section>
+        {/each}
+      {:else}
+        <ul class="flex flex-col">
+          {#each shownGroups[0].shown as file (file.id)}
+            {@render entry(file, [file])}
+          {/each}
+        </ul>
       {/if}
     </section>
   {/if}
 </div>
+
+<style>
+  /* The marked group lights up once as the list lands on it, then settles
+     into its outline: one motion, from the colour the bundle itself carries. */
+  @keyframes -global-upload-group-lit {
+    from {
+      background-color: var(--accent-dimmer);
+    }
+    to {
+      background-color: transparent;
+    }
+  }
+</style>

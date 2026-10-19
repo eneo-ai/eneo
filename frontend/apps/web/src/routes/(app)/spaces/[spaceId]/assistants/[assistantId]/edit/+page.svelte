@@ -398,36 +398,22 @@
             selectedModel={materialModel}
           />
           <div class="border-default mt-8 space-y-6 border-t pt-8">
-            <section aria-labelledby="material-space-knowledge">
-              <h4 id="material-space-knowledge" class="font-medium">{m.knowledge()}</h4>
-              <p class="text-secondary mt-1 text-sm">
-                {materialKnowledgeUsesTools
-                  ? m.material_knowledge_tool_summary()
-                  : m.material_knowledge_inject_summary()}
+            <p class="text-secondary text-sm">
+              {materialKnowledgeUsesTools
+                ? m.material_knowledge_tool_summary()
+                : m.material_knowledge_inject_summary()}
+            </p>
+            {#if $update.knowledge_mode === "tool" && materialModel && !materialModel.supports_tool_calling}
+              <p class="text-warning-stronger mt-2 text-sm">
+                {m.material_knowledge_model_fallback()}
               </p>
-              {#if $update.knowledge_mode === "tool" && materialModel && !materialModel.supports_tool_calling}
-                <p class="text-warning-stronger mt-2 text-sm">
-                  {m.material_knowledge_model_fallback()}
-                </p>
-              {/if}
-              <SelectKnowledge
-                originMode="personal"
-                aria={{ "aria-labelledby": "material-space-knowledge" }}
-                bind:selectedWebsites={$update.websites}
-                bind:selectedCollections={$update.groups}
-                bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
-              />
-            </section>
-            <section aria-labelledby="material-org-knowledge">
-              <h4 id="material-org-knowledge" class="font-medium">{m.organization_knowledge()}</h4>
-              <SelectKnowledge
-                originMode="organization"
-                aria={{ "aria-labelledby": "material-org-knowledge" }}
-                bind:selectedWebsites={$update.websites}
-                bind:selectedCollections={$update.groups}
-                bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
-              />
-            </section>
+            {/if}
+            <SelectKnowledge
+              showHeadings
+              bind:selectedWebsites={$update.websites}
+              bind:selectedCollections={$update.groups}
+              bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
+            />
           </div>
         </Settings.Row>
 

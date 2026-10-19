@@ -295,21 +295,28 @@ export function WrapperActions({
       const refused = results.find(
         (result): result is PromiseRejectedResult => result.status === "rejected"
       );
-      return { jobs, total: results.length, refusal: refused?.reason as unknown };
+      const failedNames = resyncable
+        .filter((_, index) => results[index].status === "rejected")
+        .map((item) => item.name);
+      return { jobs, total: results.length, failedNames, refusal: refused?.reason as unknown };
     },
-    onSuccess: ({ jobs, total, refusal }) => {
+    onSuccess: ({ jobs, total, failedNames, refusal }) => {
       if (jobs.length > 0) trackJob(jobs);
       invalidate();
       void queryClient.invalidateQueries({
         queryKey: ["integrations", "sync-progress", space.id]
       });
       setShowResync(false);
-      const failed = total - jobs.length;
+      const failed = failedNames.length;
       if (failed > 0) {
         toast.error(
           total === 1
             ? t("resync_all_wrapper_failed_one")
-            : t("resync_all_wrapper_partial_failure", { failed, total }),
+            : t("resync_all_wrapper_partial_failure", {
+                failed,
+                total,
+                names: failedNames.join(", ")
+              }),
           // The first refusal's reason, in the catalog's words as toastApiError gives them.
           { description: getErrorMessage(refusal, t) }
         );

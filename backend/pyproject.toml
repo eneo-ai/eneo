@@ -43,8 +43,9 @@ dependencies = [
     "sentry-sdk[fastapi]==2.8.0",
     "greenlet>=3.2.2,<4",
     "litellm==1.104.2",
+    "openai>=2.44.0,<3",  # Base exception type shared by LiteLLM/provider errors
     "jsonschema>=4.26,<5",  # Native export contract validation
-    "mcp>=1.2.0,<2", # Model Context Protocol SDK for MCP server integration
+    "mcp>=1.30.0,<2", # Model Context Protocol SDK for MCP server integration
     # MCP memory-stream types; 4.14.2 contains the security fixes. Starlette
     # 1.3.1 TestClient warns on AnyIO 4.15; remove the cap after its upgrade.
     "anyio>=4.14.2,<4.15",
