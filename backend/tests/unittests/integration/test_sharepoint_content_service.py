@@ -20,6 +20,7 @@ from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     DeltaTokenExpiredException,
     MissingDownloadUrlError,
 )
+from eneo.integration.infrastructure.content_service import sharepoint_content_service
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
     ScopeFolderUnavailable,
     SharePointContentService,
@@ -2360,6 +2361,7 @@ class TestOutOfScopeFolderSubtreeCleanup:
                 stats=stats,
                 scope_folder_path="/Documents/A",
                 known_subfolder_ids=set(),
+                indexed_ids={"child-1", "child-2"},
             )
 
         assert repo.delete_by_sharepoint_item_and_integration_knowledge.await_count == 2
@@ -2398,6 +2400,7 @@ class TestOutOfScopeFolderSubtreeCleanup:
                 stats=stats,
                 scope_folder_path="/A",
                 known_subfolder_ids=set(),
+                indexed_ids={"od-child"},
             )
 
         mock_enum.assert_awaited_once()
@@ -2466,6 +2469,7 @@ class TestOutOfScopeFolderSubtreeCleanup:
                 stats=stats,
                 scope_folder_path="/Documents/A",
                 known_subfolder_ids=set(),
+                indexed_ids={"child-1"},
             )
 
         mock_enum.assert_not_called()
@@ -3612,6 +3616,121 @@ class TestReconcileWarnings:
         assert "reconcile_warning" not in stats
 
 
+class TestReconcileAboveTheCap:
+    """Above the safety cap the listing is not trusted, but Graph's answer about
+    each orphan is: a large deletion is cleaned, an incomplete listing is not."""
+
+    @pytest.fixture
+    def ik(self):
+        ik = MagicMock()
+        ik.id = uuid4()
+        return ik
+
+    async def _reconcile(self, service, mock_dependencies, ik, orphan_ids, client):
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), item_id) for item_id in orphan_ids]
+        )
+        stats = service._initialize_stats()
+        with (
+            patch.object(
+                service,
+                "_enumerate_authoritative_item_ids",
+                AsyncMock(return_value=set()),
+            ),
+            patch.object(
+                service, "_delete_local_sharepoint_item", AsyncMock(return_value=1)
+            ) as delete,
+        ):
+            await service._reconcile_indexed_blobs(
+                client=client,
+                integration_knowledge=ik,
+                resource_type="site",
+                site_id="site-1",
+                drive_id="drive-1",
+                folder_id=None,
+                stats=stats,
+            )
+        return stats, [call.kwargs["item_id"] for call in delete.await_args_list]
+
+    async def test_orphans_graph_confirms_gone_are_removed_and_the_rest_reported(
+        self, service, mock_dependencies, ik
+    ):
+        orphan_ids = [f"item-{i}" for i in range(40)]
+        gone = {f"item-{i}": 404 if i % 4 else 410 for i in range(0, 40, 2)}
+
+        async def metadata(*, drive_id, item_id):
+            if item_id in gone:
+                raise _http_error(gone[item_id], "Not Found")
+            return {"id": item_id}
+
+        client = AsyncMock()
+        client.get_file_metadata.side_effect = metadata
+
+        stats, removed = await self._reconcile(
+            service, mock_dependencies, ik, orphan_ids, client
+        )
+
+        assert sorted(removed) == sorted(gone)
+        assert client.get_file_metadata.await_count == 40
+        assert "40 of 40" in stats["reconcile_warning"]
+        assert "safety cap" in stats["reconcile_warning"]
+        assert "removed 20" in stats["reconcile_warning"]
+        assert "kept 20" in stats["reconcile_warning"]
+
+    async def test_a_large_deletion_graph_confirms_in_full_is_cleaned_quietly(
+        self, service, mock_dependencies, ik
+    ):
+        client = AsyncMock()
+        client.get_file_metadata.side_effect = _http_error(404, "Not Found")
+
+        stats, removed = await self._reconcile(
+            service, mock_dependencies, ik, [f"item-{i}" for i in range(30)], client
+        )
+
+        assert len(removed) == 30
+        assert "reconcile_warning" not in stats
+
+    async def test_verification_stops_when_graph_cannot_answer(
+        self, service, mock_dependencies, ik
+    ):
+        """A failing Graph says nothing about the items; asking it about every
+        orphan would only stretch the sync."""
+        client = AsyncMock()
+        client.get_file_metadata.side_effect = [
+            _http_error(404, "Not Found"),
+            _http_error(503, "Service Unavailable"),
+            _http_error(404, "Not Found"),
+        ]
+
+        stats, removed = await self._reconcile(
+            service, mock_dependencies, ik, [f"item-{i}" for i in range(30)], client
+        )
+
+        assert removed == ["item-0"]
+        assert client.get_file_metadata.await_count == 2
+        assert "removed 1" in stats["reconcile_warning"]
+        assert "kept 29" in stats["reconcile_warning"]
+
+    async def test_verification_is_bounded_per_sync(
+        self, service, mock_dependencies, ik, monkeypatch
+    ):
+        monkeypatch.setattr(
+            sharepoint_content_service, "_RECONCILE_MAX_VERIFIED_ORPHANS", 25
+        )
+        client = AsyncMock()
+        client.get_file_metadata.side_effect = _http_error(404, "Not Found")
+
+        stats, removed = await self._reconcile(
+            service, mock_dependencies, ik, [f"item-{i}" for i in range(60)], client
+        )
+
+        assert client.get_file_metadata.await_count == 25
+        assert len(removed) == 25
+        assert "kept 35" in stats["reconcile_warning"]
+
+
 class TestFullSyncUsesStoredDrive:
     """Enumeration and reconciliation run against the drive the knowledge is bound to."""
 
@@ -3668,7 +3787,7 @@ class TestDeltaFolderScopeOrdering:
     ):
         """Without ``folder_metadata`` Graph answers 404 for the scope folder, so
         the pass has only the stored path and the folder's own delta entry; an
-        exception is what the metadata read raises."""
+        exception is what the metadata read raises, a function answers per item."""
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
         mock_dependencies["integration_knowledge_repo"].one.return_value = ik
         mock_dependencies[
@@ -3687,6 +3806,7 @@ class TestDeltaFolderScopeOrdering:
                 get_file_metadata=(
                     AsyncMock(side_effect=folder_metadata)
                     if isinstance(folder_metadata, Exception)
+                    or callable(folder_metadata)
                     else AsyncMock(return_value=folder_metadata)
                 ),
                 get_file_extraction_by_id=AsyncMock(
@@ -3887,6 +4007,11 @@ class TestDeltaFolderScopeOrdering:
             },
             {"id": "unplaced", "name": "x.docx", "file": {}, "parentReference": {}},
         ]
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), item["id"]) for item in descendants]
+        )
         scope_folder_now = {
             "id": "folder-a",
             "name": "A",
@@ -4125,6 +4250,433 @@ class TestDeltaFolderScopeOrdering:
                 "reason": "Could not list folder contents: throttled" + RETRY_NOTE,
             }
         ]
+
+    @staticmethod
+    def _indexed(mock_dependencies, *item_ids):
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), item_id) for item_id in item_ids]
+        )
+        return repo.get_sharepoint_item_ids_for_integration_knowledge
+
+    @staticmethod
+    def _graph_places(**located):
+        """get_file_metadata as Graph answers it outside delta, path included:
+        the scope folder under /Documents, each named item under the parent
+        path given, or the error given."""
+
+        async def metadata(*, drive_id, item_id):
+            if item_id == "folder-a":
+                return {
+                    "id": "folder-a",
+                    "name": "A",
+                    "folder": {},
+                    "parentReference": {
+                        "id": "documents-folder",
+                        "path": "/drives/drive-123/root:/Documents",
+                    },
+                }
+            answer = located[item_id]
+            if isinstance(answer, Exception):
+                raise answer
+            return {
+                "id": item_id,
+                "name": item_id,
+                "parentReference": {
+                    "id": "some-folder",
+                    "path": f"/drives/drive-123/root:{answer}",
+                },
+            }
+
+        return metadata
+
+    def _removed(self, mock_dependencies):
+        delete = mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge
+        return [call.kwargs["sharepoint_item_id"] for call in delete.await_args_list]
+
+    async def test_a_pathless_file_listed_before_its_folder_stays_in_scope(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        """Graph orders a change set arbitrarily and need not give a path in
+        delta; the folders of the whole set place a file, not those seen first."""
+        changes = [
+            {
+                "id": "n-1",
+                "name": "nested.docx",
+                "webUrl": "https://x/nested.docx",
+                "parentReference": {"id": "sub-folder"},
+            },
+            {
+                "id": "sub-folder",
+                "name": "Sub",
+                "folder": {},
+                "parentReference": {"id": "folder-a"},
+            },
+        ]
+        self._indexed(mock_dependencies, "n-1")
+
+        with patch.object(
+            service, "_enumerate_authoritative_items", AsyncMock(return_value=[])
+        ):
+            client, result = await self._run_delta(
+                service,
+                mock_dependencies,
+                mock_oauth_token,
+                folder_scoped,
+                changes,
+                folder_metadata=self._graph_places(),
+            )
+
+        assert self._removed(mock_dependencies) == []
+        client.get_file_metadata.assert_awaited_once_with(
+            drive_id="drive-123", item_id="folder-a"
+        )
+        client.get_file_extraction_by_id.assert_awaited_once_with(
+            drive_id="drive-123", item_id="n-1"
+        )
+        assert folder_scoped.delta_token == "new-token"
+        assert "1 file" in result
+
+    @pytest.mark.parametrize(
+        ("graph_path", "removed"),
+        [("/Documents/A/Sub", []), ("/Documents/B", ["deep-1"])],
+        ids=["still in scope", "moved out"],
+    )
+    async def test_an_indexed_pathless_file_is_placed_by_graph_before_it_goes(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        folder_scoped,
+        graph_path,
+        removed,
+    ):
+        """A missing path is no evidence of a move: the file's parent is just
+        not part of this change set. Graph says where the file is before its
+        documents go."""
+        changes = [
+            {
+                "id": "deep-1",
+                "name": "deep.docx",
+                "webUrl": "https://x/deep.docx",
+                "parentReference": {"id": "sub-folder"},
+            }
+        ]
+        self._indexed(mock_dependencies, "deep-1")
+
+        client, _ = await self._run_delta(
+            service,
+            mock_dependencies,
+            mock_oauth_token,
+            folder_scoped,
+            changes,
+            folder_metadata=self._graph_places(**{"deep-1": graph_path}),
+        )
+
+        client.get_file_metadata.assert_any_await(
+            drive_id="drive-123", item_id="deep-1"
+        )
+        assert self._removed(mock_dependencies) == removed
+        assert client.get_file_extraction_by_id.await_count == (0 if removed else 1)
+        assert folder_scoped.delta_token == "new-token"
+
+    async def test_an_indexed_file_graph_no_longer_finds_is_kept(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        """Gone since the delta was read: the next delta reports the deletion."""
+        changes = [
+            {
+                "id": "deep-1",
+                "name": "deep.docx",
+                "parentReference": {"id": "sub-folder"},
+            }
+        ]
+        self._indexed(mock_dependencies, "deep-1")
+
+        _, result = await self._run_delta(
+            service,
+            mock_dependencies,
+            mock_oauth_token,
+            folder_scoped,
+            changes,
+            folder_metadata=self._graph_places(
+                **{"deep-1": _http_error(404, "Not Found")}
+            ),
+        )
+
+        assert self._removed(mock_dependencies) == []
+        assert folder_scoped.delta_token == "new-token"
+        assert "1 item skipped" in result
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.metadata["skipped_details"] == [
+            {
+                "file": "deep.docx",
+                "reason": "Could not confirm where the file is in SharePoint "
+                "(HTTP 404 Not Found); kept until the next full sync",
+            }
+        ]
+
+    async def test_an_indexed_file_graph_cannot_place_now_fails_the_pass(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        changes = [
+            {
+                "id": "deep-1",
+                "name": "deep.docx",
+                "parentReference": {"id": "sub-folder"},
+            }
+        ]
+        self._indexed(mock_dependencies, "deep-1")
+
+        with pytest.raises(SyncItemsFailed, match=ONE_FILE_FAILED):
+            await self._run_delta(
+                service,
+                mock_dependencies,
+                mock_oauth_token,
+                folder_scoped,
+                changes,
+                folder_metadata=self._graph_places(
+                    **{"deep-1": _http_error(503, "Service Unavailable")}
+                ),
+            )
+
+        assert self._removed(mock_dependencies) == []
+        assert folder_scoped.delta_token == "existing-delta-token-123"
+
+    async def test_an_unindexed_pathless_file_costs_nothing(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        changes = [
+            {
+                "id": "elsewhere-1",
+                "name": "other.docx",
+                "parentReference": {"id": "other-folder"},
+            }
+        ]
+        self._indexed(mock_dependencies, "a-1")
+
+        client, _ = await self._run_delta(
+            service,
+            mock_dependencies,
+            mock_oauth_token,
+            folder_scoped,
+            changes,
+            folder_metadata=self._graph_places(),
+        )
+
+        client.get_file_metadata.assert_awaited_once_with(
+            drive_id="drive-123", item_id="folder-a"
+        )
+        assert self._removed(mock_dependencies) == []
+        assert folder_scoped.delta_token == "new-token"
+
+    @pytest.mark.parametrize(
+        ("graph_answer", "indexed_files", "removed", "indexed_now"),
+        [
+            ("/Documents/A/Deep", [], [], 1),
+            ("/Documents/B", ["q-1"], ["folder-q", "q-1"], 0),
+            (_http_error(404, "Not Found"), ["q-1"], [], 0),
+        ],
+        ids=["entered scope", "left scope", "unplaceable"],
+    )
+    async def test_a_pathless_folder_is_placed_by_graph_before_its_subtree_is_judged(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        folder_scoped,
+        graph_answer,
+        indexed_files,
+        removed,
+        indexed_now,
+    ):
+        changes = [
+            {
+                "id": "folder-q",
+                "name": "Q",
+                "folder": {"childCount": 1},
+                "parentReference": {"id": "elsewhere"},
+            }
+        ]
+        self._indexed(mock_dependencies, *indexed_files)
+        q_path = graph_answer if isinstance(graph_answer, str) else "/Unknown"
+        descendants = [_descendant("q-1", f"{q_path}/folder-q")]
+
+        with patch.object(
+            service,
+            "_enumerate_authoritative_items",
+            AsyncMock(return_value=descendants),
+        ) as walk:
+            client, _ = await self._run_delta(
+                service,
+                mock_dependencies,
+                mock_oauth_token,
+                folder_scoped,
+                changes,
+                folder_metadata=self._graph_places(**{"folder-q": graph_answer}),
+            )
+
+        client.get_file_metadata.assert_any_await(
+            drive_id="drive-123", item_id="folder-q"
+        )
+        assert self._removed(mock_dependencies) == removed
+        assert walk.await_count == (0 if isinstance(graph_answer, Exception) else 1)
+        assert client.get_file_extraction_by_id.await_count == indexed_now
+        assert folder_scoped.delta_token == "new-token"
+
+    async def test_a_folder_walked_before_under_the_same_parent_is_not_walked_again(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        """A rename, a permission change or a replayed pass re-emits a folder whose
+        files were indexed when it was walked; only a move needs a new walk."""
+        cache: dict[str, str] = {}
+        change_keys = mock_dependencies["change_key_service"]
+        change_keys.should_process = AsyncMock(
+            side_effect=lambda *, integration_knowledge_id, item_id, change_key: (
+                cache.get(item_id) != change_key
+            )
+        )
+
+        def folder_x(parent_id, name="X"):
+            return [
+                {
+                    "id": "folder-x",
+                    "name": name,
+                    "folder": {"childCount": 1},
+                    "parentReference": {"id": parent_id},
+                }
+            ]
+
+        sub_folder = {
+            "id": "folder-s",
+            "name": "S",
+            "folder": {},
+            "parentReference": {"id": "folder-a"},
+        }
+        with (
+            patch.object(
+                service,
+                "_enumerate_authoritative_items",
+                AsyncMock(return_value=[{"id": "x-1", "name": "one.docx"}]),
+            ) as walk,
+            patch.object(
+                service,
+                "_schedule_post_commit_change_keys",
+                side_effect=lambda pending: cache.update(
+                    {item_id: key for _, item_id, key in pending}
+                ),
+            ),
+        ):
+            for changes in (
+                folder_x("folder-a"),
+                folder_x("folder-a", name="X renamed"),
+                [sub_folder, *folder_x("folder-s")],
+            ):
+                await self._run_delta(
+                    service, mock_dependencies, mock_oauth_token, folder_scoped, changes
+                )
+
+        walked = [call.kwargs["folder_id"] for call in walk.await_args_list]
+        assert walked == ["folder-x", "folder-s", "folder-x"]
+
+    async def test_a_folder_whose_walk_failed_is_walked_again(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        cache: dict[str, str] = {}
+        change_keys = mock_dependencies["change_key_service"]
+        change_keys.should_process = AsyncMock(
+            side_effect=lambda *, integration_knowledge_id, item_id, change_key: (
+                cache.get(item_id) != change_key
+            )
+        )
+        changes = [
+            {
+                "id": "folder-x",
+                "name": "X",
+                "folder": {},
+                "parentReference": {"id": "folder-a"},
+            }
+        ]
+
+        with (
+            patch.object(
+                service,
+                "_enumerate_authoritative_items",
+                AsyncMock(side_effect=[RuntimeError("throttled"), []]),
+            ) as walk,
+            patch.object(
+                service,
+                "_schedule_post_commit_change_keys",
+                side_effect=lambda pending: cache.update(
+                    {item_id: key for _, item_id, key in pending}
+                ),
+            ),
+        ):
+            with pytest.raises(SyncItemsFailed):
+                await self._run_delta(
+                    service, mock_dependencies, mock_oauth_token, folder_scoped, changes
+                )
+            await self._run_delta(
+                service, mock_dependencies, mock_oauth_token, folder_scoped, changes
+            )
+
+        assert walk.await_count == 2
+        assert "folder-x" in cache
+
+    @pytest.mark.parametrize(
+        ("indexed_files", "child_count", "walked", "removed"),
+        [
+            (["z-1", "a-1"], 3, True, ["folder-z", "z-1"]),
+            ([], 3, False, ["folder-z"]),
+            (["z-1"], 0, False, ["folder-z"]),
+        ],
+        ids=["only indexed descendants go", "nothing indexed", "empty folder"],
+    )
+    async def test_a_folder_leaving_scope_costs_only_what_was_indexed_under_it(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        folder_scoped,
+        indexed_files,
+        child_count,
+        walked,
+        removed,
+    ):
+        changes = [
+            {
+                "id": "folder-z",
+                "name": "Z",
+                "folder": {"childCount": child_count},
+                "parentReference": {
+                    "id": "documents-folder",
+                    "path": "/drives/drive-123/root:/Documents",
+                },
+            }
+        ]
+        indexed = self._indexed(mock_dependencies, *indexed_files)
+        descendants = [_descendant(f"z-{i}", "/Documents/Z") for i in (1, 2, 3)]
+
+        with patch.object(
+            service,
+            "_enumerate_authoritative_items",
+            AsyncMock(return_value=descendants),
+        ) as walk:
+            await self._run_delta(
+                service,
+                mock_dependencies,
+                mock_oauth_token,
+                folder_scoped,
+                changes,
+                folder_metadata=self._graph_places(),
+            )
+
+        assert walk.await_count == (1 if walked else 0)
+        assert self._removed(mock_dependencies) == removed
+        assert indexed.await_count <= 1
+        assert folder_scoped.delta_token == "new-token"
 
 
 def _delta_file(item_id: str, name: str, **extra) -> dict:
