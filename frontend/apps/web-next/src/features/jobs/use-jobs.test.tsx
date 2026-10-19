@@ -361,7 +361,7 @@ describe("an import's first sync", () => {
 
     await vi.waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith(
-        "Protokoll: 12 dokument indexerades, 1 hoppades över",
+        "Protokoll är klar. Indexerade: 12, överhoppade: 1",
         expect.objectContaining({ action: expect.objectContaining({ label: "Visa" }) })
       )
     );
@@ -404,7 +404,7 @@ describe("an import's first sync", () => {
 
     await vi.waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith(
-        "Protokoll: 12 dokument indexerades, 1 hoppades över",
+        "Protokoll är klar. Indexerade: 12, överhoppade: 1",
         expect.anything()
       )
     );

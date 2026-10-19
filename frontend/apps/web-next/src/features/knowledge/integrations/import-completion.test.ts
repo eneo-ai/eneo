@@ -230,42 +230,114 @@ it("tells every import finishing in the same space in a toast of its own", async
   // The toaster's live region speaks them; nothing else says them again.
   expect(toast.success).toHaveBeenCalledTimes(2);
   expect(toast.success.mock.calls.map(([message]) => message)).toEqual([
-    expect.stringContaining("Avtal:"),
-    expect.stringContaining("Policy:")
+    "Avtal är klar. Indexerade: 3, överhoppade: 0",
+    "Policy är klar. Indexerade: 3, överhoppade: 0"
   ]);
   expect(pendingImports()).toEqual([]);
 });
 
-it("words the documents of an import result in the singular and the plural", async () => {
-  const waiting = [pending("a"), pending("b")];
-  trackImports(waiting);
+describe("an import of several folders", () => {
+  const batch = (jobId: string): PendingImport => ({
+    ...pending(jobId),
+    batchId: "job-a",
+    batchName: "Styrdokument"
+  });
+  const folders = (metadata: Record<string, Partial<Metadata>>) =>
+    makeSpace({
+      integrations: Object.entries(metadata).map(([id, fields]) =>
+        makeIntegration({
+          id: `ik-${id}`,
+          name: id,
+          wrapper_id: "w1",
+          wrapper_name: "Styrdokument",
+          metadata: { size: 0, ...fields }
+        })
+      )
+    });
+  const context = () => ({
+    queryClient: testQueryClient(),
+    t: createTranslator({ locale: "sv", messages: sv as Record<string, string> }),
+    navigate: vi.fn()
+  });
+  const done = (item: PendingImport) => ({ ...item, jobStatus: "complete" as const });
+
+  it("gets one notice, once all of its folders have settled", async () => {
+    trackImports([batch("a"), batch("b")]);
+    api.GET.mockResolvedValue({
+      data: folders({
+        a: { last_sync_status: "success", document_count: 3 },
+        b: { last_sync_status: "success", document_count: 4 }
+      }),
+      response: new Response("{}")
+    });
+    const reporting = context();
+
+    await reportImports([done(batch("a"))], reporting);
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(pendingImports()).toHaveLength(2);
+
+    await reportImports([done(batch("a")), done(batch("b"))], reporting);
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    const [message, options] = toast.success.mock.calls[0] as [
+      string,
+      { action: { onClick: () => void } }
+    ];
+    expect(message).toBe("Styrdokument är klar: 2 mappar. Indexerade: 7, överhoppade: 0");
+    options.action.onClick();
+    expect(reporting.navigate).toHaveBeenCalledWith(
+      "/spaces/space-1/knowledge/integrations/wrapper/w1"
+    );
+    expect(pendingImports()).toEqual([]);
+  });
+
+  it("says for how many folders it failed, and the organisation's sign-in in the viewer's words", async () => {
+    trackImports([batch("a"), batch("b")]);
+    const signIn = "SharePoint credentials are invalid or expired. Ask an administrator.";
+    api.GET.mockResolvedValue({
+      data: folders({
+        a: { last_sync_status: "success", document_count: 3 },
+        b: { last_sync_status: "error", last_sync_error: signIn }
+      }),
+      response: new Response("{}")
+    });
+    const reporting = context();
+    await reportImports([done(batch("a")), done(batch("b"))], reporting);
+
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(
+      "Styrdokument: första synken misslyckades för 1 av 2 mappar",
+      expect.objectContaining({
+        description:
+          "Inloggningen till SharePoint har gått ut. Det kan bara en administratör åtgärda. Befintliga dokument går fortfarande att söka i."
+      })
+    );
+  });
+});
+
+it("tells the organisation's sign-in failure of a single import in the viewer's words", async () => {
+  trackImports([pending("a")]);
   api.GET.mockResolvedValue({
     data: makeSpace({
       integrations: [
         makeIntegration({
           id: "ik-a",
           name: "Avtal",
-          metadata: { size: 0, last_sync_status: "success", document_count: 1 }
-        }),
-        makeIntegration({
-          id: "ik-b",
-          name: "Policy",
-          metadata: { size: 0, last_sync_status: "success", document_count: 3 }
+          metadata: {
+            size: 0,
+            last_sync_status: "error",
+            last_sync_error: "SharePoint credentials are invalid or expired"
+          }
         })
       ]
     }),
     response: new Response("{}")
   });
-  await reportImports(
-    waiting.map((item) => ({ ...item, jobStatus: "complete" })),
-    {
-      queryClient: testQueryClient(),
-      t: createTranslator({ locale: "en", messages: en as Record<string, string> }),
-      navigate: vi.fn()
-    }
-  );
-  expect(toast.success.mock.calls.map(([message]) => message)).toEqual([
-    "Avtal: 1 document indexed, 0 skipped",
-    "Policy: 3 documents indexed, 0 skipped"
-  ]);
+  await reportImports([{ ...pending("a"), jobStatus: "failed" }], {
+    queryClient: testQueryClient(),
+    t: createTranslator({ locale: "en", messages: en as Record<string, string> }),
+    navigate: vi.fn()
+  });
+  expect(toast.error).toHaveBeenCalledWith("Avtal: the first sync failed", {
+    description: expect.stringMatching(/^The sign-in to SharePoint has expired/)
+  });
 });

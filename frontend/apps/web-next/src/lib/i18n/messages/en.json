@@ -1968,7 +1968,7 @@
   "integration_import_complete_failed": "{failed} items could not be queued.",
   "integration_import_complete_failed_one": "1 item could not be queued.",
   "integration_import_view_site": "Show the import",
-  "integration_import_result_toast": "{name}: {indexed, plural, one {# document indexed} other {# documents indexed}}, {skipped} skipped",
+  "integration_import_result_toast": "{name} is ready. Indexed: {indexed}, skipped: {skipped}",
   "integration_import_batch_result_toast": "{name} is ready: {count} folders. Indexed: {indexed}, skipped: {skipped}",
   "integration_import_batch_failed_toast": "{name}: the first sync failed for {failed} of {count} folders",
   "integration_import_failed_toast": "{name}: the first sync failed",

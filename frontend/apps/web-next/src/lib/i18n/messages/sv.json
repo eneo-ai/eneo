@@ -2001,7 +2001,7 @@
   "integration_import_complete_failed": "{failed} objekt kunde inte köas.",
   "integration_import_complete_failed_one": "1 objekt kunde inte köas.",
   "integration_import_view_site": "Visa importen",
-  "integration_import_result_toast": "{name}: {indexed, plural, one {# dokument indexerades} other {# dokument indexerades}}, {skipped} hoppades över",
+  "integration_import_result_toast": "{name} är klar. Indexerade: {indexed}, överhoppade: {skipped}",
   "integration_import_batch_result_toast": "{name} är klar: {count} mappar. Indexerade: {indexed}, överhoppade: {skipped}",
   "integration_import_batch_failed_toast": "{name}: första synken misslyckades för {failed} av {count} mappar",
   "integration_import_failed_toast": "{name}: första synken misslyckades",

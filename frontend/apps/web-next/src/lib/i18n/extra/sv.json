@@ -1609,7 +1609,6 @@
   "integration_announce_sync_stopped": "Synk av {name} pågår inte längre",
   "file_preview_previous_version": "Föregående version",
   "file_preview_next_version": "Nästa version",
-  "integration_import_result_toast": "{name}: {indexed, plural, one {# dokument indexerades} other {# dokument indexerades}}, {skipped} hoppades över",
   "integration_activity_reconcile_warning": "<label>Avstämningsvarning:</label> {warning}",
   "integration_progress_step_done_named": "<hidden>Klart:</hidden> {step}"
 }

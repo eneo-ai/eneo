@@ -6,7 +6,8 @@ import { EneoApiError } from "@/lib/api/errors";
 import { toast } from "@/lib/toast";
 import type { IntegrationKnowledge } from "../knowledge";
 import type { Translate } from "./skip-reasons";
-import { itemHref } from "./sources";
+import { isCredentialsError } from "./source-problems";
+import { itemHref, sourceHref } from "./sources";
 import { summarizeIntegrationSync } from "./sync-status";
 
 /** An import whose first sync job may still run; reported once the job is over. */
@@ -16,6 +17,10 @@ export type PendingImport = {
   name: string;
   /** The space's route segment: its id, or "personal" / "organization". */
   spaceRouteId: string;
+  /** Imports queued together share one, and one notice once all of them have settled. */
+  batchId?: string;
+  /** What the notice for the batch calls it: the group's name. */
+  batchName?: string;
 };
 
 export const PENDING_IMPORTS_STORAGE_KEY = "eneo:pending-imports";
@@ -23,8 +28,13 @@ export const PENDING_IMPORTS_STORAGE_KEY = "eneo:pending-imports";
 function isPendingImport(value: unknown): value is PendingImport {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
-  return ["jobId", "knowledgeId", "name", "spaceRouteId"].every(
-    (key) => typeof record[key] === "string"
+  return (
+    ["jobId", "knowledgeId", "name", "spaceRouteId"].every(
+      (key) => typeof record[key] === "string"
+    ) &&
+    ["batchId", "batchName"].every(
+      (key) => record[key] === undefined || typeof record[key] === "string"
+    )
   );
 }
 
@@ -169,6 +179,52 @@ async function readSpace(queryClient: QueryClient, routeId: string): Promise<Spa
   }
 }
 
+function batchOf(item: PendingImport): string {
+  return item.batchId ?? item.jobId;
+}
+
+/**
+ * The settled imports in the groups their notices are given in. A batch is held
+ * back until every one of its imports has settled.
+ */
+export function reportableImports<T extends PendingImport>(
+  pending: readonly PendingImport[],
+  settled: readonly T[]
+): T[][] {
+  const groups = new Map<string, T[]>();
+  for (const item of settled)
+    groups.set(batchOf(item), [...(groups.get(batchOf(item)) ?? []), item]);
+  return [...groups.entries()]
+    .filter(
+      ([batch, items]) => pending.filter((item) => batchOf(item) === batch).length === items.length
+    )
+    .map(([, items]) => items);
+}
+
+type Result = { outcome: ImportOutcome; failed: boolean; wrapperId: string | null };
+
+/** A group's outcomes, without deleted items; null while one of them may still get its status. */
+function resultsOf(group: readonly SettledImport[], space: Space | null): Result[] | null {
+  const results: Result[] = [];
+  for (const item of group) {
+    const knowledge = space?.knowledge.integration_knowledge_list.items.find(
+      (candidate) => candidate.id === item.knowledgeId && candidate.space_id === space.id
+    );
+    // Deleted before its first sync was reported: nothing left to tell.
+    if (!knowledge) continue;
+    const outcome = describeImportOutcome(knowledge, item.spaceRouteId);
+    // A job that ended without the sync writing a status failed before it got
+    // that far; one listed as complete may yet have one written.
+    if (!outcome.synced && item.jobStatus === "complete") return null;
+    results.push({
+      outcome,
+      failed: !outcome.synced || outcome.error !== null,
+      wrapperId: knowledge.wrapper_id ?? null
+    });
+  }
+  return results;
+}
+
 async function report(
   settled: readonly SettledImport[],
   { queryClient, t, navigate }: ImportReportContext
@@ -177,7 +233,71 @@ async function report(
   const pending = settled.filter((item) =>
     pendingImports().some((candidate) => candidate.jobId === item.jobId)
   );
+  // The organisation's sign-in has a translated explanation; other sync errors have no code yet.
+  const errorText = (error: string | null) =>
+    !error
+      ? null
+      : isCredentialsError(error)
+        ? t("integration_source_stopped_sign_in_description")
+        : error;
+  const show = (href: string) => ({ label: t("show"), onClick: () => navigate(href) });
+  // The toaster's live region speaks each notice.
+  const reportOne = ({ outcome, failed }: Result) => {
+    if (failed) {
+      toast.error(t("integration_import_failed_toast", { name: outcome.name }), {
+        description: errorText(outcome.error) ?? undefined
+      });
+      return;
+    }
+    toast.success(
+      t("integration_import_result_toast", {
+        name: outcome.name,
+        indexed: outcome.indexed,
+        skipped: outcome.skipped
+      }),
+      { duration: RESULT_TOAST_DURATION_MS, action: show(outcome.href) }
+    );
+  };
+  const reportBatch = (name: string, results: Result[], routeId: string) => {
+    const wrapperId = results.find((result) => result.wrapperId)?.wrapperId ?? null;
+    const href = (tab?: "problems") =>
+      wrapperId
+        ? sourceHref(routeId, { kind: "wrapper", id: wrapperId }, { tab })
+        : `/spaces/${routeId}/knowledge?tab=integrations`;
+    const failed = results.filter((result) => result.failed);
+    if (failed.length > 0) {
+      const details = new Set(failed.map((result) => errorText(result.outcome.error)));
+      const [detail] = details;
+      toast.error(
+        t("integration_import_batch_failed_toast", {
+          name,
+          failed: failed.length,
+          count: results.length
+        }),
+        {
+          description: details.size === 1 && detail ? detail : undefined,
+          action: show(href("problems"))
+        }
+      );
+      return;
+    }
+    toast.success(
+      t("integration_import_batch_result_toast", {
+        name,
+        count: results.length,
+        indexed: results.reduce((sum, result) => sum + result.outcome.indexed, 0),
+        skipped: results.reduce((sum, result) => sum + result.outcome.skipped, 0)
+      }),
+      { duration: RESULT_TOAST_DURATION_MS, action: show(href()) }
+    );
+  };
+
   for (const routeId of new Set(pending.map((item) => item.spaceRouteId))) {
+    const groups = reportableImports(
+      pendingImports(),
+      pending.filter((item) => item.spaceRouteId === routeId)
+    );
+    if (groups.length === 0) continue;
     let space: Space | null;
     try {
       space = await readSpace(queryClient, routeId);
@@ -187,43 +307,14 @@ async function report(
       continue;
     }
     const reported: string[] = [];
-    // The toaster's live region speaks each notice.
-    const fail = (name: string, error: string | null) =>
-      toast.error(t("integration_import_failed_toast", { name }), {
-        description: error || undefined
-      });
-    for (const item of pending.filter((candidate) => candidate.spaceRouteId === routeId)) {
-      const knowledge = space?.knowledge.integration_knowledge_list.items.find(
-        (candidate) => candidate.id === item.knowledgeId && candidate.space_id === space.id
-      );
-      if (!knowledge) {
-        // Deleted before its first sync was reported: nothing left to tell.
-        reported.push(item.jobId);
-        continue;
-      }
-      const outcome = describeImportOutcome(knowledge, routeId);
-      if (!outcome.synced) {
-        // A job that ended without the sync writing a status failed before it
-        // got that far; one listed as complete may yet have one written.
-        if (item.jobStatus === "complete") continue;
-        fail(outcome.name, null);
-        reported.push(item.jobId);
-        continue;
-      }
-      reported.push(item.jobId);
-      if (outcome.error !== null) {
-        fail(outcome.name, outcome.error);
-        continue;
-      }
-      const message = t("integration_import_result_toast", {
-        name: outcome.name,
-        indexed: outcome.indexed,
-        skipped: outcome.skipped
-      });
-      toast.success(message, {
-        duration: RESULT_TOAST_DURATION_MS,
-        action: { label: t("show"), onClick: () => navigate(outcome.href) }
-      });
+    for (const group of groups) {
+      const results = resultsOf(group, space);
+      if (results === null) continue;
+      reported.push(...group.map((item) => item.jobId));
+      const [first] = results;
+      if (!first) continue;
+      if (group.length === 1) reportOne(first);
+      else reportBatch(group[0]?.batchName ?? first.outcome.name, results, routeId);
     }
     untrackImports(reported);
   }
@@ -234,7 +325,8 @@ let queue = Promise.resolve();
 /**
  * Tells how each import's first sync went once its job is over, from the
  * item as its space holds it now: the documents indexed and skipped, with a
- * way to the source, or that the sync failed and why. Runs are serialised,
+ * way to the source, or that the sync failed and why; an import of several
+ * folders gets one notice once all of them have settled. Runs are serialised,
  * so two job snapshots close together never report an import twice; a run
  * that fails is logged and its imports wait for the next.
  */

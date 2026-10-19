@@ -24,12 +24,15 @@ vi.mock("@/features/spaces/use-space", async () => {
 
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import type { UserIntegration } from "../queries";
+import { pendingImports, resetPendingImports } from "../import-completion";
 import { ConfluenceImportDialog } from "./confluence-import";
 import { SharePointImportDialog } from "./sharepoint-import";
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  sessionStorage.clear();
+  resetPendingImports();
 });
 
 const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
@@ -140,6 +143,7 @@ it("SharePoint: shows what is missing where it is chosen, one step at a time", a
     index,
     name,
     status: "created",
+    integration_knowledge_id: `ik-${index}`,
     job: { id: `job-${index}`, name, status: "queued" }
   });
   api.POST.mockImplementation(() =>
@@ -205,6 +209,17 @@ it("SharePoint: shows what is missing where it is chosen, one step at a time", a
       created(0, "Policyer").job,
       created(1, "Rutiner").job
     ])
+  );
+  // One notice for the import, named for its group, once both have synced.
+  expect(pendingImports()).toEqual(
+    ["Policyer", "Rutiner"].map((name, index) => ({
+      jobId: `job-${index}`,
+      knowledgeId: `ik-${index}`,
+      name,
+      spaceRouteId: "space-1",
+      batchId: "job-0",
+      batchName: "Styrdokument"
+    }))
   );
 });
 

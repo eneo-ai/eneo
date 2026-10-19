@@ -198,16 +198,27 @@ export function SharePointImportDialog({
       );
     },
     onSuccess: (result) => {
-      // Each created item's first sync is reported with its counts once its job is over.
+      // Each created item's first sync is reported with its counts once its job
+      // is over; several are reported together, under the first job's id.
+      const created = result.items.filter((item) => item.status === "created" && item.job);
+      const firstJob = created[0]?.job;
+      const batch =
+        created.length > 1 && firstJob && site
+          ? {
+              batchId: firstJob.id,
+              batchName: requiresWrapperName ? wrapperName.trim() : site.name
+            }
+          : {};
       trackImports(
-        result.items.flatMap((item) =>
-          item.status === "created" && item.job && item.integration_knowledge_id
+        created.flatMap((item) =>
+          item.job && item.integration_knowledge_id
             ? [
                 {
                   jobId: item.job.id,
                   knowledgeId: item.integration_knowledge_id,
                   name: item.name,
-                  spaceRouteId: routeId
+                  spaceRouteId: routeId,
+                  ...batch
                 }
               ]
             : []
