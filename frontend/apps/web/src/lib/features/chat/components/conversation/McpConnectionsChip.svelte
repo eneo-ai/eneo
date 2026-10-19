@@ -110,22 +110,26 @@
   >
     <div class="flex items-center gap-2">
       <Plug class="text-accent-stronger size-4 shrink-0" aria-hidden="true" />
-      <button
-        type="button"
-        class="text-accent-stronger flex min-w-0 flex-1 items-center gap-1 text-left font-medium"
-        onclick={() => (expanded = !expanded)}
-        aria-expanded={expanded}
-      >
-        <span class="truncate">
-          {pending.length === 1
-            ? m.mcp_oauth_chip_title_one({ server: pending[0].server_name })
-            : m.mcp_oauth_chip_title_many({ count: pending.length })}
+      {#if pending.length === 1}
+        <span class="text-accent-stronger min-w-0 flex-1 truncate font-medium">
+          {m.mcp_oauth_chip_title_one({ server: pending[0].server_name })}
         </span>
-        <ChevronRight
-          class="size-3.5 shrink-0 transition-transform {expanded ? 'rotate-90' : ''}"
-          aria-hidden="true"
-        />
-      </button>
+      {:else}
+        <button
+          type="button"
+          class="text-accent-stronger flex min-w-0 flex-1 items-center gap-1 text-left font-medium"
+          onclick={() => (expanded = !expanded)}
+          aria-expanded={expanded}
+        >
+          <span class="truncate">
+            {m.mcp_oauth_chip_title_many({ count: pending.length })}
+          </span>
+          <ChevronRight
+            class="size-3.5 shrink-0 transition-transform {expanded ? 'rotate-90' : ''}"
+            aria-hidden="true"
+          />
+        </button>
+      {/if}
       {#if pending.length === 1}
         <Button
           size="sm"
