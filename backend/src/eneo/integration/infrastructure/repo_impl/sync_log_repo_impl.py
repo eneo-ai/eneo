@@ -23,6 +23,14 @@ class SyncLogRepoImpl(
         super().__init__(session=session, model=SyncLogDBModel, mapper=mapper)
 
     @override
+    async def add(self, obj: SyncLog) -> SyncLog:
+        # A log is best-effort, but catching an SQL error alone leaves PostgreSQL's
+        # transaction aborted. Roll back only this write so the caller can still
+        # commit the documents, status and delta token from the completed pass.
+        async with self.session.begin_nested():
+            return await super().add(obj)
+
+    @override
     async def get_by_id(self, sync_log_id: UUID) -> SyncLog | None:
         return await self.one_or_none(id=sync_log_id)
 
