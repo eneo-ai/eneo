@@ -33,6 +33,7 @@
     getSpeakerMappingSourceStep,
     isSpeakerMappingCheckpoint,
     speakerNamesFromRows,
+    withProposalSupport,
     type SpeakerMappingRow
   } from "$lib/features/flows/speakerMappingReview";
   import { loadTranscriptSource, transcriptSourceRef } from "$lib/features/flows/transcriptSource";
@@ -677,7 +678,11 @@
             participants={speakerParticipants}
             inferred={speakerNamesInferred}
             disabled={!canEdit || activeAction !== null}
-            onChange={(rows) => (speakerRows = rows)}
+            onChange={(rows) =>
+              (speakerRows = withProposalSupport(
+                rows,
+                buildSpeakerRows(checkpoint?.original_payload_json)
+              ))}
           />
         {:else}
           <p class="text-secondary text-sm">

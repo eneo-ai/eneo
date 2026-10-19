@@ -224,6 +224,57 @@ describe("FlowRunEvidenceStepCard", () => {
     expect(html).toContain(m.flow_run_review_speakers_confidence_low());
   });
 
+  it("shows none of the step's support for a name its review changed or cleared", () => {
+    const renderMapping = (speakers: Record<string, unknown>[]) =>
+      renderCard(false, {
+        ...result,
+        output_payload_json: {
+          text: "",
+          speaker_mapping: {
+            inventory: [
+              { label: "SPEAKER_00", line_count: 1, samples: ["Hej Gunnar."] },
+              { label: "SPEAKER_01", line_count: 1, samples: ["Jo tack."] }
+            ]
+          },
+          structured: { speakers }
+        } as unknown as FlowRunStep["output_payload_json"]
+      });
+    const anna = {
+      label: "SPEAKER_00",
+      name: "Anna",
+      confidence: "high",
+      evidence: "Presenterar sig som Anna."
+    };
+    const bo = {
+      label: "SPEAKER_01",
+      name: "Bo",
+      confidence: "medium",
+      evidence: "Tilltalas som Bo."
+    };
+    const proposed = renderMapping([anna, bo]);
+    // What approval stores once the reviewer named Anna's speaker Bertil and
+    // cleared Bo's: no support of the step's, which was for Anna and Bo.
+    const approved = renderMapping([
+      { ...anna, name: "Bertil", confidence: "low", evidence: "" },
+      { ...bo, name: null, confidence: "low", evidence: "" }
+    ]);
+
+    for (const support of [
+      m.flow_run_review_speakers_confidence_high(),
+      m.flow_run_review_speakers_confidence_medium(),
+      anna.evidence,
+      bo.evidence
+    ]) {
+      expect(proposed).toContain(support);
+      expect(approved).not.toContain(support);
+    }
+    expect(approved).toContain("Bertil");
+    expect(approved).toContain(m.flow_run_transcript_unknown_speaker());
+    // Both rows read as the step's low confidence, without evidence: the
+    // card's presentation of a name the step's evidence does not support.
+    expect(approved.split(m.flow_run_review_speakers_confidence_low()).length - 1).toBe(2);
+  });
+
   // The transcription step's stored segments carry raw labels; which card may
   // render them decides whether names show up downstream.
   const rawContext: FlowRunTranscriptContext = {

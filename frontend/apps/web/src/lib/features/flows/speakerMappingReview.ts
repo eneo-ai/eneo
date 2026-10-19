@@ -119,6 +119,24 @@ export function buildSpeakerRows(payload: Payload): SpeakerMappingRow[] {
   return rows;
 }
 
+/**
+ * `rows` as the server stores a review of `proposed`, the step's own rows: a
+ * row keeps the step's confidence and evidence only while it names its
+ * speaker as the step did. A name the reviewer changed or cleared is theirs.
+ */
+export function withProposalSupport(
+  rows: readonly SpeakerMappingRow[],
+  proposed: readonly SpeakerMappingRow[]
+): SpeakerMappingRow[] {
+  const byLabel = new Map(proposed.map((row) => [row.label, row]));
+  return rows.map((row): SpeakerMappingRow => {
+    const proposal = byLabel.get(row.label);
+    return proposal && proposal.name === (row.name?.trim() || null)
+      ? { ...row, confidence: proposal.confidence, evidence: proposal.evidence }
+      : { ...row, confidence: "low", evidence: "" };
+  });
+}
+
 export function buildEditedMapping(rows: SpeakerMappingRow[]): SpeakerMappingEditedValue {
   return {
     speakers: rows.map((row) => ({

@@ -998,30 +998,73 @@ describe("FlowRunReviewCheckpointPanel", () => {
 });
 
 describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
-  function buildSpeakerCheckpoint(): FlowRunReviewCheckpoint {
+  function buildSpeakerCheckpoint(
+    speakers: Record<string, unknown>[] = [
+      { label: "SPEAKER_00", name: "Anna", confidence: "high", evidence: "" },
+      { label: "SPEAKER_01", name: null, confidence: "low", evidence: "" }
+    ]
+  ): FlowRunReviewCheckpoint {
+    // The review opens on the step's output, so its proposal is the original.
+    const payload = {
+      text: "[00:00:00 - 00:00:04] SPEAKER_00: Hej.\n[00:00:05 - 00:00:09] SPEAKER_01: Hallå.",
+      structured: { speakers },
+      speaker_mapping: {
+        source_step_id: "step-0",
+        source_step_order: 1,
+        participants: ["Anna", "Bo"],
+        inventory: [
+          { label: "SPEAKER_00", line_count: 1, samples: ["Hej."] },
+          { label: "SPEAKER_01", line_count: 1, samples: ["Hallå."] }
+        ]
+      }
+    };
     return {
       ...buildCheckpoint("awaiting_review", 1),
       output_type: "json",
-      current_payload_json: {
-        text: "[00:00:00 - 00:00:04] SPEAKER_00: Hej.\n[00:00:05 - 00:00:09] SPEAKER_01: Hallå.",
-        structured: {
-          speakers: [
-            { label: "SPEAKER_00", name: "Anna", confidence: "high", evidence: "" },
-            { label: "SPEAKER_01", name: null, confidence: "low", evidence: "" }
-          ]
-        },
-        speaker_mapping: {
-          source_step_id: "step-0",
-          source_step_order: 1,
-          participants: ["Anna", "Bo"],
-          inventory: [
-            { label: "SPEAKER_00", line_count: 1, samples: ["Hej."] },
-            { label: "SPEAKER_01", line_count: 1, samples: ["Hallå."] }
-          ]
-        }
-      }
+      original_payload_json: payload,
+      current_payload_json: payload
     };
   }
+
+  it("keeps the step's confidence and evidence with the name it proposed", async () => {
+    const eneo = buildEneo({
+      activeCheckpoint: buildSpeakerCheckpoint([
+        {
+          label: "SPEAKER_00",
+          name: "Anna",
+          confidence: "high",
+          evidence: "Presenterar sig som Anna."
+        },
+        { label: "SPEAKER_01", name: null, confidence: "low", evidence: "" }
+      ])
+    });
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+    const [name] = await screen.findAllByPlaceholderText(
+      m.flow_transcript_editor_name_placeholder()
+    );
+    const proposal = (confidence: string) =>
+      screen.queryByText(new RegExp(m.flow_transcript_editor_confidence({ confidence })));
+    const high = m.flow_transcript_editor_confidence_high();
+    const low = m.flow_transcript_editor_confidence_low();
+    const evidence = () => screen.queryByText("Presenterar sig som Anna.");
+    expect(proposal(high)).not.toBeNull();
+    expect(evidence()).not.toBeNull();
+
+    // A name the reviewer types over the step's is theirs: it has no support.
+    await fireEvent.input(name, { target: { value: "Bertil" } });
+    expect(proposal(high)).toBeNull();
+    expect(proposal(low)).not.toBeNull();
+    expect(evidence()).toBeNull();
+    await fireEvent.input(name, { target: { value: "" } });
+    expect(evidence()).toBeNull();
+
+    // The step's own name back, its support back.
+    await fireEvent.input(name, { target: { value: "Anna" } });
+    expect(proposal(high)).not.toBeNull();
+    expect(evidence()).not.toBeNull();
+  });
 
   it.each([false, true])(
     "approval waits for corrections; failed save blocks downstream execution (%s)",
