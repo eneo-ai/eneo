@@ -2,7 +2,7 @@ import { createZitadelClient } from "$lib/core/Zitadel";
 import { createEneo, createEneoSocket } from "@eneo/eneo-js";
 import { redirect } from "@sveltejs/kit";
 import {
-  isPasswordChangeRequiredError,
+  handlePasswordChangeRequired,
   passwordChangeUrl
 } from "$lib/features/auth/passwordChangeRequired";
 
@@ -14,7 +14,8 @@ export const load = async (event) => {
   const eneo = createEneo({
     token: tokens.id_token,
     baseUrl: environment.baseUrl ?? "",
-    fetch: event.fetch
+    fetch: event.fetch,
+    onError: (error) => handlePasswordChangeRequired(error, event.url)
   });
 
   let zitadelClient: ReturnType<typeof createZitadelClient> | null = null;
@@ -52,24 +53,18 @@ export const load = async (event) => {
   };
 
   // A session that must replace its local password is refused by every
-  // endpoint here except /users/me/, so either that status or the first
-  // refusal sends it to the change page; the batch stays parallel.
-  let loaded;
-  try {
-    loaded = await Promise.all([
-      getUserInfo(),
-      eneo.users.me(),
-      eneo.users.tenant(),
-      eneo.version.get(),
-      eneo.limits.list(),
-      eneo.settings.get(),
-      // Non-essential: an older backend during a rolling deploy must not block the app.
-      eneo.whatsNew.getState().catch(() => null)
-    ]);
-  } catch (error) {
-    if (isPasswordChangeRequiredError(error)) redirect(302, passwordChangeUrl(event.url));
-    throw error;
-  }
+  // endpoint here except /users/me/. The client's error handler also covers
+  // later calls from the loaded app, when a policy changes or a password expires.
+  const loaded = await Promise.all([
+    getUserInfo(),
+    eneo.users.me(),
+    eneo.users.tenant(),
+    eneo.version.get(),
+    eneo.limits.list(),
+    eneo.settings.get(),
+    // Non-essential: an older backend during a rolling deploy must not block the app.
+    eneo.whatsNew.getState().catch(() => null)
+  ]);
   const [userInfo, user, tenant, backendVersion, limits, settings, whatsNewState] = loaded;
   if (user.password_status?.change_required) {
     redirect(302, passwordChangeUrl(event.url));

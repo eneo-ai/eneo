@@ -292,7 +292,7 @@ async def test_sysadmin_set_password_only_admits_its_own_replacement(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_sysadmin_can_hand_out_a_permanent_password(
+async def test_sysadmin_can_skip_the_initial_password_change(
     client,
     super_admin_token,
     patch_auth_service_jwt,
@@ -346,6 +346,16 @@ async def test_admin_password_policy_round_trip(
         headers=auth,
     )
     assert unknown_field.status_code == 422, unknown_field.text
+
+    null_flag = await client.patch(
+        "/api/v1/admin/password-policy",
+        json={"require_change_after_admin_set": None},
+        headers=auth,
+    )
+    assert null_flag.status_code == 422, null_flag.text
+    unchanged = await client.get("/api/v1/admin/password-policy", headers=auth)
+    assert unchanged.status_code == 200, unchanged.text
+    assert unchanged.json() == updated.json()
 
     reset = await client.patch(
         "/api/v1/admin/password-policy",

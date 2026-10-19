@@ -62,7 +62,8 @@ class PasswordLifecyclePolicy(BaseModel):
 
 
 class PasswordLifecyclePolicyUpdate(BaseModel):
-    require_change_after_admin_set: Optional[bool] = None
+    # PATCH uses exclude_unset=True: omission is allowed, explicit null is not.
+    require_change_after_admin_set: bool = True
     max_age_days: Optional[int] = Field(default=None, ge=1, le=_MAX_AGE_DAYS_LIMIT)
 
     model_config = ConfigDict(extra="forbid")

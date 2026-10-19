@@ -36,16 +36,19 @@ export default async function PasswordChangePage({
   // Raw fetch on purpose: eneoApi's interceptor would redirect a refusal
   // right back here in a loop, and /users/me/ is one of the reachable routes.
   let me: Schema<"UserPublic"> | null = null;
+  let sessionRejected = false;
   try {
     const response = await fetch(`${env.ENEO_BACKEND_URL.replace(/\/$/, "")}/api/v1/users/me/`, {
       headers: { authorization: `Bearer ${token}` },
       cache: "no-store"
     });
-    if (response.status === 401) redirect("/logout?reason=expired");
+    sessionRejected = response.status === 401;
     if (response.ok) me = (await response.json()) as Schema<"UserPublic">;
   } catch {
     // Backend unreachable: fall through to the unavailable message.
   }
+  // Next redirects throw: keep session recovery outside the fetch catch.
+  if (sessionRejected) redirect("/logout?reason=expired");
   if (me && !me.password_status?.change_required) redirect(safeNextPath(next));
 
   const t = await getTranslations();

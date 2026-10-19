@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from eneo.authentication.auth_models import JWTPayload
+from eneo.authentication.auth_models import ApiKeyV2InDB, JWTPayload
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -90,6 +90,20 @@ def test_policy_ignores_unknown_stored_keys_but_updates_forbid_them():
     assert PasswordLifecyclePolicy.from_tenant({"later_key": 1}).max_age_days is None
     with pytest.raises(ValidationError):
         PasswordLifecyclePolicyUpdate.model_validate({"later_key": 1})
+
+
+def test_policy_patch_distinguishes_omitted_false_and_null():
+    assert PasswordLifecyclePolicyUpdate().model_dump(exclude_unset=True) == {}
+    assert PasswordLifecyclePolicyUpdate(
+        require_change_after_admin_set=False
+    ).model_dump(exclude_unset=True) == {"require_change_after_admin_set": False}
+    assert PasswordLifecyclePolicyUpdate(max_age_days=None).model_dump(
+        exclude_unset=True
+    ) == {"max_age_days": None}
+    with pytest.raises(ValidationError):
+        PasswordLifecyclePolicyUpdate.model_validate(
+            {"require_change_after_admin_set": None}
+        )
 
 
 @pytest.mark.parametrize("days", [0, -1, 3651])
@@ -402,6 +416,43 @@ def test_federated_sessions_ignore_the_local_password_lifecycle():
         max_age_days=30,
     )
     authorize_user(connection_for(gated_endpoint()), user)
+
+
+def test_api_key_authentication_ignores_expired_and_one_time_passwords():
+    # API-key authentication does not set a password session claim. The gate
+    # must still admit integration requests when both password rules apply.
+    user = password_user(
+        change_required=True,
+        changed_at=NOW - timedelta(days=400),
+        session_auth_method=None,
+        max_age_days=30,
+    )
+    user.active_api_key = ApiKeyV2InDB.model_validate(
+        {
+            "id": uuid4(),
+            "tenant_id": user.tenant_id,
+            "owner_user_id": user.id,
+            "key_prefix": "sk_",
+            "key_suffix": "test",
+            "name": "Integration",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "state": "active",
+            "key_hash": "test-hash",
+            "hash_version": "sha256",
+        }
+    )
+
+    @endpoint_access(
+        authentication=Authentication.API_KEY,
+        authorization=Authorization.AUTHENTICATED,
+        reason="Integration API-key access",
+    )
+    async def integration_endpoint() -> None: ...
+
+    authorize_user(connection_for(integration_endpoint), user)
+    assert password_status_for(user, now=NOW).change_required is False
 
 
 def test_the_gate_and_the_status_report_agree_on_federated_sessions():

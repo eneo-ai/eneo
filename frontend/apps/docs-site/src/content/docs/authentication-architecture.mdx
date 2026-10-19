@@ -117,8 +117,15 @@ provisioned through OIDC or SCIM have no local password at all.
 
 Administrators edit the policy under **Admin → Users → Password policy**
 (`GET`/`PATCH /api/v1/admin/password-policy`). The sysadmin API may create an
-account with `password_change_required: false` when the password is meant to
-be permanent, for example for a service account.
+account with `password_change_required: false` to skip the initial mandatory
+change. This does not exempt the password from `max_age_days`.
+
+API-key integrations are unaffected by this policy and by local password
+changes; their existing key permissions, expiry and revocation rules still
+apply. An integration that obtains a bearer token through the password login
+is subject to the policy and may receive `403/9070`. For unattended use,
+prefer a service-owned API key with the permissions and scopes the integration
+needs, provided its endpoints support service identities.
 
 A password session that must replace its password still signs in, so the
 account can do exactly that. Every other endpoint answers `403` with error

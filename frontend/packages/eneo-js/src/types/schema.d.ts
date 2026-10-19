@@ -18756,8 +18756,11 @@ export interface components {
     };
     /** PasswordLifecyclePolicyUpdate */
     PasswordLifecyclePolicyUpdate: {
-      /** Require Change After Admin Set */
-      require_change_after_admin_set?: boolean | null;
+      /**
+       * Require Change After Admin Set
+       * @default true
+       */
+      require_change_after_admin_set?: boolean;
       /** Max Age Days */
       max_age_days?: number | null;
     };
@@ -23381,7 +23384,7 @@ export interface components {
       tenant_id: string;
       /**
        * Password Change Required
-       * @description Whether the account must replace the given password at its first password login. Unset follows the tenant password policy; false makes the password permanent, as for a service account.
+       * @description Whether the account must replace the given password at its first password login. Unset follows the tenant password policy; false skips this initial change. The tenant's max_age_days still applies.
        */
       password_change_required?: boolean | null;
     };

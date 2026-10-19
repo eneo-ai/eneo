@@ -1,12 +1,29 @@
 import { EneoError, type PasswordStatus } from "@eneo/eneo-js";
+import { browser } from "$app/environment";
+import { redirect } from "@sveltejs/kit";
 
 export const PASSWORD_CHANGE_PATH = "/password-change";
 
 /** Backend ErrorCodes.PASSWORD_CHANGE_REQUIRED: the session may only replace its password. */
 export const PASSWORD_CHANGE_REQUIRED_CODE = 9070;
 
-export function isPasswordChangeRequiredError(error: unknown): boolean {
-  return error instanceof EneoError && error.code === PASSWORD_CHANGE_REQUIRED_CODE;
+function isPasswordChangeRequiredError(error: unknown): boolean {
+  return (
+    error instanceof EneoError &&
+    error.status === 403 &&
+    error.code === PASSWORD_CHANGE_REQUIRED_CODE
+  );
+}
+
+/** Used by the app's persistent API client, including calls after layout load. */
+export function handlePasswordChangeRequired(error: EneoError, requestedUrl: URL): void {
+  if (!isPasswordChangeRequiredError(error)) return;
+  if (browser) {
+    // The user may have navigated since this client was created.
+    window.location.assign(passwordChangeUrl(new URL(window.location.href)));
+  } else {
+    redirect(302, passwordChangeUrl(requestedUrl));
+  }
 }
 
 /** Where a signed-in user goes to replace a one-time or expired password. */
