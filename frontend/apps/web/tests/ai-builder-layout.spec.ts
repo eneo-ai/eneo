@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { backendFetch, expectOk } from "./helpers";
+import { backendFetch, expectOk, readyBuilderModelsBody } from "./helpers";
 
 function makeFixtures(spaceId: string) {
   const draft = {
@@ -91,7 +91,7 @@ async function stubAiBuilderApi(page: Page, spaceId: string) {
   await page.route("**/api/v1/flows/ai-builder/**", async (route) => {
     const url = route.request().url();
     if (url.includes("/models")) {
-      return route.fulfill({ json: { models: [], default_model_id: null } });
+      return route.fulfill({ json: readyBuilderModelsBody() });
     }
     if (/\/plans\/plan-1\/?$/.test(url)) {
       return route.fulfill({ json: PLAN });
@@ -142,7 +142,6 @@ const CONVERSATION_TITLE = "Samtalet";
 const CONVERSATION_BACK = "Tillbaka";
 const CONFIRM_TITLE = "Så här har Eneo förstått uppgiften";
 const TASK_TITLE = "Vad ska flödet göra?";
-const PLAN_CARD = PLAN.proposal.spec.flow_name;
 
 async function openBuilder(page: Page, request: APIRequestContext, query = "") {
   await page.goto("/");
@@ -208,7 +207,8 @@ test.describe("AI builder phase shell", () => {
   test("the rail shares its column with the plan", async ({ page, request }) => {
     await openBuilder(page, request, "?session=plan-session");
     const rail = page.getByRole("navigation", { name: RAIL_LABEL });
-    const planCard = page.getByRole("article", { name: PLAN_CARD });
+    // The plan card is named by its heading, not by the plan's flow name.
+    const planCard = page.getByRole("article", { name: HOW_FLOW_WORKS });
     await expect(planCard).toBeVisible();
 
     for (const width of [1280, 1440, 2560]) {

@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page, type Route } from "@playwright/test";
-import { backendFetch, expectOk } from "./helpers";
+import { backendFetch, expectOk, readyBuilderModelsBody } from "./helpers";
 
 // The builder journey against a scripted backend: every message turn answers
 // with a fixed SSE script so the run is deterministic and cheap. Copy below
@@ -130,7 +130,7 @@ async function stubBuilder(page: Page, spaceId: string, script: Script) {
     const url = route.request().url();
     const method = route.request().method();
     if (url.includes("/models")) {
-      return route.fulfill({ json: { models: [], default_model_id: null } });
+      return route.fulfill({ json: readyBuilderModelsBody() });
     }
     if (/\/messages\/?$/.test(url) && method === "POST") {
       const frames = script.turns[Math.min(turn, script.turns.length - 1)] ?? [];

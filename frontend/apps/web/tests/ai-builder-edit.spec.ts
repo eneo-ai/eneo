@@ -6,7 +6,7 @@ import {
   type Page,
   type Route
 } from "@playwright/test";
-import { backendFetch, expectOk, uniqueName } from "./helpers";
+import { backendFetch, expectOk, readyBuilderModelsBody, uniqueName } from "./helpers";
 
 // The edit-side builder journeys. The flow itself is real — created through the
 // backend API — while every AI Builder turn answers from a fixed SSE script, so
@@ -17,7 +17,8 @@ import { backendFetch, expectOk, uniqueName } from "./helpers";
 const AI_BUILDER_TAB = "AI-byggaren"; // ai_builder_tab
 const BUILDER_TAB = "Byggare"; // flow_builder
 const STAGE_PROCESSING_STEPS = "Bearbetningssteg"; // flow_stage_processing_steps
-const CHANGE_STEP_WITH_AI = "Ändra det här steget med AI"; // flow_step_change_with_ai
+const CHANGE_STEP_WITH_AI = "Ändra med AI"; // flow_step_change_with_ai
+const STEP_AI_OWN_CHANGE = "Beskriv en egen ändring"; // flow_step_ai_menu_own
 const TASK_TITLE_EDIT = "Vad ska ändras i flödet?"; // ai_builder_task_title_edit
 const TASK_TITLE = "Vad ska flödet göra?"; // ai_builder_task_title
 const SAVED_STEP_PLACEHOLDER = "Beskriv vad du vill ändra i det valda steget…"; // ai_builder_saved_step_prompt_placeholder
@@ -108,7 +109,7 @@ async function stubBuilder(page: Page, options: BuilderStubOptions): Promise<Bui
     const method = route.request().method();
 
     if (url.includes("/models")) {
-      return route.fulfill({ json: { models: [], default_model_id: null } });
+      return route.fulfill({ json: readyBuilderModelsBody() });
     }
     if (/\/messages\/?$/.test(url) && method === "POST") {
       messageRequests.push((route.request().postDataJSON() ?? {}) as Record<string, unknown>);
@@ -451,7 +452,9 @@ test.describe("AI builder edit journeys", () => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await openFlowPage(page, flow);
     await page.getByRole("button", { name: STAGE_PROCESSING_STEPS }).click();
-    await page.getByRole("button", { name: CHANGE_STEP_WITH_AI }).click();
+    await page.getByRole("button", { name: CHANGE_STEP_WITH_AI, exact: true }).click();
+    // The menu item's name also carries its description line.
+    await page.getByRole("menuitem", { name: new RegExp(`^${STEP_AI_OWN_CHANGE}`) }).click();
 
     await expect(page.getByRole("navigation", { name: RAIL_LABEL })).toBeVisible({
       timeout: 20_000
