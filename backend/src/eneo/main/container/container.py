@@ -1,5 +1,5 @@
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from contextvars import ContextVar
 
 import redis.asyncio as aioredis
@@ -78,7 +78,7 @@ from eneo.crawler.python_engine import PythonCrawlEngine
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
-from eneo.database.database import AsyncSession
+from eneo.database.database import AsyncSession, sessionmanager
 from eneo.document_templates.repo import DocumentTemplateRepository
 from eneo.document_templates.service import DocumentTemplateService
 from eneo.embedding_models.application.embedding_model_crud_service import (
@@ -445,6 +445,19 @@ def _build_crawl_engine() -> PythonCrawlEngine:
     )
 
 
+def _mcp_oauth_repo_factory(
+    encryption_service: EncryptionService,
+) -> Callable[[], AbstractAsyncContextManager[MCPOAuthRepoImpl]]:
+    """A repository on a fresh session and transaction, for streaming-time use."""
+
+    @asynccontextmanager
+    async def scope() -> AsyncGenerator[MCPOAuthRepoImpl]:
+        async with sessionmanager.session() as session, session.begin():
+            yield MCPOAuthRepoImpl(session, encryption_service)
+
+    return scope
+
+
 def _build_encryption_service() -> EncryptionService:
     # NOTE: Must use get_settings() directly because the config provider chain is
     # never initialized — the encryption service is constructed before any DI wiring.
@@ -770,9 +783,13 @@ class Container(containers.DeclarativeContainer):
     )
     # Tokens for OAuth MCP servers, resolved for the acting user. The tenant
     # comes from the user; a worker or service key has no per-user tokens.
+    # Each database access opens its own short session: the provider runs
+    # while a turn streams, after the request's transaction has ended.
     mcp_oauth_token_provider = providers.Factory(
         MCPOAuthTokenProvider,
-        repo=mcp_oauth_repo,
+        repo_factory=providers.Callable(
+            _mcp_oauth_repo_factory, encryption_service=encryption_service
+        ),
         encryption_service=encryption_service,
         settings=providers.Callable(get_settings),
         user=user,

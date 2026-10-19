@@ -414,3 +414,42 @@ async def test_shared_service_account_connection_serves_every_user(monkeypatch):
     repo.connections[(server.id, None)] = _connection(server, None, expires_in=3600)
 
     assert await _provider(repo, other, None).access_token_for(server) == "access-0"
+
+
+async def test_a_repo_factory_opens_a_repository_per_database_access(monkeypatch):
+    """In production every access gets its own short session, so the provider
+    keeps working while a turn streams after the request's transaction ended."""
+    from contextlib import asynccontextmanager
+
+    vendor = FakeAuthorizationServer()
+    vendor.install(monkeypatch)
+    user = _user()
+    repo = FakeOAuthRepo()
+    server = _server(vendor, user)
+    repo.connections[(server.id, user.id)] = _connection(
+        server, user.id, expires_in=3600
+    )
+    opened = 0
+
+    @asynccontextmanager
+    async def factory():
+        nonlocal opened
+        opened += 1
+        yield repo
+
+    provider = MCPOAuthTokenProvider(
+        repo_factory=factory,
+        encryption_service=_encryption(),
+        settings=SETTINGS,  # type: ignore[arg-type]
+        user=user,  # type: ignore[arg-type]
+    )
+    await provider.preload([server])
+    assert await provider.access_token_for(server) == "access-0"
+    assert opened == 1
+
+    with pytest.raises(ValueError, match="repo or a repo_factory"):
+        MCPOAuthTokenProvider(
+            encryption_service=_encryption(),
+            settings=SETTINGS,  # type: ignore[arg-type]
+            user=user,  # type: ignore[arg-type]
+        )

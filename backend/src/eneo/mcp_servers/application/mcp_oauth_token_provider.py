@@ -19,11 +19,18 @@ Strategy per server:
 
 Refreshes run under a Redis lock per connection so parallel tool calls from
 several workers never spend the same rotating refresh token twice.
+
+The provider works while a turn streams, after the request's own transaction
+has ended, so in production it opens a short session of its own for every
+database access (``repo_factory``), like the tool-catalog staging does. Tests
+hand it a repository directly.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncGenerator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
@@ -73,6 +80,8 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+RepoFactory = Callable[[], AbstractAsyncContextManager["MCPOAuthRepository"]]
+
 REFRESH_LOCK_TTL_SECONDS = 30
 REFRESH_LOCK_WAIT_SECONDS = 5.0
 REFRESH_LOCK_POLL_SECONDS = 0.25
@@ -84,14 +93,18 @@ class MCPOAuthTokenProvider:
     def __init__(
         self,
         *,
-        repo: MCPOAuthRepository,
+        repo: Optional[MCPOAuthRepository] = None,
+        repo_factory: Optional[RepoFactory] = None,
         encryption_service: EncryptionService,
         settings: Settings,
         user: Optional[UserInDB],
         tenant: Optional[TenantInDB] = None,
         redis_client: Optional[aioredis.Redis] = None,
     ) -> None:
-        self._repo = repo
+        if repo is None and repo_factory is None:
+            raise ValueError("MCPOAuthTokenProvider needs a repo or a repo_factory")
+        self._static_repo = repo
+        self._repo_factory = repo_factory
         self._encryption = encryption_service
         self._settings = settings
         self._user = user
@@ -102,6 +115,22 @@ class MCPOAuthTokenProvider:
         # Serialises database work: the proxy connects servers from one task,
         # but identity-scoped discovery probes several in parallel.
         self._db_lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def _repo(self) -> AsyncGenerator[MCPOAuthRepository]:
+        """The repository for one database access, serialised.
+
+        With a factory each access gets its own short session and transaction,
+        so the provider never depends on the request's transaction, which has
+        ended by the time a streaming turn calls a tool.
+        """
+        async with self._db_lock:
+            if self._repo_factory is not None:
+                async with self._repo_factory() as repo:
+                    yield repo
+            else:
+                assert self._static_repo is not None
+                yield self._static_repo
 
     # -- public ---------------------------------------------------------------
 
@@ -119,14 +148,14 @@ class MCPOAuthTokenProvider:
             return
         shared_ids = [s.id for s in oauth_servers if s.is_shared_oauth]
         user_ids = [s.id for s in oauth_servers if not s.is_shared_oauth]
-        async with self._db_lock:
+        async with self._repo() as repo:
             if shared_ids:
-                for connection in await self._repo.list_connections(
+                for connection in await repo.list_connections(
                     mcp_server_ids=shared_ids, user_id=None
                 ):
                     self._connections[(connection.mcp_server_id, None)] = connection
             if user_ids and self.user_id is not None:
-                for connection in await self._repo.list_connections(
+                for connection in await repo.list_connections(
                     mcp_server_ids=user_ids, user_id=self.user_id
                 ):
                     self._connections[(connection.mcp_server_id, self.user_id)] = (
@@ -172,8 +201,8 @@ class MCPOAuthTokenProvider:
         connection = self._connections.get(key)
         if connection is not None:
             connection.invalidate(reason)
-            async with self._db_lock:
-                await self._repo.save_connection(connection)
+            async with self._repo() as repo:
+                await repo.save_connection(connection)
         scopes = challenge.scope.split() if challenge.scope else []
         return self.user_action_required(server, reason=reason, scopes=scopes)
 
@@ -219,8 +248,8 @@ class MCPOAuthTokenProvider:
         key = self._key(server)
         if key in self._connections:
             return self._connections[key]
-        async with self._db_lock:
-            connection = await self._repo.get_connection(
+        async with self._repo() as repo:
+            connection = await repo.get_connection(
                 mcp_server_id=server.id, user_id=key[1]
             )
         if connection is not None:
@@ -228,8 +257,8 @@ class MCPOAuthTokenProvider:
         return connection
 
     async def _save(self, connection: MCPOAuthConnection) -> MCPOAuthConnection:
-        async with self._db_lock:
-            saved = await self._repo.save_connection(connection)
+        async with self._repo() as repo:
+            saved = await repo.save_connection(connection)
         self._connections[(saved.mcp_server_id, saved.user_id)] = saved
         return saved
 
@@ -411,8 +440,8 @@ class MCPOAuthTokenProvider:
         )
         if not federation.get(ID_JAG_FEDERATION_FLAG) or self.user_id is None:
             return None
-        async with self._db_lock:
-            token = await self._repo.get_idp_token(user_id=self.user_id)
+        async with self._repo() as repo:
+            token = await repo.get_idp_token(user_id=self.user_id)
         if token is None or not token.id_token:
             return None
         if (
@@ -513,8 +542,8 @@ class MCPOAuthTokenProvider:
                     secret_str, discovery.token_endpoint_auth_methods
                 ),
             )
-        async with self._db_lock:
-            registration = await self._repo.get_registration(
+        async with self._repo() as repo:
+            registration = await repo.get_registration(
                 mcp_server_id=server.id, issuer=discovery.issuer
             )
         if registration is not None:
@@ -568,8 +597,8 @@ class MCPOAuthTokenProvider:
         while waited < REFRESH_LOCK_WAIT_SECONDS:
             await asyncio.sleep(REFRESH_LOCK_POLL_SECONDS)
             waited += REFRESH_LOCK_POLL_SECONDS
-            async with self._db_lock:
-                reloaded = await self._repo.get_connection(
+            async with self._repo() as repo:
+                reloaded = await repo.get_connection(
                     mcp_server_id=connection.mcp_server_id, user_id=connection.user_id
                 )
             if reloaded is not None and reloaded.token_is_fresh():
