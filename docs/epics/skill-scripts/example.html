@@ -1,0 +1,41 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div class="page">
+<h1>Worked example: a fee calculation</h1>
+<p class="lead">A communication Skill carries <code>fee.js</code>. One package, from upload to use, and what the audit log sees.</p>
+<div class="row" style="grid-template-columns: 112px 1fr 28px 1fr 28px 1fr; row-gap: 10px; column-gap: 0">
+  <div class="box" style="background:none;border:none;padding:11px 0"><b>Day 0</b></div>
+  <div class="box"><b>Author uploads v3</b><span>Syntax check passes</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box"><b>Revision 3 stored</b><span>Exact ZIP kept, digest a1f3…</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box blue"><b>Audit</b><span>Revision created by Anna</span></div>
+
+  <div class="box" style="background:none;border:none;padding:11px 0"><b>Day 1</b></div>
+  <div class="box"><b>Publisher downloads v3</b><span>Same bytes, same digest</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box green"><b>Publishes v3</b><span>Organisation review gate</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box blue"><b>Audit</b><span>Downloaded, published</span></div>
+
+  <div class="box" style="background:none;border:none;padding:11px 0"><b>Day 2</b></div>
+  <div class="box"><b>User asks for a fee</b><span>Model calls fee.js with amount and years</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box green"><b>Runs in 120 ms</b><span>1 of 4 calls used, result saved</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box blue"><b>Answer and trace</b><span>Revision 3, 120 ms, succeeded</span></div>
+
+  <div class="box" style="background:none;border:none;padding:11px 0"><b>Day 2, other host</b></div>
+  <div class="box"><b>Host cannot seal the box</b><span>Kernel lacks TCP confinement</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box red"><b>Runtime refuses</b><span>Typed outcome, no result</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box"><b>Chat continues</b><span>Model answers without the script</span></div>
+
+  <div class="box" style="background:none;border:none;padding:11px 0"><b>Day 3</b></div>
+  <div class="box"><b>Admin sets budget to 0</b><span>Admin › Skills</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box"><b>Script tool not offered</b><span>Instructions still work</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box blue"><b>Audit</b><span>Setting changed 4 → 0</span></div>
+</div>
+<div class="scale"><span>day 0: uploaded</span><span>day 1: published</span><span>day 2: used, then refused elsewhere</span><span>day 3: switched off</span></div>
+</div></body></html>

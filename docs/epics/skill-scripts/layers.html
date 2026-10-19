@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+.layer { display: grid; grid-template-columns: 150px 1fr 1fr; gap: 0; border: 1.5px solid #3a3f45; border-radius: 9px; overflow: hidden; margin-bottom: 8px; }
+.layer > div { padding: 10px 13px; min-width: 0; }
+.layer .name { border-right: 1.5px solid #3a3f45; }
+.layer .name b { display:block; font-size: 14.5px; line-height: 1.25; }
+.layer .name span { display:block; font-size: 11.5px; color:#57606a; margin-top: 2px; }
+.layer .does { border-right: 1.5px dashed #9aa1a9; }
+.layer p { margin: 0; font-size: 12.5px; line-height: 1.4; color: #2b3138; }
+.layer p b { font-size: 11.5px; letter-spacing: .02em; text-transform: uppercase; color: #57606a; display:block; margin-bottom: 2px; }
+.l1 { background:#f6f7f9; } .l2 { background:#f6f7f9; } .l3 { background:#e8f5ec; border-color:#2f7a3e; } .l4 { background:#fdf0dc; border-color:#c27a22; } .l5 { background:#eef0f3; }
+.hint { display:flex; justify-content:space-between; font-size: 12px; color:#57606a; margin-top: 6px; }
+</style></head><body><div class="page">
+<h1>Five layers, from the person to the kernel</h1>
+<p class="lead">Each layer does one job and refuses one thing. A script only runs when every layer above it has said yes.</p>
+
+<div class="layer l1">
+  <div class="name"><b>1. People and permissions</b><span>who may do what</span></div>
+  <div class="does"><p><b>Does</b>Author adds scripts with <i>Manage Skill scripts</i>. User runs them with the existing compute permission. Administrator sets calls per turn under Admin › Skills.</p></div>
+  <div><p><b>Never</b>Nobody can run a script without the permission and the Function on the assistant. Edit access to a Space is not enough.</p></div>
+</div>
+
+<div class="layer l2">
+  <div class="name"><b>2. The Skill</b><span>instructions + scripts</span></div>
+  <div class="does"><p><b>Does</b>A ZIP with SKILL.md and scripts becomes an immutable revision with a digest. Publication is the review gate; the exact package can be downloaded.</p></div>
+  <div><p><b>Never</b>A script never changes without a new revision. A Skill grants no tools, no permissions and no data access.</p></div>
+</div>
+
+<div class="layer l3">
+  <div class="name"><b>3. Eneo</b><span>the execution owner</span></div>
+  <div class="does"><p><b>Does</b>Checks permission, provider and budget on every call. Writes the record first, saves the result before the model sees it, logs the audit trail.</p></div>
+  <div><p><b>Never</b>Never runs code itself. Never reruns a script on its own. Never sends an author's script to an external provider.</p></div>
+</div>
+
+<div class="layer l4">
+  <div class="name"><b>4. The sealed box</b><span>tool runtime</span></div>
+  <div class="does"><p><b>Does</b>Runs the script in a fresh process: JavaScript in WebAssembly, confined for files and network, 5 seconds, 64 MB. Compiles scripts at upload without running them.</p></div>
+  <div><p><b>Never</b>Never runs a job it cannot seal. No network, no files, no imports, no secrets. Reports errors as data, not prose.</p></div>
+</div>
+
+<div class="layer l5">
+  <div class="name"><b>5. The host</b><span>Linux + container</span></div>
+  <div class="does"><p><b>Does</b>Linux Landlock enforces the seal (kernel 6.7 or later). The container is read-only and reaches only the backend.</p></div>
+  <div><p><b>Never</b>No second sandbox, no gVisor. The shared kernel is the accepted boundary, and the test suite proves it before anything ships.</p></div>
+</div>
+
+<div class="hint"><span>↑ decides who and what</span><span>↓ decides how, and refuses when it cannot</span></div>
+</div></body></html>

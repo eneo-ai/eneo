@@ -1,0 +1,22 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div class="page">
+<h1>How a Skill script works</h1>
+<p class="lead">An author ships a tested calculation inside a Skill. Eneo keeps it unchanged and runs it in a sealed box. The model only asks for it.</p>
+<div class="row" style="grid-template-columns: 1fr 28px 1fr 28px 1fr 28px 1fr">
+  <div class="box"><b>1. Author uploads</b><span>A ZIP with SKILL.md and one or more scripts. Needs the permission <i>Manage Skill scripts</i>.</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box orange"><b>2. Eneo checks and stores</b><span>The runtime compiles each script without running it. The package becomes an immutable revision.</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box green"><b>3. Publisher approves</b><span>Downloads the exact package, reviews it, publishes one revision. Logged in the audit log.</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box"><b>4. The model asks for it</b><span>In a chat it names the script and gives JSON input. It can never send code.</span></div>
+</div>
+<div style="height:12px"></div>
+<div class="row" style="grid-template-columns: 1fr 28px 1fr 28px 1fr">
+  <div class="box green"><b>5. Eneo decides</b><span>May this user run it? Is there budget left this turn? Yes: write a record, then run.</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box orange"><b>6. The sealed box runs it</b><span>Fresh process, no network, no files, 5 seconds, 64 MB. Same box that runs model-written JavaScript today.</span></div>
+  <div class="arrow"><svg viewBox="0 0 28 16"><path d="M0 8h22M16 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+  <div class="box blue"><b>7. Answer and trace</b><span>The result is saved before the model answers. The debug panel shows what ran, how long, and the outcome.</span></div>
+</div>
+<p class="caption">Instruction-only Skills do not change. A Skill without scripts never touches the runtime.</p>
+</div></body></html>

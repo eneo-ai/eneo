@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div class="page">
+<h1>Who does what</h1>
+<div class="row" style="grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px">
+  <div class="box"><b>Author</b><span>Writes the script and the instructions that name it. Tests it before upload.</span></div>
+  <div class="box"><b>Administrator</b><span>Grants <i>Manage Skill scripts</i>. Sets calls per turn under Admin › Skills (default 4, 0 switches scripts off).</span></div>
+  <div class="box dash"><b>Model</b><span>Chooses the script path and the input. Nothing else. It never sees or sends source code.</span></div>
+  <div class="box green"><b>Eneo</b><span>Checks permission and budget on every call. Keeps the record. Runs the script only in the sealed runtime.</span></div>
+</div>
+<div style="height:12px"></div>
+<div class="row" style="grid-template-columns: 1fr 1fr 1fr; gap: 12px">
+  <div class="box green"><b>Set in the admin panel</b><span>Script calls per turn. Changes are audited.</span></div>
+  <div class="box orange"><b>Set by the operator</b><span>Time and memory per call, code and input size. Runtime configuration, documented.</span></div>
+  <div class="box"><b>Never changeable</b><span>Sealed process with no network and no file access. The model never sends code.</span></div>
+</div>
+</div></body></html>
