@@ -104,6 +104,26 @@ DRIVE = "https://contoso-my.sharepoint.com/personal/max_contoso_com/Documents"
             "Bilagor",
         ),
         (
+            "folder_path stored decoded keeps a literal percent in a name",
+            "https://contoso.sharepoint.com/sites/KS-ny/Delade%20dokument/Ekonomi/Budget%2050%25AB/Q1/KS-1.pdf",
+            dict(
+                item_url=FOLDER,
+                folder_path="/Ekonomi/Budget 50%AB",
+                resource_type="site",
+            ),
+            "Q1",
+        ),
+        (
+            "folder_path stored encoded, before the sync refreshed it",
+            "https://contoso.sharepoint.com/sites/KS-ny/Delade%20dokument/Ekonomi/Budget%2050%25AB/Q1/KS-1.pdf",
+            dict(
+                item_url=FOLDER,
+                folder_path="/Ekonomi/Budget%2050%25AB",
+                resource_type="site",
+            ),
+            "Q1",
+        ),
+        (
             "URL sharing neither anchor keeps its own folders",
             "https://contoso.sharepoint.com/sites/Other/Docs/Arkiv/KS-1.pdf",
             dict(item_url=FOLDER, folder_path="/Protokoll", resource_type="site"),
