@@ -529,6 +529,10 @@ class SpaceService:
                 else space.security_classification,
             )
 
+        # Read before the update: the stored links follow the domain's rule.
+        changes_security_level = is_provided(
+            security_classification
+        ) and space.changes_security_level(space_security_classification)
         space.update(
             name=name,
             description=description,
@@ -551,7 +555,6 @@ class SpaceService:
         if mcp_tools is not None:
             mcp_tool_settings = [(tool.tool_id, tool.is_enabled) for tool in mcp_tools]
 
-        classification_changed = is_provided(security_classification)
         await self.repo.update_settings(
             id,
             SpaceUpdate(
@@ -562,11 +565,11 @@ class SpaceService:
                     if space.security_classification
                     else None
                 )
-                if classification_changed
+                if is_provided(security_classification)
                 else NOT_PROVIDED,
                 minimum_security_level=(
                     space.security_classification.security_level
-                    if classification_changed
+                    if changes_security_level
                     and space.security_classification
                     and space.security_classification.security_enabled
                     else None
