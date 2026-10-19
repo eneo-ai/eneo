@@ -578,19 +578,21 @@ class SharePointIndex:
             stats["skipped_items"] += 1
 
     async def remove_refused(
-        self, integration_knowledge: "IntegrationKnowledge", stats: SyncStats
-    ) -> None:
-        """Drop the indexed copies of files whose download was refused (403).
+        self,
+        integration_knowledge: "IntegrationKnowledge",
+        stats: SyncStats,
+        refused: dict[str, str],
+    ) -> set[str]:
+        """Drop the indexed copies of files Graph refused again; the ids removed.
 
-        Called at the end of a pass that ``sharepoint_results.refused_access``
-        did not put down to the identity: a refusal among downloads that work
-        is about the file (a sensitivity label, broken inheritance), and what
-        Eneo may no longer read must not stay answerable. The refusal itself
-        was counted as the file's skip when it came.
+        ``refused`` maps item id to name. What Eneo may no longer read must not
+        stay answerable; the refusal itself was counted as the file's skip
+        when it came.
         """
-        for item_id, item_name in stats.pop("refused_downloads", {}).items():
+        removed: set[str] = set()
+        for item_id, item_name in refused.items():
             if await self._may_be_indexed(integration_knowledge.id, item_id):
-                await self.remove(
+                deleted = await self.remove(
                     item_id=item_id,
                     item_name=item_name,
                     integration_knowledge=integration_knowledge,
@@ -598,6 +600,10 @@ class SharePointIndex:
                     stats=stats,
                     reason="access-refused",
                 )
+                if deleted is None:
+                    continue
+            removed.add(item_id)
+        return removed
 
     async def index_file(
         self,
@@ -749,6 +755,8 @@ class SharePointIndex:
                 raise
             if e.status == 403:
                 sync_results.count_refused_download(stats, item_id, item_name)
+            else:
+                sync_results.count_hidden_download(stats)
             logger.warning(
                 "File %s (item_id=%s) is gone or not accessible: %s",
                 item_name,

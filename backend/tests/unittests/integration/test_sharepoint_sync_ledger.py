@@ -845,56 +845,159 @@ class TestRetriesWhileAccessIsLost:
         ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
 
 
-class TestRefusedRetries:
-    @pytest.mark.parametrize("refused", [1, 3])
-    async def test_a_retried_item_eneo_may_no_longer_read(
+class TestRefusals:
+    """A refusal removes a file's indexed copy only when a later pass confirms it."""
+
+    def _delta(self, service, mock_oauth_token, ik):
+        return lambda: service.process_delta_changes(
+            token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+        )
+
+    def _indexed(self, mock_dependencies, *item_ids):
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), item_id) for item_id in item_ids]
+        )
+        repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[MagicMock(size=0, title="indexed copy")]
+        )
+        return repo.delete_by_sharepoint_item_and_integration_knowledge
+
+    @pytest.mark.parametrize(
+        ("since", "removed"),
+        [(COUNT_INTERVAL_SECONDS, True), (COUNT_INTERVAL_SECONDS - 60, False)],
+        ids=["confirmed", "too-soon"],
+    )
+    async def test_a_second_refusal_removes_the_copy(
         self,
         service,
         mock_dependencies,
         mock_oauth_token,
         ledger,
         sqlite_session,
-        refused,
+        since,
+        removed,
     ):
-        """Refused like a download: removed when it is about the item, kept
-        recorded when every one of several was refused."""
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
-        item_ids = [f"item-{index}" for index in range(refused)]
+        delete = self._indexed(mock_dependencies, "secret")
+        ledger.failed = {"secret": FailedItem(0, 0, refused_at=NOW - since)}
+        with patch(_CLIENT) as client_class:
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(
+                    return_value=([_delta_file("secret", "secret.docx")], "token-2")
+                ),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=_http_error(403, "Forbidden")
+                ),
+            )
+            await _committed(
+                sqlite_session, service, self._delta(service, mock_oauth_token, ik)
+            )
+
+        assert ik.delta_token == "token-2"
+        if removed:
+            delete.assert_awaited_once_with(
+                sharepoint_item_id="secret", integration_knowledge_id=ik.id
+            )
+            assert ledger.failed == {}
+        else:
+            delete.assert_not_called()
+            assert ledger.failed == {"secret": FailedItem(0, 0, refused_at=NOW - since)}
+
+    async def test_a_file_read_again_is_forgotten(
+        self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
+    ):
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        delete = self._indexed(mock_dependencies, "secret")
+        ledger.failed = {"secret": FailedItem(0, 0, refused_at=NOW - HOUR)}
+        with (
+            patch(_CLIENT) as client_class,
+            patch.object(service._index, "upsert", AsyncMock(return_value="unchanged")),
+        ):
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=([], "token-2")),
+                get_file_metadata=AsyncMock(side_effect=_metadata),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body", "text/plain")
+                ),
+            )
+            await _committed(
+                sqlite_session, service, self._delta(service, mock_oauth_token, ik)
+            )
+
+        delete.assert_not_called()
+        assert ledger.failed == {}
+
+    async def test_a_refused_retry_counts_toward_the_removal_not_the_identity(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        ledger,
+        sqlite_session,
+        clock,
+    ):
+        """Three recorded items whose metadata read is refused in a quiet pass:
+        recorded, and removed when a later pass is refused them too."""
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        item_ids = ["x", "y", "z"]
+        delete = self._indexed(mock_dependencies, *item_ids)
         ledger.failed = {item_id: _failed(1) for item_id in item_ids}
-        repo = mock_dependencies["info_blob_service"].repo
-        repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
-            return_value=[(uuid4(), item_id) for item_id in item_ids]
-        )
         with patch(_CLIENT) as client_class:
             _mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=([], "token-2")),
                 get_file_metadata=AsyncMock(side_effect=_http_error(403, "Forbidden")),
             )
+            await _committed(
+                sqlite_session, service, self._delta(service, mock_oauth_token, ik)
+            )
+            assert ik.delta_token == "token-2"
+            assert ik.last_sync_status == "success"
+            delete.assert_not_called()
+            assert {item.refused_at for item in ledger.failed.values()} == {NOW}
 
-            async def run():
-                return await service.process_delta_changes(
-                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            clock["now"] += COUNT_INTERVAL_SECONDS
+            await _committed(
+                sqlite_session, service, self._delta(service, mock_oauth_token, ik)
+            )
+
+        removed = sorted(
+            call.kwargs["sharepoint_item_id"] for call in delete.await_args_list
+        )
+        assert removed == item_ids
+        assert ledger.failed == {}
+
+    async def test_downloads_all_refused_or_hidden_are_about_the_identity(
+        self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
+    ):
+        """SharePoint often answers 404 for what it hides from the identity."""
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        delete = self._indexed(mock_dependencies, "a", "b", "c")
+        ledger.failed = {"a": FailedItem(0, 0, refused_at=NOW - HOUR)}
+        changes = [_delta_file(item_id, f"{item_id}.docx") for item_id in "abc"]
+        with patch(_CLIENT) as client_class:
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=[
+                        _http_error(403, "Forbidden"),
+                        _http_error(404, "Not Found"),
+                        _http_error(404, "Not Found"),
+                    ]
+                ),
+            )
+            with pytest.raises(SyncAccessDenied, match="HTTP 403 or 404"):
+                await _committed(
+                    sqlite_session, service, self._delta(service, mock_oauth_token, ik)
                 )
 
-            if refused == 1:
-                await _committed(sqlite_session, service, run)
-            else:
-                with pytest.raises(SyncAccessDenied):
-                    await _committed(sqlite_session, service, run)
-
-        removed = [
-            call.kwargs["sharepoint_item_id"]
-            for call in repo.delete_by_sharepoint_item_and_integration_knowledge.await_args_list
-        ]
-        if refused == 1:
-            assert removed == ["item-0"]
-            assert ik.delta_token == "token-2"
-            assert ledger.failed == {}
-        else:
-            assert removed == []
-            assert ik.delta_token == "token-1"
-            assert ledger.counted() == dict.fromkeys(item_ids, 1)
+        delete.assert_not_called()
+        assert ik.delta_token == "token-1"
+        assert ledger.failed == {"a": FailedItem(0, 0, refused_at=NOW - HOUR)}
 
 
 class TestRecordLimit:

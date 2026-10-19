@@ -359,10 +359,8 @@ class SharePointContentService:
                 access_token_provider=access_token_provider,
             )
             await self._progress.set_phase("finishing", stats)
-            if not sync_results.refused_access(stats):
-                await self._index.remove_refused(integration_knowledge, stats)
             retries_recorded = await self._settle_failures(
-                resolved_integration_knowledge_id,
+                integration_knowledge,
                 stats,
                 failed_before=await self._failed_items(
                     resolved_integration_knowledge_id
@@ -371,7 +369,11 @@ class SharePointContentService:
             )
             summary_stats, forbidden = sync_results.summarize_pass(stats)
             if forbidden:
-                raise SyncAccessDenied(summary_stats, forbidden=forbidden)
+                raise SyncAccessDenied(
+                    summary_stats,
+                    forbidden=forbidden,
+                    hidden=bool(stats.get("download_not_found")),
+                )
             if summary_stats.get("failed_items"):
                 # A delta never re-emits an unchanged item, so the token may
                 # stay only when the next delta pass retries every failure.
@@ -1095,8 +1097,9 @@ class SharePointContentService:
                         reason="removed",
                     )
                 elif exc.status == 403:
-                    sync_results.count_download_attempt(delta_pass.stats)
-                    sync_results.count_refused_download(delta_pass.stats, item_id)
+                    sync_results.count_refused_download(
+                        delta_pass.stats, item_id, download=False
+                    )
                     sync_results.count_skip(
                         delta_pass.stats, error_skipped(item_id, exc)
                     )
@@ -1117,7 +1120,7 @@ class SharePointContentService:
 
     async def _settle_failures(
         self,
-        knowledge_id: UUID,
+        integration_knowledge: "IntegrationKnowledge",
         stats: SyncStats,
         *,
         failed_before: dict[str, FailedItem],
@@ -1129,9 +1132,12 @@ class SharePointContentService:
         a set-aside item's failure lets the pass advance past it. What the
         record held and this pass tried without failing is forgotten;
         ``attempted`` None means the pass tried every item (a full sync). The
-        record is written in the pass's transaction. True when every failure
-        naming an item is recorded.
+        record is written in the pass's transaction. A refusal confirming one
+        at least ``COUNT_INTERVAL_SECONDS`` earlier removes the indexed copy,
+        unless the pass shows the identity lost access. True when every
+        failure naming an item is recorded.
         """
+        knowledge_id = integration_knowledge.id
         now = int(self._clock())
         # An outage fails the pass and keeps the token; nobody's count moves.
         systemic = sync_results.failures_look_systemic(stats)
@@ -1149,8 +1155,25 @@ class SharePointContentService:
             failed_now[item_id] = failed
             if failed.set_aside_at is not None:
                 sync_results.set_aside(stats, item_id, attempts=failed.counted)
-        # Refusals still here were put down to the identity, not the files.
         refused = stats.get("refused_downloads", {})
+        if not sync_results.refused_access(stats):
+            confirmed: dict[str, str] = {}
+            for item_id, item_name in refused.items():
+                refusal, again = (
+                    failed_before.get(item_id) or FailedItem.uncounted()
+                ).after_refusal(now)
+                if again:
+                    confirmed[item_id] = item_name
+                else:
+                    failed_now[item_id] = refusal
+            removed = await self._index.remove_refused(
+                integration_knowledge, stats, confirmed
+            )
+            refused = {
+                item_id: name
+                for item_id, name in refused.items()
+                if item_id not in removed
+            }
         kept = {
             item_id: item
             for item_id, item in failed_before.items()
@@ -1324,10 +1347,8 @@ class SharePointContentService:
         stats = delta_pass.stats
         pending_change_keys = delta_pass.pending_change_keys
 
-        if not sync_results.refused_access(stats):
-            await self._index.remove_refused(integration_knowledge, stats)
         await self._settle_failures(
-            integration_knowledge.id,
+            integration_knowledge,
             stats,
             failed_before=delta_pass.failed_before,
             attempted=delta_pass.change_ids | delta_pass.retried_ids,
@@ -1344,6 +1365,7 @@ class SharePointContentService:
                 raise SyncAccessDenied(
                     summary_stats,
                     forbidden=forbidden,
+                    hidden=bool(stats.get("download_not_found")),
                     changes_detected=changes_detected,
                 )
             raise SyncItemsFailed(summary_stats, changes_detected=changes_detected)

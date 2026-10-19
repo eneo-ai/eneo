@@ -5463,11 +5463,12 @@ class TestDeltaExtractionOutcomes:
             ),
         ],
     )
-    async def test_a_refused_download_removes_the_indexed_copy_and_advances(
+    async def test_a_first_refusal_keeps_the_indexed_copy_and_advances(
         self, service, mock_dependencies, mock_oauth_token, outcomes
     ):
-        """What Eneo may no longer read must not stay answerable, and one
-        restricted file must not hold the token back."""
+        """A passing 403 must not drop a file, and one restricted file must not
+        hold the token back: the refusal is recorded, and a second one later
+        removes the copy (see test_sharepoint_sync_ledger)."""
         ik, removed, failure = await self._run_refusals(
             service, mock_dependencies, mock_oauth_token, outcomes
         )
@@ -5478,11 +5479,19 @@ class TestDeltaExtractionOutcomes:
             if isinstance(outcome, Exception)
         ]
         assert failure is None
-        assert removed == refused
+        assert removed == []
         assert ik.delta_token == "token-2"
         assert ik.last_sync_status == "success"
-        assert ik.last_sync_summary["files_deleted"] == len(refused)
+        assert ik.last_sync_summary["files_deleted"] == 0
         assert "failed_items" not in ik.last_sync_summary
+        written = mock_dependencies["integration_knowledge_repo"].update_sync_state
+        (record,) = [
+            call.kwargs["sync_failed_items"]
+            for call in written.await_args_list
+            if "sync_failed_items" in call.kwargs
+        ]
+        assert sorted(record["items"]) == refused
+        assert all(entry[3] is not None for entry in record["items"].values())
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
         assert {"file": "item-0.docx", "reason": "Error: HTTP 403 Forbidden"} in (
             _reasons(sync_log.metadata["skipped_details"])
@@ -5534,10 +5543,11 @@ class TestDeltaExtractionOutcomes:
             {"file": "indexed copy", "change": "deleted"}
         ]
 
-    async def test_a_full_sync_removes_a_file_it_may_no_longer_download(
+    async def test_a_full_sync_records_a_file_it_may_no_longer_download(
         self, service, mock_dependencies, mock_oauth_token
     ):
-        """The file is still listed, so only the refusal says it is closed."""
+        """The file is still listed, so only the refusal says it is closed; the
+        next pass that is refused it too removes the copy."""
         ik = _real_integration_knowledge(delta_token=None)
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
         mock_dependencies["integration_knowledge_repo"].one.return_value = ik
@@ -5575,11 +5585,16 @@ class TestDeltaExtractionOutcomes:
                 token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
             )
 
-        delete.assert_awaited_once_with(
-            sharepoint_item_id="secret", integration_knowledge_id=ik.id
-        )
+        delete.assert_not_called()
         assert ik.last_sync_status == "success"
         assert ik.delta_token == "delta-token"
+        written = mock_dependencies["integration_knowledge_repo"].update_sync_state
+        (record,) = [
+            call.kwargs["sync_failed_items"]
+            for call in written.await_args_list
+            if "sync_failed_items" in call.kwargs
+        ]
+        assert list(record["items"]) == ["secret"]
 
     async def test_a_stale_copy_that_cannot_be_removed_fails_the_item_once_uncached(
         self, service, mock_dependencies, mock_oauth_token

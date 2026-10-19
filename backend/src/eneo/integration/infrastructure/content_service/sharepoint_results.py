@@ -45,27 +45,35 @@ class SyncItemsFailed(Exception):
 
 
 class SyncAccessDenied(SyncItemsFailed):
-    """Every download of the pass was refused (HTTP 403), and enough of them.
+    """Every download of the pass was refused or hidden, and enough of them.
 
     A refusal among successes, or one of a handful, is about that file (a
-    sensitivity label, a broken-inheritance folder): its indexed copy goes and
-    the pass moves past it. When nothing of a meaningful number could be
-    downloaded the problem is the identity (a conditional access policy, a
-    changed Sites.Selected grant), so nothing is removed and the pass fails
-    and keeps its token. See ``refused_access``.
+    sensitivity label, a broken-inheritance folder): a second refusal removes
+    its indexed copy and the pass moves past it. When nothing of a meaningful
+    number could be downloaded the problem is the identity (a conditional
+    access policy, a changed Sites.Selected grant; SharePoint often answers
+    404 for what it hides), so nothing is removed and the pass fails and keeps
+    its token. See ``refused_access``.
     """
 
     def __init__(
-        self, summary: SyncStats, *, forbidden: int, changes_detected: int | None = None
+        self,
+        summary: SyncStats,
+        *,
+        forbidden: int,
+        hidden: bool = False,
+        changes_detected: int | None = None,
     ):
+        plural = forbidden != 1
+        statuses = "HTTP 403 or 404" if hidden else "HTTP 403"
         super().__init__(
             summary,
             changes_detected=changes_detected,
             message=(
                 f"SharePoint refused all {forbidden} "
-                f"download{'s' if forbidden != 1 else ''} (HTTP 403); check the "
+                f"download{'s' if plural else ''} ({statuses}); check the "
                 "integration's access to this library, the next sync retries "
-                f"{'them' if forbidden != 1 else 'it'}"
+                f"{'them' if plural else 'it'}"
             ),
         )
 
@@ -314,10 +322,22 @@ def count_download_attempt(stats: SyncStats) -> None:
     stats["download_attempts"] = stats.get("download_attempts", 0) + 1
 
 
-def count_refused_download(stats: SyncStats, item_id: str, item_name: str = "") -> None:
-    """A download refused with 403: about the file unless ``refused_access``."""
-    stats["download_forbidden"] = stats.get("download_forbidden", 0) + 1
+def count_refused_download(
+    stats: SyncStats, item_id: str, item_name: str = "", *, download: bool = True
+) -> None:
+    """An item Graph refused (403): about the file unless ``refused_access``.
+
+    ``download`` False for a refused metadata read, which counts toward the
+    item's removal but not toward the pass's verdict about the identity.
+    """
+    if download:
+        stats["download_forbidden"] = stats.get("download_forbidden", 0) + 1
     stats.setdefault("refused_downloads", {})[item_id] = item_name or item_id
+
+
+def count_hidden_download(stats: SyncStats) -> None:
+    """A download answered 404 or 410."""
+    stats["download_not_found"] = stats.get("download_not_found", 0) + 1
 
 
 # Fewer refused downloads than this say nothing about the identity, even when
@@ -328,13 +348,15 @@ _MIN_REFUSALS_FOR_ACCESS_PROBLEM = 3
 def refused_access(stats: SyncStats) -> int:
     """How many downloads were refused when that says the identity lost access, else 0.
 
-    Every download of the pass refused, and at least
-    ``_MIN_REFUSALS_FOR_ACCESS_PROBLEM`` of them.
+    Every download of the pass refused (403) or hidden (404, 410), at least
+    ``_MIN_REFUSALS_FOR_ACCESS_PROBLEM`` of them, one refused at least.
     """
     attempts = stats.get("download_attempts", 0)
+    forbidden = stats.get("download_forbidden", 0)
     if (
         attempts >= _MIN_REFUSALS_FOR_ACCESS_PROBLEM
-        and stats.get("download_forbidden", 0) == attempts
+        and forbidden
+        and forbidden + stats.get("download_not_found", 0) == attempts
     ):
         return attempts
     return 0
