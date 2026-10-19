@@ -120,7 +120,8 @@ export function skipReasonKind(skip: SkipReason): SkipReasonCode {
 export function describeSkipReason(skip: SkipReason, t: Translate): string {
   const describe = skip.code ? DESCRIPTIONS[skip.code] : undefined;
   const description = describe ? describe(skip.params, t) : (skip.reason ?? "").trim();
-  if (!skip.retry) return description;
+  // A set-aside file says itself when it is tried again: not at the next sync.
+  if (!skip.retry || skip.code === "set_aside") return description;
   // The retry note is a sentence of its own; a reason ending in a full stop would double it.
   return t("skip_reason_with_retry", { reason: description.replace(/\.\s*$/, "") });
 }

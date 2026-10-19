@@ -129,6 +129,15 @@ describe("describeSkipReason", () => {
     ).toBe(t("skip_reason_error", { detail: "SharePoint erbjuder ingen nedladdning av objektet" }));
   });
 
+  it("lets a set-aside file say itself when it is tried again", () => {
+    const skip: SkipReason = {
+      code: "set_aside",
+      params: { attempts: 3, detail: "HTTP 500" },
+      retry: true
+    };
+    expect(describeSkipReason(skip, t)).toBe(describeSkipReason({ ...skip, retry: false }, t));
+  });
+
   it("does not double the full stop before the retry note", () => {
     expect(describeSkipReason({ reason: "Server busy.", retry: true }, t)).toBe(
       "Server busy. Försöks igen vid nästa synk"
