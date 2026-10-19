@@ -250,9 +250,10 @@
   const showsPersonNames = $derived(
     ownsStoredSegments && (speakerMapping.length > 0 || !transcriptContext?.namedByStep)
   );
+  const stepSpeakerNames = $derived(speakerNamesFromRows(speakerMapping));
   const transcriptSpeakerNames = $derived(
     effectiveSpeakerNames(
-      speakerNamesFromRows(speakerMapping),
+      stepSpeakerNames,
       showsPersonNames ? (correctionsController?.speakerNames ?? {}) : {}
     )
   );
@@ -379,13 +380,17 @@
                       <span class="text-sm font-medium" class:text-secondary={name === null}>
                         {name ?? m.flow_run_transcript_unknown_speaker()}
                       </span>
-                      <Badge variant="outline" class="text-xs">
-                        {confidenceText(row.confidence)}
-                      </Badge>
-                      {#if row.evidence}
-                        <span class="text-secondary basis-full text-xs text-pretty sm:basis-auto">
-                          {row.evidence}
-                        </span>
+                      <!-- The step's confidence and evidence are for its own name, not
+                           for one a person changed or cleared. -->
+                      {#if name === (stepSpeakerNames[row.label] ?? null)}
+                        <Badge variant="outline" class="text-xs">
+                          {confidenceText(row.confidence)}
+                        </Badge>
+                        {#if row.evidence}
+                          <span class="text-secondary basis-full text-xs text-pretty sm:basis-auto">
+                            {row.evidence}
+                          </span>
+                        {/if}
                       {/if}
                     </li>
                   {/each}

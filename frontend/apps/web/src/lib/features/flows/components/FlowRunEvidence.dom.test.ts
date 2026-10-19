@@ -75,10 +75,14 @@ function evidenceWithBoundedSections(): FlowRunEvidenceWithTypedSteps {
   return evidence;
 }
 
-/** A transcription, then a step that names its speakers Anna and Bo. */
+/** A transcription, then a step that names its speakers Anna, Bo and Cecilia. */
 function evidenceWithNamingStep(): FlowRunEvidenceWithTypedSteps {
-  const lines = (first: string, second: string) =>
-    `[00:00:00 - 00:00:04] ${first}: Hej Gunnar.\n[00:00:05 - 00:00:09] ${second}: Jo tack.`;
+  const lines = (first: string, second: string, third: string) =>
+    [
+      `[00:00:00 - 00:00:04] ${first}: Hej Gunnar.`,
+      `[00:00:05 - 00:00:09] ${second}: Jo tack.`,
+      `[00:00:10 - 00:00:14] ${third}: Det stämmer.`
+    ].join("\n");
   return {
     run: { error: null },
     definition_integrity: {},
@@ -92,7 +96,7 @@ function evidenceWithNamingStep(): FlowRunEvidenceWithTypedSteps {
         input_payload_json: {
           transcription: { file_ids: ["file-1"], source: { attempt_no: 1 } }
         },
-        output_payload_json: { text: lines("SPEAKER_00", "SPEAKER_01") }
+        output_payload_json: { text: lines("SPEAKER_00", "SPEAKER_01", "SPEAKER_02") }
       },
       {
         id: "result-2",
@@ -100,18 +104,35 @@ function evidenceWithNamingStep(): FlowRunEvidenceWithTypedSteps {
         step_order: 2,
         status: "completed",
         output_payload_json: {
-          text: lines("Anna", "Bo"),
+          text: lines("Anna", "Bo", "Cecilia"),
           speaker_mapping: {
             source_step_id: "step-transcribe",
             inventory: [
               { label: "SPEAKER_00", line_count: 1, samples: ["Hej Gunnar."] },
-              { label: "SPEAKER_01", line_count: 1, samples: ["Jo tack."] }
+              { label: "SPEAKER_01", line_count: 1, samples: ["Jo tack."] },
+              { label: "SPEAKER_02", line_count: 1, samples: ["Det stämmer."] }
             ]
           },
           structured: {
             speakers: [
-              { label: "SPEAKER_00", name: "Anna", confidence: "high", evidence: "" },
-              { label: "SPEAKER_01", name: "Bo", confidence: "high", evidence: "" }
+              {
+                label: "SPEAKER_00",
+                name: "Anna",
+                confidence: "high",
+                evidence: "Presenterar sig som Anna."
+              },
+              {
+                label: "SPEAKER_01",
+                name: "Bo",
+                confidence: "medium",
+                evidence: "Tilltalas som Bo."
+              },
+              {
+                label: "SPEAKER_02",
+                name: "Cecilia",
+                confidence: "high",
+                evidence: "Säger att hon heter Cecilia."
+              }
             ]
           }
         }
@@ -260,7 +281,11 @@ describe("FlowRunEvidence", () => {
     ).toBeTruthy();
   });
 
-  it("names the speakers where a regeneration does: on the naming step, over its names", async () => {
+  /**
+   * Opens the naming step of a run whose corrections clear the step's Anna
+   * and rename its Bo to Bertil, once its transcript shows those names.
+   */
+  async function openNamingStep() {
     const eneo = eneoReturning(evidenceWithNamingStep());
     Object.assign(eneo.flows.runs, {
       transcriptSource: {
@@ -271,7 +296,8 @@ describe("FlowRunEvidence", () => {
           speaker_review: null,
           segments: [
             { file_index: 0, start: 0, end: 4, speaker: "SPEAKER_00", text: "Hej Gunnar." },
-            { file_index: 0, start: 5, end: 9, speaker: "SPEAKER_01", text: "Jo tack." }
+            { file_index: 0, start: 5, end: 9, speaker: "SPEAKER_01", text: "Jo tack." },
+            { file_index: 0, start: 10, end: 14, speaker: "SPEAKER_02", text: "Det stämmer." }
           ]
         }))
       },
@@ -282,7 +308,6 @@ describe("FlowRunEvidence", () => {
             step_id: "step-transcribe",
             occurrences: [],
             speaker_edits: [],
-            // A person cleared the step's Anna and renamed its Bo.
             speaker_names: { SPEAKER_00: null, SPEAKER_01: "Bertil" },
             revision: 1,
             stale: false
@@ -301,11 +326,17 @@ describe("FlowRunEvidence", () => {
       document.querySelector<HTMLButtonElement>('[aria-controls="flow-run-step-panel-run-1-2"]')!
     );
     await waitFor(() => expect(turn(2, "Jo tack.")).toContain("Bertil"));
-
-    // The naming step's list says what its transcript shows.
+    // The naming step's speaker list, one row per label.
     const rows = within(panel(2)!)
       .getAllByRole("listitem")
       .map((row) => row.textContent ?? "");
+    return { rows, turn };
+  }
+
+  it("names the speakers where a regeneration does: on the naming step, over its names", async () => {
+    const { rows, turn } = await openNamingStep();
+
+    // The naming step's list says what its transcript shows.
     expect(rows[0]).toContain(m.flow_run_transcript_unknown_speaker());
     expect(rows[0]).not.toContain("Anna");
     expect(turn(2, "Hej Gunnar.")).toContain(m.flow_transcript_editor_speaker({ number: 1 }));
@@ -315,5 +346,29 @@ describe("FlowRunEvidence", () => {
     // The transcription step keeps its labels, as its regenerated text does.
     expect(turn(1, "Jo tack.")).toContain(m.flow_transcript_editor_speaker({ number: 2 }));
     expect(turn(1, "Jo tack.")).not.toContain("Bertil");
+  });
+
+  it("does not present the step's support for a name as support for a person's change", async () => {
+    const { rows } = await openNamingStep();
+    const [cleared, renamed, kept] = rows;
+    const confidences = [
+      m.flow_run_review_speakers_confidence_high(),
+      m.flow_run_review_speakers_confidence_medium(),
+      m.flow_run_review_speakers_confidence_low()
+    ];
+
+    // The step's confidence and evidence were for Anna and Bo.
+    for (const row of [cleared, renamed]) {
+      for (const confidence of confidences) expect(row).not.toContain(confidence);
+    }
+    expect(cleared).toContain(m.flow_run_transcript_unknown_speaker());
+    expect(cleared).not.toContain("Presenterar sig som Anna.");
+    expect(renamed).toContain("Bertil");
+    expect(renamed).not.toContain("Tilltalas som Bo.");
+
+    // A name nobody changed keeps them.
+    expect(kept).toContain("Cecilia");
+    expect(kept).toContain(m.flow_run_review_speakers_confidence_high());
+    expect(kept).toContain("Säger att hon heter Cecilia.");
   });
 });
