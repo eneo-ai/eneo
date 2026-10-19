@@ -123,6 +123,13 @@ describe("describeSkipReason", () => {
     ).toBe(m.skip_reason_error({ detail: m.skip_reason_detail_no_download() }));
   });
 
+  it("lets a set-aside file say itself when it is tried again", () => {
+    const params = { attempts: 3, detail: "HTTP 500" };
+    expect(describeSkipReason({ code: "set_aside", params, retry: true })).toBe(
+      m.skip_reason_set_aside({ attempts: 3, detail: m.skip_reason_detail_http({ status: 500 }) })
+    );
+  });
+
   it("does not double the full stop before the retry note", () => {
     expect(describeSkipReason({ reason: "Server busy.", retry: true })).toBe(
       m.skip_reason_with_retry({ reason: "Server busy" })
