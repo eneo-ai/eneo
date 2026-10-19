@@ -1245,9 +1245,20 @@ describe("WrapperDetail sync status", () => {
     expect(screen.queryByText(QUEUED_NOTICE)).toBeNull();
     await waitFor(() => expect(said).toContain("Synk av Byggnad har startat"));
 
+    // Once the sync is over the space is read again, and its rows tell how it went.
+    state.space = makeSpace({
+      integrations: [
+        makeIntegration({
+          ...folder,
+          ...mall,
+          metadata: { ...mall.metadata, last_synced_at: "2026-10-19T08:05:00Z" }
+        })
+      ]
+    });
     state.progress = [];
     await refreshProgress(queryClient);
-    await waitFor(() => expect(said).toContain("Synk av Byggnad pågår inte längre"));
+    await waitFor(() => expect(said).toContain("Synk av Byggnad klar"));
+    expect(said).not.toContain("Synk av Byggnad pågår inte längre");
     expect(screen.queryByText(QUEUED_NOTICE)).toBeNull();
   });
 

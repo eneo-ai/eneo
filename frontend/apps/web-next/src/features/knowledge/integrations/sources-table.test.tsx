@@ -56,8 +56,12 @@ function running(done: number): IntegrationSyncProgress {
 
 const NOTHING_QUEUED: QueuedIds = new Set();
 
-function list(progress: ProgressById = {}, queued: QueuedIds = NOTHING_QUEUED) {
-  const sources = groupIntegrationSources([avtal, policy], (a, b) => a.localeCompare(b));
+function list(
+  progress: ProgressById = {},
+  queued: QueuedIds = NOTHING_QUEUED,
+  items: IntegrationKnowledge[] = [avtal, policy]
+) {
+  const sources = groupIntegrationSources(items, (a, b) => a.localeCompare(b));
   return (
     <>
       <h2 id="sources">Källor</h2>
@@ -115,19 +119,25 @@ describe("SourcesList", () => {
     expect(await screen.findByRole("menuitem", { name: "Fullständig synk" })).toBeTruthy();
   });
 
-  it("speaks a source's sync being queued, starting and finishing, but not its count", async () => {
+  it("speaks a sync started here being queued, starting and finishing, but not its count", async () => {
     const said = recordAnnouncements();
     const { rerender } = renderInApp(list());
     await frame();
     expect(said).toEqual([]);
 
-    for (const [progress, queued] of [
-      [{}, new Set(["i1"])],
-      [{ i1: running(1) }, NOTHING_QUEUED],
+    // Policy's sync was not started from the list: its own page speaks of it.
+    const synced = {
+      ...avtal,
+      metadata: { ...avtal.metadata!, last_synced_at: "2026-10-19T08:05:00Z" }
+    } as IntegrationKnowledge;
+    for (const [progress, queued, items] of [
+      [{}, new Set(["i1"]), undefined],
+      [{ i1: running(1), i2: { ...running(1), integration_knowledge_id: "i2" } }, NOTHING_QUEUED],
       [{ i1: running(9) }, NOTHING_QUEUED],
-      [{}, NOTHING_QUEUED]
+      [{}, NOTHING_QUEUED],
+      [{}, NOTHING_QUEUED, [synced, policy]]
     ] as const) {
-      rerender(list(progress, queued));
+      rerender(list(progress, queued, items ? [...items] : undefined));
       await frame();
     }
 
@@ -135,7 +145,7 @@ describe("SourcesList", () => {
       expect(said).toEqual([
         "Synk av Avtal köad",
         "Synk av Avtal har startat",
-        "Synk av Avtal pågår inte längre"
+        "Synk av Avtal klar"
       ])
     );
   });

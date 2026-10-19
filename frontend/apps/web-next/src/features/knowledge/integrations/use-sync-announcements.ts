@@ -2,13 +2,14 @@
 
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { Translate } from "./skip-reasons";
 import type { SourceSummary } from "./sources";
 import {
   announceProblemCount,
-  announceSourceChange,
+  SourceAnnouncers,
   sourceSnapshot,
-  type SourceSnapshot
+  type AnnouncedSource
 } from "./sync-announcements";
 
 // Spoken through Astryx's one polite live region (ACCESSIBILITY.md, status
@@ -16,10 +17,36 @@ import {
 // nothing they speak of does not run them.
 
 /**
+ * Feeds the sources to their announcers and speaks what they say, with `also`.
+ * A sync's end that waits for its outcome is fed again once the wait runs out.
+ * Returns the effect's cleanup.
+ */
+function speak(
+  announcers: SourceAnnouncers,
+  sources: readonly AnnouncedSource[],
+  t: Translate,
+  announce: (message: string) => void,
+  also: string | null = null
+): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const run = (extra: string | null) => {
+    const { messages, recheckAt } = announcers.next(sources, Date.now(), t);
+    const message = [...messages, extra].filter(Boolean).join(". ");
+    if (message) announce(message);
+    if (recheckAt !== null) {
+      timer = setTimeout(() => run(null), Math.max(0, recheckAt - Date.now()));
+    }
+  };
+  run(also);
+  return () => clearTimeout(timer);
+}
+
+/**
  * A source page's sync course and problem count, spoken as they change: a
- * sync being queued, starting, its count at most every 10 s or on a phase
- * change, progress stopping (the job reports the outcome), and changes to the
- * problem count (null while the lists load).
+ * sync being queued, starting, its count at most every 10 s or on reaching the
+ * last step, how it ended once the source's rows record it (else that it is no
+ * longer running), and changes to the problem count (null while the lists
+ * load). A change notification's background sync stays quiet.
  */
 export function useSourceAnnouncements(
   name: string,
@@ -28,53 +55,41 @@ export function useSourceAnnouncements(
 ) {
   const t = useTranslations();
   const announce = useAnnounce();
-  const previous = useRef<SourceSnapshot | null>(null);
-  const progressAnnouncedAt = useRef(0);
+  const [announcers] = useState(() => new SourceAnnouncers());
   const previousProblems = useRef<number | null>(null);
   const key = JSON.stringify(sourceSnapshot(summary));
 
   useEffect(() => {
-    const next = JSON.parse(key) as SourceSnapshot;
-    const now = Date.now();
-    const text = announceSourceChange(
-      name,
-      previous.current,
-      next,
-      now - progressAnnouncedAt.current,
-      t
-    );
-    previous.current = next;
+    const sources = [{ id: "source", name, snapshot: JSON.parse(key) }] as AnnouncedSource[];
     const problems = announceProblemCount(previousProblems.current, problemCount, t);
     if (problemCount !== null) previousProblems.current = problemCount;
-    const message = [text, problems].filter(Boolean).join(". ");
-    if (message) announce(message);
-    if (text && next.progress) progressAnnouncedAt.current = now;
-  }, [announce, key, name, problemCount, t]);
+    return speak(announcers, sources, t, announce, problems);
+  }, [announce, announcers, key, name, problemCount, t]);
 }
 
-/** A list's sources: each one's sync starting, stopping or being queued. */
+/**
+ * A list's sources: only a sync started from the list is spoken, its being
+ * queued, starting and how it ended, without counts; the rest belongs to each
+ * source's own page.
+ */
 export function useSourceListAnnouncements(
   sources: readonly { id: string; name: string; summary: SourceSummary }[]
 ) {
   const t = useTranslations();
   const announce = useAnnounce();
-  const previous = useRef<Record<string, SourceSnapshot>>({});
+  const [announcers] = useState(
+    () => new SourceAnnouncers({ speakProgress: false, onlyStartedHere: true })
+  );
   const key = JSON.stringify(
-    sources.map((source) => [source.id, source.name, sourceSnapshot(source.summary)])
+    sources.map((source): AnnouncedSource => ({
+      id: source.id,
+      name: source.name,
+      snapshot: sourceSnapshot(source.summary)
+    }))
   );
 
-  useEffect(() => {
-    const entries = JSON.parse(key) as [string, string, SourceSnapshot][];
-    const next: Record<string, SourceSnapshot> = {};
-    const messages: string[] = [];
-    for (const [id, name, snapshot] of entries) {
-      next[id] = snapshot;
-      const text = announceSourceChange(name, previous.current[id] ?? null, snapshot, 0, t, {
-        speakProgress: false
-      });
-      if (text) messages.push(text);
-    }
-    previous.current = next;
-    if (messages.length > 0) announce(messages.join(". "));
-  }, [announce, key, t]);
+  useEffect(
+    () => speak(announcers, JSON.parse(key) as AnnouncedSource[], t, announce),
+    [announce, announcers, key, t]
+  );
 }

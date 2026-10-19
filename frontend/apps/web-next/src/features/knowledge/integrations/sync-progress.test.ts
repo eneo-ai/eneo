@@ -37,8 +37,16 @@ describe("combineSyncProgress", () => {
       indexed: 9,
       unchanged: 0,
       skipped: 1,
-      syncing: 2
+      syncing: 2,
+      background: false
     });
+  });
+
+  it("marks a sync of change notifications' delta passes only as background", () => {
+    expect(combineSyncProgress([entry({ sync_type: "delta" })])?.background).toBe(true);
+    expect(
+      combineSyncProgress([entry({ sync_type: "delta" }), entry({ sync_type: "full" })])?.background
+    ).toBe(false);
   });
 
   it("does not know the total while one item does not", () => {

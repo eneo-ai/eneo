@@ -5,6 +5,7 @@ import { renderHookInApp } from "@/test/render";
 import type { IntegrationKnowledge } from "../knowledge";
 import { summarizeSource, type QueuedIds, type SourceSummary } from "./sources";
 import type { IntegrationSyncProgress, SyncProgressPhase } from "./sync-progress";
+import { OUTCOME_WAIT_MS } from "./sync-announcements";
 import { useSourceAnnouncements, useSourceListAnnouncements } from "./use-sync-announcements";
 
 const avtal = {
@@ -31,6 +32,12 @@ function running(done: number, phase: SyncProgressPhase = "processing"): Integra
 }
 
 const idle = () => summarizeSource([avtal], {});
+/** The rows read again after the sync: it is on record now. */
+const synced = () =>
+  summarizeSource(
+    [{ ...avtal, metadata: { ...avtal.metadata!, last_synced_at: "2026-10-19T08:05:00Z" } }],
+    {}
+  );
 const queued = () => summarizeSource([avtal], {}, new Set(["i1"]) as QueuedIds);
 const syncing = (done: number, phase?: SyncProgressPhase) =>
   summarizeSource([avtal], { i1: running(done, phase) });
@@ -83,15 +90,54 @@ describe("useSourceAnnouncements", () => {
     vi.setSystemTime(Date.parse("2026-10-19T08:00:11Z"));
     await show(syncing(12));
     await show(syncing(40, "finishing"));
+    // The progress is gone before the rows say how the sync went: not yet news.
     await show(idle());
+    await show(synced());
 
     // The queued sync started before the region took the first text.
     expect(said).toEqual([
       "Synk av Avtal har startat",
       "Avtal: 12 av 40 lästa",
       "Avtal: 40 av 40 lästa",
-      "Synk av Avtal pågår inte längre"
+      "Synk av Avtal klar"
     ]);
+  });
+
+  it("says a sync is no longer running when its rows do not tell how it went in time", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const said = recordAnnouncements();
+    let summary = idle();
+    const { rerender } = renderHookInApp(() => useSourceAnnouncements("Avtal", summary, null));
+    const show = async (next: SourceSummary) => {
+      summary = next;
+      rerender();
+      await act(async () => {});
+    };
+    await show(syncing(1));
+    await show(idle());
+    expect(said).toEqual([]);
+
+    await act(() => vi.advanceTimersByTimeAsync(OUTCOME_WAIT_MS));
+    vi.useRealTimers();
+    await frame();
+    expect(said).toEqual(["Synk av Avtal pågår inte längre"]);
+  });
+
+  it("keeps a change notification's sync quiet", async () => {
+    const said = recordAnnouncements();
+    let summary = idle();
+    const { rerender } = renderHookInApp(() => useSourceAnnouncements("Avtal", summary, null));
+    await frame();
+    for (const next of [
+      summarizeSource([avtal], { i1: { ...running(1), sync_type: "delta" } }),
+      idle(),
+      synced()
+    ]) {
+      summary = next;
+      rerender();
+      await frame();
+    }
+    expect(said).toEqual([]);
   });
 
   it("speaks a queued sync, and a changed number of problems once the lists are in", async () => {
@@ -115,13 +161,20 @@ describe("useSourceAnnouncements", () => {
 });
 
 describe("useSourceListAnnouncements", () => {
-  it("speaks each source's sync being queued, starting and finishing, not its count", async () => {
+  it("speaks a sync started from the list being queued, starting and finishing, not its count", async () => {
     const said = recordAnnouncements();
     const row = (summary: SourceSummary) => [{ id: "item-i1", name: "Avtal", summary }];
     let rows = row(idle());
     const { rerender } = renderHookInApp(() => useSourceListAnnouncements(rows));
 
-    for (const summary of [queued(), syncing(1), syncing(30), syncing(40, "finishing"), idle()]) {
+    for (const summary of [
+      queued(),
+      syncing(1),
+      syncing(30),
+      syncing(40, "finishing"),
+      idle(),
+      synced()
+    ]) {
       rows = row(summary);
       rerender();
       await frame();
@@ -135,9 +188,22 @@ describe("useSourceListAnnouncements", () => {
       expect(said).toEqual([
         "Synk av Avtal köad",
         "Synk av Avtal har startat",
-        "Synk av Avtal pågår inte längre"
+        "Synk av Avtal klar"
       ])
     );
+  });
+
+  it("leaves a sync it did not see queued to the source's own page", async () => {
+    const said = recordAnnouncements();
+    const row = (summary: SourceSummary) => [{ id: "item-i1", name: "Avtal", summary }];
+    let rows = row(idle());
+    const { rerender } = renderHookInApp(() => useSourceListAnnouncements(rows));
+    for (const summary of [syncing(1), idle(), synced()]) {
+      rows = row(summary);
+      rerender();
+      await frame();
+    }
+    expect(said).toEqual([]);
   });
 });
 

@@ -1,20 +1,26 @@
 import {
-  syncAnnouncement,
+  OUTCOME_WAIT_MS,
   problemCountChanged,
+  SyncAnnouncer,
+  type Snapshot,
+  type Transition
+} from "@eneo/eneo-js/integrations/sync-announcements";
+import type { Translate } from "./skip-reasons";
+import type { SourceSummary } from "./sources";
+
+export {
+  OUTCOME_WAIT_MS,
   PROGRESS_ANNOUNCE_INTERVAL_MS
 } from "@eneo/eneo-js/integrations/sync-announcements";
-export { PROGRESS_ANNOUNCE_INTERVAL_MS };
-import type { Translate } from "./skip-reasons";
-import type { SourceState, SourceSummary } from "./sources";
-import type { SyncProgressSummary } from "./sync-progress";
+export type { Snapshot } from "@eneo/eneo-js/integrations/sync-announcements";
 
-export type SourceSnapshot = {
-  state: SourceState;
-  progress: Pick<SyncProgressSummary, "phase" | "done" | "total" | "indexed" | "skipped"> | null;
-};
+type AnnouncedSummary = Pick<
+  SourceSummary,
+  "state" | "progress" | "lastSyncedAt" | "lastSyncAttemptedAt" | "failedItems"
+>;
 
 /** What of a source's summary its announcements follow. */
-export function sourceSnapshot(summary: Pick<SourceSummary, "state" | "progress">): SourceSnapshot {
+export function sourceSnapshot(summary: AnnouncedSummary): Snapshot {
   const { progress } = summary;
   return {
     state: summary.state,
@@ -22,36 +28,31 @@ export function sourceSnapshot(summary: Pick<SourceSummary, "state" | "progress"
       phase: progress.phase,
       done: progress.done,
       total: progress.total,
-      indexed: progress.indexed,
-      skipped: progress.skipped
-    }
+      background: progress.background
+    },
+    outcome: [
+      summary.lastSyncedAt ?? "",
+      summary.lastSyncAttemptedAt ?? "",
+      ...summary.failedItems.map((item) => item.id).sort()
+    ].join("|"),
+    failures: summary.failedItems.map(
+      (item) => `${item.id}@${item.metadata?.last_sync_attempted_at ?? ""}`
+    )
   };
 }
 
-/**
- * What a screen reader should hear when a source's sync state moves from
- * `previous` to `next`, or null. The first snapshot of a page is not news.
- * `sinceProgressAnnounced` is the time since the last spoken progress count;
- * a list of many sources passes `speakProgress: false` and says only when
- * syncs start, stop or queue.
- */
-export function announceSourceChange(
-  name: string,
-  previous: SourceSnapshot | null,
-  next: SourceSnapshot,
-  sinceProgressAnnounced: number,
-  t: Translate,
-  { speakProgress = true }: { speakProgress?: boolean } = {}
-): string | null {
-  const transition = syncAnnouncement(previous, next, sinceProgressAnnounced, { speakProgress });
-  if (!transition) return null;
+function describe(name: string, transition: Transition, t: Translate): string {
   switch (transition.kind) {
     case "started":
       return t("integration_announce_sync_started", { name });
-    case "stopped":
-      return t("integration_announce_sync_stopped", { name });
     case "queued":
       return t("integration_announce_sync_queued", { name });
+    case "finished":
+      return t("integration_announce_sync_finished", { name });
+    case "failed":
+      return t("integration_announce_sync_failed", { name });
+    case "stopped":
+      return t("integration_announce_sync_stopped", { name });
     case "progress":
       return transition.total === null
         ? t("integration_announce_sync_progress", { name, count: transition.done })
@@ -60,6 +61,62 @@ export function announceSourceChange(
             done: transition.done,
             total: transition.total
           });
+  }
+}
+
+export type AnnouncedSource = { id: string; name: string; snapshot: Snapshot };
+
+type Followed = { announcer: SyncAnnouncer; hadProgress: boolean; waitingSince: number | null };
+
+/**
+ * The announcements of a set of sources in the viewer's language, one
+ * SyncAnnouncer each (it holds the rules). A sync's end waits for the rows to
+ * record its outcome; `recheckAt` is when a wait runs out, so the caller can
+ * feed the same sources again then and hear the end without an outcome.
+ */
+export class SourceAnnouncers {
+  #options: ConstructorParameters<typeof SyncAnnouncer>[0];
+  #followed = new Map<string, Followed>();
+
+  constructor(options?: ConstructorParameters<typeof SyncAnnouncer>[0]) {
+    this.#options = options;
+  }
+
+  next(
+    sources: readonly AnnouncedSource[],
+    now: number,
+    t: Translate
+  ): { messages: string[]; recheckAt: number | null } {
+    const followed = new Map<string, Followed>();
+    const messages: string[] = [];
+    let recheckAt: number | null = null;
+    for (const { id, name, snapshot } of sources) {
+      const entry = this.#followed.get(id) ?? {
+        announcer: new SyncAnnouncer(this.#options),
+        hadProgress: false,
+        waitingSince: null
+      };
+      const transition = entry.announcer.next(snapshot, now);
+      if (snapshot.progress) {
+        entry.waitingSince = null;
+      } else if (entry.hadProgress) {
+        entry.waitingSince = now;
+      } else if (
+        entry.waitingSince !== null &&
+        (transition !== null || now - entry.waitingSince >= OUTCOME_WAIT_MS)
+      ) {
+        entry.waitingSince = null;
+      }
+      entry.hadProgress = snapshot.progress !== null;
+      if (entry.waitingSince !== null) {
+        const at = entry.waitingSince + OUTCOME_WAIT_MS;
+        recheckAt = recheckAt === null ? at : Math.min(recheckAt, at);
+      }
+      if (transition) messages.push(describe(name, transition, t));
+      followed.set(id, entry);
+    }
+    this.#followed = followed;
+    return { messages, recheckAt };
   }
 }
 
