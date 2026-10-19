@@ -309,6 +309,17 @@ step, including one that names the run's text or payload explicitly, gets the
 previous step as its input source and keeps its bindings, so it reads what it
 read before: an explicit reference never reads `input_source`.
 
+An edit's `form_fields` is the complete run form, so one that leaves out a saved
+field that a final step still names (a kept, modified or added step, or a tool
+argument, read by `step_reads`) is refused as `run_form_field_dropped_while_read`
+and sent back to the model, naming each field and its first three reading steps
+and how many more steps read it. A step that only takes the whole run input
+names no field and does not count, so a field stays removable from such a flow. The check runs in
+`compile_ordered_edit_proposal` before the ordering stage, so that stage judges
+the final steps against the final form. A field dropped together with its last
+reader is allowed. An omitted `form_fields` keeps the saved ones when the
+session has no confirmed run-form fields.
+
 The person decides about tools through three question families, whose ids are
 built and read only in `ai_builder_tool_question_ids.py`: `tool_relevance`,
 `tool_choice:<use_ref>` and `tool_argument:<use_ref>:<tool_ref>:<argument>`,

@@ -55,6 +55,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from eneo.flows.ai_builder.ai_builder_step_reads import (
     ReadSite,
+    form_fields_named,
     spec_step_refs,
     step_reads,
     takes_run_input_by_position,
@@ -340,6 +341,13 @@ def compile_ordered_edit_proposal(
             )
         compiled_steps.append(compiled.model_copy(update={"plan_step_ref": plan_ref}))
 
+    # Before the ordering stage, which then classifies the final steps against
+    # the final form.
+    _refuse_dropped_run_form_fields_still_read(
+        compiled_steps,
+        saved_field_names=saved.saved_form_field_names,
+        form_fields=form_fields or [],
+    )
     compiled_steps = _follow_the_steps_inserted_before(
         compiled_steps,
         first_saved_ref=base_spec.steps[0].existing_step_ref
@@ -374,6 +382,81 @@ def compile_ordered_edit_proposal(
             base_spec=base_spec,
             compiled_steps=compiled_steps,
         ),
+    )
+
+
+# Readers named per field, so an entry stays short enough to be rendered whole
+# (BoundedListing keeps whole entries only) and always names its field.
+_MAX_READERS_SHOWN = 3
+
+
+def _more_readers(count: int) -> str:
+    if count <= 0:
+        return ""
+    return f" and {count} more step" if count == 1 else f" and {count} more steps"
+
+
+def _refuse_dropped_run_form_fields_still_read(
+    steps: Sequence[StepSpec],
+    *,
+    saved_field_names: Sequence[str],
+    form_fields: Sequence[FormFieldSpec],
+) -> None:
+    """form_fields is the complete run form, so a saved field it leaves out is
+    removed. That is allowed only with its last reader: a final step that still
+    names it (a kept step, a modified step, an added step or a tool argument)
+    would read a field the flow no longer collects. The refusal asks the model to
+    list the fields again or to change the steps that read them."""
+
+    saved = set(saved_field_names)
+    dropped = saved - {field.name for field in form_fields}
+    if not dropped:
+        return
+    step_refs = spec_step_refs(steps)
+    named_by_step = [
+        (
+            order,
+            step,
+            form_fields_named(
+                step,
+                order=order,
+                step_refs=step_refs,
+                form_field_names=saved,
+            ),
+        )
+        for order, step in enumerate(steps, 1)
+    ]
+    readers = BoundedListing()
+    for name in sorted(dropped):
+        reading = [
+            (order, step) for order, step, named in named_by_step if name in named
+        ]
+        if reading:
+            readers.add(
+                lambda name=name, reading=reading: (
+                    f"'{display_value(name)}' is read by "
+                    + ", ".join(
+                        f'step {order} "{display_value(step.name)}"'
+                        for order, step in reading[:_MAX_READERS_SHOWN]
+                    )
+                    + _more_readers(len(reading) - _MAX_READERS_SHOWN)
+                )
+            )
+    if not readers.total:
+        return
+    raise AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        repair_disposition="model_correctable",
+        detail=readers.render(
+            "form_fields is the complete list of the run form, and this one "
+            "leaves out fields the flow has that steps still read. List them "
+            "again together with any new field, or change the steps so they no "
+            "longer read them:"
+        ),
+        log_context={
+            "failure_code": "run_form_field_dropped_while_read",
+            "reason": "run_form_field_dropped_while_read",
+        },
     )
 
 

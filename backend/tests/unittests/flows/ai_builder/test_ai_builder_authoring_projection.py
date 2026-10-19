@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 from uuid import uuid4
 
@@ -1789,6 +1790,8 @@ def _step(
     output_type: OutputType = OutputType.TEXT,
     output_contract: dict[str, object] | None = None,
     review_policy: FlowStepReviewPolicy | None = None,
+    input_bindings: dict[str, Any] | None = None,
+    input_config: dict[str, Any] | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=plan_ref,
@@ -1805,6 +1808,8 @@ def _step(
         output_type=output_type,
         output_contract=output_contract,
         review_policy=review_policy,
+        input_bindings=input_bindings,
+        input_config=input_config,
     )
 
 
@@ -1835,3 +1840,166 @@ def _new_step(
         uses_form_fields=uses_form_fields or [],
         uses_previous_fields=uses_previous_fields or [],
     )
+
+
+def _field(name: str) -> FormFieldSpec:
+    return FormFieldSpec(name=name, type="text", label=name)
+
+
+def _form_flow(first: str = "named") -> FlowDraftSpecCore:
+    """Steps 1 and 3 read the run-form fields ansokan and sokande: step 1 by
+    name in its question, in a tool argument or (`whole`) only as the whole run
+    input."""
+
+    def question(field: str) -> dict[str, str]:
+        return {"question": f"{field}: {{{{ flow_input.{field} }}}}"}
+
+    tool = {
+        "mcp_server_id": str(uuid4()),
+        "tool_id": str(uuid4()),
+        "arguments": {"id": "{{ flow_input.ansokan }}"},
+    }
+    step_one = {
+        "named": {"input_bindings": question("ansokan")},
+        "tool": {"input_source": InputSource.TOOL, "input_config": {"tool": tool}},
+        "whole": {},
+    }[first]
+    after = {"input_source": InputSource.PREVIOUS_STEP}
+    return _base_spec(
+        _step("step_a", "existing_step_1", "Samla", **step_one),
+        _step("step_b", "existing_step_2", "Bedöm", **after),
+        _step(
+            "step_c",
+            "existing_step_3",
+            "Skriv",
+            input_bindings=question("sokande"),
+            **after,
+        ),
+        form_fields=[_field("ansokan"), _field("sokande")],
+    )
+
+
+def _kept(*orders: int) -> list[ModifyExistingStep]:
+    return [ModifyExistingStep(existing_step_ref=f"existing_step_{n}") for n in orders]
+
+
+_NEW_FIELD_READER = ModifyExistingStep.model_validate(
+    {
+        "existing_step_ref": "existing_step_1",
+        "uses_form_fields": ["case_id"],
+        "uses_previous_fields": [],
+    }
+)
+
+
+@pytest.mark.parametrize(
+    ("first", "steps", "removed", "fields", "refused"),
+    [
+        # Kills: the check skipped, run after the ordering stage, reading the saved
+        # steps, or resolving names against the edited form.
+        pytest.param(
+            "named",
+            [AddStep(step=_new_step("Slå upp")), *_kept(1, 2, 3)],
+            set(),
+            ["case_id"],
+            ["'ansokan' is read by step 2", "'sokande' is read by step 4"],
+            id="inserted_step_and_kept_steps",
+        ),
+        # Kills: tool-argument reads not counted.
+        pytest.param(
+            "tool",
+            _kept(1, 2, 3),
+            set(),
+            ["sokande"],
+            ["'ansokan' is read by step 1"],
+            id="tool_argument",
+        ),
+        # Kills: added steps not counted.
+        pytest.param(
+            "whole",
+            [
+                AddStep(step=_new_step("Slå upp", uses_form_fields=["ansokan"])),
+                *_kept(1, 2, 3),
+            ],
+            set(),
+            ["sokande"],
+            ["'ansokan' is read by step 1 \"Slå upp\""],
+            id="added_step",
+        ),
+        # Kills: the readers of a field not bounded inside its entry, so a long
+        # list pushes the entry past the message budget and the field is not named.
+        pytest.param(
+            "whole",
+            [
+                *(
+                    AddStep(
+                        step=_new_step(
+                            f"{n:02d}" + "x" * 78, uses_form_fields=["ansokan"]
+                        )
+                    )
+                    for n in range(18)
+                ),
+                *_kept(1, 2, 3),
+            ],
+            set(),
+            ["sokande"],
+            ["'ansokan' is read by step 1", "and 15 more steps"],
+            id="many_long_named_readers",
+        ),
+        # Kills: a removed step still counted as a reader.
+        pytest.param(
+            "named",
+            _kept(1, 2),
+            {"existing_step_3"},
+            ["ansokan"],
+            None,
+            id="removed_with_its_last_reader",
+        ),
+        # Kills: the ordering stage judging a modified reader against the saved form,
+        # or reading the saved steps.
+        pytest.param(
+            "named",
+            [AddStep(step=_new_step("Slå upp")), _NEW_FIELD_READER, *_kept(2, 3)],
+            set(),
+            ["case_id", "sokande"],
+            None,
+            id="modified_reader_moves_to_a_new_field",
+        ),
+        # Kills: form_fields omitted read as an empty list.
+        pytest.param("named", _kept(1, 2, 3), set(), None, None, id="omitted"),
+        # Kills: a whole-run-input reader counted as naming every field.
+        pytest.param(
+            "whole", _kept(1, 2, 3), set(), ["sokande"], None, id="whole_input"
+        ),
+    ],
+)
+def test_an_edit_drops_a_run_form_field_only_with_its_last_reader(
+    first: str,
+    steps: list[ModifyExistingStep | AddStep],
+    removed: set[str],
+    fields: list[str] | None,
+    refused: list[str] | None,
+) -> None:
+    edit = partial(
+        compile_ordered_edit_proposal,
+        base_spec=_form_flow(first),
+        proposal=_edit_proposal(
+            steps=steps,
+            removed_existing_step_refs=frozenset(removed),
+            **({} if fields is None else {"form_fields": [_field(n) for n in fields]}),
+        ),
+    )
+    if refused is None:
+        names = [field.name for field in edit().form_fields or []]
+        assert names == (fields or ["ansokan", "sokande"])
+        return
+
+    # Kills: a refusal the model cannot repair, or one without its failure code.
+    with pytest.raises(AIBuilderArchitectureError) as raised:
+        edit()
+    assert raised.value.repair_disposition == "model_correctable"
+    assert (
+        raised.value.log_context["failure_code"] == "run_form_field_dropped_while_read"
+    )
+    assert "complete list" in raised.value.detail
+    assert all(part in raised.value.detail for part in refused)

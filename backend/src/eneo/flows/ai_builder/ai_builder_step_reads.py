@@ -335,6 +335,44 @@ def _has_unreadable_config(step: StepSpec) -> bool:
     )
 
 
+def _form_fields_named_and_whole_input(
+    step: StepSpec,
+    *,
+    order: int,
+    step_refs: dict[str, int],
+    form_field_names: set[str],
+) -> tuple[frozenset[str], bool]:
+    """The one pass over a step's reads: the form fields it names and whether
+    it reads the whole run input."""
+
+    named: set[str] = set()
+    reads_whole_run_input = False
+    for read in step_reads(
+        step, order=order, step_refs=step_refs, form_field_names=form_field_names
+    ):
+        if read.channel is ReadChannel.FORM_FIELD:
+            named.add(read.path[0])
+        elif read.reads_whole_run_input:
+            reads_whole_run_input = True
+    return frozenset(named), reads_whole_run_input
+
+
+def form_fields_named(
+    step: StepSpec,
+    *,
+    order: int,
+    step_refs: dict[str, int],
+    form_field_names: set[str],
+) -> frozenset[str]:
+    """The form fields a step names at any site `step_reads` enumerates (its
+    question, instructions, output mapping, tool arguments). Reading the whole
+    run input names none of them."""
+
+    return _form_fields_named_and_whole_input(
+        step, order=order, step_refs=step_refs, form_field_names=form_field_names
+    )[0]
+
+
 def form_fields_read(
     step: StepSpec,
     *,
@@ -346,15 +384,10 @@ def form_fields_read(
     question, instructions, output mapping) and by reading the whole run input.
     The one answer to "does this step read that field", so no site is missed."""
 
-    names: set[str] = set()
-    for read in step_reads(
+    named, reads_whole_run_input = _form_fields_named_and_whole_input(
         step, order=order, step_refs=step_refs, form_field_names=form_field_names
-    ):
-        if read.channel is ReadChannel.FORM_FIELD:
-            names.add(read.path[0])
-        elif read.reads_whole_run_input:
-            names.update(form_field_names)
-    return frozenset(names)
+    )
+    return named | form_field_names if reads_whole_run_input else named
 
 
 def _implicit_reads(step: StepSpec, *, order: int) -> list[StepRead]:
