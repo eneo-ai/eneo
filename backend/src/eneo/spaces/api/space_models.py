@@ -30,6 +30,7 @@ from eneo.group_chat.presentation.models import GroupChatSparse
 from eneo.groups_legacy.api.group_models import GroupMetadata, GroupPublicWithMetadata
 from eneo.integration.presentation.models import IntegrationKnowledgePublic
 from eneo.integration.presentation.validation import (
+    BATCH_ITEM_NAME_MAX_LENGTH,
     FOLDER_PATH_MAX_LENGTH,
     FOLDER_PATH_PATTERN,
     GRAPH_ID_MAX_LENGTH,
@@ -414,7 +415,12 @@ class CreateSpaceIntegrationKnowledge(_IntegrationKnowledgeSelection):
 
 
 class CreateSpaceIntegrationKnowledgeBatchItem(_IntegrationKnowledgeSelection):
-    name: IntegrationKnowledgeName
+    name: str = Field(
+        max_length=BATCH_ITEM_NAME_MAX_LENGTH,
+        description=f"Stored without surrounding whitespace; an item whose name "
+        f"is then empty or longer than {KNOWLEDGE_NAME_MAX_LENGTH} characters "
+        "fails on its own",
+    )
     url: str
 
     @field_validator("url")

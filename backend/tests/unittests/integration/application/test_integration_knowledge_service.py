@@ -2123,6 +2123,23 @@ class TestCreateSpaceIntegrationKnowledgeBatch:
             results[2]["job"].id,
         ]
 
+    async def test_a_name_the_api_cannot_store_fails_only_its_item(self, batch):
+        """One long SharePoint name made the whole batch a 422."""
+        results = await self._create(
+            batch, ["  Protokoll  ", "x" * 256, "   ", "Budget"]
+        )
+
+        assert [(result["status"], result["error"]) for result in results] == [
+            ("created", None),
+            ("failed", "The name must be 1 to 255 characters long"),
+            ("failed", "The name must be 1 to 255 characters long"),
+            ("created", None),
+        ]
+        assert [
+            call.kwargs["obj"].name
+            for call in batch.integration_knowledge_repo.add.await_args_list
+        ] == ["Protokoll", "Budget"]
+
     async def test_a_database_failure_is_reported_without_sql(self, batch):
         batch.integration_knowledge_repo.add.side_effect = sa.exc.IntegrityError(
             "INSERT INTO integration_knowledge (name, url) VALUES (%(name)s, %(url)s)",

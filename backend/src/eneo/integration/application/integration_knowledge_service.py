@@ -20,6 +20,10 @@ from eneo.integration.presentation.models import (
     IntegrationType,
     SharepointContentTaskParam,
 )
+from eneo.integration.presentation.validation import (
+    KNOWLEDGE_NAME_LENGTH_REASON,
+    KNOWLEDGE_NAME_MAX_LENGTH,
+)
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import JobInDb, Task
 from eneo.main.exceptions import (
@@ -448,6 +452,9 @@ class IntegrationKnowledgeService:
         """
         if not key:
             raise BadRequestException("Integration key is required")
+        name = name.strip()
+        if not name or len(name) > KNOWLEDGE_NAME_MAX_LENGTH:
+            raise BadRequestException(KNOWLEDGE_NAME_LENGTH_REASON)
 
         space = context.space
         user_integration = context.user_integration

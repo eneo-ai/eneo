@@ -210,7 +210,6 @@ def test_knowledge_items_only_link_to_https(url, expected):
     "model",
     [
         CreateSpaceIntegrationKnowledge,
-        CreateSpaceIntegrationKnowledgeBatchItem,
         UpdateIntegrationKnowledgeRequest,
         UpdateIntegrationKnowledgeWrapperRequest,
     ],
@@ -239,3 +238,14 @@ def test_a_batch_wrapper_name_may_be_blank_but_not_overlong():
     assert CreateSpaceIntegrationKnowledgeBatchRequest(**request, wrapper_name="")
     with pytest.raises(ValidationError):
         CreateSpaceIntegrationKnowledgeBatchRequest(**request, wrapper_name="x" * 256)
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 256])
+def test_a_batch_item_name_is_checked_per_item_not_per_request(name):
+    """A SharePoint name may exceed 255 characters; it fails its item only."""
+    assert CreateSpaceIntegrationKnowledgeBatchItem(**{**_BASE, "name": name})
+
+
+def test_a_batch_item_name_beyond_any_sharepoint_name_is_a_malformed_body():
+    with pytest.raises(ValidationError):
+        CreateSpaceIntegrationKnowledgeBatchItem(**{**_BASE, "name": "x" * 2049})
