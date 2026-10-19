@@ -11,16 +11,15 @@ import { useId, useRef, useState, type ReactNode } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
-import { toastApiError } from "@/lib/api/toast";
 import type { Schema } from "@/lib/api/models";
 import { rescueFocus } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
 import {
   SHAREPOINT_APP_KEY,
-  SHAREPOINT_OAUTH_STATE_KEY,
   type SharePointApp,
   sharepointSubscriptionsQueryOptions
 } from "./integrations";
+import { followServiceAccountSignIn, toastSignInError } from "./service-account-sign-in";
 import { SharePointSubscriptions, useRenewExpiredSubscriptions } from "./sharepoint-subscriptions";
 
 export type HealthState = "ok" | "warning" | "error" | "unknown";
@@ -50,14 +49,6 @@ export function classifyMicrosoftAuthError(
 ): MicrosoftAuthGuidance | null {
   if (!message) return null;
   return GUIDANCE_PATTERNS.find(([, pattern]) => pattern.test(message))?.[0] ?? null;
-}
-
-// Must match the key the callback page reads (integrations/callback/token).
-
-/** Hands the browser to Microsoft; the callback page completes the sign-in with the stored state. */
-function followServiceAccountSignIn(start: Schema<"ServiceAccountAuthStartResponse">) {
-  sessionStorage.setItem(SHAREPOINT_OAUTH_STATE_KEY, JSON.stringify({ state: start.state }));
-  window.location.assign(start.auth_url);
 }
 
 const STATE_STYLES: Record<HealthState, string> = {
@@ -148,8 +139,8 @@ function SignInCheck({ config, onEdit }: { config: SharePointApp; onEdit: () => 
           body: { redirect_uri: window.location.origin + "/integrations/callback/token/" }
         })
       ),
-    onSuccess: followServiceAccountSignIn,
-    onError: (error) => toastApiError(error, t)
+    onSuccess: (start) => followServiceAccountSignIn(start, t),
+    onError: (error) => toastSignInError(error, t)
   });
   // Stays busy after success: the browser is on its way to Microsoft.
   const redirecting = reauth.isPending || reauth.isSuccess;

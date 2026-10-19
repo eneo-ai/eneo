@@ -12,6 +12,12 @@ const spies = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/toast", () => ({ toast: spies.toast }));
+const signIn = vi.hoisted(() => ({ follow: vi.fn() }));
+vi.mock("./service-account-sign-in", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./service-account-sign-in")>();
+  signIn.follow.mockImplementation(actual.followServiceAccountSignIn);
+  return { ...actual, followServiceAccountSignIn: signIn.follow };
+});
 vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
   useAnnounce: () => spies.announce
@@ -139,7 +145,9 @@ describe("SharePointConnectionHealth", () => {
   });
 
   it("restarts a refused service-account sign-in with Microsoft", async () => {
-    const authUrl = `${window.location.origin}/#microsoft-sign-in`;
+    const authUrl = "https://login.microsoftonline.com/common/oauth2/authorize?state=s-1";
+    // jsdom cannot leave for another origin; service-account-sign-in.test.ts covers the leaving.
+    signIn.follow.mockImplementationOnce(() => {});
     respond({
       "/api/v1/admin/sharepoint/service-account/auth/reauth": { auth_url: authUrl, state: "s-1" }
     });
@@ -164,14 +172,44 @@ describe("SharePointConnectionHealth", () => {
 
     fireEvent.click(within(health).getByRole("button", { name: "Logga in igen med Microsoft" }));
 
-    await waitFor(() => expect(window.location.hash).toBe("#microsoft-sign-in"));
+    await waitFor(() =>
+      expect(signIn.follow).toHaveBeenCalledWith(
+        { auth_url: authUrl, state: "s-1" },
+        expect.any(Function)
+      )
+    );
     expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/sharepoint/service-account/auth/reauth", {
       body: { redirect_uri: `${window.location.origin}/integrations/callback/token/` }
     });
-    expect(JSON.parse(sessionStorage.getItem("sharepoint_service_account_oauth") ?? "{}")).toEqual({
-      state: "s-1"
-    });
     expect(onEdit).not.toHaveBeenCalled();
+  });
+
+  it("does not leave for a sign-in address that is not https, and says so", async () => {
+    respond({
+      "/api/v1/admin/sharepoint/service-account/auth/reauth": {
+        auth_url: "http://login.example.com/",
+        state: "s-1"
+      }
+    });
+    const { health } = show(
+      app({
+        auth_method: "service_account",
+        service_account_email: "eneo-sync@sundsvall.se",
+        auth_status: "error",
+        last_auth_error: "AADSTS700082: The refresh token has expired"
+      })
+    );
+    const reauth = within(health).getByRole("button", { name: "Logga in igen med Microsoft" });
+    fireEvent.click(reauth);
+
+    await waitFor(() =>
+      expect(spies.toast.error).toHaveBeenCalledWith(
+        "Servern gav en inloggningsadress som inte är https. Kontakta din administratör."
+      )
+    );
+    expect(sessionStorage.getItem("sharepoint_service_account_oauth")).toBeNull();
+    // Not stuck on its way to Microsoft: it can be pressed again.
+    await waitFor(() => expect(reauth.getAttribute("aria-busy")).toBeNull());
   });
 
   it("sends a refused tenant-app sign-in to the configuration, with the guidance that fits", () => {
