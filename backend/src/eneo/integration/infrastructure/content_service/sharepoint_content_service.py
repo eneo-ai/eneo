@@ -194,7 +194,6 @@ class SharePointContentService:
         self.session = session
         self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
         self._sync_state = SyncStateRecorder(integration_knowledge_repo, sync_log_repo)
-        self.change_key_service = change_key_service
         # Strong refs to in-flight post-transaction tasks (ChangeKey flushes,
         # progress clears) so the event loop does not GC them before they run.
         self._post_transaction_tasks: set["asyncio.Task[None]"] = set()
@@ -1000,9 +999,9 @@ class SharePointContentService:
         stats = delta_pass.stats
         parent_id = item.get("parentReference", {}).get("id")
         location_key = f"folder-under:{parent_id}" if parent_id else None
-        if location_key and self.change_key_service:
+        if location_key and self._index.change_key_service:
             try:
-                walked_here = not await self.change_key_service.should_process(
+                walked_here = not await self._index.change_key_service.should_process(
                     integration_knowledge_id=integration_knowledge.id,
                     item_id=item_id,
                     change_key=location_key,
@@ -1574,7 +1573,7 @@ class SharePointContentService:
         re-embed, so the only cost is a redundant download. Not worth blocking the
         event loop with a synchronous Redis write to close it.
         """
-        if not pending or not self.change_key_service:
+        if not pending or not self._index.change_key_service:
             return
         # Skipping is the safe direction: the item re-processes next sync.
         if not self._after_transaction(
@@ -1620,11 +1619,11 @@ class SharePointContentService:
         return True
 
     async def _flush_change_keys(self, pending: list[tuple[UUID, str, str]]) -> None:
-        if not self.change_key_service:
+        if not self._index.change_key_service:
             return
         for integration_knowledge_id, item_id, change_key in pending:
             try:
-                await self.change_key_service.update_change_key(
+                await self._index.change_key_service.update_change_key(
                     integration_knowledge_id=integration_knowledge_id,
                     item_id=item_id,
                     change_key=change_key,
