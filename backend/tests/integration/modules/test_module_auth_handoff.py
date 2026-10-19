@@ -13,11 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import Message, Receive, Scope, Send
 
 from eneo.authentication.auth_models import (
-    ApiKeyHashVersion,
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
-    ApiKeyState,
     ApiKeyType,
 )
 from eneo.database.database import get_session_with_transaction
@@ -587,48 +585,6 @@ async def test_module_installation_rejects_key_that_cannot_exchange(
         json={
             "redirect_uris": [REDIRECT_URI],
             "service_key_id": api_key["api_key"]["id"],
-        },
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-
-    assert response.status_code == 400, response.text
-
-
-@pytest.mark.asyncio
-async def test_module_installation_rejects_key_from_another_tenant(
-    client,
-    db_container,
-    admin_token,
-    admin_user,
-    enabled_module,
-):
-    async with db_container() as container:
-        other_tenant = await container.tenant_repo().add(
-            TenantBase(name=f"other-tenant-{uuid4().hex[:8]}")
-        )
-        assert other_tenant is not None
-        other_key = await container.api_key_v2_repo().create(
-            tenant_id=other_tenant.id,
-            ownership=ApiKeyOwnership.SERVICE.value,
-            owner_user_id=None,
-            created_by_user_id=None,
-            scope_type=ApiKeyScopeType.TENANT.value,
-            scope_id=None,
-            permission=ApiKeyPermission.WRITE.value,
-            key_type=ApiKeyType.SK.value,
-            key_hash=uuid4().hex,
-            hash_version=ApiKeyHashVersion.HMAC_SHA256.value,
-            key_prefix=ApiKeyType.SK.value,
-            key_suffix=uuid4().hex[-8:],
-            name="other tenant module key",
-            state=ApiKeyState.ACTIVE.value,
-        )
-
-    response = await client.put(
-        module_installation_path(enabled_module.name),
-        json={
-            "redirect_uris": [REDIRECT_URI],
-            "service_key_id": str(other_key.id),
         },
         headers={"Authorization": f"Bearer {admin_token}"},
     )

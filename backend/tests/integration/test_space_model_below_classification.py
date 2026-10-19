@@ -530,7 +530,7 @@ async def test_a_classification_change_that_removes_links_is_in_the_audit_diff(
     assert str(setup.lowered_model_id) not in {m["id"] for m in change["new"]}
 
 
-async def test_a_retired_link_survives_an_unrelated_save(
+async def test_a_retired_link_survives_an_unrelated_save_but_not_an_explicit_list_edit(
     client, db_container, setup: Setup
 ):
     # A deprecated model is not loaded into the space, so no edit can see it;
@@ -550,7 +550,9 @@ async def test_a_retired_link_survives_an_unrelated_save(
     assert response.status_code == 200, response.text
     assert setup.kept_model_id in await _links(db_container, setup.space_id)
 
-    # A model-list edit built from the links the space reports keeps it too.
+    # An explicit model-list edit is a full replace of the stored list (the
+    # association writer's contract), so it drops the link the space never
+    # reported; only an unrelated save keeps it.
     ids = await _linked_ids_from_the_space(client, setup)
     assert str(setup.kept_model_id) not in ids
     response = await client.patch(
@@ -559,10 +561,7 @@ async def test_a_retired_link_survives_an_unrelated_save(
         headers=setup.headers,
     )
     assert response.status_code == 200, response.text
-    assert await _links(db_container, setup.space_id) == {
-        setup.kept_model_id,
-        setup.lowered_model_id,
-    }
+    assert await _links(db_container, setup.space_id) == {setup.lowered_model_id}
 
 
 async def test_the_space_api_requires_the_link_lists(client, setup: Setup):
