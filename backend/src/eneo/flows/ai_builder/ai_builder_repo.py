@@ -40,7 +40,9 @@ from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     compact_ai_builder_conversation,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_with_turn_coverage,
     semantic_conversation,
+    turn_coverage_from_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -78,6 +80,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreflight,
     SessionTurnPreparationBaseline,
 )
+from eneo.flows.ai_builder.ai_builder_turn_coverage import TurnCoverage
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     ArchitectureCommit,
@@ -936,8 +939,13 @@ class AIBuilderRepository:
         tenant_id: UUID,
         conversation: list[ConversationMessage],
         lease: SessionSendLease,
+        turn_coverage: TurnCoverage | None = None,
     ) -> list[ConversationMessage]:
         """Persist `conversation` messages and return the compacted list that was stored.
+
+        `turn_coverage` goes on the latest turn's user message, incoming or
+        already stored, before compaction: what is kept is decided once, with
+        the key counted.
 
         Returning the compacted list lets callers derive side-effects
         (notably `PlanningState`) from the same view that will be read
@@ -966,9 +974,10 @@ class AIBuilderRepository:
                 )
 
             existing = _session_from_row(row).conversation
-            compacted = compact_ai_builder_conversation(
-                _merge_conversation_messages(existing, conversation)
-            )
+            merged = _merge_conversation_messages(existing, conversation)
+            if turn_coverage is not None:
+                merged = _with_turn_coverage(merged, row, turn_coverage)
+            compacted = compact_ai_builder_conversation(merged)
             serialized = [msg.model_dump(mode="json") for msg in compacted]
             update_stmt = (
                 update(BuilderSessions)
@@ -1447,6 +1456,13 @@ class AIBuilderRepository:
         turn: SessionSendTurn,
         error: AIBuilderPublicError | None = None,
     ) -> None:
+        """Commit the turn, with its error if it failed. What its sent model
+        requests left out goes on its user message in the same transaction
+        when that message does not already carry it (a `commit_turn` of the
+        turn stored it with its messages): every turn that commits completes
+        here, whatever ended it."""
+
+        coverage = turn.coverage.summary()
         async with self._transaction():
             terminal_error = (
                 error.model_dump(mode="json") if error is not None else None
@@ -1486,6 +1502,24 @@ class AIBuilderRepository:
                 raise AIBuilderBadRequestException(
                     "The AI Builder session lease was lost while completing the turn.",
                     code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
+                )
+            if coverage is None:
+                return
+            row = (
+                await self.session.execute(
+                    select(BuilderSessions)
+                    .where(BuilderSessions.id == updated_session_id)
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one()
+            stored = _latest_turn_user_message(row).metadata
+            if turn_coverage_from_metadata(stored) != coverage:
+                await self.append_session_messages(
+                    session_id=turn.session_id,
+                    tenant_id=turn.tenant_id,
+                    conversation=[],
+                    lease=turn.lease,
+                    turn_coverage=coverage,
                 )
 
     async def owns_session_send_lease(
@@ -1962,6 +1996,7 @@ class AIBuilderRepository:
                 tenant_id=turn.tenant_id,
                 conversation=new_messages,
                 lease=turn.lease,
+                turn_coverage=turn.coverage.summary(),
             )
             attached_file_ids = await self.list_session_file_ids(
                 session_id=turn.session_id,
@@ -2028,6 +2063,24 @@ def _latest_turn_user_message(row: BuilderSessions) -> ConversationMessage:
         if message.message_id == str(message_id):
             return message
     raise ValueError("Persisted Builder latest-turn user message is missing.")
+
+
+def _with_turn_coverage(
+    conversation: list[ConversationMessage],
+    row: BuilderSessions,
+    coverage: TurnCoverage,
+) -> list[ConversationMessage]:
+    message_id = str(row.latest_turn_message_id)
+    if not any(message.message_id == message_id for message in conversation):
+        raise ValueError("Persisted Builder latest-turn user message is missing.")
+    return [
+        message.model_copy(
+            update={"metadata": metadata_with_turn_coverage(message.metadata, coverage)}
+        )
+        if message.message_id == message_id
+        else message
+        for message in conversation
+    ]
 
 
 def _merge_conversation_messages(

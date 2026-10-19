@@ -13,6 +13,7 @@ import type {
   AIBuilderPublicErrorPayload,
   AIBuilderSendMessageRequest,
   AIBuilderSession,
+  AIBuilderTurnCoverage,
   ApplyResult,
   ProposedPlan
 } from "./protocol";
@@ -5241,5 +5242,49 @@ describe("FlowAIBuilderDriver review turns", () => {
     expect(driver.state.reviewNote).toBeNull();
     // A plan event settles the turn; no reconciliation round trip is needed.
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("FlowAIBuilderDriver turn coverage", () => {
+  const coverage: AIBuilderTurnCoverage = {
+    schema_version: 1,
+    notes: [
+      {
+        stage: "proposal",
+        material: "history_messages",
+        total: 3,
+        omitted: 2,
+        shortened: 0,
+        reasons: ["model_room"]
+      }
+    ]
+  };
+
+  // Mutants: the streamed coverage is dropped or lands on another message, or
+  // a note kind a newer server sends aborts the committed turn's stream.
+  it("puts a streamed coverage on the message the turn sent", async () => {
+    const newerNote = { kind: "catalog", material: "tool_catalog", reason: "catalog_limit" };
+    const streamed = { ...coverage, notes: [...coverage.notes, newerNote] };
+    const { driver } = makeDriver({
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onMessage?.(
+          {
+            id: "",
+            event: "coverage",
+            data: JSON.stringify({ message_id: "u2", coverage: streamed })
+          },
+          new AbortController()
+        );
+        completeStream(handlers);
+      })
+    });
+    driver.seedState({
+      session: makeSession(),
+      messages: [{ role: "user", content: "Förra", timestamp: 1 }]
+    });
+
+    expect(await driver.sendMessage("Bygg vidare")).toBe("delivered");
+
+    expect(driver.state.messages.map((message) => message.coverage)).toEqual([undefined, coverage]);
   });
 });

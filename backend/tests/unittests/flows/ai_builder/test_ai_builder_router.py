@@ -49,9 +49,14 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContextPolicy,
 )
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_with_turn_coverage,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
+    BuilderTurnLifecycle,
+    BuilderTurnState,
     ConversationMessage,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
@@ -90,6 +95,10 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_telemetry_models import SessionTelemetrySummary
 from eneo.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
+from eneo.flows.ai_builder.ai_builder_turn_coverage import (
+    CountCoverageNote,
+    TurnCoverage,
+)
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -3055,6 +3064,73 @@ class TestSendMessageEndpoint:
         usage = events[1]["data"]
         assert usage["total_tokens_total"] == 25
         assert usage["last_request_id"] == "req-retry-usage"
+
+    # Mutant: the stream sends the coverage another turn stored, as when this
+    # request lost the session to a newer turn.
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("own_turn", [True, False])
+    async def test_streams_only_the_coverage_its_own_turn_stored(self, own_turn: bool):
+        container = _make_container()
+        _configure_space_with_planner_model(container)
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        body = _send_message_request("Build a flow")
+        coverage = TurnCoverage(
+            notes=[
+                CountCoverageNote(
+                    stage="proposal",
+                    material="history_messages",
+                    total=3,
+                    omitted=2,
+                    shortened=0,
+                    reasons=["model_room"],
+                )
+            ]
+        )
+        message = ConversationMessage(
+            role="user",
+            content="Build a flow",
+            metadata=metadata_with_turn_coverage(None, coverage),
+        )
+        stored = session.model_copy(
+            update={
+                "conversation": [message],
+                "latest_turn": BuilderTurnLifecycle(
+                    client_turn_id=body.client_turn_id if own_turn else uuid4(),
+                    request_fingerprint="a" * 64,
+                    request={},
+                    state=BuilderTurnState.COMMITTED,
+                    user_message_id=UUID(message.message_id),
+                ),
+            }
+        )
+        service = container.ai_builder_service.return_value
+        service.get_session.side_effect = [session, stored]
+        # The locked preflight row the turn's grant is opened on.
+        service.get_session.return_value = session
+
+        async def mock_events(*args, **kwargs):
+            yield build_done_event()
+
+        service.send_message.return_value = mock_events()
+
+        result = await send_message(
+            request=MagicMock(), session_id=session.id, body=body, container=container
+        )
+
+        events = await _read_sse_events(result)
+        assert [event["event"] for event in events] == (
+            ["coverage", "done"] if own_turn else ["done"]
+        )
+        assert [event["data"] for event in events if event["event"] == "coverage"] == (
+            [
+                {
+                    "message_id": message.message_id,
+                    "coverage": coverage.model_dump(mode="json"),
+                }
+            ]
+            if own_turn
+            else []
+        )
 
     @pytest.mark.anyio
     async def test_forwards_existing_usage_event_without_duplicate(self):

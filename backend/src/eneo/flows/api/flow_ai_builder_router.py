@@ -88,6 +88,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     structured_question_payload_from_tool_arguments,
     text_status_from_metadata,
     tool_calls_from_message,
+    turn_coverage_from_metadata,
     unread_reason,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -113,6 +114,8 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     translate_unknown_model_capacity,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderCoverageEvent,
+    AIBuilderCoverageEventData,
     AIBuilderDoneEvent,
     AIBuilderStreamEvent,
     AIBuilderUsageEvent,
@@ -152,7 +155,6 @@ from eneo.flows.ai_builder.ai_builder_read_access import (
     scope_for_session,
 )
 from eneo.flows.ai_builder.ai_builder_service import (
-    AIBuilderService,
     PreparedMessageContext,
 )
 from eneo.flows.ai_builder.ai_builder_settings import resolve_ai_builder_budget_policy
@@ -415,16 +417,33 @@ async def _coerce_event_stream(
     return await cast(Awaitable[EventStream], stream)
 
 
-async def _current_usage_event(
-    *,
-    service: "AIBuilderService",
-    session_id: UUID,
-) -> AIBuilderUsageEvent | None:
-    session = await service.get_session(session_id)
+def _usage_event(session: BuilderSession) -> AIBuilderUsageEvent | None:
     telemetry = summarize_session_telemetry(session.conversation)
     if telemetry is None:
         return None
     return build_usage_event(SessionTelemetrySummary.model_validate(telemetry))
+
+
+def _turn_coverage_event(
+    session: BuilderSession, *, client_turn_id: UUID
+) -> AIBuilderCoverageEvent | None:
+    """The coverage this request's turn stored on its user message, read back
+    after the stream so the event carries what a reload shows."""
+
+    latest_turn = session.latest_turn
+    if latest_turn is None or latest_turn.client_turn_id != client_turn_id:
+        return None
+    for message in session.conversation:
+        if message.message_id == str(latest_turn.user_message_id):
+            coverage = turn_coverage_from_metadata(message.metadata)
+            if coverage is None:
+                return None
+            return AIBuilderCoverageEvent(
+                data=AIBuilderCoverageEventData(
+                    message_id=message.message_id, coverage=coverage
+                )
+            )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -717,6 +736,7 @@ def _to_public_user_message(
             message.metadata
         ),
         reading=_message_reading(message),
+        coverage=turn_coverage_from_metadata(message.metadata),
     )
 
 
@@ -1448,11 +1468,15 @@ async def list_sessions(
         "turn can be retried safely. A provider-outcome-unknown turn is never retried "
         "automatically and requires explicit acknowledgement that provider work and cost "
         "may be repeated. Reload the session and use latest_turn.retry_request to replay "
-        "the exact accepted request."
+        "the exact accepted request. When the turn's model requests left part of the "
+        "user's material out or shortened it, the turn's own stream sends a coverage "
+        "event before done with what the turn stored on its user message (the "
+        "message's coverage field); a replay answered from the stored turn may send "
+        "none, so read the coverage from the session."
     ),
     responses={
         200: {
-            "description": "Server-sent event stream with planner status, text, question, plan, error, and done events.",
+            "description": "Server-sent event stream with planner status, text, question, plan, coverage, error, and done events.",
             "content": {
                 "text/event-stream": {
                     "schema": ai_builder_stream_event_schema(),
@@ -1723,26 +1747,35 @@ async def send_message(
                 elif event_name == SSE_EVENT_USAGE:
                     usage_event_emitted = True
 
-            if (
+            needs_usage = (
                 has_committed_event
                 and not usage_event_emitted
                 and not stream_error_seen
-            ):
-                usage_event = await _current_usage_event(
-                    service=service,
-                    session_id=session_id,
+            )
+            # One read after the stream serves both: what the turn stored.
+            stored = (
+                await service.get_session(session_id)
+                if done_event is not None or needs_usage
+                else None
+            )
+            late_events: list[AIBuilderStreamEvent] = []
+            if stored is not None and done_event is not None:
+                coverage_event = _turn_coverage_event(
+                    stored, client_turn_id=body.client_turn_id
                 )
+                if coverage_event is not None:
+                    late_events.append(coverage_event)
+            if stored is not None and needs_usage:
+                usage_event = _usage_event(stored)
                 if usage_event is not None:
-                    wire_usage_event = encode_ai_builder_stream_event(usage_event)
-                    yield ServerSentEvent(
-                        data=wire_usage_event["data"],
-                        event=wire_usage_event["event"],
-                    )
+                    late_events.append(usage_event)
             if done_event is not None:
-                wire_done_event = encode_ai_builder_stream_event(done_event)
+                late_events.append(done_event)
+            for late_event in late_events:
+                wire_late_event = encode_ai_builder_stream_event(late_event)
                 yield ServerSentEvent(
-                    data=wire_done_event["data"],
-                    event=wire_done_event["event"],
+                    data=wire_late_event["data"],
+                    event=wire_late_event["event"],
                 )
         except _PUBLIC_ERROR_TYPES as error:
             # A refused grant (role, key scope, creator) or a flow gone since

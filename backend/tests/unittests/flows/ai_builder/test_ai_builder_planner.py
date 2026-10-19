@@ -193,6 +193,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     ReviseArchitecture,
     resolve_turn_control,
 )
+from eneo.flows.ai_builder.ai_builder_turn_coverage import ProposalPromptCut
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     prepare_user_question_metadata,
 )
@@ -3670,6 +3671,7 @@ async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
             compile_context=None,
             proposal_tool_schema=_empty_proposal_tool_schema(),
             request_budget=_proposal_budget(),
+            prompt_cut=ProposalPromptCut(),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[],
                 available_kbs=[],
@@ -4119,6 +4121,7 @@ async def test_send_message_releases_lease_when_stream_is_cancelled(
             compile_context=None,
             proposal_tool_schema=_empty_proposal_tool_schema(),
             request_budget=_proposal_budget(),
+            prompt_cut=ProposalPromptCut(),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[],
                 available_kbs=[],
@@ -4212,6 +4215,7 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
             compile_context=None,
             proposal_tool_schema=_empty_proposal_tool_schema(),
             request_budget=_proposal_budget(),
+            prompt_cut=ProposalPromptCut(),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[
                     _model_resource(str(local_model_id), "Renamed model")
@@ -4294,6 +4298,7 @@ def _stream_proposal_request() -> ProposalPrepared:
         compile_context=None,
         proposal_tool_schema=_empty_proposal_tool_schema(),
         request_budget=_proposal_budget(),
+        prompt_cut=ProposalPromptCut(),
         resource_catalog=build_ai_builder_resource_catalog(
             available_models=[],
             available_kbs=[],
@@ -6714,6 +6719,39 @@ def test_replayed_requirements_whose_core_cannot_fit_are_rejected() -> None:
 
     with pytest.raises(AIBuilderKnownProviderRejectionException):
         _fit_replayed_requirements(disclosure, fits=lambda _payload: False)
+
+
+def test_a_proposal_prompt_reports_the_confirmed_assumptions_it_left_out() -> None:
+    disclosure = _confirmed_disclosure_with_assumption_rows()
+
+    prepared = build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        conversation=_confirmation_conversation(disclosure),
+        planning_state=_document_architecture_state(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], prior_bindings=()
+        ),
+        flow=None,
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-5.4",
+        capacity=ModelCapacity(4096, 1024),
+        budget_policy=_budget_policy(),
+        attachment_file_count=0,
+        current_turn_start=2,
+    )
+
+    # Mutant: the assumptions the model room cut are reported as replayed.
+    assert (
+        prepared.prompt_cut.confirmed_assumptions,
+        prepared.prompt_cut.replayed_assumptions,
+    ) == (len(disclosure.assumptions), 0)
 
 
 def _review_evidence(excerpt_chars: int):

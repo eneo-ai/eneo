@@ -151,6 +151,10 @@ export interface AIBuilderCarriedRequest {
 
 export type AIBuilderConversationMessage = GeneratedAIBuilderConversationMessage;
 
+/** What a turn's sent model requests left out of the user's material. */
+export type AIBuilderTurnCoverage = components["schemas"]["TurnCoverage"];
+export type AIBuilderCoverageNote = AIBuilderTurnCoverage["notes"][number];
+
 /** The server's resend of an unread user message: its words and scope. */
 export type AIBuilderUnreadMessageResend = NonNullable<
   AIBuilderConversationMessage["reading"]
@@ -310,6 +314,8 @@ export interface ChatMessage {
   questionAnswer?: PersistedStructuredQuestionAnswerMetadata;
   /** The server's id of a user message no reading has received yet. */
   unreadMessageId?: string;
+  /** On a user message: what its turn's model requests left out. */
+  coverage?: AIBuilderTurnCoverage;
   metadata?: Record<string, unknown>;
   timestamp: number;
 }
@@ -770,6 +776,41 @@ const telemetryEventDataSchema = z.object({
   last_token_usage_estimated: z.boolean().optional()
 }) satisfies z.ZodType<GeneratedAIBuilderSessionTelemetrySummary>;
 
+const coverageNoteSchema = z.object({
+  kind: z.literal("count").optional(),
+  stage: z.enum(["classification", "proposal"]),
+  material: z.enum(["classification_sources", "history_messages", "requirement_assumptions"]),
+  total: z.int(),
+  omitted: z.int(),
+  shortened: z.int(),
+  reasons: z.array(z.enum(["model_room", "fixed_limit"]))
+});
+
+// Read one note at a time: a note kind or material this client does not know
+// is left out, so a new note kind never breaks a turn's stream or a reload (a
+// new schema_version still does: it is a different contract).
+const turnCoverageSchema = z.object({
+  schema_version: z.literal(1).optional(),
+  notes: z.array(z.unknown()).transform((notes) =>
+    notes.flatMap((note) => {
+      const known = coverageNoteSchema.safeParse(note);
+      return known.success ? [known.data] : [];
+    })
+  )
+});
+
+const coverageEventDataSchema = z.strictObject({
+  message_id: z.string(),
+  coverage: turnCoverageSchema
+});
+
+/** The notes of a stored or streamed coverage this client can show; none
+ *  when it knows none of them. */
+export function knownTurnCoverage(raw: unknown): AIBuilderTurnCoverage | undefined {
+  const parsed = turnCoverageSchema.safeParse(raw);
+  return parsed.success && parsed.data.notes.length > 0 ? parsed.data : undefined;
+}
+
 const aiBuilderErrorCodes = [
   "architecture_critic_invariant_failed",
   "architecture_materialization_failed",
@@ -924,6 +965,7 @@ const eventDataSchemas = {
   requirements_summary: requirementsSummaryEventDataSchema,
   plan: planEventDataSchema,
   usage: telemetryEventDataSchema,
+  coverage: coverageEventDataSchema,
   error: errorEventDataSchema
 } satisfies Record<Exclude<AIBuilderEventType, "done">, z.ZodType>;
 
@@ -1000,6 +1042,11 @@ export function parseAIBuilderStreamEvent(
       return {
         event: "usage",
         data: parseTelemetryEventData(rawEvent.data)
+      };
+    case "coverage":
+      return {
+        event: "coverage",
+        data: parseEventData(rawEvent.data, eventDataSchemas.coverage)
       };
     case "error":
       return {

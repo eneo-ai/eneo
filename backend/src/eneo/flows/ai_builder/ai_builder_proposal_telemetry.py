@@ -44,6 +44,7 @@ from eneo.flows.ai_builder.ai_builder_token_usage import (
     combine_token_usage,
 )
 from eneo.flows.ai_builder.ai_builder_tools import AdmissionNormalizerFamily
+from eneo.flows.ai_builder.ai_builder_turn_coverage import TurnCoverageRecorder
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.main.logging import get_logger
 
@@ -351,6 +352,9 @@ class ProposalTurnTelemetry:
         default_factory=_empty_admission_normalization_hits
     )
     declared_authoring: DeclaredAuthoring | None = None
+    # The turn's own (`SessionSendTurn.coverage`): the calls report to it as
+    # they are sent, and completing the turn stores its summary.
+    coverage: TurnCoverageRecorder = field(default_factory=TurnCoverageRecorder)
     _turn_started_ns: int = field(default_factory=monotonic_ns, repr=False)
     _attempt_started_ns: int | None = field(default=None, init=False, repr=False)
     _attempt_counts_as_repair: bool = field(default=False, init=False, repr=False)

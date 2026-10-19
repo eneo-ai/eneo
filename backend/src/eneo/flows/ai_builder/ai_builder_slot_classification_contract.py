@@ -205,6 +205,9 @@ class SlotClassificationInput:
     # unread). Parsing only: a reply citing one for a checkpoint change is
     # refused, so the unread hold keeps it. It never changes the prompt.
     unread_user_message_ids: frozenset[str] = frozenset()
+    # The oldest messages and answers the fixed source limit kept out of
+    # `sources`, for the turn's coverage; never part of the prompt.
+    transcript_sources_over_limit: int = 0
 
 
 @dataclass(frozen=True, slots=True)

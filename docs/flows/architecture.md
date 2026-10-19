@@ -261,6 +261,41 @@ Upload byte limits protect storage and file processing. Message, collection,
 schema, and archive inspection bounds protect their respective API, persistence,
 and parsing boundaries. Those limits remain independent of model context size.
 
+### AI Builder turn coverage
+
+When a turn's model requests leave part of the user's material out or shorten
+it, the turn records one typed summary (`TurnCoverage`, owner
+`ai_builder_turn_coverage.py`) on its own user message, as the `turn_coverage`
+metadata key. Three materials are counted, each from what its packer returned:
+
+- `classification_sources` (stage `classification`): the user's messages and
+  answer values the reading takes in. The oldest sources over the fixed
+  120-source limit and the sources the capacity fit drops are omitted; a source
+  sent in part, by the fixed 500-character answer limit or by the fit, is
+  shortened.
+- `history_messages` (stage `proposal`): earlier conversation messages the
+  proposal fit evicts, a reply and the tool results it called for counting once.
+- `requirement_assumptions` (stage `proposal`): confirmed assumptions the
+  proposal prompt does not replay.
+
+Each note gives the total, how many items were omitted and how many shortened
+(an omitted item is not also counted as shortened), and why: `model_room` (the
+model's context window) or `fixed_limit`. Only requests that were sent count,
+and over the repair and continuation calls of one turn the summary keeps the
+call that left out the most, never a sum. A `commit_turn` of the turn stores the
+summary in the same conversation write as its messages, before compaction and
+the planning state; completing the turn, with or without an error, stores it
+only when the user message does not already carry that value. A turn that ends
+without completing (lease lost, provider outcome unknown, a stream failure)
+carries the summary only if it stored its messages before it ended. The session response shows it as the user message's `coverage`.
+The turn's own message stream sends it once in a `coverage` event before
+`done`, read back from the stored message; a replay answered from the stored
+turn may send none, so a client reads the coverage from the session. Each note
+has a `kind` (`count`; a note stored without one is a `count` note), and the web
+leaves out a note kind or material it does not know. Attached files keep their
+own `AttachmentCoverage`; tool-catalogue and run-evidence trimming are not
+counted here yet.
+
 ### AI Builder MCP tool catalogue
 
 Every prepared Builder message turn, in create and edit sessions alike, reads

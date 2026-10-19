@@ -307,6 +307,13 @@ def flatten_proposal_message_groups(
     return [message for group in groups for message in group.messages]
 
 
+def history_group_count(groups: tuple[ProposalMessageGroup, ...]) -> int:
+    """The earlier conversation messages among ``groups``, one per message
+    with the tool results it called for: what a fit may evict."""
+
+    return sum(1 for group in groups if group.kind == "history")
+
+
 def fit_proposal_request_budget(
     *,
     budget: AIBuilderRequestBudget,

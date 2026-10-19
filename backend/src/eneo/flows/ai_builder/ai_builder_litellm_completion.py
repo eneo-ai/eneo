@@ -28,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionRequest,
     fit_proposal_request_budget,
     flatten_proposal_message_groups,
+    history_group_count,
     outbound_proposal_tool_schemas,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
@@ -122,6 +123,10 @@ async def call_proposal_completion(
             counts_as_repair=request.counts_as_repair,
             call_kind=call_kind,
             request_budget=request_budget,
+        )
+        usage_tracker.coverage.record_proposal_call(
+            history_in_request=history_group_count(request.message_groups),
+            history_sent=history_group_count(fitted_message_groups),
         )
     timing = ObservedTiming()
 

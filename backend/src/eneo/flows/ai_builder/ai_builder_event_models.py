@@ -26,6 +26,7 @@ from eneo.flows.ai_builder.ai_builder_telemetry_models import (
 )
 from eneo.flows.ai_builder.ai_builder_tool_question_ids import AIBuilderToolQuestion
 from eneo.flows.ai_builder.ai_builder_tool_use import TOOL_REQUEST_TEXT_MAX_CHARS
+from eneo.flows.ai_builder.ai_builder_turn_coverage import TurnCoverage
 from eneo.flows.ai_builder.planning_state import (
     AttachmentCoverage,
     FileRole,
@@ -691,6 +692,23 @@ class AIBuilderUsageEvent(BaseModel):
     data: SessionTelemetrySummary
 
 
+class AIBuilderCoverageEventData(BaseModel):
+    """What the turn's sent model requests left out, as stored on its user
+    message: a reload shows the same value."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: str = Field(description="The turn's user message.")
+    coverage: TurnCoverage
+
+
+class AIBuilderCoverageEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event: Literal["coverage"] = "coverage"
+    data: AIBuilderCoverageEventData
+
+
 class AIBuilderDoneEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -705,6 +723,7 @@ AIBuilderStreamEvent: TypeAlias = Annotated[
     | AIBuilderRequirementsSummaryEvent
     | AIBuilderPlanEvent
     | AIBuilderUsageEvent
+    | AIBuilderCoverageEvent
     | AIBuilderErrorEvent
     | AIBuilderDoneEvent,
     Field(discriminator="event"),
@@ -729,6 +748,7 @@ SSE_EVENT_REQUIREMENTS_SUMMARY: Final = _event_name(AIBuilderRequirementsSummary
 SSE_EVENT_ERROR: Final = _event_name(AIBuilderErrorEvent)
 SSE_EVENT_STATUS: Final = _event_name(AIBuilderStatusEvent)
 SSE_EVENT_USAGE: Final = _event_name(AIBuilderUsageEvent)
+SSE_EVENT_COVERAGE: Final = _event_name(AIBuilderCoverageEvent)
 SSE_EVENT_DONE: Final = _event_name(AIBuilderDoneEvent)
 
 AI_BUILDER_STREAM_EVENT_MODELS: tuple[type[BaseModel], ...] = (
@@ -738,6 +758,7 @@ AI_BUILDER_STREAM_EVENT_MODELS: tuple[type[BaseModel], ...] = (
     AIBuilderRequirementsSummaryEvent,
     AIBuilderPlanEvent,
     AIBuilderUsageEvent,
+    AIBuilderCoverageEvent,
     AIBuilderErrorEvent,
     AIBuilderDoneEvent,
 )
@@ -754,6 +775,7 @@ AI_BUILDER_SCHEMA_HOIST_MODELS: tuple[type[BaseModel], ...] = (
     RequirementsSummaryPayload,
     AIBuilderPlanEventData,
     SessionTelemetrySummary,
+    AIBuilderCoverageEventData,
     *AI_BUILDER_STREAM_EVENT_MODELS,
 )
 
@@ -769,6 +791,8 @@ def ai_builder_stream_event_schema() -> dict[str, object]:
 __all__ = [
     "AI_BUILDER_SCHEMA_HOIST_MODELS",
     "AI_BUILDER_STREAM_EVENT_MODELS",
+    "AIBuilderCoverageEvent",
+    "AIBuilderCoverageEventData",
     "AIBuilderDoneEvent",
     "AIBuilderErrorEvent",
     "AIBuilderPlanEventData",
@@ -788,6 +812,7 @@ __all__ = [
     "ResolvedRequirementPayload",
     "RequirementsSummaryPayload",
     "RuntimeInputFieldPayload",
+    "SSE_EVENT_COVERAGE",
     "SSE_EVENT_DONE",
     "SSE_EVENT_ERROR",
     "SSE_EVENT_PLAN",

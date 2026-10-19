@@ -85,6 +85,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     slot_classification_prompt_hash,
     slot_classification_provider_identity,
 )
+from eneo.flows.ai_builder.ai_builder_turn_coverage import classification_sources_note
 from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_PROVENANCE_MAX_ITEMS,
     CheckpointProducerKind,
@@ -334,6 +335,7 @@ def build_slot_classification_input(
         pending_question_id = None
 
     sources = list(_bound_classification_transcript(transcript_sources))
+    transcript_sources_over_limit = len(transcript_sources) - len(sources)
     if attachment_context is not None:
         for item in sorted(
             attachment_context.evidence,
@@ -359,6 +361,7 @@ def build_slot_classification_input(
             and message.message_id != current_user_message_id
             and text_status_from_metadata(message.metadata) == "unread"
         ),
+        transcript_sources_over_limit=transcript_sources_over_limit,
     )
 
 
@@ -739,6 +742,7 @@ async def build_runtime_discovery_context(
     # A turn on a saved flow reads its slots as the model wrote them, so its
     # request asks for no declarations.
     read_declarations = flow is None
+    offered_input = classification_input
     classification_input = admit_slot_classification_input(
         classification_input=classification_input,
         attachment_context=attachment_context,
@@ -789,6 +793,9 @@ async def build_runtime_discovery_context(
         capacity=capacity,
         budget_policy=budget_policy,
         read_declarations=read_declarations,
+        coverage=classification_sources_note(
+            offered=offered_input, admitted=classification_input
+        ),
     )
     if attempt.outcome != "resolved":
         return _complete_runtime_discovery_context(

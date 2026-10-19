@@ -70,6 +70,7 @@ AI_BUILDER_STREAM_EVENT_REFS = {
     "requirements_summary": "#/components/schemas/AIBuilderRequirementsSummaryEvent",
     "plan": "#/components/schemas/AIBuilderPlanEvent",
     "usage": "#/components/schemas/AIBuilderUsageEvent",
+    "coverage": "#/components/schemas/AIBuilderCoverageEvent",
     "error": "#/components/schemas/AIBuilderErrorEvent",
     "done": "#/components/schemas/AIBuilderDoneEvent",
 }

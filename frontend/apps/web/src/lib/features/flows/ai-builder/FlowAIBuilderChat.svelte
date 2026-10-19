@@ -114,6 +114,7 @@
           ? () => void service.resendUnreadMessage(message.unreadMessageId!)
           : undefined}
         resendDisabled={!service.canSendTurn}
+        coverage={message.coverage}
       />
     {/each}
     {#if service.isStreaming && service.messages[service.messages.length - 1]?.role === "user"}

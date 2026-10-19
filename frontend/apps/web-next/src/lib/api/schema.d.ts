@@ -4935,7 +4935,7 @@ export interface paths {
     put?: never;
     /**
      * Send AI Builder Message
-     * @description Send a user message to an AI Builder session and receive planner events as a server-sent event stream. One caller-generated client turn ID identifies one logical send: retry the same payload with the same ID, while a changed payload conflicts. This protection covers the latest accepted turn until a different turn is accepted or the session is deleted. A failed-before-provider turn can be retried safely. A provider-outcome-unknown turn is never retried automatically and requires explicit acknowledgement that provider work and cost may be repeated. Reload the session and use latest_turn.retry_request to replay the exact accepted request.
+     * @description Send a user message to an AI Builder session and receive planner events as a server-sent event stream. One caller-generated client turn ID identifies one logical send: retry the same payload with the same ID, while a changed payload conflicts. This protection covers the latest accepted turn until a different turn is accepted or the session is deleted. A failed-before-provider turn can be retried safely. A provider-outcome-unknown turn is never retried automatically and requires explicit acknowledgement that provider work and cost may be repeated. Reload the session and use latest_turn.retry_request to replay the exact accepted request. When the turn's model requests left part of the user's material out or shortened it, the turn's own stream sends a coverage event before done with what the turn stored on its user message (the message's coverage field); a replay answered from the stored turn may send none, so read the coverage from the session.
      */
     post: operations["send_ai_builder_message"];
     delete?: never;
@@ -12042,6 +12042,8 @@ export interface components {
     AIBuilderConversationMessage: {
       /** Content */
       content?: string | null;
+      /** @description On the user message of a turn whose sent model requests left part of the user's material out or shortened it: what, per stage and material. Absent when nothing was left out, and on messages stored before it was recorded. */
+      coverage?: components["schemas"]["TurnCoverage"] | null;
       /** Message Id */
       message_id: string;
       named_content_fields_edit?: components["schemas"]["NamedContentFieldsEditRequest"] | null;
@@ -12068,6 +12070,28 @@ export interface components {
             | components["schemas"]["AIBuilderToolRequestUnresolved"]
           )
         | null;
+    };
+    /** AIBuilderCoverageEvent */
+    AIBuilderCoverageEvent: {
+      data: components["schemas"]["AIBuilderCoverageEventData"];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "coverage";
+    };
+    /**
+     * AIBuilderCoverageEventData
+     * @description What the turn's sent model requests left out, as stored on its user
+     *     message: a reload shows the same value.
+     */
+    AIBuilderCoverageEventData: {
+      coverage: components["schemas"]["TurnCoverage"];
+      /**
+       * Message Id
+       * @description The turn's user message.
+       */
+      message_id: string;
     };
     /** AIBuilderDiagnosticContext */
     AIBuilderDiagnosticContext: {
@@ -16503,6 +16527,52 @@ export interface components {
        */
       stream?: boolean;
       tools?: components["schemas"]["UseTools"] | null;
+    };
+    /**
+     * CountCoverageNote
+     * @description How many items of one material a stage's sent requests left out or
+     *     carried only in part. The unit follows the material.
+     */
+    CountCoverageNote: {
+      /**
+       * Kind
+       * @description The note's shape: `count` gives item counts. Other kinds may follow; a note stored without a kind is a `count` note.
+       * @default count
+       * @constant
+       */
+      kind?: "count";
+      /**
+       * Material
+       * @description What was counted: `classification_sources` (the user's messages and answer values the reading takes in), `history_messages` (earlier conversation messages; a reply and the tool results it called for count once) or `requirement_assumptions` (confirmed assumptions).
+       * @enum {string}
+       */
+      material: "classification_sources" | "history_messages" | "requirement_assumptions";
+      /**
+       * Omitted
+       * @description The most items one sent request of the stage left out (over a turn's repair and continuation requests, the largest, never a sum).
+       */
+      omitted: number;
+      /**
+       * Reasons
+       * @description Why, each once: `model_room` (the model's context window had no room for more) or `fixed_limit` (a fixed Builder limit).
+       */
+      reasons: ("model_room" | "fixed_limit")[];
+      /**
+       * Shortened
+       * @description Items a sent request carried only in part. An omitted item is not counted here too.
+       */
+      shortened: number;
+      /**
+       * Stage
+       * @description The model call that left the material out: `classification` (reading the message) or `proposal` (drafting the flow).
+       * @enum {string}
+       */
+      stage: "classification" | "proposal";
+      /**
+       * Total
+       * @description How many items the stage had to send.
+       */
+      total: number;
     };
     /** Counts */
     Counts: {
@@ -40489,6 +40559,23 @@ export interface components {
       target_space_id: string;
     };
     /**
+     * TurnCoverage
+     * @description What one turn's sent model requests left out of the user's material.
+     */
+    TurnCoverage: {
+      /**
+       * Notes
+       * @description One note per stage and material that left something out; the reading's before the proposal's.
+       */
+      notes: components["schemas"]["CountCoverageNote"][];
+      /**
+       * Schema Version
+       * @default 1
+       * @constant
+       */
+      schema_version?: 1;
+    };
+    /**
      * UnattendedToolRefusal
      * @description What refuses a tool for a caller that runs with nobody watching: a
      *     personal space, or else the first level that says no, in the order
@@ -60612,7 +60699,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Server-sent event stream with planner status, text, question, plan, error, and done events. */
+      /** @description Server-sent event stream with planner status, text, question, plan, coverage, error, and done events. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -60635,6 +60722,7 @@ export interface operations {
             | components["schemas"]["AIBuilderRequirementsSummaryEvent"]
             | components["schemas"]["AIBuilderPlanEvent"]
             | components["schemas"]["AIBuilderUsageEvent"]
+            | components["schemas"]["AIBuilderCoverageEvent"]
             | components["schemas"]["AIBuilderErrorEvent"]
             | components["schemas"]["AIBuilderDoneEvent"];
         };

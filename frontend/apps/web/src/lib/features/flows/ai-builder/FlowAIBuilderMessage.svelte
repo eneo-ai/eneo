@@ -5,8 +5,9 @@
   import { m } from "$lib/paraglide/messages";
   import { Markdown } from "$lib/components/markdown/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import BuilderTurnCoverageNote from "./BuilderTurnCoverageNote.svelte";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
-  import type { RequirementsSummary } from "./protocol";
+  import type { AIBuilderTurnCoverage, RequirementsSummary } from "./protocol";
   import type {
     StructuredQuestion,
     StructuredQuestionAnswerPayload
@@ -34,6 +35,8 @@
     onResendUnread?: () => void;
     /** The session accepts no new message right now. */
     resendDisabled?: boolean;
+    /** On a user message: what its turn's model requests left out. */
+    coverage?: AIBuilderTurnCoverage;
   }
 
   let {
@@ -52,7 +55,8 @@
     interactionDisabled = false,
     isEdit = false,
     onResendUnread = undefined,
-    resendDisabled = false
+    resendDisabled = false,
+    coverage = undefined
   }: Props = $props();
 </script>
 
@@ -85,6 +89,13 @@
           </Button>
         </div>
       {/if}
+    {/if}
+    <!-- Also under a turn that sent no text: a confirmation's request can
+         still leave history out. -->
+    {#if coverage}
+      <div class="mt-1 flex justify-end">
+        <BuilderTurnCoverageNote {coverage} />
+      </div>
     {/if}
   {:else}
     <div class="assistant-message">

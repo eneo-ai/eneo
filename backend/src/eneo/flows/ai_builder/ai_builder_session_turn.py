@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from uuid import UUID
 
@@ -13,6 +13,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderPublicError
+from eneo.flows.ai_builder.ai_builder_turn_coverage import TurnCoverageRecorder
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 
 
@@ -28,6 +29,11 @@ class SessionSendTurn:
     tenant_id: UUID
     lease: SessionSendLease
     base_planning_state_version: int
+    # What the turn's sent model requests left out; completing the turn
+    # stores its summary on the turn's user message.
+    coverage: TurnCoverageRecorder = field(
+        default_factory=TurnCoverageRecorder, compare=False
+    )
 
 
 @dataclass(frozen=True, slots=True)

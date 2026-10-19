@@ -97,6 +97,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
 )
+from eneo.flows.ai_builder.ai_builder_turn_coverage import TurnCoverage
 from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     NAMED_RESULT_FIELD_NAME_MAX_LENGTH,
@@ -151,6 +152,7 @@ ASSISTANT_QUESTION_INDEX_METADATA_KEY = "question_index"
 SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
 TEXT_STATUS_METADATA_KEY = "text_status"
 READING_FAILURE_METADATA_KEY = "reading_failure"
+TURN_COVERAGE_METADATA_KEY = "turn_coverage"
 NAMED_CONTENT_FIELDS_EDIT_METADATA_KEY = "named_content_fields_edit"
 REOPEN_QUESTION_METADATA_KEY = "reopen_question"
 PROVIDER_TOOL_CALL_ID_MAX_LENGTH = 64
@@ -2238,6 +2240,31 @@ def reading_failure_from_metadata(
         return SlotClassificationReadingFailure.model_validate(raw)
     except ValidationError as error:
         _warn_invalid_persisted_metadata(READING_FAILURE_METADATA_KEY, error)
+        return None
+
+
+def metadata_with_turn_coverage(
+    metadata: FlowPersistedJsonObject | None, coverage: TurnCoverage
+) -> FlowPersistedJsonObject:
+    return {
+        **(metadata or {}),
+        TURN_COVERAGE_METADATA_KEY: coverage.model_dump(mode="json"),
+    }
+
+
+def turn_coverage_from_metadata(metadata: object) -> TurnCoverage | None:
+    """What the turn of this user message left out of its model requests, or
+    None when nothing was left out, the message is older than the record, or
+    the record no longer reads."""
+
+    metadata_map = _metadata_mapping(metadata)
+    raw = metadata_map.get(TURN_COVERAGE_METADATA_KEY) if metadata_map else None
+    if raw is None:
+        return None
+    try:
+        return TurnCoverage.model_validate(raw)
+    except ValidationError as error:
+        _warn_invalid_persisted_metadata(TURN_COVERAGE_METADATA_KEY, error)
         return None
 
 

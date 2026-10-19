@@ -141,8 +141,10 @@ if TYPE_CHECKING:
         ResolvedCompletionModelRoute,
     )
     from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+        ProposalCallRecord,
         ProposalTurnTelemetry,
     )
+    from eneo.flows.ai_builder.ai_builder_turn_coverage import CountCoverageNote
 
 
 # Tenant id is intentionally log-only; classification depends on typed sources and slots.
@@ -200,7 +202,11 @@ async def classify_slots(
     capacity: ModelCapacity,
     budget_policy: AIBuilderBudgetPolicy,
     read_declarations: bool = True,
+    coverage: CountCoverageNote | None = None,
 ) -> SlotClassificationAttempt:
+    """``coverage`` is what packing this input left out of the user's
+    messages and answers; it is the turn's once the request is sent."""
+
     slot_values = normalize_slot_classification_values(allowed_slot_values)
     transport = resolve_slot_classification_transport(
         supports_strict_tool_schema=completion_model_route.supports_strict_tool_schema,
@@ -308,14 +314,12 @@ async def classify_slots(
         )
     completion_kwargs["max_tokens"] = request_budget.provider_output_cap_tokens
 
-    call = (
-        usage_tracker.begin_call(
-            call_kind="slot_classification",
-            request_budget=request_budget,
+    call: ProposalCallRecord | None = None
+    if usage_tracker is not None:
+        call = usage_tracker.begin_call(
+            call_kind="slot_classification", request_budget=request_budget
         )
-        if usage_tracker is not None
-        else None
-    )
+        usage_tracker.coverage.record_classification_call(coverage)
     timing = ObservedTiming()
 
     try:

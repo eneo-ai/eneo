@@ -28,6 +28,7 @@ import {
   AIBuilderStreamContractError,
   isDiscoveryStatus,
   isRecoverableCreateDraft,
+  knownTurnCoverage,
   parseAIBuilderStreamEvent
 } from "./protocol";
 import type {
@@ -50,6 +51,7 @@ import type {
   AIBuilderSessionToolsResponse,
   AIBuilderStatus,
   AIBuilderStreamEvent,
+  AIBuilderTurnCoverage,
   AIBuilderTurnState,
   AIBuilderTurnRecoveryState,
   AIBuilderUnreadMessageResend,
@@ -1274,6 +1276,13 @@ export class FlowAIBuilderDriver {
                 this.#updateSessionTelemetry(event.data);
                 return;
               }
+              case "coverage": {
+                this.#applyTurnCoverage(
+                  optimisticUserMessage,
+                  knownTurnCoverage(event.data.coverage)
+                );
+                return;
+              }
               case "status": {
                 this.#state.statusMessage = event.data.status;
                 this.#notify();
@@ -2140,6 +2149,17 @@ export class FlowAIBuilderDriver {
     this.#state = createInitialFlowAIBuilderState();
   }
 
+  /** The coverage belongs to the message this stream sent. A turn sent
+   *  without one (a retry or a resend) reads the stored value back with the
+   *  session after the stream. */
+  #applyTurnCoverage(sent: ChatMessage | null, coverage: AIBuilderTurnCoverage | undefined): void {
+    if (!sent || !coverage) return;
+    this.#state.messages = this.#state.messages.map((message) =>
+      message === sent ? { ...message, coverage } : message
+    );
+    this.#notify();
+  }
+
   #updateSessionTelemetry(telemetry: AIBuilderUsageEventData): void {
     if (!this.#state.session) return;
 
@@ -2159,11 +2179,13 @@ export class FlowAIBuilderDriver {
           message.question_answer?.kind === "structured_question_answer"
             ? (toPersistedQuestionAnswerMetadata(message.question_answer) ?? undefined)
             : undefined;
+        const coverage = knownTurnCoverage(message.coverage);
         hydrated.push({
           role: "user",
           content: message.content ?? "",
           questionAnswer,
           ...(message.reading ? { unreadMessageId: message.message_id } : {}),
+          ...(coverage ? { coverage } : {}),
           metadata: this.#metadataFromPublicUserMessage(message),
           timestamp: this.#parseTimestamp(message.timestamp)
         });

@@ -3985,6 +3985,53 @@ describe("FlowAIBuilder conversation screen", () => {
     await waitFor(() => expect(screen.queryByText(m.ai_builder_message_not_read())).toBeNull());
   });
 
+  it("shows under a reloaded message what its turn's model request left out", async () => {
+    const coverage = {
+      schema_version: 1,
+      notes: [
+        {
+          stage: "proposal",
+          material: "history_messages",
+          total: 3,
+          omitted: 2,
+          shortened: 0,
+          reasons: ["model_room"]
+        },
+        {
+          kind: "count",
+          stage: "proposal",
+          material: "run_excerpts",
+          total: 4,
+          omitted: 1,
+          shortened: 0,
+          reasons: ["model_room"]
+        }
+      ]
+    };
+    const session = makeSession({
+      session_id: "s-coverage",
+      conversation: [userMessage("u1", "Build a flow", { coverage })]
+    });
+    const { fetch } = makeFetch({ sessions: [session] });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-coverage" });
+    await screen.findByRole("button", {
+      name: new RegExp(escape(m.ai_builder_conversation_button()))
+    });
+
+    await openConversation();
+
+    // Mutants: the reload drops the stored coverage, the transcript does not
+    // pass it to the message, or a material a newer server stores breaks the
+    // render.
+    expect(
+      screen.getByText(
+        m.ai_builder_coverage_line({
+          parts: m.ai_builder_coverage_history_messages_omitted({ count: "2" })
+        })
+      )
+    ).toBeTruthy();
+  });
+
   it("replaces the phase screen with the transcript and goes back again", async () => {
     const { fetch } = makeFetch();
     renderShell({ fetch, stream: makeStream().stream });

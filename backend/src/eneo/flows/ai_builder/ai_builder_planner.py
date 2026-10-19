@@ -237,6 +237,7 @@ class AIBuilderPlanner:
         assistant_snapshots: AssistantAuthoringSnapshots | None,
         provider_gate: ProviderWorkGate,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        usage_tracker.coverage.prepare_proposal(proposal_request.prompt_cut)
         try:
             assistant_metadata = build_assistant_message_metadata(conversation)
             # Transient status events tell the user what is happening now and
@@ -681,6 +682,7 @@ class AIBuilderPlanner:
                 request_id=request_id,
                 model=completion_model_route.litellm_model,
                 target_kind=TargetKind.EDIT if flow is not None else TargetKind.CREATE,
+                coverage=turn.coverage,
             )
             provider_gate = claimed_turn.provider_gate
             accepted_message = claimed_turn.user_message

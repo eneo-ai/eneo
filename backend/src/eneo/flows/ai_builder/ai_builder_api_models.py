@@ -74,6 +74,7 @@ from eneo.flows.ai_builder.ai_builder_telemetry_models import (
 )
 from eneo.flows.ai_builder.ai_builder_tool_catalog import tool_options_with_refs
 from eneo.flows.ai_builder.ai_builder_tools import AdmissionNormalizerFamily
+from eneo.flows.ai_builder.ai_builder_turn_coverage import TurnCoverage
 from eneo.flows.application.flow_tool_options import (
     FlowToolOptionsOverBound,
     SpaceToolOptions,
@@ -404,6 +405,15 @@ class AIBuilderConversationMessage(BaseModel):
         description=(
             "On a user message that has not been read: why, and the request "
             "that sends it again. Absent once a reading received it."
+        ),
+    )
+    coverage: TurnCoverage | None = Field(
+        default=None,
+        description=(
+            "On the user message of a turn whose sent model requests left part "
+            "of the user's material out or shortened it: what, per stage and "
+            "material. Absent when nothing was left out, and on messages stored "
+            "before it was recorded."
         ),
     )
 

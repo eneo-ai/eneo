@@ -111,6 +111,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     fit_proposal_message_groups,
     flatten_proposal_message_groups,
     group_proposal_messages,
+    history_group_count,
     outbound_proposal_tool_schemas,
     proposal_turn_tool_schemas,
 )
@@ -172,6 +173,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     GenerateProposal,
     resolve_turn_control,
 )
+from eneo.flows.ai_builder.ai_builder_turn_coverage import ProposalPromptCut
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.application.flow_authoring_snapshot import (
     UnsupportedSavedStepsError,
@@ -244,6 +246,7 @@ class PreparedPromptMessages:
     system_prompt_hash: str
     conversation_budget_tokens: int
     trimmed_message_count: int
+    history_groups_left_out: int
     system_prompt_chars: int
 
     @property
@@ -287,6 +290,7 @@ class ProposalPrepared(_PreparedBase):
     compile_context: CreateCompileContext | None
     proposal_tool_schema: ProposalToolSchema
     request_budget: AIBuilderRequestBudget
+    prompt_cut: ProposalPromptCut
     decline_tool_schema: ProposalToolSchema | None = None
     obligation_projection: ProposalObligationProjection | None = None
 
@@ -1104,6 +1108,19 @@ def build_proposal_prepared(
         decline_tool_schema=decline_tool_schema,
         obligation_projection=obligation_projection,
         request_budget=planned_request_budget,
+        prompt_cut=ProposalPromptCut(
+            history_groups_left_out=prepared_prompt.history_groups_left_out,
+            confirmed_assumptions=(
+                len(confirmed_requirements.assumptions)
+                if confirmed_requirements is not None
+                else 0
+            ),
+            replayed_assumptions=(
+                len(replayed_requirements.assumptions)
+                if replayed_requirements is not None
+                else 0
+            ),
+        ),
     )
 
 
@@ -1459,6 +1476,8 @@ def _prepare_prompt_messages(
         system_prompt_hash=stable_hash(system_prompt),
         conversation_budget_tokens=conversation_budget,
         trimmed_message_count=sum(len(group.messages) for group in trimmed_groups),
+        history_groups_left_out=history_group_count(conversation_groups)
+        - history_group_count(trimmed_groups),
         system_prompt_chars=len(system_prompt),
     )
 
