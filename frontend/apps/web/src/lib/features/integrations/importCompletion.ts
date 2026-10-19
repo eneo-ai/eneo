@@ -9,6 +9,10 @@ export type PendingImport = {
   knowledgeId: string;
   name: string;
   spaceRouteId: string;
+  /** Imports queued together share one, and one notice once all of them have settled. */
+  batchId?: string;
+  /** What the notice for the batch calls it: the group's name. */
+  batchName?: string;
 };
 
 export const PENDING_IMPORTS_STORAGE_KEY = "eneo:pending-imports";
@@ -16,8 +20,13 @@ export const PENDING_IMPORTS_STORAGE_KEY = "eneo:pending-imports";
 function isPendingImport(value: unknown): value is PendingImport {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
-  return ["jobId", "knowledgeId", "name", "spaceRouteId"].every(
-    (key) => typeof record[key] === "string"
+  return (
+    ["jobId", "knowledgeId", "name", "spaceRouteId"].every(
+      (key) => typeof record[key] === "string"
+    ) &&
+    ["batchId", "batchName"].every(
+      (key) => record[key] === undefined || typeof record[key] === "string"
+    )
   );
 }
 
@@ -84,6 +93,28 @@ export function settledImports(
     if (!job) return jobsLoaded;
     return job.status === "complete" || job.status === "failed";
   });
+}
+
+function batchOf(item: PendingImport): string {
+  return item.batchId ?? item.jobId;
+}
+
+/**
+ * The settled imports in the groups their notices are given in. A batch is held
+ * back until every one of its imports has settled.
+ */
+export function reportableImports(
+  pending: PendingImport[],
+  settled: PendingImport[]
+): PendingImport[][] {
+  const groups = new Map<string, PendingImport[]>();
+  for (const item of settled)
+    groups.set(batchOf(item), [...(groups.get(batchOf(item)) ?? []), item]);
+  return [...groups.entries()]
+    .filter(
+      ([batch, items]) => pending.filter((item) => batchOf(item) === batch).length === items.length
+    )
+    .map(([, items]) => items);
 }
 
 export type ImportOutcome = {

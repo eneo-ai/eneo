@@ -6,6 +6,7 @@ import {
   createPendingImports,
   describeImportOutcome,
   pendingImports,
+  reportableImports,
   settledImports,
   trackImports,
   untrackImports,
@@ -103,6 +104,41 @@ describe("pending imports", () => {
     store.set([pending("c")]);
     expect(get(store)).toEqual([pending("c")]);
     expect(get(createPendingImports(null))).toEqual([]);
+  });
+});
+
+describe("reportableImports", () => {
+  const batch = (jobId: string): PendingImport => ({
+    ...pending(jobId),
+    batchId: "b1",
+    batchName: "Nämnder"
+  });
+
+  it("gives an import on its own its own notice", () => {
+    expect(reportableImports([pending("a"), pending("b")], [pending("b")])).toEqual([
+      [pending("b")]
+    ]);
+  });
+
+  it("holds a batch back until all of it has settled, then gives it one notice", () => {
+    const all = [batch("a"), batch("b"), batch("c"), pending("d")];
+    expect(reportableImports(all, [batch("a"), batch("c")])).toEqual([]);
+    expect(reportableImports(all, [batch("a"), batch("b"), batch("c"), pending("d")])).toEqual([
+      [batch("a"), batch("b"), batch("c")],
+      [pending("d")]
+    ]);
+  });
+
+  it("restores a batch an earlier page load stored", () => {
+    const storage = fakeStorage();
+    createPendingImports(storage).set([batch("a")]);
+    expect(get(createPendingImports(storage))).toEqual([batch("a")]);
+
+    storage.setItem(
+      PENDING_IMPORTS_STORAGE_KEY,
+      JSON.stringify([{ ...pending("x"), batchId: 7 }, batch("y")])
+    );
+    expect(get(createPendingImports(storage))).toEqual([batch("y")]);
   });
 });
 

@@ -176,10 +176,45 @@ describe("IntegrationsTable", () => {
       page.getByText(m.integration_source_state_queued(), { exact: true }).elements()
     ).toHaveLength(0);
 
+    // The end is spoken once the source's row records how the sync went.
     api.getSyncProgress.mockResolvedValue({ items: [] });
     await expect
+      .poll(() => api.getSyncProgress.mock.calls.length, { timeout: 5_000 })
+      .toBeGreaterThan(3);
+    expect(liveText()).not.toContain(
+      m.integration_announce_sync_finished({ name: "HR-handboken" })
+    );
+    const synced = knowledge("c", "HR-handboken", {}, 100);
+    currentSpace.set(
+      spaceWith([
+        ...defaultItems.slice(0, 2),
+        { ...synced, metadata: { ...synced.metadata!, last_synced_at: "2026-10-15T10:05:00Z" } }
+      ])
+    );
+    await expect
       .poll(liveText, { timeout: 5_000 })
-      .toContain(m.integration_announce_sync_stopped({ name: "HR-handboken" }));
+      .toContain(m.integration_announce_sync_finished({ name: "HR-handboken" }));
+  });
+
+  it("keeps focus in the list when a deleted row takes its menu with it", async () => {
+    api.deleteKnowledge.mockImplementation(async () => {
+      currentSpace.set(spaceWith(defaultItems.filter((item) => item.id !== "c")));
+    });
+    render(IntegrationsTable);
+    await expect.element(page.getByRole("link", { name: "HR-handboken" })).toBeVisible();
+
+    await page
+      .getByRole("row")
+      .filter({ hasText: "HR-handboken" })
+      .getByRole("button", { name: m.actions() })
+      .click();
+    await page.getByRole("menuitem", { name: m.delete() }).click();
+    await page.getByRole("button", { name: m.delete() }).click();
+
+    await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+    expect(page.getByRole("link", { name: "HR-handboken" }).elements()).toHaveLength(0);
+    await expect.poll(() => document.activeElement?.closest("tr") ?? null).not.toBeNull();
+    expect(SOURCE_NAMES).toContain(document.activeElement?.textContent?.trim());
   });
 
   it("finds a source by its own name or a folder's name", async () => {

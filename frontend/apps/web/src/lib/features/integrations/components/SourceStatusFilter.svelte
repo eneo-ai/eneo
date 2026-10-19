@@ -27,9 +27,14 @@
     }
   }
 
+  // A filter emptied while it has focus stays until focus leaves, or focus would fall to the body.
+  let focused = $state<SourceFilter | null>(null);
+
   // A filter with nothing in it is noise, unless it is the one chosen.
   let shown = $derived(
-    SOURCE_FILTERS.filter((filter) => filter === "all" || filter === value || counts[filter] > 0)
+    SOURCE_FILTERS.filter(
+      (filter) => filter === "all" || filter === value || filter === focused || counts[filter] > 0
+    )
   );
 </script>
 
@@ -41,6 +46,10 @@
       aria-pressed={value === filter}
       class="rounded-full"
       onclick={() => (value = filter)}
+      onfocus={() => (focused = filter)}
+      onblur={() => {
+        if (focused === filter) focused = null;
+      }}
     >
       {label(filter, counts[filter])}
     </Button>

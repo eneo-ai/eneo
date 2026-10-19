@@ -69,6 +69,9 @@
   let requestedQuery: IntegrationDocumentsQuery | null = null;
   let documents = $state<IntegrationDocumentsPage | null>(null);
   let loading = $state(false);
+  // A reload after a sync replaces the rows without a word; the page already says the sync ended.
+  let quietLoad = $state(false);
+  let rangeAnnouncement = $state("");
   let error = $state<string | null>(null);
   let searchText = $state("");
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -98,10 +101,15 @@
 
   const ariaSort = { asc: "ascending", desc: "descending" } as const;
 
-  async function loadDocuments(next: IntegrationDocumentsQuery) {
+  /** `user` speaks the new range; `open` and `quiet` don't, and `quiet` shows no loading line either. */
+  async function loadDocuments(
+    next: IntegrationDocumentsQuery,
+    how: "open" | "user" | "quiet" = "user"
+  ) {
     const generation = ++loadGeneration;
     requestedQuery = next;
     loading = true;
+    quietLoad = how === "quiet";
     error = null;
     try {
       const page = await eneo.integrations.knowledge.listDocuments({
@@ -114,9 +122,17 @@
       // Documents deleted while paging can leave this offset past the end.
       const lastOffset = lastPageOffset(page, next.limit);
       if (page.items.length === 0 && next.offset > lastOffset) {
-        return loadDocuments({ ...next, offset: lastOffset });
+        return loadDocuments({ ...next, offset: lastOffset }, how);
       }
       documents = page;
+      if (how === "user") {
+        rangeAnnouncement =
+          page.items.length > 0
+            ? m.integration_documents_showing_range(documentsPageRange(page))
+            : next.q !== ""
+              ? m.no_results_found()
+              : "";
+      }
     } catch (err) {
       if (generation !== loadGeneration) return;
       error = getErrorMessage(err);
@@ -150,7 +166,7 @@
   }
 
   onMount(() => {
-    void loadDocuments(query);
+    void loadDocuments(query, "open");
   });
 
   // A finished sync, from this user or from a change in SharePoint, moves the
@@ -163,7 +179,8 @@
     const signature = syncedSignature;
     if (signature === seenSignature) return;
     seenSignature = signature;
-    untrack(() => void loadDocuments(query));
+    // A search or sort still loading is what the reader asked for; reload that, not the last shown.
+    untrack(() => void loadDocuments(requestedQuery ?? query, "quiet"));
   });
 
   onDestroy(() => clearTimeout(searchTimer));
@@ -173,7 +190,12 @@
   {#if showHeader}
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="flex min-w-0 flex-col gap-1">
-        <h2 id="folder-documents-{knowledge.id}" class="truncate text-base font-semibold">
+        <h2
+          id="folder-documents-{knowledge.id}"
+          tabindex="-1"
+          data-content-heading
+          class="focus-visible:ring-stronger truncate rounded text-base font-semibold focus-visible:ring-2 focus-visible:outline-none"
+        >
           {knowledge.name}
           {#if knowledge.original_name && knowledge.original_name !== knowledge.name}
             <span class="text-secondary text-sm font-normal">({knowledge.original_name})</span>
@@ -226,7 +248,9 @@
       {/if}
     </div>
   {:else}
-    <h2 id="folder-documents-{knowledge.id}" class="sr-only">{m.documents()}</h2>
+    <h2 id="folder-documents-{knowledge.id}" tabindex="-1" data-content-heading class="sr-only">
+      {m.documents()}
+    </h2>
   {/if}
 
   {#if progress[knowledge.id]}
@@ -319,7 +343,9 @@
       </div>
     {/if}
 
-    {#if loading}
+    <p class="sr-only" role="status">{rangeAnnouncement}</p>
+
+    {#if loading && !quietLoad}
       <div class="text-secondary flex items-center gap-2 text-sm" role="status">
         <IconLoadingSpinner size="sm" class="motion-safe:animate-spin" />
         <span>{m.integration_documents_loading()}</span>
@@ -392,7 +418,7 @@
       </div>
 
       <div class="flex flex-wrap items-center justify-between gap-3 text-sm">
-        <p class="text-secondary" aria-live="polite">
+        <p class="text-secondary">
           {m.integration_documents_showing_range(range)}
           <span class="text-muted">
             · {m.integration_documents_total_size({ size: formatBytes(documents.total_size) })}

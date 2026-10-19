@@ -11,7 +11,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import Check from "@lucide/svelte/icons/check";
   import Circle from "@lucide/svelte/icons/circle";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
@@ -97,6 +97,8 @@
         : "ok"
   );
 
+  let watchTitle = $state<HTMLElement | null>(null);
+
   const renewExpired = createAsyncState(async () => {
     try {
       const result = await eneo.integrations.admin.sharepoint.renewExpiredSubscriptions();
@@ -114,6 +116,9 @@
       toastError(error, m.sharepoint_subscriptions_renew_error());
     }
     await reloadSubscriptions();
+    // The renew button goes once nothing has expired; focus stays in its row.
+    await tick();
+    if (!document.activeElement || document.activeElement === document.body) watchTitle?.focus();
   });
 
   // --- Connection test ---
@@ -241,7 +246,15 @@
       </div>
       {#if signInState === "error"}
         {#if isServiceAccount}
-          <Button size="sm" disabled={reauth.isLoading} onclick={reauth}>
+          <!-- Busy rather than disabled: a focused button that turns disabled drops focus. -->
+          <Button
+            size="sm"
+            aria-disabled={reauth.isLoading}
+            aria-busy={reauth.isLoading}
+            onclick={() => {
+              if (!reauth.isLoading) void reauth();
+            }}
+          >
             {reauth.isLoading ? m.redirecting() : m.sharepoint_reauth_with_microsoft()}
           </Button>
         {:else}
@@ -253,7 +266,9 @@
     <li class="border-default flex flex-wrap items-start gap-3 border-b px-4 py-4">
       {@render stateIcon(watchState)}
       <div class="flex min-w-0 flex-[1_1_18rem] flex-col gap-0.5">
-        <p class="font-medium">{m.sharepoint_health_watch_title()}</p>
+        <p class="font-medium" tabindex="-1" bind:this={watchTitle}>
+          {m.sharepoint_health_watch_title()}
+        </p>
         <p class="text-secondary text-sm">
           {#if subscriptions === null && subscriptionList.loading}
             {m.loading()}
@@ -266,12 +281,12 @@
               ? m.sharepoint_health_watch_ok_one()
               : m.sharepoint_health_watch_ok_other({ count: active })}
           {:else}
-            {m.sharepoint_health_watch_issues({
-              active,
-              total: subscriptions.length,
-              expired,
-              failing
-            })}
+            {@const counts = { active, total: subscriptions.length, expired, failing }}
+            {failing === 0
+              ? m.sharepoint_health_watch_issues_expired(counts)
+              : expired === 0
+                ? m.sharepoint_health_watch_issues_failing(counts)
+                : m.sharepoint_health_watch_issues(counts)}
           {/if}
         </p>
       </div>
@@ -280,9 +295,11 @@
           <Button
             variant="outline"
             size="sm"
-            disabled={renewExpired.isLoading}
+            aria-disabled={renewExpired.isLoading}
             aria-busy={renewExpired.isLoading}
-            onclick={renewExpired}
+            onclick={() => {
+              if (!renewExpired.isLoading) void renewExpired();
+            }}
           >
             {m.sharepoint_health_watch_renew()}
           </Button>
@@ -317,9 +334,11 @@
       <Button
         variant="outline"
         size="sm"
-        disabled={runTest.isLoading}
+        aria-disabled={runTest.isLoading}
         aria-busy={runTest.isLoading}
-        onclick={runTest}
+        onclick={() => {
+          if (!runTest.isLoading) void runTest();
+        }}
       >
         {#if runTest.isLoading}
           <IconLoadingSpinner size="sm" class="motion-safe:animate-spin" />

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { getEneo } from "$lib/core/Eneo";
+  import { focusAfterRemoval } from "$lib/core/focus/focusAfterRemoval";
+  import { settleWithLimit } from "$lib/core/async/settleWithLimit";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getJobManager } from "$lib/features/jobs/JobManager";
   import { trackSyncs } from "$lib/features/integrations/pendingSyncs";
@@ -46,6 +48,8 @@
 
   let showRenameDialog = $state(false);
   let showDeleteDialog = $state(false);
+  let trigger = $state<HTMLElement | null>(null);
+  let removal: ReturnType<typeof focusAfterRemoval> | null = null;
   let showResyncDialog = $state(false);
 
   let resyncableItems = $derived(
@@ -55,14 +59,17 @@
   );
   let canResync = $derived(canEdit && resyncableItems.length > 0);
 
+  // A few at a time: each request also checks the site's change subscription.
+  const RESYNC_CONCURRENCY = 4;
+  // Names of folders that could not be queued, beyond which the toast only counts.
+  const NAMED_FAILURES = 5;
+
   // Never throws: a throw would keep the dialog open and a second confirm
   // would queue the items that already succeeded once more.
   async function resyncAll() {
     const total = resyncableItems.length;
-    const results = await Promise.allSettled(
-      resyncableItems.map((knowledge) =>
-        eneo.integrations.knowledge.triggerFullSync({ knowledge, space: $currentSpace })
-      )
+    const results = await settleWithLimit(resyncableItems, RESYNC_CONCURRENCY, (knowledge) =>
+      eneo.integrations.knowledge.triggerFullSync({ knowledge, space: $currentSpace })
     );
     const queued = resyncableItems.flatMap((item, index) => {
       const result = results[index];
@@ -81,11 +88,17 @@
         m.resync_all_wrapper_partial_failure({
           failed: failedNames.length,
           total,
-          names: failedNames.join(", ")
+          names:
+            failedNames.slice(0, NAMED_FAILURES).join(", ") +
+            (failedNames.length > NAMED_FAILURES ? ", …" : "")
         })
       );
     } else {
-      toast.success(m.resync_all_wrapper_queued({ count: total }));
+      toast.success(
+        total === 1
+          ? m.resync_all_wrapper_queued_one()
+          : m.resync_all_wrapper_queued({ count: total })
+      );
     }
   }
 
@@ -99,17 +112,19 @@
   }
 
   async function deleteWrapper() {
+    removal = focusAfterRemoval(trigger);
     await eneo.integrations.knowledge.deleteWrapper({
       space: $currentSpace,
       wrapper_id: wrapperId
     });
-    refreshCurrentSpace();
+    // Awaited so the row is gone by the time the dialog hands focus back.
+    await refreshCurrentSpace();
   }
 </script>
 
 {#if canEdit || canDelete || canResync}
   <DropdownMenu.Root>
-    <DropdownMenu.Trigger>
+    <DropdownMenu.Trigger bind:ref={trigger}>
       {#snippet child({ props })}
         <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
           <IconEllipsis />
@@ -123,10 +138,22 @@
         </DropdownMenu.Item>
       {/if}
       {#if canResync}
-        <DropdownMenu.Item disabled={syncActive} onSelect={() => (showResyncDialog = true)}>
-          <IconRefresh size="sm" />{syncActive
-            ? m.integration_sync_already_running()
-            : m.resync_all_wrapper()}
+        <!-- Stays reachable by keyboard while unavailable, so the reason is heard. -->
+        <DropdownMenu.Item
+          class="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+          onSelect={(event) => {
+            if (syncActive) event.preventDefault();
+            else showResyncDialog = true;
+          }}
+        >
+          <!-- bits writes its own aria-disabled; the element states ours last. -->
+          {#snippet child({ props })}
+            <div {...props} aria-disabled={syncActive ? "true" : undefined}>
+              <IconRefresh size="sm" />{syncActive
+                ? m.integration_sync_already_running()
+                : m.resync_all_wrapper()}
+            </div>
+          {/snippet}
         </DropdownMenu.Item>
       {/if}
       {#if canDelete}
@@ -152,7 +179,9 @@
 <ConfirmDialog
   bind:open={showResyncDialog}
   title={m.resync_all_wrapper()}
-  description={m.confirm_resync_all_wrapper({ wrapperName, count: resyncableItems.length })}
+  description={resyncableItems.length === 1
+    ? m.confirm_resync_all_wrapper_one({ wrapperName })
+    : m.confirm_resync_all_wrapper({ wrapperName, count: resyncableItems.length })}
   confirmLabel={m.start_full_sync()}
   pendingLabel={m.syncing()}
   errorContext={m.sync_failed()}
@@ -168,4 +197,8 @@
   pendingLabel={m.deleting()}
   errorContext={m.integration_delete_error()}
   onConfirm={deleteWrapper}
+  onCloseAutoFocus={(event) => {
+    if (removal?.settle()) event.preventDefault();
+    removal = null;
+  }}
 />

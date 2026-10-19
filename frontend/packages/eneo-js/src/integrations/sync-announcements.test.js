@@ -1,40 +1,167 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { syncAnnouncement, problemCountChanged } from "./sync-announcements.js";
-const progress = (done, phase = "processing") => ({
-  state: "syncing",
-  progress: { done, total: 10, phase }
-});
-const idle = { state: "ok", progress: null };
+import {
+  OUTCOME_WAIT_MS,
+  PROGRESS_ANNOUNCE_INTERVAL_MS,
+  SyncAnnouncer,
+  problemCountChanged
+} from "./sync-announcements.js";
 
-test("disappearing progress never reports success or final counts", () => {
-  for (const state of ["ok", "error", "queued", "never"]) {
-    assert.deepEqual(syncAnnouncement(progress(3), { state, progress: null }, 0), {
-      kind: "stopped"
-    });
-  }
+const idle = (outcome = "before", failures = []) => ({
+  state: failures.length > 0 ? "attention" : "ok",
+  progress: null,
+  outcome,
+  failures
 });
-test("unchanged polls are silent; progress is throttled except for phase changes", () => {
-  assert.equal(syncAnnouncement(null, progress(1), 0), null);
-  assert.equal(syncAnnouncement(progress(2), progress(2), 30_000), null);
-  assert.equal(syncAnnouncement(progress(2), progress(3), 2_000), null);
-  assert.deepEqual(syncAnnouncement(progress(2), progress(3), 10_000), {
-    kind: "progress",
-    done: 3,
-    total: 10
-  });
-  assert.deepEqual(syncAnnouncement(progress(2), progress(2, "finishing"), 0), {
-    kind: "progress",
-    done: 2,
-    total: 10
-  });
-  assert.equal(syncAnnouncement(progress(2), progress(3), 30_000, { speakProgress: false }), null);
+const queued = { state: "queued", progress: null, outcome: "before", failures: [] };
+const syncing = (done, { phase = "processing", background = false, failures = [] } = {}) => ({
+  state: "syncing",
+  progress: { done, total: 40, phase, background },
+  outcome: "before",
+  failures
 });
-test("start, queue and changed problem counts are distinct events", () => {
-  assert.deepEqual(syncAnnouncement(idle, progress(1), 0), { kind: "started" });
-  assert.deepEqual(syncAnnouncement(idle, { state: "queued", progress: null }, 0), {
-    kind: "queued"
+
+function run(announcer, steps) {
+  return steps.map(([snapshot, at]) => announcer.next(snapshot, at));
+}
+
+test("the first snapshot is not news", () => {
+  assert.equal(new SyncAnnouncer().next(syncing(3), 0), null);
+});
+
+test("a sync's end waits for the rows to say how it ended", () => {
+  const announcer = new SyncAnnouncer();
+  assert.deepEqual(
+    run(announcer, [
+      [idle(), 0],
+      [syncing(1), 1_000],
+      [idle("before"), 5_000],
+      [idle("after"), 6_000]
+    ]),
+    [null, { kind: "started" }, null, { kind: "finished" }]
+  );
+  const failing = new SyncAnnouncer();
+  assert.deepEqual(
+    run(failing, [
+      [idle(), 0],
+      [syncing(1), 1_000],
+      [idle("before"), 5_000],
+      [idle("after", ["b@6"]), 6_000]
+    ]).at(-1),
+    { kind: "failed" }
+  );
+});
+
+test("a part that was failing already and was not tried again does not fail another's sync", () => {
+  const old = ["b@1"];
+  const other = new SyncAnnouncer();
+  assert.deepEqual(
+    run(other, [
+      [idle("before", old), 0],
+      [syncing(1, { failures: old }), 1_000],
+      [idle("before", old), 5_000],
+      [idle("after", old), 6_000]
+    ]).at(-1),
+    { kind: "finished" }
+  );
+  const retried = new SyncAnnouncer();
+  assert.deepEqual(
+    run(retried, [
+      [idle("before", old), 0],
+      [syncing(1, { failures: old }), 1_000],
+      [idle("before", old), 5_000],
+      [idle("after", ["b@6"]), 6_000]
+    ]).at(-1),
+    { kind: "failed" }
+  );
+});
+
+test("without a recorded outcome the end is spoken after a wait, without one", () => {
+  const announcer = new SyncAnnouncer();
+  run(announcer, [
+    [idle(), 0],
+    [syncing(1), 1_000],
+    [idle("before"), 5_000]
+  ]);
+  assert.equal(announcer.next(idle("before"), 5_000 + OUTCOME_WAIT_MS - 1), null);
+  assert.deepEqual(announcer.next(idle("before"), 5_000 + OUTCOME_WAIT_MS), { kind: "stopped" });
+});
+
+test("counts are throttled, only move forward, and reaching the last step is spoken", () => {
+  const announcer = new SyncAnnouncer();
+  const start = 1_000;
+  run(announcer, [
+    [idle(), 0],
+    [syncing(1), start]
+  ]);
+  assert.equal(announcer.next(syncing(5), start + PROGRESS_ANNOUNCE_INTERVAL_MS - 1), null);
+  assert.deepEqual(announcer.next(syncing(6), start + PROGRESS_ANNOUNCE_INTERVAL_MS), {
+    kind: "progress",
+    done: 6,
+    total: 40
   });
+  // A folder of several finishing makes the combined count drop; that is not spoken.
+  assert.equal(announcer.next(syncing(4), start + 3 * PROGRESS_ANNOUNCE_INTERVAL_MS), null);
+  // Another folder starting moves the phase back; that alone is not news.
+  assert.equal(
+    announcer.next(
+      syncing(4, { phase: "discovering" }),
+      start + 3 * PROGRESS_ANNOUNCE_INTERVAL_MS + 1
+    ),
+    null
+  );
+  // Reaching the last step is, even inside the throttle.
+  assert.deepEqual(
+    announcer.next(
+      syncing(4, { phase: "finishing" }),
+      start + 3 * PROGRESS_ANNOUNCE_INTERVAL_MS + 2
+    ),
+    { kind: "progress", done: 4, total: 40 }
+  );
+});
+
+test("a change notification's sync stays quiet unless someone started a sync here", () => {
+  const quiet = new SyncAnnouncer();
+  assert.deepEqual(
+    run(quiet, [
+      [idle(), 0],
+      [syncing(1, { background: true }), 1_000],
+      [syncing(9, { background: true }), 30_000],
+      [idle("before"), 31_000],
+      [idle("after"), 32_000]
+    ]),
+    [null, null, null, null, null]
+  );
+  const started = new SyncAnnouncer();
+  assert.deepEqual(
+    run(started, [
+      [idle(), 0],
+      [queued, 500],
+      [syncing(1, { background: true }), 1_000]
+    ]).slice(1),
+    [{ kind: "queued" }, { kind: "started" }]
+  );
+});
+
+test("a list speaks only what was started from it, and no counts", () => {
+  const list = new SyncAnnouncer({ speakProgress: false, onlyStartedHere: true });
+  assert.equal(list.next(idle(), 0), null);
+  assert.equal(list.next(syncing(1), 1_000), null);
+  assert.equal(list.next(idle("before"), 2_000), null);
+  assert.equal(list.next(idle("after"), 3_000), null);
+  assert.deepEqual(
+    run(list, [
+      [queued, 4_000],
+      [syncing(1), 5_000],
+      [syncing(30, { phase: "finishing" }), 60_000],
+      [idle("after"), 61_000],
+      [idle("later"), 62_000]
+    ]),
+    [{ kind: "queued" }, { kind: "started" }, null, null, { kind: "finished" }]
+  );
+});
+
+test("a changed problem count is news once both counts are known", () => {
   assert.equal(problemCountChanged(null, 2), false);
   assert.equal(problemCountChanged(2, 2), false);
   assert.equal(problemCountChanged(2, 3), true);

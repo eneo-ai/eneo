@@ -31,6 +31,7 @@
   let showWatch = $derived(items.some((item) => item.integration_type === "sharepoint"));
 </script>
 
+<h2 tabindex="-1" data-content-heading class="sr-only">{m.integration_source_folders()}</h2>
 <Table.Root aria-label={m.integration_source_folders_table_label({ name: sourceName })}>
   <Table.Header>
     <Table.Row>

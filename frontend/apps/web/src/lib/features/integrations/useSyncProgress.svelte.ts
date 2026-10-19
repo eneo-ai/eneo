@@ -47,16 +47,25 @@ export function useSyncProgress({ active = () => true }: Options = {}): SyncProg
       if (first) first = false;
       else tracker.refresh();
     });
-    const unsubscribePending = pendingSyncs.subscribe((pending) => {
-      const ids = pending.map((item) => item.knowledgeId);
+    // Only this space's queued items make it poll fast; another space's are not here.
+    const followPending = () => {
+      const spaceItems = get(currentSpace).knowledge.integrationKnowledge;
+      // eslint-disable-next-line svelte/prefer-svelte-reactivity -- read once, never rendered
+      const inSpace = new Set(spaceItems.map((item) => item.id));
+      const ids = get(pendingSyncs)
+        .map((item) => item.knowledgeId)
+        .filter((id) => inSpace.has(id));
       const added = ids.some((id) => !tracker.pending.includes(id));
-      tracker.pending = ids;
+      if (added || ids.length !== tracker.pending.length) tracker.pending = ids;
       if (added) tracker.refresh();
-    });
+    };
+    const unsubscribePending = pendingSyncs.subscribe(followPending);
+    const unsubscribeSpacePending = currentSpace.subscribe(followPending);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       unsubscribe();
       unsubscribePending();
+      unsubscribeSpacePending();
       tracker.stop();
     };
   });

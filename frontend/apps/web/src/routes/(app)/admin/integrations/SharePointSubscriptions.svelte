@@ -83,7 +83,11 @@
         })
       );
     } else {
-      toast.success(m.sharepoint_subscriptions_recreated_success({ count: recreated }));
+      toast.success(
+        recreated === 1
+          ? m.sharepoint_subscriptions_recreated_success_one()
+          : m.sharepoint_subscriptions_recreated_success({ count: recreated })
+      );
     }
 
     await loadSubscriptions();

@@ -20,10 +20,7 @@
     type SourceFilter,
     type SourceSummary
   } from "$lib/features/integrations/sources";
-  import {
-    announceSourceChange,
-    type SourceSnapshot
-  } from "$lib/features/integrations/syncAnnouncements";
+  import { SourceAnnouncer } from "$lib/features/integrations/syncAnnouncements";
   import type { IntegrationSyncProgress } from "$lib/features/integrations/syncProgress";
   import { useSyncProgress } from "$lib/features/integrations/useSyncProgress.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -64,27 +61,25 @@
     }))
   );
 
-  // Each source's start, finish or queueing is spoken once; counts belong to its page.
+  // Only a sync started from this list is spoken here, once each step; counts and
+  // change notifications' background syncs belong to the source's own page.
   let announcement = $state("");
-  let previousSnapshots: Record<string, SourceSnapshot> = {};
+  let announcers: Record<string, SourceAnnouncer> = {};
   $effect(() => {
     const current = $rows;
     untrack(() => {
-      const next: Record<string, SourceSnapshot> = {};
+      const now = Date.now();
+      const next: Record<string, SourceAnnouncer> = {};
       const messages: string[] = [];
       for (const { source, summary } of current) {
-        const snapshot: SourceSnapshot = { state: summary.state, progress: summary.progress };
-        next[source.id] = snapshot;
-        const text = announceSourceChange(
-          source.name,
-          previousSnapshots[source.id] ?? null,
-          snapshot,
-          0,
-          { speakProgress: false }
-        );
+        const announcer =
+          announcers[source.id] ??
+          new SourceAnnouncer({ speakProgress: false, onlyStartedHere: true });
+        next[source.id] = announcer;
+        const text = announcer.next(source.name, summary, now);
         if (text) messages.push(text);
       }
-      previousSnapshots = next;
+      announcers = next;
       if (messages.length > 0) announcement = messages.join(". ");
     });
   });
@@ -158,7 +153,14 @@
     return "–";
   }
 
-  const STATE_ORDER: SourceSummary["state"][] = ["attention", "syncing", "never", "empty", "ok"];
+  const STATE_ORDER: SourceSummary["state"][] = [
+    "attention",
+    "syncing",
+    "queued",
+    "never",
+    "empty",
+    "ok"
+  ];
 
   function timeOf(value: string | null): number {
     return value ? new Date(value).getTime() : 0;
