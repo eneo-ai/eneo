@@ -99,6 +99,8 @@ type JobsContextValue = {
   queueUploads: (collectionId: string, files: File[]) => void;
   clearFinishedUploads: () => void;
   uploadStore: UploadStore;
+  /** The jobs query's fetcher; every reader of the list shares it. */
+  listJobs: () => Promise<Job[]>;
 };
 
 const JobsContext = createContext<JobsContextValue | null>(null);
@@ -159,6 +161,14 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const fastPollUntil = useRef(0);
+  // Set by the fetcher, not by the cache: a pushed update can fill the cache
+  // before the first list arrives, and only a list says which jobs are gone.
+  const listReceived = useRef(false);
+  const listJobs = useCallback(async () => {
+    const items = await fetchJobs();
+    listReceived.current = true;
+    return items;
+  }, []);
 
   // The live feed (job-events.ts) delivers every status change the moment it
   // is committed. Polling stays as the safety net: slow while the feed is
@@ -166,7 +176,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const live = useJobEventsConnected();
   const { data: jobs, dataUpdatedAt: jobsUpdatedAt } = useQuery({
     queryKey: JOBS_KEY,
-    queryFn: fetchJobs,
+    queryFn: listJobs,
     refetchInterval: (query) =>
       !live && (Date.now() < fastPollUntil.current || query.state.data?.some(isJobActive))
         ? FAST_POLL_MS
@@ -221,9 +231,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       // data may still have changed, so refresh as for a reported outcome.
       const changed = diff.transitions.length > 0 || diff.vanished.length > 0;
       if (changed) invalidateAfterJobs(queryClient);
-      // Only a list from the server says which jobs are gone.
       if (!loaded) return;
-      const over = (jobId: string) => isJobOver(jobId, snapshot, diff.ledger);
+      const over = (jobId: string) => isJobOver(jobId, snapshot, diff.ledger, listReceived.current);
       untrackSyncs(pendingSyncs().flatMap((item) => (over(item.jobId) ? [item.jobId] : [])));
       // Retry pending reports on each successful poll, even when no job changed.
       // reportImports serialises attempts and removes only reported imports.
@@ -355,8 +364,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   }, [sync]);
 
   const value = useMemo<JobsContextValue>(
-    () => ({ trackJob, queueUploads, clearFinishedUploads, uploadStore }),
-    [trackJob, queueUploads, clearFinishedUploads, uploadStore]
+    () => ({ trackJob, queueUploads, clearFinishedUploads, uploadStore, listJobs }),
+    [trackJob, queueUploads, clearFinishedUploads, uploadStore, listJobs]
   );
 
   return <JobsContext.Provider value={value}>{children}</JobsContext.Provider>;
@@ -375,8 +384,9 @@ export function useJobs(): JobsContextValue {
  * only reads them.
  */
 export function useJobActivity(): { jobs: Job[]; uploads: Upload[]; runningCount: number } {
-  const { uploadStore } = useJobs();
-  const { data: jobs = NO_JOBS } = useQuery({ queryKey: JOBS_KEY, queryFn: fetchJobs });
+  const { uploadStore, listJobs } = useJobs();
+  // The provider's fetcher: the query runs whichever observer's queryFn rendered last.
+  const { data: jobs = NO_JOBS } = useQuery({ queryKey: JOBS_KEY, queryFn: listJobs });
   const uploads = useSyncExternalStore(
     uploadStore.subscribe,
     uploadStore.getSnapshot,

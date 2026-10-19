@@ -32,13 +32,16 @@ const job = { id: "job-1", name: "Avtal.pdf", status: "in progress" } as Job;
 const api = vi.hoisted(() => ({
   items: [] as Job[],
   space: null as unknown,
-  spaceError: null as Error | null
+  spaceError: null as Error | null,
+  /** While set, the jobs list waits for it. */
+  jobsGate: null as Promise<void> | null
 }));
 
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: vi.fn(async (path: string) => {
       if (path === "/api/v1/spaces/{id}/" && api.spaceError) throw api.spaceError;
+      if (path === "/api/v1/jobs/" && api.jobsGate) await api.jobsGate;
       return {
         data: path === "/api/v1/spaces/{id}/" ? api.space : { items: api.items },
         response: new Response("{}")
@@ -50,6 +53,7 @@ vi.mock("@/lib/api/browser", () => ({
 beforeEach(() => {
   api.items = [job];
   api.spaceError = null;
+  api.jobsGate = null;
 });
 
 afterEach(() => {
@@ -436,6 +440,37 @@ describe("an import's first sync", () => {
     await vi.waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
     expect(pendingImports()).toEqual([]);
     logged.mockRestore();
+  });
+
+  it("is not taken for failed when a pushed update for another job comes before the first list", async () => {
+    const fake = (await import("./job-events.test-support")).installFakeEventSource();
+    sessionStorage.setItem(PENDING_IMPORTS_STORAGE_KEY, JSON.stringify([pending]));
+    resetPendingImports();
+    trackSyncs([{ jobId: "job-sync", knowledgeId: "ik-2" }]);
+    api.space = spaceWith({ last_sync_status: "never" });
+    let listArrives = () => {};
+    api.jobsGate = new Promise<void>((resolve) => (listArrives = resolve));
+    const running = [
+      { ...imported, status: "in progress" },
+      { ...imported, id: "job-sync", status: "in progress" },
+      job
+    ] as Job[];
+    api.items = running;
+    const { queryClient } = renderInApp(<JobsProvider>{null}</JobsProvider>);
+
+    await act(async () => {
+      fake.latest().open();
+      fake.latest().job(job);
+    });
+    expect(queryClient.getQueryData(["jobs"])).toEqual([job]);
+    await act(async () => listArrives());
+    await vi.waitFor(() => expect(queryClient.getQueryData(["jobs"])).toEqual(running));
+    await act(async () => {});
+
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(pendingImports()).toEqual([pending]);
+    expect(pendingSyncs()).toHaveLength(1);
+    fake.restore();
   });
 
   it("does not repeat a restored import result after a second reload", async () => {
