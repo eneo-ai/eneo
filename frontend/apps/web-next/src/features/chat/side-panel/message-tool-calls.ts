@@ -130,25 +130,3 @@ export function addGeneratedFile(
       : message
   );
 }
-
-/**
- * The messages without the generated file `fileId`: a reader's version that a
- * newer save of theirs replaced is gone from the conversation. The messages
- * are unchanged when none holds it.
- */
-export function removeGeneratedFile(messages: EneoUIMessage[], fileId: string): EneoUIMessage[] {
-  if (!messages.some((message) => messageGeneratedFiles(message).some((f) => f.id === fileId))) {
-    return messages;
-  }
-  return messages.map((message) =>
-    message.metadata?.generatedFiles?.some((file) => file.id === fileId)
-      ? {
-          ...message,
-          metadata: {
-            ...message.metadata,
-            generatedFiles: message.metadata.generatedFiles.filter((file) => file.id !== fileId)
-          }
-        }
-      : message
-  );
-}

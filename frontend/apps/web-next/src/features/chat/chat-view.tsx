@@ -40,8 +40,7 @@ import { conversationDocuments, editedPassage } from "./side-panel/document-vers
 import {
   addGeneratedFile,
   messageGeneratedFiles,
-  messageToolCalls,
-  removeGeneratedFile
+  messageToolCalls
 } from "./side-panel/message-tool-calls";
 import { conversationUploads, type PanelContents } from "./side-panel/panel-contents";
 import type { PreviewQuote } from "./side-panel/side-panel-store";
@@ -447,15 +446,6 @@ function ConversationView({
             const version = await saveDocumentVersion(sessionId, file.id, content);
             setMessages((current) => addGeneratedFile(current, version));
             return version;
-          },
-          saved: (version) => {
-            // A save onto the reader's own version takes its place: the new
-            // version then revises what the old one revised, not the old one.
-            // Only once the panel shows the new version, or the panel would
-            // close over a file the conversation no longer has.
-            if (file.revises_file_id && version.revises_file_id !== file.id) {
-              setMessages((current) => removeGeneratedFile(current, file.id));
-            }
           }
         }
       : null;

@@ -7,8 +7,6 @@ export type SavedDocumentVersion = Schema<"FilePublic">;
 /** How a reader's edit of a document is kept: as the document's next version. */
 export type DocumentSaver = {
   save: (markdown: string) => Promise<SavedDocumentVersion>;
-  /** The panel now shows the saved version; whatever it replaced can go. */
-  saved?: (version: SavedDocumentVersion) => void;
 };
 
 /**

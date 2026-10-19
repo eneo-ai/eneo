@@ -1,15 +1,11 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuDivider,
-  DropdownMenuItem
-} from "@astryxdesign/core/DropdownMenu";
+import { DropdownMenu, DropdownMenuItem } from "@astryxdesign/core/DropdownMenu";
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Download, FileText, History } from "lucide-react";
+import { Check, Diff, Download, FileText, History, RotateCcw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
@@ -130,6 +126,7 @@ export function FilePanel({
   });
   const previousMarkdown = comparing ? (previous.data ?? null) : null;
 
+  /** Saves `markdown` as the document's next version; whether it was saved. */
   async function saveAs(target: DocumentSaver, markdown: string) {
     // The save belongs to the editing session it started in: a response that
     // comes after the panel closed or another file opened applies to nothing.
@@ -137,9 +134,10 @@ export function FilePanel({
     try {
       const version = await target.save(markdown);
       request.apply(version, markdown);
-      target.saved?.(version);
+      return true;
     } catch {
       toast.error(t("file_preview_save_failed"));
+      return false;
     } finally {
       request.finish();
     }
@@ -158,7 +156,12 @@ export function FilePanel({
   const restorable = !!restorer && whole && !draft;
   async function restoreVersion() {
     if (!restorer || !restorable || content?.kind !== "markdown" || saving) return;
-    await saveAs(restorer, content.text);
+    // The restored text is the text on show, so the panel looks the same
+    // afterwards: the confirmation says what happened.
+    const number = position + 1;
+    if (await saveAs(restorer, content.text)) {
+      toast.success(t("file_preview_version_restored", { number }));
+    }
   }
 
   /** The reader drops their edits: on the Cancel button, or agreeing to in the dialog. */
@@ -197,8 +200,7 @@ export function FilePanel({
   const highlight = panel.highlight ?? (panel.quote?.fileId === file?.id ? panel.quote : null);
 
   // Versions newest first, as the menu lists them: every version with who
-  // made it and when, the current one marked, then what can be done with the
-  // one on show.
+  // made it and when, the current one marked.
   const versionRows = versions.map((version, index) => ({ version, number: index + 1 })).reverse();
   const versionMenu = (
     <DropdownMenu
@@ -241,29 +243,7 @@ export function FilePanel({
             }
             onClick={() => panel.open(row.version)}
           />
-        )),
-        ...(comparable || restorable ? [<DropdownMenuDivider key="divider" />] : []),
-        ...(comparable
-          ? [
-              <DropdownMenuCheckboxItem
-                key="changes"
-                label={t("file_preview_show_changes")}
-                value={panel.showChanges}
-                onChange={(on) => panel.setShowChanges(on)}
-              />
-            ]
-          : []),
-        ...(restorable
-          ? [
-              <DropdownMenuItem
-                key="restore"
-                icon={<span className="size-4" aria-hidden="true" />}
-                label={t("file_preview_restore_version")}
-                isDisabled={saving}
-                onClick={() => void restoreVersion()}
-              />
-            ]
-          : [])
+        ))
       ]}
     </DropdownMenu>
   );
@@ -299,7 +279,35 @@ export function FilePanel({
     </div>
   ) : (
     <div className="border-ax-border flex shrink-0 items-center justify-between gap-2 border-b py-1.5 ps-3 pe-3">
-      <span className="flex min-w-0 items-center">{versions.length > 1 && versionMenu}</span>
+      {/* What applies to the version on show stands beside its menu: the
+          change marks for one with a version before it, and bringing an
+          older one forward as the newest. */}
+      <span className="flex min-w-0 items-center gap-1">
+        {versions.length > 1 && versionMenu}
+        {comparable && (
+          <ToggleButton
+            label={t("file_preview_show_changes")}
+            tooltip={t("file_preview_show_changes")}
+            icon={<Diff className="size-4" />}
+            isIconOnly
+            size="sm"
+            isPressed={panel.showChanges}
+            onPressedChange={(on) => panel.setShowChanges(on)}
+          />
+        )}
+        {restorable && (
+          <Button
+            label={t("file_preview_restore")}
+            tooltip={t("file_preview_restore_version")}
+            variant="secondary"
+            size="sm"
+            icon={<RotateCcw className="size-4" />}
+            isLoading={saving}
+            isInterruptible
+            onClick={() => void restoreVersion()}
+          />
+        )}
+      </span>
       <span className="flex shrink-0 items-center gap-1">
         {exporting ? (
           <ExportMenu
