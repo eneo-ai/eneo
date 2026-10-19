@@ -176,7 +176,8 @@ it.each(["other-document", file.id])(
     await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
 
     expect(preview.file?.id).toBe(nextId);
-    expect(preview.editsOf(next)).toContain("Keep this edit");
+    // The edited text follows the keystrokes a moment later.
+    await vi.waitFor(() => expect(preview.editsOf(next)).toContain("Keep this edit"));
     expect(preview.dirty).toBe(true);
     expect((await editorSurface()).textContent).toContain("Keep this edit");
   }

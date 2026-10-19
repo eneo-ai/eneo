@@ -10,6 +10,7 @@
   import { m } from "$lib/paraglide/messages";
   import type { PreviewPassage } from "../FilePreview.svelte";
   import { changesBetween } from "../editor/changes";
+  import { replaceContent } from "../editor/content";
   import { documentExtensions, withFinalNewline } from "../editor/extensions";
   import {
     cellSelectionQuote,
@@ -78,8 +79,28 @@
   let frame = 0;
   // Bumped when the document changed under the highlight, so it is placed again.
   let rendered = $state(0);
+  // Once the document is marked edited, a further keystroke is marked this
+  // long after the last, since marking serialises the whole document.
+  const EDIT_DELAY = 150;
+  let pending = 0;
 
-  const CONTENT = { contentType: "markdown", emitUpdate: false } as const;
+  /** Compares the reader's text with the document as loaded, and tells of a difference. */
+  function noteEdit(current: Editor) {
+    pending = 0;
+    const text = withFinalNewline(current.getMarkdown());
+    const changed = text !== baseline;
+    if (!changed && !dirty) return;
+    dirty = changed;
+    onchange?.(changed ? text : null);
+  }
+
+  /** Marks an edit that is still waiting, so whatever reads the mark reads it current. */
+  function flush() {
+    if (!pending) return;
+    clearTimeout(pending);
+    if (editor && !editor.isDestroyed) noteEdit(editor);
+    else pending = 0;
+  }
 
   $effect(() => {
     const element = mount;
@@ -123,6 +144,7 @@
         handleKeyDown: (_view, event) => {
           if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
             event.preventDefault();
+            flush();
             onsave?.();
             return true;
           }
@@ -134,14 +156,14 @@
     // mark compares text with the document as loaded, since the editor also
     // tidies a loaded document (a paragraph to type in after a final code
     // block) without changing what it says, and a reader cannot edit a
-    // document that is read-only.
+    // document that is read-only. The first keystroke is marked at once, so
+    // whatever guards unsaved edits sees them; a burst that follows is marked
+    // once, a moment after its last.
     created.on("update", () => {
       if (applying || !created.isEditable) return;
-      const text = withFinalNewline(created.getMarkdown());
-      const changed = text !== baseline;
-      if (!changed && !dirty) return;
-      dirty = changed;
-      onchange?.(changed ? text : null);
+      clearTimeout(pending);
+      if (!dirty) noteEdit(created);
+      else pending = window.setTimeout(() => noteEdit(created), EDIT_DELAY);
     });
     editor = created;
     applied = initial;
@@ -152,7 +174,7 @@
     if (left !== null) {
       applying = true;
       try {
-        created.commands.setContent(left, CONTENT);
+        replaceContent(created, left);
       } finally {
         applying = false;
       }
@@ -169,6 +191,8 @@
     return () => {
       active = false;
       cancelAnimationFrame(frame);
+      // The last keystrokes still count: an editor torn down leaves its edits behind.
+      flush();
       created.destroy();
       editor = undefined;
     };
@@ -249,6 +273,7 @@
 
   /** The document as the reader has it now. */
   export function getMarkdown(): string {
+    flush();
     return editor ? withFinalNewline(editor.getMarkdown()) : markdown;
   }
 
@@ -256,7 +281,7 @@
   function apply(current: Editor, next: string) {
     applying = true;
     try {
-      current.commands.setContent(next, CONTENT);
+      replaceContent(current, next);
     } finally {
       applying = false;
     }
@@ -266,6 +291,8 @@
 
   /** Drops the reader's edits and shows the file's text again. */
   export function reset() {
+    clearTimeout(pending);
+    pending = 0;
     dirty = false;
     if (!editor) return;
     apply(editor, markdown);

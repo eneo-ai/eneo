@@ -22,6 +22,12 @@ describe("a document's Markdown round-trips through the editor model", () => {
     expect(roundTrip(source)).toBe(source);
   });
 
+  it("keeps headings deeper than the tools are asked for", () => {
+    const source = "#### Fyra\n\n##### Fem\n\n###### Sex\n";
+    expect(types(source)).toEqual(["heading", "heading", "heading"]);
+    expect(roundTrip(source)).toBe(source);
+  });
+
   it("keeps task lists", () => {
     const source = "- [ ] Att göra\n- [x] Klart\n";
     expect(types(source)).toEqual(["taskList"]);

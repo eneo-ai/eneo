@@ -37,7 +37,9 @@ export function documentExtensions({
 }: DocumentExtensionOptions = {}): Extensions {
   return [
     StarterKit.configure({
-      heading: { levels: [1, 2, 3] },
+      // The tools are asked for three levels, but a model writes deeper ones
+      // too, and a level the schema does not know is shown as the first it does.
+      heading: { levels: [1, 2, 3, 4, 5, 6] },
       underline: false,
       link: {
         openOnClick: false,
