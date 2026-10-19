@@ -277,11 +277,13 @@ class TestAccessSessionEndpoint:
         assert isinstance(error.details, dict)
         errors = error.details.get("errors")
         assert isinstance(errors, list)
-        assert {
-            "location": ["body", "description"],
-            "message": "String should have at least 10 characters",
-            "type": "string_too_short",
-        } in errors
+        # The type is the typed signal that the minimum-length rule fired; the
+        # message is redacted by the handler and covered by its own unit tests.
+        assert any(
+            entry["location"] == ["body", "description"]
+            and entry["type"] == "string_too_short"
+            for entry in errors
+        )
 
     async def test_create_session_success(self, client, auth_headers):
         """Verify successful session creation."""

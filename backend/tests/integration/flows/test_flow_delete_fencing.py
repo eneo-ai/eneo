@@ -78,17 +78,21 @@ async def _until_blocked_by_or_done(
 ) -> None:
     """Return once some backend waits on the holder's locks, or the task ended."""
     deadline = monotonic() + timeout_seconds
-    async with sessionmanager.session() as observer, observer.begin():
+    async with sessionmanager.session() as observer:
         while monotonic() < deadline:
             if task.done():
                 return
-            blocked = await observer.scalar(
-                sa.text(
-                    "SELECT count(*) FROM pg_stat_activity "
-                    "WHERE :holder = ANY(pg_blocking_pids(pid))"
-                ),
-                {"holder": holder_pid},
-            )
+            # PostgreSQL captures pg_stat_activity once per transaction, so a
+            # backend that connects after the first poll is only seen by a
+            # poll in a new transaction.
+            async with observer.begin():
+                blocked = await observer.scalar(
+                    sa.text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE :holder = ANY(pg_blocking_pids(pid))"
+                    ),
+                    {"holder": holder_pid},
+                )
             if blocked:
                 return
             await asyncio.sleep(0.01)

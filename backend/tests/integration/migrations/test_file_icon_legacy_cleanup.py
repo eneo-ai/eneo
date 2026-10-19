@@ -602,7 +602,12 @@ async def test_same_build_metadata_fallback_worker_and_failure_after_cleanup(
         FileContentReferences,
         ObjectContents,
     )
-    from eneo.files.file_models import FileContentVariant, FileMetadataCreate, FileType
+    from eneo.files.file_models import (
+        FileContentVariant,
+        FileMetadataCreate,
+        FileOwner,
+        FileType,
+    )
     from eneo.files.file_repo import FileRepository
     from eneo.icons.icon import IconMetadataCreate
     from eneo.icons.icon_repo import IconRepository
@@ -617,7 +622,10 @@ async def test_same_build_metadata_fallback_worker_and_failure_after_cleanup(
     )
     from eneo.object_content.file_icon_preflight import run_file_icon_preflight
 
-    url, _config, ids = contract_database
+    url, config, ids = contract_database
+    # The repositories read this build's schema; the contract revision only
+    # fixes what the cleanup and preflight expect of the legacy columns.
+    command.upgrade(config, "head")
     database = DatabaseSessionManager()
     database.init(
         make_url(url)
@@ -635,6 +643,11 @@ async def test_same_build_metadata_fallback_worker_and_failure_after_cleanup(
         async with database.session() as session, session.begin():
             repository = FileRepository(session)
             original = await repository.get_by_id(image_id)
+            owner = FileOwner(
+                tenant_id=original.tenant_id,
+                owner_type=original.owner_type,
+                owner_user_id=original.owner_user_id,
+            )
             assert await repository.get_legacy_infos([image_id])
             content_id = await session.scalar(
                 select(FileContentReferences.content_id).where(
@@ -658,16 +671,15 @@ async def test_same_build_metadata_fallback_worker_and_failure_after_cleanup(
             )
             assert await repository.get_legacy_audio_slice(image_id, None) is None
             assert await repository.get_by_ids([image_id])
-            assert await repository.get_list_by_id_and_user(
-                [image_id], original.user_id
-            )
-            assert await repository.get_list_by_user(original.user_id)
+            assert await repository.get_list_by_id_and_owner([image_id], owner)
+            assert await repository.get_list_by_owner(owner)
             assert await repository.get_by_id_for_update(image_id)
             created = await repository.add_metadata(
                 FileMetadataCreate(
                     name="after-cleanup.png",
                     file_type=FileType.IMAGE,
-                    user_id=original.user_id,
+                    owner_type=original.owner_type,
+                    owner_user_id=original.owner_user_id,
                     tenant_id=original.tenant_id,
                 )
             )
@@ -681,16 +693,15 @@ async def test_same_build_metadata_fallback_worker_and_failure_after_cleanup(
                 FileMetadataCreate(
                     name="page.png",
                     file_type=FileType.IMAGE,
-                    user_id=original.user_id,
+                    owner_type=original.owner_type,
+                    owner_user_id=original.owner_user_id,
                     tenant_id=original.tenant_id,
                     parent_file_id=created.id,
                 )
             )
             assert [
                 row.id
-                for row in await repository.get_by_parent_ids(
-                    [created.id], original.user_id
-                )
+                for row in await repository.get_by_parent_ids([created.id], owner)
             ] == [child.id]
             icons = IconRepository(session)
             icon = await icons.add_metadata(
@@ -698,7 +709,7 @@ async def test_same_build_metadata_fallback_worker_and_failure_after_cleanup(
             )
             assert await icons.get_legacy_primary(icon.id) is None
             assert await icons.get(icon.id) is None
-            await icons.delete(icon.id)
+            await icons.delete_unused(icon.id, tenant_id=original.tenant_id)
             status = await read_file_icon_backfill_status(session, settings)
             assert status.state.value == "complete" and status.legacy_cleaned
         assert (await worker.run_once()).state.value == "complete"
@@ -722,9 +733,7 @@ async def test_same_build_metadata_fallback_worker_and_failure_after_cleanup(
             assert campaign.state == "complete"
         assert (await worker.run_once()).state.value == "complete"
         async with database.session() as session, session.begin():
-            await FileRepository(session).delete_by_owner_for_lifecycle(
-                image_id, original.user_id, original.tenant_id
-            )
+            await FileRepository(session).delete_by_owner_for_lifecycle(image_id, owner)
             item = await session.scalar(
                 select(FileIconBackfillItems).where(
                     FileIconBackfillItems.owner_id == image_id

@@ -79,7 +79,7 @@ async def test_cors_exposes_both_trace_headers(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_cors_exposes_positive_package_omission_header(app):
+async def test_cors_exposes_positive_package_omission_header(app, allowed_origin):
     from httpx import ASGITransport, AsyncClient
 
     @app.get("/api/v1/_test_package_omission_header")
@@ -95,7 +95,7 @@ async def test_cors_exposes_positive_package_omission_header(app):
     async with AsyncClient(transport=transport, base_url="http://test.local") as client:
         response = await client.get(
             "/api/v1/_test_package_omission_header",
-            headers={"Origin": "http://example.com"},
+            headers={"Origin": allowed_origin},
         )
 
     assert response.status_code == 200
@@ -154,7 +154,7 @@ async def test_500_exposes_trace_headers(app, allowed_origin, same_origin):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_explicit_http_500_preserves_error_identity_and_cors(app):
+async def test_explicit_http_500_preserves_error_identity_and_cors(app, allowed_origin):
     from httpx import ASGITransport, AsyncClient
 
     @app.get("/api/v1/_test_explicit_500")
@@ -171,7 +171,7 @@ async def test_explicit_http_500_preserves_error_identity_and_cors(app):
         response = await client.get(
             "/api/v1/_test_explicit_500",
             headers={
-                "Origin": "http://example.com",
+                "Origin": allowed_origin,
                 "X-Request-ID": "explicit-http-500",
             },
         )

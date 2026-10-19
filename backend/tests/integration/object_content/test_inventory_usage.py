@@ -95,7 +95,8 @@ async def test_inventory_groups_each_content_once_by_product_owner(
             mimetype="text/plain",
             file_type="text",
             tenant_id=tenant_id,
-            user_id=user_id,
+            owner_type="user",
+            owner_user_id=user_id,
             parent_file_id=None,
         )
         knowledge_owner = InfoBlobs(
@@ -120,7 +121,8 @@ async def test_inventory_groups_each_content_once_by_product_owner(
             mimetype="text/plain",
             file_type="text",
             tenant_id=tenant_id,
-            user_id=user_id,
+            owner_type="user",
+            owner_user_id=user_id,
             parent_file_id=None,
         )
         session.add_all([file_owner, knowledge_owner, icon_owner, detached_owner])
@@ -299,7 +301,8 @@ async def test_inventory_query_stays_bounded_for_thousands_without_loading_paylo
             mimetype="text/plain",
             file_type="text",
             tenant_id=tenant_id,
-            user_id=user_id,
+            owner_type="user",
+            owner_user_id=user_id,
             parent_file_id=None,
         )
         session.add(file_owner)
