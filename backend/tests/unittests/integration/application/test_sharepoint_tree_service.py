@@ -92,6 +92,8 @@ class TestUserFacingFailures:
 
         assert str(exc_info.value) == CREDENTIALS_INVALID_MESSAGE
         assert "AADSTS" not in str(exc_info.value)
+        # The same code an import or a sync answers with.
+        assert getattr(exc_info.value, "code", None) == "sharepoint_credentials_invalid"
 
     @pytest.mark.parametrize(
         "status, expected",
@@ -129,6 +131,11 @@ class TestUserFacingFailures:
             )
 
         assert str(exc_info.value) == expected
+        assert getattr(exc_info.value, "code", None) == (
+            "sharepoint_credentials_invalid"
+            if expected == CREDENTIALS_INVALID_MESSAGE
+            else None
+        )
 
     async def test_other_failures_are_shown_without_urls_or_hosts(
         self, service, monkeypatch

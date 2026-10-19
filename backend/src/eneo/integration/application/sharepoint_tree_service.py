@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
 
-from eneo.integration.infrastructure.graph_errors import user_facing_sharepoint_error
+from eneo.integration.infrastructure.graph_errors import user_facing_sharepoint_failure
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 from eneo.observability.error_text import user_visible_error
@@ -85,10 +85,12 @@ class SharePointTreeService:
                 },
                 exc_info=True,
             )
-            raise BadRequestException(
-                user_facing_sharepoint_error(e)
-                or f"Failed to acquire SharePoint token for integration "
-                f"{user_integration_id} in {space_type} space: {user_visible_error(e)}"
+            raise (
+                user_facing_sharepoint_failure(e)
+                or BadRequestException(
+                    f"Failed to acquire SharePoint token for integration "
+                    f"{user_integration_id} in {space_type} space: {user_visible_error(e)}"
+                )
             ) from e
 
         # Create a callback function for token refresh (only used for user OAuth)
@@ -200,9 +202,11 @@ class SharePointTreeService:
                 },
                 exc_info=True,
             )
-            raise BadRequestException(
-                user_facing_sharepoint_error(e)
-                or f"Failed to fetch SharePoint folder tree: {user_visible_error(e)}"
+            raise (
+                user_facing_sharepoint_failure(e)
+                or BadRequestException(
+                    f"Failed to fetch SharePoint folder tree: {user_visible_error(e)}"
+                )
             ) from e
 
     async def search_library(
@@ -245,7 +249,9 @@ class SharePointTreeService:
                 extra={"site_id": site_id, "drive_id": drive_id},
                 exc_info=True,
             )
-            raise BadRequestException(
-                user_facing_sharepoint_error(e)
-                or f"Failed to search SharePoint library: {user_visible_error(e)}"
+            raise (
+                user_facing_sharepoint_failure(e)
+                or BadRequestException(
+                    f"Failed to search SharePoint library: {user_visible_error(e)}"
+                )
             ) from e

@@ -24,6 +24,7 @@ from eneo.integration.domain.entities.tenant_sharepoint_app import (
     AUTH_STATUS_OK,
     TenantSharePointApp,
 )
+from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 from eneo.observability.error_text import user_visible_error
 
@@ -86,6 +87,16 @@ class SharePointCredentialsInvalidError(Exception):
     def __init__(self, detail: str) -> None:
         super().__init__(CREDENTIALS_INVALID_MESSAGE)
         self.detail = detail
+
+
+class SharePointCredentialsRefusedError(BadRequestException):
+    """A browse or preview refused because the organisation's credentials no
+    longer work; served like ``SharePointCredentialsInvalidError``."""
+
+    code = SharePointCredentialsInvalidError.code
+
+    def __init__(self) -> None:
+        super().__init__(CREDENTIALS_INVALID_MESSAGE)
 
 
 def _error_body(exc: httpx.HTTPStatusError) -> dict[str, object]:
