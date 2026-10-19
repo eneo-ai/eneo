@@ -196,7 +196,12 @@ it("SharePoint: shows what is missing where it is chosen, one step at a time", a
     "Ange gruppnamn för att kunna importera.",
     "Gruppnamn krävs när du importerar flera mappar/filer samtidigt."
   ]);
-  expect(within(dialog).getByRole("textbox", { name: "Importnamn för Policyer" })).toBeTruthy();
+  // The longest names the server takes.
+  expect((groupName as HTMLInputElement).maxLength).toBe(255);
+  expect(
+    within(dialog).getByRole<HTMLInputElement>("textbox", { name: "Importnamn för Policyer" })
+      .maxLength
+  ).toBe(255);
   expect(api.POST).not.toHaveBeenCalled();
 
   fireEvent.change(groupName, { target: { value: "Styrdokument" } });
@@ -277,4 +282,58 @@ it("SharePoint: tells how many imports failed when only some were queued", async
   await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   expect(toast.warning).toHaveBeenCalledWith("1 av 2 importer köades. 1 misslyckades.");
   expect(toast.error).not.toHaveBeenCalled();
+});
+
+it("SharePoint: shows why a batch could not start at all, and lets the import be tried again", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation((path: string) =>
+    path.endsWith("/preview/")
+      ? ok({
+          items: [{ key: "site-1", type: "site", name: "Intranätet", url: "https://sp/intra" }]
+        })
+      : ok({
+          items: [
+            { id: "f1", name: "Policyer", type: "folder", path: "/Policyer", has_children: true }
+          ],
+          current_path: "/",
+          drive_id: "drive-1"
+        })
+  );
+  api.POST.mockImplementation(() =>
+    Promise.resolve({
+      error: {
+        message: "SharePoint credentials are invalid",
+        eneo_error_code: 9007,
+        code: "sharepoint_credentials_invalid"
+      },
+      response: new Response("{}", { status: 400 })
+    })
+  );
+  const onOpenChange = vi.fn();
+  renderInApp(
+    <SharePointImportDialog
+      open
+      onOpenChange={onOpenChange}
+      onBack={() => {}}
+      integration={integration("sharepoint")}
+    />
+  );
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(await within(dialog).findByRole("button", { name: "Intranätet" }));
+  const tree = within(dialog).getByRole("group", { name: "Innehåll" });
+  fireEvent.click(await within(tree).findByRole("checkbox", { name: "Policyer" }));
+  const importButton = within(dialog).getByRole("button", { name: "Importera" });
+  fireEvent.click(importButton);
+
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Microsoft nekade organisationens inloggning till SharePoint. En administratör behöver logga in igen eller uppdatera appens hemlighet.",
+      expect.anything()
+    )
+  );
+  expect(onOpenChange).not.toHaveBeenCalled();
+  expect(jobs.trackJob).not.toHaveBeenCalled();
+  await waitFor(() => expect(importButton.getAttribute("aria-busy")).toBeNull());
+  fireEvent.click(importButton);
+  await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
 });

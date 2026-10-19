@@ -42,6 +42,7 @@ import { useJobs } from "@/features/jobs/use-jobs";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import type { IntegrationKnowledge } from "../knowledge";
+import { KNOWLEDGE_NAME_MAX_LENGTH } from "./knowledge-names";
 import { trackSyncs } from "./pending-syncs";
 import type { IntegrationSource } from "./sources";
 
@@ -544,6 +545,7 @@ function RenameDialog({
             ref={nameRef}
             id="integration-name"
             value={name}
+            maxLength={KNOWLEDGE_NAME_MAX_LENGTH}
             onChange={(event) => onNameChange(event.target.value)}
             {...fieldProblemProps("integration-name", nameProblem)}
           />

@@ -91,6 +91,8 @@ it("saves a rename with Enter, without the spaces around the name", async () => 
   expect(name.form).not.toBeNull();
   expect(save.type).toBe("submit");
   expect(save.form).toBe(name.form);
+  // The longest name the server takes.
+  expect(name.maxLength).toBe(255);
 
   fireEvent.change(name, { target: { value: "  Policyer 2026 " } });
   fireEvent.submit(name.form!);
