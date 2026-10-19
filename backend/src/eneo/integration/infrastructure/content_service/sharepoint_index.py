@@ -6,10 +6,12 @@ not decide folder membership, advance delta tokens or commit transactions.
 """
 
 import hashlib
+from contextlib import AbstractAsyncContextManager, nullcontext
 from typing import TYPE_CHECKING, Optional, cast
 from uuid import UUID
 
 import aiohttp
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate, SourceMetadataEntry
 from eneo.integration.domain.skip_reasons import (
@@ -101,6 +103,14 @@ class SharePointIndex:
         # by this writer. A superset is fine; it only saves a delete that
         # cannot match.
         self._maybe_indexed: dict[UUID, set[str]] = {}
+
+    def _savepoint(self) -> AbstractAsyncContextManager[object]:
+        """Around one item's writes: a failing statement rolls back that item
+        only, instead of aborting the transaction the whole sync runs in."""
+        session = getattr(self.info_blob_service.repo, "session", None)
+        if isinstance(session, AsyncSession):
+            return session.begin_nested()
+        return nullcontext()
 
     async def list_items(self, knowledge_id: UUID) -> list[tuple[UUID, str]]:
         """Indexed blob/item identities without loading text or embeddings."""
@@ -226,12 +236,13 @@ class SharePointIndex:
             change_key=citation_key,
         ):
             return
-        await self.info_blob_service.repo.refresh_sharepoint_citation(
-            sharepoint_item_id=item_id,
-            integration_knowledge_id=integration_knowledge_id,
-            title=item.get("name", ""),
-            url=item.get("webUrl", ""),
-        )
+        async with self._savepoint():
+            await self.info_blob_service.repo.refresh_sharepoint_citation(
+                sharepoint_item_id=item_id,
+                integration_knowledge_id=integration_knowledge_id,
+                title=item.get("name", ""),
+                url=item.get("webUrl", ""),
+            )
         pending_change_keys.append((integration_knowledge_id, cache_id, citation_key))
 
     @staticmethod
@@ -267,6 +278,30 @@ class SharePointIndex:
         item_name: Optional[str] = None,
     ) -> BlobOutcome:
         """Index one document; ``item_name`` (default ``title``) names a skip."""
+        async with self._savepoint():
+            return await self._upsert(
+                title,
+                text,
+                url,
+                integration_knowledge,
+                stats=stats,
+                sharepoint_item_id=sharepoint_item_id,
+                source_metadata=source_metadata,
+                item_name=item_name,
+            )
+
+    async def _upsert(
+        self,
+        title: str,
+        text: str,
+        url: str,
+        integration_knowledge: "IntegrationKnowledge",
+        *,
+        stats: SyncStats,
+        sharepoint_item_id: Optional[str],
+        source_metadata: Optional[list[SourceMetadataEntry]],
+        item_name: Optional[str],
+    ) -> BlobOutcome:
         sanitized_text = sanitize_text_for_db(text)
         if not sanitized_text.strip():
             # Nothing indexable survives sanitising; treat it like a parser that
@@ -393,21 +428,23 @@ class SharePointIndex:
         the failure is counted here, so callers add no entry of their own.
         """
         try:
-            deleted_blobs = await self.info_blob_service.repo.delete_by_sharepoint_item_and_integration_knowledge(
-                sharepoint_item_id=item_id,
-                integration_knowledge_id=integration_knowledge_id,
-            )
-
-            valid_deleted_blobs = [
-                blob
-                for blob in deleted_blobs
-                if blob is not None  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard
-            ]
-            if valid_deleted_blobs:
-                deleted_size = sum(
-                    safe_int(getattr(blob, "size", 0)) for blob in valid_deleted_blobs
+            async with self._savepoint():
+                deleted_blobs = await self.info_blob_service.repo.delete_by_sharepoint_item_and_integration_knowledge(
+                    sharepoint_item_id=item_id,
+                    integration_knowledge_id=integration_knowledge_id,
                 )
-                await self._adjust_size(integration_knowledge, -deleted_size)
+
+                valid_deleted_blobs = [
+                    blob
+                    for blob in deleted_blobs
+                    if blob is not None  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard
+                ]
+                if valid_deleted_blobs:
+                    deleted_size = sum(
+                        safe_int(getattr(blob, "size", 0))
+                        for blob in valid_deleted_blobs
+                    )
+                    await self._adjust_size(integration_knowledge, -deleted_size)
             for blob in valid_deleted_blobs:
                 # Orphan and subtree cleanup only know the item id; the blob
                 # still carries the document's name.
