@@ -103,6 +103,9 @@ class SharePointIndex:
         # by this writer. A superset is fine; it only saves a delete that
         # cannot match.
         self._maybe_indexed: dict[UUID, set[str]] = {}
+        # Citation keys of what full syncs indexed, for the post-commit cache
+        # write; a delta queues them with its ChangeKeys.
+        self._full_sync_citations: list[tuple[UUID, str, str]] = []
 
     def _savepoint(self) -> AbstractAsyncContextManager[object]:
         """Around one item's writes: a failing statement rolls back that item
@@ -111,6 +114,10 @@ class SharePointIndex:
         if isinstance(session, AsyncSession):
             return session.begin_nested()
         return nullcontext()
+
+    def take_full_sync_citations(self) -> list[tuple[UUID, str, str]]:
+        citations, self._full_sync_citations = self._full_sync_citations, []
+        return citations
 
     async def list_items(self, knowledge_id: UUID) -> list[tuple[UUID, str]]:
         """Indexed blob/item identities without loading text or embeddings."""
@@ -122,7 +129,8 @@ class SharePointIndex:
         known = self._maybe_indexed.get(knowledge_id)
         if known is None:
             try:
-                indexed = await self.list_items(knowledge_id)
+                async with self._savepoint():
+                    indexed = await self.list_items(knowledge_id)
             except Exception as exc:
                 logger.warning("Could not read the indexed SharePoint items: %s", exc)
                 return True
@@ -694,6 +702,16 @@ class SharePointIndex:
             sync_results.count_outcome(stats, outcome, item_name)
             if outcome != "failed":
                 sync_results.item_succeeded(stats)
+                if pending_change_keys is None and (
+                    citation_key := self.citation_key(item)
+                ):
+                    self._full_sync_citations.append(
+                        (
+                            integration_knowledge_id,
+                            self.citation_cache_id(item_id),
+                            citation_key,
+                        )
+                    )
             # Defer the ChangeKey cache write until after commit so a
             # rolled-back sync re-processes the item instead of skipping it.
             if pending_change_keys is not None and change_key and outcome != "failed":
@@ -740,6 +758,7 @@ class SharePointIndex:
             logger.warning(
                 "File %s (item_id=%s) has no download URL", item_name, item_id
             )
+            sync_results.count_missing_download(stats)
             return None, error_reason(NO_DOWNLOAD_REASON)
         except ValueError as e:
             if "exceeds max download size" in str(e):

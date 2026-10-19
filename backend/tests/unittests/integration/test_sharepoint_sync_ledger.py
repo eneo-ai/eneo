@@ -12,6 +12,9 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
+from eneo.integration.infrastructure.clients.sharepoint_content_client import (
+    MissingDownloadUrlError,
+)
 from eneo.integration.infrastructure.content_service import (
     sharepoint_content_service as content_service_module,
 )
@@ -25,6 +28,7 @@ from eneo.integration.infrastructure.content_service.sharepoint_results import (
     FAILURES_IN_A_ROW_TO_STOP,
     DeltaBaselineUnavailable,
     SyncAccessDenied,
+    SyncDownloadsUnavailable,
     SyncItemsFailed,
     SyncStoppedEarly,
 )
@@ -1057,6 +1061,98 @@ class TestRecordLimit:
 
         assert ik.delta_token == "token-1"
         assert set(ledger.failed) == {"old-1", "old-2"}
+
+
+class TestSmallerGaps:
+    async def test_no_download_for_any_file_of_a_pass_fails_it(
+        self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
+    ):
+        """One item without a download is that item's; all of them is SharePoint's."""
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        changes = [_delta_file(f"item-{index}", f"{index}.docx") for index in range(3)]
+        with patch(_CLIENT) as client_class:
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=MissingDownloadUrlError("No download URL")
+                ),
+            )
+            with pytest.raises(
+                SyncDownloadsUnavailable, match="no download for any of 3 files"
+            ):
+                await _committed(
+                    sqlite_session,
+                    service,
+                    lambda: service.process_delta_changes(
+                        token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                    ),
+                )
+
+        assert ik.delta_token == "token-1"
+        assert ik.last_sync_status == "error"
+
+    async def test_an_item_the_pass_could_not_place_stays_recorded(
+        self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
+    ):
+        """Without the scope folder's path the pass decides nothing about it."""
+        ik = _knowledge(
+            mock_dependencies,
+            mock_oauth_token,
+            delta_token="token-1",
+            selected_item_type="folder",
+            folder_id="folder-a",
+            folder_path=None,
+        )
+        ledger.failed = {"x": _failed(1)}
+        elsewhere = {
+            **_delta_file("x", "x.docx"),
+            "parentReference": {
+                "id": "other",
+                "path": "/drives/drive-456/root:/Elsewhere",
+            },
+        }
+        with patch(_CLIENT) as client_class:
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=([elsewhere], "token-2")),
+                get_file_metadata=AsyncMock(side_effect=_http_error(404, "Not Found")),
+            )
+            await _committed(
+                sqlite_session,
+                service,
+                lambda: service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                ),
+            )
+
+        assert ledger.failed == {"x": _failed(1)}
+
+    async def test_a_full_sync_fills_the_citation_cache(
+        self, service, mock_dependencies, mock_oauth_token, ledger
+    ):
+        """A delta that later dedups the file then costs no title write."""
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        with (
+            patch(_CLIENT) as client_class,
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
+            patch.object(service, "_schedule_post_commit_change_keys") as schedule,
+        ):
+            _mock_graph_client(
+                client_class,
+                get_drive_root_children=AsyncMock(return_value=[_root_file("a")]),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body", "text/plain")
+                ),
+            )
+            await service.pull_content(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        scheduled = [key for call in schedule.call_args_list for key in call.args[0]]
+        assert [(item_id, key) for _, item_id, key in scheduled] == [
+            ("a#citation", service._index.citation_key(_root_file("a")))
+        ]
 
 
 class TestDeltaBaselineMint:

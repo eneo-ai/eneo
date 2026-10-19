@@ -71,6 +71,9 @@ class SyncStats(TypedDict):
     download_attempts: NotRequired[int]
     download_forbidden: NotRequired[int]
     download_not_found: NotRequired[int]
+    download_missing: NotRequired[int]
+    # Items the pass could not decide about; their record stays.
+    undecided_items: NotRequired[set[str]]
     # Item id -> name of each file whose download was refused (403).
     refused_downloads: NotRequired[dict[str, str]]
     # Item id -> indexes into skipped_details of the failures that name it.

@@ -106,10 +106,6 @@ class IncompleteDownloadError(aiohttp.ClientPayloadError):
     the download is retried like any other cut-off transfer.
     """
 
-    def __init__(self, message: str, *, content_type: str) -> None:
-        super().__init__(message)
-        self.content_type = content_type
-
 
 class MissingDownloadUrlError(ValueError):
     """Graph returned the item without a download URL.
@@ -487,8 +483,7 @@ class SharePointContentClient(BaseClient):
             if content_length is not None and len(payload) != content_length:
                 raise IncompleteDownloadError(
                     f"Incomplete download of '{file_name}' "
-                    f"({len(payload)} of {content_length} bytes)",
-                    content_type=response.headers.get("Content-Type", ""),
+                    f"({len(payload)} of {content_length} bytes)"
                 )
 
         return bytes(payload)
@@ -523,15 +518,13 @@ class SharePointContentClient(BaseClient):
                 ) from None
             return payload, content_type, charset
 
-        try:
-            payload, content_type, charset = await retry_on_throttle(
-                _download,
-                retryable_status_codes=TRANSIENT_STATUS_CODES,
-                retry_transport_errors=True,
-            )
-        except IncompleteDownloadError as e:
-            logger.warning(str(e))
-            return ExtractionResult.error(str(e), e.content_type)
+        # A body still cut off after the retries propagates: it says nothing
+        # about the file, so the caller keeps the copy and tries again later.
+        payload, content_type, charset = await retry_on_throttle(
+            _download,
+            retryable_status_codes=TRANSIENT_STATUS_CODES,
+            retry_transport_errors=True,
+        )
 
         return await extract_sharepoint_content(
             payload, content_type, file_name, charset=charset

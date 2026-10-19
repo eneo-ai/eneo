@@ -27,6 +27,7 @@ from eneo.integration.domain.entities.integration_knowledge import (
 )
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     DeltaTokenExpiredException,
+    IncompleteDownloadError,
     MissingDownloadUrlError,
     SharePointItemLookup,
 )
@@ -5411,6 +5412,12 @@ class TestDeltaExtractionOutcomes:
             (aiohttp.ClientConnectionError("reset"), "Error: Connection error"),
             (TimeoutError(), "Error: Request timed out"),
             (RuntimeError("Graph timeout"), "Error: Graph timeout"),
+            (
+                IncompleteDownloadError(
+                    "Incomplete download of 'scan.pdf' (1 of 2 bytes)"
+                ),
+                "Error: Incomplete download of 'scan.pdf' (1 of 2 bytes)",
+            ),
         ],
     )
     async def test_infrastructure_failures_keep_the_local_copy_and_the_token(

@@ -64,6 +64,7 @@ from eneo.integration.infrastructure.content_service.sharepoint_reconciliation i
 from eneo.integration.infrastructure.content_service.sharepoint_results import (
     DeltaBaselineUnavailable,
     SyncAccessDenied,
+    SyncDownloadsUnavailable,
     SyncItemsFailed,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_sync_ledger import (
@@ -360,6 +361,9 @@ class SharePointContentService:
                 access_token_provider=access_token_provider,
             )
             await self._progress.set_phase("finishing", stats)
+            self._schedule_post_commit_change_keys(
+                self._index.take_full_sync_citations()
+            )
             retries_recorded = await self._settle_failures(
                 integration_knowledge,
                 stats,
@@ -375,6 +379,8 @@ class SharePointContentService:
                     forbidden=forbidden,
                     hidden=bool(stats.get("download_not_found")),
                 )
+            if missing := sync_results.downloads_unavailable(stats):
+                raise SyncDownloadsUnavailable(summary_stats, missing=missing)
             if summary_stats.get("failed_items"):
                 # A delta never re-emits an unchanged item, so the token may
                 # stay only when the next delta pass retries every failure.
@@ -801,6 +807,7 @@ class SharePointContentService:
                 sync_results.count_skip(
                     stats, skipped_by_code(item_id, "scope_path_unavailable")
                 )
+                sync_results.keep_recorded(stats, item_id)
                 return
 
             # Without a path the entry is out of scope only because its parent
@@ -1010,6 +1017,7 @@ class SharePointContentService:
                 f"{unplaced}; kept until the next full sync",
             ),
         )
+        sync_results.keep_recorded(stats, item_id)
         return None
 
     async def _pass_indexed_ids(
@@ -1175,11 +1183,13 @@ class SharePointContentService:
                 for item_id, name in refused.items()
                 if item_id not in removed
             }
+        undecided = stats.get("undecided_items", set[str]())
         kept = {
             item_id: item
             for item_id, item in failed_before.items()
             if item_id in failed_now
             or item_id in refused
+            or item_id in undecided
             or (attempted is not None and item_id not in attempted)
         }
         recorded = len(kept) + len(failed_now.keys() - kept.keys()) <= MAX_FAILED_ITEMS
@@ -1371,6 +1381,10 @@ class SharePointContentService:
                     forbidden=forbidden,
                     hidden=bool(stats.get("download_not_found")),
                     changes_detected=changes_detected,
+                )
+            if missing := sync_results.downloads_unavailable(stats):
+                raise SyncDownloadsUnavailable(
+                    summary_stats, missing=missing, changes_detected=changes_detected
                 )
             raise SyncItemsFailed(summary_stats, changes_detected=changes_detected)
 

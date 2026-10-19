@@ -96,6 +96,26 @@ class SyncStoppedEarly(SyncItemsFailed):
         )
 
 
+class SyncDownloadsUnavailable(SyncItemsFailed):
+    """SharePoint served none of the pass's files, and enough of them.
+
+    One item without a download is about that item; every download of a pass
+    missing is about SharePoint, so the pass fails and keeps its token.
+    """
+
+    def __init__(
+        self, summary: SyncStats, *, missing: int, changes_detected: int | None = None
+    ) -> None:
+        super().__init__(
+            summary,
+            changes_detected=changes_detected,
+            message=(
+                f"SharePoint offered no download for any of {missing} files; the "
+                "next sync retries them"
+            ),
+        )
+
+
 class DeltaBaselineUnavailable(SyncItemsFailed):
     """A full sync finished without a delta token to continue from.
 
@@ -335,6 +355,16 @@ def count_refused_download(
     stats.setdefault("refused_downloads", {})[item_id] = item_name or item_id
 
 
+def count_missing_download(stats: SyncStats) -> None:
+    """An item Graph served without a download URL."""
+    stats["download_missing"] = stats.get("download_missing", 0) + 1
+
+
+def keep_recorded(stats: SyncStats, item_id: str) -> None:
+    """The pass could not decide about the item: an earlier record of it stays."""
+    stats.setdefault("undecided_items", set()).add(item_id)
+
+
 def count_hidden_download(stats: SyncStats) -> None:
     """A download answered 404 or 410."""
     stats["download_not_found"] = stats.get("download_not_found", 0) + 1
@@ -362,6 +392,18 @@ def refused_access(stats: SyncStats) -> int:
     return 0
 
 
+def downloads_unavailable(stats: SyncStats) -> int:
+    """How many downloads came without a URL when that was every one of at
+    least ``_MIN_REFUSALS_FOR_ACCESS_PROBLEM``, else 0."""
+    attempts = stats.get("download_attempts", 0)
+    if (
+        attempts >= _MIN_REFUSALS_FOR_ACCESS_PROBLEM
+        and stats.get("download_missing", 0) == attempts
+    ):
+        return attempts
+    return 0
+
+
 def summarize_pass(stats: SyncStats) -> tuple[SyncStats, int]:
     """The pass summary, and how many downloads were refused if ``refused_access``.
 
@@ -371,6 +413,8 @@ def summarize_pass(stats: SyncStats) -> tuple[SyncStats, int]:
     forbidden = refused_access(stats)
     if forbidden:
         stats["failed_items"] = stats.get("failed_items", 0) + forbidden
+    if missing := downloads_unavailable(stats):
+        stats["failed_items"] = stats.get("failed_items", 0) + missing
     return build_summary_stats(stats), forbidden
 
 
