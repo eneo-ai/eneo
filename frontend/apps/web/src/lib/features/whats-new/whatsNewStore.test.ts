@@ -7,15 +7,20 @@ const latest = latestRelease();
 if (!latest) throw new Error("releases.json must contain at least one release for these tests");
 const version = latest.version;
 
-function makeStore(seen: Marker = null, announced: Marker = null, enabled = true) {
+function makeStore(
+  seen: Marker = null,
+  announced: Marker = null,
+  enabled = true,
+  installedVersion = version
+) {
   const client = {
     markSeen: vi.fn(async (_version: string) => ({
-      seen_version: version,
+      seen_version: _version,
       announced_version: null
     })),
     markAnnounced: vi.fn(async (_version: string) => ({
       seen_version: null,
-      announced_version: version
+      announced_version: _version
     })),
     resetState: vi.fn(async () => ({ seen_version: null, announced_version: null }))
   };
@@ -24,6 +29,7 @@ function makeStore(seen: Marker = null, announced: Marker = null, enabled = true
     store: createWhatsNewStore({
       eneo: { whatsNew: client },
       whatsNewEnabled: enabled,
+      whatsNewVersion: installedVersion,
       whatsNewSeenVersion: seen,
       whatsNewAnnouncedVersion: announced
     })
@@ -33,6 +39,37 @@ function makeStore(seen: Marker = null, announced: Marker = null, enabled = true
 afterEach(() => vi.restoreAllMocks());
 
 describe("whatsNewStore", () => {
+  it("announces every RC and the final once, and keeps read progress independent", async () => {
+    let seen: Marker = "2.2.0";
+    let announced: Marker = "2.2.0";
+    for (const installed of ["2.3.0-rc.0", "2.3.0-rc.1", "2.3.0-rc.10", "2.3.0"]) {
+      const { store, client } = makeStore(seen, announced, true, installed);
+      expect(store.pendingAnnouncement()?.version).toBe(installed);
+      expect(get(store.hasUnseen)).toBe(true);
+      await store.markLatestAnnounced();
+      expect(client.markAnnounced).toHaveBeenCalledExactlyOnceWith(installed);
+      announced = get(store.announcedVersion);
+      expect(get(store.seenVersion)).toBe(seen);
+      expect(makeStore(seen, announced, true, installed).store.pendingAnnouncement()).toBeNull();
+      await store.markLatestSeen();
+      expect(client.markSeen).toHaveBeenCalledExactlyOnceWith(installed);
+      seen = get(store.seenVersion);
+      expect(get(makeStore(seen, announced, true, installed).store.hasUnseen)).toBe(false);
+    }
+  });
+
+  it("does not announce an older RC or move markers backwards after rollback", async () => {
+    for (const recorded of ["2.3.0-rc.10", "2.3.0"]) {
+      const { store, client } = makeStore(recorded, recorded, true, "2.3.0-rc.1");
+      expect(store.pendingAnnouncement()).toBeNull();
+      expect(get(store.hasUnseen)).toBe(false);
+      await store.markLatestSeen();
+      await store.markLatestAnnounced();
+      expect(client.markSeen).not.toHaveBeenCalled();
+      expect(client.markAnnounced).not.toHaveBeenCalled();
+    }
+  });
+
   it("shows the dot until the newest bundled release has been seen", () => {
     expect(get(makeStore().store.hasUnseen)).toBe(true);
     expect(get(makeStore("0.0.1").store.hasUnseen)).toBe(true);
@@ -100,6 +137,7 @@ describe("whatsNewStore", () => {
     const store = createWhatsNewStore({
       eneo: { whatsNew: client },
       whatsNewEnabled: true,
+      whatsNewVersion: version,
       whatsNewSeenVersion: undefined,
       whatsNewAnnouncedVersion: undefined
     });

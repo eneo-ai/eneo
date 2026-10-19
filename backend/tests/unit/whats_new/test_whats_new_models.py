@@ -4,7 +4,30 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from eneo.whats_new.whats_new_models import WhatsNewVersionUpdate, release_order_key
+from eneo.whats_new.whats_new_models import (
+    WhatsNewVersionUpdate,
+    can_record_release,
+    release_order_key,
+)
+
+
+@pytest.mark.parametrize(
+    ("submitted", "installed", "allowed"),
+    [
+        ("2.3.0", "2.3.0-rc.1", False),
+        ("2.3.0-rc.2", "2.3.0-rc.1", False),
+        ("2.3.0-rc.1", "2.3.0-rc.1", True),
+        ("2.3.0-rc.0", "2.3.0-rc.1", True),
+        ("2.3.0-rc.10", "v2.3.0-rc.2", False),
+        ("2.3.0", "2.3.0", True),
+        ("2.3.0", "DEV", True),
+    ],
+)
+def test_rc_backend_does_not_pre_record_a_later_release(
+    submitted: str, installed: str, allowed: bool
+):
+    assert can_record_release(submitted, installed) is allowed
+
 
 PACKAGE = Path(__file__).resolve().parents[4] / "frontend" / "packages" / "whats-new"
 
