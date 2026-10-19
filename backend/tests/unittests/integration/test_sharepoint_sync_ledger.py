@@ -1,6 +1,8 @@
-"""Items a pass could not finish: retried by the next delta, set aside when
-they keep failing, and never on their own a reason to start over with a
-full sync."""
+"""What a sync keeps between its passes.
+
+Items a pass could not finish are retried by the next delta, set aside when
+they keep failing, and never on their own a reason to start over with a full
+sync. A full sync makes the next delta walk its folders again."""
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,6 +12,9 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
+from eneo.integration.infrastructure.content_service import (
+    sharepoint_scope as scope_rules,
+)
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
     SharePointContentService,
 )
@@ -35,6 +40,13 @@ _CLIENT = "eneo.integration.infrastructure.content_service.sharepoint_content_se
 class FakeLedger:
     def __init__(self) -> None:
         self.failed: dict[str, int] = {}
+        self.generation = 0
+
+    async def walk_generation(self, knowledge_id):
+        return self.generation
+
+    async def advance_walk_generation(self, knowledge_id):
+        self.generation += 1
 
     async def failed_passes(self, knowledge_id):
         return dict(self.failed)
@@ -100,7 +112,8 @@ def _knowledge(mock_dependencies, oauth_token, **fields):
         return_value=[]
     )
     repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(return_value=[])
-    mock_dependencies["change_key_service"].should_process.return_value = True
+    if isinstance(mock_dependencies["change_key_service"], AsyncMock):
+        mock_dependencies["change_key_service"].should_process.return_value = True
     return ik
 
 
@@ -417,3 +430,91 @@ class TestDeltaBaselineMint:
                 await service.pull_content(
                     token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
                 )
+
+
+class FakeChangeKeys:
+    def __init__(self) -> None:
+        self.keys: dict[str, str] = {}
+
+    async def should_process(self, *, integration_knowledge_id, item_id, change_key):
+        return self.keys.get(item_id) != change_key
+
+    async def update_change_key(self, *, integration_knowledge_id, item_id, change_key):
+        self.keys[item_id] = change_key
+
+    async def invalidate_change_key(self, *, integration_knowledge_id, item_id):
+        self.keys.pop(item_id, None)
+
+
+class TestFolderWalkCache:
+    SCOPE = {
+        "id": "folder-a",
+        "name": "A",
+        "folder": {"childCount": 1},
+        "parentReference": {"path": "/drives/drive-456/root:/Documents"},
+    }
+    MOVED_BACK = {
+        "id": "folder-x",
+        "name": "X",
+        "folder": {"childCount": 1},
+        "parentReference": {
+            "id": "folder-a",
+            "path": "/drives/drive-456/root:/Documents/A",
+        },
+    }
+
+    async def test_a_full_sync_has_the_next_delta_walk_its_folders_again(
+        self, mock_dependencies, mock_oauth_token, ledger, sqlite_session
+    ):
+        """The full sync may have removed a folder's files as orphans while the
+        folder was elsewhere; moved back under the same parent it must be walked."""
+        mock_dependencies["change_key_service"] = FakeChangeKeys()
+        service = SharePointContentService(**mock_dependencies, sync_ledger=ledger)
+        ik = _knowledge(
+            mock_dependencies,
+            mock_oauth_token,
+            delta_token="token-1",
+            selected_item_type="folder",
+            folder_id="folder-a",
+            folder_path="/Documents/A",
+        )
+        walk = AsyncMock(return_value=[_delta_file("x-1", "one.docx")])
+
+        def delta():
+            return service.process_delta_changes(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        with (
+            patch(_CLIENT) as client_class,
+            patch.object(scope_rules, "enumerate_items", walk),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
+        ):
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(
+                    return_value=([self.MOVED_BACK], "token-2")
+                ),
+                get_file_metadata=AsyncMock(return_value=self.SCOPE),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body", "text/plain")
+                ),
+                get_folder_items=AsyncMock(return_value=[]),
+            )
+            await _committed(sqlite_session, service, delta)
+            await _committed(sqlite_session, service, delta)
+            walks_before_full_sync = walk.await_count
+
+            await _committed(
+                sqlite_session,
+                service,
+                lambda: service.pull_content(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                ),
+            )
+            walks_by_full_sync = walk.await_count - walks_before_full_sync
+            await _committed(sqlite_session, service, delta)
+
+        assert walks_before_full_sync == 1
+        assert walk.await_count == walks_before_full_sync + walks_by_full_sync + 1
+        assert ledger.generation == 1

@@ -178,6 +178,10 @@ class _DeltaPass:
     failed_before: dict[str, int] = field(default_factory=dict[str, int])
     # Those of them this pass tried again outside the change set.
     retried_ids: set[str] = field(default_factory=set[str])
+    # What the walk cache keys of this pass end with, read when first needed;
+    # None when it could not be read and the cache is not used.
+    walk_cache_suffix: Optional[str] = None
+    walk_cache_suffix_read: bool = False
 
 
 class SharePointContentService:
@@ -335,6 +339,7 @@ class SharePointContentService:
                 integration_knowledge.folder_path = folder_path
                 binding["folder_path"] = folder_path
             await self._sync_state.started(integration_knowledge, started_at, **binding)
+            await self._invalidate_walk_cache(resolved_integration_knowledge_id)
 
             delta_baseline, baseline_failure = await self._pull_content(
                 token=token,
@@ -1144,6 +1149,35 @@ class SharePointContentService:
                 exc,
             )
 
+    async def _invalidate_walk_cache(self, knowledge_id: UUID) -> None:
+        """Have the next delta walk every folder again; see ``SyncLedger``."""
+        if self._ledger is None:
+            return
+        try:
+            await self._ledger.advance_walk_generation(knowledge_id)
+        except Exception as exc:
+            logger.warning(
+                "Could not invalidate the folder walk cache of %s: %s",
+                knowledge_id,
+                exc,
+            )
+
+    async def _walk_cache_suffix(self, delta_pass: "_DeltaPass") -> Optional[str]:
+        if not delta_pass.walk_cache_suffix_read:
+            delta_pass.walk_cache_suffix_read = True
+            if self._ledger is None:
+                delta_pass.walk_cache_suffix = ""
+            else:
+                try:
+                    generation = await self._ledger.walk_generation(
+                        delta_pass.integration_knowledge.id
+                    )
+                except Exception as exc:
+                    logger.warning("Could not read the walk cache generation: %s", exc)
+                else:
+                    delta_pass.walk_cache_suffix = f"@{generation}"
+        return delta_pass.walk_cache_suffix
+
     async def _walk_folder_in_scope(
         self, delta_pass: "_DeltaPass", item: SharePointItem
     ) -> None:
@@ -1152,14 +1186,21 @@ class SharePointContentService:
         The entry does not say whether the folder moved, so its parent is kept
         once a walk completed without failures, post-commit like a file's
         ChangeKey. A folder re-emitted under the same parent (a rename, a
-        permission change, a replayed pass) has its files indexed already.
+        permission change, a replayed pass) has its files indexed already,
+        unless a full sync ran since: it may have removed them as orphans while
+        the folder was elsewhere, so the key carries the walk generation.
         """
         integration_knowledge = delta_pass.integration_knowledge
         item_id = item.get("id", "")
         item_name = item.get("name", "")
         stats = delta_pass.stats
         parent_id = item.get("parentReference", {}).get("id")
-        location_key = f"folder-under:{parent_id}" if parent_id else None
+        suffix = await self._walk_cache_suffix(delta_pass)
+        location_key = (
+            f"folder-under:{parent_id}{suffix}"
+            if parent_id and suffix is not None
+            else None
+        )
         if location_key and self._index.change_key_service:
             try:
                 walked_here = not await self._index.change_key_service.should_process(

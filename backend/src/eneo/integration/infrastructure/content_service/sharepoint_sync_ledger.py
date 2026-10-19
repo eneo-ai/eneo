@@ -7,6 +7,10 @@ and the next full sync, which tries every item, tries it again. What adds work
 is written before the transaction commits (an extra retry is harmless); what
 removes it only after, so a rolled-back pass keeps it.
 
+Walk generation: a counter every full sync moves on. The delta walk cache
+records it, so a folder walked before the last full sync is walked again: the
+full sync may have removed its files as orphans while it was elsewhere.
+
 Not authoritative: losing the data only costs retries a full sync makes up for.
 """
 
@@ -19,6 +23,9 @@ if TYPE_CHECKING:
 
 SET_ASIDE_AFTER = 3
 _FAILURES_TTL_SECONDS = 30 * 24 * 3600
+# Far longer than a walk cache entry lives (7 days): a counter that expired and
+# starts over at 0 cannot match an entry recorded before it expired.
+_WALK_GENERATION_TTL_SECONDS = 90 * 24 * 3600
 
 
 def _text(value: bytes | str) -> str:
@@ -32,6 +39,10 @@ class SyncLedger:
     @staticmethod
     def _failures_key(knowledge_id: UUID) -> str:
         return f"sharepoint_failed_items:{knowledge_id}"
+
+    @staticmethod
+    def _walk_generation_key(knowledge_id: UUID) -> str:
+        return f"sharepoint_walk_generation:{knowledge_id}"
 
     async def failed_passes(self, knowledge_id: UUID) -> dict[str, int]:
         # The stubs type the asyncio client's commands as sync ones.
@@ -58,3 +69,14 @@ class SyncLedger:
                 "Awaitable[int]",
                 self._redis.hdel(self._failures_key(knowledge_id), *item_ids),
             )
+
+    async def walk_generation(self, knowledge_id: UUID) -> int:
+        value = await self._redis.get(self._walk_generation_key(knowledge_id))
+        return int(_text(value)) if value else 0
+
+    async def advance_walk_generation(self, knowledge_id: UUID) -> None:
+        key = self._walk_generation_key(knowledge_id)
+        async with self._redis.pipeline(transaction=True) as pipe:
+            pipe.incr(key)
+            pipe.expire(key, _WALK_GENERATION_TTL_SECONDS)
+            await pipe.execute()
