@@ -680,9 +680,14 @@ class SharepointWebhookService:
         )
 
         if not await claim_sync_queue_slot(self.redis_client, knowledge_id_str):
-            # The queued job starts after this change and its pass covers it.
+            # The queued job starts after this change and its pass covers it,
+            # removing the marker as it starts. The marker stays if that job
+            # never runs (lost delivery, worker gone), and the catch-up serves
+            # it once the queued-sync marker has expired.
+            await self._leave_marker(knowledge_id_str, full=full)
             logger.info(
-                "Knowledge %s already has a sync queued; not queuing another",
+                "Knowledge %s already has a sync queued; left a marker instead of "
+                "queuing another",
                 knowledge_id_str,
             )
             return None
@@ -856,6 +861,19 @@ class SharepointWebhookService:
                     recently_caught_up=caught_up,
                 )
         return states
+
+    async def _leave_marker(self, knowledge_id: str, *, full: bool) -> None:
+        key = sync_pending_full_key if full else sync_pending_key
+        try:
+            await self.redis_client.set(
+                key(knowledge_id), "1", ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS
+            )
+        except (RedisError, OSError) as exc:
+            logger.warning(
+                "Could not leave a pending marker for knowledge %s (%s)",
+                knowledge_id,
+                type(exc).__name__,
+            )
 
     def _release_queue_slot_on_rollback(self, knowledge_id: str) -> None:
         """A job rolled back with the transaction must not block the next one."""

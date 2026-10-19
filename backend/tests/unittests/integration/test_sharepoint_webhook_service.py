@@ -6,6 +6,7 @@ including ChangeKey deduplication, scope filtering, and job queuing.
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -19,6 +20,7 @@ from eneo.integration.infrastructure.sharepoint_sync_keys import (
     SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
     SHAREPOINT_SYNC_QUEUED_TTL_SECONDS,
     sync_lock_key,
+    sync_pending_full_key,
     sync_pending_key,
     sync_queued_key,
 )
@@ -1246,3 +1248,76 @@ async def test_a_lifecycle_event_is_not_treated_as_a_change(setup: Setup):
 
     setup.service._fetch_knowledge_by_subscription.assert_not_called()
     setup.sharepoint_subscription_repo.update.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("full", "marker"), [(False, sync_pending_key), (True, sync_pending_full_key)]
+)
+async def test_a_change_behind_a_dead_queued_sync_is_served_by_the_catch_up(
+    setup: Setup,
+    mock_knowledge_db,
+    mock_tenant_app_integration_db,
+    mock_user,
+    full,
+    marker,
+):
+    """The queued job may never run (lost delivery, worker gone); the change
+    must then still reach the catch-up once the queued marker expires."""
+    from eneo.integration.infrastructure.sharepoint_webhook_service import (
+        _CatchUpCandidate,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    knowledge_id = str(mock_knowledge_db.id)
+    mock_knowledge_db.delta_token = "token"
+    redis = _NxRedis()
+    redis.store[sync_queued_key(knowledge_id)] = "1"
+    setup.service.redis_client = redis  # pyright: ignore[reportAttributeAccessIssue]
+    setup.service._fetch_knowledge = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=[(mock_knowledge_db, mock_tenant_app_integration_db)]
+    )
+    setup.user_repo.list_tenant_admins.return_value = [mock_user]
+    job_service = AsyncMock()
+
+    with patch(
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
+        return_value=job_service,
+    ):
+        assert (
+            await setup.service.queue_sync_for_knowledge(
+                mock_knowledge_db.id, full=full
+            )
+            is None
+        )
+        job_service.queue_job.assert_not_awaited()
+        assert redis.store[marker(knowledge_id)] == "1"
+
+        del redis.store[sync_queued_key(knowledge_id)]
+        now = datetime.now(timezone.utc)
+        setup.service._catch_up_candidates = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+            return_value=[
+                _CatchUpCandidate(
+                    id=mock_knowledge_db.id,
+                    has_delta_token=True,
+                    last_activity=now - timedelta(hours=1),
+                )
+            ]
+        )
+        setup.service._sync_states = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+            side_effect=lambda ids: {
+                ids[0]: SimpleNamespace(
+                    running=False,
+                    queued=False,
+                    full_requested=full,
+                    delta_requested=not full,
+                    recently_caught_up=False,
+                )
+            }
+        )
+        summary = await setup.service.queue_catch_up_syncs(
+            stale_before=now - timedelta(hours=6), limit=25, window_seconds=6 * 3600
+        )
+
+    assert summary["markers"] == 1
+    assert job_service.queue_job.await_args.kwargs["task"] == (
+        Task.PULL_SHAREPOINT_CONTENT if full else Task.SYNC_SHAREPOINT_DELTA
+    )
