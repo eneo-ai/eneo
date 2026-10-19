@@ -230,16 +230,15 @@ class IntegrationKnowledgeService:
         )
         personal = [placement for placement in placements if placement.personal]
         listed = [placement for placement in placements if not placement.personal]
-        knowledge = (
-            {
-                item.id: item
-                for item in await self.integration_knowledge_repo.get_by_ids(
-                    [placement.integration_knowledge_id for placement in listed]
-                )
-            }
+        found = (
+            await self.integration_knowledge_repo.get_by_ids(
+                [placement.integration_knowledge_id for placement in listed]
+            )
             if listed
-            else {}
+            else []
         )
+        await self.integration_knowledge_repo.attach_document_counts(found)
+        knowledge = {item.id: item for item in found}
         openable = await self._openable_spaces(listed)
         return TenantIntegrationKnowledgeOverview(
             # An item removed between the two reads is left out.
