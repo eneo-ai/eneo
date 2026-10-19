@@ -23,6 +23,8 @@
   import AddWizard from "../models/AddWizard/AddWizard.svelte";
   import { writable } from "svelte/store";
   import { readinessMessage } from "$lib/features/mcp/readiness";
+  import McpOAuthConnectStep from "./McpOAuthConnectStep.svelte";
+  import { CircleCheck } from "@lucide/svelte";
   import {
     useMcpOAuthConnect,
     type McpOAuthConnection
@@ -82,6 +84,7 @@
   // A capability provider is edited as the feature it serves, not as an MCP
   // server; the transport is an implementation detail to the admin.
   const dialogTitle = $derived.by(() => {
+    if (connectStep) return m.mcp_oauth_connect_step_heading({ server: connectStep.name });
     if (capability) {
       const label = capability.label().toLocaleLowerCase();
       return isEditMode
@@ -572,8 +575,14 @@
       <Dialog.Header class={dialogLayout.header}>
         <Dialog.Title>
           <span class="flex items-center gap-3">
-            <span class="bg-accent-dimmer flex h-10 w-10 items-center justify-center rounded-xl">
-              {#if capability}
+            <span
+              class="flex h-10 w-10 items-center justify-center rounded-xl {connectStep
+                ? 'bg-positive-dimmer'
+                : 'bg-accent-dimmer'}"
+            >
+              {#if connectStep}
+                <CircleCheck class="text-positive-default h-5 w-5" aria-hidden="true" />
+              {:else if capability}
                 <capability.icon class="text-accent-default h-5 w-5" aria-hidden="true" />
               {:else}
                 <svg
@@ -598,17 +607,15 @@
       </Dialog.Header>
 
       <div class={dialogLayout.body}>
-        <div class={dialogLayout.section}>
-          {#if connectStep}
-            <div class="flex flex-col gap-3 py-2">
-              <p class="text-default text-sm font-medium">{m.mcp_oauth_connect_step_title()}</p>
-              <p class="text-secondary text-sm">
-                {auth_scope === "shared"
-                  ? m.mcp_oauth_connect_step_shared_intro({ server: connectStep.name })
-                  : m.mcp_oauth_connect_step_intro({ server: connectStep.name })}
-              </p>
-            </div>
-          {:else}
+        {#if connectStep}
+          <McpOAuthConnectStep
+            serverName={connectStep.name}
+            shared={auth_scope === "shared"}
+            connecting={oauthConnect.isConnecting(connectStep.id)}
+            syncing={syncingTools}
+          />
+        {:else}
+          <div class={dialogLayout.section}>
             <form
               onsubmit={(e) => {
                 e.preventDefault();
@@ -1425,8 +1432,8 @@
                 </fieldset>
               {/if}
             </form>
-          {/if}
-        </div>
+          </div>
+        {/if}
 
         {#if !isEditMode && isBuiltin && activateOnSave && audience === "everyone" && replacesDefault}
           <p class="text-secondary text-sm">

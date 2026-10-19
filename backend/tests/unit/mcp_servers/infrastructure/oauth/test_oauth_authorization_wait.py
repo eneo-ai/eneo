@@ -49,11 +49,31 @@ async def test_times_out_with_what_was_connected():
     redis = FakeRedis()
     waiter = MCPOAuthAuthorizationWaiter(redis, timeout_seconds=0.05, poll_seconds=0.01)  # type: ignore[arg-type]
     user, first, second = uuid4(), uuid4(), uuid4()
-    await waiter.mark_connected(user, first)
 
+    async def connect_first():
+        await asyncio.sleep(0.01)
+        await waiter.mark_connected(user, first)
+
+    asyncio.create_task(connect_first())
     connected = await waiter.wait(user, [first, second])
 
     assert connected == {first}
+
+
+async def test_marks_left_before_the_wait_started_do_not_count():
+    """A connection made with nobody waiting (the admin dialog, the account
+    page) must not end a later turn's wait with a token that may since have
+    been revoked."""
+    redis = FakeRedis()
+    waiter = MCPOAuthAuthorizationWaiter(redis, timeout_seconds=0.05, poll_seconds=0.01)  # type: ignore[arg-type]
+    user, server = uuid4(), uuid4()
+    await waiter.mark_connected(user, server)
+    await waiter.mark_declined(user, server)
+
+    connected = await waiter.wait(user, [server])
+
+    assert connected == set()
+    assert redis.store == {}
 
 
 async def test_a_decline_ends_the_wait_for_that_server():

@@ -96,6 +96,18 @@ class MCPOAuthAuthorizationWaiter:
         pending = list(dict.fromkeys(server_ids))
         if not pending or not self.available or self._redis is None:
             return set()
+        # Only answers given while this turn waits count. A connection made
+        # earlier with nobody waiting (from the admin dialog, the account
+        # page) left its mark behind; honouring it would retry with whatever
+        # token that produced and skip the user's actual answer.
+        try:
+            await self._redis.delete(
+                *[connected_key(user_id, sid) for sid in pending],
+                *[declined_key(user_id, sid) for sid in pending],
+            )
+        except Exception as exc:  # pragma: no cover - Redis outage
+            logger.warning("MCP OAuth authorization wait aborted: %s", exc)
+            return set()
         connected: set[UUID] = set()
         deadline = asyncio.get_running_loop().time() + self._timeout
         while pending:

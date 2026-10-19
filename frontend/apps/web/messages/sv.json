@@ -4926,9 +4926,15 @@
   "audit_action_mcp_oauth_shared_connection_cleared_description": "Loggar när en administratör tar bort organisationens delade anslutning till en MCP-server",
   "mcp_oauth_connected_continuing": "Anslutet. Fortsätter…",
   "mcp_oauth_declined_continuing": "Fortsätter utan verktyget.",
-  "mcp_oauth_connect_step_title": "Servern är sparad. Anslut för att hämta verktygen.",
-  "mcp_oauth_connect_step_intro": "Eneo kan bara lista {server}s verktyg genom en anslutning. Anslut nu, så hämtas verktygen direkt.",
-  "mcp_oauth_connect_step_shared_intro": "Eneo kan bara lista {server}s verktyg genom den delade anslutningen. Logga in hos leverantören som servicekontot, så hämtas verktygen direkt.",
   "mcp_oauth_connect_later": "Senare",
-  "mcp_oauth_tools_synced": "{count} verktyg hämtade. Granska dem i verktygslistan."
+  "mcp_oauth_tools_synced": "{count} verktyg hämtade. Granska dem i verktygslistan.",
+  "mcp_oauth_connect_step_heading": "{server} är sparad",
+  "mcp_oauth_step_saved": "Servern är sparad",
+  "mcp_oauth_step_connect": "Anslut till leverantören",
+  "mcp_oauth_step_connect_hint": "Ett fönster öppnas där du godkänner att Eneo får använda {server} för din räkning.",
+  "mcp_oauth_step_connect_shared_hint": "Ett fönster öppnas. Logga in hos leverantören som det servicekonto alla användare ska dela.",
+  "mcp_oauth_step_connect_waiting": "Väntar på leverantören…",
+  "mcp_oauth_step_tools": "Verktygen hämtas",
+  "mcp_oauth_step_tools_hint": "Sker av sig självt så snart anslutningen är klar.",
+  "mcp_oauth_step_tools_syncing": "Hämtar verktyg…"
 }
