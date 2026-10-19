@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional, Sequence, cast
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 from uuid import UUID
@@ -80,6 +81,14 @@ class DeltaTokenExpiredException(Exception):
     """Raised when Microsoft Graph returns 410 Gone for an expired delta token."""
 
     pass
+
+
+@dataclass(frozen=True)
+class SharePointItemLookup:
+    """An item-level Graph answer, distinct from a failed batch request."""
+
+    status: int
+    item: SharePointItem | None = None
 
 
 class SharePointContentClient(BaseClient):
@@ -753,6 +762,86 @@ class SharePointContentClient(BaseClient):
                 logger.error(f"SharePoint API error when getting file metadata: {e}")
                 raise
 
+    async def get_item_metadata_batch(
+        self, drive_id: str, item_ids: Sequence[str]
+    ) -> dict[str, SharePointItemLookup]:
+        """Read up to 20 items in one round trip, preserving each HTTP status.
+
+        Only this narrow projection is needed to verify existence and scope.
+        Missing, duplicate or malformed answers fail the batch: absence from a
+        response is not evidence that an item was deleted. Inner throttling is
+        returned to the caller, which can stop its bounded reconciliation pass.
+        """
+        ids = list(dict.fromkeys(item_ids))
+        if not ids:
+            return {}
+        if len(ids) > self.BATCH_SIZE:
+            raise ValueError("A Graph metadata batch supports at most 20 items")
+        requests = [
+            {
+                "id": str(index),
+                "method": "GET",
+                "url": f"/drives/{quote(drive_id, safe='')}/items/"
+                f"{quote(item_id, safe='')}?$select=id,name,parentReference",
+            }
+            for index, item_id in enumerate(ids)
+        ]
+        for attempt in range(2):
+            try:
+                envelope = cast(
+                    dict[str, object],
+                    await self.client.post(
+                        "v1.0/$batch",
+                        data={"requests": requests},
+                        headers=self.headers,
+                        retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+                    ),
+                )
+            except aiohttp.ClientResponseError as exc:
+                if exc.status == 401 and attempt == 0 and self.can_refresh_token:
+                    await self.refresh_token()
+                    continue
+                raise
+            responses = envelope.get("responses")
+            if not isinstance(responses, list):
+                raise ValueError("Graph metadata batch has no responses")
+            expected = {str(index): item_id for index, item_id in enumerate(ids)}
+            results: dict[str, SharePointItemLookup] = {}
+            for raw in cast(list[object], responses):
+                if not isinstance(raw, dict):
+                    raise ValueError("Invalid Graph metadata response")
+                response = cast(dict[str, object], raw)
+                response_id = response.get("id")
+                status = response.get("status")
+                if not isinstance(response_id, str) or response_id not in expected:
+                    raise ValueError("Unknown Graph metadata response id")
+                item_id = expected[response_id]
+                if item_id in results or type(status) is not int:
+                    raise ValueError("Duplicate or invalid Graph metadata response")
+                item: SharePointItem | None = None
+                if status == 200:
+                    body = response.get("body")
+                    if not isinstance(body, dict):
+                        raise ValueError("Graph metadata response has no item")
+                    body_fields = cast(dict[str, object], body)
+                    if body_fields.get("id") != item_id:
+                        raise ValueError(
+                            "Graph metadata response does not match the item"
+                        )
+                    item = cast(SharePointItem, body_fields)
+                results[item_id] = SharePointItemLookup(status=status, item=item)
+            if len(results) != len(ids):
+                raise ValueError("Incomplete Graph metadata batch")
+            if (
+                attempt == 0
+                and self.can_refresh_token
+                and any(result.status == 401 for result in results.values())
+            ):
+                await self.refresh_token()
+                continue
+            return results
+        raise RuntimeError("Graph metadata batch could not authenticate")
+
     async def get_folder_items(
         self,
         site_id: str,
@@ -971,7 +1060,15 @@ class SharePointContentClient(BaseClient):
                 new_delta_token = delta_token
 
             logger.info(f"Retrieved {len(all_changes)} changes for drive {drive_id}")
-            return all_changes, new_delta_token
+            latest: dict[str, SharePointItem] = {}
+            without_id: list[SharePointItem] = []
+            for item in all_changes:
+                item_id = item.get("id")
+                if item_id:
+                    latest[item_id] = item
+                else:
+                    without_id.append(item)
+            return [*latest.values(), *without_id], new_delta_token
 
         except aiohttp.ClientResponseError as e:
             if e.status == 410:

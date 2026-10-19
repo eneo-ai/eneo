@@ -1007,15 +1007,13 @@ class SharePointContentService:
     ) -> Optional[SharePointItem]:
         """Where an entry without a path is, when that decides anything; else ``None``.
 
-        Folders were placed before the entries were applied. A file is asked
-        about only when it is indexed: there is nothing to lose otherwise.
+        Folders were placed before the entries were applied. New files need
+        placement too: skipping an unindexed file would advance past its only
+        delta event and leave it missing until a full sync.
         """
         item_id = item.get("id", "")
         if is_folder:
             return delta_pass.placements.get(item_id)
-        indexed_ids = await self._pass_indexed_ids(delta_pass, item.get("name", ""))
-        if indexed_ids is None or item_id not in indexed_ids:
-            return None
         return await self._locate_entry(delta_pass, item, kind="file")
 
     async def _locate_entry(
@@ -2457,8 +2455,8 @@ class SharePointContentService:
                 len(indexed),
                 cap,
             )
-            orphan_ids = await self._orphans_confirmed_gone(
-                client, drive_id, orphan_ids
+            orphan_ids = await self._verified_orphans(
+                client, drive_id, orphan_ids, folder_id=folder_id
             )
             kept = len(orphans) - len(orphan_ids)
             if kept:
@@ -2466,7 +2464,7 @@ class SharePointContentService:
                     f"Orphan cleanup limited: {len(orphans)} of {len(indexed)} "
                     "indexed documents are missing from SharePoint (above the safety "
                     f"cap of {cap}); removed {len(orphan_ids)} SharePoint confirmed "
-                    f"deleted, kept {kept} it still has or could not confirm"
+                    f"deleted or outside the scope, kept {kept} it could not confirm"
                 )
             if not orphan_ids:
                 return
@@ -2486,32 +2484,64 @@ class SharePointContentService:
                 reason="reconcile-orphan",
             )
 
-    @staticmethod
-    async def _orphans_confirmed_gone(
-        client: SharePointContentClient, drive_id: str, orphan_ids: list[str]
+    async def _verified_orphans(
+        self,
+        client: SharePointContentClient,
+        drive_id: str,
+        orphan_ids: list[str],
+        *,
+        folder_id: str | None,
     ) -> list[str]:
-        """The orphans Graph answers 404 or 410 for, asked one by one.
+        """Confirm deletions or moves out of a folder in bounded Graph batches.
 
-        A random sample when there are more than a sync asks about, so items
-        that keep answering never shut out the rest. Asking stops at the first
-        answer that says nothing about the item (throttling, an outage).
+        Refresh the selected folder's path before trusting a returned item's
+        path. A failure to locate the scope disables move-based cleanup, never
+        falls back to its stored path. 403, missing paths and transient errors
+        cannot prove removal. Stop sending batches after an outage/throttle.
         """
         if len(orphan_ids) > _RECONCILE_MAX_VERIFIED_ORPHANS:
             orphan_ids = random.sample(orphan_ids, _RECONCILE_MAX_VERIFIED_ORPHANS)
-        gone: list[str] = []
-        for item_id in orphan_ids:
+        scope_path: str | None = None
+        if folder_id:
             try:
-                await client.get_file_metadata(drive_id=drive_id, item_id=item_id)
-            except aiohttp.ClientResponseError as exc:
-                if exc.status in _GONE_HTTP_STATUSES:
-                    gone.append(item_id)
-                    continue
-                if exc.status in _ITEM_LEVEL_HTTP_STATUSES:
-                    continue
+                scope_path = await self._current_scope_folder_path(
+                    client, drive_id, folder_id
+                )
+            except ScopeFolderUnavailable as exc:
                 logger.warning("Stopped verifying orphans: %s", exc)
-                break
+                return []
+        gone: list[str] = []
+        for offset in range(0, len(orphan_ids), SharePointContentClient.BATCH_SIZE):
+            batch = orphan_ids[offset : offset + SharePointContentClient.BATCH_SIZE]
+            try:
+                results = await client.get_item_metadata_batch(drive_id, batch)
             except Exception as exc:
                 logger.warning("Stopped verifying orphans: %s", exc)
+                break
+            unavailable = False
+            for item_id in batch:
+                result = results.get(item_id)
+                if result is None:
+                    unavailable = True
+                elif result.status in _GONE_HTTP_STATUSES:
+                    gone.append(item_id)
+                elif result.status == 200:
+                    item = result.item
+                    if (
+                        item is not None
+                        and scope_path
+                        and self._parent_path(item)
+                        and not self._is_item_in_folder_scope(
+                            item, folder_id, scope_path, selected_item_type="folder"
+                        )
+                    ):
+                        gone.append(item_id)
+                elif result.status != 403:
+                    unavailable = True
+            if unavailable:
+                logger.warning(
+                    "Stopped verifying orphans: Graph could not answer a batch"
+                )
                 break
         return gone
 

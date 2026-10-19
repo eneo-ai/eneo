@@ -19,8 +19,8 @@ from eneo.integration.domain.entities.integration_knowledge import (
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     DeltaTokenExpiredException,
     MissingDownloadUrlError,
+    SharePointItemLookup,
 )
-from eneo.integration.infrastructure.content_service import sharepoint_content_service
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
     ScopeFolderUnavailable,
     SharePointContentService,
@@ -2594,7 +2594,9 @@ class TestFullSyncReconciliation:
                 service, "_delete_local_sharepoint_item", AsyncMock()
             ) as mock_delete:
                 await service._reconcile_indexed_blobs(
-                    client=AsyncMock(),
+                    client=AsyncMock(
+                        get_item_metadata_batch=AsyncMock(return_value={})
+                    ),
                     integration_knowledge=ik,
                     resource_type="site",
                     site_id="site-1",
@@ -3556,7 +3558,7 @@ class TestReconcileWarnings:
             service, "_enumerate_authoritative_item_ids", AsyncMock(return_value=set())
         ):
             await service._reconcile_indexed_blobs(
-                client=AsyncMock(),
+                client=AsyncMock(get_item_metadata_batch=AsyncMock(return_value={})),
                 integration_knowledge=ik,
                 resource_type="site",
                 site_id="site-1",
@@ -3617,8 +3619,7 @@ class TestReconcileWarnings:
 
 
 class TestReconcileAboveTheCap:
-    """Above the safety cap the listing is not trusted, but Graph's answer about
-    each orphan is: a large deletion is cleaned, an incomplete listing is not."""
+    """Only explicit Graph evidence can remove an orphan above the cap."""
 
     @pytest.fixture
     def ik(self):
@@ -3626,7 +3627,9 @@ class TestReconcileAboveTheCap:
         ik.id = uuid4()
         return ik
 
-    async def _reconcile(self, service, mock_dependencies, ik, orphan_ids, client):
+    async def _reconcile(
+        self, service, mock_dependencies, ik, orphan_ids, client, folder_id=None
+    ):
         mock_dependencies[
             "info_blob_service"
         ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
@@ -3649,86 +3652,147 @@ class TestReconcileAboveTheCap:
                 resource_type="site",
                 site_id="site-1",
                 drive_id="drive-1",
-                folder_id=None,
+                folder_id=folder_id,
                 stats=stats,
             )
         return stats, [call.kwargs["item_id"] for call in delete.await_args_list]
 
+    def _client(self, answers):
+        client = AsyncMock()
+
+        async def batch(drive_id, item_ids):
+            return {item_id: answers(item_id) for item_id in item_ids}
+
+        client.get_item_metadata_batch.side_effect = batch
+        return client
+
     async def test_orphans_graph_confirms_gone_are_removed_and_the_rest_reported(
         self, service, mock_dependencies, ik
     ):
-        orphan_ids = [f"item-{i}" for i in range(40)]
-        gone = {f"item-{i}": 404 if i % 4 else 410 for i in range(0, 40, 2)}
-
-        async def metadata(*, drive_id, item_id):
-            if item_id in gone:
-                raise _http_error(gone[item_id], "Not Found")
-            return {"id": item_id}
-
-        client = AsyncMock()
-        client.get_file_metadata.side_effect = metadata
-
-        stats, removed = await self._reconcile(
-            service, mock_dependencies, ik, orphan_ids, client
+        ids = [str(i) for i in range(40)]
+        client = self._client(
+            lambda item_id: SharePointItemLookup(404 if int(item_id) % 2 == 0 else 403)
         )
-
-        assert sorted(removed) == sorted(gone)
-        assert client.get_file_metadata.await_count == 40
-        assert "40 of 40" in stats["reconcile_warning"]
-        assert "safety cap" in stats["reconcile_warning"]
+        stats, removed = await self._reconcile(
+            service, mock_dependencies, ik, ids, client
+        )
+        assert removed == ids[::2]
+        assert client.get_item_metadata_batch.await_count == 2
+        client.get_file_metadata.assert_not_awaited()
         assert "removed 20" in stats["reconcile_warning"]
         assert "kept 20" in stats["reconcile_warning"]
 
     async def test_a_large_deletion_graph_confirms_in_full_is_cleaned_quietly(
         self, service, mock_dependencies, ik
     ):
-        client = AsyncMock()
-        client.get_file_metadata.side_effect = _http_error(404, "Not Found")
-
+        client = self._client(lambda _: SharePointItemLookup(410))
         stats, removed = await self._reconcile(
-            service, mock_dependencies, ik, [f"item-{i}" for i in range(30)], client
+            service, mock_dependencies, ik, [str(i) for i in range(30)], client
         )
-
         assert len(removed) == 30
         assert "reconcile_warning" not in stats
 
+    @pytest.mark.parametrize("status", [429, 503, 401])
     async def test_verification_stops_when_graph_cannot_answer(
-        self, service, mock_dependencies, ik
+        self, service, mock_dependencies, ik, status
     ):
-        """A failing Graph says nothing about the items; asking it about every
-        orphan would only stretch the sync."""
-        client = AsyncMock()
-        client.get_file_metadata.side_effect = [
-            _http_error(404, "Not Found"),
-            _http_error(503, "Service Unavailable"),
-            _http_error(404, "Not Found"),
-        ]
-
-        stats, removed = await self._reconcile(
-            service, mock_dependencies, ik, [f"item-{i}" for i in range(30)], client
+        client = self._client(
+            lambda item_id: SharePointItemLookup(404 if item_id == "0" else status)
         )
-
-        assert removed == ["item-0"]
-        assert client.get_file_metadata.await_count == 2
-        assert "removed 1" in stats["reconcile_warning"]
+        stats, removed = await self._reconcile(
+            service, mock_dependencies, ik, [str(i) for i in range(30)], client
+        )
+        assert removed == ["0"]
+        assert client.get_item_metadata_batch.await_count == 1
         assert "kept 29" in stats["reconcile_warning"]
 
     async def test_verification_is_bounded_per_sync(
-        self, service, mock_dependencies, ik, monkeypatch
+        self, service, mock_dependencies, ik
     ):
-        monkeypatch.setattr(
-            sharepoint_content_service, "_RECONCILE_MAX_VERIFIED_ORPHANS", 25
-        )
-        client = AsyncMock()
-        client.get_file_metadata.side_effect = _http_error(404, "Not Found")
-
+        client = self._client(lambda _: SharePointItemLookup(404))
         stats, removed = await self._reconcile(
-            service, mock_dependencies, ik, [f"item-{i}" for i in range(60)], client
+            service, mock_dependencies, ik, [str(i) for i in range(700)], client
         )
+        assert client.get_item_metadata_batch.await_count == 25
+        assert all(
+            len(call.args[1]) == 20
+            for call in client.get_item_metadata_batch.await_args_list
+        )
+        assert len(removed) == 500
+        assert "kept 200" in stats["reconcile_warning"]
 
-        assert client.get_file_metadata.await_count == 25
-        assert len(removed) == 25
-        assert "kept 35" in stats["reconcile_warning"]
+    async def test_moves_out_are_verified_against_the_current_scope_path(
+        self, service, mock_dependencies, ik
+    ):
+        def answer(item_id):
+            path = "/RenamedScope/Deep" if int(item_id) % 2 else "/Elsewhere"
+            return SharePointItemLookup(
+                200, {"id": item_id, "parentReference": {"path": path}}
+            )
+
+        client = self._client(answer)
+        client.get_file_metadata.return_value = {
+            "id": "scope",
+            "name": "RenamedScope",
+            "parentReference": {"path": "/drives/d/root:"},
+        }
+        ids = [str(i) for i in range(30)]
+        stats, removed = await self._reconcile(
+            service, mock_dependencies, ik, ids, client, folder_id="scope"
+        )
+        assert removed == ids[::2]
+        assert "kept 15" in stats["reconcile_warning"]
+
+    @pytest.mark.parametrize("status", [429, 503])
+    async def test_an_unavailable_scope_never_allows_cleanup(
+        self, service, mock_dependencies, ik, status
+    ):
+        client = self._client(lambda _: SharePointItemLookup(404))
+        client.get_file_metadata.side_effect = _http_error(status, "unavailable")
+        _, removed = await self._reconcile(
+            service,
+            mock_dependencies,
+            ik,
+            [str(i) for i in range(30)],
+            client,
+            folder_id="scope",
+        )
+        assert removed == []
+        client.get_item_metadata_batch.assert_not_awaited()
+
+    async def test_no_path_is_not_evidence_of_a_move(
+        self, service, mock_dependencies, ik
+    ):
+        client = self._client(
+            lambda item_id: SharePointItemLookup(200, {"id": item_id})
+        )
+        client.get_file_metadata.return_value = {
+            "id": "scope",
+            "name": "Scope",
+            "parentReference": {"path": "/drives/d/root:"},
+        }
+        _, removed = await self._reconcile(
+            service,
+            mock_dependencies,
+            ik,
+            [str(i) for i in range(30)],
+            client,
+            folder_id="scope",
+        )
+        assert removed == []
+
+    async def test_a_failed_batch_keeps_every_unverified_item(
+        self, service, mock_dependencies, ik
+    ):
+        client = AsyncMock()
+        client.get_item_metadata_batch.side_effect = ValueError(
+            "Incomplete Graph metadata batch"
+        )
+        _, removed = await self._reconcile(
+            service, mock_dependencies, ik, [str(i) for i in range(30)], client
+        )
+        assert removed == []
+        assert client.get_item_metadata_batch.await_count == 1
 
 
 class TestFullSyncUsesStoredDrive:
@@ -4445,32 +4509,56 @@ class TestDeltaFolderScopeOrdering:
         assert self._removed(mock_dependencies) == []
         assert folder_scoped.delta_token == "existing-delta-token-123"
 
-    async def test_an_unindexed_pathless_file_costs_nothing(
-        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    @pytest.mark.parametrize(
+        "path, indexed", [("/Documents/A/Deep", 1), ("/Documents/Other", 0)]
+    )
+    async def test_a_new_pathless_file_is_located_before_advancing_the_token(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped, path, indexed
     ):
         changes = [
             {
-                "id": "elsewhere-1",
-                "name": "other.docx",
-                "parentReference": {"id": "other-folder"},
+                "id": "new-1",
+                "name": "new.docx",
+                "parentReference": {"id": "unchanged-parent"},
             }
         ]
-        self._indexed(mock_dependencies, "a-1")
-
+        self._indexed(mock_dependencies)
         client, _ = await self._run_delta(
             service,
             mock_dependencies,
             mock_oauth_token,
             folder_scoped,
             changes,
-            folder_metadata=self._graph_places(),
+            folder_metadata=self._graph_places(**{"new-1": path}),
         )
-
-        client.get_file_metadata.assert_awaited_once_with(
-            drive_id="drive-123", item_id="folder-a"
-        )
-        assert self._removed(mock_dependencies) == []
+        client.get_file_metadata.assert_any_await(drive_id="drive-123", item_id="new-1")
+        assert client.get_file_extraction_by_id.await_count == indexed
         assert folder_scoped.delta_token == "new-token"
+
+    @pytest.mark.parametrize("status", [429, 503])
+    async def test_a_new_file_with_unavailable_location_keeps_the_token(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped, status
+    ):
+        self._indexed(mock_dependencies)
+        with pytest.raises(SyncItemsFailed):
+            await self._run_delta(
+                service,
+                mock_dependencies,
+                mock_oauth_token,
+                folder_scoped,
+                [
+                    {
+                        "id": "new-1",
+                        "name": "new.docx",
+                        "parentReference": {"id": "unchanged-parent"},
+                    }
+                ],
+                folder_metadata=self._graph_places(
+                    **{"new-1": _http_error(status, "unavailable")}
+                ),
+            )
+        assert self._removed(mock_dependencies) == []
+        assert folder_scoped.delta_token == "existing-delta-token-123"
 
     @pytest.mark.parametrize(
         ("graph_answer", "indexed_files", "removed", "indexed_now"),
