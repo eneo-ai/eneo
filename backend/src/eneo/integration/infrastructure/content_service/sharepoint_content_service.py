@@ -1116,10 +1116,14 @@ class SharePointContentService:
                 resolved.add(item_id)
             else:
                 passes[item_id] = failed
+        # Refusals still here were put down to the identity, not the files.
+        refused = stats.get("refused_downloads", {})
         resolved.update(
             item_id
             for item_id in failed_before
-            if item_id not in passes and (attempted is None or item_id in attempted)
+            if item_id not in passes
+            and item_id not in refused
+            and (attempted is None or item_id in attempted)
         )
         try:
             await self._ledger.record_failed_passes(knowledge_id, passes)

@@ -20,6 +20,7 @@ from eneo.integration.infrastructure.content_service.sharepoint_content_service 
 )
 from eneo.integration.infrastructure.content_service.sharepoint_results import (
     DeltaBaselineUnavailable,
+    SyncAccessDenied,
     SyncItemsFailed,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_sync_ledger import (
@@ -383,6 +384,41 @@ class TestFullSyncFailures:
         )
         assert ik.delta_token == "token-2"
         assert ledger.failed == {}
+
+
+class TestRetriesWhileAccessIsLost:
+    async def test_retries_refused_for_the_identity_stay_recorded(
+        self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
+    ):
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        ledger.failed = {"x": 1, "y": 1, "z": 1}
+
+        async def metadata(*, drive_id, item_id):
+            return _root_file(item_id)
+
+        with patch(_CLIENT) as client_class:
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=([], "token-2")),
+                get_file_metadata=AsyncMock(side_effect=metadata),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=_http_error(403, "Forbidden")
+                ),
+            )
+            with pytest.raises(SyncAccessDenied):
+                await _committed(
+                    sqlite_session,
+                    service,
+                    lambda: service.process_delta_changes(
+                        token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                    ),
+                )
+
+        assert ik.delta_token == "token-1"
+        assert ledger.failed == {"x": 1, "y": 1, "z": 1}
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
 
 
 class TestDeltaBaselineMint:
