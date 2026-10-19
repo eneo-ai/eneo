@@ -385,6 +385,7 @@ class SharePointIndex:
                     what=reason,
                     detail=user_visible_error(e),
                 ),
+                item_id=item_id,
             )
             return None
 
@@ -521,7 +522,9 @@ class SharePointIndex:
                 )
         except Exception as e:
             logger.error(f"Error processing file {item_name}: {e}", exc_info=True)
-            sync_results.count_failure(stats, error_skipped(item_name, e))
+            sync_results.count_failure(
+                stats, error_skipped(item_name, e), item_id=item_id
+            )
 
     async def _extract_file(
         self,

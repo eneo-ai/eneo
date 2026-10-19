@@ -68,6 +68,25 @@ class SyncAccessDenied(SyncItemsFailed):
         )
 
 
+class DeltaBaselineUnavailable(SyncItemsFailed):
+    """A full sync finished without a delta token to continue from.
+
+    Without one every change notification starts another full sync, so the
+    pass is not a success: it is recorded as failed and the next sync is a
+    full one that tries again.
+    """
+
+    def __init__(self, summary: SyncStats, *, detail: str | None) -> None:
+        cause = f" ({detail})" if detail else ""
+        super().__init__(
+            summary,
+            message=(
+                f"SharePoint change tracking could not be started{cause}; the "
+                "documents are imported and the next sync is a full one"
+            ),
+        )
+
+
 def failure_summary(failure: Exception) -> SyncStats | None:
     return failure.summary if isinstance(failure, SyncItemsFailed) else None
 
@@ -163,11 +182,41 @@ def count_skip(stats: SyncStats, detail: SkippedDetail) -> None:
     stats["skipped_details"].append(detail)
 
 
-def count_failure(stats: SyncStats, detail: SkippedDetail) -> None:
-    """Count an item the pass could not finish; the pass must not move past it."""
+def count_failure(
+    stats: SyncStats, detail: SkippedDetail, *, item_id: str | None = None
+) -> None:
+    """Count an item the pass could not finish; the pass must not move past it.
+
+    ``item_id`` names the drive item a later pass can retry on its own.
+    """
     stats["failed_items"] = stats.get("failed_items", 0) + 1
     stats["skipped_items"] += 1
     stats["skipped_details"].append({**detail, "retry": True})
+    if item_id:
+        stats.setdefault("failures_by_item", {}).setdefault(item_id, []).append(
+            len(stats["skipped_details"]) - 1
+        )
+
+
+def failed_item_ids(stats: SyncStats) -> list[str]:
+    return list(stats.get("failures_by_item", {}))
+
+
+def unretryable_failures(stats: SyncStats) -> int:
+    """Failures no item id names; only a full sync can make up for them."""
+    named = sum(len(indexes) for indexes in stats.get("failures_by_item", {}).values())
+    return stats.get("failed_items", 0) - named
+
+
+def set_aside(stats: SyncStats, item_id: str, *, attempts: int) -> None:
+    """Turn the item's failures into skips, so the pass may move past it."""
+    details = stats["skipped_details"]
+    for index in stats.get("failures_by_item", {}).pop(item_id, []):
+        failure = details[index]
+        details[index] = skipped_by_code(
+            failure["file"], "set_aside", attempts=attempts, detail=failure["reason"]
+        )
+        stats["failed_items"] = stats.get("failed_items", 0) - 1
 
 
 def initialize_stats() -> SyncStats:
