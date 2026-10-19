@@ -20,9 +20,9 @@ export type IntegrationSource = {
 
 export type SourceTab = "content" | "problems" | "activity";
 
-export type SourceState = "syncing" | "attention" | "never" | "empty" | "ok";
+export type SourceState = "syncing" | "queued" | "attention" | "never" | "empty" | "ok";
 
-export type ItemState = "syncing" | "error" | "never" | "empty" | "ok";
+export type ItemState = "syncing" | "queued" | "error" | "never" | "empty" | "ok";
 
 export type SourceSummary = {
   state: SourceState;
@@ -32,10 +32,17 @@ export type SourceSummary = {
   failedItems: IntegrationKnowledge[];
   /** Items that have not finished a first sync and are not syncing now. */
   waitingItems: number;
+  /** Items whose sync this person queued and that no worker has reported on yet. */
+  queuedItems: number;
   /** Every failure is the organisation's SharePoint sign-in, which only an admin can fix. */
   credentialsFailed: boolean;
   progress: SyncProgressSummary | null;
 };
+
+/** Items whose sync was queued from here and that no worker has reported on yet. */
+export type QueuedIds = ReadonlySet<string>;
+
+const NO_QUEUED: QueuedIds = new Set();
 
 function wrapperName(items: IntegrationKnowledge[]): string {
   const named = items.find(
@@ -131,6 +138,18 @@ export function sourceHref(
   return search ? `${base}?${search}` : base;
 }
 
+/** An item's page: its wrapper's with the item's folder chosen, or its own. */
+export function itemHref(
+  spaceRouteId: string,
+  item: IntegrationKnowledge,
+  tab?: SourceTab
+): string {
+  const wrapperId = wrapperIdOf(item);
+  return wrapperId
+    ? sourceHref(spaceRouteId, { kind: "wrapper", id: wrapperId }, { folder: item.id, tab })
+    : sourceHref(spaceRouteId, { kind: "item", id: item.id }, { tab });
+}
+
 /** Whether SharePoint tells Eneo about changes to the item, from when its subscription expires. */
 export type WatchState = "active" | "expiring" | "expired" | "none";
 
@@ -158,15 +177,21 @@ export function watchStateLabel(state: WatchState, t: Translate): string {
   return t(WATCH_STATE_LABEL[state]);
 }
 
-export function itemState(item: IntegrationKnowledge, progress: ProgressById): ItemState {
+export function itemState(
+  item: IntegrationKnowledge,
+  progress: ProgressById,
+  queued: QueuedIds = NO_QUEUED
+): ItemState {
   if (progress[item.id]) return "syncing";
+  if (queued.has(item.id)) return "queued";
   const state = summarizeIntegrationSync(item).state;
   return state === "success" ? "ok" : state;
 }
 
 export function summarizeSource(
   items: readonly IntegrationKnowledge[],
-  progress: ProgressById
+  progress: ProgressById,
+  queued: QueuedIds = NO_QUEUED
 ): SourceSummary {
   let documentCount = 0;
   let lastSyncedAt: string | null = null;
@@ -179,15 +204,17 @@ export function summarizeSource(
     lastSyncedAt = latestTime(lastSyncedAt, summary.lastSyncedAt);
     lastSyncAttemptedAt = latestTime(lastSyncAttemptedAt, summary.lastSyncAttemptedAt);
     if (summary.state === "error") failedItems.push(item);
-    states.push(itemState(item, progress));
+    states.push(itemState(item, progress, queued));
   }
   const syncing = items.flatMap((item) => {
     const entry = progress[item.id];
     return entry ? [entry] : [];
   });
+  const queuedItems = states.filter((s) => s === "queued").length;
 
   let state: SourceState;
   if (syncing.length > 0) state = "syncing";
+  else if (queuedItems > 0) state = "queued";
   else if (failedItems.length > 0) state = "attention";
   else if (states.every((s) => s === "never")) state = "never";
   else if (documentCount === 0) state = "empty";
@@ -200,11 +227,17 @@ export function summarizeSource(
     lastSyncAttemptedAt,
     failedItems,
     waitingItems: states.filter((s) => s === "never").length,
+    queuedItems,
     credentialsFailed:
       failedItems.length > 0 &&
       failedItems.every((item) => isCredentialsError(item.metadata?.last_sync_error)),
     progress: combineSyncProgress(syncing)
   };
+}
+
+/** A sync of the source is queued or running: starting one now would only queue a second. */
+export function isSyncActive(summary: Pick<SourceSummary, "progress" | "queuedItems">): boolean {
+  return summary.progress !== null || summary.queuedItems > 0;
 }
 
 /** The folders waiting for a first sync, where the source's state alone reads as more settled. */
@@ -261,7 +294,7 @@ export function matchesSourceFilter(summary: SourceSummary, filter: SourceFilter
     case "attention":
       return summary.failedItems.length > 0;
     case "syncing":
-      return summary.progress !== null;
+      return isSyncActive(summary);
     case "never":
       return summary.waitingItems > 0;
     default:
@@ -308,6 +341,8 @@ export function sourceStateStatus(state: SourceState | ItemState): SourceStatus 
   switch (state) {
     case "syncing":
       return { tone: "accent", labelKey: "integration_source_state_syncing", isPulsing: true };
+    case "queued":
+      return { tone: "accent", labelKey: "integration_source_state_queued" };
     case "attention":
       return { tone: "error", labelKey: "integration_source_state_attention" };
     case "error":

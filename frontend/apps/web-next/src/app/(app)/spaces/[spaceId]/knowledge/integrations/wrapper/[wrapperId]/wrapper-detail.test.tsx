@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import type { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router, setRoute } from "@/test/navigation";
-import { renderInApp, renderToHtml } from "@/test/render";
+import { renderInApp, renderToHtml, testQueryClient } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
 
 type Answer = { data?: unknown; error?: unknown; status?: number };
@@ -124,6 +125,8 @@ vi.mock("@/lib/api/browser", () => {
 });
 
 import { WrapperActions } from "@/features/knowledge/integrations/actions";
+import { resetPendingSyncs } from "@/features/knowledge/integrations/pending-syncs";
+import type { LoadedItems } from "@/features/knowledge/integrations/use-source-items";
 import type { IntegrationKnowledge } from "@/features/knowledge/knowledge";
 import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
 import { WrapperDetail } from "./wrapper-detail.client";
@@ -143,6 +146,7 @@ afterEach(() => {
   jobs.trackJob.mockClear();
   state.onDelete = () => {};
   links.length = 0;
+  resetPendingSyncs();
   vi.restoreAllMocks();
   window.history.replaceState(null, "", "/");
 });
@@ -155,12 +159,21 @@ const folder = { wrapper_id: "w1", wrapper_name: "Byggnad" };
 
 const WRAPPER_PAGE = "/spaces/space-1/knowledge/integrations/wrapper/w1";
 
+/** The wrapper's items as the server page found them. */
+function served(space = state.space as Space): LoadedItems {
+  return {
+    items: space.knowledge.integration_knowledge_list.items.filter(
+      (item) => item.wrapper_id === "w1"
+    )
+  };
+}
+
 function show(items: Record<string, unknown>[], route = WRAPPER_PAGE) {
   state.space = makeSpace({
     integrations: items.map((item) => makeIntegration({ ...folder, ...item }))
   });
   setRoute(route);
-  return renderInApp(<WrapperDetail wrapperId="w1" />);
+  return renderInApp(<WrapperDetail wrapperId="w1" loaded={served()} />);
 }
 
 const job = (itemId: string) => ({ id: `job-${itemId}`, name: itemId, status: "queued" });
@@ -556,8 +569,8 @@ describe("WrapperDetail in Swedish", () => {
     });
     setRoute("/spaces/space-1/knowledge/integrations/wrapper/w1");
     const server = document.createElement("div");
-    server.innerHTML = renderToHtml(<WrapperDetail wrapperId="w1" />);
-    const { container } = renderInApp(<WrapperDetail wrapperId="w1" />);
+    server.innerHTML = renderToHtml(<WrapperDetail wrapperId="w1" loaded={served()} />);
+    const { container } = renderInApp(<WrapperDetail wrapperId="w1" loaded={served()} />);
 
     for (const root of [server, container]) {
       expect(folderOrder(root)).toEqual(["/Arkiv", "/Vuxen", "/Äldreomsorg"]);
@@ -570,8 +583,8 @@ describe("WrapperDetail in Swedish", () => {
       integrations: folders.map((item) => makeIntegration({ ...folder, ...item }))
     });
     setRoute("/spaces/space-1/knowledge/integrations/wrapper/w1");
-    const html = renderToHtml(<WrapperDetail wrapperId="w1" />);
-    renderInApp(<WrapperDetail wrapperId="w1" />);
+    const html = renderToHtml(<WrapperDetail wrapperId="w1" loaded={served()} />);
+    renderInApp(<WrapperDetail wrapperId="w1" loaded={served()} />);
 
     // 2 600 + 12 + 12, grouped with a no-break space as in Swedish (the
     // queries below see it as a plain space; not "2,624" as in English).
@@ -735,6 +748,8 @@ describe("WrapperDetail navigation", () => {
     // The list's row menu deletes it ...
     const items = [makeIntegration({ ...folder, ...mall })] as IntegrationKnowledge[];
     state.space = makeSpace({ integrations: items });
+    // What the server found then, and what the router's cache keeps of it.
+    const before = served(state.space as Space);
     state.onDelete = () => {
       state.space = makeSpace();
     };
@@ -751,9 +766,13 @@ describe("WrapperDetail navigation", () => {
 
     // ... and Back shows its page again, from the router's cache.
     setRoute(WRAPPER_PAGE);
-    renderInApp(<WrapperDetail wrapperId="w1" />, { queryClient: list.queryClient });
+    renderInApp(<WrapperDetail wrapperId="w1" loaded={before} />, {
+      queryClient: list.queryClient
+    });
 
-    expect(screen.getByRole("heading", { level: 1, name: "Inga resultat hittades" })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Inga resultat hittades" })
+    ).toBeTruthy();
   });
 
   it("shows the history of the folder chosen on Activity, and keeps that folder on Contents", async () => {
@@ -1031,7 +1050,9 @@ describe("WrapperDetail problems", () => {
     });
     first.queryClient.setQueryData(["spaces", "space-1"], state.space);
     setRoute(route);
-    renderInApp(<WrapperDetail wrapperId="w1" />, { queryClient: first.queryClient });
+    renderInApp(<WrapperDetail wrapperId="w1" loaded={served()} />, {
+      queryClient: first.queryClient
+    });
 
     // The cached lists were read before the sync; they are not shown as current.
     expect(await screen.findByRole("button", { name: /Dokument 3\.docx/ })).toBeTruthy();
@@ -1099,5 +1120,174 @@ describe("WrapperDetail problems", () => {
     });
     await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
     await waitFor(() => expect(liveRegion()).toBe("Senaste synken av 2 mappar misslyckades"));
+  });
+});
+
+function running(itemId: string, done: number) {
+  return {
+    integration_knowledge_id: itemId,
+    sync_type: "full",
+    phase: "processing",
+    started_at: "2026-10-19T08:00:00Z",
+    updated_at: "2026-10-19T08:01:00Z",
+    total: 12,
+    done,
+    indexed: done - 1,
+    unchanged: 0,
+    skipped: 1,
+    deleted: 0
+  };
+}
+
+describe("WrapperDetail sync status", () => {
+  const QUEUED_NOTICE = "En synk är köad och startar så snart servern tar sig an den.";
+  const refreshProgress = (queryClient: QueryClient) =>
+    act(() =>
+      queryClient.invalidateQueries({ queryKey: ["integrations", "sync-progress", "space-1"] })
+    );
+
+  it("shows a resync it started as queued until the worker reports, and offers no second one", async () => {
+    const { queryClient } = show([mall]);
+    const { said } = recordAnnouncements();
+
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Byggnad" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Synka om alla objekt" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Synka om alla objekt" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Starta fullständig synk" }));
+
+    expect(await screen.findByText(QUEUED_NOTICE)).toBeTruthy();
+    expect(screen.getByText("Köad")).toBeTruthy();
+    await waitFor(() => expect(said).toContain("Synk av Byggnad köad"));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Byggnad" }));
+    const busy = await screen.findByRole("menuitem", {
+      name: "En synk är redan köad eller pågår"
+    });
+    expect(busy.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.keyDown(busy, { key: "Escape" });
+
+    // The worker takes it: the progress tells the rest.
+    state.progress = [running("i1", 4)];
+    await refreshProgress(queryClient);
+    expect(await screen.findByRole("heading", { name: "Synk pågår" })).toBeTruthy();
+    expect(screen.queryByText(QUEUED_NOTICE)).toBeNull();
+    await waitFor(() => expect(said).toContain("Synk av Byggnad har startat"));
+
+    state.progress = [];
+    await refreshProgress(queryClient);
+    await waitFor(() => expect(said).toContain("Synk av Byggnad pågår inte längre"));
+    expect(screen.queryByText(QUEUED_NOTICE)).toBeNull();
+  });
+
+  it("marks a folder queued in the folder list by its icon and its name", async () => {
+    show([mall, protokoll]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Byggnad" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Synka om alla objekt" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Synka om alla objekt" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Starta fullständig synk" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    const nav = screen.getByRole("navigation", { name: "Mappar" });
+    const mallar = await within(nav).findByRole("link", { name: /Mallar\s*, Köad/ });
+    expect(mallar.querySelector("svg")?.getAttribute("class")).toContain("lucide-clock");
+    // Each folder's own menu in the overview offers no second sync either.
+    const overview = screen.getByRole("table", { name: "Mappar i Byggnad" });
+    const row = within(overview).getByRole("link", { name: "Protokoll" }).closest("tr")!;
+    const trigger = within(row).getByRole("button", { name: "Fler åtgärder för Protokoll" });
+    fireEvent.click(trigger);
+    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("true"));
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+    const busy = within(menu).getByRole("menuitem", { name: "En synk är redan köad eller pågår" });
+    expect(busy.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("speaks a changed number of problems, not the first one it learns", async () => {
+    state.skipped.i1 = skippedList("scan.pdf");
+    const { queryClient } = show([mall, protokoll]);
+    const tab = screen.getByRole("tab", { name: /Problem/ });
+    expect(await within(tab).findByText("1")).toBeTruthy();
+    const { said } = recordAnnouncements();
+
+    // A sync of Protokoll finished meanwhile and could not read a file of its own.
+    state.skipped.i2 = {
+      items: [
+        {
+          file: "stor.pdf",
+          reason: "File too large (exceeds 50 MB limit)",
+          code: "file_too_large" as const,
+          params: { limit_mb: "50" },
+          retry: false
+        }
+      ],
+      total: 1,
+      truncated: false,
+      synced_at: "2026-10-19T09:00:00Z"
+    };
+    state.space = makeSpace({
+      integrations: [
+        mall,
+        {
+          ...protokoll,
+          metadata: { ...protokoll.metadata, last_synced_at: "2026-10-19T09:00:00Z" }
+        }
+      ].map((item) => makeIntegration({ ...folder, ...item }))
+    });
+    await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
+
+    expect(await within(tab).findByText("2")).toBeTruthy();
+    await waitFor(() => expect(said).toEqual(["Problem: 2"]));
+  });
+
+  it("shows a wrapper imported since the space was cached, as the server page found it", async () => {
+    const imported = makeSpace({
+      integrations: [mall, protokoll].map((item) => makeIntegration({ ...folder, ...item }))
+    });
+    // The browser's space is from before the import, and still fresh enough not to be read again.
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(["spaces", "space-1"], makeSpace(), { updatedAt: Date.now() - 5_000 });
+    state.space = imported;
+    setRoute(WRAPPER_PAGE);
+    const notFound: boolean[] = [];
+    const observer = new MutationObserver(() =>
+      notFound.push(screen.queryByText("Inga resultat hittades") !== null)
+    );
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    renderInApp(<WrapperDetail wrapperId="w1" loaded={served(imported)} />, {
+      queryClient
+    });
+
+    expect(screen.getByRole("heading", { level: 1, name: "Byggnad" })).toBeTruthy();
+    // The page reads the space again, which now holds the wrapper.
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData<Space>(["spaces", "space-1"])?.knowledge.integration_knowledge_list
+          .items
+      ).toHaveLength(2)
+    );
+    observer.disconnect();
+    expect(notFound).not.toContain(true);
+    expect(screen.getByRole("navigation", { name: "Mappar" })).toBeTruthy();
+  });
+
+  it("says the wrapper is gone when the space read again lacks it too", async () => {
+    const before = makeSpace({
+      integrations: [mall].map((item) => makeIntegration({ ...folder, ...item }))
+    });
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(["spaces", "space-1"], makeSpace(), { updatedAt: Date.now() - 5_000 });
+    // Deleted between the server's read and the browser's.
+    state.space = makeSpace();
+    setRoute(WRAPPER_PAGE);
+
+    renderInApp(<WrapperDetail wrapperId="w1" loaded={served(before)} />, {
+      queryClient
+    });
+
+    expect(screen.getByRole("heading", { level: 1, name: "Byggnad" })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Inga resultat hittades" })
+    ).toBeTruthy();
   });
 });

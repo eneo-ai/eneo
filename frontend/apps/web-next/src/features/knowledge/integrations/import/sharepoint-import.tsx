@@ -26,6 +26,7 @@ import { toast } from "@/lib/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "../../embedding-model-select";
+import { trackImports } from "../import-completion";
 import {
   integrationPreviewQueryOptions,
   type IntegrationPreview,
@@ -197,6 +198,21 @@ export function SharePointImportDialog({
       );
     },
     onSuccess: (result) => {
+      // Each created item's first sync is reported with its counts once its job is over.
+      trackImports(
+        result.items.flatMap((item) =>
+          item.status === "created" && item.job && item.integration_knowledge_id
+            ? [
+                {
+                  jobId: item.job.id,
+                  knowledgeId: item.integration_knowledge_id,
+                  name: item.name,
+                  spaceRouteId: routeId
+                }
+              ]
+            : []
+        )
+      );
       trackJob(result.items.flatMap((item) => (item.job ? [item.job] : [])));
       void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
       if (result.created_count === 0) {

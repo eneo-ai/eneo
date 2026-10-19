@@ -1,28 +1,43 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
+import { reportedSyncs, untrackSyncs, usePendingSyncs } from "./pending-syncs";
 import { syncProgressQueryOptions } from "./queries";
+import type { QueuedIds } from "./sources";
 import { finishedSyncs, type ProgressById } from "./sync-progress";
 
 const NOTHING_RUNS: ProgressById = {};
 
 /**
- * The running syncs of the current space; it polls only while the space has
- * integration knowledge of its own. When one finishes, the space (its items'
- * counts, statuses and sync revisions) is refreshed, and the lists keyed by an
- * item's revision follow.
+ * The running syncs of the current space, and its items whose sync was queued
+ * from here (pending-syncs.ts) and that no worker has reported on yet. It
+ * polls only while the space has integration knowledge of its own, fast while
+ * a queued sync waits. When a sync finishes, the space (its items' counts,
+ * statuses and sync revisions) is refreshed, and the lists keyed by an item's
+ * revision follow.
  */
-export function useSyncProgress(): ProgressById {
+export function useSyncProgress(): { progress: ProgressById; queued: QueuedIds } {
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();
-  const hasOwnKnowledge = space.knowledge.integration_knowledge_list.items.some(
+  const ownItems = space.knowledge.integration_knowledge_list.items.filter(
     (item) => item.space_id === space.id
   );
+  const hasOwnKnowledge = ownItems.length > 0;
+  const allPending = usePendingSyncs();
+  const ownIds = ownItems.map((item) => item.id).join(" ");
+  const pending = useMemo(() => {
+    const ids = new Set(ownIds.split(" "));
+    return allPending.filter((entry) => ids.has(entry.knowledgeId));
+  }, [allPending, ownIds]);
   const { data } = useQuery({
-    ...syncProgressQueryOptions(browserApi, space.id),
+    ...syncProgressQueryOptions(
+      browserApi,
+      space.id,
+      pending.map((entry) => entry.knowledgeId)
+    ),
     enabled: hasOwnKnowledge
   });
   const progress = (hasOwnKnowledge ? data : undefined) ?? NOTHING_RUNS;
@@ -37,5 +52,19 @@ export function useSyncProgress(): ProgressById {
     if (finished.length > 0) void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
   }, [progress, queryClient, routeId]);
 
-  return progress;
+  // Once the worker reports on a queued sync, its progress tells the rest.
+  useEffect(() => {
+    const reported = reportedSyncs(pending, progress);
+    if (reported.length > 0) untrackSyncs(reported.map((entry) => entry.jobId));
+  }, [pending, progress]);
+
+  const queued = useMemo<QueuedIds>(
+    () =>
+      new Set(
+        pending.filter((entry) => !(entry.knowledgeId in progress)).map((e) => e.knowledgeId)
+      ),
+    [pending, progress]
+  );
+
+  return { progress, queued };
 }

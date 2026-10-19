@@ -68,7 +68,7 @@ export function IntegrationsTab({
     (item) => item.space_id === space.id
   );
   const sources = groupIntegrationSources(items, collator.compare);
-  const progress = useSyncProgress();
+  const { progress, queued } = useSyncProgress();
   const models = embeddingModelsInUse(items, space.embedding_models);
   const grouped =
     models.length > 1 ||
@@ -111,7 +111,12 @@ export function IntegrationsTab({
       ) : (
         <>
           <div className="flex flex-wrap justify-end gap-2">{action}</div>
-          <SourcesList groups={groups} progress={progress} labelledBy={labelledBy} />
+          <SourcesList
+            groups={groups}
+            progress={progress}
+            queued={queued}
+            labelledBy={labelledBy}
+          />
         </>
       )}
     </div>

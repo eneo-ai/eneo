@@ -15,12 +15,14 @@ import { IntegrationActions } from "../actions";
 import { safeExternalUrl } from "../external-url";
 import { buildIntegrationTree, flattenIntegrationTree } from "../integration-tree";
 import { SourceStateLabel, useWatchStates } from "../source-status";
-import { itemState, watchStateLabel } from "../sources";
+import { itemState, watchStateLabel, type ItemState, type QueuedIds } from "../sources";
 import type { ProgressById } from "../sync-progress";
 import { VENDOR } from "../vendor";
 import type { InPlaceLink } from "./in-place-link";
 
 type FolderRow = { id: string; item: IntegrationKnowledge; depth: number };
+
+const isActive = (state: ItemState) => state === "syncing" || state === "queued";
 
 function LastUpToDate({ item }: { item: IntegrationKnowledge }) {
   const t = useTranslations();
@@ -59,11 +61,13 @@ function WatchCell({ item }: { item: IntegrationKnowledge }) {
 export function FolderOverview({
   items,
   progress,
+  queued,
   sourceName,
   linkFor
 }: {
   items: IntegrationKnowledge[];
   progress: ProgressById;
+  queued: QueuedIds;
   sourceName: string;
   linkFor: (itemId: string) => InPlaceLink;
 }) {
@@ -107,7 +111,7 @@ export function FolderOverview({
       key: "status",
       header: t("status"),
       width: proportional(1),
-      renderCell: (row) => <SourceStateLabel state={itemState(row.item, progress)} />
+      renderCell: (row) => <SourceStateLabel state={itemState(row.item, progress, queued)} />
     },
     {
       key: "documents",
@@ -160,7 +164,10 @@ export function FolderOverview({
                 rel="noopener noreferrer"
               />
             ) : null}
-            <IntegrationActions item={row.item} />
+            <IntegrationActions
+              item={row.item}
+              syncActive={isActive(itemState(row.item, progress, queued))}
+            />
           </span>
         );
       }

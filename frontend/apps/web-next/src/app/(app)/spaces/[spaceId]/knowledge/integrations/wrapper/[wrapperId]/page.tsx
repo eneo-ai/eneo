@@ -10,14 +10,21 @@ import { WrapperDetail } from "./wrapper-detail.client";
 
 type Params = Promise<{ spaceId: string; wrapperId: string }>;
 
-/** The space's own items imported under the wrapper, as one source (as on the client). */
+/**
+ * The space's own items imported under the wrapper, as one source (as on the
+ * client). The server copy can stand in until the client rereads its space
+ * (useSourceItems).
+ */
 async function findWrapper(spaceId: string, wrapperId: string) {
   try {
-    const space = await getQueryClient().query(spaceQueryOptions(eneoApi(), spaceId));
-    return findWrapperSource(
+    const queryClient = getQueryClient();
+    const options = spaceQueryOptions(eneoApi(), spaceId);
+    const space = await queryClient.query(options);
+    const source = findWrapperSource(
       space.knowledge.integration_knowledge_list.items.filter((item) => item.space_id === space.id),
       wrapperId
     );
+    return source;
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();
     throw error;
@@ -36,6 +43,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 /** A SharePoint wrapper as one source; an unknown wrapper (or one whose last item is gone) is a 404. */
 export default async function WrapperPage({ params }: { params: Params }) {
   const { spaceId, wrapperId } = await params;
-  if (!(await findWrapper(spaceId, wrapperId))) notFound();
-  return <WrapperDetail wrapperId={wrapperId} />;
+  const source = await findWrapper(spaceId, wrapperId);
+  if (!source) notFound();
+  return <WrapperDetail wrapperId={wrapperId} loaded={{ items: source.items }} />;
 }

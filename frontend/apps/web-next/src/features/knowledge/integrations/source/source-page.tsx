@@ -24,6 +24,7 @@ import { skippedDocumentsQueryOptions } from "../queries";
 import { buildSourceProblems, type SkippedDocuments } from "../source-problems";
 import { useWatchStates } from "../source-status";
 import {
+  isSyncActive,
   sourceContentsLabel,
   sourceHref,
   sourceTabParam,
@@ -32,6 +33,7 @@ import {
   type SourceTab
 } from "../sources";
 import { useAnnounceChange } from "../use-announce-change";
+import { useSourceAnnouncements } from "../use-sync-announcements";
 import { useSyncProgress } from "../use-sync-progress";
 import { VENDOR, VendorIcon } from "../vendor";
 import { ActivityView } from "./activity-view";
@@ -97,7 +99,8 @@ function WatchStat({ items }: { items: IntegrationKnowledge[] }) {
  * its syncs go. Contents lists folders and documents, Problems says what went
  * wrong and who fixes it, Activity is the sync history. The tab and the folder
  * live in the address (?tab=, ?folder=), so links and reloads keep them; a
- * change only rewrites the address, it does not load the page again.
+ * change only rewrites the address, it does not load the page again. The
+ * sync's course and a changed problem count are announced.
  */
 export function SourcePage({ source }: { source: IntegrationSource }) {
   const t = useTranslations();
@@ -120,8 +123,9 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   }));
   const { tab } = view;
 
-  const progress = useSyncProgress();
-  const summary = summarizeSource(source.items, progress);
+  const { progress, queued } = useSyncProgress();
+  const summary = summarizeSource(source.items, progress, queued);
+  const syncActive = isSyncActive(summary);
   const multiple = source.items.length > 1;
   const singleItem = multiple ? null : (source.items[0] ?? null);
   const selectedItem = multiple
@@ -150,6 +154,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const skippedTotal = skippedLoaded
     ? source.items.reduce((sum, item) => sum + (skippedByItem[item.id]?.total ?? 0), 0)
     : null;
+  useSourceAnnouncements(source.name, summary, problems ? problemCount : null);
 
   const listHref = `/spaces/${routeId}/knowledge?tab=integrations`;
   const adminIntegrationsUrl = hydrated
@@ -205,11 +210,12 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
           items={source.items}
           canEdit={permissions.includes("edit")}
           canDelete={permissions.includes("delete")}
+          syncActive={syncActive}
           onDeleted={toList}
         />
       ) : null
     ) : singleItem ? (
-      <IntegrationActions item={singleItem} onDeleted={toList} />
+      <IntegrationActions item={singleItem} syncActive={syncActive} onDeleted={toList} />
     ) : null;
 
   const failureTitle =
@@ -287,6 +293,14 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
                 as={SamePageLink}
               />
             }
+          />
+        ) : null}
+
+        {summary.state === "queued" && !summary.progress ? (
+          <QuietBanner
+            status="info"
+            title={t("integration_source_queued_notice")}
+            collapsible={false}
           />
         ) : null}
 
@@ -368,6 +382,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
                     <FolderNav
                       items={source.items}
                       progress={progress}
+                      queued={queued}
                       selectedId={selectedItem?.id ?? null}
                       linkFor={folderLink}
                     />
@@ -378,6 +393,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
                         key={selectedItem.id}
                         item={selectedItem}
                         progress={progress}
+                        queued={queued}
                         skipped={skippedByItem[selectedItem.id] ?? null}
                         problemsLink={problemsLink}
                       />
@@ -385,6 +401,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
                       <FolderOverview
                         items={source.items}
                         progress={progress}
+                        queued={queued}
                         sourceName={source.name}
                         linkFor={folderLink}
                       />
@@ -396,6 +413,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
                   key={singleItem.id}
                   item={singleItem}
                   progress={progress}
+                  queued={queued}
                   skipped={skippedByItem[singleItem.id] ?? null}
                   problemsLink={problemsLink}
                   showHeader={source.kind === "wrapper"}

@@ -7,6 +7,9 @@ import {
   findWrapperSource,
   groupIntegrationSources,
   groupSourcesBySpace,
+  isSyncActive,
+  itemHref,
+  itemState,
   itemWatchState,
   matchesSourceFilter,
   sourceContentsLabel,
@@ -203,6 +206,48 @@ describe("summarizeSource", () => {
       {}
     );
     expect(summary.credentialsFailed).toBe(false);
+  });
+});
+
+describe("a sync queued from here", () => {
+  const never = { last_sync_status: "never", document_count: 0 } as const;
+
+  it("reads as queued until its progress appears, and blocks a second sync meanwhile", () => {
+    const queued = new Set(["b"]);
+    const waiting = summarizeSource([item("a"), item("b", {}, never)], {}, queued);
+
+    expect(itemState(item("b", {}, never), {}, queued)).toBe("queued");
+    expect(waiting).toMatchObject({ state: "queued", queuedItems: 1, waitingItems: 0 });
+    expect(isSyncActive(waiting)).toBe(true);
+    expect(matchesSourceFilter(waiting, "syncing")).toBe(true);
+
+    // Once the worker reports on it, it is syncing; the queued set no longer holds it.
+    const running = summarizeSource([item("a"), item("b", {}, never)], { b: progress("b") });
+    expect(running.state).toBe("syncing");
+    expect(isSyncActive(running)).toBe(true);
+    expect(isSyncActive(summarizeSource([item("a")], {}))).toBe(false);
+  });
+
+  it("is overtaken by a sync that runs, and itself overtakes a failure", () => {
+    const failed = item("a", {}, { last_sync_status: "error", last_sync_error: "Graph timeout" });
+
+    expect(summarizeSource([failed, item("b")], { b: progress("b") }, new Set(["a"])).state).toBe(
+      "syncing"
+    );
+    const queued = summarizeSource([failed], {}, new Set(["a"]));
+    expect(queued.state).toBe("queued");
+    // Still under "needs attention": the failure stands until the new sync replaces it.
+    expect(matchesSourceFilter(queued, "attention")).toBe(true);
+  });
+});
+
+describe("itemHref", () => {
+  it("opens a wrapped SharePoint item as its folder of the wrapper, any other on its own", () => {
+    const wrapped = item("i1", { wrapper_id: "w1", wrapper_name: "Byggnad" });
+    expect(itemHref("space-1", wrapped, "problems")).toBe(
+      "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i1&tab=problems"
+    );
+    expect(itemHref("personal", item("i2"))).toBe("/spaces/personal/knowledge/integrations/i2");
   });
 });
 

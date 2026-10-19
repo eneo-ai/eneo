@@ -11,13 +11,20 @@ import { ItemDetail } from "./item-detail.client";
 type Params = Promise<{ spaceId: string; integrationKnowledgeId: string }>;
 type SearchParams = Promise<{ tab?: string | string[] }>;
 
-/** The space's own item; one shared in from another space is not opened here (as on the client). */
+/**
+ * The space's own item; one shared in from another space is not opened here
+ * (as on the client). The server copy can stand in until the client rereads
+ * its space (useSourceItems).
+ */
 async function findItem(spaceId: string, itemId: string) {
   try {
-    const space = await getQueryClient().query(spaceQueryOptions(eneoApi(), spaceId));
-    return space.knowledge.integration_knowledge_list.items.find(
-      (item) => item.id === itemId && item.space_id === space.id
+    const queryClient = getQueryClient();
+    const options = spaceQueryOptions(eneoApi(), spaceId);
+    const space = await queryClient.query(options);
+    const item = space.knowledge.integration_knowledge_list.items.find(
+      (entry) => entry.id === itemId && entry.space_id === space.id
     );
+    return item;
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();
     throw error;
@@ -54,5 +61,5 @@ export default async function IntegrationItemPage({
       )
     );
   }
-  return <ItemDetail itemId={integrationKnowledgeId} />;
+  return <ItemDetail itemId={integrationKnowledgeId} loaded={{ items: [item] }} />;
 }

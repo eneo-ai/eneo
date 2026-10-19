@@ -39,7 +39,7 @@ import {
 import { describeSkipReason } from "../skip-reasons";
 import type { SkippedDocuments } from "../source-problems";
 import { SourceStateLabel, useWatchStates } from "../source-status";
-import { itemState, watchStateLabel } from "../sources";
+import { itemState, watchStateLabel, type QueuedIds } from "../sources";
 import type { ProgressById } from "../sync-progress";
 import { VENDOR } from "../vendor";
 import type { InPlaceLink } from "./in-place-link";
@@ -89,16 +89,19 @@ function DocumentNameCell({ document }: { document: IntegrationDocument }) {
 function FolderHeader({
   item,
   progress,
+  queued,
   showControls
 }: {
   item: IntegrationKnowledge;
   progress: ProgressById;
+  queued: QueuedIds;
   showControls: boolean;
 }) {
   const t = useTranslations();
   const attempted = useClientTimeText(item.metadata?.last_sync_attempted_at, "date_time");
   const [watch] = useWatchStates([item]) ?? [];
   const url = safeExternalUrl(item.url);
+  const state = itemState(item, progress, queued);
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex min-w-0 flex-col gap-1">
@@ -111,7 +114,7 @@ function FolderHeader({
           ) : null}
         </h2>
         <div className="text-ax-text-secondary flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-          <SourceStateLabel state={itemState(item, progress)} className="text-xs" />
+          <SourceStateLabel state={state} className="text-xs" />
           {item.metadata?.last_synced_at ? (
             <span>
               {t("integration_source_last_up_to_date")}:{" "}
@@ -140,7 +143,7 @@ function FolderHeader({
               icon={<ExternalLink className="size-4" aria-hidden="true" />}
             />
           ) : null}
-          <IntegrationActions item={item} />
+          <IntegrationActions item={item} syncActive={state === "syncing" || state === "queued"} />
         </div>
       ) : null}
     </div>
@@ -212,6 +215,7 @@ function SkippedFiles({
 export function FolderDocuments({
   item,
   progress,
+  queued,
   skipped,
   problemsLink,
   showHeader = true,
@@ -219,6 +223,7 @@ export function FolderDocuments({
 }: {
   item: IntegrationKnowledge;
   progress: ProgressById;
+  queued: QueuedIds;
   /** The files the latest sync skipped; null while unknown or not loadable. */
   skipped: SkippedDocuments | null;
   problemsLink: InPlaceLink;
@@ -399,7 +404,7 @@ export function FolderDocuments({
       aria-labelledby={`folder-documents-${item.id}`}
     >
       {showHeader ? (
-        <FolderHeader item={item} progress={progress} showControls={showControls} />
+        <FolderHeader item={item} progress={progress} queued={queued} showControls={showControls} />
       ) : (
         <h2 id={`folder-documents-${item.id}`} className="sr-only">
           {t("documents")}
