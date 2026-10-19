@@ -179,15 +179,32 @@ class SpaceAssembler:
         integration_permissions = actor.get_integrations_permissions()
         for knowledge in space.integration_knowledge_list:
             knowledge.permissions = self._integration_item_permissions(
-                knowledge, integration_permissions
+                knowledge, space.id, integration_permissions
             )
 
-    def _integration_item_permissions(
-        self, knowledge: "IntegrationKnowledge", permissions: list[ResourcePermission]
+    def integration_item_permissions(
+        self, knowledge: "IntegrationKnowledge", *, space_id: UUID, actor: "SpaceActor"
     ) -> list[ResourcePermission]:
-        # The integration service lets only an admin rename, sync or delete
-        # what the organization's SharePoint app imported.
-        if (
+        """What the caller may do with one item seen from ``space_id``, within
+        the API key's knowledge permission."""
+        permissions = self._integration_item_permissions(
+            knowledge, space_id, actor.get_integrations_permissions()
+        )
+        rp = self._get_api_key_resource_permissions()
+        if rp is None:
+            return permissions
+        return self._cap_permissions(permissions, rp.knowledge.value)
+
+    def _integration_item_permissions(
+        self,
+        knowledge: "IntegrationKnowledge",
+        space_id: UUID | None,
+        permissions: list[ResourcePermission],
+    ) -> list[ResourcePermission]:
+        # The integration service renames, syncs and deletes an item only from
+        # the space that owns it, and what the organization's SharePoint app
+        # imported only for an admin.
+        if knowledge.space_id == space_id and (
             knowledge.user_integration.auth_type != "tenant_app"
             or Permission.ADMIN in self.user.permissions
         ):
@@ -273,6 +290,8 @@ class SpaceAssembler:
         for website in knowledge.websites.items:
             if hasattr(website, "permissions"):
                 website.permissions = cap(website.permissions, rp.knowledge.value)
+        for item in knowledge.integration_knowledge_list.items:
+            item.permissions = cap(item.permissions, rp.knowledge.value)
 
     def _apply_api_key_applications_caps(self, applications: Applications) -> None:
         rp = self._get_api_key_resource_permissions()
