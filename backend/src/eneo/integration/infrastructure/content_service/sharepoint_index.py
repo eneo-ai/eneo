@@ -75,7 +75,11 @@ logger = get_logger(__name__)
 NO_DOWNLOAD_REASON = "SharePoint offers no download for this item"
 # Verdicts about the file itself: its indexed copy no longer stands for it.
 # The value names the removal in logs and in a failed removal's reason.
-_REMOVING_VERDICTS: dict[SkipReasonCode, str] = {"password_protected": "encrypted"}
+_REMOVING_VERDICTS: dict[SkipReasonCode, str] = {
+    "password_protected": "encrypted",
+    "unsupported_type": "unsupported",
+    "file_too_large": "too-large",
+}
 
 
 class SharePointIndex:
@@ -547,6 +551,21 @@ class SharePointIndex:
             return
         integration_knowledge_id = integration_knowledge.id
         try:
+            # Before the ChangeKey: a rename to an unsupported type keeps its cTag.
+            unsupported_reason = unsupported_file_reason(
+                item_name
+            ) or unsupported_package_reason(item)
+            if unsupported_reason:
+                await self.record_unextractable(
+                    item_id=item_id,
+                    item_name=item_name,
+                    skip_reason=unsupported_reason,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=integration_knowledge_id,
+                    stats=stats,
+                )
+                return
+
             source_metadata = await self.source_metadata_for(client, drive_id, item)
             change_key = None
             if pending_change_keys is not None and self.change_key_service:
@@ -563,13 +582,6 @@ class SharePointIndex:
                     )
                     stats["unchanged_items"] += 1
                     return
-
-            unsupported_reason = unsupported_file_reason(
-                item_name
-            ) or unsupported_package_reason(item)
-            if unsupported_reason:
-                sync_results.count_skip(stats, skipped(item_name, unsupported_reason))
-                return
 
             content, skip_reason = await self._extract_file(
                 client, drive_id, item_id, item_name, stats

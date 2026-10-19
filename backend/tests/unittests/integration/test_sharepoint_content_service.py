@@ -5070,6 +5070,11 @@ class TestDeltaExtractionOutcomes:
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
         mock_dependencies["integration_knowledge_repo"].one.return_value = ik
         _size_ledger(mock_dependencies["integration_knowledge_repo"], 100)
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), "item-1")]
+        )
         delete = mock_dependencies[
             "info_blob_service"
         ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
@@ -5142,10 +5147,6 @@ class TestDeltaExtractionOutcomes:
             ),
             (_http_error(404, "Not Found"), "Error: HTTP 404 Not Found"),
             (
-                ValueError("SharePoint file 'x' exceeds max download size (1 > 0)"),
-                "File too large (exceeds 50 MB limit)",
-            ),
-            (
                 MissingDownloadUrlError("No download URL available for file 'x'"),
                 "Error: SharePoint offers no download for this item",
             ),
@@ -5173,6 +5174,103 @@ class TestDeltaExtractionOutcomes:
         assert _reasons(sync_log.metadata["skipped_details"]) == [
             {"file": "scan.pdf", "reason": expected_reason}
         ]
+
+    @pytest.mark.parametrize(
+        ("outcome", "expected_reason"),
+        [
+            (
+                ValueError("SharePoint file 'x' exceeds max download size (1 > 0)"),
+                "File too large (exceeds 50 MB limit)",
+            ),
+            (
+                ExtractionResult.skipped("Unsupported file type (.bin)"),
+                "Unsupported file type (.bin)",
+            ),
+        ],
+    )
+    async def test_a_file_that_can_no_longer_be_read_loses_its_old_text(
+        self, service, mock_dependencies, mock_oauth_token, outcome, expected_reason
+    ):
+        """A file that grew past the limit or turned into a type without text
+        must not keep answering with what it said before."""
+        ik, delete, process, failure = await self._run(
+            service, mock_dependencies, mock_oauth_token, outcome
+        )
+
+        assert failure is None
+        process.assert_not_called()
+        delete.assert_awaited_once_with(
+            sharepoint_item_id="item-1", integration_knowledge_id=ik.id
+        )
+        assert ik.delta_token == "token-2"
+        assert ik.last_sync_summary["files_deleted"] == 1
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
+            {"file": "scan.pdf", "reason": expected_reason}
+        ]
+
+    async def test_a_rename_to_an_unsupported_type_drops_the_old_text(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        """A rename keeps the cTag, so the type is checked before the ChangeKey."""
+        ik = _real_integration_knowledge(delta_token="token-1")
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), "item-1")]
+        )
+        delete = repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[MagicMock(size=0, title="report.docx")]
+        )
+        mock_dependencies["change_key_service"].should_process.return_value = False
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            client = _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(
+                    return_value=([_delta_file("item-1", "report.zip")], "token-2")
+                ),
+            )
+            await service.process_delta_changes(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        client.get_file_extraction_by_id.assert_not_called()
+        delete.assert_awaited_once_with(
+            sharepoint_item_id="item-1", integration_knowledge_id=ik.id
+        )
+        assert ik.delta_token == "token-2"
+
+    async def test_an_unsupported_file_never_indexed_costs_no_delete(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        ik = _real_integration_knowledge(delta_token="token-1")
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), "another-item")]
+        )
+        delete = repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+        images = [_delta_file(f"image-{index}", f"{index}.png") for index in range(5)]
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(return_value=(images, "token-2")),
+            )
+            await service.process_delta_changes(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        delete.assert_not_called()
+        repo.get_sharepoint_item_ids_for_integration_knowledge.assert_awaited_once()
+        assert ik.last_sync_summary["skipped_items"] == 5
 
     async def test_a_onenote_notebook_is_skipped_without_a_download(
         self, service, mock_dependencies, mock_oauth_token
