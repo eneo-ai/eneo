@@ -27,6 +27,7 @@ import { IntegrationActions, WrapperActions } from "./actions";
 import { SourceStateLabel, SourceUpdated, SyncProgress } from "./source-status";
 import {
   countSourceFilters,
+  isSyncActive,
   matchesSourceFilter,
   SOURCE_FILTERS,
   sourceContentsLabel,
@@ -34,12 +35,14 @@ import {
   summarizeSource,
   waitingLabel,
   type IntegrationSource,
+  type QueuedIds,
   type SourceFilter,
   type SourceState,
   type SourceSummary
 } from "./sources";
 import type { ProgressById } from "./sync-progress";
 import { useAnnounceChange } from "./use-announce-change";
+import { useSourceListAnnouncements } from "./use-sync-announcements";
 import { VendorIcon } from "./vendor";
 
 type SourceRow = {
@@ -58,9 +61,10 @@ const DEFAULT_SORT: TableSortState<SourceSortKey> = [{ sortKey: "name", directio
 const STATE_ORDER: Record<SourceState, number> = {
   attention: 0,
   syncing: 1,
-  never: 2,
-  empty: 3,
-  ok: 4
+  queued: 2,
+  never: 3,
+  empty: 4,
+  ok: 5
 };
 
 function time(value: string | null): number {
@@ -130,6 +134,9 @@ function SourceStatusCell({ row }: { row: SourceRow }) {
     return (
       <span className="flex flex-col items-start gap-1">
         <SourceStateLabel state={row.summary.state} />
+        {row.summary.state === "queued" && failedItems.length > 0 ? (
+          <SourceStateLabel state="attention" />
+        ) : null}
         {waiting ? <span className="text-ax-text-secondary text-xs">{waiting}</span> : null}
       </span>
     );
@@ -245,9 +252,10 @@ function SourcesTable({ rows, labelledBy }: { rows: SourceRow[]; labelledBy: str
             wrapperName={row.name}
             items={row.source.items}
             {...wrapperPermissions(row.source.items)}
+            syncActive={isSyncActive(row.summary)}
           />
         ) : single ? (
-          <IntegrationActions item={single} />
+          <IntegrationActions item={single} syncActive={isSyncActive(row.summary)} />
         ) : null;
       }
     }
@@ -278,15 +286,19 @@ export type SourceGroup = { key: string; heading: string | null; sources: Integr
  * group. The sign-in notice, the status filter and the search on a source's
  * or its folders' names sit once above every group; a group the filter
  * empties is left out, and a filter that matches nothing any more says so,
- * with a way back to every source. `labelledBy` names an ungrouped table.
+ * with a way back to every source. A source's sync starting, finishing or
+ * being queued is announced. `labelledBy` names an ungrouped table.
  */
 export function SourcesList({
   groups,
   progress,
+  queued,
   labelledBy
 }: {
   groups: SourceGroup[];
   progress: ProgressById;
+  /** Items whose sync was queued from here and that no worker has reported on yet. */
+  queued: QueuedIds;
   labelledBy: string;
 }) {
   const t = useTranslations();
@@ -305,10 +317,11 @@ export function SourcesList({
       id: `${source.kind}-${source.id}`,
       name: source.name,
       source,
-      summary: summarizeSource(source.items, progress)
+      summary: summarizeSource(source.items, progress, queued)
     }))
   }));
   const rows = grouped.flatMap((group) => group.rows);
+  useSourceListAnnouncements(rows);
   const counts = countSourceFilters(rows.map((row) => row.summary));
   const needle = query.trim().toLocaleLowerCase();
   const isVisible = (row: SourceRow) =>

@@ -7,6 +7,7 @@ import {
   CircleDashed,
   CircleMinus,
   CircleX,
+  Clock,
   LoaderCircle,
   Search,
   type LucideIcon
@@ -22,7 +23,7 @@ import {
   filterIntegrationTree,
   flattenIntegrationTree
 } from "../integration-tree";
-import { itemState, sourceStateStatus, type ItemState } from "../sources";
+import { itemState, sourceStateStatus, type ItemState, type QueuedIds } from "../sources";
 import type { ProgressById } from "../sync-progress";
 import type { InPlaceLink } from "./in-place-link";
 
@@ -34,6 +35,7 @@ const STATE_ICON: Record<ItemState, { icon: LucideIcon; className: string }> = {
   ok: { icon: CircleCheck, className: "text-ax-success" },
   error: { icon: CircleX, className: "text-ax-error" },
   syncing: { icon: LoaderCircle, className: "text-ax-text-accent motion-safe:animate-spin" },
+  queued: { icon: Clock, className: "text-ax-text-accent" },
   empty: { icon: CircleMinus, className: "text-ax-warning" },
   never: { icon: CircleDashed, className: "text-ax-text-secondary" }
 };
@@ -54,11 +56,13 @@ function StateIcon({ state }: { state: ItemState }) {
 export function FolderNav({
   items,
   progress,
+  queued,
   selectedId,
   linkFor
 }: {
   items: IntegrationKnowledge[];
   progress: ProgressById;
+  queued: QueuedIds;
   /** Null selects the overview of every folder. */
   selectedId: string | null;
   linkFor: (itemId: string | null) => InPlaceLink;
@@ -141,7 +145,7 @@ export function FolderNav({
           </li>
         ) : null}
         {rows.map((row) => {
-          const state = itemState(row.item, progress);
+          const state = itemState(row.item, progress, queued);
           const selected = selectedId === row.item.id;
           return (
             <li

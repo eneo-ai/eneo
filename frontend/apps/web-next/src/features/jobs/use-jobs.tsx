@@ -2,6 +2,7 @@
 
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
   createContext,
@@ -16,10 +17,22 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
 import { toast } from "@/lib/toast";
+import {
+  pendingImports,
+  reportImports,
+  type SettledImport
+} from "@/features/knowledge/integrations/import-completion";
+import { pendingSyncs, untrackSyncs } from "@/features/knowledge/integrations/pending-syncs";
 import { subscribeJobEvents, useJobEventsConnected } from "./job-events";
 import { describeJobOutcome } from "./job-feedback";
 import { invalidateAfterJobs } from "./job-invalidation";
-import { diffJobs, EMPTY_LEDGER, rememberActiveJob, type JobLedger } from "./job-transitions";
+import {
+  diffJobs,
+  EMPTY_LEDGER,
+  isJobOver,
+  rememberActiveJob,
+  type JobLedger
+} from "./job-transitions";
 import { isJobActive, JOBS_KEY, type Job } from "./jobs";
 import { recordFinishedJob } from "./recent-results";
 
@@ -143,6 +156,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
   const announce = useAnnounce();
+  const router = useRouter();
 
   const fastPollUntil = useRef(0);
 
@@ -150,7 +164,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   // is committed. Polling stays as the safety net: slow while the feed is
   // open, fast while it is down and something is running or was just started.
   const live = useJobEventsConnected();
-  const { data: jobs = NO_JOBS } = useQuery({
+  const { data: jobs } = useQuery({
     queryKey: JOBS_KEY,
     queryFn: fetchJobs,
     refetchInterval: (query) =>
@@ -179,14 +193,21 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   // Each snapshot is compared with the last one: a job that was active and
   // now has an outcome gets a toast, an announcement and a row highlight, and
-  // the data it produced is refreshed. The ledger lives in a ref because it
-  // is bookkeeping, not render state.
+  // the data it produced is refreshed. An import's first sync is told with
+  // its counts instead, once its item is read (import-completion.ts); a sync
+  // queued from a menu stops reading as queued once its job is over. The
+  // ledger lives in a ref because it is bookkeeping, not render state.
   const ledger = useRef<JobLedger>(EMPTY_LEDGER);
+  const importsJudged = useRef(false);
   const handleSnapshot = useCallback(
-    (snapshot: readonly Job[]) => {
+    (loaded: readonly Job[] | undefined) => {
+      const snapshot = loaded ?? NO_JOBS;
       const diff = diffJobs(ledger.current, snapshot);
       ledger.current = diff.ledger;
+      const imports = pendingImports();
       for (const { job, outcome } of diff.transitions) {
+        recordFinishedJob(job);
+        if (imports.some((item) => item.jobId === job.id)) continue;
         const feedback = describeJobOutcome(job, outcome, t);
         if (feedback.tone === "success") {
           toast.success(feedback.title);
@@ -196,15 +217,39 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           toast.info(feedback.title);
         }
         announce(feedback.title);
-        recordFinishedJob(job);
       }
       // A vanished job finished (or was cleaned up) without reporting; its
       // data may still have changed, so refresh as for a reported outcome.
-      if (diff.transitions.length > 0 || diff.vanished.length > 0) {
-        invalidateAfterJobs(queryClient);
+      const changed = diff.transitions.length > 0 || diff.vanished.length > 0;
+      if (changed) invalidateAfterJobs(queryClient);
+      // Only a list from the server says which jobs are gone.
+      if (!loaded) return;
+      const over = (jobId: string) => isJobOver(jobId, snapshot, diff.ledger);
+      untrackSyncs(pendingSyncs().flatMap((item) => (over(item.jobId) ? [item.jobId] : [])));
+      // Imports kept from an earlier page load are judged by the first list;
+      // one whose item had no status yet is looked at again with the next outcome.
+      if (!changed && importsJudged.current) return;
+      importsJudged.current = true;
+      const settled = imports.flatMap((item): SettledImport[] =>
+        over(item.jobId)
+          ? [
+              {
+                ...item,
+                jobStatus: snapshot.find((job) => job.id === item.jobId)?.status ?? null
+              }
+            ]
+          : []
+      );
+      if (settled.length > 0) {
+        void reportImports(settled, {
+          queryClient,
+          t,
+          announce,
+          navigate: (href) => router.push(href)
+        });
       }
     },
-    [announce, queryClient, t]
+    [announce, queryClient, router, t]
   );
   useEffect(() => {
     handleSnapshot(jobs);
@@ -217,7 +262,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         for (const started of jobs) ledger.current = rememberActiveJob(ledger.current, started);
         // The cached list may already show these jobs finished. Judge it now:
         // a refetch that returns identical data does not re-run the effect.
-        handleSnapshot(queryClient.getQueryData<Job[]>(JOBS_KEY) ?? NO_JOBS);
+        handleSnapshot(queryClient.getQueryData<Job[]>(JOBS_KEY));
       }
       fastPollUntil.current = Date.now() + FAST_POLL_WINDOW_MS;
       void queryClient.invalidateQueries({ queryKey: JOBS_KEY });

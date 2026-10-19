@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router, setRoute } from "@/test/navigation";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
 
 const state = vi.hoisted(() => ({ space: null as unknown, deleted: [] as string[] }));
@@ -41,6 +41,8 @@ vi.mock("@/lib/api/browser", async () => {
 });
 
 import { IntegrationActions } from "@/features/knowledge/integrations/actions";
+import { resetPendingSyncs } from "@/features/knowledge/integrations/pending-syncs";
+import type { LoadedItems } from "@/features/knowledge/integrations/use-source-items";
 import type { IntegrationKnowledge } from "@/features/knowledge/knowledge";
 import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
 import { ItemDetail } from "./item-detail.client";
@@ -48,6 +50,7 @@ import { ItemDetail } from "./item-detail.client";
 afterEach(() => {
   cleanup();
   state.deleted = [];
+  resetPendingSyncs();
 });
 
 function avtal(fields: Record<string, unknown> = {}) {
@@ -61,10 +64,15 @@ function avtal(fields: Record<string, unknown> = {}) {
   });
 }
 
+/** The item as the server page found it, `readAt` its read of the space (default: long ago). */
+function served(fields: Record<string, unknown> = {}, readAt = 0): LoadedItems {
+  return { items: [avtal(fields) as IntegrationKnowledge], readAt };
+}
+
 function show(fields: Record<string, unknown> = {}) {
   state.space = makeSpace({ integrations: [avtal(fields)] });
   setRoute("/spaces/space-1/knowledge/integrations/i1");
-  return renderInApp(<ItemDetail itemId="i1" />);
+  return renderInApp(<ItemDetail itemId="i1" loaded={served(fields)} />);
 }
 
 async function deleteFromMenu() {
@@ -126,6 +134,7 @@ describe("ItemDetail", () => {
   });
 
   it("says the item is gone when Back leads to its page after a delete from the list", async () => {
+    const servedAt = Date.now() - 1;
     // The list's row menu deletes it ...
     state.space = makeSpace({ integrations: [avtal()] });
     setRoute("/spaces/space-1/knowledge?tab=integrations");
@@ -135,23 +144,75 @@ describe("ItemDetail", () => {
     expect(state.deleted).toHaveLength(1);
     list.unmount();
 
-    // ... and Back shows its page again, from the router's cache.
+    // ... and Back shows its page again, from the router's cache: as the server
+    // found it before the delete.
     setRoute("/spaces/space-1/knowledge/integrations/i1");
-    renderInApp(<ItemDetail itemId="i1" />, { queryClient: list.queryClient });
+    renderInApp(<ItemDetail itemId="i1" loaded={served({}, servedAt)} />, {
+      queryClient: list.queryClient
+    });
 
     expect(screen.getByRole("heading", { level: 1, name: "Inga resultat hittades" })).toBeTruthy();
     expect(router.replace).not.toHaveBeenCalled();
   });
 
   it("says the item is gone on a later visit to the page it was deleted from", async () => {
+    const servedAt = Date.now() - 1;
     const page = show();
     await deleteFromMenu();
     await waitFor(() => expect(router.replace).toHaveBeenCalledTimes(1));
     page.unmount();
 
     setRoute("/spaces/space-1/knowledge/integrations/i1");
-    renderInApp(<ItemDetail itemId="i1" />, { queryClient: page.queryClient });
+    renderInApp(<ItemDetail itemId="i1" loaded={served({}, servedAt)} />, {
+      queryClient: page.queryClient
+    });
 
     expect(screen.getByRole("heading", { level: 1, name: "Inga resultat hittades" })).toBeTruthy();
+  });
+
+  it("shows an item imported since the space was cached, as the server page found it", async () => {
+    // The browser's space is from before the import, and still fresh enough not to be read again.
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(["spaces", "space-1"], makeSpace(), { updatedAt: Date.now() - 5_000 });
+    state.space = makeSpace({ integrations: [avtal()] });
+    setRoute("/spaces/space-1/knowledge/integrations/i1");
+    const notFound: boolean[] = [];
+    const observer = new MutationObserver(() =>
+      notFound.push(screen.queryByText("Inga resultat hittades") !== null)
+    );
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    renderInApp(<ItemDetail itemId="i1" loaded={served({}, Date.now())} />, { queryClient });
+
+    expect(screen.getByRole("heading", { level: 1, name: "Avtal" })).toBeTruthy();
+    // The page reads the space again, which now holds the item.
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData<Space>(["spaces", "space-1"])?.knowledge.integration_knowledge_list
+          .items
+      ).toHaveLength(1)
+    );
+    observer.disconnect();
+    expect(notFound).not.toContain(true);
+    expect(screen.getByRole("heading", { level: 1, name: "Avtal" })).toBeTruthy();
+  });
+
+  it("does not bring the server's copy back once the space has shown the item", async () => {
+    state.space = makeSpace({ integrations: [avtal()] });
+    setRoute("/spaces/space-1/knowledge/integrations/i1");
+    // A server read that looks newer than the browser's, as a fast server clock makes it.
+    const { queryClient } = renderInApp(
+      <ItemDetail itemId="i1" loaded={served({}, Date.now() + 60_000)} />
+    );
+    expect(screen.getByRole("heading", { level: 1, name: "Avtal" })).toBeTruthy();
+
+    // Deleted in another tab.
+    state.space = makeSpace();
+    await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Inga resultat hittades" })
+    ).toBeTruthy();
+    expect(router.replace).not.toHaveBeenCalled();
   });
 });

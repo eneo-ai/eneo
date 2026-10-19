@@ -7,17 +7,29 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { useIsRemovingSource } from "@/features/knowledge/integrations/actions";
 import { SourcePage } from "@/features/knowledge/integrations/source/source-page";
 import { groupIntegrationSources } from "@/features/knowledge/integrations/sources";
+import {
+  useSourceItems,
+  type LoadedItems
+} from "@/features/knowledge/integrations/use-source-items";
 import { useSpace } from "@/features/spaces/use-space";
 
-/** An item imported on its own (a file, a page, a site) as its own source. */
-export function ItemDetail({ itemId }: { itemId: string }) {
+/**
+ * An item imported on its own (a file, a page, a site) as its own source.
+ * `loaded` is the item as the server page found it, which stands in while the
+ * cached space predates it (useSourceItems).
+ */
+export function ItemDetail({ itemId, loaded }: { itemId: string; loaded: LoadedItems }) {
   const t = useTranslations();
   const collator = useCollator();
   const { space, routeId } = useSpace();
-  const item = space.knowledge.integration_knowledge_list.items.find(
-    (entry) => entry.id === itemId && entry.space_id === space.id
+  const items = useSourceItems(
+    routeId,
+    space.knowledge.integration_knowledge_list.items.filter(
+      (entry) => entry.id === itemId && entry.space_id === space.id
+    ),
+    loaded
   );
-  const [source] = item ? groupIntegrationSources([item], collator.compare) : [];
+  const [source] = groupIntegrationSources(items, collator.compare);
   const removing = useIsRemovingSource(space.id, { kind: "item", id: itemId });
 
   if (!source) {

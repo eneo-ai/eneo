@@ -259,11 +259,16 @@ function isNotFound(error: unknown): boolean {
 
 /**
  * The running syncs of a space, keyed by item. Polls every 2 s while one runs
- * and every 15 s otherwise, but not while the browser tab is hidden; stops for
+ * or an item of `awaiting` (a sync queued from here) has not reported yet, and
+ * every 15 s otherwise, but not while the browser tab is hidden; stops for
  * good on a 404 (a backend without the endpoint). Structural sharing keeps the
  * data stable between identical polls.
  */
-export function syncProgressQueryOptions(api: EneoClient, spaceId: string) {
+export function syncProgressQueryOptions(
+  api: EneoClient,
+  spaceId: string,
+  awaiting: readonly string[] = []
+) {
   return queryOptions({
     queryKey: ["integrations", "sync-progress", spaceId],
     queryFn: async (): Promise<ProgressById> => {
@@ -277,7 +282,9 @@ export function syncProgressQueryOptions(api: EneoClient, spaceId: string) {
     retry: (failures, error) => !isNotFound(error) && failures < 2,
     refetchInterval: (query) => {
       if (isNotFound(query.state.error)) return false;
-      return Object.keys(query.state.data ?? {}).length > 0 ? PROGRESS_ACTIVE_MS : PROGRESS_IDLE_MS;
+      const progress = query.state.data ?? {};
+      const busy = Object.keys(progress).length > 0 || awaiting.some((id) => !(id in progress));
+      return busy ? PROGRESS_ACTIVE_MS : PROGRESS_IDLE_MS;
     },
     refetchIntervalInBackground: false
   });

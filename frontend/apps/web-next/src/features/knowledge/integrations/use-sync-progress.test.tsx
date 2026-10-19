@@ -16,6 +16,7 @@ vi.mock("@/features/spaces/use-space", async () => {
 });
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
+import { pendingSyncs, resetPendingSyncs, trackSyncs } from "./pending-syncs";
 import { useSyncProgress } from "./use-sync-progress";
 
 const PROGRESS_KEY = ["integrations", "sync-progress", "space-1"];
@@ -55,6 +56,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetPendingSyncs();
   focusManager.setFocused(undefined);
   vi.useRealTimers();
   api.GET.mockReset();
@@ -97,7 +99,7 @@ describe("useSyncProgress", () => {
 
     await flush(60_000);
     expect(progressPolls()).toBe(0);
-    expect(result.current).toEqual({});
+    expect(result.current.progress).toEqual({});
   });
 
   it("polls a space with integration knowledge, but not while the browser tab is hidden", async () => {
@@ -115,5 +117,37 @@ describe("useSyncProgress", () => {
     act(() => focusManager.setFocused(true));
     await flush();
     expect(progressPolls()).toBe(3);
+  });
+
+  it("polls fast for a sync queued from here until its worker reports, then lets progress tell", async () => {
+    const { result } = renderSyncProgress();
+    await flush();
+    expect(progressPolls()).toBe(1);
+
+    act(() => trackSyncs([{ jobId: "job-1", knowledgeId: "i1" }]));
+    expect(result.current.queued).toEqual(new Set(["i1"]));
+    await flush(2_000);
+    expect(progressPolls()).toBe(2);
+    await flush(2_000);
+    expect(progressPolls()).toBe(3);
+
+    api.GET.mockImplementation(() =>
+      Promise.resolve({ data: { items: [running("i1")] }, response: new Response("{}") })
+    );
+    await flush(2_000);
+    await flush();
+    expect(Object.keys(result.current.progress)).toEqual(["i1"]);
+    expect(result.current.queued.size).toBe(0);
+    expect(pendingSyncs()).toEqual([]);
+  });
+
+  it("does not poll fast for a sync queued in another space", async () => {
+    const { result } = renderSyncProgress();
+    await flush();
+
+    act(() => trackSyncs([{ jobId: "job-9", knowledgeId: "elsewhere" }]));
+    await flush(14_000);
+    expect(progressPolls()).toBe(1);
+    expect(result.current.queued.size).toBe(0);
   });
 });

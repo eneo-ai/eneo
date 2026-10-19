@@ -18,10 +18,12 @@ vi.mock("@/features/spaces/use-space", async () => {
 });
 
 import { IntegrationActions } from "./actions";
+import { pendingSyncs, resetPendingSyncs } from "./pending-syncs";
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  resetPendingSyncs();
 });
 
 const policies = {
@@ -105,6 +107,20 @@ it("follows the full sync from the job it returned", async () => {
 
   // So a sync that is done before the first poll still counts as done.
   await waitFor(() => expect(jobs.trackJob).toHaveBeenCalledWith(job));
+  // The item reads as queued until the worker reports on it or the job is over.
+  expect(pendingSyncs()).toEqual([{ jobId: "job-1", knowledgeId: "i1" }]);
+});
+
+it("offers no second full sync while one is queued or running, and says why", async () => {
+  renderInApp(<IntegrationActions item={policies} syncActive />);
+  fireEvent.click(screen.getByRole("button", { name: /Policydokument/ }));
+
+  const busy = await screen.findByRole("menuitem", { name: "En synk är redan köad eller pågår" });
+  expect(busy.getAttribute("aria-disabled")).toBe("true");
+  expect(screen.queryByRole("menuitem", { name: "Fullständig synk" })).toBeNull();
+  fireEvent.click(busy);
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(api.POST).not.toHaveBeenCalled();
 });
 
 it("offers a rename or full sync only of an item the user may edit", async () => {

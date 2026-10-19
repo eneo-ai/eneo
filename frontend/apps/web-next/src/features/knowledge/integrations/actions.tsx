@@ -41,6 +41,7 @@ import { useJobs } from "@/features/jobs/use-jobs";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import type { IntegrationKnowledge } from "../knowledge";
+import { trackSyncs } from "./pending-syncs";
 import type { IntegrationSource } from "./sources";
 
 type SourceRef = Pick<IntegrationSource, "kind" | "id">;
@@ -81,13 +82,16 @@ export function useIsRemovingSource(spaceId: string, source: SourceRef): boolean
 /**
  * Row actions (rename / full sync / delete) for one integration knowledge item.
  * `onDeleted` runs once the deleted item has left the space, e.g. to leave a
- * page that only showed it (`useIsRemovingSource`).
+ * page that only showed it (`useIsRemovingSource`). While `syncActive` (a sync
+ * of the item is queued or running) another would only queue a second.
  */
 export function IntegrationActions({
   item,
+  syncActive = false,
   onDeleted
 }: {
   item: IntegrationKnowledge;
+  syncActive?: boolean;
   onDeleted?: () => void;
 }) {
   const t = useTranslations();
@@ -127,6 +131,8 @@ export function IntegrationActions({
         )
       ),
     onSuccess: (job) => {
+      // The item reads as queued until the worker reports on it or the job is over.
+      trackSyncs([{ jobId: job.id, knowledgeId: item.id }]);
       trackJob(job);
       invalidate();
       void queryClient.invalidateQueries({
@@ -171,8 +177,9 @@ export function IntegrationActions({
     ...(canEdit && item.integration_type === "sharepoint"
       ? [
           {
-            label: t("trigger_full_sync"),
+            label: syncActive ? t("integration_sync_already_running") : t("trigger_full_sync"),
             icon: <RefreshCw aria-hidden="true" />,
+            isDisabled: syncActive,
             onClick: () => setShowSync(true)
           }
         ]
@@ -242,7 +249,8 @@ export function IntegrationActions({
 
 /**
  * Wrapper actions (rename / resync every item / delete all items) shown on
- * source rows and the wrapper page. `items` are the wrapper's items.
+ * source rows and the wrapper page. `items` are the wrapper's items;
+ * `syncActive` says a sync of one of them is queued or running.
  */
 export function WrapperActions({
   wrapperId,
@@ -250,6 +258,7 @@ export function WrapperActions({
   items: wrapperItems,
   canEdit,
   canDelete,
+  syncActive = false,
   onDeleted
 }: {
   wrapperId: string;
@@ -257,6 +266,7 @@ export function WrapperActions({
   items: IntegrationKnowledge[];
   canEdit: boolean;
   canDelete: boolean;
+  syncActive?: boolean;
   onDeleted?: () => void;
 }) {
   const t = useTranslations();
@@ -289,6 +299,12 @@ export function WrapperActions({
           )
         )
       );
+      const queued = resyncable.flatMap((item, index) => {
+        const result = results[index];
+        return result?.status === "fulfilled"
+          ? [{ jobId: result.value.id, knowledgeId: item.id }]
+          : [];
+      });
       const jobs = results.flatMap((result) =>
         result.status === "fulfilled" ? [result.value] : []
       );
@@ -298,9 +314,16 @@ export function WrapperActions({
       const failedNames = resyncable
         .filter((_, index) => results[index]?.status === "rejected")
         .map((item) => item.name);
-      return { jobs, total: results.length, failedNames, refusal: refused?.reason as unknown };
+      return {
+        jobs,
+        queued,
+        total: results.length,
+        failedNames,
+        refusal: refused?.reason as unknown
+      };
     },
-    onSuccess: ({ jobs, total, failedNames, refusal }) => {
+    onSuccess: ({ jobs, queued, total, failedNames, refusal }) => {
+      trackSyncs(queued);
       if (jobs.length > 0) trackJob(jobs);
       invalidate();
       void queryClient.invalidateQueries({
@@ -380,8 +403,9 @@ export function WrapperActions({
     ...(canResync
       ? [
           {
-            label: t("resync_all_wrapper"),
+            label: syncActive ? t("integration_sync_already_running") : t("resync_all_wrapper"),
             icon: <RefreshCw aria-hidden="true" />,
+            isDisabled: syncActive,
             onClick: () => setShowResync(true)
           }
         ]

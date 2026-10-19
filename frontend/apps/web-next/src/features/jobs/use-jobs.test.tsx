@@ -1,7 +1,20 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
+import {
+  PENDING_IMPORTS_STORAGE_KEY,
+  pendingImports,
+  resetPendingImports,
+  trackImports
+} from "@/features/knowledge/integrations/import-completion";
+import {
+  pendingSyncs,
+  resetPendingSyncs,
+  trackSyncs
+} from "@/features/knowledge/integrations/pending-syncs";
+import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
+import { router } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
 import { JobIndicator } from "./job-indicator";
 import { type Job, JobsProvider, useJobs } from "./use-jobs";
@@ -13,13 +26,17 @@ const toast = vi.hoisted(() => ({
   error: vi.fn()
 }));
 vi.mock("@/lib/toast", () => ({ toast }));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 
 const job = { id: "job-1", name: "Avtal.pdf", status: "in progress" } as Job;
-const api = vi.hoisted(() => ({ items: [] as Job[] }));
+const api = vi.hoisted(() => ({ items: [] as Job[], space: null as unknown }));
 
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: vi.fn(async () => ({ data: { items: api.items }, response: new Response("{}") }))
+    GET: vi.fn(async (path: string) => ({
+      data: path === "/api/v1/spaces/{id}/" ? api.space : { items: api.items },
+      response: new Response("{}")
+    }))
   }
 }));
 
@@ -31,6 +48,9 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.clearAllMocks();
+  sessionStorage.clear();
+  resetPendingImports();
+  resetPendingSyncs();
 });
 
 it("reports a pushed job update without waiting for a poll", async () => {
@@ -255,4 +275,172 @@ it("toasts a failed job with its reason", async () => {
       expect.objectContaining({ description: expect.any(String) })
     )
   );
+});
+
+// A faked setInterval stops Testing Library's waitFor from checking again
+// until the DOM changes; these wait for state the DOM does not show.
+describe("an import's first sync", () => {
+  const imported = {
+    id: "job-import",
+    name: "Protokoll",
+    task: "pull_sharepoint_content",
+    status: "queued"
+  } as Job;
+  const pending = {
+    jobId: "job-import",
+    knowledgeId: "ik-1",
+    name: "Protokoll",
+    spaceRouteId: "space-1"
+  };
+  const spaceWith = (metadata: Record<string, unknown>) =>
+    makeSpace({
+      integrations: [
+        makeIntegration({ id: "ik-1", name: "Protokoll", metadata: { size: 0, ...metadata } })
+      ]
+    });
+  const synced = {
+    last_sync_status: "success",
+    last_synced_at: "2026-10-19T08:00:00Z",
+    document_count: 12,
+    last_sync_summary: { files_processed: 10, unchanged_items: 2, skipped_total: 1 }
+  };
+
+  function StartImport() {
+    const { trackJob } = useJobs();
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          trackImports([pending]);
+          trackJob(imported);
+        }}
+      >
+        Importera
+      </button>
+    );
+  }
+
+  async function importAndFinish(status: Job["status"]) {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    api.items = [];
+    const { queryClient } = renderInApp(
+      <JobsProvider>
+        <StartImport />
+      </JobsProvider>
+    );
+    await vi.waitFor(() => expect(queryClient.getQueryData(["jobs"])).toEqual([]));
+    fireEvent.click(screen.getByRole("button", { name: "Importera" }));
+    api.items = [{ ...imported, status: "in progress" }];
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    api.items = [{ ...imported, status }];
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+  }
+
+  it("is told with its counts and a way to the source, instead of the job's own toast", async () => {
+    api.space = spaceWith(synced);
+    await importAndFinish("complete");
+
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Protokoll: 12 dokument indexerades, 1 hoppades över",
+        expect.objectContaining({ action: expect.objectContaining({ label: "Visa" }) })
+      )
+    );
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    const [, options] = toast.success.mock.calls[0] as [
+      string,
+      { action: { onClick: () => void } }
+    ];
+    options.action.onClick();
+    expect(router.push).toHaveBeenCalledWith("/spaces/space-1/knowledge/integrations/ik-1");
+    expect(pendingImports()).toEqual([]);
+  });
+
+  it("says the first sync failed, and why", async () => {
+    api.space = spaceWith({
+      last_sync_status: "error",
+      last_sync_attempted_at: "2026-10-19T08:00:00Z",
+      last_sync_error: "Token expired"
+    });
+    await importAndFinish("failed");
+
+    await vi.waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Protokoll: första synken misslyckades", {
+        description: "Token expired"
+      })
+    );
+    // Not also the job's own "Protokoll misslyckades."
+    expect(toast.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps its promise across a reload: the first list judges an import from an earlier page", async () => {
+    sessionStorage.setItem(PENDING_IMPORTS_STORAGE_KEY, JSON.stringify([pending]));
+    resetPendingImports();
+    // Its job is no longer listed at all.
+    api.items = [];
+    api.space = spaceWith(synced);
+
+    renderInApp(<JobsProvider>{null}</JobsProvider>);
+
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Protokoll: 12 dokument indexerades, 1 hoppades över",
+        expect.anything()
+      )
+    );
+    expect(sessionStorage.getItem(PENDING_IMPORTS_STORAGE_KEY)).toBeNull();
+  });
+
+  it("waits for the status of a sync whose job is complete but wrote none yet", async () => {
+    sessionStorage.setItem(PENDING_IMPORTS_STORAGE_KEY, JSON.stringify([pending]));
+    resetPendingImports();
+    api.items = [{ ...imported, status: "complete" }];
+    api.space = spaceWith({ last_sync_status: "never" });
+
+    renderInApp(<JobsProvider>{null}</JobsProvider>);
+
+    await vi.waitFor(() =>
+      expect(browserApi.GET).toHaveBeenCalledWith("/api/v1/spaces/{id}/", expect.anything())
+    );
+    await act(async () => {});
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(pendingImports()).toEqual([pending]);
+  });
+});
+
+it("stops a sync queued from a menu reading as queued once its job is over, not before it is listed", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  api.items = [];
+  const sync = { ...job, id: "job-sync", name: "Avtal", task: "pull_sharepoint_content" };
+  function StartSync() {
+    const { trackJob } = useJobs();
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          trackSyncs([{ jobId: "job-sync", knowledgeId: "i1" }]);
+          trackJob({ ...sync, status: "queued" } as Job);
+        }}
+      >
+        Synka
+      </button>
+    );
+  }
+  const { queryClient } = renderInApp(
+    <JobsProvider>
+      <StartSync />
+    </JobsProvider>
+  );
+  await vi.waitFor(() => expect(queryClient.getQueryData(["jobs"])).toEqual([]));
+
+  fireEvent.click(screen.getByRole("button", { name: "Synka" }));
+  // The list read right after does not show the job yet.
+  await vi.waitFor(() => expect(browserApi.GET).toHaveBeenCalledTimes(2));
+  await act(async () => {});
+  expect(pendingSyncs()).toHaveLength(1);
+
+  api.items = [{ ...sync, status: "failed" } as Job];
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+  await vi.waitFor(() => expect(pendingSyncs()).toEqual([]));
 });
