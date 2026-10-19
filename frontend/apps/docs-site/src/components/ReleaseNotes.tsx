@@ -46,6 +46,9 @@ function Entry({ entry, version }: { entry: ReleaseEntry; version: string }) {
       id={anchor}
       className="rounded-lg border border-gray-200 p-4 dark:border-neutral-800"
     >
+      {entry.aliases?.map((alias) => (
+        <span key={alias} id={`v${version}-${alias}`} aria-hidden="true" />
+      ))}
       <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
         <span
           className={`rounded-full px-2 py-0.5 ${TYPE_CLASS[entry.type] ?? ""}`}
