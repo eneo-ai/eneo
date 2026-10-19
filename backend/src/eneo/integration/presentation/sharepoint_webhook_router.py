@@ -24,10 +24,26 @@ router = APIRouter()
 # Graph batches a handful of small notifications per call; anything larger is
 # not a notification and is refused before any database or Redis work.
 MAX_WEBHOOK_BODY_BYTES = 256 * 1024
+# Graph's validation tokens are a few hundred characters at most. The token is
+# echoed back verbatim to anyone who calls the public URL, so it is bounded.
+MAX_VALIDATION_TOKEN_LENGTH = 1024
 
 
 def _bad_request(detail: str) -> JSONResponse:
     return JSONResponse(status_code=400, content={"detail": detail})
+
+
+def _validation_echo(validation_token: str) -> Response:
+    """Graph's subscription handshake: the token back as plain text."""
+    if len(validation_token) > MAX_VALIDATION_TOKEN_LENGTH:
+        logger.warning(
+            "Rejecting SharePoint webhook validation: token longer than %s characters",
+            MAX_VALIDATION_TOKEN_LENGTH,
+        )
+        return _bad_request("validationToken is too long")
+    return PlainTextResponse(
+        content=validation_token, headers={"X-Content-Type-Options": "nosniff"}
+    )
 
 
 async def _read_capped_body(request: Request) -> Optional[bytes]:
@@ -82,7 +98,7 @@ async def _read_capped_body(request: Request) -> Optional[bytes]:
 async def sharepoint_webhook_validation(validationToken: Optional[str] = None):
     if validationToken:
         logger.debug("SharePoint webhook validation token received via GET")
-        return PlainTextResponse(content=validationToken)
+        return _validation_echo(validationToken)
     return {"status": "ok"}
 
 
@@ -140,7 +156,7 @@ async def sharepoint_webhook(
     if validationToken:
         # Microsoft Graph validation handshake
         logger.debug("SharePoint webhook validation token received")
-        return PlainTextResponse(content=validationToken)
+        return _validation_echo(validationToken)
 
     body = await _read_capped_body(request)
     if body is None:
@@ -151,7 +167,9 @@ async def sharepoint_webhook(
         return _bad_request("Request body too large")
     try:
         decoded = cast(object, json.loads(body))
-    except ValueError:
+    except (ValueError, RecursionError):
+        # RecursionError: nesting deep enough to exhaust the parser's stack
+        # fits well under the size cap.
         logger.warning("Rejecting SharePoint webhook: body is not JSON")
         return _bad_request("Request body must be a JSON object")
     if not isinstance(decoded, dict) or not isinstance(

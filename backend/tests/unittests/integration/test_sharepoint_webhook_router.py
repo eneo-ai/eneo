@@ -18,6 +18,7 @@ from eneo.integration.infrastructure.sharepoint_webhook_service import (
     SharepointWebhookService,
 )
 from eneo.integration.presentation.sharepoint_webhook_router import (
+    MAX_VALIDATION_TOKEN_LENGTH,
     MAX_WEBHOOK_BODY_BYTES,
     router,
 )
@@ -170,7 +171,32 @@ async def test_handshake_echoes_the_validation_token_as_plain_text(api, method):
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
+    assert response.headers["x-content-type-options"] == "nosniff"
     assert response.text == "abc 123"
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+async def test_an_overlong_validation_token_is_not_echoed(api, method):
+    token = "<" + "x" * MAX_VALIDATION_TOKEN_LENGTH
+
+    response = await api.client.request(
+        method, WEBHOOK, params={"validationToken": token}
+    )
+
+    assert response.status_code == 400
+    assert token not in response.text
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+async def test_a_validation_token_at_the_limit_is_echoed(api, method):
+    token = "t" * MAX_VALIDATION_TOKEN_LENGTH
+
+    response = await api.client.request(
+        method, WEBHOOK, params={"validationToken": token}
+    )
+
+    assert response.status_code == 200
+    assert response.text == token
 
 
 @pytest.mark.parametrize(
@@ -194,6 +220,11 @@ async def test_handshake_echoes_the_validation_token_as_plain_text(api, method):
             b"{}",
             {"content-type": "application/json", "content-length": str(10**9)},
             id="oversized-declared",
+        ),
+        pytest.param(
+            b"[" * 100_000 + b"]" * 100_000,
+            {"content-type": "application/json"},
+            id="deeply-nested",
         ),
     ],
 )
