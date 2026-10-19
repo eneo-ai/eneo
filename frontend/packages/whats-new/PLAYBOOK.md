@@ -99,6 +99,14 @@ Run this when the release branch is cut or the tag is about to be pushed.
 
 ## 3. Review (release owner, 15–30 minutes)
 
+Before each RC, rerun the collector against the exact candidate commit, with
+an explicit `--since` tag. Reconcile every described and missing-section PR
+in the release PR: link it to an entry, or record why it is excluded (already
+released, internal-only, beta-only, or part of another entry). Inspect the
+titles of PRs marked No as well; the presence check cannot judge correctness.
+Repeat this reconciliation for commits added since the previous RC, especially
+late UI changes. A passing schema check proves shape and links, not coverage.
+
 Read it as a user would. Cut, reorder, sharpen. Set `date`. Merge to the
 release branch before the tag is pushed so the release image ships with its
 own notes, and run the tag rule before creating the GitHub release:
