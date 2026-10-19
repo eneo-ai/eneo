@@ -4906,7 +4906,7 @@
   "mcp_oauth_chip_dismiss": "Dismiss",
   "mcp_oauth_connected_resend": "Connected. Send your question again.",
   "mcp_oauth_connect_failed": "Connection failed",
-  "mcp_oauth_callback_closing": "Sign-in complete. This window will close.",
+  "mcp_oauth_callback_closing": "Sign-in complete. You can go back to Eneo.",
   "mcp_oauth_callback_no_opener": "This window was not opened by Eneo. Close it and try again from Eneo.",
   "mcp_oauth_connect_page_title": "Connect service",
   "mcp_oauth_connect_page_intro": "Eneo needs your permission to use {server} on your behalf.",

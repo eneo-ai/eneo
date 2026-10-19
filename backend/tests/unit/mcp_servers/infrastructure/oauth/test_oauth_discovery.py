@@ -103,6 +103,17 @@ async def test_a_server_that_does_not_challenge_is_not_oauth(monkeypatch):
         await discover(vendor.server_url)
 
 
+async def test_the_issuer_is_kept_exactly_as_published(monkeypatch):
+    with_slash = FakeAuthorizationServer(issuer="https://vendor.example/")
+    with_slash.install(monkeypatch)
+    assert (await discover(with_slash.server_url)).issuer == "https://vendor.example/"
+
+    bare = FakeAuthorizationServer()
+    bare.install(monkeypatch)
+    assert (await discover(bare.server_url)).issuer == "https://vendor.example"
+    assert (await discover(bare.server_url)).resource == "https://vendor.example/mcp"
+
+
 async def test_discovery_is_cached_per_server(monkeypatch):
     vendor = FakeAuthorizationServer()
     vendor.install(monkeypatch)

@@ -32,10 +32,11 @@
     };
 
     if (window.opener) {
-      // Same-origin only: the code must never leave this deployment.
+      // Same-origin only: the code must never leave this deployment. The
+      // opener owns this window: it navigates it on to the next server when
+      // several are connected in turn, and closes it when it is done.
       window.opener.postMessage(payload, window.location.origin);
       status = "closing";
-      window.close();
       return;
     }
 

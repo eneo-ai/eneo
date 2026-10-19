@@ -40,6 +40,13 @@ class MCPOAuthRepository(ABC):
     ) -> bool: ...
 
     @abstractmethod
+    async def delete_server_state(self, *, mcp_server_id: UUID) -> None:
+        """Forget every connection and registration of a server: its tokens
+        and client identity were bound to a resource and issuer it no longer
+        points at."""
+        ...
+
+    @abstractmethod
     async def get_registration(
         self, *, mcp_server_id: UUID, issuer: str
     ) -> Optional[MCPOAuthClientRegistration]: ...

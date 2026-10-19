@@ -121,6 +121,9 @@ if TYPE_CHECKING:
     from eneo.mcp_servers.application.mcp_oauth_token_provider import (
         MCPOAuthTokenProvider,
     )
+    from eneo.mcp_servers.domain.repositories.mcp_oauth_repo import (
+        MCPOAuthRepository,
+    )
     from eneo.mcp_servers.domain.repositories.mcp_server_repo import (
         MCPServerRepository,
     )
@@ -307,6 +310,7 @@ class MCPServerService:
         image_model_repo: "ImageModelRepository | None" = None,
         app_view_repo: "McpAppViewRepo | None" = None,
         oauth_token_provider: "MCPOAuthTokenProvider | None" = None,
+        mcp_oauth_repo: "MCPOAuthRepository | None" = None,
     ):
         super().__init__()
         self.repo = mcp_server_repo
@@ -318,6 +322,7 @@ class MCPServerService:
         self.user_groups_repo = user_groups_repo
         # Tokens for OAuth servers, resolved for the acting administrator.
         self.oauth_token_provider = oauth_token_provider
+        self.mcp_oauth_repo = mcp_oauth_repo
 
     async def _resolve_audience(
         self,
@@ -1108,6 +1113,15 @@ class MCPServerService:
                             ),
                         ),
                     )
+
+        # Tokens and client identities are bound to the address the row had:
+        # a move to another resource (or away from OAuth) forgets them, so
+        # nothing issued for the old address is ever sent to the new one.
+        if self.mcp_oauth_repo is not None and (
+            (url_changed and is_oauth_server(mcp_server.http_auth_type))
+            or (auth_type_changed and not is_oauth_server(mcp_server.http_auth_type))
+        ):
+            await self.mcp_oauth_repo.delete_server_state(mcp_server_id=mcp_server.id)
 
         # Encrypt and apply new credentials after validation passes
         if http_auth_config_schema is not None and mcp_server.http_auth_type != "none":

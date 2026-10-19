@@ -1493,6 +1493,7 @@ class Container(containers.DeclarativeContainer):
         image_model_repo=image_model_repo,
         app_view_repo=mcp_app_view_repo,
         oauth_token_provider=mcp_oauth_token_provider,
+        mcp_oauth_repo=mcp_oauth_repo,
     )
     mcp_oauth_service = providers.Factory(
         MCPOAuthService,

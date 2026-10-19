@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 import httpx
+from mcp.shared.auth_utils import check_resource_allowed, resource_url_from_server_url
 
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.main.exceptions import MCPUserActionRequiredError
@@ -244,17 +245,55 @@ class MCPOAuthTokenProvider:
     def _key(self, server: MCPServer) -> tuple[UUID, Optional[UUID]]:
         return (server.id, None if server.is_shared_oauth else self.user_id)
 
+    @staticmethod
+    def _bound_to(connection: MCPOAuthConnection, server: MCPServer) -> bool:
+        """Whether the tokens were issued for the server the row points at now.
+
+        A token is bound to one resource (RFC 8707). When an administrator
+        points the row at another address, the stored tokens must never be
+        sent there; the connection reads as absent until someone authorizes
+        the new resource.
+        """
+        try:
+            return check_resource_allowed(
+                requested_resource=resource_url_from_server_url(server.http_url),
+                configured_resource=connection.resource,
+            )
+        except ValueError:
+            return False
+
     async def _connection(self, server: MCPServer) -> Optional[MCPOAuthConnection]:
         key = self._key(server)
         if key in self._connections:
-            return self._connections[key]
-        async with self._repo() as repo:
-            connection = await repo.get_connection(
-                mcp_server_id=server.id, user_id=key[1]
+            connection: Optional[MCPOAuthConnection] = self._connections[key]
+        else:
+            async with self._repo() as repo:
+                connection = await repo.get_connection(
+                    mcp_server_id=server.id, user_id=key[1]
+                )
+            if connection is not None:
+                self._connections[key] = connection
+        if connection is not None and not self._bound_to(connection, server):
+            logger.info(
+                "Ignoring OAuth connection for '%s': bound to %s, server is now %s",
+                server.name,
+                connection.resource,
+                server.http_url,
             )
-        if connection is not None:
-            self._connections[key] = connection
+            return None
         return connection
+
+    async def _reload(
+        self, connection: MCPOAuthConnection
+    ) -> Optional[MCPOAuthConnection]:
+        """The row as another worker may have left it meanwhile."""
+        async with self._repo() as repo:
+            latest = await repo.get_connection(
+                mcp_server_id=connection.mcp_server_id, user_id=connection.user_id
+            )
+        if latest is not None:
+            self._connections[(latest.mcp_server_id, latest.user_id)] = latest
+        return latest
 
     async def _save(self, connection: MCPOAuthConnection) -> MCPOAuthConnection:
         async with self._repo() as repo:
@@ -476,6 +515,20 @@ class MCPOAuthTokenProvider:
                 acquired = await self._acquire_lock(lock_key)
                 if not acquired:
                     raise self.user_action_required(server, reason="refresh_busy")
+            # The lock is held: re-read the row. Another worker may have
+            # refreshed and rotated the refresh token since this provider
+            # loaded its copy; spending that stale token would get the
+            # connection refused and torn down.
+            latest = await self._reload(connection)
+            if latest is not None:
+                if latest.token_is_fresh():
+                    assert latest.access_token is not None
+                    return latest.access_token
+                if not latest.refresh_token:
+                    raise self.user_action_required(
+                        server, reason=latest.last_error or "not_connected"
+                    )
+                connection = latest
             return await self._refresh(server, connection)
         finally:
             if acquired:
@@ -498,6 +551,17 @@ class MCPOAuthTokenProvider:
             )
         except OAuthTokenError as exc:
             if exc.is_invalid_grant or exc.status_code in (400, 401):
+                # Refused: unless the row was rotated under us meanwhile (then
+                # the stored tokens are the good ones), the connection is dead.
+                latest = await self._reload(connection)
+                if (
+                    latest is not None
+                    and latest.refresh_token
+                    and latest.refresh_token != connection.refresh_token
+                    and latest.token_is_fresh()
+                ):
+                    assert latest.access_token is not None
+                    return latest.access_token
                 connection.invalidate(exc.error or "refresh_rejected")
                 await self._save(connection)
                 raise self.user_action_required(

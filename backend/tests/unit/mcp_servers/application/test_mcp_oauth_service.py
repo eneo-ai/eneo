@@ -285,6 +285,22 @@ async def test_iss_is_compared_when_present_and_required_when_advertised(monkeyp
     )["status"] == "connected"
 
 
+async def test_an_issuer_published_with_a_trailing_slash_round_trips(monkeypatch):
+    vendor = FakeAuthorizationServer(iss_param=True, issuer="https://vendor.example/")
+    vendor.install(monkeypatch)
+    user = _user()
+    server = _server(vendor, user)
+    service, _, _ = _service(user, [server])
+    started = await service.authorize_url(server.id)
+    code, state = vendor.authorize(started["url"])
+
+    public = await service.complete(
+        server.id, code=code, state=state, iss="https://vendor.example/"
+    )
+
+    assert public["status"] == "connected"
+
+
 async def test_a_present_iss_is_checked_even_when_not_advertised(monkeypatch):
     vendor = FakeAuthorizationServer(iss_param=False)
     vendor.install(monkeypatch)

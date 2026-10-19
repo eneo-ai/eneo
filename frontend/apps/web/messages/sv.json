@@ -4906,7 +4906,7 @@
   "mcp_oauth_chip_dismiss": "Dölj",
   "mcp_oauth_connected_resend": "Anslutet. Skicka frågan igen.",
   "mcp_oauth_connect_failed": "Anslutningen misslyckades",
-  "mcp_oauth_callback_closing": "Inloggningen är klar. Fönstret stängs.",
+  "mcp_oauth_callback_closing": "Inloggningen är klar. Du kan gå tillbaka till Eneo.",
   "mcp_oauth_callback_no_opener": "Det här fönstret öppnades inte av Eneo. Stäng det och försök igen från Eneo.",
   "mcp_oauth_connect_page_title": "Anslut tjänst",
   "mcp_oauth_connect_page_intro": "Eneo behöver din tillåtelse att använda {server} på dina vägnar.",

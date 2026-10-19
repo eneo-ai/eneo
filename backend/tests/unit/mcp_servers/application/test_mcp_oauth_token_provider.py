@@ -65,6 +65,12 @@ class FakeOAuthRepo(MCPOAuthRepository):
     async def delete_connection(self, *, mcp_server_id, user_id):
         return self.connections.pop((mcp_server_id, user_id), None) is not None
 
+    async def delete_server_state(self, *, mcp_server_id):
+        for key in [k for k in self.connections if k[0] == mcp_server_id]:
+            del self.connections[key]
+        for key in [k for k in self.registrations if k[0] == mcp_server_id]:
+            del self.registrations[key]
+
     async def get_registration(self, *, mcp_server_id, issuer):
         return self.registrations.get((mcp_server_id, issuer))
 
@@ -276,6 +282,73 @@ async def test_record_denial_without_a_challenge_keeps_the_token(monkeypatch):
 
     assert await provider.record_denial(server, auth) is None
     assert repo.connections[(server.id, user.id)].is_connected
+
+
+class CopyingOAuthRepo(FakeOAuthRepo):
+    """Hands out copies like a real repository does: two providers never
+    share one connection object."""
+
+    async def get_connection(self, *, mcp_server_id, user_id):
+        import copy
+
+        row = self.connections.get((mcp_server_id, user_id))
+        return copy.deepcopy(row) if row is not None else None
+
+    async def list_connections(self, *, mcp_server_ids, user_id):
+        import copy
+
+        return [
+            copy.deepcopy(c)
+            for c in await super().list_connections(
+                mcp_server_ids=mcp_server_ids, user_id=user_id
+            )
+        ]
+
+
+async def test_two_providers_with_the_same_stale_token_refresh_once(monkeypatch):
+    """The second refresher re-reads the row under the lock and takes the
+    first one's result instead of spending the rotated-away refresh token
+    and tearing the connection down."""
+    vendor = FakeAuthorizationServer()
+    vendor.live_refresh_tokens.add("refresh-0")
+    vendor.install(monkeypatch)
+    user = _user()
+    repo = CopyingOAuthRepo()
+    server = _server(vendor, user)
+    repo.connections[(server.id, user.id)] = _connection(server, user.id, expires_in=10)
+    first, second = _provider(repo, user), _provider(repo, user)
+    await first.preload([server])
+    await second.preload([server])  # both hold a copy of the stale row
+
+    assert await first.access_token_for(server) == "access-1"
+    assert await second.access_token_for(server) == "access-1"
+
+    refreshes = [
+        r for r in vendor.token_requests if r.get("grant_type") == "refresh_token"
+    ]
+    assert len(refreshes) == 1
+    stored = repo.connections[(server.id, user.id)]
+    assert stored.is_connected and stored.refresh_token == "refresh-1"
+
+
+async def test_tokens_bound_to_another_address_are_never_sent(monkeypatch):
+    """An administrator pointed the row at a new address: the tokens issued
+    for the old resource read as no connection at all."""
+    vendor = FakeAuthorizationServer()
+    vendor.install(monkeypatch)
+    user = _user()
+    repo = FakeOAuthRepo()
+    server = _server(vendor, user)
+    repo.connections[(server.id, user.id)] = _connection(
+        server, user.id, expires_in=3600
+    )
+    server.http_url = "https://other-vendor.example/mcp"
+
+    with pytest.raises(MCPUserActionRequiredError) as info:
+        await _provider(repo, user).access_token_for(server)
+
+    assert info.value.reason == "not_connected"
+    assert vendor.token_requests == []
 
 
 # -- ID-JAG ------------------------------------------------------------------

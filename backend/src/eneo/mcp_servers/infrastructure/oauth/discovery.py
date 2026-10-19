@@ -234,6 +234,7 @@ async def discover(
 
     async with _client() as http:
         prm: Optional[ProtectedResourceMetadata] = None
+        raw_prm: dict[str, Any] = {}
         for url in build_protected_resource_metadata_discovery_urls(
             challenge.resource_metadata_url, server_url
         ):
@@ -255,11 +256,15 @@ async def discover(
                     f"{candidate.resource}, not {server_url}"
                 )
             prm = candidate
+            raw_prm = payload
             break
 
+        # Identifiers are kept exactly as published: the resource parameter
+        # and the RFC 9207 iss comparison are byte-for-byte, and pydantic's
+        # URL types would add a trailing slash to a bare origin.
         if prm is not None:
             auth_server_url: Optional[str] = str(prm.authorization_servers[0])
-            resource = str(prm.resource)
+            resource = str(raw_prm.get("resource") or prm.resource)
         else:
             # Pre-RFC 9728 servers: the authorization server is the resource
             # server's own origin. Kept for interoperability.
@@ -299,10 +304,8 @@ async def discover(
 
     discovery = OAuthServerDiscovery(
         server_url=server_url,
-        resource=resource.rstrip("/") if resource.endswith("/") else resource,
-        issuer=str(asm.issuer).rstrip("/")
-        if str(asm.issuer).endswith("/")
-        else str(asm.issuer),
+        resource=resource,
+        issuer=str(raw_asm.get("issuer") or asm.issuer),
         protected_resource=prm,
         authorization_server=asm,
         raw_authorization_server=raw_asm,

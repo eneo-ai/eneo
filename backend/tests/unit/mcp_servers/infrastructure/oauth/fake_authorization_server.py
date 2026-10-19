@@ -48,9 +48,12 @@ class FakeAuthorizationServer:
         auth_methods: tuple[str, ...] = ("none",),
         serve_prm: bool = True,
         prm_in_challenge: bool = True,
+        issuer: Optional[str] = None,
     ) -> None:
         self.base = base
-        self.issuer = base
+        # Some servers publish their issuer with a trailing slash; the client
+        # must keep whatever they publish, byte for byte.
+        self.issuer = issuer or base
         self.server_url = f"{base}/mcp"
         self.resource = f"{base}/mcp"
         self.cimd = cimd
