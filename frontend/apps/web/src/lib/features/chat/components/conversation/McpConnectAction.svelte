@@ -24,6 +24,11 @@
   let connected = $state(false);
   let declined = $state(false);
 
+  // Whoever shows this server as connected should look again.
+  $effect(() => {
+    connect?.noteAuthorizationRequired(remedy.mcp_server_id);
+  });
+
   async function run() {
     if (!connect) return;
     const result = await connect.connect(remedy.mcp_server_id);

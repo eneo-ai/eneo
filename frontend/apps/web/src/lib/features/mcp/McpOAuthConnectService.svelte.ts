@@ -56,6 +56,7 @@ export class McpOAuthConnectService {
     reject: (error: Error) => void;
   } | null = null;
   #listeners = new SvelteSet<(serverId: string, result: McpOAuthConnectResult) => void>();
+  #brokenListeners = new SvelteSet<(serverId: string) => void>();
   /** Servers being connected right now, for buttons to disable themselves. */
   connecting = new SvelteSet<string>();
 
@@ -68,6 +69,20 @@ export class McpOAuthConnectService {
   subscribe(listener: (serverId: string, result: McpOAuthConnectResult) => void) {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
+  }
+
+  /**
+   * Called when a tool step reports that a server needs the user's
+   * authorization: the connection a component believed in may have broken
+   * since it last asked.
+   */
+  onAuthorizationRequired(listener: (serverId: string) => void) {
+    this.#brokenListeners.add(listener);
+    return () => this.#brokenListeners.delete(listener);
+  }
+
+  noteAuthorizationRequired(serverId: string) {
+    for (const listener of this.#brokenListeners) listener(serverId);
   }
 
   isConnecting(serverId: string) {

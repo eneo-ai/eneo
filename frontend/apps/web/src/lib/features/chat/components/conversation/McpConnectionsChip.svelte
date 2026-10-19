@@ -71,7 +71,27 @@
       toastError(result.error);
     }
   });
-  onDestroy(() => unsubscribe?.());
+  // A step that needs authorization for a server listed here as connected
+  // means that connection broke after the list was fetched: fetch it again,
+  // and bring the chip back for this round.
+  const unsubscribeBroken = connect?.onAuthorizationRequired(async (serverId) => {
+    const believed = connections.find((c) => c.mcp_server_id === serverId);
+    if (!believed || believed.status !== "connected") return;
+    await load(assistantId);
+    const now = connections.find((c) => c.mcp_server_id === serverId);
+    if (now && now.status !== "connected") {
+      dismissed = false;
+      try {
+        sessionStorage.removeItem(dismissKey);
+      } catch {
+        /* storage unavailable */
+      }
+    }
+  });
+  onDestroy(() => {
+    unsubscribe?.();
+    unsubscribeBroken?.();
+  });
 
   function dismiss() {
     dismissed = true;
