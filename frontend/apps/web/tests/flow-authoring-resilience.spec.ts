@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import type { FlowStep } from "@eneo/eneo-js";
-import { backendFetch, expectOk, uniqueName } from "./helpers";
+import { backendFetch, currentDraftRevision, expectOk, uniqueName } from "./helpers";
 
 const STEP_NAME = /^(Step name|Stegnamn)\b/;
 const INSTRUCTION = /^(Instruction for the AI|Instruktion till AI:n)$/;
@@ -53,7 +53,7 @@ async function createFlow(page: Page, request: APIRequestContext) {
   }
   const response = await backendFetch(page, request, `/api/v1/flows/${flow.id}/`, {
     method: "PATCH",
-    data: { steps, expected_revision: flow.draft_revision }
+    data: { steps, expected_revision: await currentDraftRevision(page, request, flow.id) }
   });
   await expectOk(response, "saving eight-step flow");
   return response.json();
