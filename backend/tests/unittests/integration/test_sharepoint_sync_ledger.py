@@ -19,9 +19,11 @@ from eneo.integration.infrastructure.content_service.sharepoint_content_service 
     SharePointContentService,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_results import (
+    FAILURES_IN_A_ROW_TO_STOP,
     DeltaBaselineUnavailable,
     SyncAccessDenied,
     SyncItemsFailed,
+    SyncStoppedEarly,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_sync_ledger import (
     COUNT_INTERVAL_SECONDS,
@@ -146,6 +148,10 @@ def _root_file(item_id: str) -> dict:
     }
 
 
+async def _metadata(*, drive_id, item_id):
+    return _root_file(item_id)
+
+
 def _extract_failing(*failing: str):
     async def extract(*, drive_id, item_id):
         if item_id in failing:
@@ -223,7 +229,7 @@ class TestRepeatedFailures:
         assert set_aside["file"] == "bad.docx"
         assert set_aside["params"]["attempts"] == SET_ASIDE_AFTER
         assert "HTTP 502" in set_aside["params"]["detail"]
-        assert "retry" not in set_aside
+        assert set_aside["retry"] is True
 
     async def test_an_item_that_succeeds_again_starts_its_count_over(
         self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
@@ -355,6 +361,193 @@ class TestPacing:
 
         assert ik.delta_token == "token-1"
         assert ledger.failed == {"bad": FailedItem(1, NOW)}
+
+
+class TestOutages:
+    """Failures that say something is down count toward nobody's cap."""
+
+    async def test_an_outage_over_several_passes_sets_nothing_aside(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        ledger,
+        sqlite_session,
+        clock,
+    ):
+        """An embedding provider down for a first import and two quiet passes
+        an hour apart: the import fails visibly and every file comes back."""
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token=None)
+        files = [_root_file(f"f-{index}") for index in range(5)]
+        upsert = AsyncMock(side_effect=RuntimeError("embedding provider unavailable"))
+
+        def delta():
+            return service.process_delta_changes(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        with (
+            patch(_CLIENT) as client_class,
+            patch.object(service._index, "upsert", upsert),
+        ):
+            client = _mock_graph_client(
+                client_class,
+                get_drive_root_children=AsyncMock(return_value=files),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body", "text/plain")
+                ),
+            )
+            with pytest.raises(SyncItemsFailed):
+                await _committed(
+                    sqlite_session,
+                    service,
+                    lambda: service.pull_content(
+                        token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                    ),
+                )
+            client.get_delta_changes = AsyncMock(return_value=([], "token-2"))
+            client.get_file_metadata = AsyncMock(side_effect=_metadata)
+            for _ in range(SET_ASIDE_AFTER + 1):
+                clock["now"] += HOUR
+                with pytest.raises(SyncItemsFailed):
+                    await _committed(sqlite_session, service, delta)
+            assert ik.delta_token == "delta-token"
+            assert ik.last_sync_status == "error"
+            assert ledger.counted() == dict.fromkeys((file["id"] for file in files), 0)
+
+            upsert.side_effect = None
+            upsert.return_value = "added"
+            upsert.reset_mock()
+            await _committed(sqlite_session, service, delta)
+
+        assert upsert.await_count == len(files)
+        assert ik.delta_token == "token-2"
+        assert ik.last_sync_status == "success"
+        assert ledger.failed == {}
+
+    async def test_most_of_a_pass_failing_counts_for_nobody(
+        self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
+    ):
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        changes = [_delta_file(f"item-{index}", f"{index}.docx") for index in range(4)]
+        with (
+            patch(_CLIENT) as client_class,
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
+        ):
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=_extract_failing("item-0", "item-1", "item-2")
+                ),
+            )
+            with pytest.raises(SyncItemsFailed):
+                await _committed(
+                    sqlite_session,
+                    service,
+                    lambda: service.process_delta_changes(
+                        token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                    ),
+                )
+
+        assert ledger.counted() == {"item-0": 0, "item-1": 0, "item-2": 0}
+
+    async def test_many_failures_alike_count_for_nobody_among_many_successes(
+        self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
+    ):
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        changes = [_delta_file(f"item-{index}", f"{index}.docx") for index in range(40)]
+        failing = {f"item-{index}" for index in range(0, 40, 3)}
+        with (
+            patch(_CLIENT) as client_class,
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
+        ):
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=_extract_failing(*failing)
+                ),
+            )
+            with pytest.raises(SyncItemsFailed):
+                await _committed(
+                    sqlite_session,
+                    service,
+                    lambda: service.process_delta_changes(
+                        token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                    ),
+                )
+
+        assert ledger.counted() == dict.fromkeys(failing, 0)
+
+
+class TestStoppingEarly:
+    async def test_a_delta_stops_after_too_many_failures_in_a_row(
+        self, service, mock_dependencies, mock_oauth_token, ledger
+    ):
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        changes = [_delta_file(f"item-{index}", f"{index}.docx") for index in range(30)]
+        extraction = AsyncMock(side_effect=_http_error(503, "Service Unavailable"))
+        with patch(_CLIENT) as client_class:
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
+                get_file_extraction_by_id=extraction,
+            )
+            with pytest.raises(SyncStoppedEarly, match="Stopped after 10 files"):
+                await service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        assert extraction.await_count == FAILURES_IN_A_ROW_TO_STOP
+        assert ik.delta_token == "token-1"
+        assert ik.last_sync_status == "error"
+
+    async def test_a_full_sync_stopped_early_leaves_the_next_sync_a_full_one(
+        self, service, mock_dependencies, mock_oauth_token, ledger
+    ):
+        """The files it did not reach are recorded nowhere."""
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token=None)
+        files = [_root_file(f"f-{index}") for index in range(30)]
+        with patch(_CLIENT) as client_class:
+            _mock_graph_client(
+                client_class,
+                get_drive_root_children=AsyncMock(return_value=files),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=_http_error(503, "Service Unavailable")
+                ),
+            )
+            with pytest.raises(SyncStoppedEarly):
+                await service.pull_content(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        assert ik.delta_token is None
+
+    async def test_failures_between_successes_do_not_stop_the_pass(
+        self, service, mock_dependencies, mock_oauth_token, ledger
+    ):
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        changes = [_delta_file(f"item-{index}", f"{index}.docx") for index in range(30)]
+        failing = {f"item-{index}" for index in range(30) if index % 4}
+        with (
+            patch(_CLIENT) as client_class,
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
+        ):
+            client = _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=_extract_failing(*failing)
+                ),
+            )
+            with pytest.raises(SyncItemsFailed) as failure:
+                await service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        assert not isinstance(failure.value, SyncStoppedEarly)
+        assert client.get_file_extraction_by_id.await_count == 30
 
 
 class TestSetAsideCoolOff:

@@ -74,6 +74,8 @@ class SyncStats(TypedDict):
     refused_downloads: NotRequired[dict[str, str]]
     # Item id -> indexes into skipped_details of the failures that name it.
     failures_by_item: NotRequired[dict[str, list[int]]]
+    items_attempted: NotRequired[int]
+    failures_in_a_row: NotRequired[int]
     skipped_total: NotRequired[int]
     skipped_truncated: NotRequired[bool]
     changed_details: NotRequired[list[ChangedDetail]]

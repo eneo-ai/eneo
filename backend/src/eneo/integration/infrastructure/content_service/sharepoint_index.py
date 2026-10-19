@@ -661,6 +661,7 @@ class SharePointIndex:
                     stats["unchanged_items"] += 1
                     return
 
+            sync_results.count_attempt(stats)
             content, skip_reason = await self._extract_file(
                 client, drive_id, item_id, item_name, stats
             )
@@ -685,6 +686,8 @@ class SharePointIndex:
                 stats=stats,
             )
             sync_results.count_outcome(stats, outcome, item_name)
+            if outcome != "failed":
+                sync_results.item_succeeded(stats)
             # Defer the ChangeKey cache write until after commit so a
             # rolled-back sync re-processes the item instead of skipping it.
             if pending_change_keys is not None and change_key and outcome != "failed":
@@ -701,9 +704,9 @@ class SharePointIndex:
                     )
         except Exception as e:
             logger.error(f"Error processing file {item_name}: {e}", exc_info=True)
-            sync_results.count_failure(
-                stats, error_skipped(item_name, e), item_id=item_id
-            )
+            detail = error_skipped(item_name, e)
+            sync_results.count_failure(stats, detail, item_id=item_id)
+            sync_results.item_failed_in_a_row(stats, detail)
 
     async def _extract_file(
         self,

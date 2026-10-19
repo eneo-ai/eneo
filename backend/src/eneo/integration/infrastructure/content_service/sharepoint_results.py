@@ -70,6 +70,24 @@ class SyncAccessDenied(SyncItemsFailed):
         )
 
 
+class SyncStoppedEarly(SyncItemsFailed):
+    """Too many items in a row failed: the trouble is not theirs.
+
+    Raised mid-pass instead of trying every remaining item with its retries.
+    A delta keeps its token and replays; a full sync leaves the next sync a
+    full one, since the items it did not reach are recorded nowhere.
+    """
+
+    def __init__(self, summary: SyncStats, *, failures: int, last_reason: str) -> None:
+        super().__init__(
+            summary,
+            message=(
+                f"Stopped after {failures} files in a row could not be processed "
+                f"({user_visible_error(last_reason)}); the next sync tries again"
+            ),
+        )
+
+
 class DeltaBaselineUnavailable(SyncItemsFailed):
     """A full sync finished without a delta token to continue from.
 
@@ -200,6 +218,54 @@ def count_failure(
         )
 
 
+# Items in a row whose failure stops the pass; see SyncStoppedEarly.
+FAILURES_IN_A_ROW_TO_STOP = 10
+# A pass with at least this many failed items, most of what it attempted, or
+# this many and more all failing the same way, failed for a reason that is not
+# the items': an embedding provider, Graph or the database being down.
+_SYSTEMIC_MIN_FAILED = 3
+_SYSTEMIC_SAME_REASON_MIN_FAILED = 10
+
+
+def count_attempt(stats: SyncStats) -> None:
+    """An item the pass sent to Graph, the parser or the index."""
+    stats["items_attempted"] = stats.get("items_attempted", 0) + 1
+
+
+def item_succeeded(stats: SyncStats) -> None:
+    stats["failures_in_a_row"] = 0
+
+
+def item_failed_in_a_row(stats: SyncStats, detail: SkippedDetail) -> None:
+    """Count a failure toward the stop; raise once too many came in a row."""
+    in_a_row = stats.get("failures_in_a_row", 0) + 1
+    stats["failures_in_a_row"] = in_a_row
+    if in_a_row >= FAILURES_IN_A_ROW_TO_STOP:
+        raise SyncStoppedEarly(
+            build_summary_stats(stats), failures=in_a_row, last_reason=detail["reason"]
+        )
+
+
+def failures_look_systemic(stats: SyncStats) -> bool:
+    """Whether the pass's item failures say something is down, not the items.
+
+    No failure of such a pass counts toward an item's set-aside cap: an outage
+    must not set every file aside and let the pass look successful.
+    """
+    indexes = [
+        index
+        for item_indexes in stats.get("failures_by_item", {}).values()
+        for index in item_indexes
+    ]
+    failed = len(stats.get("failures_by_item", {}))
+    if failed < _SYSTEMIC_MIN_FAILED:
+        return False
+    if 2 * failed >= stats.get("items_attempted", 0):
+        return True
+    reasons = {stats["skipped_details"][index]["reason"] for index in indexes}
+    return failed >= _SYSTEMIC_SAME_REASON_MIN_FAILED and len(reasons) == 1
+
+
 def failed_item_ids(stats: SyncStats) -> list[str]:
     return list(stats.get("failures_by_item", {}))
 
@@ -211,12 +277,19 @@ def unretryable_failures(stats: SyncStats) -> int:
 
 
 def set_aside(stats: SyncStats, item_id: str, *, attempts: int) -> None:
-    """Turn the item's failures into skips, so the pass may move past it."""
+    """Turn the item's failures into skips, so the pass may move past it.
+
+    They keep the retry flag: a later sync tries the item again.
+    """
     details = stats["skipped_details"]
     for index in stats.get("failures_by_item", {}).pop(item_id, []):
         failure = details[index]
         details[index] = skipped_by_code(
-            failure["file"], "set_aside", attempts=attempts, detail=failure["reason"]
+            failure["file"],
+            "set_aside",
+            retry=True,
+            attempts=attempts,
+            detail=failure["reason"],
         )
         stats["failed_items"] = stats.get("failed_items", 0) - 1
 

@@ -1088,16 +1088,19 @@ class SharePointContentService:
                         delta_pass.stats, error_skipped(item_id, exc)
                     )
                 else:
-                    sync_results.count_failure(
-                        delta_pass.stats, error_skipped(item_id, exc), item_id=item_id
-                    )
+                    self._retry_failed(delta_pass, item_id, exc)
                 continue
             except Exception as exc:
-                sync_results.count_failure(
-                    delta_pass.stats, error_skipped(item_id, exc), item_id=item_id
-                )
+                self._retry_failed(delta_pass, item_id, exc)
                 continue
             await self._apply_delta_change(delta_pass, current)
+
+    @staticmethod
+    def _retry_failed(delta_pass: "_DeltaPass", item_id: str, exc: Exception) -> None:
+        detail = error_skipped(item_id, exc)
+        sync_results.count_attempt(delta_pass.stats)
+        sync_results.count_failure(delta_pass.stats, detail, item_id=item_id)
+        sync_results.item_failed_in_a_row(delta_pass.stats, detail)
 
     async def _settle_failures(
         self,
@@ -1118,9 +1121,14 @@ class SharePointContentService:
         if self._ledger is None:
             return False
         now = int(self._clock())
+        # An outage fails the pass and keeps the token; nobody's count moves.
+        systemic = sync_results.failures_look_systemic(stats)
         failed_now: dict[str, FailedItem] = {}
         for item_id in sync_results.failed_item_ids(stats):
             previous = failed_before.get(item_id)
+            if systemic:
+                failed_now[item_id] = previous or FailedItem.uncounted()
+                continue
             failed = (
                 previous.after_failure(now)
                 if previous

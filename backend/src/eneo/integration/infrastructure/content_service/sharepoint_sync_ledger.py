@@ -61,6 +61,11 @@ class FailedItem:
         return FailedItem.counted_now(self.counted + 1, now)
 
     @staticmethod
+    def uncounted() -> "FailedItem":
+        """Failed in a pass whose failures counted for nobody (an outage)."""
+        return FailedItem(0, 0)
+
+    @staticmethod
     def first_failure(now: int) -> "FailedItem":
         return FailedItem.counted_now(1, now)
 
