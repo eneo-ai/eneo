@@ -15,6 +15,7 @@ from typing import cast
 
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.enums import FlowInputSource, FlowOutputMode
+from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import InputSource, InputType, OutputMode, StepSpec
 from eneo.flows.flow_authoring_variable_rewriting import renumber_step_aliases
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
@@ -246,34 +247,81 @@ def step_reads(
 
 
 # What a run is started with besides its form fields: its text or payload
-# (read whole, it carries the fields too), an alias of it, a step's own upload.
+# (read whole, it carries the fields too), an alias of it, or a step's own upload.
 _RUN_INPUT_CHANNELS = frozenset(
     {ReadChannel.RUN_INPUT, ReadChannel.RUN_INPUT_ALIAS, ReadChannel.STEP_INPUT}
 )
 
 
-def steps_reading_run_input(
-    steps: Sequence[StepSpec], *, form_field_names: set[str]
-) -> tuple[int, ...]:
-    """The 1-based orders of the steps that read what a run is started with
-    besides the run form's declared fields (`form_field_names`), at any site
-    `step_reads` enumerates (a tool argument bound to {{flow_input.text}}
-    too). A step whose configuration cannot be read is counted: unknown is
-    never "reads nothing"."""
+def reads_run_input(
+    step: StepSpec,
+    *,
+    order: int,
+    step_refs: dict[str, int],
+    form_field_names: set[str],
+) -> bool:
+    """Whether the step reads what a run is started with besides the run form's
+    declared fields (`form_field_names`), at any site `step_reads` enumerates (a
+    tool argument bound to {{flow_input.text}} too). A step whose configuration
+    cannot be read counts: unknown is never "reads nothing"."""
 
-    step_refs = spec_step_refs(steps)
-    return tuple(
-        order
-        for order, step in enumerate(steps, 1)
-        if _has_unreadable_config(step)
+    return _has_unreadable_config(step) or any(
+        read.channel in _RUN_INPUT_CHANNELS
+        for read in step_reads(
+            step, order=order, step_refs=step_refs, form_field_names=form_field_names
+        )
+    )
+
+
+def takes_run_input_by_position(
+    step: StepSpec,
+    *,
+    order: int,
+    step_refs: dict[str, int],
+    form_field_names: set[str],
+) -> bool:
+    """Whether an edit must keep the step first: it reads the run input
+    implicitly (no question or source refs), which only a step with
+    input_source flow_input receives; it takes an upload (it reads step_input,
+    or the apply gives it a runtime upload), which the Builder keeps on the
+    first step; or its configuration cannot be read. An explicit reference to
+    the run's text or payload, at any site, does not count: it is resolved from
+    the run whatever the step's position or input_source."""
+
+    return (
+        _has_unreadable_config(step)
+        or build_runtime_input_config(
+            resolve_runtime_input_config(step_spec=step)
+        ).enabled
         or any(
-            read.channel in _RUN_INPUT_CHANNELS
+            read.channel is ReadChannel.STEP_INPUT
+            or (
+                read.site is ReadSite.IMPLICIT and read.channel is ReadChannel.RUN_INPUT
+            )
             for read in step_reads(
                 step,
                 order=order,
                 step_refs=step_refs,
                 form_field_names=form_field_names,
             )
+        )
+    )
+
+
+def steps_reading_run_input(
+    steps: Sequence[StepSpec], *, form_field_names: set[str]
+) -> tuple[int, ...]:
+    """The 1-based orders of the steps for which `reads_run_input` holds."""
+
+    step_refs = spec_step_refs(steps)
+    return tuple(
+        order
+        for order, step in enumerate(steps, 1)
+        if reads_run_input(
+            step,
+            order=order,
+            step_refs=step_refs,
+            form_field_names=form_field_names,
         )
     )
 

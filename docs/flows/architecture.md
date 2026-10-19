@@ -297,6 +297,18 @@ protected as saved. Every saved tool step's reads keep naming the producer they
 named when saved (`kept_step_read_retargeted`), but the tool arguments of a step
 whose tool use the edit writes.
 
+An edit that puts a step before a saved first step on `input_source`
+`flow_input` (which only step 1 may have) is ordered by
+`compile_ordered_edit_proposal` through `_follow_the_steps_inserted_before`. A
+step that takes the run's input as its own input, or an upload
+(`takes_run_input_by_position`: an implicit read of the run input, a
+`step_input` read or a runtime upload as the apply writes it, or a
+configuration that cannot be read), must stay first: the edit is refused as
+`run_input_step_displaced` and sent back to the model. Any other displaced
+step, including one that names the run's text or payload explicitly, gets the
+previous step as its input source and keeps its bindings, so it reads what it
+read before: an explicit reference never reads `input_source`.
+
 The person decides about tools through three question families, whose ids are
 built and read only in `ai_builder_tool_question_ids.py`: `tool_relevance`,
 `tool_choice:<use_ref>` and `tool_argument:<use_ref>:<tool_ref>:<argument>`,

@@ -88,7 +88,7 @@ from eneo.flows.application.flow_draft_materialization import (
 )
 from eneo.flows.application.flow_tool_options import FlowToolOption, FlowToolOptions
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
-from eneo.flows.domain.flow import Flow
+from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.tool_input import TOOL_INPUT_CONFIG_KEY, ToolInputConfig
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -104,6 +104,9 @@ from eneo.flows.flow_variable_definitions import form_field_reference_expression
 from eneo.flows.input_binding_contract_rules import SourceRefBinding
 from eneo.flows.runtime import tool_argument_check
 from eneo.mcp_servers.application.unattended_tool_use import UnattendedToolRefusal
+from tests.unittests.flows.ai_builder.test_ai_builder_form_field_lifecycle import (
+    _form_metadata,
+)
 from tests.unittests.flows.ai_builder.test_ai_builder_planner import _budget_policy
 from tests.unittests.flows.ai_builder.test_ai_builder_unsupported_saved_steps import (
     _flow,
@@ -944,10 +947,11 @@ def _edit(
     *steps: ModifyExistingStep | AddStep,
     removed: frozenset[str] = frozenset(),
     instructions: dict[int, str] | None = None,
-) -> tuple[list[dict[str, Any] | None], Any]:
-    """The edit as the Builder prepares it: each step's input config as the
-    apply writes it, and the validation. A saved step's instructions are
-    ``Gör <order>.`` unless ``instructions`` gives them."""
+    metadata_json: dict[str, Any] | None = None,
+) -> tuple[list[Any], Any]:
+    """The edit as the Builder prepares it: each step as the apply writes it,
+    and the validation. A saved step's instructions are ``Gör <order>.``
+    unless ``instructions`` gives them."""
     catalog = _catalog(VALUES, DETAILS)
     compiled = compile_edit_proposal(
         OrderedEditProposal(
@@ -958,6 +962,7 @@ def _edit(
         flow.steps,
         base_flow_revision=1,
         flow_name=flow.name,
+        current_metadata_json=metadata_json,
         assistant_snapshots={
             step.assistant_id: AssistantAuthoringSnapshot(
                 instructions=(instructions or {}).get(
@@ -992,7 +997,7 @@ def _edit(
             ref: ALL_STEP_COLUMNS & fields for ref, fields in modified.items()
         },
     )
-    return [step.input_config for step in changeset.compiled_steps], prepared.validation
+    return changeset.compiled_steps, prepared.validation
 
 
 def test_an_edit_adds_a_tool_step_and_keeps_the_saved_ones() -> None:
@@ -1000,7 +1005,7 @@ def test_an_edit_adds_a_tool_step_and_keeps_the_saved_ones() -> None:
     # tool use (kept refs emptied), an added tool step given the run's
     # primary input.
     flow = _saved_flow()
-    configs, validation = _edit(
+    steps, validation = _edit(
         flow,
         ModifyExistingStep(existing_step_ref="existing_step_1"),
         ModifyExistingStep(existing_step_ref="existing_step_2"),
@@ -1025,14 +1030,130 @@ def test_an_edit_adds_a_tool_step_and_keeps_the_saved_ones() -> None:
     )
 
     assert validation.errors == []
-    assert configs[:2] == [step.input_config for step in flow.steps[:2]]
-    assert configs[2] == {
+    assert [step.input_config for step in steps[:2]] == [
+        step.input_config for step in flow.steps[:2]
+    ]
+    assert steps[2].input_config == {
         TOOL_INPUT_CONFIG_KEY: {
             "mcp_server_id": str(SERVER),
             "tool_id": str(DETAILS_TOOL),
             "arguments": {"days": "{{ step_1.output.structured.days }}"},
         }
     }
+
+
+_DATES = _dates(source="fixed", value_json='"2026-09-01"')
+_ASK = "Ansökan:\n{{ flow_input.ansokan }}"
+_FORM = _form_metadata(variable_name="ansokan", label="Ansökan")
+
+
+def _insert_before(first_step: FlowStep, **edit: Any) -> tuple[list[Any], Any]:
+    """An edit that inserts a values tool step before the saved first step
+    (`first_step`, then a saved step 2) and keeps both saved steps."""
+    return _edit(
+        _flow(first_step, _step(2)),
+        AddStep(
+            step=SemanticStepIntent(
+                name="Hämta värden",
+                instructions="Hämta värden.",
+                tool_use=ToolUseIntent.model_validate(
+                    {"use_ref": "u", "tool_ref": VALUES_REF, "arguments": _DATES}
+                ),
+            )
+        ),
+        ModifyExistingStep(existing_step_ref="existing_step_1"),
+        ModifyExistingStep(existing_step_ref="existing_step_2"),
+        **edit,
+    )
+
+
+def _upload(input_format: str) -> dict[str, Any]:
+    return {
+        "runtime_input": {
+            "enabled": True,
+            "required": True,
+            "input_format": input_format,
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("metadata_json", "first_step", "input_source"),
+    [
+        # Kills: the displaced step left on flow_input at position 2
+        # (flow_input_not_first, which the model cannot repair), and a rebase
+        # that rewrites its bindings.
+        (
+            _FORM,
+            _step(1, input_type="text", input_bindings={"question": _ASK}),
+            "previous_step",
+        ),
+        # Kills: a step that names the run's text refused; an explicit
+        # reference never reads input_source.
+        (
+            None,
+            _step(
+                1,
+                input_type="text",
+                input_bindings={"question": "{{ flow_input.text }}"},
+            ),
+            "previous_step",
+        ),
+    ],
+    ids=["form_field", "run_text"],
+)
+def test_a_saved_first_step_that_names_what_it_reads_follows_an_inserted_step(
+    metadata_json: dict[str, Any] | None, first_step: FlowStep, input_source: str
+) -> None:
+    steps, validation = _insert_before(first_step, metadata_json=metadata_json)
+
+    assert validation.errors == []
+    assert steps[1].input_source.value == input_source
+    assert steps[1].input_bindings == first_step.input_bindings
+
+
+@pytest.mark.parametrize(
+    "first_step",
+    [
+        # Kills: the implicit read of the run input not counted.
+        _step(1, input_type="text"),
+        # Kills: an upload not counted at all.
+        _step(
+            1,
+            input_type="audio",
+            output_mode="transcribe_only",
+            input_config=_upload("audio"),
+        ),
+        # Kills: the runtime upload the apply gives a document step not counted.
+        _step(1, input_bindings={"question": _ASK}),
+        # Kills: a {{ step_input }} read not counted.
+        _step(
+            1,
+            input_type="text",
+            input_bindings={"question": "{{ step_input.text }}"},
+            input_config=_upload("document"),
+        ),
+        # Kills: a configuration that cannot be read counted as reading nothing.
+        _step(
+            1,
+            input_type="text",
+            input_bindings={"question": _ASK},
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={"bindings": "x"},
+        ),
+    ],
+    ids=["implicit", "audio_upload", "document", "step_input", "unreadable_config"],
+)
+def test_a_saved_first_step_that_takes_the_run_input_by_position_stays_first(
+    first_step: FlowStep,
+) -> None:
+    with pytest.raises(AIBuilderArchitectureError) as raised:
+        _insert_before(first_step, metadata_json=_FORM)
+
+    assert raised.value.repair_disposition == "model_correctable"
+    assert raised.value.log_context["reason"] == "run_input_step_displaced"
+    assert "Steg 1" in raised.value.detail
 
 
 def test_an_edit_checks_the_tool_steps_it_writes_and_not_the_saved_ones() -> None:
@@ -1102,7 +1223,7 @@ def test_an_edit_changes_a_tool_steps_arguments_and_nothing_else_of_it() -> None
         ModifyExistingStep(existing_step_ref="existing_step_3"),
     ]
 
-    configs, validation = _edit(
+    steps, validation = _edit(
         flow,
         ModifyExistingStep(existing_step_ref="existing_step_1", tool_use=new_dates),
         *keep_rest,
@@ -1124,7 +1245,7 @@ def test_an_edit_changes_a_tool_steps_arguments_and_nothing_else_of_it() -> None
         )
 
     assert validation.errors == []
-    assert configs == [
+    assert [step.input_config for step in steps] == [
         {
             TOOL_INPUT_CONFIG_KEY: {
                 "mcp_server_id": str(SERVER),

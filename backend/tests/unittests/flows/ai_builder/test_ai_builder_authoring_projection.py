@@ -453,7 +453,9 @@ def test_edit_overlay_requires_step_coverage_or_removal() -> None:
 
 def test_edit_overlay_step_order_and_insertion() -> None:
     base = _base_spec(
-        _step("step_a", "existing_step_1", "First"),
+        # Kills: a moved saved first step that is not on flow_input (a tool
+        # step) rebased to previous_step.
+        _step("step_a", "existing_step_1", "First", input_source=InputSource.TOOL),
         _step("step_b", "existing_step_2", "Second"),
         _step("step_c", "existing_step_3", "Third"),
         document_body_writer_step_refs=("step_b",),
@@ -482,6 +484,7 @@ def test_edit_overlay_step_order_and_insertion() -> None:
     ]
     assert result.steps[0].name == "Inserted first"
     assert result.document_body_writer_step_refs == ("step_b",)
+    assert result.steps[2].input_source is InputSource.TOOL
 
 
 @pytest.mark.parametrize(
@@ -1491,8 +1494,8 @@ def test_edit_overlay_add_step_derives_audio_output_mode_with_shared_compiler() 
                         output_type=OutputType.TEXT,
                     )
                 ),
-                ModifyExistingStep(existing_step_ref="existing_step_1"),
             ],
+            removed_existing_step_refs=frozenset({"existing_step_1"}),
         ),
     )
 

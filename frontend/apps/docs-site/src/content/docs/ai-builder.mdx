@@ -68,6 +68,8 @@ In edit sessions, changes to a step's input source, input type, or selected form
 
 Existing Flow steps are preserved unless the approved edit proposal explicitly includes a modified version of the step or lists the step for removal.
 
+When an edit adds a step before the saved first step, a saved step that takes the run's input as its own input, takes an upload, or has a configuration the Builder cannot read must stay first: the edit is sent back to the model. A saved step that names what it reads (run-form fields, or the run's text or whole input explicitly) is moved and keeps reading the same input; its input source becomes the previous step because only step 1 may take the run's input as its input source.
+
 An applied edit writes only what the approved plan lists as changed. A modified step keeps every column the plan does not name as it was saved, including configuration the Builder cannot author, and a column the plan names with no value is cleared rather than filled with a default. Two changes reach a column the plan does not name: a reference to a step that moves follows that step, and configuration of a mode the step no longer runs is dropped. The run form keeps its saved field types.
 
 The Builder cannot edit a saved Flow that has a step which fetches data over HTTP, takes an image as input, or sends its result over HTTP. The Builder asks its usual questions first; when it would propose the edit, it instead answers with the names of those steps and a pointer to the step editor, where they are changed by hand, and no plan is proposed. A request to edit another step of the same Flow is refused the same way and the answer says that no edits can be proposed while those steps exist.

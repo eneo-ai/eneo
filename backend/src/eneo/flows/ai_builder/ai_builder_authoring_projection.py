@@ -57,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_step_reads import (
     ReadSite,
     spec_step_refs,
     step_reads,
+    takes_run_input_by_position,
 )
 from eneo.flows.ai_builder.ai_builder_tool_catalog import (
     EMPTY_TOOL_CATALOG,
@@ -339,6 +340,13 @@ def compile_ordered_edit_proposal(
             )
         compiled_steps.append(compiled.model_copy(update={"plan_step_ref": plan_ref}))
 
+    compiled_steps = _follow_the_steps_inserted_before(
+        compiled_steps,
+        first_saved_ref=base_spec.steps[0].existing_step_ref
+        if base_spec.steps
+        else None,
+        form_field_names=set(saved.form_field_names),
+    )
     _refuse_tool_arguments_without_run_form_fields(
         [
             *(
@@ -367,6 +375,58 @@ def compile_ordered_edit_proposal(
             compiled_steps=compiled_steps,
         ),
     )
+
+
+def _follow_the_steps_inserted_before(
+    compiled_steps: list[StepSpec],
+    *,
+    first_saved_ref: str | None,
+    form_field_names: set[str],
+) -> list[StepSpec]:
+    """Only step 1 may have input_source flow_input, so the saved first step,
+    when the edit puts another step before it, gets input_source previous_step
+    with its bindings kept. A step that only names what it reads (form fields,
+    the run's text or payload) reads the same there, since explicit references
+    never read input_source. One that takes the run's input as its own input,
+    or an upload (`takes_run_input_by_position`), would lose it, so the model
+    must keep it first."""
+
+    step_refs = spec_step_refs(compiled_steps)
+    followed: list[StepSpec] = []
+    for order, step in enumerate(compiled_steps, 1):
+        if (
+            order == 1
+            or step.existing_step_ref is None
+            or step.existing_step_ref != first_saved_ref
+            or step.input_source is not InputSource.FLOW_INPUT
+        ):
+            followed.append(step)
+            continue
+        if takes_run_input_by_position(
+            step,
+            order=order,
+            step_refs=step_refs,
+            form_field_names=form_field_names,
+        ):
+            raise AIBuilderArchitectureError(
+                public_code="architecture_materialization_failed",
+                repair_disposition="model_correctable",
+                detail=(
+                    f'Step {order} "{display_value(step.name)}" '
+                    f"({step.existing_step_ref}) must stay the first step: it "
+                    "takes the run's input as its own input, takes an upload, or "
+                    "has a configuration the Builder cannot read. Put the added "
+                    "step after it."
+                ),
+                log_context={
+                    "failure_code": "run_input_step_displaced",
+                    "reason": "run_input_step_displaced",
+                },
+            )
+        followed.append(
+            step.model_copy(update={"input_source": InputSource.PREVIOUS_STEP})
+        )
+    return followed
 
 
 def _refuse_tool_arguments_without_run_form_fields(
