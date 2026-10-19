@@ -11,6 +11,9 @@ from eneo.files.file_models import (
     FileOriginalNotFoundError,
 )
 from eneo.info_blobs.info_blob import InfoBlobOriginalUnavailableError
+from eneo.integration.domain.repositories.integration_knowledge_repo import (
+    IntegrationKnowledgeSyncingError,
+)
 from eneo.integration.infrastructure.auth_service.base_auth_service import (
     OAuthClientRejectedError,
     OAuthCodeRejectedError,
@@ -218,6 +221,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     SharePointCredentialsInvalidError: (400, None, ErrorCodes.BAD_REQUEST),
     OAuthCodeRejectedError: (400, None, ErrorCodes.BAD_REQUEST),
     OAuthClientRejectedError: (400, None, ErrorCodes.BAD_REQUEST),
+    IntegrationKnowledgeSyncingError: (409, None, ErrorCodes.BAD_REQUEST),
     # --- Website crawl lifecycle ---
     WebsiteCrawlActiveError: (
         409,

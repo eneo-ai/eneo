@@ -28,6 +28,9 @@ from eneo.integration.application.integration_knowledge_service import (
 from eneo.integration.application.user_integration_service import (
     AuthorizedIntegration,
 )
+from eneo.integration.domain.repositories.integration_knowledge_repo import (
+    IntegrationKnowledgeSyncingError,
+)
 from eneo.integration.infrastructure.auth_service.org_token_provider import (
     SharePointCredentialsInvalidError,
 )
@@ -470,3 +473,82 @@ async def test_a_rename_during_a_sync_keeps_what_the_sync_wrote(db_container, se
         "success",
         {"files_processed": 12},
     )
+
+
+async def _held_by_a_sync(db_container, setup, monkeypatch):
+    """An item and a sync's open transaction holding its row, with a short
+    lock timeout for the change under test."""
+    monkeypatch.setattr(
+        "eneo.integration.infrastructure.repo_impl.integration_knowledge_repo_impl."
+        "ROW_LOCK_TIMEOUT",
+        "300ms",
+    )
+    async with db_container() as container:
+        knowledge = IntegrationKnowledge(
+            name="Protokoll",
+            original_name="Protokoll",
+            url="https://contoso.sharepoint.com/sites/KS/Protokoll",
+            space_id=setup.personal_space,
+            tenant_id=container.user().tenant_id,
+            embedding_model_id=setup.embedding_model,
+            user_integration_id=setup.connection,
+            wrapper_id=uuid4(),
+            wrapper_name="Kommunstyrelsen",
+        )
+        container.session().add(knowledge)
+        await container.session().flush()
+        return knowledge.id, knowledge.wrapper_id
+
+
+@pytest.mark.parametrize("change", ["rename", "rename_wrapper", "delete"])
+async def test_a_change_to_a_syncing_source_answers_at_once(
+    db_container, setup, monkeypatch, change
+):
+    """The change used to hold its request open until the sync committed."""
+    knowledge_id, wrapper_id = await _held_by_a_sync(db_container, setup, monkeypatch)
+
+    async with db_container() as sync:
+        await sync.integration_knowledge_repo().update_sync_state(
+            knowledge_id, last_sync_status="success"
+        )
+        with pytest.raises(IntegrationKnowledgeSyncingError):
+            async with db_container() as request:
+                service = request.integration_knowledge_service()
+                async with asyncio.timeout(5):
+                    if change == "rename":
+                        await service.update_knowledge_name(
+                            setup.personal_space, knowledge_id, "Protokoll KS"
+                        )
+                    elif change == "rename_wrapper":
+                        await service.update_wrapper_name(
+                            setup.personal_space, wrapper_id, "KS"
+                        )
+                    else:
+                        await service.remove_knowledge(
+                            setup.personal_space, knowledge_id
+                        )
+
+    async with db_container() as container:
+        row = (
+            await container.session().execute(
+                sa.select(
+                    IntegrationKnowledge.name, IntegrationKnowledge.wrapper_name
+                ).where(IntegrationKnowledge.id == knowledge_id)
+            )
+        ).one()
+    assert tuple(row) == ("Protokoll", "Kommunstyrelsen")
+
+
+async def test_a_change_after_the_sync_restores_the_lock_timeout(
+    db_container, setup, monkeypatch
+):
+    knowledge_id, _ = await _held_by_a_sync(db_container, setup, monkeypatch)
+
+    async with db_container() as request:
+        before = await request.session().scalar(sa.text("SHOW lock_timeout"))
+        await request.integration_knowledge_service().update_knowledge_name(
+            setup.personal_space, knowledge_id, "Protokoll KS"
+        )
+        after = await request.session().scalar(sa.text("SHOW lock_timeout"))
+
+    assert after == before

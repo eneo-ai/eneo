@@ -101,6 +101,14 @@ _SPACE_OPERATION_ACCESS_REASON = (
     "SpaceService enforces membership and the requested space operation."
 )
 _INTEGRATION_KNOWLEDGE_ACCESS_REASON = "IntegrationKnowledgeService enforces the space actor's permission for this operation."
+# A rename or delete answers at once while a sync holds the item.
+_SYNCING_RESPONSE = {
+    409: {
+        "model": GeneralError,
+        "description": "`code` is `integration_knowledge_syncing`: a sync holds "
+        "the source; try again when it has finished.",
+    }
+}
 # Imports and syncs through the organization's SharePoint app fetch its token first.
 _ORGANIZATION_TOKEN_RESPONSES = {
     **responses.get_responses([400, 403, 404]),
@@ -1127,7 +1135,7 @@ async def create_space_integration_knowledge_batch(
     "/{id}/knowledge/integrations/remove/{integration_knowledge_id}/",
     status_code=204,
     description="Remove integration knowledge from a space.",
-    responses=responses.get_responses([403, 404]),
+    responses={**responses.get_responses([403, 404]), **_SYNCING_RESPONSE},
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -1171,7 +1179,7 @@ async def delete_space_integration_knowledge(
     "/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
     response_model=list[IntegrationKnowledgePublic],
     description="Rename an integration knowledge wrapper in a space.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses={**responses.get_responses([400, 403, 404]), **_SYNCING_RESPONSE},
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -1201,7 +1209,7 @@ async def update_integration_knowledge_wrapper(
     "/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
     status_code=204,
     description="Remove an integration knowledge wrapper and its items from a space.",
-    responses=responses.get_responses([403, 404]),
+    responses={**responses.get_responses([403, 404]), **_SYNCING_RESPONSE},
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -1296,7 +1304,7 @@ async def get_integration_sync_details(
     "/{id}/knowledge/integrations/{integration_knowledge_id}/",
     response_model=IntegrationKnowledgePublic,
     description="Rename integration knowledge in a space.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses={**responses.get_responses([400, 403, 404]), **_SYNCING_RESPONSE},
 )
 @endpoint_access(
     authentication=Authentication.USER,
