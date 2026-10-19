@@ -287,3 +287,75 @@ class TestFileDownloadExtraction:
 
         with pytest.raises(ValueError, match="exceeds max download size"):
             await client.get_file_extraction_by_id("drive", "item")
+
+
+@pytest.mark.parametrize("status", [200, 403, 404, 410, 429, 503])
+async def test_metadata_batch_preserves_item_level_answers(client, status):
+    client.client.post = AsyncMock(
+        return_value={
+            "responses": [
+                {
+                    "id": "0",
+                    "status": status,
+                    "body": {"id": "a", "parentReference": {"path": "/Elsewhere"}},
+                },
+                {"id": "1", "status": 404},
+            ]
+        }
+    )
+    results = await client.get_item_metadata_batch("drive", ["a", "b"])
+    assert results["a"].status == status
+    assert (results["a"].item is not None) == (status == 200)
+    assert results["b"].status == 404
+    assert client.client.post.await_count == 1
+    requests = client.client.post.await_args.kwargs["data"]["requests"]
+    assert len(requests) == 2
+    assert requests[0]["url"] == "/drives/drive/items/a?$select=id,name,parentReference"
+
+
+@pytest.mark.parametrize(
+    "responses",
+    [
+        [],
+        [{"id": "0", "status": 200, "body": {"id": "wrong"}}],
+        [{"id": "0", "status": 404}, {"id": "0", "status": 404}],
+        [{"id": "unexpected", "status": 404}],
+        [{"id": "0", "status": "404"}],
+    ],
+)
+async def test_malformed_metadata_batch_is_not_deletion_evidence(client, responses):
+    client.client.post = AsyncMock(return_value={"responses": responses})
+    with pytest.raises(ValueError):
+        await client.get_item_metadata_batch("drive", ["a"])
+
+
+async def test_metadata_batch_refreshes_inner_unauthorized_once(client):
+    client.access_token_provider = AsyncMock(return_value="fresh")
+    client.client.post = AsyncMock(
+        side_effect=[
+            {"responses": [{"id": "0", "status": 401}]},
+            {"responses": [{"id": "0", "status": 404}]},
+        ]
+    )
+    result = await client.get_item_metadata_batch("drive", ["a"])
+    assert result["a"].status == 404
+    assert client.client.post.await_count == 2
+    assert (
+        client.client.post.await_args.kwargs["headers"]["Authorization"]
+        == "Bearer fresh"
+    )
+
+
+async def test_delta_uses_last_occurrence_across_pages(client):
+    client.client.get = AsyncMock(
+        side_effect=[
+            {"value": [{"id": "a", "deleted": {}}], "@odata.nextLink": "v1.0/next"},
+            {
+                "value": [{"id": "a", "name": "restored.docx"}],
+                "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta?token=next",
+            },
+        ]
+    )
+    changes, token = await client.get_delta_changes("drive", "previous")
+    assert changes == [{"id": "a", "name": "restored.docx"}]
+    assert token == "next"
