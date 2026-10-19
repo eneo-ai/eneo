@@ -66,7 +66,6 @@ from eneo.flows.flow_security_classification import (
 )
 from eneo.flows.http_transport.effective_url import (
     InvalidHttpUrl,
-    parse_credential_http_url,
     parse_effective_http_url,
 )
 from eneo.flows.output_processing import (
@@ -105,7 +104,6 @@ from eneo.main.exceptions import (
 from eneo.mcp_servers.application.unattended_tool_call import (
     EXCHANGE_STOP_GRACE_SECONDS,
 )
-from eneo.mcp_servers.domain.entities.mcp_server import sends_credential
 
 if TYPE_CHECKING:
     from eneo.flows.domain.flow import FlowRun
@@ -567,18 +565,6 @@ async def _vet_server_address(
         address = parse_effective_http_url(server.http_url)
     except InvalidHttpUrl:
         raise _destination_blocked(step) from None
-    if sends_credential(server.http_auth_type):
-        # As an HTTP step's secret headers, a credential goes only over https.
-        try:
-            parse_credential_http_url(server.http_url)
-        except InvalidHttpUrl:
-            raise _refusal(
-                f"Step {step.step_order}: the address of the tool's MCP server "
-                "must use https, because the step sends the server's credential "
-                "with the call.",
-                FlowApiErrorCode.TYPED_IO_TOOL_DESTINATION_BLOCKED,
-                step_order=step.step_order,
-            ) from None
     try:
         await vet_destination(
             address.host,

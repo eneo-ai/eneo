@@ -82,6 +82,12 @@ _REFUSAL_SENTENCES_SV: Final[Mapping[UnattendedToolRefusal, str]] = {
         "flödeskörning har ingen, vilket instansens administratör kan ändra på "
         "servern."
     ),
+    UnattendedToolRefusal.SERVER_CREDENTIAL_NEEDS_HTTPS: (
+        "verktygets MCP-server kräver en autentiseringsuppgift och dess adress "
+        "använder inte https, så anropet skulle skicka uppgiften läsbar över "
+        "nätverket; instansens administratör kan registrera serverns "
+        "https-adress, utan användarnamn eller lösenord i den."
+    ),
     UnattendedToolRefusal.TOOL_NOT_FOUND: (
         "verktyget finns inte längre på sin MCP-server, så välj ett annat verktyg."
     ),

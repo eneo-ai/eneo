@@ -54,6 +54,7 @@ def _listed(
         is_enabled=True,
         purpose="general",
         http_auth_type="none",
+        http_url="https://cases.example.org/mcp",
         forward_identity=False,
         effective_security_classification=None,
     )

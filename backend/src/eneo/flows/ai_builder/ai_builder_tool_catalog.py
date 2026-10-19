@@ -60,7 +60,8 @@ ToolSchemaState = Literal["included", "over_budget", "none_declared"]
 @dataclass(frozen=True, slots=True)
 class AIBuilderListedTool:
     """A usable tool as the planner sees it: approved text only, and no
-    address or credential of its server, which the list never reads."""
+    address or credential of its server. The list reads no stored credential, and
+    the address only for the decision."""
 
     ref: str
     server_id: UUID

@@ -124,16 +124,6 @@ def is_builtin_provider(http_auth_type: str | None) -> bool:
     return http_auth_type == INTERNAL_AUTH_TYPE
 
 
-# The auth type of a server that is sent no credential.
-NO_AUTH_TYPE = "none"
-
-
-def sends_credential(http_auth_type: str) -> bool:
-    """Whether a server of ``http_auth_type`` is sent a credential with each
-    request: every auth type but none is."""
-    return http_auth_type != NO_AUTH_TYPE
-
-
 # A bundled server runs in the tool runtime shipped with Eneo (an
 # isolated container, never the backend process). It is an ordinary server
 # otherwise: its URL is derived from ``tool_runtime_url`` when an admin adds

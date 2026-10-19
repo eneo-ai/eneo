@@ -14,6 +14,9 @@ from eneo.mcp_servers.application.capability_resolver import (
     ClassifiedServer,
     meets_security_classification,
 )
+from eneo.mcp_servers.domain.credential_transport import (
+    credential_transport_violation,
+)
 from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServer,
     MCPServerTool,
@@ -39,6 +42,8 @@ class UnattendedServer(ClassifiedServer, Protocol):
     def purpose(self) -> str: ...
     @property
     def http_auth_type(self) -> str: ...
+    @property
+    def http_url(self) -> str: ...
     @property
     def forward_identity(self) -> bool: ...
 
@@ -85,13 +90,15 @@ class UnattendedToolFacts(Generic[ServerT, ToolT]):
 @dataclass(frozen=True, slots=True)
 class ListedServer:
     """What a list of a space's tools reads of a server: what the decision
-    and an option need, and not its address, credentials or configuration."""
+    and an option need (the address only for the decision), and not its
+    credentials or configuration."""
 
     id: UUID
     name: str
     is_enabled: bool
     purpose: str
     http_auth_type: str
+    http_url: str
     forward_identity: bool
     # The server's own: a list reads general servers only, and only a
     # built-in provider runs on a catalog model whose level it would take
@@ -121,7 +128,9 @@ ListedToolFacts: TypeAlias = UnattendedToolFacts[ListedServer, ListedTool]
 @dataclass(frozen=True)
 class ToolsOfSpace:
     """The first tools of a space's list, up to the row where a bound is
-    crossed, and the bytes of the text an option returns for them together.
+    crossed, and the bytes of the counted fields together: the server name, the
+    tool name, the approved description and the approved input schema, which
+    an option returns, and the server's address, which the decision reads.
 
     The whole list is over a bound exactly when these facts number more than
     the read's ``max_count`` or their ``text_bytes`` exceed its
@@ -153,6 +162,11 @@ def unattended_tool_refusal(
         return UnattendedToolRefusal.SERVER_NOT_GENERAL
     if server.forward_identity:
         return UnattendedToolRefusal.SERVER_FORWARDS_IDENTITY
+    if (
+        credential_transport_violation(server.http_auth_type, server.http_url)
+        is not None
+    ):
+        return UnattendedToolRefusal.SERVER_CREDENTIAL_NEEDS_HTTPS
 
     if tool is None or tool.mcp_server_id != server.id:
         return UnattendedToolRefusal.TOOL_NOT_FOUND

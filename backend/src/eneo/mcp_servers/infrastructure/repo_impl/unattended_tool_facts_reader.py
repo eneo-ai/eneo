@@ -47,10 +47,11 @@ _FactRow = tuple[Spaces, MCPServers, MCPServerTools, bool, UUID, bool]
 
 
 # The text each variable-length field of a listed option comes from, by the
-# option's field name. The list's byte budget is the sum of these, so a field
-# an option returns outside it would escape the bound; a test compares the
-# names with the response model's. The tool's name counts because an MCP
-# server bounds it only through the size of the whole definition.
+# option's field name. The list's byte budget is the sum of these and of
+# _DECISION_TEXT_FIELDS, so a field an option returns outside it would escape
+# the bound; a test compares the names with the response model's. The tool's
+# name counts because an MCP server bounds it only through the size of the
+# whole definition.
 LISTED_TEXT_FIELDS: dict[
     str, "SQLCoreOperations[str] | SQLCoreOperations[str | None]"
 ] = {
@@ -60,14 +61,20 @@ LISTED_TEXT_FIELDS: dict[
     "input_schema": sa.cast(MCPServerTools.input_schema, sa.Text),
 }
 
+# The text counted for every tool that no option returns: the decision
+# needs the server's address (server_credential_needs_https), and nothing
+# bounds its length, so it counts against the same byte budget.
+_DECISION_TEXT_FIELDS: tuple["SQLCoreOperations[str]", ...] = (MCPServers.http_url,)
+
 
 class _ListedRow(NamedTuple):
     """One row of the list, read by the labels of the select: the server's
     columns and level, the tool's columns, the tenant's and the space's switch
     for the tool, the space's owner and level (each level with its tenant's
-    classification switch), and the running sum of the bytes of the text an
-    option returns. The outer joins' members are None when nothing is stored, which their
-    types say.
+    classification switch), and the running sum of the bytes of the counted
+    fields (the server name, the server address, the tool name, the approved
+    description and the approved input schema). The outer joins' members are None when nothing is stored,
+    which their types say.
     """
 
     server_id: UUID
@@ -75,6 +82,7 @@ class _ListedRow(NamedTuple):
     server_is_enabled: bool
     server_purpose: str
     server_http_auth_type: str
+    server_http_url: str
     server_forward_identity: bool
     server_level: SecurityClassificationTable | None
     server_security_enabled: bool | None
@@ -217,9 +225,12 @@ class UnattendedToolFactsReader:
         what the decision would say about it now, the refused ones included.
         Ordered by server name, then tool name. A server that is not general
         has nothing a flow can choose, so its tools are neither returned nor
-        counted. The bytes are those of every variable-length text an option
-        returns (``LISTED_TEXT_FIELDS``); a pending definition is not
-        selected. The rows end after ``max_count`` + 1 tools,
+        counted. The bytes are those of the server name, the tool name, the
+        approved description and the approved input schema, which an option
+        returns (``LISTED_TEXT_FIELDS``), and the server's address, which the
+        decision reads (``_DECISION_TEXT_FIELDS``); the classification names
+        and descriptions the statement also reads are not counted. A pending
+        definition is not selected. The rows end after ``max_count`` + 1 tools,
         or after the first tool that brings the bytes over
         ``max_text_bytes``, whichever comes first: a list over a bound
         is returned only as far as it takes to see that. Empty for a space that
@@ -229,7 +240,7 @@ class UnattendedToolFactsReader:
         tools a catalog refresh stores meanwhile are in both or in neither.
         """
         text_bytes = sa.literal(0)
-        for text in LISTED_TEXT_FIELDS.values():
+        for text in (*LISTED_TEXT_FIELDS.values(), *_DECISION_TEXT_FIELDS):
             text_bytes = text_bytes + sa.func.coalesce(sa.func.octet_length(text), 0)
         # Unique: a server's tool names are (uq_mcp_server_tools_server_name).
         order = (MCPServers.name, MCPServers.id, MCPServerTools.name)
@@ -273,6 +284,7 @@ class UnattendedToolFactsReader:
                 MCPServers.is_enabled.label("server_is_enabled"),
                 MCPServers.purpose.label("server_purpose"),
                 MCPServers.http_auth_type.label("server_http_auth_type"),
+                MCPServers.http_url.label("server_http_url"),
                 MCPServers.forward_identity.label("server_forward_identity"),
                 server_level,
                 server_level_tenant.security_enabled.label("server_security_enabled"),
@@ -355,6 +367,7 @@ def _listed_facts(row: _ListedRow) -> ListedToolFacts:
             is_enabled=row.server_is_enabled,
             purpose=row.server_purpose,
             http_auth_type=row.server_http_auth_type,
+            http_url=row.server_http_url,
             forward_identity=row.server_forward_identity,
             effective_security_classification=SecurityClassification.to_domain(
                 row.server_level, tenant_security_enabled=row.server_security_enabled

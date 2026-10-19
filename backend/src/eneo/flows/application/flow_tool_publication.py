@@ -73,6 +73,12 @@ REFUSAL_SENTENCES: Mapping[UnattendedToolRefusal, str] = {
         "The tool's MCP server answers as the signed-in user and a flow run has "
         "none, which the instance administrator can change on the server."
     ),
+    UnattendedToolRefusal.SERVER_CREDENTIAL_NEEDS_HTTPS: (
+        "The tool's MCP server takes a credential and its address does not use "
+        "https, so the call would send the credential readable on the network; "
+        "the instance administrator can register the server's https address, "
+        "without a user name or password in it."
+    ),
     UnattendedToolRefusal.TOOL_NOT_FOUND: (
         "The tool no longer exists on its MCP server, so choose another tool."
     ),

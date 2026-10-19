@@ -13,6 +13,7 @@ from eneo.mcp_servers.application.unattended_tool_use import (
     unattended_tool_refusal,
 )
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    BUNDLED_AUTH_TYPE,
     INTERNAL_AUTH_TYPE,
     MCPServer,
     MCPServerTool,
@@ -111,6 +112,56 @@ def _facts(
             R.SERVER_FORWARDS_IDENTITY,
             id="forwards-identity",
         ),
+        # Kills the decision that lets a tool step send the server's
+        # credential over plain http; the address rule itself has its own test.
+        pytest.param(
+            _facts(
+                server={
+                    "http_url": "http://cases.example.org/mcp",
+                    "http_auth_type": "bearer",
+                }
+            ),
+            R.SERVER_CREDENTIAL_NEEDS_HTTPS,
+            id="credential-over-http",
+        ),
+        # Kills the decision that re-implements the transport rule instead of
+        # calling credential_transport_violation: the shared rule lets plain
+        # http through to a loopback host, and a user name and password in the
+        # address are a credential whatever the auth type.
+        pytest.param(
+            _facts(
+                server={
+                    "http_url": "http://localhost:9000/mcp",
+                    "http_auth_type": "bearer",
+                }
+            ),
+            None,
+            id="credential-over-http-to-loopback",
+        ),
+        pytest.param(
+            _facts(
+                server={
+                    "http_url": "http://u:p@cases.example.org/mcp",
+                    "http_auth_type": "none",
+                }
+            ),
+            R.SERVER_CREDENTIAL_NEEDS_HTTPS,
+            id="credential-in-the-address",
+        ),
+        # A bundled server gets the runtime token at the deployment's plain
+        # http runtime URL: kills a decision that counts that token as an
+        # admin-supplied credential and asks the address before the kind.
+        pytest.param(
+            _facts(
+                server={
+                    "http_auth_type": BUNDLED_AUTH_TYPE,
+                    "purpose": "compute",
+                    "http_url": "http://tool-runtime:8080/mcp/compute",
+                }
+            ),
+            R.SERVER_NOT_GENERAL,
+            id="bundled-over-http",
+        ),
         # The grant of one server must not carry a tool of another.
         pytest.param(
             _facts(tool={"mcp_server_id": uuid4()}),
@@ -167,6 +218,20 @@ def _facts(
             R.SERVER_DISABLED,
             id="order-server-before-space",
         ),
+        # Kills the https check moved before the identity check: the author
+        # would be told to ask for an https address on a server that is
+        # refused whatever its address.
+        pytest.param(
+            _facts(
+                server={
+                    "http_url": "http://cases.example.org/mcp",
+                    "http_auth_type": "bearer",
+                    "forward_identity": True,
+                }
+            ),
+            R.SERVER_FORWARDS_IDENTITY,
+            id="order-identity-before-https",
+        ),
         pytest.param(
             _facts(tool={"requires_approval": True}, space_override=False),
             R.TOOL_WAITING_FOR_REVIEW,
@@ -176,6 +241,32 @@ def _facts(
             _facts(tenant_setting=False, server_in_space=False),
             R.TOOL_SWITCHED_OFF,
             id="order-instance-switch-before-space",
+        ),
+        # Kills the address asked before the server's kind: no administrator
+        # change of the address lets a capability provider into a flow.
+        pytest.param(
+            _facts(
+                server={
+                    "purpose": "web_search",
+                    "http_url": "http://search.example.org/mcp",
+                    "http_auth_type": "bearer",
+                }
+            ),
+            R.SERVER_NOT_GENERAL,
+            id="order-kind-before-address",
+        ),
+        # Kills the address asked after the tool's levels: the author would
+        # wait for a review that does not let the call out.
+        pytest.param(
+            _facts(
+                server={
+                    "http_url": "http://cases.example.org/mcp",
+                    "http_auth_type": "api_key_header",
+                },
+                tool={"requires_approval": True},
+            ),
+            R.SERVER_CREDENTIAL_NEEDS_HTTPS,
+            id="order-server-address-before-the-review",
         ),
         # A personal space is the answer whatever the levels have stored: an
         # author told "waits for review" asks an administrator who cannot help.

@@ -1274,39 +1274,34 @@ async def test_the_servers_address_is_vetted_with_the_tool_setting(
 
 
 @pytest.mark.parametrize(
-    ("http_url", "auth_type", "code"),
+    ("http_url", "auth_type", "refusal"),
     [
-        ("http://mcp.internal/mcp", "bearer", "typed_io_tool_destination_blocked"),
-        (
-            "http://mcp.internal/mcp",
-            "api_key_header",
-            "typed_io_tool_destination_blocked",
-        ),
+        ("http://mcp.internal/mcp", "bearer", "server_credential_needs_https"),
         ("http://mcp.internal/mcp", "none", None),
         ("https://mcp.internal/mcp", "bearer", None),
     ],
 )
 async def test_a_credential_goes_to_the_server_only_over_https(
-    user, http_url: str, auth_type: str, code: str | None
+    user, http_url: str, auth_type: str, refusal: str | None
 ) -> None:
-    # Kills the mutants that call a server that takes a credential at an http
-    # address, that ask https of a server that takes none, and that refuse it
-    # with the sentence of a blocked network, which does not say what to fix.
+    # Kills the mutants that call a server whose credential would go over
+    # plain http, and that ask https of a server that takes none. The decision
+    # refuses before the address is vetted: nothing goes out, so nothing is
+    # audited as an outbound call.
     facts = _facts(server={"http_url": http_url, "http_auth_type": auth_type})
     caller = _answered({"ok": True})
     executor = _tool_executor(user, _Facts(facts), caller)
 
-    if code is None:
+    if refusal is None:
         await _read(executor, _tool_step(facts), _running(user))
         assert len(caller.calls) == 1
     else:
         refused = await _refused(executor, _tool_step(facts), _running(user))
-        assert (refused.code, str(refused)) == (
-            code,
-            "Step 2: the address of the tool's MCP server must use https, "
-            "because the step sends the server's credential with the call.",
+        assert (refused.code, (refused.context or {}).get("refusal")) == (
+            "typed_io_tool_not_allowed",
+            refusal,
         )
-        assert caller.calls == []
+        assert (caller.calls, _audits(executor)) == ([], [])
 
 
 async def test_the_call_connects_only_to_an_address_the_policy_allows_then(

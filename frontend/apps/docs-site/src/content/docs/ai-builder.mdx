@@ -365,7 +365,13 @@ the work or to add the step in the step editor.
 When the request needs a tool that the space may not use (for example switched
 off in the space or waiting for review), or a tool whose input schema is too
 large for the Builder to show while it writes the arguments, the Builder says
-why instead of proposing a step with another tool. With that answer it shows
+why instead of proposing a step with another tool. It does not offer a tool
+whose MCP server takes a credential at a plain `http` address other than
+`localhost`, `127.0.0.1` or `[::1]` either, because the call would send the
+credential readable on the network (a flow refuses a call to those loopback
+addresses later, through the destination policy); it says that the instance
+administrator registers the server's `https` address, without a user name or
+password in it. With that answer it shows
 the reason and how a tool becomes available in the space, with a link to the
 space settings (in a new tab) when you may edit the space; a session reopened
 before it has a plan shows them again. The Builder can also answer that it

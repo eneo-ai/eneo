@@ -88,7 +88,8 @@ def _server(tenant_id: UUID, sorts: str, **columns: object) -> MCPServers:
     return MCPServers(
         tenant_id=tenant_id,
         name=f"unattended-facts-{sorts}-{uuid4()}",
-        http_url="http://localhost:9000/mcp",
+        # Its own address, so a list that reads another server's is seen.
+        http_url=f"http://localhost:9000/mcp/{sorts}",
         http_auth_type="none",
         is_enabled=True,
         **columns,
@@ -276,15 +277,19 @@ async def test_a_tool_is_a_fact_only_together_with_the_asked_server(
 
 
 async def _text_bytes(stored: _Stored, tools: list[str], texts: list[str]) -> int:
-    """The bytes the list counts for ``tools``: each one's server name and
-    tool name as stored, and the description and schema ``texts`` they have."""
+    """The bytes the list counts for ``tools``: each one's server name,
+    server address and tool name as stored, and the description and schema
+    ``texts`` they have."""
     async with sessionmanager.session() as session, session.begin():
         rows = await session.execute(
-            sa.select(MCPServers.name, MCPServerTools.name)
+            sa.select(MCPServers.name, MCPServers.http_url, MCPServerTools.name)
             .join(MCPServerTools, MCPServerTools.mcp_server_id == MCPServers.id)
             .where(MCPServerTools.id.in_([stored.ids[tool] for tool in tools]))
         )
-    names = [len(server.encode()) + len(tool.encode()) for server, tool in rows]
+    names = [
+        len(server.encode()) + len(url.encode()) + len(tool.encode())
+        for server, url, tool in rows
+    ]
     return sum(names) + sum(len(text.encode()) for text in texts)
 
 
@@ -300,6 +305,7 @@ def _seen(
     )
     return (
         (server.id, server.is_enabled, server.purpose, server.http_auth_type),
+        server.http_url,
         (server.forward_identity, server_level and server_level.security_level),
         (server_level and server_level.security_enabled),
         (tool.id, tool.mcp_server_id, tool.requires_approval),
@@ -505,8 +511,10 @@ async def test_the_list_ends_with_the_row_that_crosses_a_bound(
     """Kills the mutants of the cut: a cut before the crossing row (an
     over-bound list then looks within it), no cut (the whole catalog is
     read), a sum that is not running in the list's order, an exclusive
-    bound, and a sum that leaves out a text an option returns (the server's
-    name or the tool's name: their bytes are in every expected sum)."""
+    bound, and a sum that leaves out a counted text of a tool (the
+    server's name, the tool's name, or the server's address, which the
+    decision reads and no option returns: their bytes are in every expected
+    sum)."""
     ids = stored.ids
     async with sessionmanager.session() as session, session.begin():
         session.add(

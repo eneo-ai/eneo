@@ -279,7 +279,8 @@ is listed, or the space's list exceeds the editor's list bounds, the prompt says
 the catalogue is not shown. Refused tools are not offered; the turn keeps them
 with their refusal code for guidance, and names them, within a 2,000-character
 budget of their own, by name and refusal code only. The projection holds no
-server address or credential: the reader does not read them.
+server address or credential: the reader reads the address only for the refusal
+decision and returns it nowhere, and it reads no stored credential.
 
 Each tool has a ref (`tool_` and the first twelve hex digits of the SHA-256 of
 its server's and its own id; two tools whose refs coincide, which a space does

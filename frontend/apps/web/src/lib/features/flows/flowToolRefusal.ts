@@ -11,6 +11,7 @@ const TOOL_REFUSAL_SENTENCES = {
   server_disabled: m.flow_tool_refusal_server_disabled,
   server_not_general: m.flow_tool_refusal_server_not_general,
   server_forwards_identity: m.flow_tool_refusal_server_forwards_identity,
+  server_credential_needs_https: m.flow_tool_refusal_server_credential_needs_https,
   tool_not_found: m.flow_tool_refusal_tool_not_found,
   tool_removed_at_server: m.flow_tool_refusal_tool_removed_at_server,
   tool_waiting_for_review: m.flow_tool_refusal_tool_waiting_for_review,

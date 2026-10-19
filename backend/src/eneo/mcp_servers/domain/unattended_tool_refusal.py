@@ -23,6 +23,10 @@ class UnattendedToolRefusal(StrEnum):
     # The server answers as the acting user; an unattended caller has none
     # whose rights the answer may carry.
     SERVER_FORWARDS_IDENTITY = "server_forwards_identity"
+    # The server takes an admin-supplied credential and its registered
+    # address is plain http to any host other than localhost, 127.0.0.1 or
+    # ::1: the call would send the credential readable on the network path.
+    SERVER_CREDENTIAL_NEEDS_HTTPS = "server_credential_needs_https"
     # The instance admin's tool.
     TOOL_NOT_FOUND = "tool_not_found"
     TOOL_REMOVED_AT_SERVER = "tool_removed_at_server"

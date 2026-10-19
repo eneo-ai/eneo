@@ -21,9 +21,11 @@ from eneo.mcp_servers.application.unattended_tool_use import (
 # answer (and the memory to build it) grows with the space. A safety bound
 # like MCP_TOOL_CATALOG_HARD_MAX_COUNT, not a policy an administrator tunes:
 # a space over it is refused, never listed in part, since a part would hide
-# tools without saying so. The byte bound counts every variable-length text
-# an item returns (see LISTED_TEXT_FIELDS), because an MCP server bounds a
-# tool's name only through the size of the whole definition.
+# tools without saying so. The byte bound counts the server name, the tool
+# name, the approved description and the approved input schema an item returns
+# (see LISTED_TEXT_FIELDS), because an MCP server bounds a tool's name only
+# through the size of the whole definition. It also counts the server's
+# address, which the decision reads for every tool and no item returns.
 FLOW_TOOL_OPTIONS_MAX_COUNT = 1000
 FLOW_TOOL_OPTIONS_MAX_TEXT_BYTES = 8 * 1024 * 1024
 TOOL_OPTIONS_TOO_LARGE_MESSAGE = (

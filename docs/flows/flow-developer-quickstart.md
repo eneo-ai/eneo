@@ -150,8 +150,9 @@ are listed with the refusal; the tools of a server that is not a general one
 A personal space has no MCP servers, so its list is empty. It needs the
 permission to edit flows in the space. One database statement reads the list
 and returns it only up to the first tool past 1,000 tools or past 8 MiB of
-the text it returns (server name, tool name, approved description and approved
-input schema); such a list is refused with 413
+the counted text of them (each tool's server name, tool name,
+approved description and approved input schema, which the list returns, and its
+server's address, which it does not); such a list is refused with 413
 `flow_tool_options_too_large`, never listed in part.
 
 ### Speaker mapping (`speaker_mapping`)

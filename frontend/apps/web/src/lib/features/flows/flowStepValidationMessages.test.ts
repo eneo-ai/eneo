@@ -84,6 +84,7 @@ describe("tool step refusals", () => {
       server_disabled: true,
       server_not_general: true,
       server_forwards_identity: true,
+      server_credential_needs_https: true,
       tool_not_found: true,
       tool_removed_at_server: true,
       tool_waiting_for_review: true,
@@ -113,7 +114,7 @@ describe("tool step refusals", () => {
     const sentences = facts.flatMap((fact) =>
       fact?.toolRefusal ? [describeToolStepRefusal(fact.toolRefusal)] : []
     );
-    expect(new Set(sentences).size).toBe(22);
+    expect(new Set(sentences).size).toBe(23);
   });
 
   // Kills: the invalid-schema refusal, which carries no issue_code, is not

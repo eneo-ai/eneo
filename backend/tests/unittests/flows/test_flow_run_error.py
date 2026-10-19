@@ -653,11 +653,12 @@ def test_a_stored_tool_refusal_the_enum_no_longer_has_reads_as_no_refusal() -> N
     )
 
 
-def test_the_tool_refusals_a_run_error_stores_are_these_twelve_values() -> None:
+def test_the_tool_refusals_a_run_error_stores_are_these_thirteen_values() -> None:
     # Kills the mutant that renames a refusal in the MCP module's enum: the
     # value is stored in run errors, so a rename orphans what is stored.
     assert sorted(refusal.value for refusal in UnattendedToolRefusal) == [
         "server_below_space_classification",
+        "server_credential_needs_https",
         "server_disabled",
         "server_forwards_identity",
         "server_not_found",
