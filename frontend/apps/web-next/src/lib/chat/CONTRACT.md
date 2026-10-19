@@ -73,6 +73,14 @@ _eneo_ are Eneo-specific payloads carried inside the SDK's extension points
 emits is listed; the SDK rejects anything else (see
 [Failures](#what-the-client-treats-as-failure)).
 
+New drafts send `settings`; existing conversations send `settings_revision`.
+Both preflight and answer use the same snapshot. Choices are loaded through
+`POST /api/v1/conversations/settings/resolve/` and saved through
+`PATCH /api/v1/conversations/{session_id}/settings/` with `expected_revision`.
+The resolution includes the current catalog of allowed models, the effective model and
+reasoning level, and an explicit unavailable-model state. HTTP 409 requires
+reloading the saved choices; clients never overwrite another tab automatically.
+
 ### Lifecycle
 
 | Part     | Fields      | Notes                                                                                                                                                                                                                                         |
@@ -91,6 +99,7 @@ transient, so it lands in `message.parts` (first part of every live answer).
   "type": "data-session",
   "data": {
     "session_id": "<uuid>",
+    "settings": {/* ConversationSettingsState: revision and saved choices */},
     "completion_model": {/* CompletionModelPublic (OpenAPI), or null */},
     "files": [/* FilePublic[] — the question's uploaded attachments */],
     "web_search_references": [],
@@ -101,7 +110,7 @@ transient, so it lands in `message.parts` (first part of every live answer).
 ```
 
 The client reads `session_id` (to continue the conversation and to enable
-title generation), `answering_assistant`, and `completion_model.{id,name,nickname,token_limit}`.
+title generation), `settings` (the authoritative revision for subsequent saves and turns), `answering_assistant`, and `completion_model.{id,name,nickname,token_limit}`.
 
 ### Text and reasoning
 

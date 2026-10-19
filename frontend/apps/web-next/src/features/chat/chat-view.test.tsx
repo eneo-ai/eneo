@@ -35,7 +35,18 @@ const api = vi.hoisted(() => ({
     }
     return { data: undefined, error: { message: "unexpected" }, response: new Response() };
   }),
-  POST: vi.fn(async () => ({ data: undefined, response: new Response() })),
+  POST: vi.fn(async (path: string, init?: { body?: { session_id?: string } }) => ({
+    data: path.endsWith("/settings/resolve/")
+      ? {
+          revision: init?.body?.session_id ? 1 : 0,
+          settings: {},
+          supports_tool_calling: true,
+          mcp_servers: [],
+          capabilities: []
+        }
+      : undefined,
+    response: new Response()
+  })),
   PUT: vi.fn(async (_path: string, init: { body: unknown }) => ({
     data: init.body,
     response: new Response()

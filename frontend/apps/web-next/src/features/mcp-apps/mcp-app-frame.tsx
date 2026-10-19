@@ -8,7 +8,7 @@ import { useTheme } from "next-themes";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSidePanel } from "@/features/chat/side-panel/use-side-panel";
-import { autoAcceptToolsPreference } from "@/features/chat/use-tool-choices";
+import { useAutomaticConversationTools } from "@/features/chat/conversation-settings";
 import { cn } from "@/lib/utils";
 import { McpAppBridge, type McpAppToolResult, type McpAppToolState } from "./bridge";
 import { hostContext } from "./host-context";
@@ -102,9 +102,10 @@ export function McpAppFrame({
 
   // The bridge's callbacks read the newest props and store through this ref,
   // written after every commit.
-  const latest = useRef({ call, live, panel, sessionId, displayMode, locale });
+  const automaticTools = useAutomaticConversationTools();
+  const latest = useRef({ call, live, panel, sessionId, displayMode, locale, automaticTools });
   useEffect(() => {
-    latest.current = { call, live, panel, sessionId, displayMode, locale };
+    latest.current = { call, live, panel, sessionId, displayMode, locale, automaticTools };
   });
 
   // What the view is told about its call: the arguments while the model
@@ -204,7 +205,7 @@ export function McpAppFrame({
   const permissionToRunTools = useCallback(
     (name: string, args: Record<string, unknown>) =>
       new Promise<boolean>((resolve) => {
-        if (latest.current.call.isBundled && autoAcceptToolsPreference()) return resolve(true);
+        if (latest.current.call.isBundled && latest.current.automaticTools) return resolve(true);
         setAsking((current) => {
           // Concurrent requests cannot share the approval of another call.
           if (current) {
