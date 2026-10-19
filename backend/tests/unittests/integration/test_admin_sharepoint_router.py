@@ -25,12 +25,14 @@ from eneo.integration.presentation.admin_sharepoint_router import (
     _get_sharepoint_token_for_user_integration,
     _require_sharepoint_webhook_client_state,
     _to_app_public,
+    delete_sharepoint_app,
     get_sharepoint_app,
     list_sharepoint_subscriptions,
     recreate_all_subscriptions,
     recreate_subscription,
     renew_expired_subscriptions,
     restart_service_account_auth,
+    router,
     service_account_auth_callback,
 )
 from eneo.integration.presentation.admin_sharepoint_router import (
@@ -478,3 +480,31 @@ async def test_recreate_all_is_refused_before_any_subscription_is_touched_when_w
     assert "SHAREPOINT_WEBHOOK_CLIENT_STATE" in exc_info.value.detail
     subscription_repo.list_by_tenant.assert_not_awaited()
     subscription_service.recreate_expired_subscription.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_app_removes_its_organization_connections_only():
+    """The description promised personal OAuth tokens were deleted too."""
+    app = MagicMock(id=uuid4())
+    organization_connection = MagicMock(id=uuid4())
+    container = MagicMock()
+    tenant_app_service = container.tenant_sharepoint_app_service.return_value
+    tenant_app_service.tenant_app_repo.get_by_tenant = AsyncMock(return_value=app)
+    tenant_app_service.delete_app = AsyncMock(return_value=True)
+    connections = container.user_integration_repo.return_value
+    connections.query = AsyncMock(return_value=[organization_connection])
+    connections.remove = AsyncMock()
+
+    await delete_sharepoint_app(container=container)
+
+    connections.query.assert_awaited_once_with(tenant_app_id=app.id)
+    connections.remove.assert_awaited_once_with(id=organization_connection.id)
+    (route,) = [
+        route
+        for route in router.routes
+        if getattr(route, "endpoint", None) is delete_sharepoint_app
+    ]
+    assert "Personal SharePoint connections and their imports are kept" in (
+        route.description
+    )
+    assert "oauth_tokens" not in route.description

@@ -538,15 +538,18 @@ async def _test_stored_sharepoint_app(container: Container) -> TenantAppTestResu
     response_model=dict[str, str],
     summary="Permanently delete SharePoint app",
     description=(
-        "Permanently delete the tenant's SharePoint app configuration and all associated data. "
-        "WARNING: This action CANNOT be undone. This will cascade delete:\n"
-        "- All user_integrations using this tenant app (both org and personal)\n"
-        "- All integration_knowledge (imported SharePoint content)\n"
-        "- All info_blobs and embeddings (document data and vectors)\n"
-        "- All sharepoint_subscriptions (webhooks)\n"
-        "- All oauth_tokens for personal SharePoint integrations\n"
-        "- All sync_logs\n\n"
-        "Assistants linked to this knowledge will lose their connections.\n"
+        "Permanently delete the tenant's SharePoint app configuration and the "
+        "organization-wide SharePoint connection that uses it (app or service "
+        "account). WARNING: This action CANNOT be undone. In one request it "
+        "deletes:\n"
+        "- the organization-wide connections of this app\n"
+        "- the SharePoint knowledge imported through them, with its documents, "
+        "embeddings and sync history\n"
+        "- Eneo's records of their change-notification subscriptions\n\n"
+        "Personal SharePoint connections and their imports are kept, but they "
+        "sign in through this app and stop syncing until an app is configured "
+        "again. Subscriptions registered at Microsoft are not removed there; "
+        "they expire on their own. Assistants lose the deleted knowledge. "
         "Requires admin role."
     ),
     responses={
