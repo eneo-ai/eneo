@@ -1,3 +1,7 @@
+from eneo.integration.infrastructure.content_service import (
+    sharepoint_results as sync_results,
+)
+
 """Source metadata handling in the SharePoint content service."""
 
 import hashlib
@@ -240,7 +244,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
             source_metadata=ENTRIES,
         )
 
@@ -271,7 +275,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
             source_metadata=ENTRIES,
         )
 
@@ -297,7 +301,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
             source_metadata=list(ENTRIES),
         )
 
@@ -327,7 +331,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
             source_metadata=metadata,
         )
 
@@ -353,7 +357,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
             source_metadata=[],
         )
 
@@ -375,7 +379,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
             source_metadata=None,
         )
 
@@ -400,7 +404,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
             source_metadata=ENTRIES,
         )
 
@@ -422,7 +426,7 @@ class TestProcessInfoBlob:
             url="https://x",
             integration_knowledge=integration_knowledge,
             sharepoint_item_id="i1",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
             source_metadata=[],
         )
 
