@@ -30,6 +30,10 @@ TokenRefreshCallback = Callable[[UUID], Awaitable[dict[str, str]]]
 AccessTokenProvider = Callable[[], Awaitable[str]]
 
 
+# Without it a delta page also lists the parent chain of every changed item.
+DELTA_REQUEST_HEADERS: dict[str, str] = {"Prefer": "deltaExcludeParent"}
+
+
 def _relative_graph_link(url: str) -> str:
     """Reduce an absolute Graph URL to the relative path+query the client expects."""
     parsed: ParseResult = urlparse(url)
@@ -844,13 +848,17 @@ class SharePointContentClient(BaseClient):
 
         Only the first page carries our own query string; later pages come
         from ``@odata.nextLink``, which Graph builds from the accepted options.
+        Graph otherwise lists the parent chain of every changed item too; those
+        folders carry no change of their own and, above a folder scope, would
+        read as having left it.
         """
+        headers = {**self.headers, **DELTA_REQUEST_HEADERS}
         try:
-            return await self.client.get(link, headers=self.headers)
+            return await self.client.get(link, headers=headers)
         except aiohttp.ClientResponseError as e:
             if self._disable_item_expand_after(e):
                 stripped = _strip_query_param(link, "$expand")
-                return await self.client.get(stripped, headers=self.headers)
+                return await self.client.get(stripped, headers=headers)
             raise
 
     async def initialize_delta_token(

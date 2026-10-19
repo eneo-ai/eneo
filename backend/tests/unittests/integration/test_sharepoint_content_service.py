@@ -2310,8 +2310,22 @@ class TestExtractTextFromCanvasLayout:
         assert "Second section" in result
 
 
+def _descendant(item_id: str, parent_path: str) -> dict:
+    """A file Graph lists under a walked folder, placed by its parent path."""
+    return {
+        "id": item_id,
+        "name": f"{item_id}.docx",
+        "file": {},
+        "parentReference": {
+            "id": "walked",
+            "path": f"/drives/drive-1/root:{parent_path}",
+        },
+    }
+
+
 class TestOutOfScopeFolderSubtreeCleanup:
-    """A folder leaving scope must take its descendant blobs with it."""
+    """A folder leaving scope takes its descendant blobs with it, each placed
+    against the scope first."""
 
     async def test_deletes_descendant_blobs_when_folder_leaves_scope(
         self, service, mock_dependencies
@@ -2325,8 +2339,13 @@ class TestOutOfScopeFolderSubtreeCleanup:
 
         with patch.object(
             service,
-            "_enumerate_authoritative_item_ids",
-            AsyncMock(return_value={"child-1", "child-2"}),
+            "_enumerate_authoritative_items",
+            AsyncMock(
+                return_value=[
+                    _descendant("child-1", "/Documents/Moved"),
+                    _descendant("child-2", "/Documents/Moved/Sub"),
+                ]
+            ),
         ):
             stats = service._initialize_stats()
             await service._delete_out_of_scope_folder_subtree(
@@ -2339,6 +2358,8 @@ class TestOutOfScopeFolderSubtreeCleanup:
                 integration_knowledge=ik,
                 integration_knowledge_id=ik.id,
                 stats=stats,
+                scope_folder_path="/Documents/A",
+                known_subfolder_ids=set(),
             )
 
         assert repo.delete_by_sharepoint_item_and_integration_knowledge.await_count == 2
@@ -2361,8 +2382,8 @@ class TestOutOfScopeFolderSubtreeCleanup:
 
         with patch.object(
             service,
-            "_enumerate_authoritative_item_ids",
-            AsyncMock(return_value={"od-child"}),
+            "_enumerate_authoritative_items",
+            AsyncMock(return_value=[_descendant("od-child", "/Moved")]),
         ) as mock_enum:
             stats = service._initialize_stats()
             await service._delete_out_of_scope_folder_subtree(
@@ -2375,6 +2396,8 @@ class TestOutOfScopeFolderSubtreeCleanup:
                 integration_knowledge=ik,
                 integration_knowledge_id=ik.id,
                 stats=stats,
+                scope_folder_path="/A",
+                known_subfolder_ids=set(),
             )
 
         mock_enum.assert_awaited_once()
@@ -2401,7 +2424,7 @@ class TestOutOfScopeFolderSubtreeCleanup:
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
             patch.object(
-                service, "_enumerate_authoritative_item_ids", AsyncMock()
+                service, "_enumerate_authoritative_items", AsyncMock()
             ) as enumerate_ids,
         ):
             _mock_graph_client(
@@ -2429,7 +2452,7 @@ class TestOutOfScopeFolderSubtreeCleanup:
         content_client = AsyncMock()
         repo = mock_dependencies["info_blob_service"].repo
 
-        with patch.object(service, "_enumerate_authoritative_item_ids") as mock_enum:
+        with patch.object(service, "_enumerate_authoritative_items") as mock_enum:
             stats = service._initialize_stats()
             await service._delete_out_of_scope_folder_subtree(
                 content_client=content_client,
@@ -2441,6 +2464,8 @@ class TestOutOfScopeFolderSubtreeCleanup:
                 integration_knowledge=ik,
                 integration_knowledge_id=ik.id,
                 stats=stats,
+                scope_folder_path="/Documents/A",
+                known_subfolder_ids=set(),
             )
 
         mock_enum.assert_not_called()
@@ -3759,6 +3784,141 @@ class TestDeltaFolderScopeOrdering:
         )
         assert folder_scoped.folder_path == "/Docs renamed/A"
         assert "1 file" in result
+
+    @pytest.mark.parametrize(
+        ("ancestor_name", "scope_path_now"),
+        [("Documents", "/Documents/A"), ("Docs renamed", "/Docs renamed/A")],
+        ids=["parent chain of a change", "renamed ancestor"],
+    )
+    async def test_an_ancestor_entry_is_neither_cleaned_up_nor_walked(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        folder_scoped,
+        ancestor_name,
+        scope_path_now,
+    ):
+        """Graph lists the parent chain of a changed item and emits a renamed
+        ancestor on its own. An ancestor is above the scope, not out of it: its
+        subtree holds the scope's documents and nothing of its own is indexed."""
+        changes = [
+            {
+                "id": "documents-folder",
+                "name": ancestor_name,
+                "folder": {"childCount": 3},
+                "parentReference": {"id": "root-id", "path": "/drives/drive-123/root:"},
+            },
+            {
+                "id": "nested-1",
+                "name": "nested.docx",
+                "webUrl": "https://x/nested.docx",
+                "parentReference": {
+                    "id": "sub-folder",
+                    "path": f"/drives/drive-123/root:{scope_path_now}/Sub",
+                },
+            },
+        ]
+        scope_folder_now = {
+            "id": "folder-a",
+            "name": "A",
+            "folder": {},
+            "parentReference": {
+                "id": "documents-folder",
+                "path": f"/drives/drive-123/root:/{ancestor_name}",
+            },
+        }
+
+        client, result = await self._run_delta(
+            service,
+            mock_dependencies,
+            mock_oauth_token,
+            folder_scoped,
+            changes,
+            folder_metadata=scope_folder_now,
+        )
+
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
+        client.get_folder_items.assert_not_awaited()
+        client.get_file_extraction_by_id.assert_awaited_once_with(
+            drive_id="drive-123", item_id="nested-1"
+        )
+        assert folder_scoped.folder_path == scope_path_now
+        assert folder_scoped.delta_token == "new-token"
+        assert "1 file" in result
+
+    async def test_cleaning_a_folder_that_left_scope_keeps_descendants_inside_it(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        """The folder's own parent path decides its fate; each descendant is
+        placed against the scope before its documents go, and one Graph cannot
+        place stays for the next full sync to reconcile."""
+        changes = [
+            {
+                "id": "folder-b",
+                "name": "B",
+                "folder": {},
+                "parentReference": {
+                    "id": "documents-folder",
+                    "path": "/drives/drive-123/root:/Documents",
+                },
+            }
+        ]
+        descendants = [
+            {
+                "id": "b-file",
+                "name": "b.docx",
+                "file": {},
+                "parentReference": {
+                    "id": "folder-b",
+                    "path": "/drives/drive-123/root:/Documents/B",
+                },
+            },
+            {
+                "id": "a-file",
+                "name": "a.docx",
+                "file": {},
+                "parentReference": {
+                    "id": "sub-folder",
+                    "path": "/drives/drive-123/root:/Documents/A/Sub",
+                },
+            },
+            {"id": "unplaced", "name": "x.docx", "file": {}, "parentReference": {}},
+        ]
+        scope_folder_now = {
+            "id": "folder-a",
+            "name": "A",
+            "folder": {},
+            "parentReference": {
+                "id": "documents-folder",
+                "path": "/drives/drive-123/root:/Documents",
+            },
+        }
+
+        with patch.object(
+            service,
+            "_enumerate_authoritative_items",
+            AsyncMock(return_value=descendants),
+        ) as walk:
+            await self._run_delta(
+                service,
+                mock_dependencies,
+                mock_oauth_token,
+                folder_scoped,
+                changes,
+                folder_metadata=scope_folder_now,
+            )
+
+        walk.assert_awaited_once()
+        assert walk.await_args.kwargs["folder_id"] == "folder-b"
+        delete = mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge
+        removed = [call.kwargs["sharepoint_item_id"] for call in delete.await_args_list]
+        assert removed == ["folder-b", "b-file"]
+        assert folder_scoped.delta_token == "new-token"
 
     async def test_unreadable_scope_folder_fails_the_pass_before_classifying(
         self, service, mock_dependencies, mock_oauth_token
