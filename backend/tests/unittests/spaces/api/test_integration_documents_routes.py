@@ -14,6 +14,8 @@ from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts
+from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.auth_models import ApiKeyOwnership, ApiKeyPermission
 from eneo.info_blobs.info_blob import InfoBlobInDBNoText
 from eneo.info_blobs.info_blob_repo import IntegrationDocumentsPage
 from eneo.integration.domain.entities.integration_knowledge import (
@@ -40,6 +42,7 @@ from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from eneo.spaces.api.space_router import router
 from eneo.spaces.space import Space
 from eneo.users.user import UserInDB
+from tests.unit.api_key_test_utils import make_api_key
 
 FOLDER = "https://contoso.sharepoint.com/sites/KS/Shared%20Documents/Protokoll"
 
@@ -181,6 +184,7 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
     app = FastAPI()
     app.include_router(router, prefix="/spaces")
     add_exception_handlers(app)
+    app.dependency_overrides[get_current_active_user] = lambda: user
     for route in router.routes:
         if isinstance(route, APIRoute):
             for dependency in route.dependant.dependencies:
@@ -715,3 +719,63 @@ async def test_refused_organization_credentials_are_a_400_with_a_stable_code(
     assert body["message"] == CREDENTIALS_INVALID_MESSAGE
     assert "AADSTS" not in response.text
     jobs.queue_job.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("method", "route", "body"),
+    [
+        pytest.param(
+            "POST",
+            "add/{id}/",
+            {
+                "name": "Protokoll",
+                "embedding_model": {"id": str(uuid4())},
+                "url": "https://contoso.sharepoint.com/sites/KS",
+                "key": "contoso.sharepoint.com,site,web",
+            },
+            id="add",
+        ),
+        pytest.param(
+            "POST",
+            "add/{id}/batch/",
+            {
+                "embedding_model": {"id": str(uuid4())},
+                "items": [
+                    {
+                        "name": "Protokoll",
+                        "url": "https://contoso.sharepoint.com/sites/KS",
+                        "key": "contoso.sharepoint.com,site,web",
+                    }
+                ],
+            },
+            id="batch",
+        ),
+        pytest.param("POST", "{id}/sync/", None, id="sync"),
+    ],
+)
+async def test_service_keys_cannot_queue_imports_or_syncs(
+    documents_api, method, route, body
+):
+    """The queued job belongs to the caller; a service key has no user row."""
+    api = documents_api
+    api.user.active_api_key = make_api_key(
+        ownership=ApiKeyOwnership.SERVICE,
+        owner_user_id=None,
+        permission=ApiKeyPermission.ADMIN,
+        tenant_id=api.user.tenant_id,
+    )
+    jobs = AsyncMock()
+    api.container.job_service.override(providers.Object(jobs))
+
+    async with AsyncClient(
+        transport=ASGITransport(app=api.app), base_url="http://test"
+    ) as client:
+        response = await client.request(
+            method, api.change_url(route, api.knowledge.id), json=body
+        )
+
+    assert response.status_code == 403, response.text
+    # The production app flattens this detail; this app serves it as raised.
+    assert response.json()["detail"]["code"] == "service_key_cannot_create_resources"
+    jobs.queue_job.assert_not_awaited()
+    api.space_repo.one.assert_not_awaited()

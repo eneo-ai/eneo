@@ -944,6 +944,7 @@ async def create_space_integration_knowledge(
     user_integration_id: UUID,
     data: CreateSpaceIntegrationKnowledge,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.integration_knowledge_service()
 
@@ -1009,6 +1010,7 @@ async def create_space_integration_knowledge_batch(
     user_integration_id: UUID,
     data: CreateSpaceIntegrationKnowledgeBatchRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.integration_knowledge_service()
 
@@ -1394,6 +1396,7 @@ async def trigger_integration_full_sync(
     id: UUID,
     integration_knowledge_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.integration_knowledge_service()
 
