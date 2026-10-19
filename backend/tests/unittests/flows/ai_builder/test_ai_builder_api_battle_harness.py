@@ -13485,7 +13485,7 @@ def test_execution_sends_its_inputs_under_the_run_contract_names(
         (
             {"contract": {"form_fields": [{"name": "kommun", "type": "text"}]}},
             {"form_fields": {"kommune": "Sundsvall"}},
-            "kommune",
+            "undeclared_form_field",
         ),
         ({"published_version": None}, {"text": "Skriv beslutet."}, "not published"),
     ],

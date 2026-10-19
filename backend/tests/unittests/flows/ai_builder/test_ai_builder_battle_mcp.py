@@ -1,26 +1,32 @@
 """MCP tool cases of the Builder harness: the seed manifest, scripted tool
-answers, the call log and the M1-M6 checks, including the oracle self-test
+answers, the call log and the M1-M8 checks, including the oracle self-test
 (T0): deliberately wrong synthetic bundles must fail, a right one must pass,
 and missing evidence is never a pass."""
 
 from __future__ import annotations
 
+import ast
 import importlib
+import io
 import json
 import sys
 import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
+from urllib.error import HTTPError
 from uuid import UUID
 
 from pydantic import ValidationError
 from pytest import MonkeyPatch, fixture, mark, raises
 
 from eneo.flows.ai_builder.ai_builder_tool_catalog import tool_ref
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from tests.unittests.flows.ai_builder.test_ai_builder_api_battle_harness import (
     _battle_harness,  # pyright: ignore[reportPrivateUsage]
     _complete_live_case_bundle,  # pyright: ignore[reportPrivateUsage]
+    _EditApi,  # pyright: ignore[reportPrivateUsage]
+    _run_edit,  # pyright: ignore[reportPrivateUsage]
 )
 
 _SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
@@ -187,8 +193,10 @@ def _scored(
     evidence: bool = True,
     follow_ups: tuple[str, ...] = (),
     delivered: tuple[str, Any] | None = None,
+    edit: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """`delivered` = (the run's text, its OutputExpectation): the case runs."""
+    """`delivered` = (the run's text, its OutputExpectation): the case runs;
+    `edit` is the bundle's edit evidence of a saved flow."""
     plan = interactions[-1]["plan"]
     case: dict[str, Any] = {"expected": {"expected_mcp": expected_mcp}, "file_ids": []}
     if follow_ups:
@@ -212,6 +220,8 @@ def _scored(
             },
         },
     }
+    if edit is not None:
+        bundle["edit_evidence"] = edit
     if evidence:
         bundle["mcp_evidence"] = {
             "manifest": _manifest(),
@@ -533,6 +543,30 @@ def test_an_mcp_expectation_has_one_closed_shape(
     with raises(ValueError, match="expected_mcp"):
         harness._read_cases_file(
             _cases_file(harness, tmp_path, expected={"expected_mcp": expected_mcp})
+        )
+
+
+@mark.parametrize("check", ["tool_output_reaches_last_step", "keeps_saved_flow"])
+def test_an_edit_check_needs_an_edit_case(
+    harness: ModuleType, tmp_path: Path, check: str
+) -> None:
+    # Kills: M7 or M8 accepted on a case with no edit block, where the check
+    # could never be measured (one mutant per check).
+    with raises(ValueError, match="edit checks need an edit case"):
+        harness._read_cases_file(
+            _cases_file(
+                harness,
+                tmp_path,
+                apply_plan=True,
+                expected={
+                    "expected_mcp": {
+                        "outcome": {"kind": "applied_plan"},
+                        "turns": [],
+                        "uses": [],
+                        check: True,
+                    }
+                },
+            )
         )
 
 
@@ -1319,3 +1353,416 @@ def test_every_tool_a_case_names_must_be_seeded_before_any_observation(
     # Kills: a selector source the seed check does not visit.
     with raises(ValueError, match="Missing/ghost"):
         harness._require_mcp_seed(args, [case])
+
+
+# --- edit cases: the tool's output reaches the output, the saved flow is kept --
+
+_SEED = json.loads(
+    (_SCRIPTS / "fixtures" / "ai_builder_battle" / "edit_seed_a.json").read_text(
+        encoding="utf-8"
+    )
+)
+_SAVED_FIELDS: list[dict[str, Any]] = _SEED["metadata_json"]["form_schema"]["fields"]
+_CASE_ID = {"name": "case_id", "type": "number", "label": "Ärende", "required": True}
+_QUESTION = _SEED["steps"][0]["input_bindings"]["question"]
+
+
+def _snapshot(steps: list[dict[str, Any]], fields: list[Any]) -> dict[str, Any]:
+    """A persisted flow as the harness snapshots it."""
+    return {
+        "flow": {
+            "steps": [{**step, "step_order": n} for n, step in enumerate(steps, 1)],
+            "metadata_json": {"form_schema": {"fields": fields}},
+        },
+        "assistants": {
+            step["assistant_id"]: {"prompt": {"text": step["instructions"]}}
+            for step in steps
+        },
+    }
+
+
+def _saved_steps() -> list[dict[str, Any]]:
+    return [
+        {**step, "assistant_id": f"saved-{n}", "user_description": step["name"]}
+        for n, step in enumerate(_SEED["steps"], 1)
+    ]
+
+
+def _lookup_first(
+    first_bindings: dict[str, Any],
+    fields: list[Any],
+    saved_fields: list[Any] = _SAVED_FIELDS,
+) -> dict[str, Any]:
+    """The seed's edit evidence after a lookup step is inserted first: the
+    saved step_N refs renumbered as the apply writes them, step 1's bindings
+    and the run form as given (the saved one too, when it is not the seed's)."""
+    saved = _saved_steps()
+    one, two, three = saved
+    shifted = json.dumps(three["input_bindings"]).replace("step_2", "step_3")
+    lookup = {
+        "assistant_id": "lookup",
+        "user_description": "Hämta ärende",
+        "instructions": "Hämta ärendet.",
+        "input_source": "tool",
+        "input_config": _tool_step("x", {"case_id": "{{ flow_input.case_id }}"})[
+            "input_config"
+        ],
+    }
+    applied = [
+        lookup,
+        {**one, "input_bindings": first_bindings},
+        two,
+        {**three, "input_bindings": json.loads(shifted.replace("step_1", "step_2"))},
+    ]
+    return {
+        "identity": {step["assistant_id"]: f"s{n}" for n, step in enumerate(saved, 1)},
+        "baseline": _snapshot(saved, saved_fields),
+        "applied": _snapshot(applied, fields),
+    }
+
+
+def _right_with_saved_fields(
+    saved_fields: list[Any], kept: list[Any]
+) -> dict[str, Any]:
+    """The right plan over a run form the editor saved as `saved_fields`,
+    written back as `kept` (new field first)."""
+    return _lookup_first(
+        {
+            "question": _QUESTION,
+            "source_refs": [{"step_ref": "step_1", "output": "text", "label": "Ä"}],
+        },
+        [{**_CASE_ID, "order": 1}, *kept],
+        saved_fields,
+    )
+
+
+_UNREAD = {"name": "note", "type": "text", "label": "Anteckning", "required": False}
+_UNLABELLED = [
+    {k: v for k, v in field.items() if k != "label"} if n == 0 else field
+    for n, field in enumerate(_SAVED_FIELDS)
+]
+_EDITS: dict[str, dict[str, Any] | None] = {
+    # Positive control: the saved question text kept, the lookup added as a
+    # source ref, the new field listed first (every saved field renumbered).
+    "right": _lookup_first(
+        {
+            "question": _QUESTION,
+            "source_refs": [{"step_ref": "step_1", "output": "text", "label": "Ä"}],
+        },
+        [
+            {**_CASE_ID, "order": 1},
+            *({**field, "order": field["order"] + 1} for field in _SAVED_FIELDS),
+        ],
+    ),
+    # nc4046 luna6 cand2: no step reads the lookup, three saved fields relabelled
+    # and made optional.
+    "hollow": _lookup_first(
+        {"question": _QUESTION},
+        [
+            *({**field, "label": "x", "required": False} for field in _SAVED_FIELDS),
+            _CASE_ID,
+        ],
+    ),
+    # The lookup read in place of the saved read of `ansokan`.
+    "dropped_read": _lookup_first(
+        {"question": "{{ step_1.output.text }}"}, [*_SAVED_FIELDS, _CASE_ID]
+    ),
+    # The authoring view reads an unlabelled saved field as its name, and a
+    # label's surrounding space away, so neither is a change.
+    "unlabelled_kept": _right_with_saved_fields(_UNLABELLED, _UNLABELLED),
+    "label_padded": _right_with_saved_fields(
+        _SAVED_FIELDS,
+        [
+            {**_SAVED_FIELDS[0], "label": f" {_SAVED_FIELDS[0]['label']} "},
+            *_SAVED_FIELDS[1:],
+        ],
+    ),
+    # A saved field no step reads, gone from the applied flow: only the
+    # contract comparison can see it.
+    "dropped_field": _right_with_saved_fields([*_SAVED_FIELDS, _UNREAD], _SAVED_FIELDS),
+    # A saved field of a type the platform does not accept cannot be compared.
+    "unaccepted_type": _right_with_saved_fields(
+        [{**_SAVED_FIELDS[0], "type": "bogus"}, *_SAVED_FIELDS[1:]], _SAVED_FIELDS
+    ),
+    # The saved flow written back with no tool step at all.
+    "no_tool_step": {
+        "identity": {f"saved-{n}": f"s{n}" for n in (1, 2, 3)},
+        "baseline": _snapshot(_saved_steps(), _SAVED_FIELDS),
+        "applied": _snapshot(_saved_steps(), _SAVED_FIELDS),
+    },
+    "no_edit_evidence": None,
+}
+_M7 = "mcp_m7_tool_output_reaches_last_step"
+_M8 = "mcp_m8_saved_flow_kept"
+
+
+@mark.parametrize(
+    ("edit", "reaches", "kept", "plan"),
+    [
+        ("right", True, True, "pass"),
+        ("hollow", False, False, "fail"),
+        ("dropped_read", True, False, "fail"),
+        ("dropped_field", True, False, "fail"),
+        ("unlabelled_kept", True, True, "pass"),
+        ("label_padded", True, True, "pass"),
+        ("unaccepted_type", True, None, "unmeasured"),
+        ("no_tool_step", False, True, "fail"),
+        ("no_edit_evidence", None, None, "unmeasured"),
+    ],
+)
+def test_an_edit_adding_a_tool_passes_only_when_its_output_is_used_and_the_saved_flow_kept(
+    harness: ModuleType, edit: str, reaches: bool | None, kept: bool | None, plan: str
+) -> None:
+    expected = {
+        **_EXPLICIT,
+        "tool_output_reaches_last_step": True,
+        "keeps_saved_flow": True,
+    }
+    bundle = _scored(
+        harness, expected, _CHOICE_TURN, calls=[_PROBE_CALL], edit=_EDITS[edit]
+    )
+    measured = {c["name"]: c for c in bundle["quality_report"]["mcp_checks"]}
+
+    # Kills: an unread lookup counted as used; reach read through the implicit
+    # chain a question replaces; a dropped saved read or a changed saved field
+    # not caught; a removed saved field not counted as a change, or its absent
+    # view raising in the contract reader; a renumbered field order taken for
+    # a contract change; a saved field read by a second rule instead of the
+    # authoring view (unlabelled or padded label); an unreadable saved type
+    # raising or counting as a pass; a flow with no tool step passing M7; the
+    # checks not gating the plan; no edit evidence read as a pass.
+    assert (measured[_M7]["passed"], measured[_M8]["passed"]) == (reaches, kept)
+    assert (
+        harness._verdict_states(bundle, observation_status="completed")["plan"] == plan
+    )
+
+
+def test_an_mcp_case_that_declares_no_edit_check_reports_none(
+    harness: ModuleType,
+) -> None:
+    bundle = _scored(
+        harness, _EXPLICIT, _CHOICE_TURN, calls=[_PROBE_CALL], edit=_EDITS["hollow"]
+    )
+
+    # Kills: the edit checks reported for every case, which would change every
+    # recorded report a reanalysis must reproduce.
+    names = {c["name"] for c in bundle["quality_report"]["mcp_checks"]}
+    assert {_M7, _M8}.isdisjoint(names)
+
+
+def test_a_live_edit_observation_scores_its_edit_checks_as_reanalysis_does(
+    harness: ModuleType, monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    _EditApi().install(harness, monkeypatch)
+    expected = {"outcome": {"kind": "applied_plan"}, "turns": [], "uses": []}
+    case = harness._read_cases_file(
+        _cases_file(
+            harness,
+            tmp_path,
+            apply_plan=True,
+            expected={"expected_mcp": {**expected, "keeps_saved_flow": True}},
+            edit={"seed_flow_fixture": "edit_seed_a.json", "scope": "whole_flow"},
+        )
+    )[0]
+
+    bundle = _run_edit(harness, case, tmp_path)
+
+    # Kills: the live report scored before the bundle holds its edit evidence,
+    # so it leaves M8 unmeasured where a reanalysis measures it.
+    measured = {c["name"]: c for c in bundle["quality_report"]["mcp_checks"]}
+    assert measured[_M8]["passed"] is True
+
+
+# --- a run the applied flow's run form refuses -----------------------------
+
+# The body Eneo's run endpoint answered in nc4046 (luna6 base2, mcp_f6).
+_RECORDED_REFUSAL = (
+    b'{"message":"Missing required input field \'input\'.","eneo_error_code":9007,'
+    b'"code":"flow_input_required_field_missing","context":{"field_name":"input",'
+    b'"field_type":"text"},"request_id":"4fa0584db72caf5c9c516aab1711f098"}'
+)
+_STALE_VERSION = b'{"code": "flow_run_stale_version"}'
+_FORM_INPUT = {"form_fields": {"query": "Bullerklagomål"}}
+
+
+def _run_case(inputs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "apply_plan": True,
+        "execution": {
+            "inputs": inputs,
+            "expect": {"output_kind": "text", "required_facts": ["Hamnen"]},
+        },
+    }
+
+
+@mark.parametrize(
+    ("inputs", "declared", "body", "code"),
+    [
+        (
+            _FORM_INPUT,
+            ["query"],
+            _RECORDED_REFUSAL,
+            "flow_input_required_field_missing",
+        ),
+        (_FORM_INPUT, ["sokt"], None, "undeclared_form_field"),
+        ({"text": "Bullerklagomål"}, ["query"], None, "free_text_for_form_flow"),
+        (_FORM_INPUT, ["query"], _STALE_VERSION, None),
+    ],
+    ids=["server_refusal", "renamed_field", "free_text_on_form", "other_refusal"],
+)
+def test_a_run_form_refusing_the_case_input_fails_the_output_and_keeps_the_plan(
+    harness: ModuleType,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    inputs: dict[str, Any],
+    declared: list[str],
+    body: bytes | None,
+    code: str | None,
+) -> None:
+    plan = _plan(tool_arguments=None)
+    runs: list[str] = []
+
+    def request(*, method: str, path: str, **_: object) -> object:
+        if path.endswith("/runs/"):
+            runs.append(path)
+            raise HTTPError(path, 400, "Bad Request", None, io.BytesIO(body or b""))  # type: ignore[arg-type]
+        return {
+            "/flows/ai-builder/plans/plan-1/create": {"flow_id": "flow-1"},
+            "/flows/flow-1/": {"id": "flow-1", "steps": []},
+            "/flows/flow-1/publish/": {"published_version": 2},
+            "/flows/flow-1/run-contract/": {
+                "published_flow_version": 2,
+                "form_fields": [{"name": name} for name in declared],
+            },
+            "/flows/ai-builder/sessions/s-1/_diagnostics/classifier-slots": {
+                "session_id": "s-1"
+            },
+        }.get(path, {})
+
+    monkeypatch.setattr(harness, "_create_session", lambda **_: {"session_id": "s-1"})
+    monkeypatch.setattr(
+        harness,
+        "_send_and_fetch",
+        lambda **_: {"plan_id": "plan-1", "plan": plan, "events": []},
+    )
+    monkeypatch.setattr(harness, "_request_json", request)
+    monkeypatch.setattr(harness, "_request_no_content", request)
+    monkeypatch.setattr(harness, "_optional_request_json", lambda **_: None)
+    # The fake session records no telemetry to judge live provenance by.
+    monkeypatch.setattr(
+        harness, "_quality_report_with_live_provenance", lambda report, **_: report
+    )
+    case = harness._read_cases_file(
+        _cases_file(harness, tmp_path, **_run_case(inputs))
+    )[0]
+
+    def observe() -> dict[str, Any]:
+        return harness._run_case_session(
+            case=case,
+            config=harness.ApiConfig(
+                base_url="http://localhost:8123/api/v1",
+                api_key="test-key",
+                timeout_seconds=1,
+            ),
+            args=SimpleNamespace(
+                space_id=_SPACE,
+                model_id=None,
+                ui_language="sv",
+                file_ids=None,
+                auto_confirm_requirements=False,
+                timeout_seconds=1,
+            ),
+            existing_session_id=None,
+            artifact_output_dir=tmp_path,
+            cases_path=None,
+            provisioned_fixtures=None,
+            seeded_flow=None,
+        )
+
+    if code is None:
+        # Kills: every refused run request taken for the plan's, by status alone.
+        with raises(harness.BattleFlowLifecycleError) as raised:
+            observe()
+        assert harness.harness_failure_class(raised.value) == "harness_configuration"
+        return
+    bundle = observe()
+
+    # Kills: a refusal of the run form filed as a harness fault (its plan
+    # dropped), kept as a harness refusal (an unmeasured output), or without
+    # its typed code.
+    assert bundle["plan_id"] == "plan-1" and "harness_refusal" not in bundle
+    checks = {c["name"]: c for c in bundle["quality_report"]["checks"]}
+    assert checks["run_input_accepted"]["actual"] == code
+    states = harness._verdict_states(bundle, observation_status="completed")
+    assert (states["output"], states["case"]) == ("fail", "fail")
+    # Kills: the form's shape checked after the request, so a plan the input
+    # cannot fit still starts a run.
+    assert bool(runs) == (body is not None)
+    # Kills: the refusal read from the live exception only, so a reanalysis
+    # of the kept run record no longer fails the output.
+    kept_record = {
+        **_complete_live_case_bundle(harness, case),
+        "flow_lifecycle": bundle["flow_lifecycle"],
+    }
+    kept_record["quality_report"] = harness._quality_report_of(
+        kept_record,
+        summary={},
+        event_summary={},
+        journey={},
+        expected=case.expected or {},
+        output_expectation=case.execution.expect,
+    )
+    path = tmp_path / "refused-run.json"
+    path.write_text(json.dumps(kept_record), encoding="utf-8")
+    assert (
+        harness._reanalyze_bundles(bundle_paths=[path], output_dir=tmp_path / "re") == 0
+    )
+    rescored = json.loads(next((tmp_path / "re").iterdir()).read_text())
+    assert rescored["observation"]["verdict_states"]["output"] == "fail"
+
+
+@mark.parametrize(
+    ("inputs", "declared", "payload"),
+    [
+        ({"text": "Hej"}, [], {"text": "Hej"}),
+        ({"form_fields": {"query": "x"}}, ["query", "other"], {"query": "x"}),
+        ({}, ["query"], None),
+    ],
+    ids=["text_for_a_flow_without_form", "subset_of_the_form", "no_input"],
+)
+def test_a_run_input_the_published_form_takes_is_sent_as_it_is(
+    harness: ModuleType, inputs: dict[str, Any], declared: list[str], payload: Any
+) -> None:
+    contract = {"form_fields": [{"name": name} for name in declared]}
+
+    # Kills: a form field the case leaves out (the server decides if it is
+    # required) or free text for a Flow without a form taken for a mismatch.
+    assert (
+        harness._run_input_payload(
+            contract=contract, inputs=harness.ExecutionInputs(**inputs)
+        )
+        == payload
+    )
+
+
+def test_the_run_form_refusals_are_those_the_run_form_validator_raises(
+    harness: ModuleType,
+) -> None:
+    validator = (
+        Path(__file__).resolve().parents[4]
+        / "src"
+        / "eneo"
+        / "flows"
+        / "flow_run_input_payload.py"
+    )
+    raised = {
+        FlowApiErrorCode[node.attr]
+        for node in ast.walk(ast.parse(validator.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "FlowApiErrorCode"
+    }
+
+    # Kills: a code added to (or dropped from) the validator that the hand-kept
+    # allowlist of the harness does not follow, so its refusal is a harness fault.
+    assert harness._RUN_FORM_REFUSALS == raised

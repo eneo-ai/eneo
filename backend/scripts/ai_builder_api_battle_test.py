@@ -32,6 +32,7 @@ from dataclasses import field as dataclass_field
 from dataclasses import fields as dataclass_fields
 from datetime import UTC, datetime
 from decimal import Decimal
+from enum import StrEnum
 from http.client import HTTPException
 from pathlib import Path
 from threading import BoundedSemaphore, Condition, Lock
@@ -166,10 +167,15 @@ OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 5
 # (`ai_builder_plan_mechanisms`) ride along in every Builder observation's
 # report (not the oracle arm's) and decide nothing.
 # v5: a case's `expected.expected_mcp` is judged by its MCP checks
-# (`ai_builder_mcp_eval.mcp_checks`, M1-M6): those that apply grade its plan
+# (`ai_builder_mcp_eval.mcp_checks`, M1-M8): those that apply grade its plan
 # and output in place of the content and binding graders, and its outcome
 # replaces `plan_created`.
-SCORER_SEMANTICS_VERSION = 5
+# v6: an edit case may declare M7 (the tool's output reaches the last step)
+# and M8 (the saved flow's reads and run form kept); Eneo refusing the run
+# input the case declares for the applied flow, or the plan's run form not
+# declaring what the case sends (`_run_form_refusal`), fails the output
+# instead of ending the observation as a harness fault.
+SCORER_SEMANTICS_VERSION = 6
 # The scoring modules beside the harness: what a verdict means is written in
 # their bytes too, so a receipt records them with the harness's own digest.
 _SCORER_MODULES = (
@@ -190,6 +196,8 @@ _SCORER_MODULES = (
 PLAN_CONTENT_GRADER = "plan_step_content"
 # Output: no two required values exchanged places (`_value_binding_check`).
 OUTPUT_BINDING_GRADER = "output_value_binding"
+# Output: the applied Flow's run form refused the case's run input.
+RUN_INPUT_ACCEPTED_CHECK = "run_input_accepted"
 
 
 def _ensure_backend_src_importable() -> None:
@@ -277,7 +285,7 @@ from ai_builder_runtime_lineage import (  # noqa: E402
     recorded_runtime_lineage,
     runtime_lineage,
 )
-from pydantic import ValidationError  # noqa: E402
+from pydantic import BaseModel, ValidationError  # noqa: E402
 
 from eneo.files.docx_template_validation import (  # noqa: E402
     docx_template_archive_metrics,
@@ -318,6 +326,7 @@ from eneo.flows.enums import (  # noqa: E402
     FlowOutputType,
     FlowRunStatus,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode  # noqa: E402
 from eneo.flows.flow_authoring_name import (  # noqa: E402
     flow_name_family,
     normalize_flow_name,
@@ -519,6 +528,80 @@ class HarnessRefusal(ValueError):
     The plan was observed, so its slot keeps and scores it; the run and its
     delivery were never measured.
     """
+
+
+class RunInputMismatch(StrEnum):
+    """Why the applied Flow's run form cannot take the case's run input,
+    decided from the published form and the input's shape alone."""
+
+    FREE_TEXT_FOR_FORM = "free_text_for_form_flow"
+    UNDECLARED_FORM_FIELD = "undeclared_form_field"
+
+
+RunInputRefusalCode = FlowApiErrorCode | RunInputMismatch
+
+
+class FlowRunRefused(ValueError):
+    """The applied Flow's run form does not accept the run input the case
+    declares: Eneo refused it, or the form's shape shows it would. The plan
+    was observed and its output fails; the typed code is in the run record."""
+
+    def __init__(self, code: RunInputRefusalCode) -> None:
+        super().__init__(f"the applied Flow's run form refuses the case: {code.value}")
+        self.code = code
+
+
+class _ErrorBody(BaseModel):
+    """The typed code of an Eneo error body; nothing else of it is read."""
+
+    code: FlowApiErrorCode
+
+
+# The refusals of the run-form validator (`flow_run_input_payload`): only
+# these say the applied Flow's run form does not accept the case's input;
+# any other refused run request stays a harness fault.
+_RUN_FORM_REFUSALS = frozenset(
+    {
+        FlowApiErrorCode.INPUT_REQUIRED_FIELD_MISSING,
+        FlowApiErrorCode.INPUT_REQUIRED_FIELD_EMPTY,
+        FlowApiErrorCode.INPUT_TYPE_MISMATCH,
+        FlowApiErrorCode.INPUT_INVALID_NUMBER,
+        FlowApiErrorCode.INPUT_INVALID_DATE,
+        FlowApiErrorCode.INPUT_INVALID_OPTION,
+        FlowApiErrorCode.INPUT_INVALID_MULTISELECT_VALUE,
+        FlowApiErrorCode.INPUT_INVALID_MULTISELECT_TYPE,
+        FlowApiErrorCode.INPUT_INVALID_LIST_VALUE,
+        FlowApiErrorCode.INPUT_INVALID_LIST_TYPE,
+    }
+)
+
+
+def _run_form_refusal(execution: object) -> RunInputRefusalCode | None:
+    """The typed code of a run the applied Flow's run form refused, read from
+    the run record: `run_input_mismatch` (the harness found the input does not
+    fit the form) or the body of the refused request (`run_request_refused`);
+    None for any other or unreadable refusal."""
+
+    record = cast(
+        Mapping[str, object], execution if isinstance(execution, Mapping) else {}
+    )
+    try:
+        return RunInputMismatch(record["run_input_mismatch"])
+    except (KeyError, ValueError):
+        pass
+    refused = record.get("run_request_refused")
+    body = (
+        cast(Mapping[str, object], refused).get("error")
+        if isinstance(refused, Mapping)
+        else None
+    )
+    if not isinstance(body, str):
+        return None
+    try:
+        code = _ErrorBody.model_validate_json(body).code
+    except ValidationError:
+        return None
+    return code if code in _RUN_FORM_REFUSALS else None
 
 
 class BattleFlowLifecycleError(ValueError):
@@ -2599,8 +2682,9 @@ def _case_tool_answers(
 
 
 def _validate_mcp_expectation(path: Path, case: BattleCase) -> None:
-    """`expected.expected_mcp` has its closed shape, and declares run-probe
-    calls and run input only for a case whose plan is run on that input."""
+    """`expected.expected_mcp` has its closed shape, declares run-probe calls
+    and run input only for a case whose plan is run on that input, and edit
+    checks only for an edit case (they compare against its seed flow)."""
 
     raw = (case.expected or {}).get("expected_mcp")
     if raw is None:
@@ -2615,6 +2699,10 @@ def _validate_mcp_expectation(path: Path, case: BattleCase) -> None:
         run is None
     ):
         raise ValueError(f"{owner}: calls and run_input need an executed plan.")
+    if (
+        expectation.tool_output_reaches_last_step or expectation.keeps_saved_flow
+    ) and case.edit is None:
+        raise ValueError(f"{owner}: the edit checks need an edit case.")
     if (
         expectation.run_input is not None
         and run is not None
@@ -5960,11 +6048,14 @@ def _run_case_session(
                 )
             )
         except BattleFlowLifecycleError as error:
-            if not isinstance(error.cause, HarnessRefusal):
+            if not isinstance(error.cause, (HarnessRefusal, FlowRunRefused)):
                 raise
-            # The harness cannot run this Flow, but the plan it was given was
-            # observed: keep scoring it, with no run and so no delivery.
-            refusal = error
+            # The harness cannot run this Flow, or its run form refuses the
+            # case's run input, but the plan it was given was observed: keep
+            # scoring it, with no run. Only the harness's refusal leaves the
+            # delivery unmeasured; the form's fails it (`_run_form_refusal`).
+            if isinstance(error.cause, HarnessRefusal):
+                refusal = error
             applied_flow_evidence = error.applied_flow_evidence
             runtime_evidence = None
             flow_lifecycle = error.flow_lifecycle
@@ -6064,6 +6155,9 @@ def _run_case_session(
         "runtime_metrics": None,
         "quality_report": None,
     }
+    if case.edit is not None and seeded_flow is not None:
+        bundle["case"]["edit"] = _edit_contract(case.edit)
+        bundle["edit_evidence"] = edit_evidence
     # Scored from the bundle's own keys, as a reanalysis scores it.
     quality_report = _quality_report_with_live_provenance(
         _quality_report_of(
@@ -6088,9 +6182,6 @@ def _run_case_session(
         )
     bundle["runtime_metrics"] = _runtime_metrics_from_quality_report(quality_report)
     bundle["quality_report"] = quality_report
-    if case.edit is not None and seeded_flow is not None:
-        bundle["case"]["edit"] = _edit_contract(case.edit)
-        bundle["edit_evidence"] = edit_evidence
     if refusal is not None:
         fields = _failure_error_fields(refusal)
         bundle["harness_refusal"] = {
@@ -6492,11 +6583,14 @@ def _execute_and_collect_runtime_evidence(
         raise ValueError(
             f"case {case_id} Flow was not published; refusing to start a run."
         )
+    try:
+        input_payload = _run_input_payload(contract=contract, inputs=execution.inputs)
+    except FlowRunRefused as refused:
+        record["run_input_mismatch"] = refused.code.value
+        raise
     run_request: JsonObject = {
         "expected_flow_version": published_version,
-        "input_payload_json": _run_input_payload(
-            contract=contract, inputs=execution.inputs, case_id=case_id
-        ),
+        "input_payload_json": input_payload,
         "step_inputs": None,
     }
     uploaded_files: list[JsonObject] = []
@@ -6536,6 +6630,8 @@ def _execute_and_collect_runtime_evidence(
             run_ended = error.code < 500
             # The server owns run-request validation; keep its answer.
             record["run_request_refused"] = _http_error_detail(error, config)
+            if (code := _run_form_refusal(record)) is not None:
+                raise FlowRunRefused(code) from error
             raise
         run_id = _required_string(created_run, "id")
         record["run_id"] = run_id
@@ -6599,9 +6695,11 @@ def _run_input_payload(
     *,
     contract: Mapping[str, object],
     inputs: ExecutionInputs,
-    case_id: str,
 ) -> JsonObject | None:
-    """The run's `input_payload_json`, keyed as the published contract names it."""
+    """The run's `input_payload_json`, keyed as the published contract names it.
+
+    A run form that cannot take the case's input is the plan's fault: the plan
+    declared the form. FlowRunRefused, as when Eneo refuses the input itself."""
 
     declared = {
         str(form_field.get("name"))
@@ -6610,20 +6708,12 @@ def _run_input_payload(
     if inputs.text is not None:
         # The run form offers free text only to a Flow without form fields.
         if declared:
-            raise HarnessRefusal(
-                f"case {case_id} sends free text, but the published Flow asks for "
-                f"form fields: {', '.join(sorted(declared))}."
-            )
+            raise FlowRunRefused(RunInputMismatch.FREE_TEXT_FOR_FORM)
         return {"text": inputs.text}
     # The server keeps an unknown key without complaint, so a misnamed field
     # would run the Flow with that field empty.
-    undeclared = sorted(set(inputs.form_fields) - declared)
-    if undeclared:
-        raise HarnessRefusal(
-            f"case {case_id} sets form field(s) the published Flow does not "
-            f"declare: {', '.join(undeclared)}; it declares "
-            f"{', '.join(sorted(declared)) or 'none'}."
-        )
+    if set(inputs.form_fields) - declared:
+        raise FlowRunRefused(RunInputMismatch.UNDECLARED_FORM_FIELD)
     return dict(inputs.form_fields) or None
 
 
@@ -9817,6 +9907,11 @@ def _verdict_states(
             if mcp_output
             else NOT_REQUIRED_STATE
         )
+    elif any(
+        c.get("name") == RUN_INPUT_ACCEPTED_CHECK and c.get("passed") is False
+        for c in checks
+    ):
+        output = "fail"
     elif evidence is None or stopped:
         output = "unmeasured"
     else:
@@ -10350,6 +10445,7 @@ def _quality_report_of(
     follow_ups = script.get("turns") if isinstance(script, Mapping) else None
     applied = mapping("applied_flow_evidence") or {}
     applied_flow = applied.get("flow")
+    lifecycle = mapping("flow_lifecycle") or {}
     return _quality_report(
         plan=plan if isinstance(plan, dict) else None,
         summary=summary,
@@ -10364,6 +10460,8 @@ def _quality_report_of(
         interactions=interactions,
         mcp_evidence=mapping("mcp_evidence"),
         declared_turns=1 + len(_string_list(follow_ups)),
+        edit_evidence=mapping("edit_evidence"),
+        run_form_refusal=_run_form_refusal(lifecycle.get("execution")),
     )
 
 
@@ -12647,6 +12745,8 @@ def _quality_report(
     interactions: Sequence[Mapping[str, Any]] = (),
     mcp_evidence: Mapping[str, Any] | None = None,
     declared_turns: int = 1,
+    edit_evidence: Mapping[str, Any] | None = None,
+    run_form_refusal: FlowApiErrorCode | None = None,
 ) -> JsonObject:
     checks: list[JsonObject] = []
     warnings: list[str] = []
@@ -12683,6 +12783,7 @@ def _quality_report(
             applied=applied_flow is not None,
             evidence=mcp_evidence,
             declared_turns=declared_turns,
+            edit_evidence=edit_evidence,
         )
         checks.extend(gating)
         delivery_check_names.extend(mcp_report["required_check_names"]["output"])
@@ -12698,6 +12799,16 @@ def _quality_report(
         )
     else:
         add_check("plan_created", plan is not None, plan is not None, True)
+    if run_form_refusal is not None:
+        # Reported only for a refused run, so every other report keeps its
+        # recorded shape; `_verdict_states` fails the output on it.
+        add_check(
+            RUN_INPUT_ACCEPTED_CHECK,
+            False,
+            run_form_refusal.value,
+            "the applied Flow accepts the case's run input",
+        )
+        delivery_check_names.append(RUN_INPUT_ACCEPTED_CHECK)
     text_only_questions = (
         _int_value(event_summary.get("server_ask_question_text_only_count")) or 0
     )
@@ -13474,6 +13585,7 @@ def _mcp_report(
     applied: bool,
     evidence: Mapping[str, Any] | None,
     declared_turns: int,
+    edit_evidence: Mapping[str, Any] | None,
 ) -> tuple[list[JsonObject], JsonObject]:
     """The MCP checks that judge the case, and the report beside them: every
     check as measured (`mcp_checks`, M2 and M6 only reported there) and the
@@ -13486,6 +13598,7 @@ def _mcp_report(
         applied=applied,
         evidence=evidence,
         declared_turns=declared_turns,
+        edit_evidence=edit_evidence,
     )
     applicable = [check for check in measured if check["applicable"]]
     required = {

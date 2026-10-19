@@ -1,5 +1,5 @@
 """MCP tool cases of the Builder harness: the seeded catalogue a run is read
-against, the case's answers to tool questions, and the M1-M6 checks.
+against, the case's answers to tool questions, and the M1-M8 checks.
 
 A seed manifest (written by the seeding tool) names each server and tool of
 the run's space with the ref the Builder shows for it, and the call log the
@@ -7,8 +7,9 @@ test server writes. A case names tools by server and name only; the manifest
 resolves them. Scripted answers are matched on a question's typed tool facts
 and its offered options, never on its id or text. The checks read only what
 an observation bundle keeps (`mcp_evidence`, the interactions and the final
-plan), so a reanalysis decides as the live run did; evidence that does not
-read whole leaves a check unmeasured, never passed.
+plan, and for an edit the saved and applied flow), so a reanalysis decides
+as the live run did; evidence that does not read whole leaves a check
+unmeasured, never passed.
 """
 
 from __future__ import annotations
@@ -21,6 +22,12 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, TypeAlias, cast
 from uuid import UUID
 
+from ai_builder_edit_expectation import (
+    edge_steps,
+    flow_edges,
+    observed_atoms,
+    snapshot_view,
+)
 from pydantic import (
     AfterValidator,
     AwareDatetime,
@@ -54,11 +61,13 @@ from eneo.flows.domain.tool_input import (
     ToolArgumentError,
     ToolInputConfig,
 )
+from eneo.flows.flow_authoring_spec import FormFieldSpec, authoring_form_field
 from eneo.flows.flow_metadata import FlowFormFieldType, parse_flow_form_field_type
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
 )
+from eneo.main.exceptions import BadRequestException
 from eneo.mcp_servers.domain.unattended_tool_refusal import UnattendedToolRefusal
 
 JsonObject = dict[str, Any]
@@ -78,6 +87,8 @@ PLAN_CHECK_NAMES = (
     "mcp_m1_no_tools",
     "mcp_m3_bindings",
     "mcp_m4_outcome",
+    "mcp_m7_tool_output_reaches_last_step",
+    "mcp_m8_saved_flow_kept",
 )
 OUTPUT_CHECK_NAMES = ("mcp_m5_calls",)
 
@@ -302,11 +313,26 @@ class McpExpectation(BaseModel):
     uses: list[ExpectedUse]
     calls: list[ExpectedCall] | None = None
     run_input: dict[str, JsonValue] | None = None
+    # Checks of an edit, each reported only when declared, so the reports of
+    # the cases that declare none keep their recorded shape. M7: the applied
+    # flow's last step reads each tool step's output, directly or through the
+    # steps between. M8: the applied flow still makes every read the saved
+    # flow made, and each saved run-form field keeps its type, label,
+    # requiredness and options.
+    tool_output_reaches_last_step: StrictBool = False
+    keeps_saved_flow: StrictBool = False
 
     @model_validator(mode="after")
     def _only_an_applied_plan_uses_tools(self) -> McpExpectation:
-        if self.outcome.kind != "applied_plan" and (self.uses or self.calls):
-            raise ValueError("only an applied plan has tool uses and calls")
+        if self.outcome.kind != "applied_plan" and (
+            self.uses
+            or self.calls
+            or self.tool_output_reaches_last_step
+            or self.keeps_saved_flow
+        ):
+            raise ValueError(
+                "only an applied plan has tool uses, calls and edit checks"
+            )
         return self
 
 
@@ -616,10 +642,12 @@ def mcp_checks(
     applied: bool,
     evidence: Mapping[str, Any] | None,
     declared_turns: int = 1,
+    edit_evidence: Mapping[str, Any] | None = None,
 ) -> list[JsonObject]:
-    """M1-M6 of one observation, each `{name, passed, applicable, actual,
+    """M1-M8 of one observation, each `{name, passed, applicable, actual,
     expected}`; `passed` None is unmeasured. An inapplicable check is
-    reported with `applicable` false and judges nothing."""
+    reported with `applicable` false and judges nothing; M7 and M8 are
+    reported only when the expectation declares them."""
 
     manifest, calls, probe_at = _evidence(evidence)
     turns = _turns(interactions)
@@ -659,7 +687,7 @@ def mcp_checks(
         if actual_uses is None or picks or len(readable) != len(asked)
         else [_left_open(use, asked_arguments) for use in actual_uses]
     )
-    return [
+    checks = [
         _check(
             "mcp_m1_questions",
             True,
@@ -703,6 +731,12 @@ def mcp_checks(
         _calls_check(expectation, calls=calls, probe_at=probe_at),
         _check("mcp_m6_cost", True, None, _cost(interactions, asked), None),
     ]
+    views = _edit_views(edit_evidence)
+    if expectation.tool_output_reaches_last_step:
+        checks.append(_reach_check(views))
+    if expectation.keeps_saved_flow:
+        checks.append(_kept_check(views))
+    return checks
 
 
 def _check(
@@ -861,6 +895,114 @@ def _binding_holds(expected: ArgumentBinding, actual: Mapping[str, Any]) -> bool
     # A tool that two steps read does not name one producer: the case must
     # name it by position, and until then the binding is undecided.
     return True if producer.get("tool_steps") == 1 else None
+
+
+def _edit_views(
+    evidence: Mapping[str, Any] | None,
+) -> tuple[Mapping[str, Any], Mapping[str, Any]] | None:
+    """The saved and the applied flow as the edit comparator reads them
+    (`snapshot_view`: steps by their seeded identity); None when the bundle
+    keeps no applied flow (an apply refused or never made)."""
+
+    if evidence is None:
+        return None
+    identity = _mapping(evidence.get("identity"))
+    baseline = _snapshot(evidence.get("baseline"))
+    applied = _snapshot(evidence.get("applied"))
+    if identity is None or baseline is None or applied is None:
+        return None
+    return snapshot_view(baseline, identity), snapshot_view(applied, identity)
+
+
+def _snapshot(value: object) -> Mapping[str, Any] | None:
+    snapshot = _mapping(value)
+    if snapshot is None or any(
+        _mapping(snapshot.get(key)) is None for key in ("flow", "assistants")
+    ):
+        return None
+    return snapshot
+
+
+def _reach_check(
+    views: tuple[Mapping[str, Any], Mapping[str, Any]] | None,
+) -> JsonObject:
+    """M7 over the reads the edit comparator finds (`flow_edges`): from each
+    tool step, read by read, to the applied flow's last step. A read through
+    another tool step's arguments is no edge there, so a chain of tool steps
+    needs that reader extended before a case declares it."""
+
+    name = "mcp_m7_tool_output_reaches_last_step"
+    if views is None:
+        return _check(name, True, None, None, None)
+    steps = _mappings(views[1].get("steps"))
+    readers: dict[str, set[str]] = {}
+    for edge in flow_edges(views[1])[0]:
+        producer, consumer = edge_steps(edge)
+        if producer is not None and consumer is not None:
+            readers.setdefault(producer, set()).add(consumer)
+    last = steps[-1].get("slot") if steps else None
+    tools = [str(step.get("slot")) for step in steps if _reads_tool(step)]
+    unread = [slot for slot in tools if last not in _reached(slot, readers)]
+    return _check(
+        name,
+        True,
+        bool(tools) and not unread,
+        {"tool_steps": tools, "unread_by_last_step": unread},
+        {"last_step": last},
+    )
+
+
+def _reached(start: str, readers: Mapping[str, set[str]]) -> set[str]:
+    reached, frontier = {start}, [start]
+    while frontier:
+        for consumer in readers.get(frontier.pop(), set()) - reached:
+            reached.add(consumer)
+            frontier.append(consumer)
+    return reached
+
+
+def _kept_check(
+    views: tuple[Mapping[str, Any], Mapping[str, Any]] | None,
+) -> JsonObject:
+    """M8: no read of the saved flow is gone (the comparator's dropped-read
+    atoms), and each saved run-form field keeps its authoring contract; a
+    field's order is not part of it, so adding one first changes none."""
+
+    name = "mcp_m8_saved_flow_kept"
+    if views is None:
+        return _check(name, True, None, None, None)
+    baseline, applied = views
+    dropped = sorted(
+        atom[1] for atom in observed_atoms(baseline, applied) if atom[0] == "edge-"
+    )
+    saved = _mapping(baseline.get("form_fields")) or {}
+    final = _mapping(applied.get("form_fields")) or {}
+    contracts = {field: _form_contract(raw) for field, raw in saved.items()}
+    changed = sorted(
+        field
+        for field, contract in contracts.items()
+        if contract != _form_contract(final.get(field))
+    )
+    return _check(
+        name,
+        True,
+        None if None in contracts.values() else not dropped and not changed,
+        {"dropped_reads": dropped, "changed_form_fields": changed},
+        {"saved_form_fields": sorted(saved)},
+    )
+
+
+def _form_contract(raw: object) -> FormFieldSpec | None:
+    """A saved run-form field as the authoring view reads it (the one owner of
+    that reading); None when it is no field or its type is one the platform
+    does not accept."""
+
+    if not isinstance(raw, Mapping):
+        return None
+    try:
+        return authoring_form_field(cast(Mapping[str, object], raw), index=0)
+    except BadRequestException:
+        return None
 
 
 def _canonical(value: object) -> str:

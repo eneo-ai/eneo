@@ -907,7 +907,9 @@
         }
        }
       }
-     ]
+     ],
+     "tool_output_reaches_last_step": true,
+     "keeps_saved_flow": true
     }
    },
    "edit": {

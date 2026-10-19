@@ -1033,7 +1033,7 @@ def parse_edit_expectation(
         f"add {edge}"
         for edge in edges.add + edges.may_add
         if edge in baseline
-        or any(end and end not in sequence for end in _edge_steps(edge))
+        or any(end and end not in sequence for end in edge_steps(edge))
     ]
     misfits += [
         f"postcondition {post.step}"
@@ -1048,7 +1048,10 @@ def parse_edit_expectation(
     return gold
 
 
-def _edge_steps(edge: str) -> tuple[str | None, str | None]:
+def edge_steps(edge: str) -> tuple[str | None, str | None]:
+    """An edge's producer step slot (None for a form, system or run read) and
+    its consumer slot."""
+
     match = re.match(_EDGE, edge)
     return (match["slot"], match["consumer"]) if match else (None, None)
 
@@ -1390,7 +1393,7 @@ def gold_atoms(
     permitted |= {
         ("edge-", edge)
         for edge in flow_edges(baseline)[0]
-        if set(_edge_steps(edge)) & removed
+        if set(edge_steps(edge)) & removed
     }
     return required, permitted
 
