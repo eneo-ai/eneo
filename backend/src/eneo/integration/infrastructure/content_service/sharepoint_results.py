@@ -45,27 +45,73 @@ class SyncItemsFailed(Exception):
 
 
 class SyncAccessDenied(SyncItemsFailed):
-    """Every download of the pass was refused (HTTP 403), and enough of them.
+    """Every download of the pass was refused or hidden, and enough of them.
 
     A refusal among successes, or one of a handful, is about that file (a
-    sensitivity label, a broken-inheritance folder): its indexed copy goes and
-    the pass moves past it. When nothing of a meaningful number could be
-    downloaded the problem is the identity (a conditional access policy, a
-    changed Sites.Selected grant), so nothing is removed and the pass fails
-    and keeps its token. See ``refused_access``.
+    sensitivity label, a broken-inheritance folder): a second refusal removes
+    its indexed copy and the pass moves past it. When nothing of a meaningful
+    number could be downloaded the problem is the identity (a conditional
+    access policy, a changed Sites.Selected grant; SharePoint often answers
+    404 for what it hides), so nothing is removed and the pass fails and keeps
+    its token. See ``refused_access``.
     """
 
     def __init__(
-        self, summary: SyncStats, *, forbidden: int, changes_detected: int | None = None
+        self,
+        summary: SyncStats,
+        *,
+        forbidden: int,
+        hidden: bool = False,
+        changes_detected: int | None = None,
     ):
+        plural = forbidden != 1
+        statuses = "HTTP 403 or 404" if hidden else "HTTP 403"
         super().__init__(
             summary,
             changes_detected=changes_detected,
             message=(
                 f"SharePoint refused all {forbidden} "
-                f"download{'s' if forbidden != 1 else ''} (HTTP 403); check the "
+                f"download{'s' if plural else ''} ({statuses}); check the "
                 "integration's access to this library, the next sync retries "
-                f"{'them' if forbidden != 1 else 'it'}"
+                f"{'them' if plural else 'it'}"
+            ),
+        )
+
+
+class SyncStoppedEarly(SyncItemsFailed):
+    """Too many items in a row failed: the trouble is not theirs.
+
+    Raised mid-pass instead of trying every remaining item with its retries.
+    A delta keeps its token and replays; a full sync leaves the next sync a
+    full one, since the items it did not reach are recorded nowhere.
+    """
+
+    def __init__(self, summary: SyncStats, *, failures: int, last_reason: str) -> None:
+        super().__init__(
+            summary,
+            message=(
+                f"Stopped after {failures} files in a row could not be processed "
+                f"({user_visible_error(last_reason)}); the next sync tries again"
+            ),
+        )
+
+
+class SyncDownloadsUnavailable(SyncItemsFailed):
+    """SharePoint served none of the pass's files, and enough of them.
+
+    One item without a download is about that item; every download of a pass
+    missing is about SharePoint, so the pass fails and keeps its token.
+    """
+
+    def __init__(
+        self, summary: SyncStats, *, missing: int, changes_detected: int | None = None
+    ) -> None:
+        super().__init__(
+            summary,
+            changes_detected=changes_detected,
+            message=(
+                f"SharePoint offered no download for any of {missing} files; the "
+                "next sync retries them"
             ),
         )
 
@@ -200,6 +246,54 @@ def count_failure(
         )
 
 
+# Items in a row whose failure stops the pass; see SyncStoppedEarly.
+FAILURES_IN_A_ROW_TO_STOP = 10
+# A pass with at least this many failed items, most of what it attempted, or
+# this many and more all failing the same way, failed for a reason that is not
+# the items': an embedding provider, Graph or the database being down.
+_SYSTEMIC_MIN_FAILED = 3
+_SYSTEMIC_SAME_REASON_MIN_FAILED = 10
+
+
+def count_attempt(stats: SyncStats) -> None:
+    """An item the pass sent to Graph, the parser or the index."""
+    stats["items_attempted"] = stats.get("items_attempted", 0) + 1
+
+
+def item_succeeded(stats: SyncStats) -> None:
+    stats["failures_in_a_row"] = 0
+
+
+def item_failed_in_a_row(stats: SyncStats, detail: SkippedDetail) -> None:
+    """Count a failure toward the stop; raise once too many came in a row."""
+    in_a_row = stats.get("failures_in_a_row", 0) + 1
+    stats["failures_in_a_row"] = in_a_row
+    if in_a_row >= FAILURES_IN_A_ROW_TO_STOP:
+        raise SyncStoppedEarly(
+            build_summary_stats(stats), failures=in_a_row, last_reason=detail["reason"]
+        )
+
+
+def failures_look_systemic(stats: SyncStats) -> bool:
+    """Whether the pass's item failures say something is down, not the items.
+
+    No failure of such a pass counts toward an item's set-aside cap: an outage
+    must not set every file aside and let the pass look successful.
+    """
+    indexes = [
+        index
+        for item_indexes in stats.get("failures_by_item", {}).values()
+        for index in item_indexes
+    ]
+    failed = len(stats.get("failures_by_item", {}))
+    if failed < _SYSTEMIC_MIN_FAILED:
+        return False
+    if 2 * failed >= stats.get("items_attempted", 0):
+        return True
+    reasons = {stats["skipped_details"][index]["reason"] for index in indexes}
+    return failed >= _SYSTEMIC_SAME_REASON_MIN_FAILED and len(reasons) == 1
+
+
 def failed_item_ids(stats: SyncStats) -> list[str]:
     return list(stats.get("failures_by_item", {}))
 
@@ -211,12 +305,19 @@ def unretryable_failures(stats: SyncStats) -> int:
 
 
 def set_aside(stats: SyncStats, item_id: str, *, attempts: int) -> None:
-    """Turn the item's failures into skips, so the pass may move past it."""
+    """Turn the item's failures into skips, so the pass may move past it.
+
+    They keep the retry flag: a later sync tries the item again.
+    """
     details = stats["skipped_details"]
     for index in stats.get("failures_by_item", {}).pop(item_id, []):
         failure = details[index]
         details[index] = skipped_by_code(
-            failure["file"], "set_aside", attempts=attempts, detail=failure["reason"]
+            failure["file"],
+            "set_aside",
+            retry=True,
+            attempts=attempts,
+            detail=failure["reason"],
         )
         stats["failed_items"] = stats.get("failed_items", 0) - 1
 
@@ -241,10 +342,32 @@ def count_download_attempt(stats: SyncStats) -> None:
     stats["download_attempts"] = stats.get("download_attempts", 0) + 1
 
 
-def count_refused_download(stats: SyncStats, item_id: str, item_name: str = "") -> None:
-    """A download refused with 403: about the file unless ``refused_access``."""
-    stats["download_forbidden"] = stats.get("download_forbidden", 0) + 1
+def count_refused_download(
+    stats: SyncStats, item_id: str, item_name: str = "", *, download: bool = True
+) -> None:
+    """An item Graph refused (403): about the file unless ``refused_access``.
+
+    ``download`` False for a refused metadata read, which counts toward the
+    item's removal but not toward the pass's verdict about the identity.
+    """
+    if download:
+        stats["download_forbidden"] = stats.get("download_forbidden", 0) + 1
     stats.setdefault("refused_downloads", {})[item_id] = item_name or item_id
+
+
+def count_missing_download(stats: SyncStats) -> None:
+    """An item Graph served without a download URL."""
+    stats["download_missing"] = stats.get("download_missing", 0) + 1
+
+
+def keep_recorded(stats: SyncStats, item_id: str) -> None:
+    """The pass could not decide about the item: an earlier record of it stays."""
+    stats.setdefault("undecided_items", set()).add(item_id)
+
+
+def count_hidden_download(stats: SyncStats) -> None:
+    """A download answered 404 or 410."""
+    stats["download_not_found"] = stats.get("download_not_found", 0) + 1
 
 
 # Fewer refused downloads than this say nothing about the identity, even when
@@ -255,13 +378,27 @@ _MIN_REFUSALS_FOR_ACCESS_PROBLEM = 3
 def refused_access(stats: SyncStats) -> int:
     """How many downloads were refused when that says the identity lost access, else 0.
 
-    Every download of the pass refused, and at least
-    ``_MIN_REFUSALS_FOR_ACCESS_PROBLEM`` of them.
+    Every download of the pass refused (403) or hidden (404, 410), at least
+    ``_MIN_REFUSALS_FOR_ACCESS_PROBLEM`` of them, one refused at least.
     """
+    attempts = stats.get("download_attempts", 0)
+    forbidden = stats.get("download_forbidden", 0)
+    if (
+        attempts >= _MIN_REFUSALS_FOR_ACCESS_PROBLEM
+        and forbidden
+        and forbidden + stats.get("download_not_found", 0) == attempts
+    ):
+        return attempts
+    return 0
+
+
+def downloads_unavailable(stats: SyncStats) -> int:
+    """How many downloads came without a URL when that was every one of at
+    least ``_MIN_REFUSALS_FOR_ACCESS_PROBLEM``, else 0."""
     attempts = stats.get("download_attempts", 0)
     if (
         attempts >= _MIN_REFUSALS_FOR_ACCESS_PROBLEM
-        and stats.get("download_forbidden", 0) == attempts
+        and stats.get("download_missing", 0) == attempts
     ):
         return attempts
     return 0
@@ -276,6 +413,8 @@ def summarize_pass(stats: SyncStats) -> tuple[SyncStats, int]:
     forbidden = refused_access(stats)
     if forbidden:
         stats["failed_items"] = stats.get("failed_items", 0) + forbidden
+    if missing := downloads_unavailable(stats):
+        stats["failed_items"] = stats.get("failed_items", 0) + missing
     return build_summary_stats(stats), forbidden
 
 

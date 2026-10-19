@@ -27,6 +27,7 @@ from eneo.integration.domain.entities.integration_knowledge import (
 )
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     DeltaTokenExpiredException,
+    IncompleteDownloadError,
     MissingDownloadUrlError,
     SharePointItemLookup,
 )
@@ -4899,8 +4900,9 @@ class TestDeltaFolderScopeOrdering:
     async def test_a_folder_walked_before_under_the_same_parent_is_not_walked_again(
         self, service, mock_dependencies, mock_oauth_token, folder_scoped
     ):
-        """A rename, a permission change or a replayed pass re-emits a folder whose
-        files were indexed when it was walked; only a move needs a new walk."""
+        """A permission change or a replayed pass re-emits a folder whose files
+        were indexed when it was walked; a rename or a move needs a new walk,
+        which refreshes its files' links."""
         cache: dict[str, str] = {}
         change_keys = mock_dependencies["change_key_service"]
         change_keys.should_process = AsyncMock(
@@ -4941,15 +4943,50 @@ class TestDeltaFolderScopeOrdering:
         ):
             for changes in (
                 folder_x("folder-a"),
+                folder_x("folder-a"),
                 folder_x("folder-a", name="X renamed"),
-                [sub_folder, *folder_x("folder-s")],
+                [sub_folder, *folder_x("folder-s", name="X renamed")],
             ):
                 await self._run_delta(
                     service, mock_dependencies, mock_oauth_token, folder_scoped, changes
                 )
 
         walked = [call.kwargs["folder_id"] for call in walk.await_args_list]
-        assert walked == ["folder-x", "folder-s", "folder-x"]
+        assert walked == ["folder-x", "folder-x", "folder-s", "folder-x"]
+
+    async def test_a_renamed_folder_refreshes_the_links_of_its_indexed_files(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        """Graph emits only the folder; its files keep their cTag."""
+        self._indexed(mock_dependencies, "x-1")
+        refresh = mock_dependencies[
+            "info_blob_service"
+        ].repo.refresh_sharepoint_citation = AsyncMock(return_value=True)
+        renamed = {
+            "id": "folder-x",
+            "name": "X renamed",
+            "folder": {"childCount": 1},
+            "parentReference": {"id": "folder-a"},
+        }
+        moved_file = {
+            "id": "x-1",
+            "name": "one.docx",
+            "webUrl": "https://x/Documents/A/X renamed/one.docx",
+        }
+        with patch.object(
+            scope_rules, "enumerate_items", AsyncMock(return_value=[moved_file])
+        ):
+            client, _ = await self._run_delta(
+                service, mock_dependencies, mock_oauth_token, folder_scoped, [renamed]
+            )
+
+        client.get_file_extraction_by_id.assert_not_called()
+        refresh.assert_awaited_once_with(
+            sharepoint_item_id="x-1",
+            integration_knowledge_id=folder_scoped.id,
+            title="one.docx",
+            url="https://x/Documents/A/X renamed/one.docx",
+        )
 
     async def test_a_folder_whose_walk_failed_is_walked_again(
         self, service, mock_dependencies, mock_oauth_token, folder_scoped
@@ -5375,6 +5412,12 @@ class TestDeltaExtractionOutcomes:
             (aiohttp.ClientConnectionError("reset"), "Error: Connection error"),
             (TimeoutError(), "Error: Request timed out"),
             (RuntimeError("Graph timeout"), "Error: Graph timeout"),
+            (
+                IncompleteDownloadError(
+                    "Incomplete download of 'scan.pdf' (1 of 2 bytes)"
+                ),
+                "Error: Incomplete download of 'scan.pdf' (1 of 2 bytes)",
+            ),
         ],
     )
     async def test_infrastructure_failures_keep_the_local_copy_and_the_token(
@@ -5463,11 +5506,12 @@ class TestDeltaExtractionOutcomes:
             ),
         ],
     )
-    async def test_a_refused_download_removes_the_indexed_copy_and_advances(
+    async def test_a_first_refusal_keeps_the_indexed_copy_and_advances(
         self, service, mock_dependencies, mock_oauth_token, outcomes
     ):
-        """What Eneo may no longer read must not stay answerable, and one
-        restricted file must not hold the token back."""
+        """A passing 403 must not drop a file, and one restricted file must not
+        hold the token back: the refusal is recorded, and a second one later
+        removes the copy (see test_sharepoint_sync_ledger)."""
         ik, removed, failure = await self._run_refusals(
             service, mock_dependencies, mock_oauth_token, outcomes
         )
@@ -5478,11 +5522,19 @@ class TestDeltaExtractionOutcomes:
             if isinstance(outcome, Exception)
         ]
         assert failure is None
-        assert removed == refused
+        assert removed == []
         assert ik.delta_token == "token-2"
         assert ik.last_sync_status == "success"
-        assert ik.last_sync_summary["files_deleted"] == len(refused)
+        assert ik.last_sync_summary["files_deleted"] == 0
         assert "failed_items" not in ik.last_sync_summary
+        written = mock_dependencies["integration_knowledge_repo"].update_sync_state
+        (record,) = [
+            call.kwargs["sync_failed_items"]
+            for call in written.await_args_list
+            if "sync_failed_items" in call.kwargs
+        ]
+        assert sorted(record["items"]) == refused
+        assert all(entry[3] is not None for entry in record["items"].values())
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
         assert {"file": "item-0.docx", "reason": "Error: HTTP 403 Forbidden"} in (
             _reasons(sync_log.metadata["skipped_details"])
@@ -5534,10 +5586,11 @@ class TestDeltaExtractionOutcomes:
             {"file": "indexed copy", "change": "deleted"}
         ]
 
-    async def test_a_full_sync_removes_a_file_it_may_no_longer_download(
+    async def test_a_full_sync_records_a_file_it_may_no_longer_download(
         self, service, mock_dependencies, mock_oauth_token
     ):
-        """The file is still listed, so only the refusal says it is closed."""
+        """The file is still listed, so only the refusal says it is closed; the
+        next pass that is refused it too removes the copy."""
         ik = _real_integration_knowledge(delta_token=None)
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
         mock_dependencies["integration_knowledge_repo"].one.return_value = ik
@@ -5575,11 +5628,16 @@ class TestDeltaExtractionOutcomes:
                 token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
             )
 
-        delete.assert_awaited_once_with(
-            sharepoint_item_id="secret", integration_knowledge_id=ik.id
-        )
+        delete.assert_not_called()
         assert ik.last_sync_status == "success"
         assert ik.delta_token == "delta-token"
+        written = mock_dependencies["integration_knowledge_repo"].update_sync_state
+        (record,) = [
+            call.kwargs["sync_failed_items"]
+            for call in written.await_args_list
+            if "sync_failed_items" in call.kwargs
+        ]
+        assert list(record["items"]) == ["secret"]
 
     async def test_a_stale_copy_that_cannot_be_removed_fails_the_item_once_uncached(
         self, service, mock_dependencies, mock_oauth_token
@@ -5820,12 +5878,12 @@ class TestSiteRootExtractionOutcomes:
         ]
 
     @pytest.mark.parametrize("delta_token", [None, "token-1"], ids=["first", "tokened"])
-    async def test_a_download_failure_fails_the_sync_without_a_delta_token(
+    async def test_a_download_failure_fails_the_sync_and_records_the_file(
         self, service, mock_dependencies, mock_oauth_token, delta_token
     ):
-        """No token means the next sync is a full one that retries the file,
-        instead of a delta that never sees it again; a token the knowledge
-        already had goes the same way."""
+        """The sync keeps its change tracking (the baseline it minted, or the
+        token it had) and records the file on the knowledge row, so the next
+        delta retries it instead of the next sync being a full one."""
         ik, delete, process, failure = await self._run(
             service,
             mock_dependencies,
@@ -5837,9 +5895,15 @@ class TestSiteRootExtractionOutcomes:
         assert str(failure) == ONE_FILE_FAILED
         process.assert_not_called()
         delete.assert_not_called()
-        assert ik.delta_token is None
+        assert ik.delta_token == (delta_token or "delta-token")
         written = mock_dependencies["integration_knowledge_repo"].update_sync_state
-        assert written.await_args.kwargs["delta_token"] is None
+        assert written.await_args.kwargs["delta_token"] == ik.delta_token
+        (recorded,) = [
+            call.kwargs["sync_failed_items"]
+            for call in written.await_args_list
+            if "sync_failed_items" in call.kwargs
+        ]
+        assert list(recorded["items"]) == ["item-1"]
         assert ik.last_sync_status == "error"
         assert ik.last_sync_error == ONE_FILE_FAILED
         assert ik.last_synced_at is None

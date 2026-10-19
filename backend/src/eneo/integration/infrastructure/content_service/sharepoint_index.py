@@ -103,6 +103,9 @@ class SharePointIndex:
         # by this writer. A superset is fine; it only saves a delete that
         # cannot match.
         self._maybe_indexed: dict[UUID, set[str]] = {}
+        # Citation keys of what full syncs indexed, for the post-commit cache
+        # write; a delta queues them with its ChangeKeys.
+        self._full_sync_citations: list[tuple[UUID, str, str]] = []
 
     def _savepoint(self) -> AbstractAsyncContextManager[object]:
         """Around one item's writes: a failing statement rolls back that item
@@ -111,6 +114,10 @@ class SharePointIndex:
         if isinstance(session, AsyncSession):
             return session.begin_nested()
         return nullcontext()
+
+    def take_full_sync_citations(self) -> list[tuple[UUID, str, str]]:
+        citations, self._full_sync_citations = self._full_sync_citations, []
+        return citations
 
     async def list_items(self, knowledge_id: UUID) -> list[tuple[UUID, str]]:
         """Indexed blob/item identities without loading text or embeddings."""
@@ -122,7 +129,8 @@ class SharePointIndex:
         known = self._maybe_indexed.get(knowledge_id)
         if known is None:
             try:
-                indexed = await self.list_items(knowledge_id)
+                async with self._savepoint():
+                    indexed = await self.list_items(knowledge_id)
             except Exception as exc:
                 logger.warning("Could not read the indexed SharePoint items: %s", exc)
                 return True
@@ -218,7 +226,7 @@ class SharePointIndex:
     def citation_cache_id(item_id: str) -> str:
         return f"{item_id}#citation"
 
-    async def _refresh_citation(
+    async def refresh_citation(
         self,
         item: SharePointItem,
         item_id: str,
@@ -578,19 +586,21 @@ class SharePointIndex:
             stats["skipped_items"] += 1
 
     async def remove_refused(
-        self, integration_knowledge: "IntegrationKnowledge", stats: SyncStats
-    ) -> None:
-        """Drop the indexed copies of files whose download was refused (403).
+        self,
+        integration_knowledge: "IntegrationKnowledge",
+        stats: SyncStats,
+        refused: dict[str, str],
+    ) -> set[str]:
+        """Drop the indexed copies of files Graph refused again; the ids removed.
 
-        Called at the end of a pass that ``sharepoint_results.refused_access``
-        did not put down to the identity: a refusal among downloads that work
-        is about the file (a sensitivity label, broken inheritance), and what
-        Eneo may no longer read must not stay answerable. The refusal itself
-        was counted as the file's skip when it came.
+        ``refused`` maps item id to name. What Eneo may no longer read must not
+        stay answerable; the refusal itself was counted as the file's skip
+        when it came.
         """
-        for item_id, item_name in stats.pop("refused_downloads", {}).items():
+        removed: set[str] = set()
+        for item_id, item_name in refused.items():
             if await self._may_be_indexed(integration_knowledge.id, item_id):
-                await self.remove(
+                deleted = await self.remove(
                     item_id=item_id,
                     item_name=item_name,
                     integration_knowledge=integration_knowledge,
@@ -598,6 +608,10 @@ class SharePointIndex:
                     stats=stats,
                     reason="access-refused",
                 )
+                if deleted is None:
+                    continue
+            removed.add(item_id)
+        return removed
 
     async def index_file(
         self,
@@ -655,12 +669,13 @@ class SharePointIndex:
                     logger.info(
                         f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
                     )
-                    await self._refresh_citation(
+                    await self.refresh_citation(
                         item, item_id, integration_knowledge_id, pending_change_keys
                     )
                     stats["unchanged_items"] += 1
                     return
 
+            sync_results.count_attempt(stats)
             content, skip_reason = await self._extract_file(
                 client, drive_id, item_id, item_name, stats
             )
@@ -685,6 +700,18 @@ class SharePointIndex:
                 stats=stats,
             )
             sync_results.count_outcome(stats, outcome, item_name)
+            if outcome != "failed":
+                sync_results.item_succeeded(stats)
+                if pending_change_keys is None and (
+                    citation_key := self.citation_key(item)
+                ):
+                    self._full_sync_citations.append(
+                        (
+                            integration_knowledge_id,
+                            self.citation_cache_id(item_id),
+                            citation_key,
+                        )
+                    )
             # Defer the ChangeKey cache write until after commit so a
             # rolled-back sync re-processes the item instead of skipping it.
             if pending_change_keys is not None and change_key and outcome != "failed":
@@ -701,9 +728,9 @@ class SharePointIndex:
                     )
         except Exception as e:
             logger.error(f"Error processing file {item_name}: {e}", exc_info=True)
-            sync_results.count_failure(
-                stats, error_skipped(item_name, e), item_id=item_id
-            )
+            detail = error_skipped(item_name, e)
+            sync_results.count_failure(stats, detail, item_id=item_id)
+            sync_results.item_failed_in_a_row(stats, detail)
 
     async def _extract_file(
         self,
@@ -731,6 +758,7 @@ class SharePointIndex:
             logger.warning(
                 "File %s (item_id=%s) has no download URL", item_name, item_id
             )
+            sync_results.count_missing_download(stats)
             return None, error_reason(NO_DOWNLOAD_REASON)
         except ValueError as e:
             if "exceeds max download size" in str(e):
@@ -746,6 +774,8 @@ class SharePointIndex:
                 raise
             if e.status == 403:
                 sync_results.count_refused_download(stats, item_id, item_name)
+            else:
+                sync_results.count_hidden_download(stats)
             logger.warning(
                 "File %s (item_id=%s) is gone or not accessible: %s",
                 item_name,
