@@ -38,7 +38,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_policy import (
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
-    ClassifiedSlot,
     SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationSource,
@@ -55,6 +54,7 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    ClassifiedSlot,
     slot_classification_result,
 )
 

@@ -757,7 +757,7 @@ class ProposalSubmissionOwner:
     ) -> None:
         if usage_tracker is not None:
             usage_tracker.record_attempt_failure(
-                failure_kind=_attempt_failure_kind(reason),
+                failure_kind=reason,
                 failure_codes=failure_codes,
                 producers=producers,
             )
@@ -1089,9 +1089,3 @@ def _first_attempt_failure_kind(
     if kind in ("provider_error", "provider_truncation", "internal_error"):
         return None
     return kind
-
-
-def _attempt_failure_kind(
-    reason: ProposalRepairReason,
-) -> ProposalAttemptFailureKind:
-    return reason

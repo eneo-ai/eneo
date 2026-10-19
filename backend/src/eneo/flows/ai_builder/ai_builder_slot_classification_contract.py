@@ -328,17 +328,6 @@ class ClassifiedSchemaDirection:
 
 
 @dataclass(frozen=True, slots=True)
-class ClassifiedSlot:
-    slot_name: str
-    value: str
-    confidence: SlotClassificationConfidence
-    reason: str
-    evidence: tuple[ClassifiedEvidence, ...] = ()
-    evidence_level: SlotClassificationEvidenceLevel = "inferred"
-    classification_kind: Literal["resolved", "explicitly_uncertain"] = "resolved"
-
-
-@dataclass(frozen=True, slots=True)
 class ResolvedSlotClassificationOutcome:
     value: str
     confidence: SlotClassificationConfidence
@@ -346,19 +335,6 @@ class ResolvedSlotClassificationOutcome:
     evidence: tuple[ClassifiedEvidence, ...]
     evidence_level: SlotClassificationEvidenceLevel
     kind: Literal["resolved"] = dataclass_field(default="resolved", init=False)
-
-    @classmethod
-    def from_classified_slot(
-        cls,
-        slot: ClassifiedSlot,
-    ) -> ResolvedSlotClassificationOutcome:
-        return cls(
-            value=slot.value,
-            confidence=slot.confidence,
-            reason=slot.reason,
-            evidence=slot.evidence,
-            evidence_level=slot.evidence_level,
-        )
 
 
 @dataclass(frozen=True, slots=True)

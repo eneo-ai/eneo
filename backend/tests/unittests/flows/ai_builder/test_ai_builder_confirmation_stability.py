@@ -46,7 +46,6 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     ClassifiedFormIntake,
-    ClassifiedSlot,
     SlotClassificationAttempt,
     SlotClassificationConfidence,
     SlotClassificationInput,
@@ -84,6 +83,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
 from eneo.flows.ai_builder.question_catalog import render_question, render_summary_label
 from eneo.flows.domain.flow import Flow, FlowStep
 from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    ClassifiedSlot,
     slot_classification_result,
 )
 

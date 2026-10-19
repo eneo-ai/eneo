@@ -1200,9 +1200,6 @@ class PlanningState(_PlanningModel):
             )
         return self
 
-    def has_template_file_role(self) -> bool:
-        return any(item.role == "template" for item in self.file_roles)
-
     def template_selection(self) -> TemplateSelection:
         """Resolve which DOCX template a template-fill plan is bound to.
 

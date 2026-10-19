@@ -43,6 +43,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     AIBuilderRequestBudget,
+    AIBuilderResolvedRequestBudget,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
@@ -81,6 +82,18 @@ def _proposal_request_budget(
     ).proposal_request_budget(
         capacity=ModelCapacity(100_000, model_output_ceiling_tokens),
     )
+
+
+def resolved_whole_request_budget(
+    budget: AIBuilderRequestBudget, *, input_tokens: int
+) -> AIBuilderResolvedRequestBudget:
+    """The budget of a request whose complete input is required."""
+
+    planned = budget.plan(required_input_tokens=input_tokens)
+    assert planned is not None
+    resolved = planned.resolve(input_tokens=input_tokens)
+    assert resolved is not None
+    return resolved
 
 
 def _make_context(**overrides: object) -> ProposalTurnContext:

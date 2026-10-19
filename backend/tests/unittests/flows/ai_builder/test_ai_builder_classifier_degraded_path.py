@@ -20,7 +20,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
-    ClassifiedSlot,
     SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
@@ -33,6 +32,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT
 from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
 from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    ClassifiedSlot,
     slot_classification_result,
 )
 

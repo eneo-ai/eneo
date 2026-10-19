@@ -90,6 +90,9 @@ from eneo.observability.failure_events import (
     FAILURE_EVENT_SCHEMA_VERSION,
     make_failure_fingerprint,
 )
+from tests.unittests.flows.ai_builder.proposal_turn_builders import (
+    resolved_whole_request_budget,
+)
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import _make_usage
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
@@ -200,12 +203,14 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
         "proposal_initial",
         "proposal_repair",
     )
-    request_budget = AIBuilderRequestBudget(
-        capacity=ModelCapacity(32_000, 16_000),
-        safety_buffer_tokens=2_000,
-        timeout_seconds=180.0,
-    ).resolve_whole(input_tokens=6_000)
-    assert request_budget is not None
+    request_budget = resolved_whole_request_budget(
+        AIBuilderRequestBudget(
+            capacity=ModelCapacity(32_000, 16_000),
+            safety_buffer_tokens=2_000,
+            timeout_seconds=180.0,
+        ),
+        input_tokens=6_000,
+    )
     for kind, usage in zip(kinds, usages, strict=True):
         call = telemetry.begin_call(
             call_kind=kind,
@@ -1300,13 +1305,14 @@ def test_call_records_an_older_build_wrote_in_another_shape_are_counted_as_skipp
 
 
 def _classification_budget_at_the_gateway() -> AIBuilderResolvedRequestBudget:
-    resolved = AIBuilderRequestBudget(
-        capacity=ModelCapacity(131_072, 16_384),
-        safety_buffer_tokens=2_000,
-        timeout_seconds=180.0,
-    ).resolve_whole(input_tokens=112_688)
-    assert resolved is not None
-    return resolved
+    return resolved_whole_request_budget(
+        AIBuilderRequestBudget(
+            capacity=ModelCapacity(131_072, 16_384),
+            safety_buffer_tokens=2_000,
+            timeout_seconds=180.0,
+        ),
+        input_tokens=112_688,
+    )
 
 
 def test_a_gateway_status_before_the_deadline_is_named_as_an_upstream_timeout() -> None:
@@ -1408,12 +1414,14 @@ def test_a_503_before_the_deadline_is_an_upstream_failure_not_a_timeout() -> Non
 def _failed_turn_tracker() -> tuple[
     ProposalTurnTelemetry, AIBuilderResolvedRequestBudget
 ]:
-    request_budget = AIBuilderRequestBudget(
-        capacity=ModelCapacity(32_000, 16_000),
-        safety_buffer_tokens=2_000,
-        timeout_seconds=180.0,
-    ).resolve_whole(input_tokens=6_000)
-    assert request_budget is not None
+    request_budget = resolved_whole_request_budget(
+        AIBuilderRequestBudget(
+            capacity=ModelCapacity(32_000, 16_000),
+            safety_buffer_tokens=2_000,
+            timeout_seconds=180.0,
+        ),
+        input_tokens=6_000,
+    )
     return (
         ProposalTurnTelemetry(
             request_id="req-failed-turn",
@@ -1671,12 +1679,14 @@ def test_the_output_cap_is_the_last_calls_and_the_finish_reason_the_last_respons
     None
 ):
     telemetry, first_budget = _failed_turn_tracker()
-    second_budget = AIBuilderRequestBudget(
-        capacity=ModelCapacity(32_000, 8_000),
-        safety_buffer_tokens=2_000,
-        timeout_seconds=180.0,
-    ).resolve_whole(input_tokens=6_000)
-    assert second_budget is not None
+    second_budget = resolved_whole_request_budget(
+        AIBuilderRequestBudget(
+            capacity=ModelCapacity(32_000, 8_000),
+            safety_buffer_tokens=2_000,
+            timeout_seconds=180.0,
+        ),
+        input_tokens=6_000,
+    )
     assert second_budget.provider_output_cap_tokens != (
         first_budget.provider_output_cap_tokens
     )

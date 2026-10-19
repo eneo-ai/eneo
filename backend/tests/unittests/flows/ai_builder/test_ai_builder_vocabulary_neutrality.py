@@ -35,7 +35,9 @@ def test_generic_underlag_does_not_create_domain_or_runtime_metadata_evidence() 
     }
 
     assert "runtime_metadata_fields" not in signals
-    runtime_metadata = profile.resolved_slot("runtime_metadata_fields")
+    runtime_metadata = profile.planning_state.resolved_slots.get(
+        "runtime_metadata_fields"
+    )
     assert runtime_metadata is None or runtime_metadata.source == "policy_default"
     assert "processing_scope" not in question_ids
 
@@ -75,7 +77,9 @@ def test_structured_runtime_fields_persist_without_reasking() -> None:
     assert planning_state.resolved_slots["runtime_metadata_fields"].value == (
         "detailed_runtime_metadata"
     )
-    runtime_metadata = profile.resolved_slot("runtime_metadata_fields")
+    runtime_metadata = profile.planning_state.resolved_slots.get(
+        "runtime_metadata_fields"
+    )
     assert runtime_metadata is not None
     assert runtime_metadata.value == "detailed_runtime_metadata"
     assert all(

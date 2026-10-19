@@ -4,6 +4,9 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_canonicalization import (
+    SUPPORTED_STRUCTURED_QUESTION_IDS,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -21,7 +24,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     resolve_output_intent,
     resolve_pdf_generation_mode,
     slot_names_blocked_by_explicit_uncertainty,
-    supported_structured_question_ids,
     terminal_output_uncertainty_is_unresolved,
 )
 from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
@@ -1827,7 +1829,7 @@ def test_supported_structured_question_ids_partition_catalog_and_policy_ids() ->
     )
     slot_question_ids = frozenset(QUESTION_CATALOG)
 
-    assert frozenset(supported_structured_question_ids()) == (
+    assert SUPPORTED_STRUCTURED_QUESTION_IDS == (
         slot_question_ids | non_slot_policy_ids
     )
     assert non_slot_policy_ids.isdisjoint(slot_question_ids)
@@ -1866,7 +1868,7 @@ def test_structured_question_aliases_are_supported_but_not_public_ids(
     alias: str,
 ) -> None:
     assert is_supported_structured_question_id(alias)
-    assert alias not in supported_structured_question_ids()
+    assert alias not in SUPPORTED_STRUCTURED_QUESTION_IDS
 
 
 @pytest.mark.parametrize(

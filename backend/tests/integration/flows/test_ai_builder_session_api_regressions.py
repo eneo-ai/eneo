@@ -132,8 +132,6 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
     ClassifiedEvidence,
-    ClassifiedSlot,
-    ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
@@ -190,6 +188,10 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import provider_wor
 from tests.unittests.flows.ai_builder.requirements_card_test_support import (
     pending_card_message,
 )
+from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    ClassifiedSlot,
+    resolved_outcome,
+)
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -240,10 +242,7 @@ def _classified_result(*slots: ClassifiedSlot) -> SlotClassificationResult:
     """A classifier result keyed the way the total contract expects."""
 
     return SlotClassificationResult(
-        slot_outcomes={
-            slot.slot_name: ResolvedSlotClassificationOutcome.from_classified_slot(slot)
-            for slot in slots
-        }
+        slot_outcomes={slot.slot_name: resolved_outcome(slot) for slot in slots}
     )
 
 

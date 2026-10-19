@@ -10,7 +10,6 @@ from eneo.flows.ai_builder.ai_builder_canonicalization import (
     is_supported_structured_question_id,
     normalize_question_answer,
     normalize_structured_question_payload,
-    supported_structured_question_ids,
 )
 from eneo.flows.ai_builder.ai_builder_clause_segmenter import (
     RoleScopedText,
@@ -78,7 +77,6 @@ __all__ = [
     "resolve_output_intent",
     "runtime_metadata_requested",
     "slot_names_blocked_by_explicit_uncertainty",
-    "supported_structured_question_ids",
     "terminal_output_uncertainty_is_unresolved",
 ]
 

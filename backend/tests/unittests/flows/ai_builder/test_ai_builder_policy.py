@@ -146,7 +146,6 @@ def test_required_input_that_leaves_no_room_is_refused_and_one_token_is_not() ->
     resolved = planned.resolve(input_tokens=125_999)
     assert resolved is not None
     assert resolved.provider_output_cap_tokens == 1
-    assert budget.resolve_whole(input_tokens=126_000) is None
 
 
 def test_the_reserve_rounds_up_and_never_exceeds_the_room() -> None:
@@ -378,8 +377,6 @@ def test_a_planned_budget_is_one_allocation_until_a_new_call_plans_again() -> No
     assert (planned.reserved_output_tokens, planned.available_input_tokens) == (40, 60)
     with pytest.raises(TypeError):
         planned.plan(required_input_tokens=50)
-    with pytest.raises(TypeError):
-        planned.resolve_whole(input_tokens=50)
     again = planned.unplanned().plan(required_input_tokens=50)
     assert again is not None
     assert (again.reserved_output_tokens, again.available_input_tokens) == (25, 75)

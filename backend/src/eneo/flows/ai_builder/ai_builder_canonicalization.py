@@ -155,7 +155,3 @@ def is_supported_structured_question_id(question_id: str) -> bool:
         canonical in SUPPORTED_STRUCTURED_QUESTION_IDS
         or parse_tool_question_id(canonical) is not None
     )
-
-
-def supported_structured_question_ids() -> tuple[str, ...]:
-    return tuple(sorted(SUPPORTED_STRUCTURED_QUESTION_IDS))

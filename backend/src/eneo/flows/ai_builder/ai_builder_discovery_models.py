@@ -20,7 +20,7 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     DiscoveryFamily as DiscoveryFamily,
 )
-from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
+from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.ai_builder.question_catalog import QuestionExposure
 
 DiscoverySeverity = Literal["blocking", "info"]
@@ -95,6 +95,3 @@ class DiscoveryProfile:
     document_like_input: bool
     audio_like_input: bool
     final_output_text_or_docx: bool
-
-    def resolved_slot(self, slot_name: str) -> ResolvedSlot | None:
-        return self.planning_state.resolved_slots.get(slot_name)

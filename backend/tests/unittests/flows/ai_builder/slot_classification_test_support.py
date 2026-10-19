@@ -1,24 +1,52 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Literal
 
 from eneo.flows.ai_builder.ai_builder_result_contract import ResultObligation
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
     AbsentSlotClassificationOutcome,
     ClassifiedCheckpointUpdate,
+    ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedNamedResultDelta,
     ClassifiedSchemaDirection,
-    ClassifiedSlot,
     ExplicitlyUncertainSlotClassificationOutcome,
     ResolvedSlotClassificationOutcome,
+    SlotClassificationConfidence,
     SlotClassificationDiagnostic,
+    SlotClassificationEvidenceLevel,
     SlotClassificationOutcome,
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.planning_state import ExampleOutputConstraintEvidence
+
+
+@dataclass(frozen=True, slots=True)
+class ClassifiedSlot:
+    """One slot as a test states it; `slot_classification_result` maps it to
+    the typed outcome the production contract carries."""
+
+    slot_name: str
+    value: str
+    confidence: SlotClassificationConfidence
+    reason: str
+    evidence: tuple[ClassifiedEvidence, ...] = ()
+    evidence_level: SlotClassificationEvidenceLevel = "inferred"
+    classification_kind: Literal["resolved", "explicitly_uncertain"] = "resolved"
+
+
+def resolved_outcome(slot: ClassifiedSlot) -> ResolvedSlotClassificationOutcome:
+    return ResolvedSlotClassificationOutcome(
+        value=slot.value,
+        confidence=slot.confidence,
+        reason=slot.reason,
+        evidence=slot.evidence,
+        evidence_level=slot.evidence_level,
+    )
 
 
 def slot_classification_result(
@@ -46,7 +74,7 @@ def slot_classification_result(
                 else (
                     AbsentSlotClassificationOutcome()
                     if slot.value == UNKNOWN_SLOT_VALUE
-                    else ResolvedSlotClassificationOutcome.from_classified_slot(slot)
+                    else resolved_outcome(slot)
                 )
             )
             for slot in slots

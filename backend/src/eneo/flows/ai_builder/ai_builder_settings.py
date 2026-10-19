@@ -164,18 +164,6 @@ class AIBuilderRequestBudget:
             available_input_tokens=available_input_tokens,
         )
 
-    def resolve_whole(
-        self, *, input_tokens: int
-    ) -> AIBuilderResolvedRequestBudget | None:
-        """The budget of a request whose complete input is required.
-
-        For a payload that carries nothing optional: the plan and the packed
-        measurement are the same number.
-        """
-
-        planned = self.plan(required_input_tokens=input_tokens)
-        return None if planned is None else planned.resolve(input_tokens=input_tokens)
-
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AIBuilderPlannedRequestBudget(AIBuilderRequestBudget):

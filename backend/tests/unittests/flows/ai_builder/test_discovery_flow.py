@@ -83,7 +83,6 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
-    ClassifiedSlot,
     ExplicitlyUncertainSlotClassificationOutcome,
     ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
@@ -110,6 +109,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
 from eneo.flows.ai_builder.question_catalog import render_summary_label
 from eneo.flows.domain.flow import Flow, FlowStep
 from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    ClassifiedSlot,
     slot_classification_result,
 )
 

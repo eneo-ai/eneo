@@ -253,7 +253,10 @@ from eneo.tokens.token_utils import (
     measure_provider_input_reserve,
 )
 from tests.unittests.flows.ai_builder.conftest import SendLockReleaseSpy
-from tests.unittests.flows.ai_builder.proposal_turn_builders import provider_work_gate
+from tests.unittests.flows.ai_builder.proposal_turn_builders import (
+    provider_work_gate,
+    resolved_whole_request_budget,
+)
 
 _DISCOVERY_STATUSES = {"understanding_request", "reading_sources"}
 
@@ -4412,17 +4415,17 @@ async def _stream_proposal_error_turn(
     ]
 
 
-_FAILED_PROPOSAL_BUDGET = (
+_FAILED_PROPOSAL_BUDGET = resolved_whole_request_budget(
     AIBuilderRequestBudget(
         capacity=ModelCapacity(32_000, 16_000),
         safety_buffer_tokens=2_000,
         timeout_seconds=180.0,
-    )
-).resolve_whole(input_tokens=6_000)
+    ),
+    input_tokens=6_000,
+)
 
 
 def _failed_proposal_output_cap() -> int:
-    assert _FAILED_PROPOSAL_BUDGET is not None
     return _FAILED_PROPOSAL_BUDGET.provider_output_cap_tokens
 
 

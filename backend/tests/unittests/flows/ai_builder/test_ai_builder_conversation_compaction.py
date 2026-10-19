@@ -47,7 +47,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
-    ClassifiedSlot,
     ExplicitlyUncertainSlotClassificationOutcome,
     ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
@@ -72,6 +71,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    ClassifiedSlot,
     slot_classification_result,
 )
 
