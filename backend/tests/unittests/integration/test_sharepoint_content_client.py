@@ -61,6 +61,39 @@ async def test_401_without_any_refresh_path_propagates():
 
 
 @pytest.mark.asyncio
+async def test_delta_pages_ask_graph_to_leave_out_the_parent_chain():
+    """Parent folders of changed items are not changes; above a folder scope
+    they would read as having left it."""
+    client = SharePointContentClient(
+        base_url="https://graph.microsoft.com",
+        api_token="mock-token",
+        max_download_bytes=1,
+    )
+    client.client = MagicMock()
+    client.client.get = AsyncMock(
+        side_effect=[
+            {
+                "value": [{"id": "1"}],
+                "@odata.nextLink": "https://graph.microsoft.com/v1.0/drives/d/root/delta?token=page-2",
+            },
+            {
+                "value": [{"id": "2"}],
+                "@odata.deltaLink": "https://graph.microsoft.com/v1.0/drives/d/root/delta?token=next",
+            },
+        ]
+    )
+
+    changes, token = await client.get_delta_changes("d", "first")
+
+    assert ([change["id"] for change in changes], token) == (["1", "2"], "next")
+    assert client.client.get.await_count == 2
+    for call in client.client.get.await_args_list:
+        assert call.kwargs["headers"]["Prefer"] == "deltaExcludeParent"
+        assert call.kwargs["headers"]["Authorization"] == "Bearer mock-token"
+    assert "Prefer" not in client.headers
+
+
+@pytest.mark.asyncio
 async def test_uses_settings_default_max_download_bytes_when_not_overridden():
     settings = MagicMock()
     settings.sharepoint_max_download_bytes = 12_345_678

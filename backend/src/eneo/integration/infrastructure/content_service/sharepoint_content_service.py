@@ -853,6 +853,19 @@ class SharePointContentService:
         if has_graph_facet(item, "root"):
             return
 
+        # The same goes for every other ancestor of the scope folder: Graph
+        # lists the parent chain of a changed item unless the delta request
+        # asks it not to, and a renamed ancestor is emitted on its own. An
+        # ancestor is above the scope, not out of it, and its subtree holds
+        # the scope; nothing of its own is indexed.
+        if (
+            is_folder
+            and not is_deleted
+            and integration_knowledge.selected_item_type == "folder"
+            and self._is_ancestor_of_scope(item, scope_folder_path)
+        ):
+            return
+
         # Skip scope check for deleted items — they may lack
         # parentReference data.  The DB delete queries already
         # filter by integration_knowledge_id so they are safe.
@@ -911,6 +924,8 @@ class SharePointContentService:
                     integration_knowledge=integration_knowledge,
                     integration_knowledge_id=resolved_integration_knowledge_id,
                     stats=stats,
+                    scope_folder_path=scope_folder_path,
+                    known_subfolder_ids=known_subfolder_ids,
                 )
             return
 
@@ -1757,8 +1772,10 @@ class SharePointContentService:
         integration_knowledge: "IntegrationKnowledge",
         integration_knowledge_id: UUID,
         stats: SyncStats,
+        scope_folder_path: Optional[str],
+        known_subfolder_ids: set[str],
     ) -> None:
-        """Remove indexed blobs for every descendant of a folder that left scope.
+        """Remove indexed blobs for the descendants of a folder that left scope.
 
         SharePoint/OneDrive delta only re-emits the moved folder, not its
         unchanged children, so deleting just the folder id would orphan the whole
@@ -1767,12 +1784,18 @@ class SharePointContentService:
         same strict enumeration as reconciliation, which handles both SharePoint
         (needs site_id) and OneDrive (drive-only), so OneDrive subtrees are cleaned
         inline rather than waiting for a full sync that may never come.
+
+        Each descendant is placed against the scope before it goes: the folder's
+        classification is only as good as its own parent path, and a subtree that
+        turns out to contain the scope must not take the scope's documents with
+        it. A descendant without a parent path cannot be placed and is left to the
+        next full sync's reconciliation.
         """
         if not drive_id:
             return
 
         try:
-            descendant_ids = await self._enumerate_authoritative_item_ids(
+            descendants = await self._enumerate_authoritative_items(
                 client=content_client,
                 resource_type=resource_type,
                 site_id=site_id,
@@ -1794,7 +1817,26 @@ class SharePointContentService:
             )
             return
 
-        for descendant_id in descendant_ids:
+        for descendant in descendants:
+            descendant_id = descendant.get("id")
+            if not descendant_id:
+                continue
+            if self._is_item_in_folder_scope(
+                descendant,
+                integration_knowledge.folder_id,
+                scope_folder_path=scope_folder_path,
+                known_subfolder_ids=known_subfolder_ids,
+                selected_item_type="folder",
+            ):
+                continue
+            if not descendant.get("parentReference", {}).get("path"):
+                logger.warning(
+                    "Keeping item %s under out-of-scope folder %s: Graph gave no "
+                    "parent path to place it by",
+                    descendant_id,
+                    folder_id,
+                )
+                continue
             await self._delete_local_sharepoint_item(
                 item_id=descendant_id,
                 item_name=descendant_id,
@@ -1803,6 +1845,23 @@ class SharePointContentService:
                 stats=stats,
                 reason="out-of-scope-subtree",
             )
+
+    def _is_ancestor_of_scope(
+        self, item: SharePointItem, scope_folder_path: Optional[str]
+    ) -> bool:
+        """Whether the folder entry's own path lies above the scope folder's.
+
+        The scope folder itself is not an ancestor: its own entry (a rename or
+        move) is in scope and counted like any other folder.
+        """
+        if not scope_folder_path:
+            return False
+        own_path = self._folder_path_from_item(item)
+        if not own_path:
+            return False
+        scope = self._normalize_path(scope_folder_path)
+        own = self._normalize_path(own_path)
+        return bool(own) and scope.startswith(own + "/")
 
     async def _current_scope_folder_path(
         self,
