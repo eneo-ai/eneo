@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from eneo.flows.domain.speaker_labels import (
     INVENTORY_SAMPLE_CHARS,
     OPENING_EXCERPT_CHARS,
@@ -9,6 +11,7 @@ from eneo.flows.domain.speaker_labels import (
     build_label_renumbering,
     build_opening_excerpt,
     build_speaker_inventory,
+    effective_speaker_names,
     merge_speaker_inventories,
     parse_participants,
     renumber_segment_speakers,
@@ -62,6 +65,32 @@ def test_apply_names_replaces_only_mapped_labels() -> None:
 
 def test_apply_names_ignores_empty_names() -> None:
     assert apply_speaker_names(TRANSCRIPT, {"SPEAKER_00": ""}) == TRANSCRIPT
+
+
+@pytest.mark.parametrize(
+    "overrides, expected",
+    [
+        # An absent label inherits the step's name.
+        ({}, {"SPEAKER_00": "Anna", "SPEAKER_01": "Bo"}),
+        # A string overrides it.
+        ({"SPEAKER_00": "Anna Berg"}, {"SPEAKER_00": "Anna Berg", "SPEAKER_01": "Bo"}),
+        # None removes it: explicitly no name.
+        ({"SPEAKER_01": None}, {"SPEAKER_00": "Anna"}),
+        # A label the step left unnamed is named; None on it changes nothing.
+        (
+            {"SPEAKER_02": "Cecilia", "SPEAKER_03": None},
+            {"SPEAKER_00": "Anna", "SPEAKER_01": "Bo", "SPEAKER_02": "Cecilia"},
+        ),
+    ],
+)
+def test_effective_names_override_remove_and_inherit(overrides, expected) -> None:
+    base = {"SPEAKER_00": "Anna", "SPEAKER_01": "Bo"}
+
+    assert effective_speaker_names(base, overrides) == expected
+    assert base == {"SPEAKER_00": "Anna", "SPEAKER_01": "Bo"}
+    assert effective_speaker_names({}, overrides) == {
+        label: name for label, name in overrides.items() if name is not None
+    }
 
 
 def test_parse_participants_accepts_lists_and_delimited_text() -> None:

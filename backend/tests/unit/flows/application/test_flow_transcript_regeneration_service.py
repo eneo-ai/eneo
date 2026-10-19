@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -8,6 +9,7 @@ import pytest
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.application.flow_transcript_regeneration_service import (
     FlowTranscriptRegenerationService,
+    _render_reviewed_transcript,
 )
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.step_output import build_text_overflow_metadata
@@ -16,6 +18,7 @@ from eneo.flows.domain.transcript_corrections import (
     TranscriptSpeakerEdit,
     segments_content_hash,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 
 
@@ -103,6 +106,7 @@ def context():
         revision=4,
         schema_version=3,
         segments_hash=segments_content_hash(segments),
+        speaker_names={},
         occurrences=lambda: [],
         speaker_edits=lambda: [
             TranscriptSpeakerEdit(0, None, None, None, "SPEAKER_00", "SPEAKER_00"),
@@ -386,4 +390,197 @@ async def test_regeneration_records_approval_from_reviewed_snapshot(
     seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
     assert seed.review_established_step_ids == (
         frozenset({context.steps[1].step_id}) if review_required else frozenset()
+    )
+
+
+# Five lines over two recordings: a correction, a split, a line nobody named, an
+# unresolved decision and an overlap.
+NAMED_SEGMENTS = [
+    {
+        "file_index": 0,
+        "start": 0,
+        "end": 1,
+        "speaker": "SPEAKER_00",
+        "text": "Vi frågade sugary.",
+    },
+    {
+        "file_index": 0,
+        "start": 1,
+        "end": 2,
+        "speaker": "SPEAKER_01",
+        "text": "Hej där alla.",
+    },
+    {"file_index": 0, "start": 2, "end": 3, "speaker": "SPEAKER_02", "text": "Tredje."},
+    {"file_index": 1, "start": 3, "end": 4, "speaker": "SPEAKER_00", "text": "Okänd."},
+    {
+        "file_index": 1,
+        "start": 4,
+        "end": 5,
+        "speaker": "SPEAKER_00",
+        "speaker_attribution": "provisional",
+        "text": "Överlapp.",
+    },
+]
+NAMED_OCCURRENCES = [TranscriptCorrectionOccurrence(0, 11, 17, "sugary", "Çagri")]
+NAMED_EDITS = [
+    TranscriptSpeakerEdit(1, 4, 13, "där alla.", "SPEAKER_01", "SPEAKER_03"),
+    TranscriptSpeakerEdit(3, None, None, None, "SPEAKER_00", None, "unresolved"),
+]
+
+
+def _name_the_transcript(context, names, *, speaker_step: bool = False):
+    digest = segments_content_hash(NAMED_SEGMENTS)
+    context.service.transcript_source_service.get_for_attempt.return_value = (
+        _source_state(NAMED_SEGMENTS)
+    )
+    context.request["segments_hash"] = digest
+    context.corrections.segments_hash = digest
+    context.corrections.occurrences = lambda: list(NAMED_OCCURRENCES)
+    context.corrections.speaker_edits = lambda: list(NAMED_EDITS)
+    context.corrections.speaker_names = names
+    if not speaker_step:
+        # The owner's shape: transcription, then steps that only pass text on.
+        context.steps[1].output_mode = "pass_through"
+
+
+async def test_names_reach_the_next_step_through_the_transcription_prefix(context):
+    _name_the_transcript(
+        context, {"SPEAKER_00": "Anna", "SPEAKER_01": None, "SPEAKER_03": "Cecilia"}
+    )
+
+    await context.service.regenerate(**context.request)
+
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    # Corrections and the split come first; names replace labels last. A label
+    # nobody named, null included, stays; bracket lines and headings stay.
+    expected = "\n".join(
+        [
+            "## Del 1",
+            "",
+            "[00:00:00 - 00:00:01] Anna: Vi frågade Çagri.",
+            "[00:00:01 - 00:00:02] SPEAKER_01: Hej",
+            "[00:00:01 - 00:00:02] Cecilia: där alla.",
+            "[00:00:02 - 00:00:03] SPEAKER_02: Tredje.",
+            "",
+            "## Del 2",
+            "",
+            "[00:00:03 - 00:00:04] [Talare går inte att avgöra]: Okänd.",
+            "[00:00:04 - 00:00:05] [Överlappande tal – osäker talare]: Överlapp.",
+        ]
+    )
+    assert seed.transcript.text == expected
+    assert len(seed.results) == 1
+    assert seed.results[0].output_payload_json["text"] == expected
+    assert (
+        seed.provenance["reviewed_text_hash"]
+        == hashlib.sha256(expected.encode()).hexdigest()
+    )
+
+
+async def test_without_names_the_regenerated_transcript_is_unchanged(context):
+    _name_the_transcript(context, {})
+
+    await context.service.regenerate(**context.request)
+
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    labelled = _render_reviewed_transcript(
+        NAMED_SEGMENTS, NAMED_OCCURRENCES, NAMED_EDITS, None
+    )
+    assert seed.transcript.text == labelled
+    assert seed.results[0].output_payload_json["text"] == labelled
+    assert (
+        seed.provenance["reviewed_text_hash"]
+        == hashlib.sha256(labelled.encode()).hexdigest()
+    )
+
+
+async def test_a_persons_names_override_the_speaker_naming_step(context):
+    _name_the_transcript(
+        context,
+        {"SPEAKER_00": "Anna Berg", "SPEAKER_01": None},
+        speaker_step=True,
+    )
+    context.results[1].output_payload_json["structured"] = {
+        "speakers": [
+            {"label": "SPEAKER_00", "name": "Anna"},
+            {"label": "SPEAKER_01", "name": "Bo"},
+            {"label": "SPEAKER_02", "name": "Cecilia"},
+        ]
+    }
+
+    await context.service.regenerate(**context.request)
+
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    transcription, naming = (result.output_payload_json for result in seed.results)
+    labelled = _render_reviewed_transcript(
+        NAMED_SEGMENTS, NAMED_OCCURRENCES, NAMED_EDITS, None
+    )
+    # The transcription keeps its labels; the naming step's text has the names.
+    assert transcription["text"] == labelled
+    named = naming["text"].splitlines()
+    assert named[2] == "[00:00:00 - 00:00:01] Anna Berg: Vi frågade Çagri."
+    assert named[3] == "[00:00:01 - 00:00:02] SPEAKER_01: Hej"
+    assert named[5] == "[00:00:02 - 00:00:03] Cecilia: Tredje."
+    assert seed.transcript.text == naming["text"]
+    assert (
+        seed.provenance["reviewed_text_hash"]
+        == hashlib.sha256(naming["text"].encode()).hexdigest()
+    )
+
+
+async def test_the_new_run_keeps_the_names_for_its_own_regeneration(context):
+    names = {"SPEAKER_00": "Anna"}
+    _name_the_transcript(context, names)
+
+    await context.service.regenerate(**context.request)
+
+    first = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    snapshot = context.service.corrections_repo.copy_snapshot.await_args.kwargs
+    assert snapshot["corrections"].speaker_names == names
+    # The copied set is all the new run's regeneration reads.
+    child = context.service.run_service.create_run.return_value.run
+    context.service.access_policy.load_run.return_value = SimpleNamespace(
+        **{**vars(context.source), "id": child.id}
+    )
+    context.service.corrections_repo.get_for_step.return_value = snapshot["corrections"]
+    await context.service.regenerate(
+        **{**context.request, "run_id": child.id, "idempotency_key": "again"}
+    )
+    second = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    assert second.transcript.text == first.transcript.text
+    assert "] Anna: Vi frågade Çagri." in second.transcript.text
+
+
+async def test_a_name_change_is_a_new_regeneration_request(context):
+    _name_the_transcript(context, {"SPEAKER_00": "Anna"})
+    await context.service.regenerate(**context.request)
+    args = context.service.run_service.create_run.await_args.kwargs
+    child = context.service.run_service.create_run.return_value.run
+    child.input_payload_json = {
+        "transcript_regeneration": args["prefix_seed"].provenance
+    }
+    context.service.run_repo.get_idempotent_run.return_value = (child, "fingerprint")
+    context.service.run_service.create_run.reset_mock()
+
+    # The same request replays the run it created.
+    replay = await context.service.regenerate(**context.request)
+    assert replay.run is child
+    assert replay.created is False
+    context.service.run_service.create_run.assert_not_awaited()
+
+    # Saving a name bumps the correction revision the request names, so the
+    # same key no longer fits and a new key creates a new run.
+    context.corrections.speaker_names = {"SPEAKER_00": "Anna Berg"}
+    context.corrections.revision = 5
+    renamed = {**context.request, "expected_correction_revision": 5}
+    with pytest.raises(FlowBadRequestException) as exc:
+        await context.service.regenerate(**renamed)
+    assert exc.value.code == FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT
+    context.service.run_repo.get_idempotent_run.return_value = None
+    await context.service.regenerate(**{**renamed, "idempotency_key": "renamed"})
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    assert "] Anna Berg: Vi frågade Çagri." in seed.transcript.text
+    assert (
+        seed.provenance["request_hash"]
+        != args["prefix_seed"].provenance["request_hash"]
     )

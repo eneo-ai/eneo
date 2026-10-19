@@ -96,7 +96,10 @@ No audio is transcribed or realigned by importing the prefix.
 The source run, its summary and files stay unchanged. The new run stores source
 run/step IDs, correction revision and source/reviewed-text hashes in its input
 provenance and imported attempt records. Raw segments, word evidence and human
-decisions remain separate. Unresolved spans are preserved.
+decisions remain separate. Unresolved spans are preserved. The speaker names saved
+with the corrections replace the labels once the corrections apply: in the imported
+transcription text when no speaker-mapping step follows it, otherwise in that step's
+text, over the names it gave. The new run's copy of the corrections keeps them.
 
 Supply the original segments_hash and observed run/correction revisions.
 The same Idempotency-Key and request replay the accepted run (200), even if

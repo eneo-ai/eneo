@@ -22,7 +22,11 @@ from eneo.flows.application.flow_transcript_source_service import (
     FlowTranscriptSourceService,
 )
 from eneo.flows.domain.flow import FlowRunStatus, FlowStepResult, FlowStepResultStatus
-from eneo.flows.domain.speaker_labels import apply_speaker_names, render_line_prefix
+from eneo.flows.domain.speaker_labels import (
+    apply_speaker_names,
+    effective_speaker_names,
+    render_line_prefix,
+)
 from eneo.flows.domain.speaker_review import attribution_text
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
@@ -237,6 +241,7 @@ class FlowTranscriptRegenerationService:
             _invalid("stale_or_unsupported_corrections", conflict=True)
         occurrences = corrections.occurrences() if corrections else []
         edits = corrections.speaker_edits() if corrections else []
+        names = corrections.speaker_names if corrections else {}
         try:
             validate_occurrences(segments, occurrences)
             validate_speaker_edits(segments, edits)
@@ -286,6 +291,10 @@ class FlowTranscriptRegenerationService:
         prefix_steps = [steps[0]]
         if len(steps) > 1 and steps[1].output_mode == "speaker_mapping":
             prefix_steps.append(steps[1])
+        else:
+            # Without a naming step the transcription's own text carries the
+            # names a person gave, so the next step reads them.
+            reviewed = apply_speaker_names(reviewed, effective_speaker_names({}, names))
         downstream = steps[len(prefix_steps) :]
         if not downstream or any(
             step.input_type == "audio" or step.output_mode == "speaker_mapping"
@@ -316,7 +325,10 @@ class FlowTranscriptRegenerationService:
                 ):
                     _invalid("speaker_mapping_source_changed", conflict=True)
                 reviewed = apply_speaker_names(
-                    reviewed, mapping_to_names(cast(dict[str, Any], mapping))
+                    reviewed,
+                    effective_speaker_names(
+                        mapping_to_names(cast(dict[str, Any], mapping)), names
+                    ),
                 )
                 payload = {
                     **payload,
