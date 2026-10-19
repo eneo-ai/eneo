@@ -17,7 +17,11 @@ from eneo.integration.infrastructure.sharepoint_subscription_service import (
 from tests.integration.test_sharepoint_subscription_ensure_race import _connection
 from tests.integration.test_sharepoint_sync_catch_up import _source
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.asyncio,
+    pytest.mark.usefixtures("sharepoint_webhook_configured"),
+]
 
 TOKEN = MagicMock(access_token="token", base_url="https://graph")
 
