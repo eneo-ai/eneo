@@ -24,7 +24,11 @@ from eneo.integration.infrastructure.sharepoint_subscription_service import (
     SharePointSubscriptionService,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.asyncio,
+    pytest.mark.usefixtures("sharepoint_webhook_configured"),
+]
 
 SITE = "contoso.sharepoint.com,site,web"
 
