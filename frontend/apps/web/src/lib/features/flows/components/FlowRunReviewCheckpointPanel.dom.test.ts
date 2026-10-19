@@ -1048,7 +1048,7 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
     render(FlowRunReviewCheckpointPanel, {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
-    const [name] = await screen.findAllByPlaceholderText(
+    const [name, unnamedName] = await screen.findAllByPlaceholderText(
       m.flow_transcript_editor_name_placeholder()
     );
     const proposedHigh = m.flow_transcript_editor_confidence({
@@ -1067,22 +1067,35 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
       m.flow_transcript_editor_no_evidence(),
       anna.evidence
     ];
-    const shown = () =>
-      proposalWording.filter((wording) => name.parentElement?.textContent?.includes(wording));
+    // The proposal wording the row of `input` shows.
+    const shown = (input: HTMLElement) =>
+      proposalWording.filter((wording) => input.parentElement?.textContent?.includes(wording));
 
     // A name the reviewer gave is theirs: nothing words it as the step's.
     expect((name as HTMLInputElement).value).toBe("Bertil");
-    expect(shown()).toEqual([]);
+    expect(shown(name)).toEqual([]);
 
     // The step's own name back, its proposal and reasoning back.
     await fireEvent.input(name, { target: { value: "Anna" } });
-    expect(shown()).toEqual([proposedHigh, anna.evidence]);
+    expect(shown(name)).toEqual([proposedHigh, anna.evidence]);
+    // The wording is the step's, whatever spaces the reviewer typed: Anna is a
+    // listed participant, not a name the step inferred from the conversation.
+    await fireEvent.input(name, { target: { value: "Anna " } });
+    expect(shown(name)).toEqual([proposedHigh, anna.evidence]);
 
     // A name typed over it is the reviewer's again, and so is a cleared one.
     for (const typed of ["Cecilia", ""]) {
       await fireEvent.input(name, { target: { value: typed } });
-      expect(shown()).toEqual([]);
+      expect(shown(name)).toEqual([]);
     }
+
+    // A row the step left unnamed, blanked with spaces, still says the step
+    // proposed nobody, with no reasoning.
+    await fireEvent.input(unnamedName, { target: { value: "  " } });
+    expect(shown(unnamedName)).toEqual([
+      m.flow_transcript_editor_no_suggestion(),
+      m.flow_transcript_editor_no_evidence()
+    ]);
   });
 
   it.each([false, true])(

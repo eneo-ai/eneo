@@ -58,17 +58,19 @@
   // One disclosure per row: a single flag would open every row at once.
   const whyOpen = new SvelteSet<string>();
 
-  /** The step's proposal beside the name it proposed: how sure it was, or that it had none. */
-  function proposalNote(row: SpeakerMappingRow): string {
-    if (!row.name) return ` · ${m.flow_transcript_editor_no_suggestion()}`;
+  /** The step's note on its own row: how sure it was of the name, or that it proposed none. */
+  function proposalNote(proposal: SpeakerMappingRow): string {
+    if (!proposal.name) return ` · ${m.flow_transcript_editor_no_suggestion()}`;
     const confidence =
-      row.confidence === "high"
+      proposal.confidence === "high"
         ? m.flow_transcript_editor_confidence_high()
-        : row.confidence === "medium"
+        : proposal.confidence === "medium"
           ? m.flow_transcript_editor_confidence_medium()
           : m.flow_transcript_editor_confidence_low();
     const fromConversation =
-      inferred && !participants.includes(row.name) ? m.flow_transcript_editor_inferred_name() : "";
+      inferred && !participants.includes(proposal.name)
+        ? m.flow_transcript_editor_inferred_name()
+        : "";
     return ` · ${m.flow_transcript_editor_confidence({ confidence })}${fromConversation}`;
   }
 </script>
@@ -87,9 +89,10 @@
     >{#each names as name (name)}<option value={name}></option>{/each}</datalist
   >
   {#each rows as row, index (row.label)}
-    <!-- Only the name the step proposed is its proposal: a name a person gave
-         or cleared is theirs, with none of the step's wording or reasoning. -->
-    {@const asProposed = keptProposal(row, proposed) !== undefined}
+    <!-- The step's own row while this row keeps the step's name; the proposal's
+         wording describes that row, not what the reviewer typed. A name a
+         person gave or cleared is theirs, with none of the step's wording. -->
+    {@const proposal = keptProposal(row, proposed)}
     <div
       class="border-default grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)_2.5rem] items-start gap-3 border-b py-5 last:border-b-0"
     >
@@ -121,7 +124,7 @@
             row.lineCount,
             m.flow_transcript_editor_lines_one,
             m.flow_transcript_editor_lines
-          )}{asProposed ? proposalNote(row) : ""}
+          )}{proposal ? proposalNote(proposal) : ""}
         </p>
         <details
           open={whyOpen.has(row.label)}
@@ -140,7 +143,7 @@
               aria-hidden="true"
             />{m.flow_transcript_editor_why()}</summary
           >
-          {#if asProposed}<p class="mt-2 leading-relaxed">
+          {#if proposal}<p class="mt-2 leading-relaxed">
               {row.evidence || m.flow_transcript_editor_no_evidence()}
             </p>{/if}
           {#each row.samples as sample, i (i)}<p
