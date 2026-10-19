@@ -642,7 +642,11 @@ def test_shared_instruction_fitting_charges_one_body_and_keeps_every_source(
             if line.startswith(("[run", "- körning")) and '"' in line
         )
 
-    fitter = fit_review_evidence if investigation else fit_sample_excerpts
+    def fitter(carrier, *, fits):
+        if investigation:
+            return fit_review_evidence(carrier, fits=fits)[0]
+        return fit_sample_excerpts(carrier, fits=fits)
+
     carrier = evidence if investigation else sample
     fitted = fitter(carrier, fits=lambda candidate: readable_chars(candidate) <= 5)
     assert [len(e.text or "") for e in fitted.excerpts] == [3, 3, 3, 2]

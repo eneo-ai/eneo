@@ -89,6 +89,10 @@ from eneo.flows.ai_builder.ai_builder_tools import (
     build_propose_flow_tool_schema,
     validate_native_strict_schema,
 )
+from eneo.flows.ai_builder.ai_builder_turn_coverage import (
+    CountCoverageNote,
+    ProposalPromptCut,
+)
 from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
 )
@@ -162,6 +166,21 @@ def _completion_request(
         request_budget=request_budget,
         **kwargs,
     )
+
+
+# A prepared prompt that left out a confirmed assumption.
+_PROMPT_LEFT_OUT_AN_ASSUMPTION = ProposalPromptCut(
+    notes=(
+        CountCoverageNote(
+            stage="proposal",
+            material="requirement_assumptions",
+            total=1,
+            omitted=1,
+            shortened=0,
+            reasons=["model_room"],
+        ),
+    )
+)
 
 
 def _request_budget(
@@ -797,6 +816,7 @@ async def test_proposal_provider_failure_uses_typed_disposition(
         model="private-model",
         target_kind=TargetKind.CREATE,
     )
+    tracker.coverage.prepare_proposal(_PROMPT_LEFT_OUT_AN_ASSUMPTION)
 
     with patch.object(error_contract_module.logger, "info") as event_log:
         with pytest.raises(AIBuilderBadRequestException) as exc_info:
@@ -814,6 +834,9 @@ async def test_proposal_provider_failure_uses_typed_disposition(
 
     assert isinstance(exc_info.value, expected_exception)
     assert exc_info.value.code == expected_code
+    # Mutant: coverage counted only once the provider answered; this request
+    # was sent.
+    assert tracker.coverage.summary() is not None
     assert isinstance(
         exc_info.value,
         (
@@ -2247,6 +2270,7 @@ async def test_a_refused_admission_raises_the_turns_own_error_not_a_provider_fai
     tracker = ProposalTurnTelemetry(
         request_id="req-refused", model="gpt-test", target_kind=TargetKind.CREATE
     )
+    tracker.coverage.prepare_proposal(_PROMPT_LEFT_OUT_AN_ASSUMPTION)
 
     with patch.object(error_contract_module.logger, "info") as event_log:
         with pytest.raises(AIBuilderBadRequestException) as exc_info:
@@ -2264,6 +2288,8 @@ async def test_a_refused_admission_raises_the_turns_own_error_not_a_provider_fai
 
     assert exc_info.value is lost
     client.acompletion.assert_not_called()
+    # Mutant: coverage counted before the turn admitted the request.
+    assert tracker.coverage.summary() is None
     assert [
         call for call in event_log.call_args_list if call.args == ("failure_event",)
     ] == []

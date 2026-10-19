@@ -28,6 +28,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     TypeAdapter,
     ValidationError,
     field_validator,
@@ -97,7 +98,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
 )
-from eneo.flows.ai_builder.ai_builder_turn_coverage import TurnCoverage
+from eneo.flows.ai_builder.ai_builder_turn_coverage import CoverageNote, TurnCoverage
 from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     NAMED_RESULT_FIELD_NAME_MAX_LENGTH,
@@ -2252,20 +2253,39 @@ def metadata_with_turn_coverage(
     }
 
 
+class _StoredTurnCoverage(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[1] = 1
+    notes: list[JsonValue]
+
+
+_COVERAGE_NOTE: TypeAdapter[CoverageNote] = TypeAdapter(CoverageNote)
+
+
 def turn_coverage_from_metadata(metadata: object) -> TurnCoverage | None:
     """What the turn of this user message left out of its model requests, or
     None when nothing was left out, the message is older than the record, or
-    the record no longer reads."""
+    the record no longer reads. The notes are read one at a time: a note
+    another release wrote (a kind, material or reason this one does not know)
+    is left out, the others are kept."""
 
     metadata_map = _metadata_mapping(metadata)
     raw = metadata_map.get(TURN_COVERAGE_METADATA_KEY) if metadata_map else None
     if raw is None:
         return None
     try:
-        return TurnCoverage.model_validate(raw)
+        stored = _StoredTurnCoverage.model_validate(raw)
     except ValidationError as error:
         _warn_invalid_persisted_metadata(TURN_COVERAGE_METADATA_KEY, error)
         return None
+    notes: list[CoverageNote] = []
+    for note in stored.notes:
+        try:
+            notes.append(_COVERAGE_NOTE.validate_python(note))
+        except ValidationError as error:
+            _warn_invalid_persisted_metadata(TURN_COVERAGE_METADATA_KEY, error)
+    return TurnCoverage(notes=notes) if notes else None
 
 
 UnreadReason: TypeAlias = SlotClassificationReadingFailureReason | Literal["unknown"]

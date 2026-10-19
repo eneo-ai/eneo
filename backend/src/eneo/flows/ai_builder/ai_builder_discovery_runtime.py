@@ -85,7 +85,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     slot_classification_prompt_hash,
     slot_classification_provider_identity,
 )
-from eneo.flows.ai_builder.ai_builder_turn_coverage import classification_sources_note
+from eneo.flows.ai_builder.ai_builder_turn_coverage import classification_notes
 from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_PROVENANCE_MAX_ITEMS,
     CheckpointProducerKind,
@@ -793,8 +793,10 @@ async def build_runtime_discovery_context(
         capacity=capacity,
         budget_policy=budget_policy,
         read_declarations=read_declarations,
-        coverage=classification_sources_note(
-            offered=offered_input, admitted=classification_input
+        coverage=classification_notes(
+            offered=offered_input,
+            admitted=classification_input,
+            files=attachment_context.evidence if attachment_context is not None else (),
         ),
     )
     if attempt.outcome != "resolved":

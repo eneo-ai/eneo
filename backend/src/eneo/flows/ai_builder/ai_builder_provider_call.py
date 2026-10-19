@@ -375,9 +375,11 @@ async def complete_with_silence_deadline(
     the failure classifier records as a timeout with an unknown provider
     outcome. The stream is closed on every exit, within a bounded wait that
     never hides the original error. A provider refusal is raised.
-    ``observe_timing`` receives the request's timing, once, however the call
-    ends, before the stream is closed, and is not called when no request was
-    sent. ``gate`` is the owning turn's: the request is admitted through it
+    ``observe_sdk_input`` receives the outbound request once the turn has
+    admitted it, right before it is sent, and is not called when it was not
+    admitted. ``observe_timing`` receives the request's timing, once, however
+    the call ends, before the stream is closed, and is not called when no
+    request was sent. ``gate`` is the owning turn's: the request is admitted through it
     right before it is sent (a refusal ends the call with
     ``ProviderRequestNotAdmitted``), and
     once its ``ownership_lost`` is set the call ends with

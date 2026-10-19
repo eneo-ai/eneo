@@ -124,10 +124,6 @@ async def call_proposal_completion(
             call_kind=call_kind,
             request_budget=request_budget,
         )
-        usage_tracker.coverage.record_proposal_call(
-            history_in_request=history_group_count(request.message_groups),
-            history_sent=history_group_count(fitted_message_groups),
-        )
     timing = ObservedTiming()
 
     def observe_sdk_input(sdk_input: Mapping[str, Any]) -> None:
@@ -135,6 +131,14 @@ async def call_proposal_completion(
         incident_evidence = _proposal_request_evidence(
             request=request, sdk_input=sdk_input
         )
+        # The turn has admitted the request and it is being sent: only now
+        # does what it left out count.
+        if usage_tracker is not None:
+            usage_tracker.coverage.record_proposal_call(
+                history_in_request=history_group_count(request.message_groups),
+                history_sent=history_group_count(fitted_message_groups),
+                request_budget=request_budget,
+            )
 
     try:
         raw_response = await complete_with_silence_deadline(

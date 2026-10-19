@@ -776,15 +776,32 @@ const telemetryEventDataSchema = z.object({
   last_token_usage_estimated: z.boolean().optional()
 }) satisfies z.ZodType<GeneratedAIBuilderSessionTelemetrySummary>;
 
-const coverageNoteSchema = z.object({
-  kind: z.literal("count").optional(),
-  stage: z.enum(["classification", "proposal"]),
-  material: z.enum(["classification_sources", "history_messages", "requirement_assumptions"]),
-  total: z.int(),
-  omitted: z.int(),
-  shortened: z.int(),
-  reasons: z.array(z.enum(["model_room", "fixed_limit"]))
-});
+const coverageNoteSchema = z.union([
+  z.object({
+    kind: z.literal("count").optional(),
+    stage: z.enum(["classification", "proposal"]),
+    material: z.enum([
+      "classification_sources",
+      "history_messages",
+      "requirement_assumptions",
+      "attachment_files",
+      "run_excerpts",
+      "usable_tools",
+      "tool_schemas",
+      "unavailable_tool_names"
+    ]),
+    total: z.int(),
+    omitted: z.int(),
+    shortened: z.int(),
+    reasons: z.array(z.enum(["model_room", "fixed_limit", "configured_limit"]))
+  }),
+  z.object({
+    kind: z.literal("tool_catalog_unavailable"),
+    stage: z.literal("proposal"),
+    material: z.literal("tool_catalog"),
+    reason: z.literal("catalog_limit")
+  })
+]);
 
 // Read one note at a time: a note kind or material this client does not know
 // is left out, so a new note kind never breaks a turn's stream or a reload (a

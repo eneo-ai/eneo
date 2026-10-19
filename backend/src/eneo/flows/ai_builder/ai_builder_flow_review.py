@@ -42,11 +42,13 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     READ_DEADLINE_SECONDS,
     ExcerptAvailability,
+    ExcerptCut,
     FlowReviewSample,
     ReviewPromptGroups,
     ReviewSampleExcerpt,
     ReviewSampleRun,
     admission_note_sv,
+    excerpt_cut,
     excerpts_for_run,
     fit_excerpts,
     quoted_excerpt,
@@ -1004,14 +1006,15 @@ def fit_review_evidence(
     *,
     fits: Callable[[FlowReviewEvidence], bool],
     prompt_groups: ReviewPromptGroups | None = None,
-) -> FlowReviewEvidence:
-    """Fit excerpts and failure text together, marking budget omissions.
+) -> tuple[FlowReviewEvidence, ExcerptCut | None]:
+    """Fit excerpts and failure text together, marking budget omissions, with
+    what the fit left out of them (None when the evidence fits whole).
 
     Runtime truncation remains independent of how much of the retained
     beginning and ending the planner's request budget can carry.
     """
     if fits(evidence):
-        return evidence
+        return evidence, None
     excerpts = list(evidence.excerpts)
     failure = evidence.failure
     retained_output = failure.rejected_output if failure is not None else None
@@ -1098,13 +1101,18 @@ def fit_review_evidence(
             }
         )
 
-    return fit_excerpts(
+    fitted, sent = fit_excerpts(
         excerpts,
-        render=render,
-        fits=fits,
+        render=lambda candidate: (render(candidate), candidate),
+        fits=lambda rendered: fits(rendered[0]),
         prompt_groups=prompt_groups,
         suffix_indices=(len(excerpts) - 1,) if retained_tail else (),
     )
+    items = [[pair] for pair in zip(excerpts, sent, strict=True)]
+    if retained_tail:
+        # The failed output's beginning and its end are one item of the run.
+        items[-2:] = [[*items[-2], *items[-1]]]
+    return fitted, excerpt_cut(items)
 
 
 def _token_count_sv(count: int | None) -> str:

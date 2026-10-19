@@ -266,7 +266,7 @@ and parsing boundaries. Those limits remain independent of model context size.
 When a turn's model requests leave part of the user's material out or shorten
 it, the turn records one typed summary (`TurnCoverage`, owner
 `ai_builder_turn_coverage.py`) on its own user message, as the `turn_coverage`
-metadata key. Three materials are counted, each from what its packer returned:
+metadata key. Each material is counted from what its packer returned:
 
 - `classification_sources` (stage `classification`): the user's messages and
   answer values the reading takes in. The oldest sources over the fixed
@@ -277,12 +277,49 @@ metadata key. Three materials are counted, each from what its packer returned:
   proposal fit evicts, a reply and the tool results it called for counting once.
 - `requirement_assumptions` (stage `proposal`): confirmed assumptions the
   proposal prompt does not replay.
+- `attachment_files` (stages `classification` and `proposal`): attached files
+  with readable text, by the coverage the request's own attachment fit gave
+  each file. A file the request carries none of the text of, or leaves out of
+  the reading entirely, is omitted; one it carries in part is shortened
+  (`model_room`). A file without readable text is not counted. The confirm
+  screen shows each file's coverage as the turn admitted it, before any
+  proposal request; this note reports what each sent request carried, which
+  can be less.
+- `run_excerpts` (stage `proposal`): the recorded texts of a review-backed
+  proposal (the sampled runs' and a failed attempt's; a failed output read as
+  its beginning and its end is one item) that the evidence fit left out or
+  cut. When the review-evidence limit was not above the room the prompt left
+  the evidence, the reason is `fixed_limit` for the 16,000-token system bound
+  and `configured_limit` for a lower value the organisation set; otherwise the
+  room bound it.
+- `usable_tools`, `tool_schemas` and `unavailable_tool_names` (stage
+  `proposal`): the space's usable tools not listed, the listed tools' input
+  schemas marked as not shown, and refused tools not named. The catalogue's
+  character limits (6,000 overview, 12,000 schemas, 2,000 refused names) give
+  `fixed_limit`; the fit to the request's room gives the room's reason, also
+  when the room left no tool at all. When the space's tool list is over its
+  bounds (1,000 tools, 8 MiB), the tools are not known: the prompt says the
+  catalogue is not shown, and the note has kind `tool_catalog_unavailable`,
+  material `tool_catalog`, reason `catalog_limit` and no counts. That holds
+  for a create session too, whose person has not chosen to use the tools,
+  because its prompt carries that sentence. A create session in a space whose
+  list fits is not offered the tools until then (`not_offered`) and gets no
+  note.
 
 Each note gives the total, how many items were omitted and how many shortened
 (an omitted item is not also counted as shortened), and why: `model_room` (the
-model's context window) or `fixed_limit`. Only requests that were sent count,
-and over the repair and continuation calls of one turn the summary keeps the
-call that left out the most, never a sum. A `commit_turn` of the turn stores the
+model's context window), `fixed_limit` or `configured_limit` (a limit set in
+the organisation's Builder settings). Where the room bound, a request whose
+available input the organisation's review-evidence input cap set, not the
+model (`AIBuilderPlannedRequestBudget.input_cap_binds`), gives
+`configured_limit`: the preparation's plan decides for the prompt's notes, and
+each sent call's own plan for the history it fitted (a repair plans again).
+Only requests that were sent count: a reading or proposal request counts once
+the turn has admitted it, right before it goes to the provider (the provider
+call's `observe_sdk_input`), so a refused admission counts nothing and a sent
+request the provider rejects still counts. Per stage and material, over the
+repair and continuation calls of one turn, the summary keeps the request that
+left out the most (omitted, then shortened), never a sum. A `commit_turn` of the turn stores the
 summary in the same conversation write as its messages, before compaction and
 the planning state; completing the turn, with or without an error, stores it
 only when the user message does not already carry that value. A turn that ends
@@ -291,10 +328,11 @@ carries the summary only if it stored its messages before it ended. The session 
 The turn's own message stream sends it once in a `coverage` event before
 `done`, read back from the stored message; a replay answered from the stored
 turn may send none, so a client reads the coverage from the session. Each note
-has a `kind` (`count`; a note stored without one is a `count` note), and the web
-leaves out a note kind or material it does not know. Attached files keep their
-own `AttachmentCoverage`; tool-catalogue and run-evidence trimming are not
-counted here yet.
+has a `kind` (`count`, where a note stored without one is a `count` note, or
+`tool_catalog_unavailable`). The backend reader and the web read the notes one
+at a time and leave out a note whose kind, material or reason they do not
+know, keeping the others. The web's line names each material once, by the
+stage that left out the most; its popover lists every note by stage.
 
 ### AI Builder MCP tool catalogue
 

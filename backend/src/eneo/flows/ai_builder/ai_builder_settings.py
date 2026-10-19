@@ -201,6 +201,20 @@ class AIBuilderPlannedRequestBudget(AIBuilderRequestBudget):
             "unplanned().plan(...) for a new provider call"
         )
 
+    @property
+    def input_cap_binds(self) -> bool:
+        """Whether the input cap, not the model's room, set
+        ``available_input_tokens``: a larger model would carry no more."""
+
+        return (
+            self.input_cap_tokens is not None
+            and self.input_cap_tokens
+            <= self.capacity.input_allowance(
+                output_reserve_tokens=self.reserved_output_tokens,
+                safety_tokens=self.safety_buffer_tokens,
+            )
+        )
+
     def unplanned(self) -> AIBuilderRequestBudget:
         """The model and policy facts alone, for a deliberately new plan."""
 

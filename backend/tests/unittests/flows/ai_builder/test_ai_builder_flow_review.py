@@ -2544,7 +2544,7 @@ def test_fit_review_evidence_keeps_facts_and_marks_what_did_not_fit() -> None:
             for order, length in ((1, 30), (2, 3000))
         ],
     )
-    fitted = fit_review_evidence(
+    fitted, _ = fit_review_evidence(
         evidence,
         fits=lambda candidate: sum(len(e.text or "") for e in candidate.excerpts)
         <= 100,
@@ -2555,6 +2555,70 @@ def test_fit_review_evidence_keeps_facts_and_marks_what_did_not_fit() -> None:
     assert len(fitted.excerpts[1].text or "") == 70
     rendered = render_review_evidence(fitted)
     assert "avklippt efter 70 av 3000 tecken" in rendered
+
+
+def test_fit_review_evidence_counts_the_excerpts_it_left_out_or_shortened() -> None:
+    from eneo.flows.ai_builder.ai_builder_flow_review import FlowReviewFailureFact
+    from eneo.flows.ai_builder.ai_builder_flow_review_sample import ExcerptCut
+    from eneo.flows.domain.step_output import sample_rejected_output
+
+    run_id = uuid4()
+    evidence = FlowReviewEvidence(
+        flow_version=2,
+        definition_checksum="sum",
+        evidence_classification_level=0,
+        completed_run_count=1,
+        failed_run_count=1,
+        steps=[],
+        facts=[],
+        excerpts=[
+            ReviewSampleExcerpt(
+                run_id=run_id,
+                step_order=order,
+                field="output",
+                availability=availability,
+                text=text,
+            )
+            for order, availability, text in (
+                (1, "truncated_by_runtime", "p" * 60),
+                (2, "included", "i" * 60),
+                (3, "unavailable_mapped_input", "anropssammanfattning"),
+            )
+        ],
+        failure=FlowReviewFailureFact(
+            run_id=run_id,
+            step_order=4,
+            attempt_no=1,
+            error_code="step_failed",
+            error_message="m",
+            effective_prompt="f" * 50,
+            rejected_output=sample_rejected_output(
+                "o" * 3000, max_inline_bytes=200_000
+            ),
+            requested_model=None,
+        ),
+    )
+
+    def carried(candidate: FlowReviewEvidence) -> int:
+        failure = candidate.failure
+        assert failure is not None and failure.rejected_output is not None
+        output = failure.rejected_output
+        return (
+            sum(len(e.text or "") for e in candidate.excerpts[:2])
+            + len(failure.effective_prompt or "")
+            + len(output.text)
+            + len(output.evidence.tail if output.evidence else "")
+        )
+
+    _, cut = fit_review_evidence(
+        evidence, fits=lambda candidate: carried(candidate) <= 1
+    )
+
+    # Mutants: a runtime preview the fit cut shorter (its mark unchanged) is
+    # not counted, an excerpt the fit never allocates (a mapped step's call
+    # summary) is, an omitted one counts as shortened, or a failed output
+    # read as its beginning and its end counts twice.
+    assert cut == ExcerptCut(readable=4, omitted=3, shortened=1)
 
 
 def test_investigation_evidence_treats_a_runtime_preview_as_unread():
@@ -2596,7 +2660,7 @@ def test_investigation_evidence_treats_a_runtime_preview_as_unread():
             )
         ],
     )
-    fitted = fit_review_evidence(evidence, fits=lambda _candidate: True)
+    fitted, _ = fit_review_evidence(evidence, fits=lambda _candidate: True)
     assert fitted.excerpts[0].availability == "truncated_by_runtime"
     assert fitted.excerpts[0].text == "Början av utdata"
     rendered = render_review_evidence(fitted)
@@ -3144,7 +3208,7 @@ def test_failure_text_fits_budget_with_explicit_shortening(runtime_truncated, bu
         ),
     )
     fits = lambda candidate: len(render_review_evidence(candidate)) <= budget
-    fitted = fit_review_evidence(evidence, fits=fits)
+    fitted, _ = fit_review_evidence(evidence, fits=fits)
     assert fits(fitted)
     assert fitted.failure is not None
     assert fitted.failure.run_id == evidence.failure.run_id
@@ -3154,7 +3218,7 @@ def test_failure_text_fits_budget_with_explicit_shortening(runtime_truncated, bu
     assert "Instruktionen: kortad av utrymmesskäl" in rendered
     assert "Avvisad utdata: kortad av utrymmesskäl" in rendered
     assert ("kortad av flödet vid körningen" in rendered) == runtime_truncated
-    omitted = fit_review_evidence(evidence, fits=lambda candidate: False)
+    omitted, _ = fit_review_evidence(evidence, fits=lambda candidate: False)
     omitted_block = render_review_evidence(omitted)
     assert "Instruktionen: utelämnad av utrymmesskäl, inte läst" in omitted_block
     assert "Avvisad utdata: utelämnad av utrymmesskäl, inte läst" in omitted_block
@@ -3190,7 +3254,7 @@ def test_truncated_failure_samples_survive_review_budget(budget, inline_ceiling)
             finish_reason="length",
         ),
     )
-    fitted = fit_review_evidence(
+    fitted, _ = fit_review_evidence(
         evidence, fits=lambda value: len(render_review_evidence(value)) <= budget
     )
     assert fitted.failure is not None
@@ -3279,7 +3343,7 @@ def test_content_free_failure_fits_budget_without_an_output_excerpt():
         ),
     )
     fits = lambda candidate: len(render_review_evidence(candidate)) <= 4000
-    fitted = fit_review_evidence(evidence, fits=fits)
+    fitted, _ = fit_review_evidence(evidence, fits=fits)
     assert fits(fitted)
     assert fitted.failure is not None
     assert fitted.failure.rejected_output is None
@@ -3292,7 +3356,7 @@ def test_content_free_failure_fits_budget_without_an_output_excerpt():
     assert "Instruktionen: kortad av utrymmesskäl" in rendered
     assert len(fitted.excerpts) == 0
     omitted = render_review_evidence(
-        fit_review_evidence(evidence, fits=lambda candidate: False)
+        fit_review_evidence(evidence, fits=lambda candidate: False)[0]
     )
     assert "Instruktionen: utelämnad av utrymmesskäl, inte läst" in omitted
     assert "finish_reason=length" in omitted and "Avvisad utdata" not in omitted

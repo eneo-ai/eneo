@@ -74,6 +74,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     render_review_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
+    ExcerptCut,
     ReviewPromptGroups,
     review_prompt_groups,
 )
@@ -173,7 +174,14 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     GenerateProposal,
     resolve_turn_control,
 )
-from eneo.flows.ai_builder.ai_builder_turn_coverage import ProposalPromptCut
+from eneo.flows.ai_builder.ai_builder_turn_coverage import (
+    ProposalPromptCut,
+    attachment_files_note,
+    request_room,
+    requirement_assumptions_note,
+    run_excerpts_note,
+    tool_catalog_notes,
+)
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.application.flow_authoring_snapshot import (
     UnsupportedSavedStepsError,
@@ -1001,9 +1009,10 @@ def build_proposal_prepared(
 
     review_evidence_fit_ms: int | None = None
     fitted_review_evidence: FlowReviewEvidence | None = None
+    review_excerpt_cut: ExcerptCut | None = None
     if review_evidence is not None:
         fit_started = time.monotonic()
-        fitted_review_evidence = fit_review_evidence(
+        fitted_review_evidence, review_excerpt_cut = fit_review_evidence(
             review_evidence, fits=evidence_fits, prompt_groups=prompt_groups
         )
         review_evidence_fit_ms = int((time.monotonic() - fit_started) * 1000)
@@ -1093,6 +1102,36 @@ def build_proposal_prepared(
         },
     )
 
+    carried_files = (
+        fitted_attachment_context.evidence
+        if fitted_attachment_context is not None
+        else ()
+    )
+    prompt_notes = (
+        requirement_assumptions_note(
+            confirmed=(
+                len(confirmed_requirements.assumptions)
+                if confirmed_requirements is not None
+                else 0
+            ),
+            replayed=(
+                len(replayed_requirements.assumptions)
+                if replayed_requirements is not None
+                else 0
+            ),
+        ),
+        attachment_files_note(
+            "proposal",
+            files=attachment_context.evidence if attachment_context is not None else (),
+            carried={item.file_id: item.coverage for item in carried_files},
+        ),
+        run_excerpts_note(
+            review_excerpt_cut,
+            limit_tokens=evidence_share_limit,
+            room_tokens=system_prompt_token_limit - scaffold_reserve,
+        ),
+        *tool_catalog_notes(offered_tools, listed=fitted_tool_catalog),
+    )
     return ProposalPrepared(
         requirements_state=requirements_state,
         ui_language=ui_language,
@@ -1110,16 +1149,8 @@ def build_proposal_prepared(
         request_budget=planned_request_budget,
         prompt_cut=ProposalPromptCut(
             history_groups_left_out=prepared_prompt.history_groups_left_out,
-            confirmed_assumptions=(
-                len(confirmed_requirements.assumptions)
-                if confirmed_requirements is not None
-                else 0
-            ),
-            replayed_assumptions=(
-                len(replayed_requirements.assumptions)
-                if replayed_requirements is not None
-                else 0
-            ),
+            notes=tuple(note for note in prompt_notes if note is not None),
+            room=request_room(planned_request_budget),
         ),
     )
 

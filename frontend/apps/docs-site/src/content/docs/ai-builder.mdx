@@ -426,10 +426,14 @@ When a model request for a turn could not carry everything, the conversation
 shows one muted line under your message, for example "Not everything fit in the
 model's request: 12 older messages". Select it to see what was left out or
 shortened, and when: while your message was read (your earlier messages and
-answers) or while the flow was drafted (older messages and confirmed
-assumptions). Where the model's context window was the limit, a model with a
+answers, attached files) or while the flow was drafted (older messages,
+confirmed assumptions, attached files, excerpts from the runs a review reads,
+and the space's tools). Where the model's context window was the limit, a model with a
 larger context window would see more; some limits are fixed by the Builder and
-do not depend on the model. The line appears on turns that completed, with or
+do not depend on the model, and some are set in your organisation's Builder
+settings. The confirm screen shows how much of each attached file the Builder
+took in before the flow was drafted; the line reports what each request of the
+turn carried, which can be less. The line appears on turns that completed, with or
 without an error. A turn that ended without completing (another send took over
 the session, the provider outcome is unknown, or the stream failed) shows it
 only if it had saved its messages before it ended.
@@ -437,13 +441,18 @@ only if it had saved its messages before it ended.
 API clients read the same value as `coverage` on the turn's user message in the
 session response. The turn's own message stream sends it once in a `coverage`
 event before `done`; a replay answered from the stored turn may not, so read
-it from the session. Each note has a `kind` (`count`), the `stage`
+it from the session. A note of kind `count` has the `stage`
 (`classification` or `proposal`), the `material` (`classification_sources`,
-`history_messages`, `requirement_assumptions`), the `total`, how many items
-were `omitted` and how many `shortened`, and the `reasons` (`model_room`,
-`fixed_limit`). Skip a note whose `kind` or `material` your client does not
-know: later releases may add kinds and materials. A turn that left nothing out
-has no `coverage` and no event.
+`history_messages`, `requirement_assumptions`, `attachment_files`,
+`run_excerpts`, `usable_tools`, `tool_schemas`, `unavailable_tool_names`), the
+`total`, how many items were `omitted` and how many `shortened`, and the
+`reasons` (`model_room`, `fixed_limit`, `configured_limit`). A note of kind
+`tool_catalog_unavailable` (stage `proposal`, material `tool_catalog`, reason
+`catalog_limit`) says the space's tool list is over its bounds, so no tool was
+listed and nothing is counted. Skip a note whose `kind` or `material`, or one of
+whose `reasons`, your client does not know: later releases may add kinds,
+materials and reasons. A turn that left nothing out has no `coverage` and no
+event.
 
 ## Review checklist
 

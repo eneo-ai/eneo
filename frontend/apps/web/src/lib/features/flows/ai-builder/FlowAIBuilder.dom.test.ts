@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { formatList } from "$lib/core/formatting/formatList";
 import { m } from "$lib/paraglide/messages";
 
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
@@ -3995,12 +3996,18 @@ describe("FlowAIBuilder conversation screen", () => {
           total: 3,
           omitted: 2,
           shortened: 0,
-          reasons: ["model_room"]
+          reasons: ["configured_limit"]
+        },
+        {
+          kind: "tool_catalog_unavailable",
+          stage: "proposal",
+          material: "tool_catalog",
+          reason: "catalog_limit"
         },
         {
           kind: "count",
           stage: "proposal",
-          material: "run_excerpts",
+          material: "a_later_material",
           total: 4,
           omitted: 1,
           shortened: 0,
@@ -4020,13 +4027,16 @@ describe("FlowAIBuilder conversation screen", () => {
 
     await openConversation();
 
-    // Mutants: the reload drops the stored coverage, the transcript does not
-    // pass it to the message, or a material a newer server stores breaks the
-    // render.
+    // Mutants: the reload drops the stored coverage or the unlisted tool
+    // catalogue, the transcript does not pass it to the message, or a
+    // material a newer server stores breaks the render.
     expect(
       screen.getByText(
         m.ai_builder_coverage_line({
-          parts: m.ai_builder_coverage_history_messages_omitted({ count: "2" })
+          parts: formatList([
+            m.ai_builder_coverage_history_messages_omitted({ count: "2" }),
+            m.ai_builder_coverage_tool_catalog_unavailable()
+          ])
         })
       )
     ).toBeTruthy();

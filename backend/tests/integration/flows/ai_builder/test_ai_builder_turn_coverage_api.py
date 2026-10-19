@@ -10,13 +10,15 @@ import random
 from contextlib import nullcontext
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from litellm.exceptions import BadRequestError
-from sqlalchemy import update
+from sqlalchemy import delete, select, update
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.database.tables.flow_tables import BuilderSessions
+from eneo.database.tables.mcp_server_table import MCPServers, MCPServerTools
 from eneo.flows.ai_builder import ai_builder_repo
 from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     MAX_SESSION_CONVERSATION_BYTES,
@@ -31,8 +33,13 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 )
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderRequestBudget
 from eneo.flows.ai_builder.ai_builder_turn_coverage import ProposalPromptCut
 from eneo.flows.ai_builder.planning_state import PlanningState
+from tests.integration.flows.ai_builder.test_ai_builder_space_tool_catalog import (
+    _saved_flow_id,
+    _seed_space_tools,
+)
 from tests.integration.flows.ai_builder.test_ai_builder_unsupported_saved_steps_api import (
     _drive_to_answer,
 )
@@ -43,7 +50,10 @@ from tests.integration.flows.test_ai_builder_session_api_regressions import (
     _create_ai_builder_session,
     _create_space_with_planner_model,
     _make_llm_response,
+    _reading_nothing_response,
     _route,
+    _send_builder_message,
+    _upload_reference_file,
     bearer_token,  # noqa: F401  (registers the fixture)
 )
 
@@ -176,6 +186,123 @@ async def test_a_turn_that_left_material_out_streams_and_stores_one_coverage(
         assert note["omitted"] + note["shortened"] == 1
 
 
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_turn_notes_the_attached_file_and_tools_its_requests_could_not_carry(
+    client,
+    bearer_token,  # noqa: F811
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name=f"AI Builder turn coverage files {uuid4().hex[:6]}",
+        planner_model_overrides={"max_input_tokens": 32_000},
+        planner_model_is_only_space_model=True,
+    )
+    tool_id = await _seed_space_tools(db_container, UUID(space_id))
+    flow_id = await _saved_flow_id(db_container, UUID(space_id))
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+        target_kind="edit",
+        flow_id=flow_id,
+    )
+    file_id = await _upload_reference_file(
+        client=client,
+        bearer_token=bearer_token,
+        content=_longer_than_the_model_window().encode(),
+    )
+
+    async def provider(**kwargs: object) -> object:
+        # The reading finds nothing; the proposal request is refused.
+        if "tools" in kwargs:
+            raise BadRequestError("rejected", model="m", llm_provider="p")
+        return _reading_nothing_response()
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=AsyncMock(side_effect=provider),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ),
+    ):
+        first = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message="Förbättra instruktionerna i flödet.",
+            file_ids=[file_id],
+        )
+        last, _, _ = await _drive_to_answer(
+            client=client, token=bearer_token, session_id=session_id, edit_context=None
+        )
+    reloaded = await client.get(
+        f"/api/v1/flows/ai-builder/sessions/{session_id}",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert reloaded.status_code == 200, reloaded.text
+    async with db_container() as container:
+        await container.session().execute(
+            delete(MCPServers).where(
+                MCPServers.id
+                == select(MCPServerTools.mcp_server_id)
+                .where(MCPServerTools.id == tool_id)
+                .scalar_subquery()
+            )
+        )
+    stored = {
+        message["message_id"]: message["coverage"]
+        for message in reloaded.json()["conversation"]
+    }
+    # The first turn's reading sent the file; a later turn's reading of the
+    # same messages is answered from the cache and sends none.
+    streamed = [
+        cast(
+            dict[str, Any], next(e["data"] for e in events if e["event"] == "coverage")
+        )
+        for events in (first, last)
+    ]
+    # Mutant: a note kind the turn stores is not the one it streams.
+    for live in streamed:
+        assert live["coverage"] == stored[live["message_id"]]
+    notes = {
+        (note["stage"], note["material"]): note
+        for live in streamed
+        for note in live["coverage"]["notes"]
+    }
+    file = {
+        "kind": "count",
+        "total": 1,
+        "omitted": 0,
+        "shortened": 1,
+        "reasons": ["model_room"],
+    }
+    tools = {**file, "material": "usable_tools", "total": 2, "omitted": 2}
+    # Mutants: the reading's or the proposal's request does not report the
+    # attached file it carried in part; the attachment, fitted first, left
+    # the space's two usable tools no room and that goes unsaid.
+    assert [
+        notes.get(key)
+        for key in (
+            ("classification", "attachment_files"),
+            ("proposal", "attachment_files"),
+            ("proposal", "usable_tools"),
+        )
+    ] == [
+        {**file, "stage": "classification", "material": "attachment_files"},
+        {**file, "stage": "proposal", "material": "attachment_files"},
+        {**tools, "stage": "proposal", "shortened": 0},
+    ]
+
+
 async def _session_with_a_turn_that_left_history_out(
     *, client, token: str, completion_model_factory, db_container, repo, user
 ) -> SessionSendTurn:
@@ -197,7 +324,15 @@ async def _session_with_a_turn_that_left_history_out(
         repo=repo, session_id=session.id, tenant_id=user.tenant_id
     )
     turn.coverage.prepare_proposal(ProposalPromptCut(history_groups_left_out=1))
-    turn.coverage.record_proposal_call(history_in_request=1, history_sent=1)
+    budget = AIBuilderRequestBudget(
+        capacity=ModelCapacity(100_000, 1_000),
+        safety_buffer_tokens=0,
+        timeout_seconds=30.0,
+    ).plan(required_input_tokens=1)
+    assert budget is not None
+    turn.coverage.record_proposal_call(
+        history_in_request=1, history_sent=1, request_budget=budget
+    )
     return turn
 
 

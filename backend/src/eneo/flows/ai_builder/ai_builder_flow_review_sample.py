@@ -16,7 +16,8 @@ the request that carries them, against that model's window: see
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 from uuid import UUID
@@ -430,6 +431,40 @@ def fit_excerpts(
 
 
 _FITTED: frozenset[str] = frozenset({"included", "truncated_by_runtime"})
+
+
+@dataclass(frozen=True, slots=True)
+class ExcerptCut:
+    """What a fit did to the items it allocates room to (a recorded text
+    whole or as a runtime preview): how many there were, how many it left
+    out and how many it carried in part."""
+
+    readable: int
+    omitted: int
+    shortened: int
+
+
+def excerpt_cut(
+    items: Iterable[Sequence[tuple[ReviewSampleExcerpt, ReviewSampleExcerpt]]],
+) -> ExcerptCut:
+    """The cut of each item, given as the excerpts it was read into (one, or
+    a beginning and an end), each as offered to the fit and as returned."""
+
+    readable = omitted = shortened = 0
+    for pairs in items:
+        fitted = [
+            (before, after) for before, after in pairs if before.availability in _FITTED
+        ]
+        offered_chars = sum(len(before.text or "") for before, _ in fitted)
+        if not offered_chars:
+            continue
+        readable += 1
+        sent_chars = sum(len(after.text or "") for _, after in fitted)
+        if not sent_chars:
+            omitted += 1
+        elif sent_chars < offered_chars:
+            shortened += 1
+    return ExcerptCut(readable=readable, omitted=omitted, shortened=shortened)
 
 
 def fit_sample_excerpts(

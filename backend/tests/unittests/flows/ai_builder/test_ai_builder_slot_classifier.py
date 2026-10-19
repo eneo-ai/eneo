@@ -92,6 +92,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
 from eneo.flows.ai_builder.ai_builder_tools import validate_native_strict_schema
+from eneo.flows.ai_builder.ai_builder_turn_coverage import CountCoverageNote
 from eneo.flows.ai_builder.planning_state import (
     CheckpointProducerKind,
     ExactNamedResultPlacement,
@@ -3698,8 +3699,12 @@ async def test_slot_classification_provider_failure_uses_typed_disposition(
                 tenant_id=tenant_id,
                 usage_tracker=usage_tracker,
                 provider_gate=provider_work_gate(before_provider_call),
+                coverage=(_READING_LEFT_OUT_A_MESSAGE,),
             )
 
+    # Mutant: coverage counted only once the provider answered; this request
+    # was sent.
+    assert usage_tracker.coverage.summary() is not None
     expected_exception = (
         AIBuilderKnownProviderRejectionException
         if expected_committed
@@ -8004,6 +8009,17 @@ async def test_a_classification_stopped_by_lost_ownership_ends_as_lease_lost_not
     assert isinstance(stopped["provider_elapsed_ms"], int)
 
 
+# A reading request that left out an earlier message.
+_READING_LEFT_OUT_A_MESSAGE = CountCoverageNote(
+    stage="classification",
+    material="classification_sources",
+    total=2,
+    omitted=1,
+    shortened=0,
+    reasons=["model_room"],
+)
+
+
 @pytest.mark.asyncio
 async def test_a_refused_classifier_admission_raises_the_turns_own_error() -> None:
     from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
@@ -8014,6 +8030,9 @@ async def test_a_refused_classifier_admission_raises_the_turns_own_error() -> No
     )
     litellm_client = MagicMock()
     litellm_client.acompletion = AsyncMock()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-refused", model="gpt-test", target_kind=TargetKind.CREATE
+    )
 
     with patch.object(error_contract_module.logger, "info") as event_log:
         with pytest.raises(AIBuilderBadRequestException) as exc_info:
@@ -8023,9 +8042,13 @@ async def test_a_refused_classifier_admission_raises_the_turns_own_error() -> No
                 classification_input=_classification_input(f"text-{uuid4()}"),
                 allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
                 tenant_id=uuid4(),
+                usage_tracker=tracker,
                 provider_gate=provider_work_gate(AsyncMock(side_effect=lost)),
+                coverage=(_READING_LEFT_OUT_A_MESSAGE,),
             )
 
     assert exc_info.value is lost
     litellm_client.acompletion.assert_not_called()
     event_log.assert_not_called()
+    # Mutant: coverage counted before the turn admitted the request.
+    assert tracker.coverage.summary() is None

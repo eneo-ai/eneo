@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.completion_models.domain.model_capacity import ModelCapacity
+from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     build_proposal_prepared,
 )
@@ -26,6 +27,7 @@ from eneo.flows.ai_builder.ai_builder_tool_catalog import (
     TOOL_CATALOG_OVERVIEW_MAX_CHARS,
     TOOL_CATALOG_SCHEMA_MAX_CHARS,
     AIBuilderToolCatalogProjection,
+    AIBuilderToolCatalogTooLarge,
     fit_tool_catalog_projection,
     render_tool_catalog_block,
 )
@@ -384,6 +386,62 @@ def _schema_tokens(tool_refs: tuple[str, ...]) -> int:
         ),
         "openai/gpt-5.4",
     )
+
+
+@pytest.mark.parametrize(
+    ("tool_options", "notes"),
+    [
+        (
+            FlowToolOptionsOverBound(),
+            [
+                {
+                    "kind": "tool_catalog_unavailable",
+                    "stage": "proposal",
+                    "material": "tool_catalog",
+                    "reason": "catalog_limit",
+                }
+            ],
+        ),
+        (_space(_option("Cases", "lookup_case")), []),
+    ],
+    ids=["over_bound", "not_offered"],
+)
+def test_a_create_turn_notes_the_tool_catalogue_its_prompt_says_is_not_shown(
+    tool_options: SpaceToolOptions, notes: list[dict[str, object]]
+) -> None:
+    # A create session whose person has not chosen to use the space's tools:
+    # an over-bound list still reaches the prompt as "not shown", a list that
+    # fits is not offered at all.
+    prepared = build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        conversation=[ConversationMessage(role="user", content="Sammanfatta.")],
+        planning_state=_document_architecture_state(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], tool_options=tool_options
+        ),
+        flow=None,
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-5.4",
+        capacity=ModelCapacity(128_000, 4_096),
+        budget_policy=_budget_policy(),
+        attachment_file_count=0,
+        current_turn_start=0,
+    )
+
+    # Mutants: a catalogue the prompt never offered gets a note, or the
+    # catalogue the prompt calls too large goes unnoted.
+    assert [note.model_dump(mode="json") for note in prepared.prompt_cut.notes] == notes
+    assert (
+        render_tool_catalog_block(AIBuilderToolCatalogTooLarge())
+        in str(prepared.llm_messages[0]["content"])
+    ) == bool(notes)
 
 
 def test_a_space_without_tools_adds_nothing_to_the_prompt() -> None:

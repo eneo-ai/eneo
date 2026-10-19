@@ -16543,10 +16543,18 @@ export interface components {
       kind?: "count";
       /**
        * Material
-       * @description What was counted: `classification_sources` (the user's messages and answer values the reading takes in), `history_messages` (earlier conversation messages; a reply and the tool results it called for count once) or `requirement_assumptions` (confirmed assumptions).
+       * @description What was counted: `classification_sources` (the user's messages and answer values the reading takes in), `history_messages` (earlier conversation messages; a reply and the tool results it called for count once), `requirement_assumptions` (confirmed assumptions), `attachment_files` (attached files with readable text: omitted when the request carries none of a file's text, shortened when it carries part), `run_excerpts` (excerpts from the runs a review-backed proposal reads), `usable_tools` (the space's tools a flow may use, omitted when not listed), `tool_schemas` (the input schemas of the listed tools, omitted when marked as not shown) or `unavailable_tool_names` (the tools the space refuses, named with their refusal).
        * @enum {string}
        */
-      material: "classification_sources" | "history_messages" | "requirement_assumptions";
+      material:
+        | "classification_sources"
+        | "history_messages"
+        | "requirement_assumptions"
+        | "attachment_files"
+        | "run_excerpts"
+        | "usable_tools"
+        | "tool_schemas"
+        | "unavailable_tool_names";
       /**
        * Omitted
        * @description The most items one sent request of the stage left out (over a turn's repair and continuation requests, the largest, never a sum).
@@ -16554,9 +16562,9 @@ export interface components {
       omitted: number;
       /**
        * Reasons
-       * @description Why, each once: `model_room` (the model's context window had no room for more) or `fixed_limit` (a fixed Builder limit).
+       * @description Why, each once: `model_room` (the model's context window had no room for more), `fixed_limit` (a fixed Builder limit) or `configured_limit` (a limit set in the organisation's Builder settings). Later releases may add reasons.
        */
-      reasons: ("model_room" | "fixed_limit")[];
+      reasons: ("model_room" | "fixed_limit" | "configured_limit")[];
       /**
        * Shortened
        * @description Items a sent request carried only in part. An omitted item is not counted here too.
@@ -39921,6 +39929,38 @@ export interface components {
       tool_call_id: string;
     };
     /**
+     * ToolCatalogUnavailableNote
+     * @description The proposal's sent requests listed none of the space's tools because
+     *     the space offers more than the tool list's bounds (1,000 tools, 8 MiB of
+     *     text): the tools are not known, so the note gives no counts.
+     */
+    ToolCatalogUnavailableNote: {
+      /**
+       * Kind
+       * @description The note's shape: the space's tool list is over its bounds, so no tool was listed and nothing is counted.
+       * @constant
+       */
+      kind: "tool_catalog_unavailable";
+      /**
+       * Material
+       * @description The space's MCP tools.
+       * @constant
+       */
+      material: "tool_catalog";
+      /**
+       * Reason
+       * @description `catalog_limit`: the space offers more tools than the tool list's bounds allow.
+       * @constant
+       */
+      reason: "catalog_limit";
+      /**
+       * Stage
+       * @description Only the proposal lists the space's tools.
+       * @constant
+       */
+      stage: "proposal";
+    };
+    /**
      * ToolChangePublic
      * @description DTO for a tool change detected during sync.
      */
@@ -40567,7 +40607,10 @@ export interface components {
        * Notes
        * @description One note per stage and material that left something out; the reading's before the proposal's.
        */
-      notes: components["schemas"]["CountCoverageNote"][];
+      notes: (
+        | components["schemas"]["CountCoverageNote"]
+        | components["schemas"]["ToolCatalogUnavailableNote"]
+      )[];
       /**
        * Schema Version
        * @default 1

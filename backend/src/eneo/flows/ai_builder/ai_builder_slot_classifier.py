@@ -202,10 +202,11 @@ async def classify_slots(
     capacity: ModelCapacity,
     budget_policy: AIBuilderBudgetPolicy,
     read_declarations: bool = True,
-    coverage: CountCoverageNote | None = None,
+    coverage: tuple[CountCoverageNote, ...] = (),
 ) -> SlotClassificationAttempt:
     """``coverage`` is what packing this input left out of the user's
-    messages and answers; it is the turn's once the request is sent."""
+    messages, answers and attached files; it is the turn's once the request
+    is sent."""
 
     slot_values = normalize_slot_classification_values(allowed_slot_values)
     transport = resolve_slot_classification_transport(
@@ -319,8 +320,13 @@ async def classify_slots(
         call = usage_tracker.begin_call(
             call_kind="slot_classification", request_budget=request_budget
         )
-        usage_tracker.coverage.record_classification_call(coverage)
     timing = ObservedTiming()
+
+    def count_coverage(_sent: Mapping[str, Any]) -> None:
+        # Called once the turn has admitted the request, right before it is
+        # sent: a refused admission sends nothing and counts nothing.
+        if usage_tracker is not None:
+            usage_tracker.coverage.record_classification_call(coverage)
 
     try:
         response = await complete_with_silence_deadline(
@@ -337,6 +343,7 @@ async def classify_slots(
                 "drop_params": True,
                 **completion_kwargs,
             },
+            observe_sdk_input=count_coverage,
             observe_timing=timing,
             gate=provider_gate,
         )

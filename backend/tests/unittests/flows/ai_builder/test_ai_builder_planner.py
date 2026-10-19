@@ -160,6 +160,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 )
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
+    AIBuilderPlannedRequestBudget,
     AIBuilderRequestBudget,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
@@ -193,7 +194,10 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     ReviseArchitecture,
     resolve_turn_control,
 )
-from eneo.flows.ai_builder.ai_builder_turn_coverage import ProposalPromptCut
+from eneo.flows.ai_builder.ai_builder_turn_coverage import (
+    ProposalPromptCut,
+    TurnCoverageRecorder,
+)
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     prepare_user_question_metadata,
 )
@@ -2833,6 +2837,23 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
     assert isinstance(system_content, str)
     assert attachment_text not in system_content
     assert "ATTACHMENT-EVIDENCE" in system_content
+    # Mutant: the note reads the coverage the attachment was admitted with
+    # (the whole file), not what this request carries of it.
+    assert [
+        note.model_dump(mode="json")
+        for note in prepared.prompt_cut.notes
+        if note.material == "attachment_files"
+    ] == [
+        {
+            "kind": "count",
+            "stage": "proposal",
+            "material": "attachment_files",
+            "total": 1,
+            "omitted": 0,
+            "shortened": 1,
+            "reasons": ["model_room"],
+        }
+    ]
 
     assert baseline.request_budget is not None
     # A window that cannot carry the protected messages and the schema at all
@@ -6748,10 +6769,17 @@ def test_a_proposal_prompt_reports_the_confirmed_assumptions_it_left_out() -> No
     )
 
     # Mutant: the assumptions the model room cut are reported as replayed.
-    assert (
-        prepared.prompt_cut.confirmed_assumptions,
-        prepared.prompt_cut.replayed_assumptions,
-    ) == (len(disclosure.assumptions), 0)
+    assert [note.model_dump(mode="json") for note in prepared.prompt_cut.notes] == [
+        {
+            "kind": "count",
+            "stage": "proposal",
+            "material": "requirement_assumptions",
+            "total": len(disclosure.assumptions),
+            "omitted": len(disclosure.assumptions),
+            "shortened": 0,
+            "reasons": ["model_room"],
+        }
+    ]
 
 
 def _review_evidence(excerpt_chars: int):
@@ -6958,6 +6986,49 @@ def test_the_investigation_evidence_share_is_bounded_by_the_system_bound() -> No
         review_evidence_max_input_tokens=None, window=1_000_000, excerpt_chars=2_000
     )
     assert "avklippt efter" not in short.message_groups[0].messages[0]["content"]
+
+
+@pytest.mark.parametrize(
+    ("window", "input_cap", "evidence_limit", "reason"),
+    [
+        (1_000_000, None, 16_000, "fixed_limit"),
+        (1_000_000, None, 2_000, "configured_limit"),
+        (12_000, None, 16_000, "model_room"),
+        (1_000_000, 12_000, 16_000, "configured_limit"),
+    ],
+    ids=["system_bound", "organisation_limit", "window", "organisation_input_cap"],
+)
+def test_a_review_backed_proposal_notes_which_bound_cut_its_run_excerpts(
+    window: int, input_cap: int | None, evidence_limit: int, reason: str
+) -> None:
+    prepared = _build_review_backed_proposal(
+        review_evidence_max_input_tokens=input_cap,
+        window=window,
+        review_investigation_evidence_max_tokens=evidence_limit,
+    )
+    assert isinstance(prepared.request_budget, AIBuilderPlannedRequestBudget)
+    recorder = TurnCoverageRecorder()
+    recorder.prepare_proposal(prepared.prompt_cut)
+    recorder.record_proposal_call(
+        history_in_request=0, history_sent=0, request_budget=prepared.request_budget
+    )
+    summary = recorder.summary()
+
+    # Mutants: the reason is not the bound that cut (the evidence limit
+    # against the room the window leaves the evidence), a limit or an input
+    # cap the organisation set is named fixed or the model's room.
+    assert summary is not None
+    assert [note.model_dump(mode="json") for note in summary.notes] == [
+        {
+            "kind": "count",
+            "stage": "proposal",
+            "material": "run_excerpts",
+            "total": 1,
+            "omitted": 0,
+            "shortened": 1,
+            "reasons": [reason],
+        }
+    ]
 
 
 def test_review_backed_proposal_preserves_output_outside_its_input_cap() -> None:
