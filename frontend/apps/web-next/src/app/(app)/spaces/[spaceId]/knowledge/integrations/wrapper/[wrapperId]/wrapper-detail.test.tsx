@@ -996,10 +996,12 @@ describe("WrapperDetail documents", () => {
     const next = screen.getByRole("button", { name: "Gå till nästa sida" });
     next.focus();
     fireEvent.click(next);
-
-    expect(await screen.findByRole("button", { name: /Dokument 51\.docx/ })).toBeTruthy();
+    // The last page is known from the first one: the button turns disabled at once,
+    // and a browser drops its focus then (jsdom does not, so do it here).
     expect(next.hasAttribute("disabled")).toBe(true);
     focusFixup();
+
+    expect(await screen.findByRole("button", { name: /Dokument 51\.docx/ })).toBeTruthy();
     await waitFor(
       () => expect(document.activeElement).toBe(screen.getByRole("region", { name: "Mallar" })),
       { timeout: 1500 }
