@@ -412,9 +412,10 @@ async def cleanup_orphaned_subscriptions(container: Container):
 # task runs its whole body in ONE transaction committed only at the end, so a hard
 # crash rolls back the in-flight IN_PROGRESS write and the row reverts to its last
 # committed state (QUEUED). The reaper therefore targets BOTH QUEUED and IN_PROGRESS
-# (see JobRepository.mark_stale_jobs_failed). The timeout must exceed the longest
-# legitimate full sync of a large site AND any normal queue wait, so a slow-but-live
-# job is never killed.
+# (see JobRepository.mark_stale_jobs_failed). A running sync holds its job row
+# locked until it commits and the reaper skips locked rows, so a live sync is
+# never failed and never blocks the reaper; the timeout only has to exceed a
+# normal queue wait.
 SHAREPOINT_SYNC_TASKS = ["pull_sharepoint_content", "sync_sharepoint_delta"]
 SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES = 120
 
