@@ -1,5 +1,5 @@
 import type { IntegrationKnowledge } from "@eneo/eneo-js";
-import { page } from "@vitest/browser/context";
+import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
@@ -97,7 +97,7 @@ describe("SharePointWrapperActions resync all", () => {
     // Each item reads as queued until the worker reports on it or its job ends.
     expect(api.addJob).toHaveBeenCalledTimes(items.length);
     expect(api.startFastUpdatePolling).toHaveBeenCalledOnce();
-    expect(get(pendingSyncs)).toEqual(
+    expect(get(pendingSyncs).map(({ jobId, knowledgeId }) => ({ jobId, knowledgeId }))).toEqual(
       items.map((item) => ({ jobId: `job-${item.id}`, knowledgeId: item.id }))
     );
     expect(api.toastSuccess).toHaveBeenCalledWith(
@@ -133,6 +133,51 @@ describe("SharePointWrapperActions resync all", () => {
     await confirmResync();
     expect(api.triggerFullSync).toHaveBeenCalledTimes(items.length * 2);
   });
+
+  it("sends a few at a time", async () => {
+    let inFlight = 0;
+    let most = 0;
+    api.triggerFullSync.mockImplementation(
+      async ({ knowledge }: { knowledge: IntegrationKnowledge }) => {
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        inFlight -= 1;
+        return jobFor({ knowledge });
+      }
+    );
+    await openResyncDialog();
+    await confirmResync();
+
+    expect(api.triggerFullSync).toHaveBeenCalledTimes(items.length);
+    expect(most).toBe(4);
+  });
+});
+
+describe("SharePointWrapperActions with many folders", () => {
+  it("names the first few failed folders and only counts the rest", async () => {
+    const many = Array.from({ length: 8 }, (_, index) => item(`f${index}`));
+    api.triggerFullSync.mockReset().mockRejectedValue(new Error("boom"));
+    api.toastError.mockClear();
+    render(SharePointWrapperActions, {
+      wrapperId: "w-2",
+      wrapperName: "Arkiv",
+      itemCount: many.length,
+      items: many,
+      canEdit: true,
+      canDelete: true
+    });
+    await openResyncDialog();
+    await confirmResync();
+
+    expect(api.toastError).toHaveBeenCalledWith(
+      m.resync_all_wrapper_partial_failure({
+        failed: 8,
+        total: 8,
+        names: "Item f0, Item f1, Item f2, Item f3, Item f4, …"
+      })
+    );
+  });
 });
 
 describe("SharePointWrapperActions while a sync is active", () => {
@@ -153,5 +198,15 @@ describe("SharePointWrapperActions while a sync is active", () => {
       .element(page.getByRole("menuitem", { name: m.integration_sync_already_running() }))
       .toHaveAttribute("aria-disabled", "true");
     expect(page.getByRole("menuitem", { name: m.resync_all_wrapper() }).elements()).toHaveLength(0);
+
+    // Reachable with the arrow keys, so the reason is heard, and choosing it does nothing.
+    const reason = page.getByRole("menuitem", { name: m.integration_sync_already_running() });
+    for (let step = 0; step < 3 && document.activeElement !== reason.element(); step++) {
+      await userEvent.keyboard("{ArrowDown}");
+    }
+    expect(document.activeElement).toBe(reason.element());
+    await userEvent.keyboard("{Enter}");
+    expect(page.getByRole("alertdialog").elements()).toHaveLength(0);
+    expect(api.triggerFullSync).not.toHaveBeenCalled();
   });
 });

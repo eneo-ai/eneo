@@ -203,7 +203,7 @@ describe("admin integrations page: SharePoint credential health", () => {
     await expect
       .element(
         page.getByText(
-          m.sharepoint_health_watch_issues({ active: 0, total: 1, expired: 1, failing: 0 })
+          m.sharepoint_health_watch_issues_expired({ active: 0, total: 1, expired: 1 })
         )
       )
       .toBeVisible();

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import { get, writable } from "svelte/store";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
@@ -27,8 +27,7 @@
   } from "$lib/features/integrations/sources";
   import {
     announceProblemCount,
-    announceSourceChange,
-    type SourceSnapshot
+    SourceAnnouncer
   } from "$lib/features/integrations/syncAnnouncements";
   import { useSyncProgress } from "$lib/features/integrations/useSyncProgress.svelte";
   import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
@@ -84,6 +83,23 @@
     return source.items.some((item) => item.id === requested) ? requested : null;
   });
   let selectedItem = $derived(source.items.find((item) => item.id === selectedId) ?? null);
+
+  // Picking a folder in the overview replaces the overview, link and all; focus would fall to the body.
+  let contentView = $state<HTMLElement | null>(null);
+  let shownSelection: string | null | undefined;
+  $effect(() => {
+    const id = selectedId;
+    if (shownSelection === undefined || id === shownSelection) {
+      shownSelection = id;
+      return;
+    }
+    shownSelection = id;
+    void tick().then(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body) return;
+      contentView?.querySelector<HTMLElement>("[data-content-heading]")?.focus();
+    });
+  });
 
   // --- Skipped files, for the problems and the counts ---
 
@@ -149,26 +165,17 @@
   // One polite region speaks the sync's course and a changed problem count; the
   // count while syncing is throttled so a 2 s poll does not talk over the user.
   let announcement = $state("");
-  let previousSnapshot: SourceSnapshot | null = null;
-  let progressAnnouncedAt = 0;
+  const announcer = new SourceAnnouncer();
   let previousProblemCount: number | null = null;
   $effect(() => {
-    const next: SourceSnapshot = { state: summary.state, progress: summary.progress };
+    const current = summary;
     const nextProblemCount = problems ? problemCount : null;
     untrack(() => {
-      const now = Date.now();
-      const text = announceSourceChange(
-        source.name,
-        previousSnapshot,
-        next,
-        now - progressAnnouncedAt
-      );
-      previousSnapshot = next;
+      const text = announcer.next(source.name, current, Date.now());
       const problemText = announceProblemCount(previousProblemCount, nextProblemCount);
       if (nextProblemCount !== null) previousProblemCount = nextProblemCount;
       const message = [text, problemText].filter(Boolean).join(". ");
       if (message) announcement = message;
-      if (text && next.progress) progressAnnouncedAt = now;
     });
   });
 
@@ -304,10 +311,11 @@
         {/if}
       </div>
 
+      <!-- Not a live region: the page's announcement already says a sync failed, and the
+           banner comes back on every tab switch. -->
       {#if summary.failedItems.length > 0 && $tab !== "problems"}
         <div
           class="border-negative-default bg-negative-dimmer text-negative-stronger flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3 text-sm"
-          role="status"
         >
           <TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           <div class="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -403,7 +411,7 @@
                 hrefFor={folderHref}
               />
             </div>
-            <div class="min-w-0 flex-[999_1_32rem]">
+            <div class="min-w-0 flex-[999_1_32rem]" data-focus-region bind:this={contentView}>
               {#if selectedItem}
                 {#key selectedItem.id}
                   <FolderDocuments

@@ -68,8 +68,22 @@ function describeLimit(params: SkipReason["params"]): string {
   }
 }
 
+// The backend names unsupported types in English; the names without words pass through.
+const TYPE_LABELS: Record<string, () => string> = {
+  image: m.skip_reason_type_image,
+  video: m.skip_reason_type_video,
+  audio: m.skip_reason_type_audio,
+  "legacy Word .doc, save as .docx": m.skip_reason_type_legacy_word,
+  "legacy PowerPoint .ppt, save as .pptx": m.skip_reason_type_legacy_powerpoint,
+  "rich text .rtf": m.skip_reason_type_rtf
+};
+
+function typeLabel(label: string): string {
+  return Object.hasOwn(TYPE_LABELS, label) ? TYPE_LABELS[label]() : label;
+}
+
 const DESCRIPTIONS: Record<SkipReasonCode, (params: SkipReason["params"]) => string> = {
-  unsupported_type: (p) => m.skip_reason_unsupported_type({ label: text(p, "label") }),
+  unsupported_type: (p) => m.skip_reason_unsupported_type({ label: typeLabel(text(p, "label")) }),
   no_text_layer: () => m.skip_reason_no_text_layer(),
   empty_content: () => m.skip_reason_empty_content(),
   file_too_large: (p) => m.skip_reason_file_too_large({ limit: text(p, "limit_mb") }),
@@ -96,5 +110,7 @@ export function skipReasonKind(skip: SkipReason): SkipReasonCode {
 export function describeSkipReason(skip: SkipReason): string {
   const describe = skip.code ? DESCRIPTIONS[skip.code] : undefined;
   const description = describe ? describe(skip.params) : (skip.reason ?? "").trim();
-  return skip.retry ? m.skip_reason_with_retry({ reason: description }) : description;
+  if (!skip.retry) return description;
+  // The retry note is a sentence of its own; a reason ending in a full stop would double it.
+  return m.skip_reason_with_retry({ reason: description.replace(/\.\s*$/, "") });
 }

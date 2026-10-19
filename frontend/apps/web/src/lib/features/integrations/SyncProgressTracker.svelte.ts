@@ -12,7 +12,7 @@ type Options = {
 /**
  * Polls the space's live sync progress: quickly while something syncs or a queued
  * sync waits for a worker, slowly otherwise. Stops for good when the backend does
- * not offer the endpoint.
+ * not offer the endpoint or refuses the space.
  */
 export class SyncProgressTracker {
   byId = $state<Record<string, IntegrationSyncProgress>>({});
@@ -70,7 +70,9 @@ export class SyncProgressTracker {
       if (finished.length > 0) this.#onSettled?.(finished);
     } catch (error) {
       if (generation !== this.#generation) return;
-      if ((error as { status?: number })?.status === 404) {
+      const status = (error as { status?: number })?.status;
+      // No endpoint (an older backend), or no access to the space any more: asking again won't help.
+      if (status === 404 || status === 403 || status === 401) {
         this.#unavailable = true;
         this.stop();
         return;

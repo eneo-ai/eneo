@@ -1,43 +1,56 @@
 import {
-  syncAnnouncement,
+  SyncAnnouncer,
   problemCountChanged,
+  type Snapshot,
+  type Transition
+} from "@eneo/eneo-js/integrations/sync-announcements";
+import { m } from "$lib/paraglide/messages";
+import type { SourceSummary } from "./sources";
+
+export {
+  OUTCOME_WAIT_MS,
   PROGRESS_ANNOUNCE_INTERVAL_MS
 } from "@eneo/eneo-js/integrations/sync-announcements";
-export { PROGRESS_ANNOUNCE_INTERVAL_MS };
-import { m } from "$lib/paraglide/messages";
-import type { SourceState } from "./sources";
-import type { SyncProgressSummary } from "./syncProgress";
 
-/** A running sync's count is spoken at most this often; phase changes always are. */
+type AnnouncedSummary = Pick<
+  SourceSummary,
+  "state" | "progress" | "lastSyncedAt" | "lastSyncAttemptedAt" | "failedItems"
+>;
 
-export type SourceSnapshot = {
-  state: SourceState;
-  progress: Pick<SyncProgressSummary, "phase" | "done" | "total" | "indexed" | "skipped"> | null;
-};
+/** What of a source's summary its announcements follow. */
+export function sourceSnapshot(summary: AnnouncedSummary): Snapshot {
+  const { progress } = summary;
+  return {
+    state: summary.state,
+    progress: progress && {
+      phase: progress.phase,
+      done: progress.done,
+      total: progress.total,
+      background: progress.background
+    },
+    outcome: [
+      summary.lastSyncedAt ?? "",
+      summary.lastSyncAttemptedAt ?? "",
+      ...summary.failedItems.map((item) => item.id).sort()
+    ].join("|"),
+    failures: summary.failedItems.map(
+      (item) => `${item.id}@${item.metadata?.last_sync_attempted_at ?? ""}`
+    )
+  };
+}
 
-/**
- * What a screen reader should hear when a source's sync state moves from
- * `previous` to `next`, or null. The first snapshot of a page is not news.
- * `sinceProgressAnnounced` is the time since the last spoken progress count;
- * a list of many sources passes `speakProgress: false` and says only when
- * syncs start, finish or queue.
- */
-export function announceSourceChange(
-  name: string,
-  previous: SourceSnapshot | null,
-  next: SourceSnapshot,
-  sinceProgressAnnounced: number,
-  { speakProgress = true }: { speakProgress?: boolean } = {}
-): string | null {
-  const transition = syncAnnouncement(previous, next, sinceProgressAnnounced, { speakProgress });
-  if (!transition) return null;
+function describe(name: string, transition: Transition): string {
   switch (transition.kind) {
     case "started":
       return m.integration_announce_sync_started({ name });
-    case "stopped":
-      return m.integration_announce_sync_stopped({ name });
     case "queued":
       return m.integration_announce_sync_queued({ name });
+    case "finished":
+      return m.integration_announce_sync_finished({ name });
+    case "failed":
+      return m.integration_announce_sync_failed({ name });
+    case "stopped":
+      return m.integration_announce_sync_stopped({ name });
     case "progress":
       return transition.total === null
         ? m.integration_announce_sync_progress({ name, count: transition.done })
@@ -46,6 +59,20 @@ export function announceSourceChange(
             done: transition.done,
             total: transition.total
           });
+  }
+}
+
+/** One source's announcements in the viewer's language; SyncAnnouncer holds the rules. */
+export class SourceAnnouncer {
+  #announcer: SyncAnnouncer;
+
+  constructor(options?: ConstructorParameters<typeof SyncAnnouncer>[0]) {
+    this.#announcer = new SyncAnnouncer(options);
+  }
+
+  next(name: string, summary: AnnouncedSummary, now: number): string | null {
+    const transition = this.#announcer.next(sourceSnapshot(summary), now);
+    return transition ? describe(name, transition) : null;
   }
 }
 

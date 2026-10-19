@@ -167,7 +167,11 @@ describe("FolderDocuments", () => {
     await vi.advanceTimersByTimeAsync(300);
 
     expect(lastDocumentsCall()).toMatchObject({ q: "zzz", offset: 0 });
-    await expect.element(page.getByText(m.no_results_found())).toBeVisible();
+    // Shown, and said once in the status line.
+    await expect.poll(() => page.getByText(m.no_results_found()).elements().length).toBe(2);
+    await expect
+      .element(page.getByRole("status").getByText(m.no_results_found()))
+      .toBeInTheDocument();
   });
 
   it("toggles the sort column and order through the API and announces it", async () => {
@@ -186,6 +190,13 @@ describe("FolderDocuments", () => {
     await sortBySize.click();
     expect(lastDocumentsCall()).toMatchObject({ sort: "size", order: "desc" });
     await expect.poll(headerSort).toBe("descending");
+    await expect
+      .element(
+        page
+          .getByRole("status")
+          .getByText(m.integration_documents_showing_range({ from: 1, to: 1, total: 1 }))
+      )
+      .toBeInTheDocument();
   });
 
   it("pages forward and falls back to the last page when documents disappeared meanwhile", async () => {
@@ -286,7 +297,9 @@ describe("FolderDocuments", () => {
     await expect.element(feed.getByText(m.integration_live_indexed())).toBeVisible();
     // The reason is on screen, not only in a tooltip.
     await expect
-      .element(feed.getByText(m.skip_reason_unsupported_type({ label: "image" })))
+      .element(
+        feed.getByText(m.skip_reason_unsupported_type({ label: m.skip_reason_type_image() }))
+      )
       .toBeVisible();
     await expectNoAxeViolations();
   });

@@ -500,6 +500,14 @@
       createdItems.forEach((item) => {
         if (item.job) addJob(item.job);
       });
+      // One notice for the whole import; the first job's id names the batch.
+      const batch =
+        createdItems.length > 1 && createdItems[0].job
+          ? {
+              batchId: createdItems[0].job.id,
+              batchName: requiresWrapperName ? wrapperName.trim() : site.name
+            }
+          : {};
       trackImports(
         createdItems.flatMap((item) =>
           item.job && item.integration_knowledge_id
@@ -508,7 +516,8 @@
                   jobId: item.job.id,
                   knowledgeId: item.integration_knowledge_id,
                   name: item.name,
-                  spaceRouteId: $currentSpace.routeId
+                  spaceRouteId: $currentSpace.routeId,
+                  ...batch
                 }
               ]
             : []
@@ -891,11 +900,15 @@
                 {m.integration_import_complete_title()}
               </h3>
               <p class="text-muted-foreground mt-1 max-w-md text-sm">
-                {m.integration_import_complete_description({ count: importResult.queued })}
+                {importResult.queued === 1
+                  ? m.integration_import_complete_description_one()
+                  : m.integration_import_complete_description({ count: importResult.queued })}
               </p>
               {#if importResult.failed > 0}
                 <p class="text-warning-stronger mt-1 max-w-md text-sm">
-                  {m.integration_import_complete_failed({ failed: importResult.failed })}
+                  {importResult.failed === 1
+                    ? m.integration_import_complete_failed_one()
+                    : m.integration_import_complete_failed({ failed: importResult.failed })}
                 </p>
               {/if}
             </div>

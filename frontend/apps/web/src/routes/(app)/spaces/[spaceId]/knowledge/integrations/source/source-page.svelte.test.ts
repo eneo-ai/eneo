@@ -298,7 +298,7 @@ describe("source page", () => {
   });
 
   it("speaks a folder's sync starting and finishing in a polite live region", async () => {
-    showWrapper();
+    const { rerender } = showWrapper();
     await expect
       .element(page.getByRole("navigation", { name: m.integration_source_folders() }))
       .toBeVisible();
@@ -311,9 +311,43 @@ describe("source page", () => {
     currentSpace.set({ ...space });
     await expect.poll(live).toBe(m.integration_announce_sync_started({ name: "Kommunstyrelsen" }));
 
+    // The progress ends before the rows say how; the end is spoken once they do.
     api.getSyncProgress.mockResolvedValue({ items: [] });
     currentSpace.set({ ...space });
-    await expect.poll(live).toBe(m.integration_announce_sync_stopped({ name: "Kommunstyrelsen" }));
+    await expect.poll(() => api.getSyncProgress.mock.calls.length).toBeGreaterThan(2);
+    expect(live()).toBe(m.integration_announce_sync_started({ name: "Kommunstyrelsen" }));
+    const synced = knowledge(
+      "ik-a",
+      "Protokoll",
+      {},
+      { last_synced_at: "2026-10-19T09:00:00Z", sharepoint_subscription_expires_at: inDays(2.5) }
+    );
+    await rerender({ source: groupIntegrationSources([synced, skannade])[0] });
+    await expect.poll(live).toBe(m.integration_announce_sync_finished({ name: "Kommunstyrelsen" }));
+  });
+
+  it("puts focus on the view that replaced the one focus was in", async () => {
+    const { rerender } = showWrapper("?folder=ik-a");
+    await expect.element(page.getByRole("heading", { name: "Protokoll", level: 2 })).toBeVisible();
+
+    // Back to the overview, as by the browser's back button, with focus left in the folder.
+    api.route.url = new URL("http://localhost/spaces/space-1/knowledge/integrations/wrapper/w1");
+    (document.activeElement as HTMLElement | null)?.blur();
+    await rerender({ source: groupIntegrationSources([protokoll, skannade])[0] });
+    await expect
+      .poll(() => document.activeElement?.textContent?.trim())
+      .toBe(m.integration_source_folders());
+
+    // Focus that is somewhere still on the page stays there.
+    const nav = page.getByRole("navigation", { name: m.integration_source_folders() });
+    const folderLink = nav.getByRole("link", { name: /Skannade/ }).element() as HTMLElement;
+    folderLink.focus();
+    api.route.url = new URL(
+      "http://localhost/spaces/space-1/knowledge/integrations/wrapper/w1?folder=ik-b"
+    );
+    await rerender({ source: groupIntegrationSources([protokoll, skannade])[0] });
+    await expect.element(page.getByRole("heading", { name: "Skannade", level: 2 })).toBeVisible();
+    expect(document.activeElement).toBe(folderLink);
   });
 
   it("lists the problems by cause on the problems tab", async () => {

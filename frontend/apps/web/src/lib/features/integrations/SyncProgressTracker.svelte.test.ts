@@ -86,9 +86,9 @@ describe("SyncProgressTracker", () => {
     tracker.stop();
   });
 
-  it("stops for good when the backend has no progress endpoint", async () => {
+  it.each([404, 403])("stops for good on a %s", async (status) => {
     const load = vi.fn(async () => {
-      throw Object.assign(new Error("Not found"), { status: 404 });
+      throw Object.assign(new Error("Refused"), { status });
     });
     const tracker = new SyncProgressTracker({ load });
 
@@ -99,6 +99,21 @@ describe("SyncProgressTracker", () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps polling through a failure that may pass", async () => {
+    const load = vi.fn(async () => {
+      throw Object.assign(new Error("Bad gateway"), { status: 502 });
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const tracker = new SyncProgressTracker({ load });
+
+    tracker.start();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(load.mock.calls.length).toBeGreaterThan(1);
+    tracker.stop();
+    warn.mockRestore();
   });
 
   it("polls at once when started again after a pause", async () => {

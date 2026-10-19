@@ -42,6 +42,8 @@ export type SyncProgressSummary = {
   skipped: number;
   /** Items of the source that are syncing right now. */
   syncing: number;
+  /** Every running sync is a change notification's delta pass, started by nobody here. */
+  background: boolean;
 };
 
 const PHASE_ORDER: SyncProgressPhase[] = ["discovering", "processing", "finishing"];
@@ -78,7 +80,8 @@ export function combineSyncProgress(
     indexed,
     unchanged,
     skipped,
-    syncing: entries.length
+    syncing: entries.length,
+    background: entries.every((entry) => entry.sync_type === "delta")
   };
 }
 

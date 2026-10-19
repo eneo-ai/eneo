@@ -12,7 +12,7 @@ import {
 const EXAMPLES: Record<SkipReasonCode, [SkipReason, string]> = {
   unsupported_type: [
     { code: "unsupported_type", params: { label: "legacy Word .doc, save as .docx" } },
-    m.skip_reason_unsupported_type({ label: "legacy Word .doc, save as .docx" })
+    m.skip_reason_unsupported_type({ label: m.skip_reason_type_legacy_word() })
   ],
   no_text_layer: [{ code: "no_text_layer", params: {} }, m.skip_reason_no_text_layer()],
   empty_content: [{ code: "empty_content", params: {} }, m.skip_reason_empty_content()],
@@ -93,6 +93,25 @@ describe("describeSkipReason", () => {
   it("adds that the next sync tries again", () => {
     expect(describeSkipReason({ code: "http_error", params: { status: 503 }, retry: true })).toBe(
       m.skip_reason_with_retry({ reason: m.skip_reason_http_other({ status: 503 }) })
+    );
+  });
+
+  it("names a type in the viewer's language, and passes names without words through", () => {
+    for (const [label, expected] of [
+      ["image", m.skip_reason_type_image()],
+      ["Outlook .msg", "Outlook .msg"],
+      [".zip", ".zip"],
+      ["toString", "toString"]
+    ]) {
+      expect(describeSkipReason({ code: "unsupported_type", params: { label } })).toBe(
+        m.skip_reason_unsupported_type({ label: expected })
+      );
+    }
+  });
+
+  it("does not double the full stop before the retry note", () => {
+    expect(describeSkipReason({ reason: "Server busy.", retry: true })).toBe(
+      m.skip_reason_with_retry({ reason: "Server busy" })
     );
   });
 

@@ -699,8 +699,12 @@
         <Button
           variant="outline"
           class="w-full sm:w-auto"
-          disabled={testCredentials.isLoading || !credentialsComplete}
-          onclick={testCredentials}
+          disabled={!credentialsComplete}
+          aria-disabled={testCredentials.isLoading}
+          aria-busy={testCredentials.isLoading}
+          onclick={() => {
+            if (!testCredentials.isLoading) void testCredentials();
+          }}
         >
           {#if testCredentials.isLoading}
             <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
@@ -709,8 +713,12 @@
         </Button>
         <Button
           class="w-full sm:w-auto"
-          disabled={saveConfig.isLoading || !credentialsComplete}
-          onclick={saveConfig}
+          disabled={!credentialsComplete}
+          aria-disabled={saveConfig.isLoading}
+          aria-busy={saveConfig.isLoading}
+          onclick={() => {
+            if (!saveConfig.isLoading) void saveConfig();
+          }}
         >
           {#if saveConfig.isLoading}
             <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
@@ -728,8 +736,12 @@
       {:else}
         <Button
           class="w-full sm:w-auto"
-          disabled={startServiceAccountOAuth.isLoading || !credentialsComplete}
-          onclick={startServiceAccountOAuth}
+          disabled={!credentialsComplete}
+          aria-disabled={startServiceAccountOAuth.isLoading}
+          aria-busy={startServiceAccountOAuth.isLoading}
+          onclick={() => {
+            if (!startServiceAccountOAuth.isLoading) void startServiceAccountOAuth();
+          }}
         >
           {#if startServiceAccountOAuth.isLoading}
             <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
