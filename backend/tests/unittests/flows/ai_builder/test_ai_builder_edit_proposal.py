@@ -2944,6 +2944,165 @@ async def test_confirmed_edit_field_survives_when_model_omits_form_fields() -> N
     ]
 
 
+def _confirmed_priority_state() -> PlanningState:
+    state = PlanningState.empty()
+    state.input_fields = [
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="a",
+                label="Priority",
+                field_type="select",
+                required=True,
+                options=["Low", "High"],
+                provenance="user_confirmed",
+            ),
+            purpose="interpret_input",
+            structured_answer_message_id="message-1",
+        )
+    ]
+    return state
+
+
+def _saved_a_and_b() -> dict[str, object]:
+    return _form_metadata(
+        {"name": "a", "type": "text", "label": "Saved A", "required": False},
+        {"name": "b", "type": "text", "label": "Saved B", "required": False},
+    )
+
+
+_CONFIRMED_A = FormFieldSpec(
+    name="a",
+    type="select",
+    label="Priority",
+    required=True,
+    options=["Low", "High"],
+)
+
+
+@pytest.mark.asyncio
+async def test_confirmed_field_is_laid_over_the_saved_form_when_form_fields_is_omitted() -> (
+    None
+):
+    # Kills: the confirmed fields replacing the saved form (b dropped), and
+    # the saved attributes of a confirmed field kept (a stays "Saved A").
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Analyze text"),
+        metadata_json=_saved_a_and_b(),
+    )
+
+    result = await _process(
+        flow=flow,
+        planning_state=_confirmed_priority_state(),
+        arguments={
+            "plan_rationale": "Keep the form.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    assert result.compiled.content.spec.form_fields == [
+        _CONFIRMED_A,
+        FormFieldSpec(name="b", type="text", label="Saved B", required=False),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_form_fields_list_the_model_sends_stays_the_whole_form() -> None:
+    # Kills: the saved form merged into a list the model sent, which would
+    # bring b back.
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Analyze text"),
+        metadata_json=_saved_a_and_b(),
+    )
+
+    result = await _process(
+        flow=flow,
+        planning_state=_confirmed_priority_state(),
+        arguments={
+            "plan_rationale": "Replace the form.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+            "form_fields": [
+                {"name": "a", "type": "text", "label": "Model A"},
+                {"name": "c", "type": "text", "label": "C"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    assert result.compiled.content.spec.form_fields == [
+        _CONFIRMED_A,
+        FormFieldSpec(name="c", type="text", label="C", required=False),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_saved_resource_gone_from_the_catalog_ends_the_edit_as_the_user_fix() -> (
+    None
+):
+    # Kills: building the saved baseline outside the guard that maps its errors,
+    # which lets the unavailable-resource error escape as an unhandled failure.
+    assistant_id = uuid4()
+    flow = _flow(
+        _flow_step(step_order=1, assistant_id=assistant_id, user_description="Analyze")
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Keep the flow.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+        },
+        assistant_snapshots={
+            assistant_id: AssistantAuthoringSnapshot(
+                instructions="Analyze.",
+                model=AssistantAuthoringResourceRef(
+                    local_ref="11111111-1111-4111-8111-111111111111", label="GPT"
+                ),
+                knowledge_refs=(),
+            )
+        },
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[]
+        ),
+    )
+
+    assert isinstance(result, TerminalFailure), result
+    assert (
+        result.code == AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDING_UNAVAILABLE
+    )
+    assert result.details == {"resource_kind": "model"}
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_field_makes_the_saved_main_text_field_required() -> None:
+    # Pins the known limit of the omitted-list overlay: it counts as a declared
+    # list, so the server makes the elected main-text field required beside a
+    # confirmed field. Kills: that rule silently stopping (or spreading to other
+    # saved fields: `b` stays optional) without the limit being revisited.
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Analyze text"),
+        metadata_json=_form_metadata(
+            {"name": "input", "type": "text", "label": "Indata", "required": False},
+            {"name": "b", "type": "text", "label": "B", "required": False},
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        planning_state=_confirmed_priority_state(),
+        arguments={
+            "plan_rationale": "Keep the form.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    required = {
+        field.name: field.required for field in result.compiled.content.spec.form_fields
+    }
+    assert required == {"input": True, "a": True, "b": False}
+
+
 @pytest.mark.asyncio
 async def test_confirmed_edit_shadow_field_is_answered_with_the_field_to_rename() -> (
     None
@@ -4033,13 +4192,18 @@ async def test_a_review_turn_is_not_blamed_for_the_compilers_housekeeping():
 async def test_a_review_turn_is_not_blamed_for_the_input_field_the_server_carries():
     """A confirmed runtime field from the session is projected onto every
     proposal before compilation. The bounded turn never wrote it, and the
-    unchanged flow gets the same projection, so it is not the model's."""
+    unchanged flow gets the same projection, so it is not the model's.
+    Kills: the unchanged flow projected without the saved form (the saved
+    main-text field's required flip then reads as the model's change)."""
     flow = _flow(
         _flow_step(step_order=1, user_description="Sammanfatta"),
         _flow_step(
             step_order=2,
             user_description="Föreslå beslut",
             input_source="previous_step",
+        ),
+        metadata_json=_form_metadata(
+            {"name": "input", "type": "text", "label": "Indata", "required": False}
         ),
     )
     state = PlanningState.empty()
@@ -4078,7 +4242,8 @@ async def test_a_review_turn_is_not_blamed_for_the_input_field_the_server_carrie
 
     assert isinstance(result, ProposalReady), getattr(result, "feedback", result)
     assert [f.name for f in result.compiled.content.spec.form_fields or []] == [
-        "priority"
+        "input",
+        "priority",
     ]
 
 

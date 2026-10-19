@@ -336,6 +336,32 @@ class EditCompilationResult:
         )
 
 
+def saved_edit_spec(
+    *,
+    current_steps: list[FlowStep],
+    flow_name: str | None,
+    flow_description: str | None,
+    current_metadata_json: dict[str, Any] | None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None,
+    resource_catalog: AIBuilderResourceCatalog | None,
+) -> FlowDraftSpecCore:
+    """The flow as saved: the spec an edit's baseline is, unless a revision
+    supplies one (`edit_baseline_spec`)."""
+
+    return current_flow_authoring_spec(
+        current_steps=current_steps,
+        flow_name=flow_name,
+        flow_description=flow_description,
+        assistant_snapshots=assistant_snapshots,
+        assistant_snapshot_projector=(
+            resource_catalog.assistant_spec_from_snapshot
+            if resource_catalog is not None
+            else None
+        ),
+        form_fields=extract_form_fields_from_metadata(current_metadata_json),
+    )
+
+
 def compile_edit_proposal(
     proposal: OrderedEditProposal,
     current_steps: list[FlowStep],
@@ -359,19 +385,15 @@ def compile_edit_proposal(
         requested_primary_runtime_input_type
         or _primary_runtime_input_type_from_steps(current_steps)
     )
-    base_form_fields = extract_form_fields_from_metadata(current_metadata_json)
-    base_spec = current_flow_authoring_spec(
+    base_spec = saved_edit_spec(
         current_steps=current_steps,
         flow_name=flow_name,
         flow_description=flow_description,
+        current_metadata_json=current_metadata_json,
         assistant_snapshots=assistant_snapshots,
-        assistant_snapshot_projector=(
-            resource_catalog.assistant_spec_from_snapshot
-            if resource_catalog is not None
-            else None
-        ),
-        form_fields=base_form_fields,
+        resource_catalog=resource_catalog,
     )
+    base_form_fields = base_spec.form_fields
     if revision_spec is not None and [
         step.existing_step_ref for step in revision_spec.steps
     ] != [step.existing_step_ref for step in base_spec.steps]:

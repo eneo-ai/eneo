@@ -143,6 +143,22 @@ def form_field_specs(fields: Sequence[FlowInputFieldIntent]) -> list[FormFieldSp
     ]
 
 
+def form_field_intents(fields: Sequence[FormFieldSpec]) -> list[FlowInputFieldIntent]:
+    """The form_fields entries that declare these run-form fields."""
+    return [
+        FlowInputFieldIntent.model_validate(
+            {
+                "name": field.name,
+                "label": field.label,
+                "type": field.type,
+                "required": field.required,
+                "options": field.options or [],
+            }
+        )
+        for field in fields
+    ]
+
+
 def materialize_ordered_edit_proposal(
     proposal: OrderedEditProposal,
     *,
@@ -260,8 +276,9 @@ def edit_baseline_spec(
     """The spec an edit starts from, and its run-form fields are the edit's
     baseline fields: those of the revision when a saved step is being revised
     (it may carry an earlier turn's state), else the saved flow's. Preparing the
-    proposal, compiling it and judging the final run form all read this one
-    spec, so no stage sees a different form than another."""
+    proposal, compiling it, judging the final run form and binding tool
+    arguments all read this one spec, so no stage sees a different form than
+    another."""
 
     return revision if revision is not None else saved
 

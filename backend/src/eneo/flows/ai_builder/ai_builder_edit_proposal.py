@@ -11,7 +11,11 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     architecture_failure_outcome,
     log_architecture_error,
 )
-from eneo.flows.ai_builder.ai_builder_authoring_projection import form_field_specs
+from eneo.flows.ai_builder.ai_builder_authoring_projection import (
+    edit_baseline_spec,
+    form_field_intents,
+    form_field_specs,
+)
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     authored_knowledge_ref_repair,
     prepare_compiled_spec_for_session,
@@ -34,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_edit_admission import (
 )
 from eneo.flows.ai_builder.ai_builder_edit_compiler import (
     compile_edit_proposal,
+    saved_edit_spec,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
@@ -44,9 +49,6 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     review_edit_changes_of_the_model,
     validate_review_edit_effect,
     validate_review_edit_proposal,
-)
-from eneo.flows.ai_builder.ai_builder_form_fields import (
-    extract_form_fields_from_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
     non_plan_outcome,
@@ -120,7 +122,7 @@ from eneo.flows.application.flow_draft_materialization import (
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.tool_input import read_stored_tool_input_config
-from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, FormFieldSpec
 from eneo.flows.input_binding_contract_rules import (
     source_ref_bindings,
 )
@@ -366,10 +368,40 @@ async def process_edit_arguments(
         else None,
     ):
         return tool_outcome
-    # The run form compile reads: the model's form fields (or the saved ones)
+    current_step_refs = [
+        existing_step_ref_for_order(step.step_order)
+        for step in sorted(flow.steps, key=lambda step: step.step_order)
+    ]
+    saved_step_revision = is_saved_step_revision(
+        context=plan_edit_context,
+        prior_spec=prior_spec_for_revision,
+        current_step_refs=current_step_refs,
+    )
+    revision_spec = prior_spec_for_revision if saved_step_revision else None
+    ui_language = compile_context.ui_language if compile_context is not None else None
+    # Tool binding and form projection start from the baseline compile starts
+    # from: `edit_baseline_spec` over the saved flow and the revision. Building
+    # the saved spec can fail the way compiling does, so it ends the same way.
+    try:
+        run_form_baseline = edit_baseline_spec(
+            saved=saved_edit_spec(
+                current_steps=list(flow.steps),
+                flow_name=flow.name,
+                flow_description=flow.description,
+                current_metadata_json=flow.metadata_json,
+                assistant_snapshots=assistant_snapshots,
+                resource_catalog=resource_catalog,
+            ),
+            revision=revision_spec,
+        )
+    except _EDIT_BUILD_ERRORS as exc:
+        return _edit_build_failure(exc, ui_language=ui_language)
+    # The run form compile reads: the model's form fields (or the baseline's)
     # with the fields the server owns, projected once for both.
     projected_proposal = _apply_server_owned_input_fields(
-        authored_proposal, planning_state=planning_state
+        authored_proposal,
+        planning_state=planning_state,
+        baseline_form_fields=run_form_baseline.form_fields,
     )
     settled = await settle_tool_uses(
         _edit_tool_use_sites(authored_proposal, flow=flow, catalog=tool_catalog),
@@ -383,28 +415,17 @@ async def process_edit_arguments(
             fields=tuple(
                 form_field_specs(projected_proposal.form_fields or [])
                 if "form_fields" in projected_proposal.model_fields_set
-                else extract_form_fields_from_metadata(flow.metadata_json) or []
+                else run_form_baseline.form_fields or []
             ),
             # An edit's tool arguments read the fields its run form keeps.
             adds_fields=False,
         ),
         is_users_quote=users_quote_check(conversation),
-        ui_language=compile_context.ui_language
-        if compile_context is not None
-        else None,
+        ui_language=ui_language,
     )
     if not isinstance(settled, SettledToolUses):
         return settled
     authored_proposal = _with_settled_tool_uses(authored_proposal, settled)
-    current_step_refs = [
-        existing_step_ref_for_order(step.step_order)
-        for step in sorted(flow.steps, key=lambda step: step.step_order)
-    ]
-    saved_step_revision = is_saved_step_revision(
-        context=plan_edit_context,
-        prior_spec=prior_spec_for_revision,
-        current_step_refs=current_step_refs,
-    )
     # Judged on what the model wrote, before the server fills in the fields it
     # owns: an omitted form_fields that the server then preserves must not read
     # as the model having changed them.
@@ -434,7 +455,6 @@ async def process_edit_arguments(
             producers=frozenset({"scope_guard"}),
         )
     proposal = _with_settled_tool_uses(projected_proposal, settled)
-    ui_language = compile_context.ui_language if compile_context is not None else None
 
     async def compile_and_prepare(
         candidate: OrderedEditProposal,
@@ -451,7 +471,7 @@ async def process_edit_arguments(
                 current_metadata_json=flow.metadata_json,
                 assistant_snapshots=assistant_snapshots,
                 resource_catalog=resource_catalog,
-                revision_spec=prior_spec_for_revision if saved_step_revision else None,
+                revision_spec=revision_spec,
                 requested_primary_runtime_input_type=(
                     compile_context.runtime_input_type
                     if compile_context is not None
@@ -474,37 +494,8 @@ async def process_edit_arguments(
                     else None
                 ),
             )
-        except BadRequestException as exc:
-            return CorrectableFailure(
-                feedback=_format_edit_compilation_request_error(exc),
-                kind="validation",
-                codes=_edit_compilation_request_failure_codes(exc),
-                producers=frozenset({"assembly"}),
-            )
-        except AIBuilderArchitectureError as exc:
-            # A failure only the user can fix ends as an answer naming the fix.
-            answer = user_action_answer(exc, ui_language=ui_language)
-            if answer is None:
-                return architecture_failure_outcome(exc)
-            log_architecture_error(exc)
-            return answer
-        except AssistantSnapshotResourceUnavailableError as exc:
-            logger.warning(
-                "Edit compilation failed because an assistant snapshot references "
-                "an unavailable %s resource",
-                exc.kind,
-            )
-            # Only the user can re-select the resource; another model call cannot.
-            return TerminalFailure(
-                kind="validation",
-                message=(
-                    "A resource used by the existing flow is no longer available. "
-                    "Re-select the affected model or knowledge base and try again."
-                ),
-                code=AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDING_UNAVAILABLE,
-                phase=AIBuilderErrorPhase.PROPOSAL,
-                details={"resource_kind": str(exc.kind)},
-            )
+        except _EDIT_BUILD_ERRORS as exc:
+            return _edit_build_failure(exc, ui_language=ui_language)
         prepared = await prepare_compiled_spec_for_session(
             spec=edit_result.spec,
             target_kind=TargetKind.EDIT,
@@ -548,7 +539,9 @@ async def process_edit_arguments(
         # held to the difference; the plan the user approves shows all of it.
         baseline = await compile_and_prepare(
             _apply_server_owned_input_fields(
-                _unchanged_edit_proposal(flow.steps), planning_state=planning_state
+                _unchanged_edit_proposal(flow.steps),
+                planning_state=planning_state,
+                baseline_form_fields=run_form_baseline.form_fields,
             )
         )
         own_changes = review_edit_changes_of_the_model(
@@ -721,17 +714,32 @@ def _apply_server_owned_input_fields(
     proposal: OrderedEditProposal,
     *,
     planning_state: PlanningState | None,
+    baseline_form_fields: Sequence[FormFieldSpec] | None,
 ) -> OrderedEditProposal:
+    """The edit's form with the confirmed fields laid over it: the model's
+    list, or the baseline's when the model left form_fields out (null keeps the
+    current fields, so the confirmed fields join them rather than replace them).
+
+    The result counts as a declared list for the server's form rules (the
+    elected main-text field becomes required, a field shadowing the primary
+    input is dropped), so a saved field can change beside a confirmed one. That
+    stays until those rules act on the fields an edit adds or modifies rather
+    than on a list being present."""
+
     if planning_state is None or not planning_state.input_fields:
         return proposal
     server_fields = {
         record.value.variable_name: record.value
         for record in planning_state.input_fields
     }
-    if "form_fields" not in proposal.model_fields_set or proposal.form_fields is None:
-        return proposal.model_copy(update={"form_fields": list(server_fields.values())})
+    declared = (
+        proposal.form_fields
+        if "form_fields" in proposal.model_fields_set
+        and proposal.form_fields is not None
+        else form_field_intents(baseline_form_fields or [])
+    )
     projected_fields = [
-        server_fields.get(field.variable_name, field) for field in proposal.form_fields
+        server_fields.get(field.variable_name, field) for field in declared
     ]
     projected_names = {field.variable_name for field in projected_fields}
     projected_fields.extend(
@@ -740,6 +748,58 @@ def _apply_server_owned_input_fields(
         if record.value.variable_name not in projected_names
     )
     return proposal.model_copy(update={"form_fields": projected_fields})
+
+
+# What building the saved spec or compiling an edit raises: a correctable
+# request error, an architecture error (a user action or a server defect) or an
+# unavailable resource. `_edit_build_failure` owns each outcome.
+_EDIT_BUILD_ERRORS = (
+    BadRequestException,
+    AIBuilderArchitectureError,
+    AssistantSnapshotResourceUnavailableError,
+)
+
+
+def _edit_build_failure(
+    exc: BadRequestException
+    | AIBuilderArchitectureError
+    | AssistantSnapshotResourceUnavailableError,
+    *,
+    ui_language: str | None,
+) -> ProposalAnswer | CorrectableFailure | TerminalFailure:
+    """The outcome of an edit whose spec could not be built: the one owner for
+    the compile and the saved-baseline build."""
+
+    if isinstance(exc, BadRequestException):
+        return CorrectableFailure(
+            feedback=_format_edit_compilation_request_error(exc),
+            kind="validation",
+            codes=_edit_compilation_request_failure_codes(exc),
+            producers=frozenset({"assembly"}),
+        )
+    if isinstance(exc, AIBuilderArchitectureError):
+        # A failure only the user can fix ends as an answer naming the fix.
+        answer = user_action_answer(exc, ui_language=ui_language)
+        if answer is None:
+            return architecture_failure_outcome(exc)
+        log_architecture_error(exc)
+        return answer
+    logger.warning(
+        "Edit compilation failed because an assistant snapshot references "
+        "an unavailable %s resource",
+        exc.kind,
+    )
+    # Only the user can re-select the resource; another model call cannot.
+    return TerminalFailure(
+        kind="validation",
+        message=(
+            "A resource used by the existing flow is no longer available. "
+            "Re-select the affected model or knowledge base and try again."
+        ),
+        code=AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDING_UNAVAILABLE,
+        phase=AIBuilderErrorPhase.PROPOSAL,
+        details={"resource_kind": str(exc.kind)},
+    )
 
 
 def _format_edit_compilation_request_error(exc: BadRequestException) -> str:

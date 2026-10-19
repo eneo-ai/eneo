@@ -44,9 +44,14 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import persist_non_plan_turn
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderSavedFlowStepEditContext,
+    ResolvedAIBuilderEditContext,
+)
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     ProposalPrepared,
     ServerOutputPrepared,
+    _prior_spec_for_revision,
     build_proposal_prepared,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
@@ -797,6 +802,93 @@ def test_an_edit_settles_against_the_run_form_compile_uses() -> None:
     )
 
     assert isinstance(outcome, ProposalReady), outcome
+
+
+def test_a_saved_step_revision_binds_to_a_field_only_its_baseline_has() -> None:
+    # Kills: a binding settled against the saved flow's form while compile
+    # starts from the revision (the person is asked again for a field the
+    # revised step already reads), and the reverse.
+    flow = _saved_flow()
+    snapshots = {
+        step.assistant_id: AssistantAuthoringSnapshot(instructions="Gör.")
+        for step in flow.steps
+    }
+    catalog = _catalog(VALUES, DETAILS)
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+    )
+    revision = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    assert revision is not None
+    revision = revision.model_copy(
+        update={
+            "form_fields": [
+                FormFieldSpec(
+                    name="start_day", type="date", label="Startdag", required=True
+                )
+            ]
+        }
+    )
+    state = PlanningState.empty()
+    state.tool_decisions = ToolDecisions(
+        uses={
+            "values": ToolUseDecision(
+                tool_ref=VALUES_REF,
+                arguments_for=VALUES_REF,
+                arguments={
+                    "from_date": RunInputToolArgument(
+                        name="from_date", field_name="start_day"
+                    )
+                },
+            )
+        }
+    )
+
+    outcome = asyncio.run(
+        process_edit_arguments(
+            turn=_make_turn(),
+            conversation=[ConversationMessage(role="user", content="Hämta igen.")],
+            arguments={
+                "plan_rationale": "Edit.",
+                "steps": [
+                    {
+                        "kind": "modify",
+                        "existing_step_ref": "existing_step_1",
+                        "tool_use": {
+                            "use_ref": "values",
+                            "tool_ref": VALUES_REF,
+                            "arguments": [
+                                _argument("from_date", "ask_user"),
+                                _argument(
+                                    "to_date", "fixed", value_json='"2026-10-31"'
+                                ),
+                            ],
+                        },
+                    }
+                ],
+            },
+            available_model_refs=None,
+            available_kb_refs=None,
+            flow=flow,
+            assistant_snapshots=snapshots,
+            resource_catalog=catalog,
+            planning_state=state,
+            plan_edit_context=context,
+            prior_spec_for_revision=revision,
+        )
+    )
+
+    assert isinstance(outcome, ProposalReady), outcome
+    assert [f.name for f in outcome.compiled.content.spec.form_fields or []] == [
+        "start_day"
+    ]
 
 
 def test_more_uses_than_a_flow_holds_are_answered() -> None:

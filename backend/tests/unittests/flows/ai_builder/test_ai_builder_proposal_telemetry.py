@@ -1855,10 +1855,8 @@ _CORRECTABLE_FAILURE_PRODUCERS: dict[tuple[str, str], list[str]] = {
         "platform_validator",
         "scope_guard",
     ],
-    ("ai_builder_edit_proposal.py", "compile_and_prepare"): [
-        "assembly",
-        "platform_validator",
-    ],
+    ("ai_builder_edit_proposal.py", "_edit_build_failure"): ["assembly"],
+    ("ai_builder_edit_proposal.py", "compile_and_prepare"): ["platform_validator"],
     ("ai_builder_edit_proposal.py", "process_edit_arguments"): [
         "parse",
         "review_guard",
