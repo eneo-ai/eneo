@@ -39,15 +39,18 @@
       return;
     }
     if (result.error.message !== "popup_closed") toastError(result.error);
-    if (live) {
-      // Refused at the vendor or the popup closed: the paused turn goes on
-      // without the tool instead of waiting out its timeout.
-      declined = true;
-      try {
-        await eneo.mcpOauth.decline({ id: remedy.mcp_server_id });
-      } catch {
-        /* the wait then ends at its timeout */
-      }
+    // Refused at the vendor or the popup closed: the paused turn goes on
+    // without the tool instead of waiting out its timeout.
+    if (live) await skip();
+  }
+
+  /** Let the paused turn go on without this server. */
+  async function skip() {
+    declined = true;
+    try {
+      await eneo.mcpOauth.decline({ id: remedy.mcp_server_id });
+    } catch {
+      /* the wait then ends at its timeout */
     }
   }
 </script>
@@ -61,14 +64,27 @@
 {:else if declined && live}
   <span class="text-muted text-xs">{m.mcp_oauth_declined_continuing()}</span>
 {:else if connect}
-  <Button
-    variant="outline"
-    size="sm"
-    class="h-7 gap-1.5 text-xs"
-    disabled={connect.isConnecting(remedy.mcp_server_id)}
-    onclick={run}
-  >
-    <Plug class="size-3.5" aria-hidden="true" />
-    {m.mcp_oauth_connect_server({ server: remedy.server_name })}
-  </Button>
+  <div class="flex flex-wrap items-center gap-2">
+    <Button
+      variant="outline"
+      size="sm"
+      class="h-7 gap-1.5 text-xs"
+      disabled={connect.isConnecting(remedy.mcp_server_id)}
+      onclick={run}
+    >
+      <Plug class="size-3.5" aria-hidden="true" />
+      {m.mcp_oauth_connect_server({ server: remedy.server_name })}
+    </Button>
+    {#if live}
+      <Button
+        variant="ghost"
+        size="sm"
+        class="h-7 text-xs"
+        disabled={connect.isConnecting(remedy.mcp_server_id)}
+        onclick={skip}
+      >
+        {m.mcp_oauth_continue_without()}
+      </Button>
+    {/if}
+  </div>
 {/if}

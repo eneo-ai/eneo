@@ -4927,6 +4927,7 @@
   "mcp_oauth_connected_continuing": "Anslutet. Fortsätter…",
   "mcp_oauth_declined_continuing": "Fortsätter utan verktyget.",
   "mcp_oauth_connect_later": "Senare",
+  "mcp_oauth_continue_without": "Fortsätt utan",
   "mcp_oauth_tools_synced": "{count} verktyg hämtade. Granska dem i verktygslistan.",
   "mcp_oauth_connect_step_heading": "{server} är sparad",
   "mcp_oauth_step_saved": "Servern är sparad",

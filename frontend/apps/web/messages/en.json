@@ -4927,6 +4927,7 @@
   "mcp_oauth_connected_continuing": "Connected. Continuing…",
   "mcp_oauth_declined_continuing": "Continuing without the tool.",
   "mcp_oauth_connect_later": "Later",
+  "mcp_oauth_continue_without": "Continue without",
   "mcp_oauth_tools_synced": "{count} tools fetched. Review them in the tool list.",
   "mcp_oauth_connect_step_heading": "{server} is saved",
   "mcp_oauth_step_saved": "Server saved",
