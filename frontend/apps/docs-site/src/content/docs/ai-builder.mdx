@@ -354,8 +354,13 @@ large for the Builder to show while it writes the arguments, the Builder says
 why instead of proposing a step with another tool. With that answer it shows
 the reason and how a tool becomes available in the space, with a link to the
 space settings (in a new tab) when you may edit the space; a session reopened
-before it has a plan shows them again. In an edit, the Builder asks
-before every step that would use a tool the step does not already use. It may
+before it has a plan shows them again. The Builder can also answer that it
+could not match a specific tool you ask for to a tool it lists for the space,
+usable or not. That answer has no plan, so no step uses another tool in its
+place; it shows the words the AI Builder took as your request for the tool and
+the same steps for making a tool available. It does not say that the tool is
+missing, since the list the Builder sees can be shortened to fit the model. In
+an edit, the Builder asks before every step that would use a tool the step does not already use. It may
 add a step that reads a tool, change the arguments of a saved tool step, or
 remove a saved tool step; nothing else of a saved tool step changes, a tool step
 the edit does not name stays as saved, and an edit that removes a tool step

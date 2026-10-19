@@ -127,6 +127,7 @@ from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     ToolArgumentParseError,
     parse_tool_call_arguments,
 )
+from eneo.flows.ai_builder.ai_builder_tool_validation import tool_request_outcome
 from eneo.flows.ai_builder.ai_builder_tools import (
     PROPOSE_FLOW_TOOL_NAME,
     AdmissionNormalizerFamily,
@@ -485,6 +486,27 @@ class ProposalSubmissionOwner:
             )
         if admitted_arguments is not invocation.arguments:
             invocation = replace(invocation, arguments=admitted_arguments)
+        # Before any plan is read: the answer that the person asked for a
+        # tool the turn does not list compiles nothing.
+        request_outcome = tool_request_outcome(
+            invocation.arguments,
+            tool_schema=proposal_tool_schema,
+            target_kind=target_kind,
+            ui_language=(
+                compile_context.ui_language if compile_context is not None else None
+            ),
+        )
+        if isinstance(request_outcome, ProposalAnswer):
+            return await self._persist_invocation_answer(
+                invocation=invocation,
+                answer=request_outcome,
+                request_id=request_id,
+                usage_tracker=usage_tracker,
+                planning_state=planning_state,
+            )
+        if isinstance(request_outcome, CorrectableFailure):
+            return request_outcome
+        invocation = replace(invocation, arguments=request_outcome)
         baseline_validation = (
             validate_spec(prior_spec_for_revision)
             if prior_spec_for_revision is not None

@@ -1,8 +1,10 @@
 """What the AI Builder does with a tool step a turn writes.
 
-Three outcomes, never a guessed tool: a tool use whose ref names no tool is
-repaired by the model; a tool the space may not use, or whose input schema no
-flow can check, is the person's to change, so the turn answers with why
+Never a guessed tool: a tool use whose ref names no tool is repaired by the
+model, to the same tool or to the answer that the person asked for a tool the
+turn does not list (``tool_request_outcome``), which the turn gives instead of
+a plan; a tool the space may not use, or whose input schema no flow can
+check, is the person's to change, so the turn answers with why
 (``ProposalAnswer``); an argument the tool's input schema refuses is repaired
 by the model. The argument checks are publish's own
 (``check_tool_configuration``), run on the final compiled spec, so a tool
@@ -15,14 +17,20 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterable, Mapping
 from functools import partial
-from typing import Final, Literal, TypeAlias
+from typing import Any, Final, Literal, TypeAlias
 
-from eneo.flows.ai_builder.ai_builder_domain_models import LintSeverity
-from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderToolRefusal
+from pydantic import ValidationError
+
+from eneo.flows.ai_builder.ai_builder_domain_models import LintSeverity, TargetKind
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderToolRefusal,
+    AIBuilderToolRequestUnresolved,
+)
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
     non_plan_outcome,
     uses_english,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import safe_validation_issues
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     BoundedListing,
     CorrectableFailure,
@@ -32,12 +40,20 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 from eneo.flows.ai_builder.ai_builder_tool_catalog import AIBuilderToolCatalog
 from eneo.flows.ai_builder.ai_builder_tool_use import (
     ARGUMENT_SCHEMA_FEEDBACK_MAX_CHARS,
+    TOOL_REQUEST_PLAN_FIELDS_RULE,
+    TOOL_REQUEST_UNRESOLVED_KEY,
+    ToolRequestUnresolvedIntent,
     ToolUseIntent,
     ToolUseRefUnavailable,
     ToolUseRefUnknown,
     argument_schema,
     bind_tool_use,
     declared_arguments_text,
+)
+from eneo.flows.ai_builder.ai_builder_tools import (
+    ProposalToolSchema,
+    plan_carriers_sentence,
+    proposal_plan_carriers,
 )
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.application.flow_tool_options import FlowToolOption
@@ -156,7 +172,13 @@ def tool_use_ref_outcome(
     return CorrectableFailure(
         feedback="\n".join(
             (
-                unknown.render("Replace these tool refs with a listed tool's ref:"),
+                unknown.render(
+                    "Correct each of these tool refs to the ref of the same tool "
+                    "if it is listed; if the tool the person asked for is not "
+                    f"listed, answer with {TOOL_REQUEST_UNRESOLVED_KEY} and "
+                    f"{TOOL_REQUEST_PLAN_FIELDS_RULE} instead of using another "
+                    "tool:"
+                ),
                 valid.render(f"Listed tool refs ({valid.total}):"),
             )
         ),
@@ -304,4 +326,86 @@ def tool_not_usable_answer(
         ),
         codes=frozenset({code}),
         tool_refusal=refusal,
+    )
+
+
+def tool_request_outcome(
+    arguments: dict[str, Any],
+    *,
+    tool_schema: ProposalToolSchema,
+    target_kind: TargetKind,
+    ui_language: str | None,
+) -> CorrectableFailure | ProposalAnswer | dict[str, Any]:
+    """The turn's answer when the admitted proposal says the person asked for
+    a tool it does not list: never compiled, and refused beside any plan
+    carrier of ``tool_schema`` (the schema the model was given) that holds
+    more than its empty value. For a plan, the plan's arguments without the
+    outcome key, which the closed create and edit models reject (a strict
+    route sends it as null with every plan).
+
+    Run on every proposal the model writes, the first and each repair,
+    before any plan is read, in create and edit alike.
+    """
+    raw = arguments.get(TOOL_REQUEST_UNRESOLVED_KEY)
+    if raw is None:
+        if TOOL_REQUEST_UNRESOLVED_KEY not in arguments:
+            return arguments
+        return {
+            key: value
+            for key, value in arguments.items()
+            if key != TOOL_REQUEST_UNRESOLVED_KEY
+        }
+    carried = [
+        carrier
+        for carrier in proposal_plan_carriers(tool_schema, target_kind=target_kind)
+        if carrier.carries(arguments)
+    ]
+    if carried:
+        # Named from the same declaration, so the repair asks only for values
+        # admission accepts (an array with no null is emptied, never nulled).
+        emptied = plan_carriers_sentence(carried)
+        return CorrectableFailure(
+            feedback=(
+                f"{TOOL_REQUEST_UNRESOLVED_KEY} answers instead of a plan: send "
+                f"it with {emptied}, or set it to null and propose the plan."
+            ),
+            kind="validation",
+            codes=frozenset({"tool_request_unresolved_with_plan"}),
+            producers=frozenset({"platform_validator"}),
+        )
+    try:
+        request = ToolRequestUnresolvedIntent.model_validate(raw)
+    except ValidationError as error:
+        return CorrectableFailure(
+            feedback=(
+                f"Invalid {TOOL_REQUEST_UNRESOLVED_KEY}: "
+                + "; ".join(safe_validation_issues(error))
+            ),
+            kind="parse",
+            codes=frozenset({"tool_request_unresolved_invalid"}),
+            producers=frozenset({"parse"}),
+        )
+    return tool_request_unresolved_answer(request.request_text, ui_language=ui_language)
+
+
+def tool_request_unresolved_answer(
+    request_text: str, *, ui_language: str | None
+) -> ProposalAnswer:
+    """The turn's answer when the person asked for a tool the planner could
+    not match to one it lists. It does not say the tool is missing: the
+    turn's list can be cut to fit the model."""
+    request = display_value(request_text)
+    answer = (
+        f"I couldn't match the tool you asked for (“{request}”) to a "
+        "tool I can use in this flow, so I haven't built a step with another "
+        "tool in its place."
+        if uses_english(ui_language)
+        else f"Jag kunde inte koppla verktyget du bad om (”{request}”) "
+        "till ett verktyg som jag kan använda i det här flödet, så jag har inte "
+        "byggt något steg med ett annat verktyg i dess ställe."
+    )
+    return ProposalAnswer(
+        answer=answer,
+        outcome=non_plan_outcome("tool_request_unresolved", "make_tool_usable"),
+        tool_refusal=AIBuilderToolRequestUnresolved(request_text=request_text),
     )

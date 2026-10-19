@@ -20,7 +20,7 @@
   import BuilderStepDetails, { type StepFieldChangeDisplay } from "./BuilderStepDetails.svelte";
   import BuilderStepNode from "./BuilderStepNode.svelte";
   import ToolsUnavailable from "$lib/features/flows/components/tool/ToolsUnavailable.svelte";
-  import type { UnusableTool } from "$lib/features/flows/flowToolRefusal";
+  import type { BuilderToolGuidance } from "$lib/features/flows/flowToolRefusal";
   import { describeBuilderToolStep, type BuilderToolStep } from "./builderToolStep";
   import { answerPhrase, contractFieldCount, inSentence, readsLabel } from "./builderStepPhrases";
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
@@ -85,8 +85,8 @@
     onattachtemplate?: () => void;
     /** Narrow layouts: bring the conversation back into view. */
     onshowconversation?: () => void;
-    /** The tool Eneo's latest reply says cannot be used, with why. */
-    toolRefusal?: UnusableTool | null;
+    /** The tool guidance Eneo's latest reply gives instead of a plan. */
+    toolRefusal?: BuilderToolGuidance | null;
   }
 
   let {

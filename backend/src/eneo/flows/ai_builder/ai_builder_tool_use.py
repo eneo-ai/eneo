@@ -13,12 +13,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, TypeAlias
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StringConstraints,
     TypeAdapter,
     ValidationError,
     field_validator,
@@ -50,6 +51,16 @@ if TYPE_CHECKING:
 ToolArgumentSourceKind = Literal["fixed", "run_input", "earlier_step", "ask_user"]
 # How much of the user's words a use may cite.
 TOOL_USE_EVIDENCE_MAX_CHARS = 240
+# The proposal's alternative to a plan when the person asks for a tool the
+# turn does not list, and how much of their words naming it it carries.
+TOOL_REQUEST_UNRESOLVED_KEY: Final = "tool_request_unresolved"
+# For the texts written without the proposal schema at hand; the schema's own
+# description names the carriers it offers (``plan_carriers_sentence``).
+TOOL_REQUEST_PLAN_FIELDS_RULE: Final = (
+    "the plan fields null or empty (steps and, in an edit, also the step "
+    "removals, run form, name and description)"
+)
+TOOL_REQUEST_TEXT_MAX_CHARS: Final = 240
 
 
 class FixedToolArgument(BaseModel):
@@ -396,6 +407,49 @@ def tool_use_property_schema(listed_refs: Sequence[str]) -> dict[str, Any]:
             },
         },
     }
+
+
+class ToolRequestUnresolvedIntent(BaseModel):
+    """The planner's answer, instead of a plan, that the person asked for a
+    tool the turn does not list."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_text: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True,
+            min_length=1,
+            max_length=TOOL_REQUEST_TEXT_MAX_CHARS,
+        ),
+    ]
+
+
+def offer_tool_request_unresolved(parameters: dict[str, Any]) -> None:
+    """Let a proposal that may name tools answer, instead of a plan, that the
+    person asked for one it does not list: the alternative property, and a
+    ``steps`` that may then be null (``tool_request_outcome`` refuses both
+    at once). The prompt says when (``_resource_context_block``). The
+    caller describes the property: which plan fields it leaves empty is the
+    schema's."""
+    properties: dict[str, Any] = parameters["properties"]
+    steps = properties.pop("steps")
+    steps["type"] = ["array", "null"]
+    properties[TOOL_REQUEST_UNRESOLVED_KEY] = {
+        "type": ["object", "null"],
+        "additionalProperties": False,
+        "required": ["request_text"],
+        "properties": {
+            "request_text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": TOOL_REQUEST_TEXT_MAX_CHARS,
+                "description": "The person's words that name the tool, copied exactly.",
+            }
+        },
+    }
+    # The recursive plan body stays last on the wire (see the create schema).
+    properties["steps"] = steps
 
 
 @dataclass(frozen=True, slots=True)

@@ -1864,6 +1864,10 @@ _CORRECTABLE_FAILURE_PRODUCERS: dict[tuple[str, str], list[str]] = {
     ("ai_builder_proposal_submission.py", "_handle_propose_flow_tool_call"): ["parse"],
     ("ai_builder_proposal_submission.py", "_process_submission_invocation"): ["parse"],
     ("ai_builder_tool_validation.py", "tool_use_ref_outcome"): ["platform_validator"],
+    ("ai_builder_tool_validation.py", "tool_request_outcome"): [
+        "parse",
+        "platform_validator",
+    ],
     ("ai_builder_tool_questions.py", "settle_tool_uses"): ["platform_validator"],
     ("ai_builder_tool_questions.py", "_contradicted"): ["platform_validator"],
 }
@@ -1925,7 +1929,7 @@ def _correctable_failure_sites() -> dict[tuple[str, str], list[str]]:
 def test_every_correctable_failure_site_names_its_rule_owner() -> None:
     sites = _correctable_failure_sites()
 
-    assert sum(len(labels) for labels in sites.values()) == 25
+    assert sum(len(labels) for labels in sites.values()) == 27
     assert {site: sorted(labels) for site, labels in sites.items()} == {
         site: sorted(labels) for site, labels in _CORRECTABLE_FAILURE_PRODUCERS.items()
     }

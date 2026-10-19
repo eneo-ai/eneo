@@ -6,7 +6,7 @@
   import type { AIBuilderStatus } from "./protocol";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
   import type { AIBuilderEditContext } from "./protocol";
-  import type { UnusableTool } from "$lib/features/flows/flowToolRefusal";
+  import type { BuilderToolGuidance } from "$lib/features/flows/flowToolRefusal";
   import ToolsUnavailable from "$lib/features/flows/components/tool/ToolsUnavailable.svelte";
 
   /**
@@ -18,8 +18,8 @@
     /** The phase the server reported for this turn, when it named one. */
     status?: AIBuilderStatus | null;
     assistantText: string | null;
-    /** The tool Eneo's reply says cannot be used, with why. */
-    toolRefusal?: UnusableTool | null;
+    /** The tool guidance Eneo's reply gives instead of a plan. */
+    toolRefusal?: BuilderToolGuidance | null;
     editContext?: AIBuilderEditContext | null;
     editContextLabel?: string | null;
     editContextLocked?: boolean;

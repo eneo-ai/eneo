@@ -29,7 +29,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStreamEvent,
     AIBuilderTextEvent,
     AIBuilderTextEventData,
-    AIBuilderToolRefusal,
+    AIBuilderToolGuidance,
     AIBuilderUsageEvent,
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
@@ -49,7 +49,7 @@ def encode_ai_builder_stream_event(event: AIBuilderStreamEvent) -> dict[str, str
 
 
 def build_text_event(
-    text: str, *, tool_refusal: AIBuilderToolRefusal | None = None
+    text: str, *, tool_refusal: AIBuilderToolGuidance | None = None
 ) -> AIBuilderTextEvent:
     return AIBuilderTextEvent(
         data=AIBuilderTextEventData(text=text, tool_refusal=tool_refusal)

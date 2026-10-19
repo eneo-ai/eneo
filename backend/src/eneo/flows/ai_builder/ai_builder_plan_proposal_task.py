@@ -59,6 +59,10 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
 from eneo.flows.ai_builder.ai_builder_tool_questions import (
     render_tool_decisions_block,
 )
+from eneo.flows.ai_builder.ai_builder_tool_use import (
+    TOOL_REQUEST_PLAN_FIELDS_RULE,
+    TOOL_REQUEST_UNRESOLVED_KEY,
+)
 from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
     PlanningState,
@@ -595,7 +599,11 @@ def _resource_context_block(
                 "with the answer. Only a tool the request needs gets a step. "
                 "When the request needs a tool listed as not usable, give that "
                 "step the tool's ref anyway: the person is told why it cannot "
-                "be used, and no other tool takes its place. Give each use a "
+                "be used, and no other tool takes its place. When the person "
+                "asks for a specific tool that is listed neither as usable nor "
+                f"as not usable, set {TOOL_REQUEST_UNRESOLVED_KEY} with their "
+                f"words that name it and {TOOL_REQUEST_PLAN_FIELDS_RULE}: never "
+                "use another tool in its place. Give each use a "
                 "use_ref; when another listed tool would serve the use too, list it "
                 "in alternative_refs; for a required value the request does not "
                 "give, write the argument with source ask_user: the person is "

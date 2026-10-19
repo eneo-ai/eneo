@@ -92,6 +92,25 @@ describe("ToolsUnavailable in the AI Builder", () => {
     }
   );
 
+  // Kills: an unresolved request shown as no guidance, as a named tool, or
+  // without the steps by which a tool becomes available.
+  it("names the request it could not match and how a tool becomes available", () => {
+    render(ToolsUnavailable, {
+      surface: "builder",
+      unusable: { kind: "request_unresolved", request_text: "kalendern Bokning" }
+    });
+
+    expect(
+      screen.getByText(m.flow_tool_request_unresolved_title({ request: "kalendern Bokning" }))
+    ).toBeTruthy();
+    expect(screen.getByText(m.flow_tool_request_unresolved_reason())).toBeTruthy();
+    expect(steps()).toEqual([
+      m.flow_tool_options_empty_step_server(),
+      m.flow_tool_options_empty_editor(),
+      m.flow_tool_unavailable_step_ask_again()
+    ]);
+  });
+
   // Kills: the settings link offered to someone who may not edit the space,
   // or opened in the Builder's own tab.
   it.each([true, false])("links the space settings only for a space editor (%s)", (mayEdit) => {

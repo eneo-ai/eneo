@@ -5176,6 +5176,8 @@
   "flow_tool_unavailable_step_ask_again": "Then ask the AI Builder to use the tool again.",
   "flow_tool_unusable_input_schema_invalid": "Its MCP server describes the tool's arguments in a way no flow can check. An administrator can correct it at the server.",
   "flow_tool_unusable_input_schema_too_large": "The tool's description of its arguments is larger than the AI Builder can read. Add the step in the step editor instead.",
+  "flow_tool_request_unresolved_title": "“{request}” did not match a tool the AI Builder can use",
+  "flow_tool_request_unresolved_reason": "The AI Builder built no step with another tool in its place.",
   "flow_tool_stored_missing": "The saved tool is no longer among the space's tools.",
   "flow_tool_stored_missing_action": "Choose another tool.",
   "flow_tool_stored_arguments_title": "Saved arguments",

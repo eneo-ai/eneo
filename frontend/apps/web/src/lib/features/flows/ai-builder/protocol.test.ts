@@ -352,6 +352,12 @@ describe("AI Builder stream protocol", () => {
       event: "text",
       data: { text: "Nej.", tool_refusal: null }
     });
+    // Kills: the unresolved-request guidance dropped as unreadable.
+    const unresolved = { kind: "request_unresolved", request_text: "kalendern Bokning" };
+    expect(parse(unresolved)).toEqual({
+      event: "text",
+      data: { text: "Nej.", tool_refusal: unresolved }
+    });
   });
 
   // Kills: the typed tool question dropped by the parser, leaving the web

@@ -42,9 +42,13 @@ from pydantic import (
 )
 
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderToolGuidance,
     AIBuilderToolRefusal,
     StructuredQuestionOptionPayload,
     StructuredQuestionPayload,
+)
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
+    tool_guidance_from_stored,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import NonPlanKind
 from eneo.flows.ai_builder.ai_builder_tool_catalog import TOOL_REF_PATTERN, tool_ref
@@ -213,7 +217,12 @@ class GuidanceOutcome(BaseModel):
     model_config = _CLOSED
 
     kind: Literal["guidance"]
-    refusal_kind: Literal["refused", "input_schema_invalid", "input_schema_too_large"]
+    refusal_kind: Literal[
+        "refused",
+        "input_schema_invalid",
+        "input_schema_too_large",
+        "request_unresolved",
+    ]
     refusal: UnattendedToolRefusal | None
 
     @model_validator(mode="after")
@@ -228,6 +237,14 @@ class AnswerOutcome(BaseModel):
 
     kind: Literal["answer"]
     non_plan_kind: NonPlanKind
+
+    @model_validator(mode="after")
+    def _tool_guidance_is_a_guidance_outcome(self) -> AnswerOutcome:
+        # Those answers carry a tool refusal, which an answer outcome
+        # contradicts, so it could never pass.
+        if self.non_plan_kind in ("tool_not_usable", "tool_request_unresolved"):
+            raise ValueError("a tool answer is expected as a guidance outcome")
+        return self
 
 
 class RunInputSource(BaseModel):
@@ -1213,8 +1230,8 @@ def _reference_binding(
     return {"unreadable": bound.expression}
 
 
-def _tool_refusal(interaction: Mapping[str, Any]) -> AIBuilderToolRefusal | None:
-    """The refusal the session's last assistant answer carries, if any."""
+def _tool_refusal(interaction: Mapping[str, Any]) -> AIBuilderToolGuidance | None:
+    """The tool guidance the session's last assistant answer carries, if any."""
 
     session = _mapping(interaction.get("latest_session")) or {}
     answers = [
@@ -1222,11 +1239,9 @@ def _tool_refusal(interaction: Mapping[str, Any]) -> AIBuilderToolRefusal | None
         for message in _mappings(session.get("conversation"))
         if message.get("role") == "assistant"
     ]
-    stored = answers[-1].get("tool_refusal") if answers else None
-    try:
-        return None if stored is None else AIBuilderToolRefusal.model_validate(stored)
-    except ValidationError:
-        return None
+    return tool_guidance_from_stored(
+        answers[-1].get("tool_refusal") if answers else None
+    )
 
 
 def _outcome_check(
@@ -1245,7 +1260,10 @@ def _outcome_check(
         passed = (
             plan is None
             and refusal is not None
-            and (refusal.kind, refusal.refusal)
+            and (
+                refusal.kind,
+                refusal.refusal if isinstance(refusal, AIBuilderToolRefusal) else None,
+            )
             == (outcome.refusal_kind, outcome.refusal)
         )
     else:

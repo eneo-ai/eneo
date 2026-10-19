@@ -8,7 +8,7 @@
   import {
     toolRefusalSentence,
     unusableToolSentence,
-    type UnusableTool
+    type BuilderToolGuidance
   } from "$lib/features/flows/flowToolRefusal";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
@@ -22,9 +22,10 @@
     /** Where the reader comes back to once a tool is available: the step
      *  editor's list, or the AI Builder asked again. */
     surface: "step_editor" | "builder";
-    /** The tool the reader asked for and why it cannot be used; null when
-     *  the space simply offers no tool. */
-    unusable?: UnusableTool | null;
+    /** The tool the reader asked for and why it cannot be used, or the
+     *  request the AI Builder could not match to a tool; null when the space
+     *  simply offers no tool. */
+    unusable?: BuilderToolGuidance | null;
     actions?: Snippet;
   } = $props();
 
@@ -37,12 +38,27 @@
   const personal = $derived($currentSpace.personal);
   const mayEditSpace = $derived(!personal && $currentSpace.hasPermission("edit", "space"));
 
-  const reason = $derived(unusable === null ? null : unusableToolSentence(unusable));
+  const title = $derived.by(() => {
+    if (unusable === null) return m.flow_tool_options_empty();
+    if (unusable.kind === "request_unresolved") {
+      return m.flow_tool_request_unresolved_title({ request: unusable.request_text });
+    }
+    return m.flow_tool_unavailable_title({
+      tool: unusable.tool_name,
+      server: unusable.server_name
+    });
+  });
+  const reason = $derived.by(() => {
+    if (unusable === null) return null;
+    if (unusable.kind === "request_unresolved") return m.flow_tool_request_unresolved_reason();
+    return unusableToolSentence(unusable);
+  });
   // The steps say how a space gets a tool; they cannot fix a tool whose
   // schema no flow can read, nor a personal space.
   const showsSteps = $derived(
     !personal &&
       (unusable === null ||
+        unusable.kind === "request_unresolved" ||
         (unusable.kind === "refused" && unusable.refusal !== "space_is_personal"))
   );
 </script>
@@ -58,11 +74,8 @@
         <TriangleAlert class="text-warning-stronger" aria-hidden="true" />
       {/if}
     </Empty.Media>
-    <Empty.Title>
-      {unusable === null
-        ? m.flow_tool_options_empty()
-        : m.flow_tool_unavailable_title({ tool: unusable.tool_name, server: unusable.server_name })}
-    </Empty.Title>
+    <!-- A tool name or the person's words can be one long token. -->
+    <Empty.Title class="wrap-anywhere">{title}</Empty.Title>
     <Empty.Description>
       {#if reason !== null}
         {reason}

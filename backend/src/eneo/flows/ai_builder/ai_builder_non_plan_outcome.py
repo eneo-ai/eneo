@@ -16,7 +16,7 @@ import unicodedata
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Final, Literal, cast, get_args
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -29,7 +29,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStreamEvent,
-    AIBuilderToolRefusal,
+    AIBuilderToolGuidance,
 )
 from eneo.flows.ai_builder.ai_builder_events import build_text_event
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
@@ -511,21 +511,33 @@ _NON_PLAN_OUTCOME_KEY: Final = "non_plan_outcome"
 _TOOL_REFUSAL_KEY: Final = "tool_refusal"
 
 
+_TOOL_GUIDANCE: Final[TypeAdapter[AIBuilderToolGuidance]] = TypeAdapter(
+    AIBuilderToolGuidance
+)
+
+
+def tool_guidance_from_stored(stored: object) -> AIBuilderToolGuidance | None:
+    """A stored or served tool guidance as its typed variant; None when it is
+    absent or no longer reads whole."""
+    if stored is None:
+        return None
+    try:
+        return _TOOL_GUIDANCE.validate_python(stored)
+    except ValidationError:
+        return None
+
+
 def tool_refusal_from_metadata(
     metadata: dict[str, Any] | None,
-) -> AIBuilderToolRefusal | None:
-    """The tool refusal an answered turn stored, so a reloaded session shows
+) -> AIBuilderToolGuidance | None:
+    """The tool guidance an answered turn stored, so a reloaded session shows
     the same guidance; None when there is none or it no longer reads whole."""
     outcome = (metadata or {}).get(_NON_PLAN_OUTCOME_KEY)
     if not isinstance(outcome, dict):
         return None
-    stored = cast(dict[str, Any], outcome).get(_TOOL_REFUSAL_KEY)
-    if stored is None:
-        return None
-    try:
-        return AIBuilderToolRefusal.model_validate(stored)
-    except ValidationError:
-        return None
+    return tool_guidance_from_stored(
+        cast(dict[str, Any], outcome).get(_TOOL_REFUSAL_KEY)
+    )
 
 
 async def persist_non_plan_turn(
@@ -544,7 +556,7 @@ async def persist_non_plan_turn(
     planning_state: PlanningState,
     flow: "Flow | None",
     outcome: NonPlanOutcome | None = None,
-    tool_refusal: AIBuilderToolRefusal | None = None,
+    tool_refusal: AIBuilderToolGuidance | None = None,
 ) -> tuple[AIBuilderStreamEvent, ...]:
     """Store an answered turn the same way an accepted proposal is stored.
 

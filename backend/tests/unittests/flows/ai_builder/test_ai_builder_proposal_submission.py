@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter_ns
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -148,7 +148,12 @@ from tests.unittests.flows.ai_builder.test_ai_builder_reference_flow_preservatio
     _saved_spec,
     _saved_step_context,
 )
-from tests.unittests.flows.ai_builder.test_ai_builder_tool_steps import _saved_flow
+from tests.unittests.flows.ai_builder.test_ai_builder_tool_steps import (
+    _saved_flow,
+    _two_tool_flow,
+    least_strict_outcome,
+    proposal_tool,
+)
 
 
 def _proposal_tool_schema_double() -> ProposalToolSchema:
@@ -1351,6 +1356,138 @@ async def test_an_edit_only_the_user_can_fix_is_answered_after_one_provider_call
     assert logged.call_args.kwargs["extra"]["failure_code"] == (
         "confirmed_form_field_incompatible"
     )
+
+
+_PLAN = {"plan_rationale": "R.", "steps": [], "flow_name": "F"}
+
+
+async def _run_proposal_turn(
+    *,
+    in_edit: bool,
+    proposal_tool_schema: ProposalToolSchema,
+    proposals: list[dict[str, Any]],
+    compile_proposal: AsyncMock,
+) -> tuple[list[dict[str, str]], AsyncMock, AsyncMock]:
+    """The events of one proposal turn whose provider writes `proposals` in
+    turn, with the create or edit compile replaced by `compile_proposal`."""
+    state = _committed_text_planning_state()
+    repo = AsyncMock()
+    repo.commit_turn = AsyncMock(return_value=3)
+    submission = _make_submission(repo=repo)
+    submission.litellm_client.acompletion = AsyncMock(
+        side_effect=[
+            _make_response_with_tool_calls(
+                _make_tool_call(
+                    PROPOSE_FLOW_TOOL_NAME, arguments, tool_call_id=f"call-{index}"
+                )
+            )
+            for index, arguments in enumerate(proposals)
+        ]
+    )
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_submission.process_"
+        + ("edit_arguments" if in_edit else "create_intent_arguments"),
+        new=compile_proposal,
+    ):
+        events = _wire_events(
+            [
+                event
+                async for event in submission.run_active_submission_attempt(
+                    turn=_make_context().turn,
+                    conversation=[ConversationMessage(role="user", content="Boka.")],
+                    new_messages_start=1,
+                    message_groups=_message_groups(
+                        [{"role": "system", "content": "Prompt"}]
+                    ),
+                    completion_model_route=_route(),
+                    available_model_refs=None,
+                    available_kb_refs=None,
+                    resource_catalog=build_ai_builder_resource_catalog(
+                        available_models=[], available_kbs=[]
+                    ),
+                    proposal_tool_schema=proposal_tool_schema,
+                    proposal_request_budget=_proposal_request_budget(8_192),
+                    provider_gate=provider_work_gate(),
+                    request_id="req-unresolved",
+                    usage_tracker=ProposalTurnTelemetry(
+                        request_id="req-unresolved",
+                        model=_route().litellm_model,
+                        target_kind=TargetKind.EDIT if in_edit else TargetKind.CREATE,
+                    ),
+                    flow=_saved_flow() if in_edit else None,
+                    planning_state=state,
+                    compile_context=create_compile_context_from_planning_state(
+                        state, ui_language="en"
+                    ),
+                )
+            ]
+        )
+    return events, repo, submission.litellm_client.acompletion
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("in_edit", [False, True], ids=["create", "edit"])
+async def test_an_unresolved_tool_request_is_answered_and_never_compiled(
+    in_edit: bool,
+) -> None:
+    # Kills: a plan or a removal beside the outcome accepted (as the answer or
+    # compiled), the seam reading another schema than the turn's, the outcome
+    # compiled or persisted as a plan, the strict-shaped repair not answered,
+    # the typed guidance left out of the event or the stored turn, the answer
+    # not in the interface language.
+    compile_proposal = AsyncMock()
+    _, schema = proposal_tool("ordered_edit" if in_edit else "create")
+    least = least_strict_outcome(schema)
+    change = (
+        {"removed_existing_step_refs": ["existing_step_3"]}
+        if in_edit
+        else {"steps": _two_tool_flow()["steps"]}
+    )
+
+    events, repo, provider = await _run_proposal_turn(
+        in_edit=in_edit,
+        proposal_tool_schema=schema,
+        proposals=[{**least, **change}, least],
+        compile_proposal=compile_proposal,
+    )
+
+    assert provider.await_count == 2
+    compile_proposal.assert_not_awaited()
+    repo.create_plan.assert_not_awaited()
+    guidance = {"kind": "request_unresolved", "request_text": "kalendern Bokning"}
+    assert events[-1]["event"] == "text"
+    answer = json.loads(events[-1]["data"])
+    assert answer["tool_refusal"] == guidance
+    assert answer["text"].startswith("I couldn't match the tool")
+    stored = repo.commit_turn.await_args.kwargs["new_messages"]
+    assert stored[0].metadata["non_plan_outcome"] == {
+        "kind": "tool_request_unresolved",
+        "required_action": "make_tool_usable",
+        "affected": [],
+        "affected_remaining": 0,
+        "tool_refusal": guidance,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("in_edit", [False, True], ids=["create", "edit"])
+async def test_a_plan_with_no_tool_request_compiles_without_the_request_key(
+    in_edit: bool,
+) -> None:
+    # Kills: the key sent on a strict route with every plan (null) reaching
+    # the closed create/edit models, which reject it as an extra input.
+    compile_proposal = AsyncMock(return_value=ProposalAnswer(answer="Klart."))
+
+    await _run_proposal_turn(
+        in_edit=in_edit,
+        proposal_tool_schema=_proposal_tool_schema_double(),
+        proposals=[{**_PLAN, "tool_request_unresolved": None}],
+        compile_proposal=compile_proposal,
+    )
+
+    compiled = compile_proposal.await_args.kwargs["arguments"]
+    assert "tool_request_unresolved" not in compiled
+    assert compiled["flow_name"] == "F"
 
 
 @pytest.mark.asyncio

@@ -304,7 +304,7 @@
   $effect(() => {
     if (service.session?.session_id) void service.loadSessionTools();
   });
-  // Why a tool the request needs cannot be used, when Eneo's reply says so.
+  // The tool guidance Eneo's reply gives instead of a plan, when it gives one.
   const lastAssistantToolRefusal = $derived.by(() => {
     for (let i = service.messages.length - 1; i >= 0; i -= 1) {
       const message = service.messages[i];
@@ -313,8 +313,8 @@
     }
     return null;
   });
-  // After the confirmation Eneo can answer instead of planning (a tool the
-  // request needs cannot be used): that answer is read and replied to, not
+  // After the confirmation Eneo can answer instead of planning (tool
+  // guidance): that answer is read and replied to, not
   // waited on as if a plan were still coming. A failed turn keeps its own
   // failure surface.
   const answeredWithoutPlan = $derived(

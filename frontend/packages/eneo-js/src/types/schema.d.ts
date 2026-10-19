@@ -12054,8 +12054,16 @@ export interface components {
       role: "user" | "assistant";
       /** Timestamp */
       timestamp?: string | null;
-      /** @description On an assistant answer that explains why a needed MCP tool cannot be used: the tool, its server and the typed reason, as the answer's text event carried it. */
-      tool_refusal?: components["schemas"]["AIBuilderToolRefusal"] | null;
+      /**
+       * Tool Refusal
+       * @description On an assistant answer that gives tool guidance instead of a plan, as the answer's text event carried it: a needed MCP tool that cannot be used (the tool, its server and the typed reason), or a request for a tool the Builder could not match to one it may use (`kind` request_unresolved, the person's words only).
+       */
+      tool_refusal?:
+        | (
+            | components["schemas"]["AIBuilderToolRefusal"]
+            | components["schemas"]["AIBuilderToolRequestUnresolved"]
+          )
+        | null;
     };
     /** AIBuilderDiagnosticContext */
     AIBuilderDiagnosticContext: {
@@ -12518,8 +12526,16 @@ export interface components {
     AIBuilderTextEventData: {
       /** Text */
       text: string;
-      /** @default null */
-      tool_refusal?: components["schemas"]["AIBuilderToolRefusal"] | null;
+      /**
+       * Tool Refusal
+       * @default null
+       */
+      tool_refusal?:
+        | (
+            | components["schemas"]["AIBuilderToolRefusal"]
+            | components["schemas"]["AIBuilderToolRequestUnresolved"]
+          )
+        | null;
     };
     /**
      * AIBuilderToolQuestion
@@ -12556,11 +12572,10 @@ export interface components {
      */
     AIBuilderToolRefusal: {
       /**
-       * Kind
-       * @description refused: the space may not use the tool now (see `refusal`). input_schema_invalid: no flow can check its arguments against the schema its server gives. input_schema_too_large: its schema is larger than the Builder can show the planner.
+       * @description refused: the space may not use the tool now (see `refusal`). input_schema_invalid: no flow can check its arguments against the schema its server gives. input_schema_too_large: its schema is larger than the Builder can show the planner. (enum property replaced by openapi-typescript)
        * @enum {string}
        */
-      kind: "refused" | "input_schema_invalid" | "input_schema_too_large";
+      kind: "input_schema_invalid" | "input_schema_too_large" | "refused";
       /** @description Why the space may not use the tool; set only for `refused`. */
       refusal?: components["schemas"]["UnattendedToolRefusal"] | null;
       /**
@@ -12573,6 +12588,25 @@ export interface components {
        * @description The tool's name at its server.
        */
       tool_name: string;
+    };
+    /**
+     * AIBuilderToolRequestUnresolved
+     * @description The person asked for a tool the Builder could not match to one it may
+     *     use in the flow, so it built no step with another tool. It names no tool
+     *     or server: the request may name one that exists, but the Builder's list
+     *     of the space's tools can be cut to fit the model.
+     */
+    AIBuilderToolRequestUnresolved: {
+      /**
+       * @description request_unresolved: the Builder could not match the request to a tool it may use. (enum property replaced by openapi-typescript)
+       * @enum {string}
+       */
+      kind: "request_unresolved";
+      /**
+       * Request Text
+       * @description The person's words that name the tool, as the planner copied them; shown only, never matched against tool names.
+       */
+      request_text: string;
     };
     /** AIBuilderTurnLifecycleResponse */
     AIBuilderTurnLifecycleResponse: {

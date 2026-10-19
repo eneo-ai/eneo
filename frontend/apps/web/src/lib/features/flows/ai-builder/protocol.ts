@@ -16,6 +16,7 @@ import type {
 import { z } from "zod";
 import {
   isUnattendedToolRefusal,
+  type BuilderToolGuidance,
   type UnattendedToolRefusal,
   type UnusableTool
 } from "$lib/features/flows/flowToolRefusal";
@@ -294,8 +295,8 @@ export interface ChatMessage {
   plan?: ProposedPlan;
   question?: StructuredQuestion;
   requirementsSummary?: RequirementsSummary;
-  /** An answer explaining why a tool the request needs cannot be used. */
-  toolRefusal?: UnusableTool;
+  /** An answer giving tool guidance instead of a plan. */
+  toolRefusal?: BuilderToolGuidance;
   /** Typed structured-question answer carried by a user message; set at the
    *  hydration/optimistic boundary so views never parse metadata dicts. */
   questionAnswer?: PersistedStructuredQuestionAnswerMetadata;
@@ -514,11 +515,20 @@ const unusableToolSchema = z.strictObject({
   refusal: z.custom<UnattendedToolRefusal>(isUnattendedToolRefusal).nullable().optional()
 }) satisfies z.ZodType<UnusableTool>;
 
+const unresolvedToolRequestSchema = z.strictObject({
+  kind: z.literal("request_unresolved"),
+  request_text: z.string()
+}) satisfies z.ZodType<components["schemas"]["AIBuilderToolRequestUnresolved"]>;
+
 const textEventDataSchema = z.object({
   text: z.string(),
-  // The answer's words already say why; a refusal this client cannot read
-  // only loses the guidance beside them, never the answer.
-  tool_refusal: unusableToolSchema.nullable().catch(null).optional()
+  // The answer's words already say why; guidance this client cannot read
+  // only loses the card beside them, never the answer.
+  tool_refusal: z
+    .union([unusableToolSchema, unresolvedToolRequestSchema])
+    .nullable()
+    .catch(null)
+    .optional()
 }) satisfies z.ZodType<AIBuilderTextEventData>;
 
 const statusEventDataSchema = z.object({

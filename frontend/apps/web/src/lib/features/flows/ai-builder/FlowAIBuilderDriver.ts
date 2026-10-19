@@ -1,5 +1,5 @@
 import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
-import type { UnusableTool } from "$lib/features/flows/flowToolRefusal";
+import type { BuilderToolGuidance } from "$lib/features/flows/flowToolRefusal";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
 import type { EneoFetchFunction, EneoStreamFunction } from "@eneo/eneo-js";
@@ -2046,7 +2046,7 @@ export class FlowAIBuilderDriver {
     plan?: ProposedPlan,
     question?: StructuredQuestion,
     requirementsSummary?: RequirementsSummary,
-    toolRefusal?: UnusableTool
+    toolRefusal?: BuilderToolGuidance
   ): void {
     const lastMsg = this.#state.messages[this.#state.messages.length - 1];
     if (lastMsg?.role === "assistant") {

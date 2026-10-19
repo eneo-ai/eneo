@@ -419,6 +419,30 @@ schema budget). A refusal reaches the web typed: the answer's
 text event and its stored `non_plan_outcome` carry `tool_refusal` (tool name,
 server name, kind `refused`, `input_schema_invalid` or `input_schema_too_large`,
 and the refusal code).
+A request for a tool the turn does not list is the other variant: when the prompt
+lists tools, `propose_flow` also offers `tool_request_unresolved`
+(`request_text`, at most 240 characters) as the alternative to a plan, with
+`steps` null. One check, `tool_request_outcome`, runs in
+`_process_submission_invocation` on the admitted arguments of every proposal
+(the first call, the call forced after text and each repair) before create or
+edit reads a plan. The outcome with no plan is answered as a non-plan turn of
+kind `tool_request_unresolved` and compiles nothing. What counts as a plan is
+declared by the schema builder (`proposal_plan_carriers`, read from the schema
+the model was given): a create's `steps`; an edit's `steps`,
+`removed_existing_step_refs`, `form_fields`, `flow_name` and
+`flow_description`, as far as its scope offers them. Each carrier has the
+empty value its schema admits: null where the schema allows null, otherwise
+an empty list. So the outcome as a strict route must send it (every property
+present, each empty) is answered on the first call, while a carrier with any
+other value beside it goes back to the model
+(`tool_request_unresolved_with_plan`) with a repair that names those empty
+values; the property's own description names them too, built from the same
+carriers when the schema is built (a carrier that admits no empty value fails
+there with `PlanCarrierError`, not in a turn). `plan_rationale`, `assumptions` and a create's name and description
+change no flow; the answer does not read them. A null outcome, which
+a strict route sends with every plan, is dropped before the plan is read. The
+guidance it carries is `kind: request_unresolved` with `request_text` and
+names no tool or server, since the listed tools can be cut to fit the model.
 
 The catalogue is optional prompt content. The request budget is planned from
 the prompt without it, so the answer reserve is the same as in a turn without

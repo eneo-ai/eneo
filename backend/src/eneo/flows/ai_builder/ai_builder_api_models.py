@@ -43,7 +43,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderPublicError,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
-    AIBuilderToolRefusal,
+    AIBuilderToolGuidance,
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
 )
@@ -345,12 +345,14 @@ class AIBuilderConversationMessage(BaseModel):
     question_answer: StructuredQuestionAnswerMetadata | None = None
     requirements_confirmation: RequirementsConfirmationMetadata | None = None
     named_content_fields_edit: NamedContentFieldsEditRequest | None = None
-    tool_refusal: AIBuilderToolRefusal | None = Field(
+    tool_refusal: AIBuilderToolGuidance | None = Field(
         default=None,
         description=(
-            "On an assistant answer that explains why a needed MCP tool cannot "
-            "be used: the tool, its server and the typed reason, as the answer's "
-            "text event carried it."
+            "On an assistant answer that gives tool guidance instead of a plan, "
+            "as the answer's text event carried it: a needed MCP tool that "
+            "cannot be used (the tool, its server and the typed reason), or a "
+            "request for a tool the Builder could not match to one it may use "
+            "(`kind` request_unresolved, the person's words only)."
         ),
     )
 

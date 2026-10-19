@@ -416,8 +416,13 @@ def test_a_turn_beyond_the_declared_ones_expects_no_tool_question(
     )
 
 
-def _refused(kind: str) -> list[dict[str, Any]]:
-    refusal = {"tool_name": "t", "server_name": "s", "kind": kind}
+def _refused(kind: str, code: str | None = None) -> list[dict[str, Any]]:
+    refusal: dict[str, Any] = (
+        {"kind": kind, "request_text": "kalendern Bokning"}
+        if kind == "request_unresolved"
+        else {"tool_name": "t", "server_name": "s", "kind": kind}
+        | ({"refusal": code} if code else {})
+    )
     conversation = [{"role": "assistant", "tool_refusal": refusal}]
     return [
         {"events": [], "plan": None, "latest_session": {"conversation": conversation}}
@@ -441,6 +446,61 @@ def test_a_guidance_outcome_matches_the_typed_refusal_of_the_last_answer(
     # Kills: a guidance outcome passed on "no plan" alone.
     right = _states(harness, _GUIDANCE, _refused("input_schema_too_large"), calls=[])
     wrong = _states(harness, _GUIDANCE, _refused("input_schema_invalid"), calls=[])
+
+    assert (right["plan"], wrong["plan"]) == ("pass", "fail")
+
+
+def test_a_refused_tool_guidance_matches_the_refusal_code(
+    harness: ModuleType,
+) -> None:
+    # Kills: the code of a refused tool left out of the comparison, so any
+    # refused tool passes whatever refused it.
+    refused = {
+        "outcome": {
+            "kind": "guidance",
+            "refusal_kind": "refused",
+            "refusal": "tool_switched_off_in_space",
+        },
+        "turns": [],
+        "uses": [],
+    }
+
+    right = _states(
+        harness, refused, _refused("refused", "tool_switched_off_in_space"), calls=[]
+    )
+    wrong = _states(
+        harness, refused, _refused("refused", "space_is_personal"), calls=[]
+    )
+
+    assert (right["plan"], wrong["plan"]) == ("pass", "fail")
+
+
+@mark.parametrize("kind", ["tool_not_usable", "tool_request_unresolved"])
+def test_a_tool_answer_cannot_be_expected_as_a_plain_answer(kind: str) -> None:
+    # Kills: an answer expectation for a tool refusal that validates and then
+    # can never pass, because the refusal contradicts an answer outcome.
+    with raises(ValueError, match="guidance outcome"):
+        mcp.AnswerOutcome.model_validate({"kind": "answer", "non_plan_kind": kind})
+
+
+def test_a_guidance_outcome_reads_the_unresolved_request_variant(
+    harness: ModuleType,
+) -> None:
+    # Kills: the harness reading the guidance with the refusal type only, so a
+    # correct unresolved answer scores as no guidance (or an expectation of
+    # it cannot be written).
+    unresolved = {
+        "outcome": {
+            "kind": "guidance",
+            "refusal_kind": "request_unresolved",
+            "refusal": None,
+        },
+        "turns": [],
+        "uses": [],
+    }
+
+    right = _states(harness, unresolved, _refused("request_unresolved"), calls=[])
+    wrong = _states(harness, unresolved, _refused("input_schema_invalid"), calls=[])
 
     assert (right["plan"], wrong["plan"]) == ("pass", "fail")
 

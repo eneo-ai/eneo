@@ -32,6 +32,11 @@ export function toolRefusalSentence(refusal: UnattendedToolRefusal): string {
 /** A tool a flow needs and cannot use, as the AI Builder names it in its answer. */
 export type UnusableTool = components["schemas"]["AIBuilderToolRefusal"];
 
+/** Why the AI Builder answered instead of building a step with a tool: a tool
+ *  it cannot use, or a request it could not match to a tool it may use. */
+export type BuilderToolGuidance =
+  UnusableTool | components["schemas"]["AIBuilderToolRequestUnresolved"];
+
 /** Why `tool` cannot be used: the refusing level's sentence, or why no flow
  *  can read the arguments its schema describes. Null for a refusal that does
  *  not say which level refuses it. */

@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Literal, NotRequired, TypedDict, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Final,
+    Literal,
+    NotRequired,
+    TypedDict,
+    cast,
+)
 
 import jsonschema
 
 if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
     from eneo.flows.ai_builder.ai_builder_flow_review import ReviewEditScope
     from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
         EditOperationPermissions,
@@ -33,6 +43,10 @@ from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     extract_assumptions,
     extract_plan_rationale,
+)
+from eneo.flows.ai_builder.ai_builder_tool_use import (
+    TOOL_REQUEST_UNRESOLVED_KEY,
+    offer_tool_request_unresolved,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.output_processing import build_schema_validator, validate_schema_syntax
@@ -78,29 +92,125 @@ def build_propose_flow_tool_schema(
     tool_refs: Sequence[str] = (),
 ) -> ProposalToolSchema:
     """``tool_refs`` are the tools a step may read (``tool_use``); none
-    leaves the property out."""
-    if current_steps is None:
-        return cast(
-            ProposalToolSchema,
-            build_create_flow_tool_schema(
-                resource_catalog=resource_catalog,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-                is_pure_audio_transcription=is_pure_audio_transcription,
-                confirmed_runtime_inputs=confirmed_runtime_inputs,
-                structured_review_mode=structured_review_mode,
-                tool_refs=tool_refs,
-            ),
+    leaves the property out, and with it the answer that the person asked
+    for a tool the turn does not list."""
+    schema = (
+        build_create_flow_tool_schema(
+            resource_catalog=resource_catalog,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+            is_pure_audio_transcription=is_pure_audio_transcription,
+            confirmed_runtime_inputs=confirmed_runtime_inputs,
+            structured_review_mode=structured_review_mode,
+            tool_refs=tool_refs,
         )
-    return cast(
-        ProposalToolSchema,
-        build_edit_flow_tool_schema(
+        if current_steps is None
+        else build_edit_flow_tool_schema(
             current_steps,
             resource_catalog=resource_catalog,
             tool_name=PROPOSE_FLOW_TOOL_NAME,
             review_scope=review_scope,
             permissions=permissions,
             tool_refs=tool_refs,
-        ),
+        )
+    )
+    if tool_refs:
+        parameters = schema["function"]["parameters"]
+        offer_tool_request_unresolved(parameters)
+        # Described from the carriers it must leave empty, which depend on
+        # the schema just built (a scoped edit offers fewer of them).
+        parameters["properties"][TOOL_REQUEST_UNRESOLVED_KEY]["description"] = (
+            "Null with a plan. To answer instead of a plan, send it with "
+            + plan_carriers_sentence(
+                _plan_carriers(
+                    parameters, "create" if current_steps is None else "edit"
+                )
+            )
+            + "."
+        )
+    return cast(ProposalToolSchema, schema)
+
+
+@dataclass(frozen=True, slots=True)
+class PlanCarrier:
+    """An argument through which a proposal creates or changes a flow, and
+    its value that changes nothing in the schema the model was given:
+    ``null``, or, where the schema has no null, ``empty`` (an empty list)."""
+
+    key: str
+    empty: Literal["null", "empty"]
+
+    def carries(self, arguments: Mapping[str, Any]) -> bool:
+        if self.key not in arguments:
+            return False
+        value = arguments[self.key]
+        return value is not None if self.empty == "null" else value != []
+
+
+# Per proposal kind, the arguments that create or change a flow. A create
+# builds nothing without steps; its name and description only describe them.
+# An edit also removes steps, replaces the run form and renames or
+# redescribes the flow (the authoring projection applies each; null keeps a
+# flow field). A scoped or saved-step edit schema leaves some of them out,
+# and with them out of its carriers. Keyed by the ``TargetKind`` values: the
+# domain models' first import cycles through the database tables, so this
+# module names the kind only in types and stays importable on its own.
+_PlanKind = Literal["create", "edit"]
+_PLAN_CARRIER_KEYS: Final[Mapping[_PlanKind, tuple[str, ...]]] = {
+    "create": ("steps",),
+    "edit": (
+        "steps",
+        "removed_existing_step_refs",
+        "form_fields",
+        "flow_name",
+        "flow_description",
+    ),
+}
+
+
+class PlanCarrierError(ValueError):
+    """A plan carrier of the proposal schema admits no value that changes
+    nothing, so no repair could ask the model for one."""
+
+
+def proposal_plan_carriers(
+    tool_schema: ProposalToolSchema, *, target_kind: "TargetKind"
+) -> tuple[PlanCarrier, ...]:
+    """The plan carriers of the proposal schema built for ``target_kind``,
+    each with the empty value that schema admits, so a check or a repair
+    built from them never asks for a value admission rejects."""
+    return _plan_carriers(tool_schema["function"]["parameters"], target_kind.value)
+
+
+def plan_carriers_sentence(carriers: Sequence[PlanCarrier]) -> str:
+    """The carriers with their empty values, as the model is told them
+    (``null steps and empty removed_existing_step_refs``)."""
+    return " and ".join(f"{carrier.empty} {carrier.key}" for carrier in carriers)
+
+
+def _plan_carriers(
+    parameters: dict[str, Any], kind: _PlanKind
+) -> tuple[PlanCarrier, ...]:
+    properties: dict[str, Any] = parameters["properties"]
+    return tuple(
+        _plan_carrier(key, properties[key])
+        for key in _PLAN_CARRIER_KEYS[kind]
+        if key in properties
+    )
+
+
+def _plan_carrier(key: str, property_schema: dict[str, Any]) -> PlanCarrier:
+    schema_type = property_schema.get("type")
+    schema_types = (
+        cast(list[object], schema_type)
+        if isinstance(schema_type, list)
+        else [schema_type]
+    )
+    if "null" in schema_types:
+        return PlanCarrier(key=key, empty="null")
+    if schema_types == ["array"] and not property_schema.get("minItems"):
+        return PlanCarrier(key=key, empty="empty")
+    raise PlanCarrierError(
+        f"propose_flow admits no value of {key} that changes nothing"
     )
 
 
@@ -843,10 +953,14 @@ __all__ = [
     "AdmissionNormalizerHitRecorder",
     "admit_propose_flow_tool_arguments",
     "build_propose_flow_tool_schema",
+    "PlanCarrier",
     "ProposalToolArgumentsError",
     "ProposalToolSchema",
     "extract_assumptions",
     "extract_plan_rationale",
     "parse_create_flow_intent_arguments",
+    "PlanCarrierError",
+    "plan_carriers_sentence",
+    "proposal_plan_carriers",
     "validate_propose_flow_tool_arguments",
 ]

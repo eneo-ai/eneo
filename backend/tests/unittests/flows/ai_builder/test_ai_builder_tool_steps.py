@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import pytest
@@ -38,6 +38,13 @@ from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
 )
+from eneo.flows.ai_builder.ai_builder_flow_review import ReviewEditScope
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+    EditOperationPermissions,
+)
+from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
+    build_plan_proposal_system_prompt,
+)
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     ProposalPrepared,
     build_proposal_prepared,
@@ -62,19 +69,30 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_tool_catalog import (
     TOOL_REF_HEX_DIGITS,
     AIBuilderToolCatalogListed,
+    AIBuilderToolCatalogProjection,
     AIBuilderToolCatalogTooLarge,
     fit_tool_catalog_projection,
     tool_options_with_refs,
     tool_ref,
 )
 from eneo.flows.ai_builder.ai_builder_tool_use import (
+    TOOL_REQUEST_PLAN_FIELDS_RULE,
     RunFormFieldShape,
     ToolUseIntent,
     tool_argument_form_field,
 )
-from eneo.flows.ai_builder.ai_builder_tool_validation import tool_use_ref_outcome
+from eneo.flows.ai_builder.ai_builder_tool_validation import (
+    tool_request_outcome,
+    tool_use_ref_outcome,
+)
 from eneo.flows.ai_builder.ai_builder_tools import (
+    PlanCarrierError,
+    ProposalToolSchema,
+    admit_propose_flow_tool_arguments,
+    build_native_strict_tool_schema,
     build_propose_flow_tool_schema,
+    plan_carriers_sentence,
+    proposal_plan_carriers,
     validate_propose_flow_tool_arguments,
 )
 from eneo.flows.ai_builder.planning_state import (
@@ -403,6 +421,218 @@ def test_a_step_offers_tool_use_only_with_the_refs_the_turn_names() -> None:
     assert offered["properties"]["tool_ref"]["enum"] == [VALUES_REF, OFF_REF]
 
 
+@pytest.mark.parametrize("in_edit", [False, True], ids=["create", "edit"])
+def test_a_turn_that_names_tools_may_answer_an_unresolved_request_instead(
+    in_edit: bool,
+) -> None:
+    # Kills: the alternative missing from the create or the edit tool or
+    # offered with no tool to name, steps that cannot be null beside it, a
+    # schema strict providers refuse, blank words taken as the request, the
+    # prompt rule missing or given without the field or the plan fields.
+    catalog = _catalog(VALUES, OFF)
+    steps = list(_saved_flow().steps) if in_edit else None
+
+    def tool(refs: tuple[str, ...]) -> ProposalToolSchema:
+        return build_propose_flow_tool_schema(
+            resource_catalog=catalog, current_steps=steps, tool_refs=refs
+        )
+
+    def prompt(projection: AIBuilderToolCatalogProjection) -> str:
+        return build_plan_proposal_system_prompt(
+            planning_state=PlanningState.empty(),
+            confirmed_requirements=None,
+            attachment_context=None,
+            flow_context=None,
+            is_edit_mode=in_edit,
+            resource_catalog=catalog,
+            tool_catalog=projection,
+        )
+
+    plain = tool(())["function"]["parameters"]
+    offered = tool(catalog.tools.listed_refs)
+    validate_propose_flow_tool_arguments(
+        arguments={
+            "flow_name": "F",
+            "plan_rationale": "R.",
+            "steps": None,
+            "tool_request_unresolved": {"request_text": "kalendern Bokning"},
+        },
+        tool_schema=offered,
+    )
+    build_native_strict_tool_schema(offered)
+
+    assert "tool_request_unresolved" not in plain["properties"]
+    blank = tool_request_outcome(
+        {"steps": None, "tool_request_unresolved": {"request_text": " "}},
+        tool_schema=offered,
+        target_kind=TargetKind.EDIT if in_edit else TargetKind.CREATE,
+        ui_language="sv",
+    )
+    assert isinstance(blank, CorrectableFailure)
+    assert blank.codes == frozenset({"tool_request_unresolved_invalid"})
+    assert prompt(catalog.tools.projection).count("tool_request_unresolved") == 1
+    assert TOOL_REQUEST_PLAN_FIELDS_RULE in prompt(catalog.tools.projection)
+    assert "tool_request_unresolved" not in prompt(AIBuilderToolCatalogTooLarge())
+
+
+ProposalKind = Literal["create", "ordered_edit", "review_edit", "saved_step_edit"]
+# What changes nothing in a flow, beside the outcome. Every other property of
+# the tool is a plan carrier, so a property added to a schema fails the
+# partition test until someone decides which it is.
+_NON_CARRIERS: dict[ProposalKind, set[str]] = {
+    "create": {"plan_rationale", "assumptions", "flow_name", "flow_description"},
+    "ordered_edit": {"plan_rationale", "assumptions"},
+    "review_edit": {"plan_rationale", "assumptions"},
+    "saved_step_edit": {"plan_rationale", "assumptions"},
+}
+
+
+def proposal_tool(kind: ProposalKind) -> tuple[TargetKind, ProposalToolSchema]:
+    """The propose_flow tool of one proposal kind, for a turn that names
+    tools, and the kind the submission reads it with."""
+    catalog = _catalog(VALUES, DETAILS, OFF)
+    steps = list(_saved_flow().steps)
+    third = frozenset({"existing_step_3"})
+    if kind == "create":
+        return TargetKind.CREATE, build_propose_flow_tool_schema(
+            resource_catalog=catalog, tool_refs=catalog.tools.listed_refs
+        )
+    if kind == "saved_step_edit":
+        permissions = EditOperationPermissions(
+            step_refs=third, removable_step_refs=frozenset(), may_add=False
+        )
+        return TargetKind.EDIT, build_propose_flow_tool_schema(
+            resource_catalog=catalog,
+            current_steps=steps,
+            permissions=permissions,
+            tool_refs=catalog.tools.listed_refs,
+        )
+    scope = (
+        ReviewEditScope(step_refs=third, removable_step_refs=third, may_add=True)
+        if kind == "review_edit"
+        else None
+    )
+    return TargetKind.EDIT, build_propose_flow_tool_schema(
+        resource_catalog=catalog,
+        current_steps=steps,
+        review_scope=scope,
+        tool_refs=catalog.tools.listed_refs,
+    )
+
+
+def least_strict_outcome(schema: ProposalToolSchema) -> dict[str, Any]:
+    """The outcome as a strict route must send it: every property of the
+    native-strict tool, each at the least value its wire type allows."""
+    wire = build_native_strict_tool_schema(schema)["function"]["parameters"]
+
+    def least(property_schema: dict[str, Any]) -> object:
+        types = property_schema["type"]
+        types = types if isinstance(types, list) else [types]
+        return None if "null" in types else [] if "array" in types else "R."
+
+    return {
+        **{key: least(value) for key, value in wire["properties"].items()},
+        "tool_request_unresolved": {"request_text": "kalendern Bokning"},
+    }
+
+
+@pytest.mark.parametrize("kind", list(_NON_CARRIERS))
+def test_every_property_of_a_proposal_tool_is_a_carrier_or_named_as_none(
+    kind: ProposalKind,
+) -> None:
+    # Kills: a property added to a schema (or dropped from the declaration)
+    # that silently stops counting as a change beside the outcome.
+    target_kind, schema = proposal_tool(kind)
+    parameters = schema["function"]["parameters"]
+    carriers = {
+        carrier.key
+        for carrier in proposal_plan_carriers(schema, target_kind=target_kind)
+    }
+
+    assert set(parameters["properties"]) == (
+        carriers | _NON_CARRIERS[kind] | {"tool_request_unresolved"}
+    )
+    description = parameters["properties"]["tool_request_unresolved"]["description"]
+    assert description.endswith(
+        plan_carriers_sentence(proposal_plan_carriers(schema, target_kind=target_kind))
+        + "."
+    )
+
+
+def test_a_carrier_with_no_empty_value_is_refused_when_the_schema_is_built() -> None:
+    # Kills: a carrier whose empty value admission rejects (a list that needs
+    # items, a string) given a repair that asks for it.
+    def schema(carrier: dict[str, Any]) -> ProposalToolSchema:
+        return {
+            "type": "function",
+            "function": {
+                "name": "propose_flow",
+                "parameters": {"properties": {"steps": carrier}},
+            },
+        }
+
+    for carrier in (
+        {"type": "array", "minItems": 1},
+        {"type": "string"},
+    ):
+        with pytest.raises(PlanCarrierError):
+            proposal_plan_carriers(schema(carrier), target_kind=TargetKind.CREATE)
+
+
+@pytest.mark.parametrize("kind", list(_NON_CARRIERS))
+def test_the_outcome_is_answered_at_once_and_refused_beside_a_change(
+    kind: ProposalKind,
+) -> None:
+    # Kills: a carrier missing from the kind's declaration, an empty list or
+    # a null counted as a change, a missing key counted as a change, a repair
+    # that demands null for a list, one fixed key list for every kind (a
+    # create's description is no change).
+    target_kind, schema = proposal_tool(kind)
+    change: dict[str, object] = {
+        "steps": (
+            _two_tool_flow()["steps"]
+            if kind == "create"
+            else [{"kind": "modify", "existing_step_ref": "existing_step_3"}]
+        ),
+        "removed_existing_step_refs": ["existing_step_3"],
+        "form_fields": [],  # an empty list clears the saved run form
+        "flow_name": "Nytt namn",
+        "flow_description": "Ny beskrivning",
+    }
+
+    def outcome(arguments: dict[str, Any]) -> object:
+        return tool_request_outcome(
+            admit_propose_flow_tool_arguments(arguments=arguments, tool_schema=schema),
+            tool_schema=schema,
+            target_kind=target_kind,
+            ui_language="en",
+        )
+
+    least = least_strict_outcome(schema)
+    required = schema["function"]["parameters"]["required"]
+    assert isinstance(outcome(least), ProposalAnswer)
+    # A route that is not strict may leave the optional carriers out.
+    only_required = {key: least[key] for key in required} | {
+        "tool_request_unresolved": least["tool_request_unresolved"]
+    }
+    assert isinstance(outcome(only_required), ProposalAnswer)
+    carriers = {
+        carrier.key
+        for carrier in proposal_plan_carriers(schema, target_kind=target_kind)
+    }
+    for key in least.keys() - {"tool_request_unresolved"}:
+        if key not in carriers:
+            content = ["Antagande"] if isinstance(least[key], list) else "Text"
+            assert isinstance(outcome({**least, key: content}), ProposalAnswer), key
+            continue
+        refused = outcome({**least, key: change[key]})
+        assert isinstance(refused, CorrectableFailure), key
+        assert refused.codes == frozenset({"tool_request_unresolved_with_plan"})
+        repair = None if f"null {key}" in refused.feedback else []
+        assert f"{'null' if repair is None else 'empty'} {key}" in refused.feedback
+        assert isinstance(outcome({**least, key: repair}), ProposalAnswer), key
+
+
 def test_a_create_plan_reads_tools_through_the_editors_tool_configuration() -> None:
     # Kills: hand-written templates instead of the owners', a first step
     # forced to read the run input, a main-text field added to a run form
@@ -619,6 +849,9 @@ def test_a_ref_the_space_has_no_tool_for_is_repaired_and_a_refused_one_answered(
 
     assert isinstance(unknown, CorrectableFailure)
     assert "tool_ffffffff" in unknown.feedback and VALUES_REF in unknown.feedback
+    # Kills: a repair told to take any listed tool in place of the one asked
+    # for, with no way to answer that it is not listed.
+    assert "tool_request_unresolved" in unknown.feedback
     assert isinstance(refused, ProposalAnswer) and refused.outcome is not None
     assert refused.outcome.kind == "tool_not_usable"
     assert refused.codes == frozenset({"tool_switched_off_in_space"})

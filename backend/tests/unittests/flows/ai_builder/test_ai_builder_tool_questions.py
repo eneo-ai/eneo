@@ -39,6 +39,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderQuestionEvent,
     AIBuilderTextEvent,
     AIBuilderToolRefusal,
+    AIBuilderToolRequestUnresolved,
     StructuredQuestionOptionPayload,
     StructuredQuestionPayload,
 )
@@ -94,7 +95,10 @@ from eneo.flows.ai_builder.ai_builder_tool_use import (
     RunInputToolArgument,
     ToolUseIntent,
 )
-from eneo.flows.ai_builder.ai_builder_tool_validation import tool_not_usable_answer
+from eneo.flows.ai_builder.ai_builder_tool_validation import (
+    tool_not_usable_answer,
+    tool_request_unresolved_answer,
+)
 from eneo.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     prepare_user_question_metadata,
@@ -1424,16 +1428,38 @@ def test_an_edit_asks_before_each_new_use_of_a_tool() -> None:
     assert isinstance(kept_tool, ProposalReady)
 
 
-def test_a_tool_refusal_reaches_the_web_typed() -> None:
-    # Kills: the refusal left out of the answer, of the text event, of the
-    # stored message or of the message API that a reloaded session reads; a
-    # stored refusal that no longer reads whole shown instead of dropped.
-    answer = tool_not_usable_answer(
-        "archive",
-        "Data",
-        reason=UnattendedToolRefusal.TOOL_SWITCHED_OFF_IN_SPACE,
-        ui_language="en",
-    )
+@pytest.mark.parametrize(
+    ("answer", "guidance"),
+    [
+        (
+            tool_not_usable_answer(
+                "archive",
+                "Data",
+                reason=UnattendedToolRefusal.TOOL_SWITCHED_OFF_IN_SPACE,
+                ui_language="en",
+            ),
+            AIBuilderToolRefusal(
+                tool_name="archive",
+                server_name="Data",
+                kind="refused",
+                refusal=UnattendedToolRefusal.TOOL_SWITCHED_OFF_IN_SPACE,
+            ),
+        ),
+        (
+            tool_request_unresolved_answer("kalendern Bokning", ui_language="sv"),
+            AIBuilderToolRequestUnresolved(request_text="kalendern Bokning"),
+        ),
+    ],
+    ids=["refused", "unresolved"],
+)
+def test_tool_guidance_reaches_the_web_typed(
+    answer: ProposalAnswer,
+    guidance: AIBuilderToolRefusal | AIBuilderToolRequestUnresolved,
+) -> None:
+    # Kills: the guidance left out of the answer, of the text event, of the
+    # stored message or of the message API that a reloaded session reads (an
+    # unresolved request read back as no guidance); stored guidance that no
+    # longer reads whole shown instead of dropped.
     repo = SimpleNamespace(
         commit_turn=AsyncMock(return_value=1),
         restore_awaiting_approval_after_answered_turn=AsyncMock(),
@@ -1456,16 +1482,10 @@ def test_a_tool_refusal_reaches_the_web_typed() -> None:
         )
     )
 
-    refusal = AIBuilderToolRefusal(
-        tool_name="archive",
-        server_name="Data",
-        kind="refused",
-        refusal=UnattendedToolRefusal.TOOL_SWITCHED_OFF_IN_SPACE,
-    )
-    assert answer.tool_refusal == refusal
-    assert isinstance(event, AIBuilderTextEvent) and event.data.tool_refusal == refusal
+    assert answer.tool_refusal == guidance
+    assert isinstance(event, AIBuilderTextEvent) and event.data.tool_refusal == guidance
     (public,) = _to_public_conversation(conversation)
-    assert public.tool_refusal == refusal
+    assert public.tool_refusal == guidance
     metadata = cast(dict[str, Any], conversation[0].metadata)
     metadata["non_plan_outcome"]["tool_refusal"]["kind"] = "renamed"
     (garbled,) = _to_public_conversation(conversation)
@@ -1504,3 +1524,13 @@ def test_only_a_tool_answer_keeps_the_confirmed_requirements(
 
     assert answered.confirmed_requirements_version == (version if keeps else None)
     assert resolve_requirements_state(conversation).confirmed is False
+
+
+def test_the_unresolved_request_is_one_escaped_line_in_the_answer() -> None:
+    # Kills: the person's words (copied from anywhere, an attachment included)
+    # put in the answer unescaped, where a line break starts a line of its own
+    # in the text the next turn replays to the planner.
+    answer = tool_request_unresolved_answer("a\nb", ui_language="en")
+
+    assert "“a\\nb”" in answer.answer
+    assert answer.tool_refusal == AIBuilderToolRequestUnresolved(request_text="a\nb")

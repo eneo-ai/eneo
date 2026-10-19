@@ -5176,6 +5176,8 @@
   "flow_tool_unavailable_step_ask_again": "Be sedan AI-byggaren använda verktyget igen.",
   "flow_tool_unusable_input_schema_invalid": "MCP-servern beskriver verktygets argument så att inget flöde kan kontrollera dem. En administratör kan rätta det på servern.",
   "flow_tool_unusable_input_schema_too_large": "Verktygets beskrivning av sina argument är större än AI-byggaren kan läsa. Lägg till steget i stegredigeraren i stället.",
+  "flow_tool_request_unresolved_title": "”{request}” motsvarade inget verktyg som AI-byggaren kan använda",
+  "flow_tool_request_unresolved_reason": "AI-byggaren byggde inget steg med ett annat verktyg i dess ställe.",
   "flow_tool_stored_missing": "Det sparade verktyget finns inte längre bland ytans verktyg.",
   "flow_tool_stored_missing_action": "Välj ett annat verktyg.",
   "flow_tool_stored_arguments_title": "Sparade argument",

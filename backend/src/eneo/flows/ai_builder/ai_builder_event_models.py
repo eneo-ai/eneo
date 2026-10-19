@@ -25,6 +25,7 @@ from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
 )
 from eneo.flows.ai_builder.ai_builder_tool_question_ids import AIBuilderToolQuestion
+from eneo.flows.ai_builder.ai_builder_tool_use import TOOL_REQUEST_TEXT_MAX_CHARS
 from eneo.flows.ai_builder.planning_state import (
     AttachmentCoverage,
     FileRole,
@@ -231,10 +232,41 @@ class AIBuilderToolRefusal(BaseModel):
     )
 
 
+class AIBuilderToolRequestUnresolved(BaseModel):
+    """The person asked for a tool the Builder could not match to one it may
+    use in the flow, so it built no step with another tool. It names no tool
+    or server: the request may name one that exists, but the Builder's list
+    of the space's tools can be cut to fit the model."""
+
+    kind: Literal["request_unresolved"] = Field(
+        default="request_unresolved",
+        description=(
+            "request_unresolved: the Builder could not match the request to a "
+            "tool it may use."
+        ),
+    )
+    request_text: str = Field(
+        min_length=1,
+        max_length=TOOL_REQUEST_TEXT_MAX_CHARS,
+        description=(
+            "The person's words that name the tool, as the planner copied them; "
+            "shown only, never matched against tool names."
+        ),
+    )
+
+
+# Why the Builder answered instead of building a step with a tool: the tool
+# it cannot use, or a request it could not match to a tool.
+AIBuilderToolGuidance: TypeAlias = Annotated[
+    AIBuilderToolRefusal | AIBuilderToolRequestUnresolved,
+    Field(discriminator="kind"),
+]
+
+
 class AIBuilderTextEventData(BaseModel):
     text: str
-    # Set on an answer that explains why a needed tool cannot be used.
-    tool_refusal: AIBuilderToolRefusal | None = None
+    # Set on an answer that gives tool guidance instead of a plan.
+    tool_refusal: AIBuilderToolGuidance | None = None
 
 
 class AIBuilderStatusEventData(BaseModel):
