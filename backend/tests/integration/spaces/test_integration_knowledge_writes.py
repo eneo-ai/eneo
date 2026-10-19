@@ -116,6 +116,33 @@ async def setup(db_container, admin_user, embedding_model_factory) -> Setup:
     return built
 
 
+class _Dispatches:
+    """Jobs handed to the worker; the hand-over waits for the commit."""
+
+    def __init__(self) -> None:
+        self.knowledge_ids: list[UUID] = []
+        self._changed = asyncio.Event()
+
+    async def record(self, task, job_id, params) -> None:
+        self.knowledge_ids.append(params.integration_knowledge_id)
+        self._changed.set()
+
+    async def wait_for(self, count: int) -> None:
+        async def reached() -> None:
+            while len(self.knowledge_ids) < count:
+                self._changed.clear()
+                await self._changed.wait()
+
+        await asyncio.wait_for(reached(), timeout=5)
+
+
+@pytest.fixture
+def dispatches(monkeypatch) -> _Dispatches:
+    recorder = _Dispatches()
+    monkeypatch.setattr("eneo.jobs.job_manager.job_manager.enqueue", recorder.record)
+    return recorder
+
+
 def _service(container, *, job_service, organization_token=None):
     """The real service and repositories, with Graph, the job queue and the
     token sources replaced."""
@@ -236,6 +263,52 @@ async def test_a_batch_item_that_fails_after_its_write_leaves_nothing(
             ["Budget", "Rutiner"],
             [],
         )
+
+
+async def test_jobs_reach_the_worker_only_after_the_commit_and_only_for_kept_items(
+    db_container, setup, dispatches
+):
+    async with db_container() as container:
+        service = _service(
+            container, job_service=_jobs(None, RuntimeError("queue down"), None)
+        )
+        results = await service.create_space_integration_knowledge_batch(
+            user_integration_id=setup.connection,
+            embedding_model_id=setup.embedding_model,
+            space_id=setup.personal_space,
+            items=_items("Budget", "Protokoll", "Rutiner"),
+        )
+        await asyncio.sleep(0.05)
+        assert dispatches.knowledge_ids == []
+
+    await dispatches.wait_for(2)
+    assert dispatches.knowledge_ids == [
+        results[0]["integration_knowledge_id"],
+        results[2]["integration_knowledge_id"],
+    ]
+
+
+async def test_a_rolled_back_request_hands_no_job_to_the_worker(
+    db_container, setup, dispatches
+):
+    with pytest.raises(RuntimeError, match="request failed"):
+        async with db_container() as container:
+            service = _service(container, job_service=container.job_service())
+            await service.create_space_integration_knowledge(
+                user_integration_id=setup.connection,
+                name="Budget",
+                embedding_model_id=setup.embedding_model,
+                space_id=setup.personal_space,
+                **{
+                    key: value
+                    for key, value in _items("Budget")[0].items()
+                    if key != "name"
+                },
+            )
+            raise RuntimeError("request failed")
+
+    await asyncio.sleep(0.05)
+    assert dispatches.knowledge_ids == []
 
 
 async def test_a_failed_item_in_the_organization_space_loses_its_distribution(

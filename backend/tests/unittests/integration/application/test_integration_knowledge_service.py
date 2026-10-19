@@ -1900,12 +1900,19 @@ class TestCreateSpaceIntegrationKnowledge:
 
 
 class _Savepoints:
-    """A session whose savepoints record whether they were released or rolled back."""
+    """A session whose savepoints record whether they were released or rolled
+    back; the ones numbered in ``fail_release`` (in opening order) fail at
+    RELEASE."""
 
     def __init__(self) -> None:
         self.outcomes: list[str] = []
+        self.fail_release: set[int] = set()
+        self._opened = 0
 
     def begin_nested(self):
+        number = self._opened
+        self._opened += 1
+
         @asynccontextmanager
         async def savepoint():
             try:
@@ -1913,6 +1920,9 @@ class _Savepoints:
             except BaseException:
                 self.outcomes.append("rolled back")
                 raise
+            if number in self.fail_release:
+                self.outcomes.append("release failed")
+                raise RuntimeError("Connection error")
             self.outcomes.append("released")
 
         return savepoint()
@@ -2063,6 +2073,55 @@ class TestCreateSpaceIntegrationKnowledgeBatch:
         # rolled back, so its row and distribution go and the others stay.
         assert batch.integration_knowledge_repo.add.await_count == 3
         assert batch.space_repo.session.outcomes.count("rolled back") == 1
+
+    async def test_a_job_is_dispatched_only_after_its_item_is_kept(
+        self, batch, monkeypatch
+    ):
+        """Enqueueing inside the savepoint left the worker a job for an item
+        whose RELEASE then failed."""
+        registered = []
+
+        def record(session, start):
+            batch.space_repo.session.outcomes.append("dispatch")
+            registered.append(start)
+
+        monkeypatch.setattr(
+            "eneo.integration.application.integration_knowledge_service."
+            "run_after_commit",
+            record,
+        )
+        # Each item opens its own savepoint and then one for its subscription.
+        batch.space_repo.session.fail_release = {2}
+
+        results = await self._create(batch, ["Protokoll", "Rutiner", "Budget"])
+
+        assert [result["status"] for result in results] == [
+            "created",
+            "failed",
+            "created",
+        ]
+        assert batch.space_repo.session.outcomes == [
+            "released",
+            "released",
+            "dispatch",
+            "released",
+            "release failed",
+            "released",
+            "released",
+            "dispatch",
+        ]
+        assert {
+            call.kwargs["enqueue"]
+            for call in batch.job_service.queue_job.await_args_list
+        } == {False}
+        enqueue = AsyncMock()
+        monkeypatch.setattr("eneo.jobs.job_manager.job_manager.enqueue", enqueue)
+        for start in registered:
+            await start()
+        assert [call.args[1] for call in enqueue.await_args_list] == [
+            results[0]["job"].id,
+            results[2]["job"].id,
+        ]
 
     async def test_a_database_failure_is_reported_without_sql(self, batch):
         batch.integration_knowledge_repo.add.side_effect = sa.exc.IntegrityError(
@@ -2244,6 +2303,8 @@ class TestTriggerFullSync:
         )
         integration_knowledge_repo.update.assert_not_called()
         job_service.queue_job.assert_called_once()
+        # A worker that picked the job up before the commit would not see it.
+        assert job_service.queue_job.call_args.kwargs["after_commit"] is True
         task_params = job_service.queue_job.call_args.kwargs["task_params"]
         assert task_params.token_id == oauth_token.id
         assert task_params.tenant_app_id is None
