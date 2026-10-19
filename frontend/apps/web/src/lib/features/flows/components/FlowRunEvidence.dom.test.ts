@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import { writable } from "svelte/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -73,6 +73,57 @@ function evidenceWithBoundedSections(): FlowRunEvidenceWithTypedSteps {
     }
   ];
   return evidence;
+}
+
+/** A transcription, then a step that names its speakers Anna and Bo. */
+function evidenceWithNamingStep(): FlowRunEvidenceWithTypedSteps {
+  const lines = (first: string, second: string) =>
+    `[00:00:00 - 00:00:04] ${first}: Hej Gunnar.\n[00:00:05 - 00:00:09] ${second}: Jo tack.`;
+  return {
+    run: { error: null },
+    definition_integrity: {},
+    definition_snapshot: {},
+    step_results: [
+      {
+        id: "result-1",
+        step_id: "step-transcribe",
+        step_order: 1,
+        status: "completed",
+        input_payload_json: {
+          transcription: { file_ids: ["file-1"], source: { attempt_no: 1 } }
+        },
+        output_payload_json: { text: lines("SPEAKER_00", "SPEAKER_01") }
+      },
+      {
+        id: "result-2",
+        step_id: "step-names",
+        step_order: 2,
+        status: "completed",
+        output_payload_json: {
+          text: lines("Anna", "Bo"),
+          speaker_mapping: {
+            source_step_id: "step-transcribe",
+            inventory: [
+              { label: "SPEAKER_00", line_count: 1, samples: ["Hej Gunnar."] },
+              { label: "SPEAKER_01", line_count: 1, samples: ["Jo tack."] }
+            ]
+          },
+          structured: {
+            speakers: [
+              { label: "SPEAKER_00", name: "Anna", confidence: "high", evidence: "" },
+              { label: "SPEAKER_01", name: "Bo", confidence: "high", evidence: "" }
+            ]
+          }
+        }
+      }
+    ],
+    step_attempts: [],
+    result_files: [],
+    review_checkpoints: [],
+    webhook_deliveries: [],
+    provider_calls: {},
+    debug_export: { run: { summary: {} } }
+  } as unknown as FlowRunEvidenceWithTypedSteps;
 }
 
 function eneoReturning(evidence: FlowRunEvidenceWithTypedSteps): Eneo {
@@ -207,5 +258,62 @@ describe("FlowRunEvidence", () => {
         })
       )
     ).toBeTruthy();
+  });
+
+  it("names the speakers where a regeneration does: on the naming step, over its names", async () => {
+    const eneo = eneoReturning(evidenceWithNamingStep());
+    Object.assign(eneo.flows.runs, {
+      transcriptSource: {
+        get: vi.fn(async () => ({
+          status: "present",
+          source_hash: "a".repeat(64),
+          next_segment_index: null,
+          speaker_review: null,
+          segments: [
+            { file_index: 0, start: 0, end: 4, speaker: "SPEAKER_00", text: "Hej Gunnar." },
+            { file_index: 0, start: 5, end: 9, speaker: "SPEAKER_01", text: "Jo tack." }
+          ]
+        }))
+      },
+      transcriptWords: { get: vi.fn(async () => null) },
+      transcriptCorrections: {
+        list: vi.fn(async () => [
+          {
+            step_id: "step-transcribe",
+            occurrences: [],
+            speaker_edits: [],
+            // A person cleared the step's Anna and renamed its Bo.
+            speaker_names: { SPEAKER_00: null, SPEAKER_01: "Bertil" },
+            revision: 1,
+            stale: false
+          }
+        ])
+      },
+      inputFileSignedUrl: vi.fn(async () => ({ url: "https://app.test/f", expires_at: 4102444800 }))
+    });
+    render(FlowRunEvidence, { runId: "run-1", flowId: "flow-1", eneo, runStatus: "completed" });
+
+    const panel = (order: number) => document.getElementById(`flow-run-step-panel-run-1-${order}`);
+    const turn = (order: number, text: string) =>
+      within(panel(order)!).getByText(text).closest("[data-turn-index]")?.textContent ?? "";
+    await waitFor(() => expect(panel(1)).not.toBeNull());
+    await fireEvent.click(
+      document.querySelector<HTMLButtonElement>('[aria-controls="flow-run-step-panel-run-1-2"]')!
+    );
+    await waitFor(() => expect(turn(2, "Jo tack.")).toContain("Bertil"));
+
+    // The naming step's list says what its transcript shows.
+    const rows = within(panel(2)!)
+      .getAllByRole("listitem")
+      .map((row) => row.textContent ?? "");
+    expect(rows[0]).toContain(m.flow_run_transcript_unknown_speaker());
+    expect(rows[0]).not.toContain("Anna");
+    expect(turn(2, "Hej Gunnar.")).toContain(m.flow_transcript_editor_speaker({ number: 1 }));
+    expect(rows[1]).toContain("Bertil");
+    expect(rows[1]).not.toContain("Bo");
+
+    // The transcription step keeps its labels, as its regenerated text does.
+    expect(turn(1, "Jo tack.")).toContain(m.flow_transcript_editor_speaker({ number: 2 }));
+    expect(turn(1, "Jo tack.")).not.toContain("Bertil");
   });
 });

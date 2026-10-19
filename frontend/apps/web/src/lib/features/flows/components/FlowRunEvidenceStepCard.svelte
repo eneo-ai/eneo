@@ -76,6 +76,8 @@
     loading?: boolean;
     /** The transcription step the segments (and any corrections) anchor to. */
     stepId: string | null;
+    /** A speaker-naming step names these segments; the transcription step keeps its labels. */
+    namedByStep?: boolean;
     getAudioUrl: (fileIndex: number) => Promise<SignedAudio>;
   };
 
@@ -242,12 +244,16 @@
       transcriptContext !== undefined &&
       (result.step_id === transcriptContext.stepId || speakerMapping.length > 0)
   );
-  // The names a person gave, kept with the corrections, go over the mapping's,
-  // as in a transcript regeneration; they name the stored segments only.
+  // The names a person gave, kept with the corrections, go where a transcript
+  // regeneration puts them: over the naming step's names on its card, or on
+  // the transcription step's when no naming step names its segments.
+  const showsPersonNames = $derived(
+    ownsStoredSegments && (speakerMapping.length > 0 || !transcriptContext?.namedByStep)
+  );
   const transcriptSpeakerNames = $derived(
     effectiveSpeakerNames(
       speakerNamesFromRows(speakerMapping),
-      ownsStoredSegments ? (correctionsController?.speakerNames ?? {}) : {}
+      showsPersonNames ? (correctionsController?.speakerNames ?? {}) : {}
     )
   );
   const transcriptSegments = $derived.by(() => {
@@ -366,10 +372,12 @@
                 </h4>
                 <ul class="divide-default mt-1.5 divide-y rounded-lg border p-0">
                   {#each speakerMapping as row (row.label)}
+                    <!-- The name the transcript below shows, a person's over the step's. -->
+                    {@const name = transcriptSpeakerNames[row.label] ?? null}
                     <li class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-3 py-2">
                       <span class="text-secondary text-xs">{speakerRowLabel(row.label)}</span>
-                      <span class="text-sm font-medium" class:text-secondary={row.name === null}>
-                        {row.name ?? m.flow_run_transcript_unknown_speaker()}
+                      <span class="text-sm font-medium" class:text-secondary={name === null}>
+                        {name ?? m.flow_run_transcript_unknown_speaker()}
                       </span>
                       <Badge variant="outline" class="text-xs">
                         {confidenceText(row.confidence)}

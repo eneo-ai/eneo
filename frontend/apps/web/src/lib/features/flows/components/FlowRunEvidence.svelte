@@ -36,6 +36,7 @@
     type TranscriptSourceLoad
   } from "$lib/features/flows/transcriptSource";
   import { attachWords, type TranscriptWordsPayload } from "$lib/features/flows/transcriptSegments";
+  import { buildSpeakerRows } from "$lib/features/flows/speakerMappingReview";
   import TranscriptCorrectionReviewDialog from "./TranscriptCorrectionReviewDialog.svelte";
   import {
     createTranscriptCorrectionsController,
@@ -373,7 +374,8 @@
   });
 
   const transcriptContext = $derived.by((): FlowRunTranscriptContext | null => {
-    for (const result of evidence?.step_results ?? []) {
+    const results = evidence?.step_results ?? [];
+    for (const result of results) {
       const transcription = getStepTranscription(result);
       const fileIds = Array.isArray(transcription?.file_ids)
         ? transcription.file_ids.filter((id): id is string => typeof id === "string")
@@ -386,6 +388,9 @@
         segments: source ? attachWords(source.segments, transcriptWords) : null,
         loading: transcriptSourceLoading,
         stepId: result.step_id,
+        namedByStep: results.some(
+          (step) => buildSpeakerRows(step.output_payload_json ?? null).length > 0
+        ),
         getAudioUrl: (fileIndex: number) => {
           const fileId = fileIds[fileIndex];
           if (!fileId) return Promise.reject(new Error("No audio file for this part"));
