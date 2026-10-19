@@ -230,6 +230,17 @@ unresolved decisions (null speaker); it requires the original segments_hash. Old
 clients cannot replace v3 decisions. Failures return
 `400` with code `flow_transcript_corrections_invalid_speaker_edit`.
 
+`speaker_names` replaces the step's names for its speakers once the run has
+completed: a label of the stored segments, or a `speaker` the request's
+`speaker_edits` assign, maps to a name or to null (explicitly no name, which clears
+the name a speaker-naming step gave). A client that omits the field keeps the stored
+names, without those of split labels its `speaker_edits` no longer assign. The
+stored transcript keeps its labels; a transcript regeneration writes the names into
+the new run.
+Refused names return `400` with code `flow_transcript_corrections_invalid_speaker_edit`
+and `reason` `unknown_speaker_label`, `invalid_speaker_name`,
+`too_many_speaker_names` or `run_not_completed`.
+
 Service-key principals may edit corrections only for runs they own (key must have
 `resource_permissions.flows = write`).
 
@@ -317,6 +328,7 @@ def _present_transcript_corrections(
             TranscriptSpeakerEditPublic.model_validate(item)
             for item in view.corrections.speaker_edits_json
         ],
+        speaker_names=view.corrections.speaker_names,
         revision=view.corrections.revision,
         stale=view.stale,
         edited_by_principal_type=view.corrections.edited_by_principal_type,
@@ -433,7 +445,7 @@ async def list_flow_run_transcript_corrections(
                 "`flow_transcript_corrections_invalid_occurrence`, and "
                 "`flow_transcript_corrections_invalid_speaker_edit` (the "
                 "last two carry `reason` plus the offending anchor fields "
-                "in `context`)."
+                "in `context`; refused `speaker_names` come with the last)."
             ),
             examples=_FLOW_TRANSCRIPT_CORRECTIONS_EDIT_ERROR_EXAMPLES,
         ),
@@ -516,6 +528,7 @@ async def edit_flow_run_transcript_corrections(
                 )
                 for edit in corrections_in.speaker_edits
             ],
+            speaker_names=corrections_in.speaker_names,
         )
         response = _present_transcript_corrections(view)
     return response

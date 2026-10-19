@@ -525,6 +525,7 @@ async def test_saves_and_revert_preserve_correction_revisions(
                 step_id=scenario.transcription_step_id,
                 occurrences_json=occurrences,
                 speaker_edits_json=[],
+                speaker_names={},
                 segments_hash="a" * 64,
                 expected_revision=saved.revision if saved else None,
                 principal=service_principal if index == 1 else principal,
@@ -602,6 +603,7 @@ async def test_correction_revision_page_limits_loaded_payload_bytes(
                 step_id=scenario.transcription_step_id,
                 occurrences_json=occurrences,
                 speaker_edits_json=speakers,
+                speaker_names={},
                 segments_hash="a" * 64,
                 expected_revision=saved.revision if saved else None,
                 principal=FlowPrincipal.from_user(admin_user),
@@ -618,7 +620,7 @@ async def test_correction_revision_page_limits_loaded_payload_bytes(
                     logical_byte_budget=32,
                 )
             assert value is None
-            assert obstructing == (2, 531)
+            assert obstructing == (2, 533)
             assert len(queries) == 1
             assert "octet_length" in queries[0].sql
             with _capture_queries(bind) as queries:
@@ -634,7 +636,7 @@ async def test_correction_revision_page_limits_loaded_payload_bytes(
             assert obstructing is None
             assert len(queries) == 2
             return
-        sizes = {1: 26, 2: 531, 3: 4}
+        sizes = {1: 28, 2: 533, 3: 6}
         for after, limit, budget, expected, more, obstruction_revision in (
             (None, 200, 32, [1], True, 2),
             (None, 200, 540, [1], True, 2),
@@ -1114,21 +1116,29 @@ async def test_history_migration_preserves_current_correction_revision(
                 step_id=scenario.transcription_step_id,
                 occurrences_json=[_occurrence().as_json()],
                 speaker_edits_json=[],
+                speaker_names={},
                 segments_hash="a" * 64,
                 expected_revision=saved.revision if saved else None,
                 principal=FlowPrincipal.from_user(admin_user),
             )
-        path = (
-            Path(__file__).parents[3]
-            / "alembic/versions/202609151040_add_review_change_history.py"
-        )
-        spec = importlib.util.spec_from_file_location("history_migration", path)
-        assert spec is not None and spec.loader is not None
-        migration = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(migration)
+
+        def load(name: str):
+            path = Path(__file__).parents[3] / "alembic/versions" / name
+            spec = importlib.util.spec_from_file_location(
+                name.removesuffix(".py"), path
+            )
+            assert spec is not None and spec.loader is not None
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        migration = load("202609151040_add_review_change_history.py")
+        # A later migration adds a column to the history table: it goes first.
+        speaker_names = load("202610191000_add_transcript_speaker_names.py")
 
         def cycle(connection):
             with Operations.context(MigrationContext.configure(connection)):
+                speaker_names.downgrade()
                 migration.downgrade()
                 assert not sa.inspect(connection).has_table(
                     "flow_transcript_correction_revisions"
@@ -1143,6 +1153,7 @@ async def test_history_migration_preserves_current_correction_revision(
                     )
                 }
                 migration.upgrade()
+                speaker_names.upgrade()
 
         await (await session.connection()).run_sync(cycle)
         revisions = await repo.list_revisions_for_run(
@@ -2139,3 +2150,315 @@ async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
         )
     assert output["text"] == document
     assert run_input["transkribering"]["text"] == document
+
+
+async def _complete_run(session, run_id: UUID) -> None:
+    from eneo.database.tables.flow_tables import FlowRuns
+
+    await session.execute(
+        sa.update(FlowRuns).where(FlowRuns.id == run_id).values(status="completed")
+    )
+
+
+async def test_speaker_names_are_kept_replaced_and_pruned_under_the_revision(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    import json
+
+    from eneo.audit.domain.action_types import ActionType
+    from eneo.database.tables.audit_log_table import AuditLog
+
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        await _complete_run(session, scenario.flow_run_id)
+        service = _service(session=session, admin_user=admin_user)
+        # SPEAKER_01's only line is split off to SPEAKER_05.
+        split = _speaker_edit(original_speaker="SPEAKER_01", speaker="SPEAKER_05")
+
+        async def save(revision, *, edits, names=None, occurrences=()):
+            view = await service.save(
+                flow_id=scenario.flow_id,
+                run_id=scenario.flow_run_id,
+                step_id=scenario.transcription_step_id,
+                schema_version=3,
+                expected_segments_hash=segments_content_hash(SEGMENTS),
+                expected_revision=revision,
+                occurrences=list(occurrences),
+                speaker_edits=edits,
+                speaker_names=names,
+            )
+            return view.corrections
+
+        named = await save(
+            None,
+            edits=[split],
+            names={"SPEAKER_00": " Anna ", "SPEAKER_01": "", "SPEAKER_05": "Eva Ek"},
+        )
+        assert named.speaker_names == {
+            "SPEAKER_00": "Anna",
+            "SPEAKER_01": None,
+            "SPEAKER_05": "Eva Ek",
+        }
+        # A save without names keeps them, SPEAKER_01's null with no line left
+        # to it included.
+        kept = await save(named.revision, edits=[split], occurrences=[_occurrence()])
+        assert kept.speaker_names == named.speaker_names
+        # A name alone is a revision of its own.
+        renamed = await save(
+            kept.revision,
+            edits=[split],
+            names={**named.speaker_names, "SPEAKER_00": "Anna Berg"},
+            occurrences=[_occurrence()],
+        )
+        assert renamed.revision == kept.revision + 1
+        assert renamed.speaker_names["SPEAKER_00"] == "Anna Berg"
+        # Undoing the split drops its name without being asked.
+        undone = await save(renamed.revision, edits=[], occurrences=[_occurrence()])
+        assert undone.speaker_names == {"SPEAKER_00": "Anna Berg", "SPEAKER_01": None}
+
+        revisions = await FlowTranscriptCorrectionsRepository(
+            session=session
+        ).list_revisions_for_run(
+            run_id=scenario.flow_run_id, tenant_id=scenario.tenant_id
+        )
+        assert [item.speaker_names for item in revisions] == [
+            named.speaker_names,
+            kept.speaker_names,
+            renamed.speaker_names,
+            undone.speaker_names,
+        ]
+        audits = (
+            await session.scalars(
+                sa.select(AuditLog)
+                .where(
+                    AuditLog.entity_id == scenario.flow_run_id,
+                    AuditLog.action
+                    == ActionType.FLOW_RUN_TRANSCRIPT_CORRECTIONS_EDITED.value,
+                )
+                .order_by(AuditLog.created_at)
+            )
+        ).all()
+        assert [
+            audit.log_metadata["extra"]["speaker_name_count"] for audit in audits
+        ] == [3, 3, 3, 2]
+        recorded = json.dumps([audit.log_metadata for audit in audits])
+        assert "Anna" not in recorded
+        assert "Eva Ek" not in recorded
+
+
+async def test_speaker_names_count_toward_history_budgets_and_follow_a_snapshot(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowTranscriptCorrectionsRepository(session=session)
+        names = {"SPEAKER_00": "Anna", "SPEAKER_01": None}
+        unnamed = await repo.save(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            occurrences_json=[],
+            speaker_edits_json=[],
+            speaker_names={},
+            segments_hash="a" * 64,
+            expected_revision=None,
+            principal=FlowPrincipal.from_user(admin_user),
+        )
+        first = await repo.measure_revision_evidence(
+            run_id=scenario.flow_run_id, tenant_id=scenario.tenant_id
+        )
+        saved = await repo.save(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            occurrences_json=[],
+            speaker_edits_json=[],
+            speaker_names=names,
+            segments_hash="a" * 64,
+            expected_revision=unnamed.revision,
+            principal=FlowPrincipal.from_user(admin_user),
+        )
+        both = await repo.measure_revision_evidence(
+            run_id=scenario.flow_run_id, tenant_id=scenario.tenant_id
+        )
+
+        # PostgreSQL renders the stored names as '{"SPEAKER_00": "Anna", ...}'.
+        names_text = '{"SPEAKER_00": "Anna", "SPEAKER_01": null}'
+        assert first.logical_json_bytes == len("[][]{}")
+        assert both.logical_json_bytes - first.logical_json_bytes == len(
+            f"[][]{names_text}"
+        )
+        assert (
+            both.stored_json_bytes - first.stored_json_bytes > first.stored_json_bytes
+        )
+        value, obstructing = await repo.get_revision_for_step(
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            tenant_id=scenario.tenant_id,
+            revision=2,
+            logical_byte_budget=len(f"[][]{names_text}") - 1,
+        )
+        assert value is None
+        assert obstructing == (2, len(f"[][]{names_text}"))
+
+        # A regeneration copies the set into its new run, names included.
+        child = await FlowRunRepository(session=session).create(
+            flow_id=scenario.flow_id,
+            flow_version=1,
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"question": "Transkribera mötet"},
+            preseed_steps=[],
+        )
+        await repo.copy_snapshot(corrections=saved, run_id=child.id)
+        copied = await repo.get_for_step(
+            run_id=child.id,
+            step_id=scenario.transcription_step_id,
+            tenant_id=scenario.tenant_id,
+        )
+        assert copied is not None
+        assert copied.speaker_names == names
+        assert copied.revision == saved.revision
+
+
+async def test_patching_speaker_names(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    from eneo.database.tables.spaces_table import SpacesUsers
+    from eneo.spaces.api.space_models import SpaceRoleValue
+
+    async with db_container() as container:
+        scenario = await _create_scenario(
+            session=container.session(),
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        flow = await FlowRepository(session=container.session()).get(
+            scenario.flow_id, admin_user.tenant_id
+        )
+        container.session().add(
+            SpacesUsers(
+                space_id=flow.space_id,
+                user_id=admin_user.id,
+                role=SpaceRoleValue.EDITOR,
+            )
+        )
+        await container.session().flush()
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    headers = {"Authorization": f"Bearer {token}"}
+    run_path = f"/api/v1/flows/{scenario.flow_id}/runs/{scenario.flow_run_id}"
+    url = f"{run_path}/steps/{scenario.transcription_step_id}/transcript-corrections/"
+    body = {
+        "schema_version": 3,
+        "segments_hash": segments_content_hash(SEGMENTS),
+        "occurrences": [],
+        "speaker_edits": [],
+    }
+
+    def refusal(response) -> str:
+        assert response.status_code == 400, response.text
+        error = response.json()
+        assert (
+            error["code"]
+            == FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT.value
+        )
+        return error["context"]["reason"]
+
+    # The run is still going: a save without names, as Eneo web sends it, and
+    # one that sends the names as stored are saves like any other; naming is not.
+    created = await client.patch(
+        url, headers=headers, json={**body, "expected_revision": None}
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["speaker_names"] == {}
+    unchanged = await client.patch(
+        url, headers=headers, json={**body, "expected_revision": 1, "speaker_names": {}}
+    )
+    assert unchanged.status_code == 200, unchanged.text
+    early = await client.patch(
+        url,
+        headers=headers,
+        json={**body, "expected_revision": 2, "speaker_names": {"SPEAKER_00": "Anna"}},
+    )
+    assert refusal(early) == "run_not_completed"
+
+    async with db_container() as container:
+        await _complete_run(container.session(), scenario.flow_run_id)
+    for names, reason in (
+        ({"SPEAKER_07": "Anna"}, "unknown_speaker_label"),
+        ({"SPEAKER_00": "Anna\nBerg"}, "invalid_speaker_name"),
+        ({"SPEAKER_00": "A" * 121}, "invalid_speaker_name"),
+        (
+            {f"SPEAKER_{index:03d}": "Anna" for index in range(101)},
+            "too_many_speaker_names",
+        ),
+    ):
+        response = await client.patch(
+            url,
+            headers=headers,
+            json={**body, "expected_revision": 2, "speaker_names": names},
+        )
+        assert refusal(response) == reason
+    named = await client.patch(
+        url,
+        headers=headers,
+        json={
+            **body,
+            "expected_revision": 2,
+            "speaker_names": {"SPEAKER_00": " Anna ", "SPEAKER_01": ""},
+        },
+    )
+    assert named.status_code == 200, named.text
+    expected = {"SPEAKER_00": "Anna", "SPEAKER_01": None}
+    assert named.json()["speaker_names"] == expected
+    # Eneo web's next save, without the field, leaves the names alone.
+    web = await client.patch(
+        url, headers=headers, json={**body, "expected_revision": 3}
+    )
+    assert web.status_code == 200, web.text
+    assert web.json()["speaker_names"] == expected
+
+    listed = await client.get(f"{run_path}/transcript-corrections/", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()[0]["speaker_names"] == expected
+    history = await client.get(
+        f"{run_path}/transcript-corrections/{scenario.transcription_step_id}/revisions",
+        headers=headers,
+        params={"after_revision": 2},
+    )
+    assert history.status_code == 200, history.text
+    page = history.json()
+    assert page["baseline"]["speaker_names"] == {}
+    assert [item["speaker_names"] for item in page["items"]] == [expected, expected]

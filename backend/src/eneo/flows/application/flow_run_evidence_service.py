@@ -392,6 +392,7 @@ class FlowRunEvidenceService:
             revision=0,
             occurrences_json=[],
             speaker_edits_json=[],
+            speaker_names={},
         )
         if after_revision is not None:
             (
@@ -415,6 +416,7 @@ class FlowRunEvidenceService:
                 revision=after_revision,
                 occurrences_json=redact_payload(previous.occurrences_json),
                 speaker_edits_json=redact_payload(previous.speaker_edits_json),
+                speaker_names=redact_payload(previous.speaker_names),
             )
         rows, more, obstructing = await self.transcript_corrections_repo.list_revisions(
             run_id=run.id,
@@ -434,6 +436,7 @@ class FlowRunEvidenceService:
                     update={
                         "occurrences_json": redact_payload(row.occurrences_json),
                         "speaker_edits_json": redact_payload(row.speaker_edits_json),
+                        "speaker_names": redact_payload(row.speaker_names),
                     }
                 )
                 for row in rows

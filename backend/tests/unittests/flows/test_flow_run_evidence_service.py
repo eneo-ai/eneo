@@ -271,6 +271,7 @@ async def test_history_page_passes_budget_remaining_after_baseline(
             revision=2,
             occurrences_json=[{"corrected": "é"}],
             speaker_edits_json=[],
+            speaker_names={"SPEAKER_00": "Åsa"},
         )
     else:
         repo = service.flow_run_review_checkpoint_repo
@@ -306,6 +307,11 @@ async def test_history_page_passes_budget_remaining_after_baseline(
     )
     if not corrections or after_revision is not None:
         assert baseline_reader.await_args.kwargs["logical_byte_budget"] == budget
+    if corrections:
+        # The names are part of the baseline the budget is spent on.
+        assert page.baseline.speaker_names == (
+            {"SPEAKER_00": "Åsa"} if after_revision is not None else {}
+        )
 
 
 @pytest.mark.asyncio
@@ -338,6 +344,7 @@ async def test_history_page_maps_obstruction_metadata_to_size_error(
         payload_sha256="a" * 64,
         occurrences_json=[],
         speaker_edits_json=[],
+        speaker_names={},
     )
     if corrections:
         baseline_reader = service.transcript_corrections_repo.get_revision_for_step
@@ -1689,6 +1696,7 @@ async def test_history_sections_record_row_and_byte_omissions(
             step_id=checkpoint.step_id,
             occurrences_json=[],
             speaker_edits_json=[],
+            speaker_names={},
             segments_hash="a" * 64,
         )
     reader.return_value = [item] * 3 if reason == "row_limit" else []

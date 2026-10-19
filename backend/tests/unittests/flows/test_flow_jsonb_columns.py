@@ -55,8 +55,10 @@ _REVIEWED_JSONB_COLUMNS = frozenset(
     flow_template_assets.placeholders
     flow_transcript_correction_revisions.occurrences_json
     flow_transcript_correction_revisions.speaker_edits_json
+    flow_transcript_correction_revisions.speaker_names
     flow_transcript_corrections.occurrences_json
     flow_transcript_corrections.speaker_edits_json
+    flow_transcript_corrections.speaker_names
     flow_versions.definition_json
     flows.metadata_json
     tenants.flow_settings

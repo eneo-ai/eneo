@@ -2450,6 +2450,7 @@ def test_evidence_preserves_and_redacts_change_history() -> None:
             {"original": "password=first", "corrected": "password=second"}
         ],
         speaker_edits_json=[{"speaker": "token=hidden"}],
+        speaker_names={"SPEAKER_00": "token=hidden"},
         segments_hash="a" * 64,
         edited_by_user_id=run.principal_user_id,
         edited_by_service_id=None,
@@ -2491,6 +2492,9 @@ def test_evidence_preserves_and_redacts_change_history() -> None:
         3,
     ]
     assert raw["transcript_correction_revisions"][0]["id"] == str(revision.id)
+    assert raw["transcript_correction_revisions"][0]["speaker_names"] == (
+        revision.speaker_names
+    )
     redacted = redact_evidence_bundle(bundle).to_dict()
     redacted_edit = redacted["review_checkpoints"][0]["edits"][0]
     assert redacted_edit["payload_json"]["text"] != "password=secret"
@@ -2502,6 +2506,10 @@ def test_evidence_preserves_and_redacts_change_history() -> None:
     assert (
         redacted["transcript_correction_revisions"][0]["speaker_edits_json"]
         != revision.speaker_edits_json
+    )
+    assert (
+        redacted["transcript_correction_revisions"][0]["speaker_names"]
+        != revision.speaker_names
     )
     export = render_evidence_json_export(bundle=bundle, context=_raw_export_context())
     assert export["summary"]["review_checkpoints"]["any_edited"] is True

@@ -837,3 +837,135 @@ def test_v3_text_replacement_cannot_cross_a_speaker_decision_boundary():
     validate_correction_partitions(
         [TranscriptCorrectionOccurrence(0, 4, 5, "o", "o.")], [edit]
     )
+
+
+def _named_segments() -> list[dict]:
+    return [
+        _segment("Hej.", speaker="SPEAKER_00"),
+        _segment("Hallå.", speaker="SPEAKER_01"),
+    ]
+
+
+def test_speaker_names_are_trimmed_and_an_emptied_name_is_explicitly_none():
+    from eneo.flows.domain.transcript_corrections import normalize_speaker_names
+
+    names = normalize_speaker_names(
+        {"SPEAKER_00": "  Anna Berg \n", "SPEAKER_01": "   "},
+        segments=_named_segments(),
+        speaker_edits=[],
+    )
+
+    # None is "no name", which clears what a speaker-naming step gave.
+    assert names == {"SPEAKER_00": "Anna Berg", "SPEAKER_01": None}
+    assert normalize_speaker_names(
+        {"SPEAKER_01": None}, segments=_named_segments(), speaker_edits=[]
+    ) == {"SPEAKER_01": None}
+
+
+@pytest.mark.parametrize(
+    "label", ["SPEAKER_02", "speaker_00", "SPEAKER_0", "Anna", "SPEAKER_00 ", ""]
+)
+def test_a_name_for_a_label_the_transcript_does_not_have_is_refused(label):
+    from eneo.flows.domain.transcript_corrections import normalize_speaker_names
+
+    with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+        normalize_speaker_names(
+            {label: "Anna"}, segments=_named_segments(), speaker_edits=[]
+        )
+
+    assert excinfo.value.reason == "unknown_speaker_label"
+    assert excinfo.value.context == {"label": label}
+
+
+def test_a_label_the_saved_speaker_edits_split_off_may_be_named():
+    from eneo.flows.domain.transcript_corrections import normalize_speaker_names
+
+    split = _speaker_edit(
+        segment_index=1, original_speaker="SPEAKER_01", speaker="SPEAKER_02"
+    )
+
+    assert normalize_speaker_names(
+        {"SPEAKER_02": "Cecilia"}, segments=_named_segments(), speaker_edits=[split]
+    ) == {"SPEAKER_02": "Cecilia"}
+
+
+@pytest.mark.parametrize(
+    "name", ["Anna\nBerg", "Anna\rBerg", "Anna Berg", "Anna\tBerg", "An\x00na"]
+)
+def test_a_name_that_breaks_the_line_is_refused(name):
+    from eneo.flows.domain.transcript_corrections import normalize_speaker_names
+
+    with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+        normalize_speaker_names(
+            {"SPEAKER_00": name}, segments=_named_segments(), speaker_edits=[]
+        )
+
+    assert excinfo.value.reason == "invalid_speaker_name"
+    # The name itself is never echoed back.
+    assert excinfo.value.context == {"label": "SPEAKER_00", "max_chars": 120}
+
+
+def test_a_name_is_at_most_120_characters():
+    from eneo.flows.domain.transcript_corrections import normalize_speaker_names
+
+    longest = "Å" * 120
+    assert normalize_speaker_names(
+        {"SPEAKER_00": f" {longest} "}, segments=_named_segments(), speaker_edits=[]
+    ) == {"SPEAKER_00": longest}
+    with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+        normalize_speaker_names(
+            {"SPEAKER_00": longest + "x"},
+            segments=_named_segments(),
+            speaker_edits=[],
+        )
+    assert excinfo.value.reason == "invalid_speaker_name"
+
+
+def test_at_most_100_speakers_are_named():
+    from eneo.flows.domain.transcript_corrections import (
+        MAX_SPEAKER_NAMES,
+        normalize_speaker_names,
+    )
+
+    segments = [
+        _segment("Hej.", speaker=f"SPEAKER_{index:03d}") for index in range(101)
+    ]
+    names = {f"SPEAKER_{index:03d}": "Anna" for index in range(101)}
+
+    assert MAX_SPEAKER_NAMES == 100
+    assert (
+        len(
+            normalize_speaker_names(
+                dict(list(names.items())[:100]), segments=segments, speaker_edits=[]
+            )
+        )
+        == 100
+    )
+    with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+        normalize_speaker_names(names, segments=segments, speaker_edits=[])
+    assert excinfo.value.reason == "too_many_speaker_names"
+    assert excinfo.value.context == {
+        "speaker_name_count": 101,
+        "max_speaker_names": 100,
+    }
+
+
+def test_pruning_drops_only_split_labels_whose_last_edit_is_gone():
+    from eneo.flows.domain.transcript_corrections import prune_speaker_names
+
+    # SPEAKER_01's only passage moved to SPEAKER_02; SPEAKER_03's split was undone.
+    edits = [
+        _speaker_edit(
+            segment_index=1, original_speaker="SPEAKER_01", speaker="SPEAKER_02"
+        )
+    ]
+    stored = {
+        "SPEAKER_00": None,
+        "SPEAKER_01": "Bo",
+        "SPEAKER_02": "Cecilia",
+        "SPEAKER_03": "David",
+    }
+
+    assert prune_speaker_names(
+        stored, segments=_named_segments(), speaker_edits=edits
+    ) == {"SPEAKER_00": None, "SPEAKER_01": "Bo", "SPEAKER_02": "Cecilia"}
