@@ -15,6 +15,8 @@ from httpx import AsyncClient
 from eneo.authentication.auth_service import AuthService
 from eneo.database.database import sessionmanager
 from eneo.database.tables.tenant_table import Tenants
+from eneo.main.exceptions import ErrorCodes
+from eneo.main.models import GeneralError
 from eneo.tenants.tenant_repo import TenantRepository
 
 
@@ -460,9 +462,16 @@ async def test_patch_federation_rejects_null_required_field(
     )
 
     assert response.status_code == 422
-    assert response.json() == {
-        "detail": [{"loc": ["body"], "type": "value_error", "msg": "Invalid value"}]
-    }
+    error = GeneralError.model_validate(response.json())
+    assert error.eneo_error_code is ErrorCodes.VALIDATION_ERROR
+    assert error.code == "request_validation_error"
+    assert isinstance(error.details, dict)
+    errors = error.details.get("errors")
+    assert isinstance(errors, list)
+    assert any(
+        entry["location"] == ["body"] and entry["type"] == "value_error"
+        for entry in errors
+    )
 
 
 @pytest.mark.integration

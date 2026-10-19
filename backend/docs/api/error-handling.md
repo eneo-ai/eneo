@@ -28,10 +28,11 @@ Fields:
 
 ## Request validation errors
 
-Request validation returns HTTP 422 using the documented `HTTPValidationError`
-shape: `detail` is a list containing `loc`, `type` and `msg`. Clients should use
-the field location and error type for specific feedback. Messages are static
-public descriptions; unrecognized validation types use `Invalid value`.
+Request validation returns HTTP 422 in the error envelope above with
+`code: "request_validation_error"`. `details.errors` is a list whose entries
+carry `location` (the path of the failing field), `type` and `message`. Clients
+should use the field location and error type for specific feedback. Messages are
+static public descriptions; unrecognized validation types use `Invalid value`.
 
 The API does not return raw `input`, validation `ctx`, or validator-generated
 messages. Those can contain credentials even when the request model uses
