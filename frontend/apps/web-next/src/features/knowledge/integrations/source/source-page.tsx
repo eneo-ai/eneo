@@ -47,6 +47,10 @@ import { SyncProgressPanel } from "./progress-panel";
 /** What the page shows: a tab and, on a source of many folders, the folder (null: all of them). */
 type SourceView = { tab: SourceTab; folder: string | null };
 
+function viewOfAddress(tab: string | null, folder: string | null): SourceView {
+  return { tab: sourceTabParam(tab ?? undefined) ?? "content", folder };
+}
+
 function Stat({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="border-ax-border flex flex-col gap-1 px-4 py-3 [&:not(:first-child)]:border-s max-lg:[&:nth-child(3)]:border-s-0 max-lg:[&:nth-child(n+3)]:border-t">
@@ -117,10 +121,24 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const tabId = (tab: SourceTab) => `${baseId}-tab-${tab}`;
   // By id, not a ref: the in-place links that call it are built during render (react-hooks/refs).
   const focusPanelIfLost = () => rescueFocus(document.getElementById(panelId));
-  const [view, setView] = useState<SourceView>(() => ({
-    tab: sourceTabParam(searchParams.get("tab") ?? undefined) ?? "content",
-    folder: searchParams.get("folder")
+  // The view follows the address: a navigation here with other parameters (a
+  // link, a toast's Show) changes it. An in-place change sets the view and
+  // writes the address it reads from, so the two never disagree.
+  const addressTab = searchParams.get("tab");
+  const addressFolder = searchParams.get("folder");
+  const [shown, setShown] = useState(() => ({
+    tab: addressTab,
+    folder: addressFolder,
+    view: viewOfAddress(addressTab, addressFolder)
   }));
+  if (shown.tab !== addressTab || shown.folder !== addressFolder) {
+    setShown({
+      tab: addressTab,
+      folder: addressFolder,
+      view: viewOfAddress(addressTab, addressFolder)
+    });
+  }
+  const { view } = shown;
   const { tab } = view;
 
   const { progress, queued } = useSyncProgress();
@@ -175,7 +193,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
 
   // Like the knowledge page's tabs: the address follows, without a server round trip.
   function show(next: SourceView) {
-    setView(next);
+    setShown((current) => ({ ...current, view: next }));
     const url = new URL(window.location.href);
     if (next.tab === "content") url.searchParams.delete("tab");
     else url.searchParams.set("tab", next.tab);

@@ -671,6 +671,27 @@ describe("WrapperDetail navigation", () => {
     expect(router.replace).not.toHaveBeenCalled();
   });
 
+  it("follows a navigation to the source with other parameters while it is open", async () => {
+    const { rerender } = show([mall, protokoll]);
+    const selected = (name: string | RegExp) =>
+      screen.getByRole("tab", { name }).getAttribute("aria-selected");
+    expect(selected("Innehåll")).toBe("true");
+
+    // The import result's Show leads to the folder's problems.
+    setRoute(`${WRAPPER_PAGE}?tab=problems&folder=i2`);
+    rerender(<WrapperDetail wrapperId="w1" loaded={served()} />);
+    expect(selected(/Problem/)).toBe("true");
+
+    setRoute(`${WRAPPER_PAGE}?folder=i2`);
+    rerender(<WrapperDetail wrapperId="w1" loaded={served()} />);
+    expect(selected("Innehåll")).toBe("true");
+    expect(await screen.findByRole("heading", { level: 2, name: "Protokoll" })).toBeTruthy();
+
+    // In place, as before.
+    fireEvent.click(screen.getByRole("tab", { name: "Aktivitet" }));
+    expect(selected("Aktivitet")).toBe("true");
+  });
+
   it("replaces the page with the list once the source was deleted from its own menu", async () => {
     show([mall]);
     state.onDelete = () => {
