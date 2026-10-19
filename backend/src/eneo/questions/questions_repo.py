@@ -143,8 +143,30 @@ class QuestionRepository:
 
         return list((await self.session.scalars(stmt)).all())
 
+    async def add_generated_file(self, *, question_id: UUID, file: File) -> None:
+        """Attach a file to a turn's answer after the turn was persisted.
+
+        Used for a version a user saved of a document that turn made: it
+        joins the turn's generated files, so the conversation, its export and
+        the model's history treat it like the version it was made from.
+        """
+        await self._add_files(
+            question_id=question_id, files=[file], file_type="assistant"
+        )
+
+    async def remove_generated_file(self, *, question_id: UUID, file_id: UUID) -> None:
+        """Take a file out of a turn's answer: a reader's version that a newer
+        save of theirs replaces."""
+        await self.session.execute(
+            sa.delete(QuestionsFiles).where(
+                QuestionsFiles.question_id == question_id,
+                QuestionsFiles.file_id == file_id,
+                QuestionsFiles.type == "assistant",
+            )
+        )
+
     async def _add_files(
-        self, question_id: int, files: list[File], file_type: str = "user"
+        self, question_id: UUID, files: list[File], file_type: str = "user"
     ):
         stmt = sa.insert(QuestionsFiles).values(
             [

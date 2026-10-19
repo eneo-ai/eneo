@@ -180,6 +180,21 @@ class DocumentExportRequest(BaseModel):
     format: Literal["docx", "pdf"] = Field(description="The format to export to.")
 
 
+# The most a document tool can be configured to accept (its max_content_chars
+# ceiling), so a saved version is never longer than the tool could write.
+MAX_DOCUMENT_VERSION_CHARS = 1_000_000
+
+
+class DocumentVersionCreate(BaseModel):
+    """A reader's edited Markdown of a conversation document, saved as its next version."""
+
+    content: str = Field(
+        min_length=1,
+        max_length=MAX_DOCUMENT_VERSION_CHARS,
+        description="The whole document as Markdown, as the reader left it.",
+    )
+
+
 class ViewToolCallRequest(BaseModel):
     """A tool call made by the interactive view (MCP App) of an earlier call."""
 
