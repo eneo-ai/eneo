@@ -278,7 +278,7 @@ export function FolderDocuments({
   });
 
   const data = documents.data;
-  const state = itemState(item, progress);
+  const state = itemState(item, progress, queued);
   const live = progress[item.id];
   const lastPage = data ? Math.max(1, Math.ceil(data.total_count / DOCUMENTS_PAGE_SIZE)) : 1;
   // A sync that shrank the folder under the current page: show its last page.
@@ -300,7 +300,7 @@ export function FolderDocuments({
   const emptyText =
     q !== ""
       ? t("no_results_found")
-      : state === "syncing"
+      : state === "syncing" || state === "queued"
         ? t("integration_source_folder_empty_syncing")
         : state === "never"
           ? t("integration_documents_empty_never_synced")

@@ -164,7 +164,7 @@ vi.mock("@/lib/api/browser", () => {
 });
 
 import { WrapperActions } from "@/features/knowledge/integrations/actions";
-import { resetPendingSyncs } from "@/features/knowledge/integrations/pending-syncs";
+import { resetPendingSyncs, trackSyncs } from "@/features/knowledge/integrations/pending-syncs";
 import type { LoadedItems } from "@/features/knowledge/integrations/use-source-items";
 import type { IntegrationKnowledge } from "@/features/knowledge/knowledge";
 import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
@@ -1237,6 +1237,19 @@ describe("WrapperDetail sync status", () => {
     await refreshProgress(queryClient);
     await waitFor(() => expect(said).toContain("Synk av Byggnad pågår inte längre"));
     expect(screen.queryByText(QUEUED_NOTICE)).toBeNull();
+  });
+
+  it("tells a folder queued for its first sync that its documents are on the way", async () => {
+    trackSyncs([{ jobId: "job-i3", knowledgeId: "i3" }]);
+    show(
+      [mall, { id: "i3", name: "Nytt", folder_path: "/Nytt", metadata: { size: 0 } }],
+      `${WRAPPER_PAGE}?folder=i3`
+    );
+
+    expect(
+      await screen.findByText("Dokumenten visas här i takt med att synken läser dem.")
+    ).toBeTruthy();
+    expect(screen.queryByText("Inga dokument ännu. Första synken körs i bakgrunden.")).toBeNull();
   });
 
   it("marks a folder queued in the folder list by its icon and its name", async () => {
