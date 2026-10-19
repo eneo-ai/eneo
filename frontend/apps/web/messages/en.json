@@ -4925,5 +4925,10 @@
   "audit_action_mcp_oauth_shared_connection_cleared": "Shared MCP connection removed",
   "audit_action_mcp_oauth_shared_connection_cleared_description": "Logs when an administrator removes the organization's shared connection to an MCP server",
   "mcp_oauth_connected_continuing": "Connected. Continuing…",
-  "mcp_oauth_declined_continuing": "Continuing without the tool."
+  "mcp_oauth_declined_continuing": "Continuing without the tool.",
+  "mcp_oauth_connect_step_title": "The server is saved. Connect to fetch its tools.",
+  "mcp_oauth_connect_step_intro": "Eneo can only list the tools of {server} through a connection. Connect now and the tools are fetched right away.",
+  "mcp_oauth_connect_step_shared_intro": "Eneo can only list the tools of {server} through the shared connection. Sign in with the vendor as the service account and the tools are fetched right away.",
+  "mcp_oauth_connect_later": "Later",
+  "mcp_oauth_tools_synced": "{count} tools fetched. Review them in the tool list."
 }

@@ -4925,5 +4925,10 @@
   "audit_action_mcp_oauth_shared_connection_cleared": "Delad MCP-anslutning borttagen",
   "audit_action_mcp_oauth_shared_connection_cleared_description": "Loggar när en administratör tar bort organisationens delade anslutning till en MCP-server",
   "mcp_oauth_connected_continuing": "Anslutet. Fortsätter…",
-  "mcp_oauth_declined_continuing": "Fortsätter utan verktyget."
+  "mcp_oauth_declined_continuing": "Fortsätter utan verktyget.",
+  "mcp_oauth_connect_step_title": "Servern är sparad. Anslut för att hämta verktygen.",
+  "mcp_oauth_connect_step_intro": "Eneo kan bara lista {server}s verktyg genom en anslutning. Anslut nu, så hämtas verktygen direkt.",
+  "mcp_oauth_connect_step_shared_intro": "Eneo kan bara lista {server}s verktyg genom den delade anslutningen. Logga in hos leverantören som servicekontot, så hämtas verktygen direkt.",
+  "mcp_oauth_connect_later": "Senare",
+  "mcp_oauth_tools_synced": "{count} verktyg hämtade. Granska dem i verktygslistan."
 }

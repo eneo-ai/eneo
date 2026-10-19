@@ -149,7 +149,9 @@
   const oauthConnect = useMcpOAuthConnect();
   let syncNeedsAuthorization = $state(false);
   oauthConnect.subscribe((_serverId, result) => {
-    if (result.success) syncNeedsAuthorization = false;
+    if (!result.success) return;
+    syncNeedsAuthorization = false;
+    void syncTools();
   });
 
   async function syncTools() {
