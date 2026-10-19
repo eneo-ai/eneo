@@ -51,6 +51,9 @@ if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
     from eneo.document_templates.domain import DocumentTemplateReference
     from eneo.main.container.container import Container
+    from eneo.mcp_servers.application.mcp_oauth_token_provider import (
+        MCPOAuthTokenProvider,
+    )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
         MCPServerToolRepository,
@@ -110,6 +113,7 @@ class CompletionService:
         redis_client: Optional[aioredis.Redis] = None,
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
         audit_service: Optional["AuditService"] = None,
+        mcp_oauth_token_provider: "MCPOAuthTokenProvider | None" = None,
     ):
         self.context_builder = context_builder
         self.tenant = tenant
@@ -125,10 +129,22 @@ class CompletionService:
         self.session = session
         self.redis_client = redis_client
         self.mcp_server_tool_repo = mcp_server_tool_repo
+        # Resolves the acting user's tokens for OAuth servers; one per request.
+        self.mcp_oauth_token_provider = mcp_oauth_token_provider
         self._mcp_proxy_factory = MCPProxySessionFactory(
             encryption_service=self.encryption_service
         )
         super().__init__()
+
+    async def _preload_oauth_tokens(self, servers: "list[MCPServer]") -> None:
+        """Load the acting user's OAuth connections before the proxy connects.
+
+        Done here, on the request task, so the proxy's connects and parallel
+        identity probes never share the session for the lookup.
+        """
+        if self.mcp_oauth_token_provider is None:
+            return
+        await self.mcp_oauth_token_provider.preload(list(servers))
 
     async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
         """
@@ -231,10 +247,12 @@ class CompletionService:
         enabled_servers = [server for server in mcp_servers if server.is_enabled]
         mcp_proxy: MCPProxySession | None = None
         if enabled_servers and model.supports_tool_calling:
+            await self._preload_oauth_tokens(enabled_servers)
             mcp_proxy = self._mcp_proxy_factory.create(
                 enabled_servers,
                 identity_headers=build_identity_headers(self.user, self.tenant),
                 mcp_server_tool_repo=self.mcp_server_tool_repo,
+                oauth_auth_resolver=self.mcp_oauth_token_provider,
             )
 
         try:
@@ -522,6 +540,7 @@ class CompletionService:
             # Build the acting user/tenant identity headers once; each client
             # forwards them only to its server when forward_identity is set.
             identity_headers = build_identity_headers(self.user, self.tenant)
+            await self._preload_oauth_tokens(mcp_servers)
             mcp_proxy = self._mcp_proxy_factory.create(
                 mcp_servers,
                 identity_headers=identity_headers,
@@ -529,6 +548,7 @@ class CompletionService:
                 app_view_repo=(
                     McpAppViewRepo(self.session) if self.session is not None else None
                 ),
+                oauth_auth_resolver=self.mcp_oauth_token_provider,
             )
             # Tools may only be handed links to the files minted above.
             mcp_proxy.allow_file_references(file_reference_urls)

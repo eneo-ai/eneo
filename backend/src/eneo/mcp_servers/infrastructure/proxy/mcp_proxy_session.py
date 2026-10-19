@@ -12,10 +12,12 @@ import asyncio
 import json
 import re
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from uuid import UUID
+
+import httpx
 
 from eneo.authentication.signed_urls import (
     reference_file_ids,
@@ -34,6 +36,7 @@ from eneo.internal_mcp.constants import (
 )
 from eneo.libs.json_text import contains_null_character
 from eneo.main.config import get_settings
+from eneo.main.exceptions import MCPUserActionRequiredError
 from eneo.main.logging import get_logger
 from eneo.mcp_apps.domain.mcp_app_view import (
     McpAppViewInfo,
@@ -47,6 +50,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServerTool,
     generated_filename,
     is_capability_purpose,
+    is_oauth_server,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPAuthenticationError,
@@ -116,6 +120,42 @@ MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS = float(
 )
 _CIRCUIT_BREAKER_STATE: dict[UUID, dict[str, float | int]] = {}
 _CIRCUIT_BREAKER_LOCK = asyncio.Lock()
+# What the model reads when an OAuth server has no usable authorization for
+# the acting principal. The structured remedy rides in the result's meta.
+AUTHORIZATION_REQUIRED_NOTICE = (
+    "AUTHORIZATION_REQUIRED: Eneo is not authorized to use this tool for the "
+    "current user yet. The tool was not executed. Tell the user that they need "
+    "to connect '{server}' in Eneo (a connect action is shown next to this "
+    "step) and to send their question again afterwards. Do not retry this tool "
+    "now and do not ask for credentials."
+)
+SHARED_AUTHORIZATION_REQUIRED_NOTICE = (
+    "AUTHORIZATION_REQUIRED: '{server}' has not been connected by an "
+    "administrator yet, so its tools cannot run. The tool was not executed. "
+    "Tell the user to ask an administrator to connect it. Do not retry this "
+    "tool now."
+)
+
+
+class OAuthAuthResolver(Protocol):
+    """Resolves the acting principal's OAuth token for one server.
+
+    ``auth_for`` returns the httpx auth to send, or raises
+    :class:`MCPUserActionRequiredError` when nobody has authorized Eneo yet.
+    ``record_denial`` is called when the server refused the token that was
+    sent; it returns the error to surface, or None when the refusal was not an
+    OAuth challenge.
+    """
+
+    async def auth_for(self, server: MCPServer) -> httpx.Auth: ...
+
+    async def record_denial(
+        self, server: MCPServer, auth: httpx.Auth | None = None
+    ) -> MCPUserActionRequiredError | None: ...
+
+
+# A resolver may also be a plain coroutine function for tests.
+OAuthAuthResolverLike = OAuthAuthResolver | Callable[[MCPServer], Awaitable[httpx.Auth]]
 
 
 def _trace_server_name(server: MCPServer) -> str:
@@ -165,6 +205,7 @@ class MCPProxySession:
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
         app_view_repo: "McpAppViewRepo | None" = None,
         for_view: bool = False,
+        oauth_auth_resolver: OAuthAuthResolver | None = None,
     ):
         """
         Initialize proxy session.
@@ -176,11 +217,19 @@ class MCPProxySession:
             identity_headers: Acting user/tenant X-Eneo-* headers, handed to
                 every client. Each client forwards them only when its own server
                 has ``forward_identity=True`` (per-server PII opt-in).
+            oauth_auth_resolver: Tokens for OAuth servers; see
+                :class:`OAuthAuthResolver`. Without one an OAuth server answers
+                every call with the authorization-required remedy.
         """
         super().__init__()
         self.mcp_servers = mcp_servers
         self.auth_credentials_map = auth_credentials_map or {}
         self.identity_headers = identity_headers or {}
+        self._oauth_auth_resolver = oauth_auth_resolver
+        # OAuth servers nobody has authorized for this principal: the error
+        # carries the remedy every call to them returns for the rest of the
+        # session, without contacting the server again.
+        self._authorization_required: dict[UUID, MCPUserActionRequiredError] = {}
         self._mcp_server_tool_repo = mcp_server_tool_repo
         # Who calls through this session: the model, or one of a server's
         # views. Each is offered only the tools its server makes visible to it.
@@ -437,12 +486,24 @@ class MCPProxySession:
 
     async def _discover_identity_scoped_tools(
         self, server: MCPServer
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, Any]] | None:
+        """The server's tools for this identity; None keeps the admin catalog.
+
+        An OAuth server nobody has authorized yet cannot narrow anything: its
+        approved catalog stays exposed so a call to it returns the connect
+        remedy instead of the tools silently vanishing.
+        """
         auth_credentials = self.auth_credentials_map.get(server.id, {})
+        try:
+            auth = await self._oauth_auth(server)
+        except MCPUserActionRequiredError as exc:
+            self._authorization_required[server.id] = exc
+            return None
         client = MCPClient(
             server,
             auth_credentials,
             identity_headers=self.identity_headers,
+            auth=auth,
         )
         try:
             async with client:
@@ -450,6 +511,8 @@ class MCPProxySession:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            if await self._note_oauth_denial(server, client):
+                return None
             logger.warning(
                 "[MCPProxy] Failed identity-scoped tool discovery for '%s': %s",
                 server.name,
@@ -573,9 +636,11 @@ class MCPProxySession:
                     "[MCPProxy] Identity-scoped tool discovery timed out for '%s'",
                     server.name,
                 )
-                live_tools: list[dict[str, Any]] = []
+                live_tools: list[dict[str, Any]] | None = []
             else:
                 live_tools = task.result()
+            if live_tools is None:
+                continue
             catalog_is_safe = await self._stage_live_tool_catalog(server, live_tools)
             self._rebuild_server_tools(server, live_tools if catalog_is_safe else [])
 
@@ -678,6 +743,63 @@ class MCPProxySession:
     async def _record_success(self, server_id: UUID) -> None:
         async with _CIRCUIT_BREAKER_LOCK:
             _CIRCUIT_BREAKER_STATE.pop(server_id, None)
+
+    async def _oauth_auth(self, server: MCPServer) -> httpx.Auth | None:
+        """The OAuth token to send to ``server``, or None for other auth types."""
+        if not is_oauth_server(server.http_auth_type):
+            return None
+        if server.id in self._authorization_required:
+            raise self._authorization_required[server.id]
+        if self._oauth_auth_resolver is None:
+            raise MCPUserActionRequiredError(
+                f"'{server.name}' requires OAuth but no token resolver is available",
+                mcp_server_id=server.id,
+                server_name=server.name,
+                auth_scope=server.auth_scope,
+                reason="no_resolver",
+            )
+        return await self._oauth_auth_resolver.auth_for(server)
+
+    async def _note_oauth_denial(self, server: MCPServer, client: MCPClient) -> bool:
+        """Record that the server refused the OAuth token the client sent.
+
+        True when this was an OAuth challenge (the remedy is now in
+        ``_authorization_required``); False for any other failure.
+        """
+        if not is_oauth_server(server.http_auth_type) or not client.oauth_token_refused:
+            return False
+        error: MCPUserActionRequiredError | None = None
+        if self._oauth_auth_resolver is not None:
+            error = await self._oauth_auth_resolver.record_denial(server, client.auth)
+        if error is None:
+            error = MCPUserActionRequiredError(
+                f"'{server.name}' refused the OAuth access token",
+                mcp_server_id=server.id,
+                server_name=server.name,
+                auth_scope=server.auth_scope,
+                reason="token_rejected",
+            )
+        self._authorization_required[server.id] = error
+        return True
+
+    def _authorization_required_result(
+        self, error: MCPUserActionRequiredError
+    ) -> dict[str, Any]:
+        """The tool result for a server nobody has authorized Eneo for.
+
+        The text tells the model what to say; the remedy under ``meta`` tells
+        the client which connect action to offer.
+        """
+        notice = (
+            SHARED_AUTHORIZATION_REQUIRED_NOTICE
+            if error.auth_scope == "shared"
+            else AUTHORIZATION_REQUIRED_NOTICE
+        ).format(server=error.server_name)
+        return {
+            "content": [{"type": "text", "text": notice}],
+            "is_error": True,
+            "meta": {"eneo/authorization_required": error.remedy()},
+        }
 
     def _mark_server_failed(self, server_id: UUID) -> None:
         """Mark a server unusable for the rest of this session.
@@ -1058,6 +1180,11 @@ class MCPProxySession:
                 return self._clients[server_id]
 
             auth_creds = self.auth_credentials_map.get(server_id, {})
+            try:
+                auth = await self._oauth_auth(server)
+            except MCPUserActionRequiredError as exc:
+                self._authorization_required[server_id] = exc
+                raise
             client = MCPClient(
                 server,
                 auth_creds,
@@ -1066,11 +1193,17 @@ class MCPProxySession:
                 ),
                 identity_headers=self.identity_headers,
                 tool_call_timeout=_tool_call_timeout_for(server),
+                auth=auth,
             )
 
             logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")
             start_time = time.perf_counter()
-            await client.connect()
+            try:
+                await client.connect()
+            except Exception:
+                if await self._note_oauth_denial(server, client):
+                    raise self._authorization_required[server_id] from None
+                raise
             elapsed_ms = (time.perf_counter() - start_time) * 1000
 
             self._clients[server_id] = client
@@ -1328,6 +1461,11 @@ class MCPProxySession:
 
         logger.debug(f"[MCPProxy] Calling {original_tool_name} on '{server.name}'")
 
+        if server.id in self._authorization_required:
+            return self._authorization_required_result(
+                self._authorization_required[server.id]
+            )
+
         if await self._is_circuit_open(server.id):
             return self._unavailable_result(tool_name, arguments)
 
@@ -1392,6 +1530,10 @@ class MCPProxySession:
                     result = {**result, "content": blocks}
             return result
         except MCPAuthenticationError:
+            if await self._note_oauth_denial(server, client):
+                return self._authorization_required_result(
+                    self._authorization_required[server.id]
+                )
             return {
                 "content": [{"type": "text", "text": AUTH_DENIED_NOTICE}],
                 "is_error": True,
@@ -1442,10 +1584,19 @@ class MCPProxySession:
         # anyio's task-boundary check would silently leak the underlying HTTP
         # read/write loops, creeping CPU toward 100% over the worker's lifetime.
         for server in servers_needed.values():
-            if server.id in self._clients or server.id in self._failed_server_ids:
+            if (
+                server.id in self._clients
+                or server.id in self._failed_server_ids
+                or server.id in self._authorization_required
+            ):
                 continue
             try:
                 await self._get_or_create_client(server)
+            except MCPUserActionRequiredError as exc:
+                logger.info(
+                    "[MCPProxy] '%s' awaits authorization (%s)", server.name, exc.reason
+                )
+                self._authorization_required[server.id] = exc
             except Exception as exc:
                 logger.warning(
                     f"[MCPProxy] Failed to pre-connect to '{server.name}': {exc}"

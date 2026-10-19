@@ -473,6 +473,7 @@ async def create_mcp_server(
         user_group_ids=data.user_group_ids,
         image_model_id=data.image_model_id,
         activate=data.activate,
+        auth_scope=data.auth_scope,
     )
 
     # If connection failed, return 400 error with message
@@ -581,6 +582,7 @@ async def update_mcp_server(
         audience_priority=data.audience_priority,
         user_group_ids=data.user_group_ids,
         image_model_id=data.image_model_id,
+        auth_scope=data.auth_scope,
     )
 
     # If connection validation failed, return 400 error with message

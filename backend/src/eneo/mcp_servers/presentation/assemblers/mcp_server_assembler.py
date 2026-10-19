@@ -1,9 +1,14 @@
 from typing import TYPE_CHECKING, Any, cast
 
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    AUTH_SCOPE_PER_USER,
+    AUTH_SCOPES,
+    MCPServer,
+)
 from eneo.mcp_servers.presentation.models import (
     MCPServerAudience,
     MCPServerAudienceGroupPublic,
+    MCPServerAuthScope,
     MCPServerBackingModelPublic,
     MCPServerList,
     MCPServerPublic,
@@ -20,7 +25,15 @@ if TYPE_CHECKING:
     from eneo.settings.encryption_service import EncryptionService
 
 # Keys in http_auth_config_schema that contain secrets
-_SECRET_KEYS = ("token",)
+_SECRET_KEYS = ("token", "client_secret")
+
+
+def _auth_scope(mcp_server: MCPServer) -> MCPServerAuthScope:
+    """The row's scope; anything unknown reads as the per-user default."""
+    scope = getattr(mcp_server, "auth_scope", AUTH_SCOPE_PER_USER)
+    if scope not in AUTH_SCOPES:
+        scope = AUTH_SCOPE_PER_USER
+    return cast(MCPServerAuthScope, scope)
 
 
 def _compute_credential_preview(
@@ -94,6 +107,7 @@ class MCPServerAssembler:
             "description": mcp_server.description,
             "http_url": mcp_server.http_url,
             "http_auth_type": mcp_server.http_auth_type,
+            "auth_scope": _auth_scope(mcp_server),
             "purpose": mcp_server.purpose,
             # Org-level availability: a deactivated server stays attached to
             # assistants but is never called, so clients show it as unavailable.
@@ -124,6 +138,7 @@ class MCPServerAssembler:
             description=mcp_server.description,
             http_url=mcp_server.http_url,
             http_auth_type=mcp_server.http_auth_type,
+            auth_scope=_auth_scope(mcp_server),
             purpose=cast(MCPServerPurpose, mcp_server.purpose),
             is_enabled=mcp_server.is_enabled,
             readiness_reason=mcp_server.readiness_reason,
@@ -200,6 +215,7 @@ class MCPServerSettingsAssembler:
             description=mcp_server.description,
             http_url=mcp_server.http_url,
             http_auth_type=mcp_server.http_auth_type,
+            auth_scope=_auth_scope(mcp_server),
             purpose=cast(MCPServerPurpose, mcp_server.purpose),
             is_enabled=mcp_server.is_enabled,
             readiness_reason=mcp_server.readiness_reason,

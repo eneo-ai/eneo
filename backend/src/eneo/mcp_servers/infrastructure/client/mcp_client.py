@@ -521,13 +521,14 @@ async def _open_streamable_http_client(
     read_timeout_seconds: float = MCP_SSE_READ_TIMEOUT_SECONDS,
     tool_catalog_max_count: int,
     tool_catalog_max_bytes: int,
+    auth: httpx.Auth | None = None,
 ) -> AsyncGenerator[MCPStreams]:
     timeout = httpx.Timeout(timeout_seconds, read=read_timeout_seconds)
     http_headers = {"Accept-Encoding": "identity", **headers}
     # The SDK's create_mcp_http_client sets only headers and timeout and takes
     # no mounts; this client is the same plus the loopback bypass.
     async with httpx.AsyncClient(
-        headers=http_headers, timeout=timeout, mounts=_LOOPBACK_DIRECT
+        headers=http_headers, timeout=timeout, auth=auth, mounts=_LOOPBACK_DIRECT
     ) as http_client:
         wire_max_bytes = tool_catalog_max_bytes + MCP_TOOL_LIST_PROTOCOL_OVERHEAD_BYTES
         # This coarse pre-decode bound measures server-encoded HTTP/SSE bytes;
@@ -714,6 +715,7 @@ class MCPClient:
         tool_call_timeout: int | None = None,
         on_tools_list_changed: Callable[[], None] | None = None,
         identity_headers: dict[str, str] | None = None,
+        auth: httpx.Auth | None = None,
     ):
         """
         Initialize MCP client.
@@ -721,6 +723,10 @@ class MCPClient:
         Args:
             mcp_server: MCP server configuration
             auth_credentials: Authentication credentials from tenant settings
+            auth: An httpx auth that carries an OAuth access token on every
+                request (servers with ``http_auth_type = "oauth"``). The token
+                is resolved by the caller for the acting principal; the client
+                only reports when the server refused it.
             timeout: Connection timeout in seconds (defaults to 30s)
             identity_headers: Acting user/tenant X-Eneo-* headers. Sent on every
                 request for bundled servers (opaque IDs only). External servers
@@ -735,6 +741,7 @@ class MCPClient:
         self.mcp_server = mcp_server
         self.endpoint_url = endpoint_url(mcp_server)
         self.auth_credentials = auth_credentials or {}
+        self.auth = auth
         self.timeout = timeout or MCP_CONNECTION_TIMEOUT_DEFAULT
         self.list_tools_timeout = list_tools_timeout or MCP_LIST_TOOLS_TIMEOUT_DEFAULT
         self.tool_call_timeout = tool_call_timeout or MCP_TOOL_CALL_TIMEOUT_DEFAULT
@@ -865,6 +872,14 @@ class MCPClient:
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as e:
+            if self.oauth_token_refused:
+                # The OAuth token was sent and the server answered 401 or an
+                # insufficient_scope 403: nothing to diagnose, someone has to
+                # authorize again. The caller maps this to its remedy.
+                await self._cleanup_contexts()
+                raise MCPAuthenticationError(
+                    f"{self.mcp_server.name} refused the OAuth access token"
+                ) from e
             error_msg = _extract_error_message(e)
             if not error_msg:
                 # Cancel scope or other unhelpful error — do a direct HTTP
@@ -881,6 +896,11 @@ class MCPClient:
             )
             await self._cleanup_contexts()
             raise MCPClientError(error_msg) from e
+
+    @property
+    def oauth_token_refused(self) -> bool:
+        """The server challenged the OAuth token this client sent."""
+        return bool(getattr(self.auth, "denied", False))
 
     async def _cleanup_contexts(self) -> None:
         """Clean up any partially initialized contexts."""
@@ -921,6 +941,7 @@ class MCPClient:
             read_timeout_seconds=transport_read_timeout(self.tool_call_timeout),
             tool_catalog_max_count=self.mcp_server.tool_catalog_max_count,
             tool_catalog_max_bytes=self.mcp_server.tool_catalog_max_bytes,
+            auth=self.auth,
         )
 
         streams = await streams_context.__aenter__()
@@ -1205,7 +1226,7 @@ class MCPClient:
         except BaseException as e:
             error_msg = _extract_error_message(e) or str(e)
             lowered = error_msg.lower()
-            if any(
+            if self.oauth_token_refused or any(
                 x in lowered
                 for x in ("401", "403", "unauthorized", "forbidden", "authentication")
             ):

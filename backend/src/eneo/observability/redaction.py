@@ -30,6 +30,8 @@ SENSITIVE_KEYS = {
     "access_token",
     "refresh_token",
     "id_token",
+    "assertion",
+    "code_verifier",
     "password",
     "secret",
 }

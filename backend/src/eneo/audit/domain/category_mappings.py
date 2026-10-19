@@ -151,6 +151,10 @@ CATEGORY_MAPPINGS = {
     ActionType.MCP_SERVER_DISABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_ENABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_DISABLED.value: "integration_events",
+    ActionType.MCP_OAUTH_CONNECTED.value: "integration_events",
+    ActionType.MCP_OAUTH_DISCONNECTED.value: "integration_events",
+    ActionType.MCP_OAUTH_SHARED_CONNECTION_SET.value: "integration_events",
+    ActionType.MCP_OAUTH_SHARED_CONNECTION_CLEARED.value: "integration_events",
     ActionType.MCP_APP_VIEW_LINK_CREATED.value: "integration_events",
     ActionType.MCP_APP_TOOL_CALLED.value: "integration_events",
     # Model Provider Outbound Header Actions (3 actions)

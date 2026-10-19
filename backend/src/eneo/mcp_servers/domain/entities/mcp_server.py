@@ -153,6 +153,26 @@ def is_bundled_server(http_auth_type: str | None) -> bool:
     return http_auth_type == BUNDLED_AUTH_TYPE
 
 
+# An OAuth server is protected by the vendor's own OAuth 2.1 authorization
+# server (MCP authorization spec 2026-07-28). No credential is stored on the
+# row; Eneo obtains tokens as an OAuth client. ``auth_scope`` says whose
+# identity the vendor sees: each user authorizes once (``per_user``), or the
+# tenant admin connects a shared machine or service-account identity that
+# every call uses (``shared``). The scope only means something for this type.
+OAUTH_AUTH_TYPE = "oauth"
+AUTH_SCOPE_PER_USER = "per_user"
+AUTH_SCOPE_SHARED = "shared"
+AUTH_SCOPES: tuple[str, ...] = (AUTH_SCOPE_PER_USER, AUTH_SCOPE_SHARED)
+# Admin-entered keys of an OAuth server's ``http_auth_config_schema``: a
+# pre-registered client at the vendor's authorization server (also the client
+# of a shared client-credentials connection) and a scope override.
+OAUTH_CONFIG_KEYS: tuple[str, ...] = ("client_id", "client_secret", "scope")
+
+
+def is_oauth_server(http_auth_type: str | None) -> bool:
+    return http_auth_type == OAUTH_AUTH_TYPE
+
+
 def bundled_tool_name(http_url: str) -> str | None:
     """The runtime tool a bundled row serves: the last segment of its URL."""
     tool = http_url.rstrip("/").rsplit("/", 1)[-1]
@@ -366,6 +386,7 @@ class MCPServer(Entity):
         description: Optional[str] = None,
         http_auth_type: str = "none",
         http_auth_config_schema: Optional[dict[str, Any]] = None,
+        auth_scope: str = AUTH_SCOPE_PER_USER,
         purpose: str = GENERAL_PURPOSE,
         is_enabled: bool = True,
         audience: str = AUDIENCE_EVERYONE,
@@ -398,6 +419,7 @@ class MCPServer(Entity):
         self.http_url = http_url
         self.http_auth_type = http_auth_type
         self.http_auth_config_schema = http_auth_config_schema
+        self.auth_scope = auth_scope
         self.purpose = purpose
         self.is_enabled = is_enabled
         self.audience = audience
@@ -428,6 +450,15 @@ class MCPServer(Entity):
         approval and are never mistaken for Eneo's own.
         """
         return self._is_loopback or is_builtin_provider(self.http_auth_type)
+
+    @property
+    def is_oauth(self) -> bool:
+        """Whether Eneo must present an OAuth token obtained as a client."""
+        return is_oauth_server(self.http_auth_type)
+
+    @property
+    def is_shared_oauth(self) -> bool:
+        return self.is_oauth and self.auth_scope == AUTH_SCOPE_SHARED
 
     @property
     def is_bundled(self) -> bool:

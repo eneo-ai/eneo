@@ -4,7 +4,10 @@ import logging
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
+from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import (
+    MCPProxySession,
+    OAuthAuthResolver,
+)
 
 if TYPE_CHECKING:
     from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
@@ -62,6 +65,7 @@ class MCPProxySessionFactory:
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
         app_view_repo: "McpAppViewRepo | None" = None,
         for_view: bool = False,
+        oauth_auth_resolver: OAuthAuthResolver | None = None,
     ) -> MCPProxySession:
         """
         Create a new MCPProxySession for the given servers.
@@ -72,6 +76,9 @@ class MCPProxySessionFactory:
                 never fetches views.
             for_view: The caller is one of a server's views, not the model; it
                 is offered the tools the server makes visible to its views.
+            oauth_auth_resolver: Resolves the acting principal's OAuth token for
+                servers with ``http_auth_type = "oauth"``. Without one such
+                servers cannot be called.
 
         Returns:
             Configured MCPProxySession instance
@@ -99,4 +106,5 @@ class MCPProxySessionFactory:
             mcp_server_tool_repo=mcp_server_tool_repo,
             app_view_repo=app_view_repo,
             for_view=for_view,
+            oauth_auth_resolver=oauth_auth_resolver,
         )

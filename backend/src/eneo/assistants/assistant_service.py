@@ -489,6 +489,27 @@ class AssistantService:
             servers = [*resolution.capability_servers, *resolution.general_servers]
         return assistant, [server for server in servers if server.is_enabled]
 
+    async def mcp_servers_a_turn_reaches(self, assistant_id: UUID) -> "list[MCPServer]":
+        """The servers one of this assistant's turns would be given now.
+
+        Read access to the assistant is required, as for any read of it.
+        """
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        if not actor.can_read_assistant(assistant=assistant):
+            raise UnauthorizedException(
+                "You do not have permission to read assistants in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
+        _, servers = await self._servers_a_turn_reaches(assistant_id)
+        return servers
+
     async def mcp_server_for_view(
         self, *, assistant_id: UUID, mcp_server_id: UUID
     ) -> "MCPServer | None":
