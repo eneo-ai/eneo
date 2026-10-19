@@ -30,6 +30,10 @@ RESOURCE_TYPES = ("site", "onedrive")
 SELECTED_ITEM_TYPE_PATTERN = r"^[a-z_]*$"
 SELECTED_ITEM_TYPE_MAX_LENGTH = 32
 
+# A display name a person types or a SharePoint item name, as long as the
+# names of assistant templates and uploaded files.
+KNOWLEDGE_NAME_MAX_LENGTH = 255
+
 
 def validate_folder_path(value: Optional[str]) -> Optional[str]:
     """Reject paths with ``..`` segments; the pattern already rejects the rest."""

@@ -5,6 +5,7 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from eneo.integration.domain.skip_reasons import (
+    ALREADY_SYNCED_REASON,
     CORRUPT_FILE_REASON,
     EMPTY_CONTENT_REASON,
     LEGACY_RETRY_SUFFIX,
@@ -25,6 +26,7 @@ from eneo.integration.domain.skip_reasons import (
     visible_skip_params,
     with_code,
 )
+from eneo.integration.presentation.models import IntegrationSkippedDocument
 
 # Every text the sync composes today, with the code and parameters it stands for.
 WRITTEN_TEXTS = [
@@ -125,21 +127,36 @@ WRITTEN_TEXTS = [
 ]
 
 
-@pytest.mark.parametrize(("text", "code", "params"), WRITTEN_TEXTS)
+# Texts only older releases wrote; rows holding them are classified when served.
+LEGACY_TEXTS = [
+    pytest.param(ALREADY_SYNCED_REASON, "unchanged", {}, id="already-synced-2-2"),
+]
+
+
+@pytest.mark.parametrize(("text", "code", "params"), WRITTEN_TEXTS + LEGACY_TEXTS)
 def test_every_written_text_has_its_code(text, code, params):
     assert classify_skip_reason(text) == (code, params, False)
 
 
-@pytest.mark.parametrize(("text", "code", "params"), WRITTEN_TEXTS)
+@pytest.mark.parametrize(("text", "code", "params"), WRITTEN_TEXTS + LEGACY_TEXTS)
 def test_the_text_of_a_code_classifies_back_to_it(text, code, params):
     """The renderer and the classifier agree, so coded and legacy rows read alike."""
     assert reason_text(code, params) == text
 
 
 def test_every_code_is_written_by_some_text():
-    assert {code for _, code, _ in (p.values for p in WRITTEN_TEXTS)} == set(
-        SKIP_REASON_CODES
+    assert {
+        code for _, code, _ in (p.values for p in WRITTEN_TEXTS + LEGACY_TEXTS)
+    } == set(SKIP_REASON_CODES)
+
+
+def test_an_unchanged_file_from_2_2_is_not_served_as_an_error():
+    """2.2.x delta syncs listed files they had already processed as skipped."""
+    served = IntegrationSkippedDocument.model_validate(
+        {"file": "Protokoll.docx", "reason": ALREADY_SYNCED_REASON}
     )
+
+    assert (served.code, served.params, served.retry) == ("unchanged", {}, False)
 
 
 @pytest.mark.parametrize(

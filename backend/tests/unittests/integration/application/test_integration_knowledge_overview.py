@@ -14,6 +14,7 @@ from httpx import ASGITransport, AsyncClient
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
+from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeTable,
 )
@@ -50,6 +51,7 @@ def placements_database(integration_access):
             ("id", "space_id", "tenant_id", "last_sync_status", "created_at"),
         ),
         (Spaces, ("id", "name", "user_id", "tenant_space_id", "tenant_id")),
+        (InfoBlobs, ("id", "integration_knowledge_id", "version_state")),
     ]:
         tables[model] = sa.Table(
             model.__table__.name,
@@ -155,6 +157,16 @@ def _insert_space(connection, tables, *, tenant_id, name, user_id=None, parent=N
     return space_id
 
 
+def _insert_documents(connection, tables, knowledge_id, *, active, superseded=0):
+    connection.execute(
+        tables[InfoBlobs].insert(),
+        [
+            dict(id=uuid4(), integration_knowledge_id=knowledge_id, version_state=state)
+            for state in ["active"] * active + ["superseded"] * superseded
+        ],
+    )
+
+
 def _insert_knowledge(connection, tables, *, tenant_id, space_id, status, day=1):
     knowledge_id = uuid4()
     connection.execute(
@@ -214,10 +226,12 @@ async def test_lists_shared_and_organization_items_and_only_counts_personal_ones
     closed_item = _insert_knowledge(
         connection, tables, tenant_id=tenant_id, space_id=closed, status="success"
     )
-    for status in ("error", "success", "error"):
+    personal_item, *_ = (
         _insert_knowledge(
             connection, tables, tenant_id=tenant_id, space_id=personal, status=status
         )
+        for status in ("error", "success", "error")
+    )
     # Either side belonging to another tenant keeps a row out, even a mismatched one.
     for item_tenant, space_id in [
         (foreign_tenant, foreign_shared),
@@ -243,7 +257,6 @@ async def test_lists_shared_and_organization_items_and_only_counts_personal_ones
             user_integration=case.integration,
             embedding_model=EMBEDDING_MODEL,
             last_sync_status="success",
-            document_count=12,
             folder_path="/Styrdokument",
             wrapper_name="Kommunstyrelsen",
         ),
@@ -278,6 +291,12 @@ async def test_lists_shared_and_organization_items_and_only_counts_personal_ones
             last_sync_status="success",
         ),
     }
+
+    # Fetches leave document_count at zero, as the real get_by_ids does; the
+    # overview must attach the counts from info_blobs itself.
+    _insert_documents(connection, tables, org_item, active=12, superseded=3)
+    _insert_documents(connection, tables, older_shared_item, active=2)
+    _insert_documents(connection, tables, personal_item, active=5)
 
     async def get_by_ids(ids: list[UUID]) -> list[IntegrationKnowledge]:
         return [knowledge[id] for id in ids]
@@ -317,7 +336,7 @@ async def test_lists_shared_and_organization_items_and_only_counts_personal_ones
             "sharepoint",
             "never",
             None,
-            0,
+            2,
         ),
         (
             {

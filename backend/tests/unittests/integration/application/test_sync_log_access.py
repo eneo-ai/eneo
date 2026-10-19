@@ -450,3 +450,42 @@ async def test_sync_history_written_before_the_cleanup_is_served_clean(
     )
     for secret in ("tempauth", "eyJ", "db.internal", "DELETE FROM", "Lönelista"):
         assert secret not in response.text
+
+
+@pytest.mark.parametrize("offset", [1_000_001, 2**63])
+@pytest.mark.parametrize("batch", [False, True], ids=["sync-logs", "sync-details"])
+async def test_history_offsets_past_any_real_page_are_refused(
+    integration_access, authenticated_integration_app, batch, offset
+):
+    """An offset past int64 made the database driver fail the query (500)."""
+    sync_log_repo = AsyncMock(spec=SyncLogRepository)
+    app = authenticated_integration_app(
+        Container(
+            user=providers.Object(integration_access.user),
+            sync_log_repo=providers.Object(sync_log_repo),
+        )
+    )
+    knowledge_id = uuid4()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        if batch:
+            response = await client.post(
+                f"/spaces/{uuid4()}/knowledge/integrations/sync-details/",
+                json={
+                    "items": [
+                        {
+                            "integration_knowledge_id": str(knowledge_id),
+                            "offset": offset,
+                        }
+                    ]
+                },
+            )
+        else:
+            response = await client.get(
+                f"/integrations/sync-logs/{knowledge_id}/", params={"skip": offset}
+            )
+
+    assert response.status_code == 422, response.text
+    sync_log_repo.get_windows.assert_not_awaited()
+    sync_log_repo.get_by_integration_knowledge.assert_not_awaited()

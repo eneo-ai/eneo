@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Optional, cast
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 
 from eneo.authentication.endpoint_access import Authentication, endpoint_access
@@ -13,6 +14,10 @@ from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
 from eneo.integration.domain.entities.user_integration import UserIntegration
+from eneo.integration.infrastructure.auth_service.base_auth_service import (
+    OAuthCodeRejectedError,
+    rejected_code,
+)
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
 )
@@ -533,15 +538,18 @@ async def _test_stored_sharepoint_app(container: Container) -> TenantAppTestResu
     response_model=dict[str, str],
     summary="Permanently delete SharePoint app",
     description=(
-        "Permanently delete the tenant's SharePoint app configuration and all associated data. "
-        "WARNING: This action CANNOT be undone. This will cascade delete:\n"
-        "- All user_integrations using this tenant app (both org and personal)\n"
-        "- All integration_knowledge (imported SharePoint content)\n"
-        "- All info_blobs and embeddings (document data and vectors)\n"
-        "- All sharepoint_subscriptions (webhooks)\n"
-        "- All oauth_tokens for personal SharePoint integrations\n"
-        "- All sync_logs\n\n"
-        "Assistants linked to this knowledge will lose their connections.\n"
+        "Permanently delete the tenant's SharePoint app configuration and the "
+        "organization-wide SharePoint connection that uses it (app or service "
+        "account). WARNING: This action CANNOT be undone. In one request it "
+        "deletes:\n"
+        "- the organization-wide connections of this app\n"
+        "- the SharePoint knowledge imported through them, with its documents, "
+        "embeddings and sync history\n"
+        "- Eneo's records of their change-notification subscriptions\n\n"
+        "Personal SharePoint connections and their imports are kept, but they "
+        "sign in through this app and stop syncing until an app is configured "
+        "again. Subscriptions registered at Microsoft are not removed there; "
+        "they expire on their own. Assistants lose the deleted knowledge. "
         "Requires admin role."
     ),
     responses={
@@ -1209,7 +1217,10 @@ async def restart_service_account_auth(
     ),
     responses={
         201: {"description": "Service account successfully configured"},
-        400: {"description": "Invalid state or auth code"},
+        400: {
+            "description": "Invalid state or auth code; `code` is "
+            "`oauth_code_rejected` when Microsoft refuses the code"
+        },
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
     },
@@ -1229,12 +1240,17 @@ async def service_account_auth_callback(
         _require_sharepoint_webhook_client_state()
 
         encryption_service: EncryptionService = container.encryption_service()
-        stored_state = await _oauth_state_store(container).pop(callback.state)
+        state_store = _oauth_state_store(container)
+        expired = HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OAuth state. Please restart the authentication flow.",
+        )
+        # The binding is checked before the state is spent, so another admin
+        # cannot burn it.
+        stored_state = await state_store.peek(callback.state)
         if stored_state is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired OAuth state. Please restart the authentication flow.",
-            )
+            await state_store.pop(callback.state)
+            raise expired
 
         if stored_state.get("tenant_id") != str(user.tenant_id) or stored_state.get(
             "user_id"
@@ -1243,6 +1259,9 @@ async def service_account_auth_callback(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="OAuth state was initiated by a different user or tenant",
             )
+        stored_state = await state_store.pop(callback.state)
+        if stored_state is None:
+            raise expired
 
         tenant_app_service: TenantSharePointAppService = (
             container.tenant_sharepoint_app_service()
@@ -1265,15 +1284,20 @@ async def service_account_auth_callback(
             client_secret = stored_state["client_secret"]
             tenant_domain = stored_state["tenant_domain"]
 
-        # Exchange auth code for tokens
         service_account_auth_service = ServiceAccountAuthService()
-        token_result = await service_account_auth_service.exchange_token(
-            auth_code=callback.auth_code,
-            client_id=client_id,
-            client_secret=client_secret,
-            tenant_domain=tenant_domain,
-            redirect_uri=stored_state.get("redirect_uri"),
-        )
+        try:
+            token_result = await service_account_auth_service.exchange_token(
+                auth_code=callback.auth_code,
+                client_id=client_id,
+                client_secret=client_secret,
+                tenant_domain=tenant_domain,
+                redirect_uri=stored_state.get("redirect_uri"),
+            )
+        except httpx.HTTPStatusError as exc:
+            rejection = rejected_code(exc)
+            if rejection is None:
+                raise
+            raise rejection from exc
 
         app = await tenant_app_service.configure_service_account(
             tenant_id=user.tenant_id,
@@ -1369,7 +1393,7 @@ async def service_account_auth_callback(
 
         return _to_app_public(app, encryption_service)
 
-    except HTTPException:
+    except (HTTPException, OAuthCodeRejectedError):
         raise
     except Exception:
         logger.error("Failed to complete service account OAuth", exc_info=True)

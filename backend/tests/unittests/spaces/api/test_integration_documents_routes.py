@@ -14,6 +14,9 @@ from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts
+from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
+from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.auth_models import ApiKeyOwnership, ApiKeyPermission
 from eneo.info_blobs.info_blob import InfoBlobInDBNoText
 from eneo.info_blobs.info_blob_repo import IntegrationDocumentsPage
 from eneo.integration.domain.entities.integration_knowledge import (
@@ -24,6 +27,10 @@ from eneo.integration.domain.repositories.integration_knowledge_repo import (
     IntegrationKnowledgeLocation,
 )
 from eneo.integration.domain.skip_reasons import NO_TEXT_LAYER_REASON
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    CREDENTIALS_INVALID_MESSAGE,
+    SharePointCredentialsInvalidError,
+)
 from eneo.integration.infrastructure.sharepoint_sync_progress import (
     sync_progress_key,
 )
@@ -36,8 +43,12 @@ from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from eneo.spaces.api.space_router import router
 from eneo.spaces.space import Space
 from eneo.users.user import UserInDB
+from tests.unit.api_key_test_utils import make_api_key
 
 FOLDER = "https://contoso.sharepoint.com/sites/KS/Shared%20Documents/Protokoll"
+EMBEDDING_MODEL = EmbeddingModelLegacy(
+    id=uuid4(), name="multilingual-e5-large", is_deprecated=False, open_source=True
+)
 
 
 @dataclass
@@ -51,6 +62,7 @@ class DocumentsAPI:
     sync_logs: AsyncMock
     progress_redis: AsyncMock
     knowledge_repo: AsyncMock
+    container: Container
 
     @property
     def progress_url(self) -> str:
@@ -176,6 +188,7 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
     app = FastAPI()
     app.include_router(router, prefix="/spaces")
     add_exception_handlers(app)
+    app.dependency_overrides[get_current_active_user] = lambda: user
     for route in router.routes:
         if isinstance(route, APIRoute):
             for dependency in route.dependant.dependencies:
@@ -194,6 +207,7 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
         sync_logs,
         progress_redis,
         knowledge_repo,
+        container,
     )
 
 
@@ -335,6 +349,8 @@ async def test_documents_page_sorted_by_path_reorders_the_page_on_decoded_folder
         {"limit": 0},
         {"limit": 101},
         {"offset": -1},
+        {"offset": 1_000_001},
+        {"offset": 2**63},
         {"q": "x" * 201},
     ],
 )
@@ -668,3 +684,173 @@ async def test_sync_progress_written_before_the_cleanup_is_served_clean(
             "retry": False,
         }
     ]
+
+
+def _organization_item(api: DocumentsAPI) -> None:
+    """Make the item one the organization's SharePoint app imported, and the
+    caller an admin who may sync it."""
+    api.user.roles = [
+        RoleInDB(
+            id=uuid4(),
+            name="Admin",
+            tenant_id=api.user.tenant_id,
+            permissions=[Permission.ADMIN, Permission.INTEGRATIONS],
+        )
+    ]
+    api.space.members[api.user.id].role = SpaceRoleValue.ADMIN
+    api.knowledge.user_integration.auth_type = "tenant_app"
+    api.knowledge.user_integration.tenant_app_id = uuid4()
+    api.knowledge.site_id = "contoso.sharepoint.com,site,web"
+
+
+async def test_refused_organization_credentials_are_a_400_with_a_stable_code(
+    documents_api,
+):
+    """An expired app secret made a sync a 500."""
+    api = documents_api
+    _organization_item(api)
+    tokens = AsyncMock()
+    tokens.get_access_token.side_effect = SharePointCredentialsInvalidError(
+        "AADSTS7000222: The provided client secret keys are expired."
+    )
+    jobs = AsyncMock()
+    api.container.org_token_provider.override(providers.Object(tokens))
+    api.container.job_service.override(providers.Object(jobs))
+
+    response = await _send(api, "POST", api.change_url("{id}/sync/", api.knowledge.id))
+
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["code"] == "sharepoint_credentials_invalid"
+    assert body["message"] == CREDENTIALS_INVALID_MESSAGE
+    assert "AADSTS" not in response.text
+    jobs.queue_job.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("method", "route", "body"),
+    [
+        pytest.param(
+            "POST",
+            "add/{id}/",
+            {
+                "name": "Protokoll",
+                "embedding_model": {"id": str(uuid4())},
+                "url": "https://contoso.sharepoint.com/sites/KS",
+                "key": "contoso.sharepoint.com,site,web",
+            },
+            id="add",
+        ),
+        pytest.param(
+            "POST",
+            "add/{id}/batch/",
+            {
+                "embedding_model": {"id": str(uuid4())},
+                "items": [
+                    {
+                        "name": "Protokoll",
+                        "url": "https://contoso.sharepoint.com/sites/KS",
+                        "key": "contoso.sharepoint.com,site,web",
+                    }
+                ],
+            },
+            id="batch",
+        ),
+        pytest.param("POST", "{id}/sync/", None, id="sync"),
+    ],
+)
+async def test_service_keys_cannot_queue_imports_or_syncs(
+    documents_api, method, route, body
+):
+    """The queued job belongs to the caller; a service key has no user row."""
+    api = documents_api
+    api.user.active_api_key = make_api_key(
+        ownership=ApiKeyOwnership.SERVICE,
+        owner_user_id=None,
+        permission=ApiKeyPermission.ADMIN,
+        tenant_id=api.user.tenant_id,
+    )
+    jobs = AsyncMock()
+    api.container.job_service.override(providers.Object(jobs))
+
+    async with AsyncClient(
+        transport=ASGITransport(app=api.app), base_url="http://test"
+    ) as client:
+        response = await client.request(
+            method, api.change_url(route, api.knowledge.id), json=body
+        )
+
+    assert response.status_code == 403, response.text
+    # The production app flattens this detail; this app serves it as raised.
+    assert response.json()["detail"]["code"] == "service_key_cannot_create_resources"
+    jobs.queue_job.assert_not_awaited()
+    api.space_repo.one.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "route, body",
+    [
+        pytest.param("{id}/", {"name": "  Protokoll KS  "}, id="item"),
+        pytest.param("wrappers/{wrapper}/", {"name": "Kommunstyrelsen"}, id="wrapper"),
+    ],
+)
+async def test_a_rename_serves_the_item_with_its_permissions(
+    documents_api, route, body
+):
+    """The rename responses used to serve no permissions at all."""
+    api = documents_api
+    api.user.roles = [
+        RoleInDB(
+            id=uuid4(),
+            name="Importer",
+            tenant_id=api.user.tenant_id,
+            permissions=[Permission.INTEGRATIONS],
+        )
+    ]
+    api.space.members[api.user.id].role = SpaceRoleValue.ADMIN
+    api.knowledge.wrapper_id = uuid4()
+    api.knowledge.embedding_model = EMBEDDING_MODEL
+    api.knowledge.user_integration.id = uuid4()
+    api.knowledge.user_integration.auth_type = "user_oauth"
+    api.knowledge_repo.one.return_value = api.knowledge
+    api.knowledge_repo.get_by_ids.return_value = [api.knowledge]
+
+    async with AsyncClient(
+        transport=ASGITransport(app=api.app), base_url="http://test"
+    ) as client:
+        response = await client.patch(
+            f"/spaces/{api.space.id}/knowledge/integrations/"
+            + route.format(id=api.knowledge.id, wrapper=api.knowledge.wrapper_id),
+            json=body,
+        )
+
+    assert response.status_code == 200, response.text
+    served = response.json()
+    item = served[0] if isinstance(served, list) else served
+    # As the space response lists them for an item the space owns.
+    assert item["permissions"] == ["edit", "delete"]
+    if route == "{id}/":
+        api.knowledge_repo.rename.assert_awaited_once_with(
+            api.knowledge.id, "Protokoll KS"
+        )
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 256])
+@pytest.mark.parametrize("route", ["{id}/", "wrappers/{wrapper}/"])
+async def test_a_rename_to_a_blank_or_overlong_name_is_refused(
+    documents_api, route, name
+):
+    api = documents_api
+
+    async with AsyncClient(
+        transport=ASGITransport(app=api.app), base_url="http://test"
+    ) as client:
+        response = await client.patch(
+            f"/spaces/{api.space.id}/knowledge/integrations/"
+            + route.format(id=api.knowledge.id, wrapper=uuid4()),
+            json={"name": name},
+        )
+
+    assert response.status_code == 422, response.text
+    api.knowledge_repo.rename.assert_not_awaited()
+    api.knowledge_repo.rename_wrapper.assert_not_awaited()

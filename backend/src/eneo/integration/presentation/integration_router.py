@@ -13,6 +13,7 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
 )
 from eneo.integration.presentation.models import (
+    MAX_PAGE_OFFSET,
     Integration,
     IntegrationList,
     IntegrationPreviewDataList,
@@ -313,7 +314,10 @@ async def disconnect_user_integration(
 async def get_sync_logs(
     integration_knowledge_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    skip: Annotated[int, Query(ge=0, description="Number of items to skip")] = 0,
+    skip: Annotated[
+        int,
+        Query(ge=0, le=MAX_PAGE_OFFSET, description="Number of items to skip"),
+    ] = 0,
     limit: Annotated[
         int, Query(ge=1, le=100, description="Number of items per page")
     ] = 10,

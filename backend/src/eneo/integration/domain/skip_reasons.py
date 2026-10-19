@@ -31,6 +31,7 @@ SkipReasonCode = Literal[
     "listing_failed",
     "scope_path_unavailable",
     "missing_item_id",
+    "unchanged",
     "error",
 ]
 SKIP_REASON_CODES: tuple[SkipReasonCode, ...] = get_args(SkipReasonCode)
@@ -58,6 +59,8 @@ PASSWORD_PROTECTED_REASON = "Password-protected file"
 CORRUPT_FILE_REASON = "Corrupt or malformed file"
 SCOPE_PATH_UNAVAILABLE_REASON = "Folder scope path unavailable"
 MISSING_ITEM_ID_REASON = "Missing item id"
+# 2.2.x delta syncs listed a file whose change was already processed as skipped.
+ALREADY_SYNCED_REASON = "Already synced (no changes)"
 
 # The parser ran to completion and found nothing. Only these reasons may
 # remove an existing index entry; every other outcome is non-destructive.
@@ -123,6 +126,8 @@ def reason_text(code: SkipReasonCode, params: Mapping[str, str | int]) -> str:
         return SCOPE_PATH_UNAVAILABLE_REASON
     if code == "missing_item_id":
         return MISSING_ITEM_ID_REASON
+    if code == "unchanged":
+        return ALREADY_SYNCED_REASON
     return error_reason(str(params.get("detail", "")))
 
 
@@ -212,6 +217,8 @@ def classify_skip_reason(
         return "scope_path_unavailable", {}, retry
     if text == MISSING_ITEM_ID_REASON:
         return "missing_item_id", {}, retry
+    if text == ALREADY_SYNCED_REASON:
+        return "unchanged", {}, retry
     if match := _UNSUPPORTED_TYPE.match(text):
         return "unsupported_type", {"label": match.group(1)}, retry
     if match := _FILE_TOO_LARGE.match(text):

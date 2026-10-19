@@ -100,6 +100,46 @@ def test_a_sync_log_is_served_clean():
     ]
 
 
+def test_a_sync_log_another_release_wrote_is_served_without_its_unreadable_parts():
+    """A null or unexpected value in one stored row failed the whole history."""
+    log = SyncLog(
+        id=uuid4(),
+        integration_knowledge_id=uuid4(),
+        sync_type="full",
+        status="success",
+        metadata={
+            "files_processed": 3,
+            "recovery": None,
+            "trigger": {"source": "webhook"},
+            "skipped_items": 1,
+            "skipped_details": [
+                {"file": "b.zip", "reason": "Unsupported file type (.zip)"},
+                "b.zip",
+            ],
+            "changed_details": [{"file": "c.docx", "change": "renamed"}],
+            "written_by_a_newer_release": {"x": 1},
+        },
+        started_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+    )
+
+    served = log.model_dump(mode="json")
+
+    assert served["metadata"] == {
+        "files_processed": 3,
+        "skipped_items": 1,
+        "skipped_details": [
+            {
+                "file": "b.zip",
+                "reason": "Unsupported file type (.zip)",
+                "code": "unsupported_type",
+                "params": {"label": ".zip"},
+            }
+        ],
+    }
+    assert served["files_processed"] == 3
+
+
 def test_skipped_documents_and_progress_reasons_are_served_clean():
     skipped = IntegrationSkippedDocument(
         file="a.docx", reason=f"Could not remove removed: {STORED_SQL_ERROR}"

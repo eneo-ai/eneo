@@ -35,6 +35,7 @@ from eneo.integration.presentation.assemblers.integration_knowledge_assembler im
     IntegrationKnowledgeAssembler,
 )
 from eneo.integration.presentation.models import (
+    MAX_PAGE_OFFSET,
     IntegrationDocumentsPage,
     IntegrationKnowledgePublic,
     IntegrationSkippedDocuments,
@@ -48,7 +49,13 @@ from eneo.integration.presentation.models import (
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
-from eneo.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
+from eneo.main.models import (
+    NOT_PROVIDED,
+    GeneralError,
+    ModelId,
+    PaginatedResponse,
+    is_provided,
+)
 from eneo.roles.permissions import Permission
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
@@ -94,6 +101,16 @@ _SPACE_OPERATION_ACCESS_REASON = (
     "SpaceService enforces membership and the requested space operation."
 )
 _INTEGRATION_KNOWLEDGE_ACCESS_REASON = "IntegrationKnowledgeService enforces the space actor's permission for this operation."
+# Imports and syncs through the organization's SharePoint app fetch its token first.
+_ORGANIZATION_TOKEN_RESPONSES = {
+    **responses.get_responses([400, 403, 404]),
+    400: {
+        "model": GeneralError,
+        "description": "Bad request; `code` is `sharepoint_credentials_invalid` when "
+        "Microsoft refuses the organization's SharePoint credentials, which an "
+        "administrator must reconnect.",
+    },
+}
 ApiKeyRevokingContainer = Annotated[
     Container,
     Depends(get_container(with_user=True, transaction_scope="function")),
@@ -911,12 +928,27 @@ async def _audit_integration_knowledge(
     )
 
 
+async def _attach_item_permissions(
+    container: Container, space_id: UUID, items: "list[IntegrationKnowledge]"
+) -> None:
+    """The permissions the space response gives these items, for a response
+    that serves them on their own."""
+    actor = container.actor_manager().get_space_actor(
+        await container.space_repo().get_space_access_facts(space_id)
+    )
+    assembler = container.space_assembler()
+    for item in items:
+        item.permissions = assembler.integration_item_permissions(
+            item, space_id=space_id, actor=actor
+        )
+
+
 @router.post(
     "/{id}/knowledge/integrations/add/{user_integration_id}/",
     response_model=JobPublic,
     status_code=202,  # Changed to 202 Accepted since job is queued
     description="Add integration knowledge to a space. Returns a job to track import progress.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=_ORGANIZATION_TOKEN_RESPONSES,
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -928,6 +960,7 @@ async def create_space_integration_knowledge(
     user_integration_id: UUID,
     data: CreateSpaceIntegrationKnowledge,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.integration_knowledge_service()
 
@@ -993,6 +1026,7 @@ async def create_space_integration_knowledge_batch(
     user_integration_id: UUID,
     data: CreateSpaceIntegrationKnowledgeBatchRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.integration_knowledge_service()
 
@@ -1153,6 +1187,7 @@ async def update_integration_knowledge_wrapper(
         wrapper_id=wrapper_id,
         name=data.name,
     )
+    await _attach_item_permissions(container, id, updated_items)
     return [
         IntegrationKnowledgeAssembler.to_space_knowledge_model(item)
         for item in updated_items
@@ -1277,6 +1312,7 @@ async def update_integration_knowledge(
         integration_knowledge_id=integration_knowledge_id,
         name=data.name,
     )
+    await _attach_item_permissions(container, id, [knowledge])
     return IntegrationKnowledgeAssembler.to_space_knowledge_model(knowledge)
 
 
@@ -1307,7 +1343,7 @@ async def get_integration_knowledge_documents(
     sort: Annotated[IntegrationDocumentSort, Query()] = "path",
     order: Annotated[SortOrder, Query()] = "asc",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=MAX_PAGE_OFFSET)] = 0,
 ):
     service = container.integration_knowledge_service()
     knowledge = await service.get_readable_knowledge(
@@ -1367,7 +1403,7 @@ async def get_integration_knowledge_skipped_documents(
     response_model=JobPublic,
     status_code=202,
     description="Trigger a full re-sync of integration knowledge. Returns a job to track progress.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=_ORGANIZATION_TOKEN_RESPONSES,
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -1378,6 +1414,7 @@ async def trigger_integration_full_sync(
     id: UUID,
     integration_knowledge_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.integration_knowledge_service()
 
