@@ -4877,5 +4877,6 @@
   "admin_password_policy_max_age_invalid": "Ange ett heltal mellan 1 och 3650 dagar, eller lämna fältet tomt.",
   "admin_password_policy_days": "dagar",
   "admin_password_policy_never": "Aldrig",
-  "admin_password_policy_updated": "Lösenordspolicyn är sparad."
+  "admin_password_policy_updated": "Lösenordspolicyn är sparad.",
+  "eneo_error_9070": "Du behöver välja ett nytt lösenord innan du kan fortsätta."
 }
