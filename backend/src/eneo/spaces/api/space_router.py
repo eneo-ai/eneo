@@ -35,6 +35,7 @@ from eneo.integration.presentation.assemblers.integration_knowledge_assembler im
     IntegrationKnowledgeAssembler,
 )
 from eneo.integration.presentation.models import (
+    MAX_PAGE_OFFSET,
     IntegrationDocumentsPage,
     IntegrationKnowledgePublic,
     IntegrationSkippedDocuments,
@@ -1325,7 +1326,7 @@ async def get_integration_knowledge_documents(
     sort: Annotated[IntegrationDocumentSort, Query()] = "path",
     order: Annotated[SortOrder, Query()] = "asc",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=MAX_PAGE_OFFSET)] = 0,
 ):
     service = container.integration_knowledge_service()
     knowledge = await service.get_readable_knowledge(

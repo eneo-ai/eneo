@@ -35,6 +35,10 @@ from eneo.observability.error_text import user_visible_error
 
 T = TypeVar("T", bound=BaseModel)
 
+# Above this an offset stops being a page anyone browses to, and past int64
+# the database driver fails the query.
+MAX_PAGE_OFFSET = 1_000_000
+
 
 def _empty_resource_permissions() -> list[ResourcePermission]:
     return []
@@ -626,7 +630,7 @@ class PaginatedSyncLogList(BaseModel):
 
 class IntegrationSyncWindowRequest(BaseModel):
     integration_knowledge_id: UUID
-    offset: int = Field(default=0, ge=0)
+    offset: int = Field(default=0, ge=0, le=MAX_PAGE_OFFSET)
 
 
 class IntegrationSyncDetailsRequest(BaseModel):

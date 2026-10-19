@@ -345,6 +345,8 @@ async def test_documents_page_sorted_by_path_reorders_the_page_on_decoded_folder
         {"limit": 0},
         {"limit": 101},
         {"offset": -1},
+        {"offset": 1_000_001},
+        {"offset": 2**63},
         {"q": "x" * 201},
     ],
 )
