@@ -80,6 +80,11 @@ export type JobStatus = components["schemas"]["Status"];
 // Until the schema is fixed upstream we extend the type so consumers can use `tenant.id`.
 export type Tenant = components["schemas"]["TenantPublic"] & { id: string };
 export type ModelProviderPublic = components["schemas"]["ModelProviderPublic"];
+export type OutboundHeaderInput = components["schemas"]["OutboundHeaderInput"];
+export type OutboundHeaderPublic = components["schemas"]["OutboundHeaderPublic"];
+export type OutboundHeaderOptions = components["schemas"]["OutboundHeaderOptions"];
+export type OutboundHeaderPreview = components["schemas"]["OutboundHeaderPreview"];
+export type DynamicValuePublic = components["schemas"]["DynamicValuePublic"];
 export type AnalyticsData = components["schemas"]["MetadataStatistics"];
 export type AnalyticsAggregateRow = {
   created_at: string;
@@ -232,8 +237,8 @@ export namespace SSE {
   export type Reasoning = Omit<components["schemas"]["SSEReasoning"], "$defs">;
   export type FirstChunk = Omit<components["schemas"]["SSEFirstChunk"], "$defs">;
   export type Files = Omit<components["schemas"]["SSEFiles"], "$defs">;
-  export type Eneo = Omit<components["schemas"]["SSEEneoEvent"], "$defs">;
   export type ToolCall = Omit<components["schemas"]["SSEToolCall"], "$defs">;
+  export type ToolCallDelta = Omit<components["schemas"]["SSEToolCallDelta"], "$defs">;
   export type ToolApprovalRequired = {
     session_id: string;
     eneo_event_type: "tool_approval_required";
@@ -265,7 +270,6 @@ export namespace SSE {
     | Reasoning
     | FirstChunk
     | Files
-    | Eneo
     | ToolCall
     | ToolApprovalRequired
     | ToolApprovalTimeout

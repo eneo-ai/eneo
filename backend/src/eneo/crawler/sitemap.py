@@ -4,6 +4,10 @@ import gzip
 import hashlib
 from dataclasses import dataclass
 from io import BytesIO
+
+# DTD/entities and non-ASCII-compatible encodings are rejected before parsing below.
+# Covered by tests/unit/crawler/test_sitemap.py, including declarations past a long preamble.
+# nosemgrep: python.lang.security.use-defused-xml.use-defused-xml
 from xml.etree import ElementTree
 
 _SITEMAP_NAMESPACE = "http://www.sitemaps.org/schemas/sitemap/0.9"

@@ -40,11 +40,13 @@ flowchart LR
     Review --> Published["Exact published version"]
     Published --> Builder
     Published --> Policy["Personal Chat policy"]
-    Builder --> Resource["Assistant or App"]
+    Builder --> Assistant["Assistant"]
+    Builder --> App["Eneo App"]
     Policy --> Chat["Personal Chat"]
-    Resource --> Mode["Always or on demand"]
+    Assistant --> Mode["Always or on demand"]
+    Chat --> Mode
     Mode --> Request["Resolved instructions enter the request"]
-    Chat --> Request
+    App -->|Eager| Request
 ```
 
 A Skill is not a separate Assistant. It does not choose a model, grant access,
@@ -67,6 +69,17 @@ Reuse one Skill when the capability has one real owner and release cycle. Do not
 merge Skills only because parts of their text look similar.
 
 ## Use a Skill with MCP
+
+The same guidance applies to [Functions](/guides/capabilities) backed by
+the bundled runtime. A Skill can define the checks for a budget analysis;
+**Ask a file** performs them, **Charts** presents comparisons, and **Create a
+file** writes the report. Those Functions must already be available to the
+Assistant. The Skill supplies the procedure and adds no execution permission.
+
+MCP Apps are interactive tool-result views, distinct from the Eneo Apps that
+can bind Skills. The native workspace displays saved documents independently
+of MCP Apps. See [Architecture](/docs/architecture#skills-functions-tools-and-views)
+for the responsibilities and design decisions.
 
 Think of the two parts separately:
 
@@ -440,8 +453,8 @@ configuration limit rather than a conflict, described in
 - Skills contain instructions and metadata. They do not execute scripts or
   import bundled files.
 - Skills do not grant models, tools, knowledge, or permissions.
-- Assistant bindings can be **always** or **on demand**. Apps and Personal Chat
-  remain eager.
+- Assistant and Personal Chat bindings can be **always** or **on demand**.
+  Apps remain eager.
 - Organisation approval and exact pins do not update existing resources
   automatically.
 - This release has no external Skill marketplace or package installation flow.
@@ -454,6 +467,9 @@ Remove the permission from a role to hide the panel from it. Select a
 persisted turn to inspect which exact Skill revisions were available, entered
 the model context, were blocked, or were rejected, along with token
 measurement, activation rounds, and selection time.
+
+Activation evidence records that instructions entered the model context; it
+does not prove the model followed them.
 
 The panel is for development and support diagnostics. It does not expose Skill
 instructions, model reasoning, credentials, or an administrator's incident
@@ -519,3 +535,14 @@ Skills retain their instructions, immutable versions, and audit history under
 **Removed**, including Skills that were published before removal. Local Space
 Skills still use permanent deletion once their bindings and active App jobs have
 been cleared.
+
+## Skill evidence in a reply
+
+Chat labels distinguish instructions included from the start from instructions
+loaded on demand. These labels report what entered the request, not proof that the
+model followed every instruction or that a tool completed successfully.
+
+For example, a budget-analysis Skill can explain which checks and report sections
+are required. Ask a file executes workbook queries, Charts creates visual results,
+and Create a file writes the report into the document workspace. Those Functions
+must already be available to the Assistant; attaching the Skill grants no access.

@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import AliasPath, BaseModel, Field
 
+from eneo.questions.question import MessageFeedback
+
 
 class AssistantMetadata(BaseModel):
     id: UUID
@@ -71,9 +73,22 @@ class ConversationInsightRequest(BaseModel):
     group_chat_id: Optional[UUID] = None
 
 
+class MessageFeedbackCounts(BaseModel):
+    """How many answers their conversation owners rated good and bad."""
+
+    positive: int = Field(description="Answers rated good (1).")
+    negative: int = Field(description="Answers rated bad (-1).")
+
+
 class ConversationInsightResponse(BaseModel):
     total_conversations: int
     total_questions: int
+    feedback: MessageFeedbackCounts = Field(
+        description=(
+            "Ratings on the answers in these conversations. Conversation-level "
+            "feedback is not included."
+        )
+    )
 
 
 class AssistantInsightQuestion(BaseModel):
@@ -81,6 +96,10 @@ class AssistantInsightQuestion(BaseModel):
     question: str
     created_at: datetime
     session_id: UUID
+    feedback: Optional[MessageFeedback] = Field(
+        default=None,
+        description="The conversation owner's rating of the answer; null when unrated.",
+    )
 
 
 class AnalysisJobStatus(str, Enum):

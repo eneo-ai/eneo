@@ -99,6 +99,11 @@ async def _build_embedding_model_spec(
     tenant_id: UUID,
     load_provider: _ProviderLoader = load_active_litellm_provider,
 ) -> EmbeddingModelSpec:
+    """The crawl's embedding model with its provider pre-resolved.
+
+    A snapshot: the crawl keeps these credentials and this header
+    configuration until it finishes, whatever is edited meanwhile.
+    """
     provider: ResolvedLiteLLMProvider | None = None
     if embedding_model.provider_id is not None:
         provider = await load_provider(
@@ -128,6 +133,9 @@ async def _build_embedding_model_spec(
         provider_type=provider.provider_type if provider is not None else None,
         provider_credentials=provider.credentials if provider is not None else None,
         provider_config=provider.config if provider is not None else None,
+        provider_outbound_headers=(
+            provider.outbound_headers if provider is not None else None
+        ),
     )
 
 
@@ -1136,10 +1144,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 while not heartbeat_stop.is_set():
                     await heartbeat_monitor.tick()
                     try:
-                        await asyncio.wait_for(
-                            heartbeat_stop.wait(),
-                            timeout=float(heartbeat_interval_seconds),
-                        )
+                        async with asyncio.timeout(float(heartbeat_interval_seconds)):
+                            await heartbeat_stop.wait()
                     except TimeoutError:
                         pass
 

@@ -93,6 +93,9 @@ class ErrorCodes(int, Enum):
     WEBSITE_CRAWL_ACTIVE = 9063
     WEBSITE_CRAWL_CLEANUP_PENDING = 9064
     CONVERSATION_SETTINGS_CONFLICT = 9065
+    # A prompt library entry the personal assistant governance policy uses
+    # cannot be deleted until the policy stops using it.
+    PROMPT_IN_USE_BY_GOVERNANCE = 9069
 
 
 class NotFoundException(Exception):
@@ -183,15 +186,22 @@ class ModelInUseException(Exception):
 
 
 class QuotaExceededException(Exception):
-    pass
+    """A storage quota refused the write.
+
+    Subclasses name which limit was hit so the 403 payload's ``code`` and the
+    job failure code let the client say whether the organisation or the user
+    has to act.
+    """
+
+    code: str | None = None
 
 
 class TenantQuotaExceededException(QuotaExceededException):
-    pass
+    code = "tenant_quota_exceeded"
 
 
 class UserQuotaExceededException(QuotaExceededException):
-    pass
+    code = "user_quota_exceeded"
 
 
 class UniqueException(Exception):
@@ -378,6 +388,18 @@ class ConversationSettingsConflictException(Exception):
     pass
 
 
+class PromptInUseException(Exception):
+    """Raised when deleting a prompt library entry that the personal assistant
+    governance policy still uses.
+
+    Surfaced as 409 with its own error code, so a client can say what blocks
+    the delete and how to clear it; it used to borrow NAME_COLLISION, whose
+    text is about a taken name.
+    """
+
+    pass
+
+
 class SkillRevisionConflictException(Exception):
     pass
 
@@ -528,6 +550,7 @@ EXCEPTION_MAP = {
         None,
         ErrorCodes.CONVERSATION_SETTINGS_CONFLICT,
     ),
+    PromptInUseException: (409, None, ErrorCodes.PROMPT_IN_USE_BY_GOVERNANCE),
     SkillRevisionConflictException: (
         409,
         None,

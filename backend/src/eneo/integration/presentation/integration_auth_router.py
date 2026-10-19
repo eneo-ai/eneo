@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 # Audit logging - module level imports for consistency
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -39,12 +39,18 @@ router = APIRouter()
 async def gen_url(
     tenant_integration_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    redirect_uri: Annotated[
+        str | None,
+        Query(description="An exact operator-registered OAuth callback URL."),
+    ] = None,
 ):
     # The backend generates and stores its own single-use CSRF state (see
     # oauth2_service.start_auth); callers no longer pass one in.
     oauth2_service = container.oauth2_service()
 
-    return await oauth2_service.start_auth(tenant_integration_id=tenant_integration_id)
+    return await oauth2_service.start_auth(
+        tenant_integration_id=tenant_integration_id, redirect_uri=redirect_uri
+    )
 
 
 @router.post(

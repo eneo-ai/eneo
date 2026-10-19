@@ -229,6 +229,12 @@ CONVERSATIONS_READ_OVERRIDES: frozenset[str] = frozenset(
         "leave_feedback",
         "conversation_settings_defaults",
         "update_conversation_settings",
+        # Rating answers is part of chatting, like conversation feedback; the
+        # route's own "conversations" guard still applies.
+        "set_message_feedback",
+        "delete_message_feedback",
+        # Reads a document of the conversation in another format; stores nothing.
+        "export_conversation_document",
     }
 )
 
@@ -245,6 +251,9 @@ FILES_READ_OVERRIDES: frozenset[str] = frozenset(
         "generate_original_signed_url",
     }
 )
+
+# A link to a tool's view is read access to what a conversation shows.
+MCP_APPS_READ_OVERRIDES: frozenset[str] = frozenset({"mint_app_view_token"})
 
 
 def require_resource_permission_for_method(

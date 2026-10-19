@@ -5,6 +5,7 @@ from eneo.main.exceptions import (
     ErrorCodes,
     NotFoundException,
     OpenAIException,
+    PromptInUseException,
     ProviderRejectedRequestException,
     UnauthorizedException,
 )
@@ -122,3 +123,19 @@ def test_provider_rejected_request_maps_to_400_despite_openai_subclassing():
     assert payload["eneo_error_code"] == ErrorCodes.PROVIDER_REJECTED_REQUEST
     assert payload["code"] == "provider_rejected_request"
     assert payload["details"]["retryable"] is False
+
+
+def test_prompt_in_use_maps_to_409_with_its_own_code():
+    message = (
+        "Prompt 'Standard' is referenced by the personal assistant governance "
+        "policy. Unset it on the policy before deleting."
+    )
+    client = _make_client(PromptInUseException(message))
+
+    response = client.get("/boom")
+
+    assert response.status_code == 409
+    payload = response.json()
+    # Not NAME_COLLISION: clients word that one as a taken name.
+    assert payload["eneo_error_code"] == ErrorCodes.PROMPT_IN_USE_BY_GOVERNANCE == 9069
+    assert payload["message"] == message

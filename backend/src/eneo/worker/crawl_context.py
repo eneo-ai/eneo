@@ -78,6 +78,9 @@ class EmbeddingModelSpec:
     - provider_type: e.g. "openai", "azure", "infinity"
     - provider_credentials: encrypted credentials dict from provider
     - provider_config: additional provider config dict
+    - provider_outbound_headers: configured outbound headers (stored form,
+      secrets still encrypted). Like the credentials, a snapshot: a running
+      crawl keeps the header configuration it started with.
     """
 
     id: UUID
@@ -92,6 +95,9 @@ class EmbeddingModelSpec:
     provider_type: str | None = None
     provider_credentials: dict[str, Any] | None = None
     provider_config: dict[str, Any] | None = None
+    provider_outbound_headers: list[dict[str, Any]] | None = field(
+        default=None, repr=False
+    )
 
 
 @dataclass(frozen=True)

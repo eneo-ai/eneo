@@ -179,6 +179,9 @@ class MCPServerTools(BasePublic):
     display_name: Mapped[Optional[str]] = mapped_column(Text)
     description: Mapped[Optional[str]] = mapped_column(Text)
     input_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    meta: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    # SHA-256 of the approved MCP App view HTML; only that stored view is served.
+    ui_resource_sha256: Mapped[Optional[str]] = mapped_column(String(64))
     is_enabled_by_default: Mapped[bool] = mapped_column(
         Boolean, server_default="True", nullable=False
     )
@@ -186,6 +189,8 @@ class MCPServerTools(BasePublic):
     # Pending changes for tool sync approval
     pending_description: Mapped[Optional[str]] = mapped_column(Text)
     pending_input_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    pending_meta: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    pending_ui_resource_sha256: Mapped[Optional[str]] = mapped_column(String(64))
     requires_approval: Mapped[bool] = mapped_column(
         Boolean, server_default="false", nullable=False
     )
@@ -215,29 +220,6 @@ class MCPServerToolSettings(BaseCrossReference):
 
     # Relationships
     tool: Mapped[MCPServerTools] = relationship()
-
-
-class MCPServerSettings(BaseCrossReference):
-    """Tenant-level MCP server settings (org-wide configuration)."""
-
-    __tablename__ = "mcp_server_settings"  # type: ignore[assignment]
-
-    tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True
-    )
-    mcp_server_id: Mapped[UUID] = mapped_column(
-        ForeignKey(MCPServers.id, ondelete="CASCADE"), primary_key=True
-    )
-
-    is_org_enabled: Mapped[bool] = mapped_column(
-        Boolean, server_default="True", nullable=False
-    )
-    env_vars: Mapped[Optional[dict[str, Any]]] = mapped_column(
-        JSONB
-    )  # Org-level credentials
-
-    # Relationships
-    mcp_server: Mapped[MCPServers] = relationship()
 
 
 class SpacesMCPServers(BaseCrossReference):

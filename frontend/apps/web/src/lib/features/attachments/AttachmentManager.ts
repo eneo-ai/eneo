@@ -13,6 +13,8 @@ export type Attachment = {
   status: "queued" | "uploading" | "completed";
   progress: number;
   fileRef?: UploadedFile;
+  /** The file was already in the conversation and is attached again without an upload. */
+  reused?: boolean;
   /** Remove/Cancel this upload; if `Attachment.status` is
    * - `queued`: will remove it from the queue
    * - `uploading`: will cancel the upload
@@ -35,13 +37,46 @@ export type AttachmentRules = {
   acceptedFormats?: AcceptedFormat[];
 };
 
+/**
+ * Thrown by `awaitUploads` when the awaited attachments will never all be
+ * ready: one of them failed (the manager has already reported that through
+ * `uploadError`) or the caller gave up before they finished.
+ */
+export class UploadsNotReadyError extends Error {
+  reason: "failed" | "aborted";
+
+  constructor(reason: "failed" | "aborted", message: string) {
+    super(message);
+    this.name = "UploadsNotReadyError";
+    this.reason = reason;
+  }
+}
+
 export type AttachmentValidationError = {
-  kind: "max_total_count" | "unsupported_type" | "file_size" | "max_total_size";
+  kind: "max_total_count" | "unsupported_type" | "file_size" | "max_total_size" | "duplicate";
   message: string;
   fileName?: string;
   fileSizeBytes?: number;
   maxSizeBytes?: number;
 };
+
+/** Whether two picked files are the same file: same name, size, type and modification time. */
+function isSameFile(a: File, b: File): boolean {
+  return (
+    a.name === b.name && a.size === b.size && a.type === b.type && a.lastModified === b.lastModified
+  );
+}
+
+/**
+ * Whether a picked file is a file already uploaded: same name and type, and
+ * the same number of bytes as the stored original. A document's `size` counts
+ * its extracted text, so it only stands in where no original size is known.
+ */
+export function matchesUpload(file: File, uploaded: UploadedFile): boolean {
+  const mimetype = file.type.split(";")[0];
+  const bytes = uploaded.original_size ?? uploaded.size;
+  return uploaded.name === file.name && uploaded.mimetype === mimetype && bytes === file.size;
+}
 
 export function unsupportedTypeError(file: File): AttachmentValidationError {
   // Some files have a codec in the type, separated by a `;`
@@ -70,6 +105,9 @@ type AttachmentManagerParams = {
      * store for the consumer to render inline (e.g. next to the chat input)
      * instead of being shown as a toast. */
     inlineErrors?: boolean;
+    /** A file already on the server that a picked file is a copy of, e.g. one
+     * sent earlier in the conversation. It is attached again without an upload. */
+    findExisting?: (file: File) => UploadedFile | undefined;
   };
 };
 
@@ -81,7 +119,7 @@ function initAttachmentManager(data: AttachmentManagerParams) {
 
 export { initAttachmentManager, getAttachmentManager };
 
-function createAttachmentManager(data: AttachmentManagerParams) {
+export function createAttachmentManager(data: AttachmentManagerParams) {
   const { eneo } = data;
   const inlineErrors = data.options?.inlineErrors ?? false;
   const attachmentRules = (() => {
@@ -106,6 +144,27 @@ function createAttachmentManager(data: AttachmentManagerParams) {
   const waitingUploads: string[] = [];
   const runningUploads: string[] = [];
 
+  /** Attaches a file the server already has; removing it only drops it from the list. */
+  function reuseUpload(file: File, fileRef: UploadedFile) {
+    const id = crypto.randomUUID();
+    const attachment: Attachment = {
+      id,
+      file,
+      status: "completed",
+      progress: 100,
+      fileRef,
+      reused: true,
+      remove: () => {
+        attachments.update(($attachments) => $attachments.filter((item) => item.id !== id));
+      }
+    };
+    attachments.update(($attachments) => {
+      $attachments.push(attachment);
+      return $attachments;
+    });
+    data.options?.onFileUploaded?.(fileRef);
+  }
+
   function queueUploads(files: File[]) {
     files.forEach((file) => {
       const id = crypto.randomUUID();
@@ -115,7 +174,8 @@ function createAttachmentManager(data: AttachmentManagerParams) {
         status: "queued",
         progress: 0,
         remove: () => {
-          waitingUploads.splice(waitingUploads.findIndex((item) => item === id));
+          const index = waitingUploads.indexOf(id);
+          if (index !== -1) waitingUploads.splice(index, 1);
           attachments.update(($attachments) => $attachments.filter((item) => item.id !== id));
         }
       };
@@ -217,6 +277,62 @@ function createAttachmentManager(data: AttachmentManagerParams) {
     uploadError.set(null);
   }
 
+  /** Drop the given attachments from the list, e.g. once they have been sent. */
+  function removeUploads(ids: string[]) {
+    const sent = new Set(ids);
+    attachments.update(($attachments) => $attachments.filter((item) => !sent.has(item.id)));
+    uploadError.set(null);
+  }
+
+  /**
+   * Resolves with the uploaded files once every listed attachment has
+   * completed. Rejects with `UploadsNotReadyError` when one of them leaves the
+   * list first (its upload failed or it was removed) or when `signal` aborts.
+   * The uploads themselves are never cancelled by this.
+   */
+  function awaitUploads(ids: string[], signal?: AbortSignal): Promise<UploadedFile[]> {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new UploadsNotReadyError("aborted", "Cancelled before the uploads finished"));
+        return;
+      }
+
+      let settled = false;
+      let unsubscribe: (() => void) | undefined = undefined;
+      const settle = (outcome: () => void) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        unsubscribe?.();
+        outcome();
+      };
+      const onAbort = () =>
+        settle(() =>
+          reject(new UploadsNotReadyError("aborted", "Cancelled before the uploads finished"))
+        );
+      signal?.addEventListener("abort", onAbort, { once: true });
+
+      unsubscribe = attachments.subscribe(($attachments) => {
+        const files: UploadedFile[] = [];
+        for (const id of ids) {
+          const attachment = $attachments.find((item) => item.id === id);
+          if (!attachment) {
+            settle(() =>
+              reject(new UploadsNotReadyError("failed", "An attachment did not finish uploading"))
+            );
+            return;
+          }
+          if (attachment.status !== "completed" || !attachment.fileRef) return;
+          files.push(attachment.fileRef);
+        }
+        settle(() => resolve(files));
+      });
+      // The store calls back synchronously, so the subscription may already
+      // have settled before it could be released above.
+      if (settled) unsubscribe();
+    });
+  }
+
   function clearUploadError() {
     uploadError.set(null);
   }
@@ -238,6 +354,17 @@ function createAttachmentManager(data: AttachmentManagerParams) {
           message: m.attachment_error_max_count({ count: selectedRules.maxTotalCount })
         });
         break;
+      }
+
+      // A file picked again (the same folder dropped twice, say) is already
+      // on its way or in the list; it is not uploaded a second time.
+      if ($attachments.some((attachment) => isSameFile(attachment.file, file))) {
+        errors.push({
+          kind: "duplicate",
+          fileName: file.name,
+          message: m.attachment_error_duplicate({ fileName: file.name })
+        });
+        continue;
       }
 
       if (selectedRules.acceptedFormats) {
@@ -286,11 +413,26 @@ function createAttachmentManager(data: AttachmentManagerParams) {
         continue;
       }
 
+      const existing = data.options?.findExisting?.(file);
+      if (existing) {
+        reuseUpload(file, existing);
+        continue;
+      }
+
       queueUploads([file]);
     }
 
     if (errors.length > 0) {
-      uploadError.set(errors.map((error) => error.message).join("\n"));
+      // Many skipped duplicates are one line, not a wall of them.
+      const duplicates = errors.filter((error) => error.kind === "duplicate");
+      const shown =
+        duplicates.length > 1
+          ? [
+              ...errors.filter((error) => error.kind !== "duplicate").map((e) => e.message),
+              m.attachment_error_duplicates({ count: duplicates.length })
+            ]
+          : errors.map((error) => error.message);
+      uploadError.set(shown.join("\n"));
       return errors;
     }
     return null;
@@ -322,6 +464,10 @@ function createAttachmentManager(data: AttachmentManagerParams) {
     queueValidUploadsDetailed,
     /** Will reset the current attachment list */
     clearUploads,
+    /** Drop specific attachments from the list without deleting their files */
+    removeUploads,
+    /** Wait for the listed attachments to finish uploading */
+    awaitUploads,
     /** Dismiss the current inline upload error */
     clearUploadError
   });

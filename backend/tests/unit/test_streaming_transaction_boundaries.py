@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 import eneo.sessions.session_service as session_service_module
+from eneo.files.file_models import FileType
 from eneo.files.file_service import FileService
 from eneo.sessions.session_service import SessionService
 
@@ -181,7 +182,9 @@ async def test_file_service_save_image_starts_short_transaction_when_needed():
     session.in_transaction.return_value = False
     session.begin.return_value = _begin()
 
-    repo = SimpleNamespace(session=session)
+    repo = SimpleNamespace(
+        session=session, get_content_references=AsyncMock(return_value=[])
+    )
     service = FileService(
         user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
         repo=repo,
@@ -192,6 +195,7 @@ async def test_file_service_save_image_starts_short_transaction_when_needed():
     service._persist_prepared_file = AsyncMock(return_value=file_id)
     service.get_file_by_id = AsyncMock(
         return_value=SimpleNamespace(
+            file_type=FileType.IMAGE,
             model_dump=lambda: {
                 "id": file_id,
                 "name": "generated_image.jpeg",
@@ -201,7 +205,7 @@ async def test_file_service_save_image_starts_short_transaction_when_needed():
                 "file_type": "image",
                 "user_id": service.user.id,
                 "tenant_id": service.user.tenant_id,
-            }
+            },
         )
     )
 
@@ -217,7 +221,9 @@ async def test_file_service_save_image_reuses_existing_transaction():
     session.in_transaction.return_value = True
     session.begin = MagicMock()
 
-    repo = SimpleNamespace(session=session)
+    repo = SimpleNamespace(
+        session=session, get_content_references=AsyncMock(return_value=[])
+    )
     service = FileService(
         user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
         repo=repo,
@@ -228,6 +234,7 @@ async def test_file_service_save_image_reuses_existing_transaction():
     service._persist_prepared_file = AsyncMock(return_value=file_id)
     service.get_file_by_id = AsyncMock(
         return_value=SimpleNamespace(
+            file_type=FileType.IMAGE,
             model_dump=lambda: {
                 "id": file_id,
                 "name": "generated_image.jpeg",
@@ -237,7 +244,7 @@ async def test_file_service_save_image_reuses_existing_transaction():
                 "file_type": "image",
                 "user_id": service.user.id,
                 "tenant_id": service.user.tenant_id,
-            }
+            },
         )
     )
 

@@ -1,8 +1,9 @@
 import json
 import logging
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Collection, Optional, Protocol, Sequence
+from typing import Any, Collection, Optional, Protocol, Sequence, cast
 from uuid import UUID
 
 from typing_extensions import override
@@ -25,10 +26,13 @@ from eneo.completion_models.infrastructure.static_prompts import (
     ATTACHED_FILE_REFERENCES_INSTRUCTION,
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
+    TOOL_DELIVERABLE_INSTRUCTION,
     TOOL_NAMING_INSTRUCTION,
     TRANSCRIPTION_PROMPT,
 )
+from eneo.completion_models.infrastructure.table_selection import parse_table_selection
 from eneo.files.file_models import File, FileType
+from eneo.files.model_file_references import file_handle, model_file_references
 from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.info_blobs.source_metadata import format_source_metadata_lines
 from eneo.questions.question import ToolCallInfo
@@ -60,8 +64,8 @@ def _replayable_tool_calls(
     fall back to the split `tool_name` for legacy rows that predate this field.
 
     Images the call generated are named in `result` only by placeholder. When
-    a fresh reference URL exists for one, it is appended here (never
-    persisted: the URL is short-lived), so the model can hand the image back
+    an authorized reference exists for one, its stable handle is appended
+    here so the model can hand the image back
     to an image tool on a later turn.
     """
     if not tool_calls:
@@ -80,27 +84,44 @@ def _replayable_tool_calls(
             MessageToolCall(
                 tool_call_id=tc.tool_call_id,
                 tool_name=tc.mcp_tool_name or tc.tool_name,
-                arguments=tc.arguments,
+                # Legacy URLs become credential-free handles on replay, too.
+                arguments=cast(
+                    "dict[str, object] | None",
+                    model_file_references(tc.arguments, file_reference_urls or {}),
+                ),
                 result=_with_generated_image_references(tc, file_reference_urls),
             )
         )
     return replayable
 
 
+_GENERATED_PLACEHOLDER = re.compile(r"\[(Image|File) (\d+) \(")
+
+
 def _with_generated_image_references(
     tc: ToolCallInfo, file_reference_urls: Optional[dict[UUID, str]]
 ) -> str:
-    """The persisted result plus one reference line per generated image.
+    """The persisted result plus one reference line per generated file.
 
-    Numbering follows the "[Image N ...]" placeholders the result already
-    carries, in the order the files were persisted for this call.
+    Labels follow the "[Image N ...]" and "[File N ...]" placeholders the
+    result already carries: they appear in the order the files were persisted
+    for this call, so the n-th placeholder names the n-th generated file.
     """
-    result = tc.result or ""
+    result = model_file_references(tc.result or "", file_reference_urls or {})
     if not tc.generated_file_ids or not file_reference_urls:
         return result
+    labels = [
+        f"{kind} {number}" for kind, number in _GENERATED_PLACEHOLDER.findall(result)
+    ]
+
+    def label(position: int) -> str:
+        # Results persisted before documents existed carry image placeholders
+        # only, which the list covers; fall back to the old numbering anyway.
+        return labels[position] if position < len(labels) else f"Image {position + 1}"
+
     lines = [
-        f"Reference url for Image {index}: {file_reference_urls[file_id]}"
-        for index, file_id in enumerate(tc.generated_file_ids, start=1)
+        f"File reference for {label(position)}: {file_handle(file_id)}"
+        for position, file_id in enumerate(tc.generated_file_ids)
         if file_id in file_reference_urls
     ]
     if not lines:
@@ -228,7 +249,7 @@ def _file_reference_entries(
                 "filename": file.name,
                 "mimetype": file.mimetype,
                 "size_bytes": file.size,
-                "url": file_reference_urls[file.id],
+                "file_ref": file_handle(file.id),
             }
         )
         for file in files
@@ -264,10 +285,9 @@ def build_assistant_file_references_string(
 def build_file_references_string(
     files: list[File], file_reference_urls: dict[UUID, str]
 ) -> str:
-    """Surface signed download URLs for attached files to the model.
+    """Surface credential-free handles for attached files to the model.
 
-    Lets the model pass a URL to whichever MCP tool accepts a URL input so the
-    tool can fetch the original file. Only files present in
+    The proxy resolves these into URLs for whichever MCP tool consumes them. Only files present in
     ``file_reference_urls`` (those with a durably stored original) get an
     entry; the rest keep relying on the inlined text from
     ``build_files_string``.
@@ -278,14 +298,14 @@ def build_file_references_string(
 
     references = "\n".join(entries)
     # Mechanics only: the behavioral rules (never judge readability from the
-    # url, never ask for re-upload, read_file as fallback, images go to image
+    # reference, never ask for re-upload, read_file as fallback, images go to image
     # tools) live in ATTACHED_FILE_REFERENCES_INSTRUCTION, stated once in the
     # system prompt. This block repeats per message with referenced files,
     # history included.
     return (
         "Files in this message (one JSON entry per file). Their raw bytes are "
-        'NOT in this prompt; each "url" is a signed file reference for tools '
-        "that accept a URL input.\n\n"
+        "NOT in this prompt; pass file_ref in the tool's URL input. "
+        "Eneo resolves it before execution; do not construct URLs or tokens.\n\n"
         f"{references}"
     )
 
@@ -335,6 +355,7 @@ class _Prompt:
         # ahead of the data blocks below.
         if self.has_tools:
             components.append(TOOL_NAMING_INSTRUCTION)
+            components.append(TOOL_DELIVERABLE_INSTRUCTION)
 
         # Attached-file reference entries render in the messages; state the
         # tool-arbitration rule once here instead of per message. Meaningless
@@ -417,6 +438,7 @@ class _Prompt:
         chunk_numbers: dict[UUID, set[int]] = {}
         header_tokens: dict[UUID, int] = {}
         estimated_tokens = 0
+        overflow_rendered = False
         for chunk in chunks:
             numbers = chunk_numbers.setdefault(chunk.info_blob_id, set())
             if chunk.info_blob_id not in header_tokens:
@@ -449,14 +471,25 @@ class _Prompt:
             if candidate_tokens > max_tokens:
                 # Summing chunk bodies is conservative when they overlap. Only
                 # render at the boundary, rather than tokenizing every prefix
-                # of a potentially very large retrieval candidate set.
+                # of a potentially very large retrieval candidate set. A chunk
+                # that does not fit is left out and the loop goes on, because
+                # a cheaper chunk further down the ranking may still fit. Once
+                # a rendering has shown an overflow, that verdict holds until
+                # the selection changes: later rejections come from the
+                # estimate alone, so the list is never rendered once per
+                # rejected chunk, and an accepted chunk reopens the boundary
+                # check, so overlap and shared headers keep being credited.
+                if overflow_rendered:
+                    continue
                 candidate = self._render_reconstructed_chunks([*selected, chunk])
                 candidate_tokens = count_tokens(candidate, self.model_name)
                 if candidate_tokens > max_tokens:
-                    break
+                    overflow_rendered = True
+                    continue
             selected.append(chunk)
             numbers.add(chunk.chunk_no)
             estimated_tokens = candidate_tokens
+            overflow_rendered = False
 
         # Tokenization at joined boundaries can differ from the running sum.
         # The stored cost and final admission always use the actual rendering.
@@ -616,7 +649,20 @@ class ContextBuilder:
         # reachable via a signed URL are represented by that URL only (skips the
         # extracted text — e.g. a large CSV that would blow the context window).
         # Files without a URL are always inlined so the model still sees them.
+        selection = parse_table_selection(input_str)
         text_files = self._get_files_by_type(files, FileType.TEXT)
+        if (
+            selection
+            and file_reference_urls
+            and selection.file_id in file_reference_urls
+        ):
+            # A coordinate selection must be queried, not answered from the preview
+            # or an inlined dump of the original file.
+            text_files = [file for file in text_files if file.id != selection.file_id]
+            input_str += (
+                "\n\nSelected table rows (file reference for table tools):\n"
+                + json.dumps(selection.reference(), ensure_ascii=False)
+            )
         if not inline_file_text and file_reference_urls:
             text_files = [f for f in text_files if f.id not in file_reference_urls]
         if text_files:
