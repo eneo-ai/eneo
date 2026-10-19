@@ -94,11 +94,9 @@ def extraction_limit_reason(limit: str) -> str:
 
 
 def set_aside_reason(attempts: int, detail: str) -> str:
-    """An item that failed ``attempts`` passes in a row; a full sync tries it again."""
-    return (
-        f"Set aside after {attempts} failed attempts, retried by the next full "
-        f"sync: {detail}"
-    )
+    """An item that kept failing, set aside so newer changes keep flowing; a
+    later sync tries it again."""
+    return f"Set aside after {attempts} failed attempts, tried again later: {detail}"
 
 
 def error_reason(detail: str | BaseException) -> str:
@@ -199,7 +197,7 @@ _LIMIT_PDF_PAGES = re.compile(r"^(\d+) PDF pages$")
 _REMOVAL_FAILED = re.compile(r"^Could not remove ?([^:]*): (.+)$", re.S)
 _LISTING_FAILED = re.compile(r"^Could not list folder contents: (.+)$", re.S)
 _SET_ASIDE = re.compile(
-    r"^Set aside after (\d+) failed attempts, retried by the next full sync: (.+)$",
+    r"^Set aside after (\d+) failed attempts, tried again later: (.+)$",
     re.S,
 )
 _ERROR = re.compile(r"^Error: (.+)$", re.S)

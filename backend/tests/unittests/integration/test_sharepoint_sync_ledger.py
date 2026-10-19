@@ -24,7 +24,10 @@ from eneo.integration.infrastructure.content_service.sharepoint_results import (
     SyncItemsFailed,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_sync_ledger import (
+    COUNT_INTERVAL_SECONDS,
     SET_ASIDE_AFTER,
+    SET_ASIDE_SECONDS,
+    FailedItem,
 )
 from eneo.integration.infrastructure.content_service.utils import ExtractionResult
 from tests.unittests.integration.test_sharepoint_content_service import (
@@ -38,10 +41,17 @@ from tests.unittests.integration.test_sharepoint_content_service import (
 _CLIENT = "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
 
 
+NOW = 1_800_000_000
+HOUR = 3600
+
+
 class FakeLedger:
     def __init__(self) -> None:
-        self.failed: dict[str, int] = {}
+        self.failed: dict[str, FailedItem] = {}
         self.generation = 0
+
+    def counted(self) -> dict[str, int]:
+        return {item_id: item.counted for item_id, item in self.failed.items()}
 
     async def walk_generation(self, knowledge_id):
         return self.generation
@@ -49,11 +59,11 @@ class FakeLedger:
     async def advance_walk_generation(self, knowledge_id):
         self.generation += 1
 
-    async def failed_passes(self, knowledge_id):
+    async def failed_items(self, knowledge_id):
         return dict(self.failed)
 
-    async def record_failed_passes(self, knowledge_id, passes):
-        self.failed.update(passes)
+    async def record_failed_items(self, knowledge_id, items):
+        self.failed.update(items)
 
     async def forget(self, knowledge_id, item_ids):
         for item_id in item_ids:
@@ -99,9 +109,20 @@ def sqlite_session(mock_dependencies):
     engine.dispose()
 
 
+def _failed(counted: int, *, at: int = NOW - HOUR) -> FailedItem:
+    return FailedItem(counted, at)
+
+
 @pytest.fixture
-def service(mock_dependencies, ledger):
-    return SharePointContentService(**mock_dependencies, sync_ledger=ledger)
+def clock():
+    return {"now": NOW}
+
+
+@pytest.fixture
+def service(mock_dependencies, ledger, clock):
+    service = SharePointContentService(**mock_dependencies, sync_ledger=ledger)
+    service._clock = lambda: clock["now"]
+    return service
 
 
 def _knowledge(mock_dependencies, oauth_token, **fields):
@@ -150,7 +171,13 @@ def _last_log(mock_dependencies):
 
 class TestRepeatedFailures:
     async def test_an_item_failing_every_pass_is_set_aside_so_the_token_advances(
-        self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        ledger,
+        sqlite_session,
+        clock,
     ):
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
         changes = [_delta_file("bad", "bad.docx"), _delta_file("good", "good.docx")]
@@ -175,7 +202,8 @@ class TestRepeatedFailures:
             for _ in range(SET_ASIDE_AFTER - 1):
                 with pytest.raises(SyncItemsFailed):
                     await _committed(sqlite_session, service, run)
-                after_failed_passes.append((ik.delta_token, dict(ledger.failed)))
+                after_failed_passes.append((ik.delta_token, ledger.counted()))
+                clock["now"] += COUNT_INTERVAL_SECONDS
             await _committed(sqlite_session, service, run)
 
         assert after_failed_passes == [
@@ -184,7 +212,9 @@ class TestRepeatedFailures:
         ]
         assert ik.delta_token == "token-2"
         assert ik.last_sync_status == "success"
-        assert ledger.failed == {}
+        assert ledger.failed == {
+            "bad": FailedItem(SET_ASIDE_AFTER, clock["now"], set_aside_at=clock["now"])
+        }
         (set_aside,) = [
             detail
             for detail in _last_log(mock_dependencies).metadata["skipped_details"]
@@ -199,7 +229,7 @@ class TestRepeatedFailures:
         self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
     ):
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
-        ledger.failed = {"flaky": SET_ASIDE_AFTER - 1}
+        ledger.failed = {"flaky": _failed(SET_ASIDE_AFTER - 1)}
         with (
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="updated")),
@@ -251,6 +281,187 @@ class TestRepeatedFailures:
         assert ik.delta_token == "token-1"
 
 
+class TestFailedItem:
+    def test_a_failure_counts_once_per_interval(self):
+        item = FailedItem.first_failure(NOW)
+
+        assert item.after_failure(NOW + COUNT_INTERVAL_SECONDS - 1) == item
+        assert item.after_failure(NOW + COUNT_INTERVAL_SECONDS) == FailedItem(
+            2, NOW + COUNT_INTERVAL_SECONDS
+        )
+
+    def test_the_last_counted_failure_sets_it_aside(self):
+        item = FailedItem(SET_ASIDE_AFTER - 1, NOW - COUNT_INTERVAL_SECONDS)
+
+        assert item.after_failure(NOW) == FailedItem(
+            SET_ASIDE_AFTER, NOW, set_aside_at=NOW
+        )
+        assert not item.after_failure(NOW).due(NOW + SET_ASIDE_SECONDS - 1)
+        assert item.after_failure(NOW).due(NOW + SET_ASIDE_SECONDS)
+
+    def test_a_set_aside_item_failing_again_starts_another_cool_off(self):
+        item = FailedItem(SET_ASIDE_AFTER, NOW, set_aside_at=NOW)
+        later = NOW + SET_ASIDE_SECONDS
+
+        assert item.after_failure(later) == FailedItem(
+            SET_ASIDE_AFTER, NOW, set_aside_at=later
+        )
+
+    @pytest.mark.parametrize(
+        "item",
+        [FailedItem(1, NOW), FailedItem(3, NOW, set_aside_at=NOW + 5)],
+    )
+    def test_the_stored_form_round_trips(self, item):
+        assert FailedItem.decode(item.encode()) == item
+
+
+class TestPacing:
+    async def test_a_burst_of_failed_passes_counts_once(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        ledger,
+        sqlite_session,
+        clock,
+    ):
+        """Notifications during an outage replay the pass every few minutes;
+        only one failure per half hour counts toward the cap."""
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        with (
+            patch(_CLIENT) as client_class,
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
+        ):
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(
+                    return_value=([_delta_file("bad", "bad.docx")], "token-2")
+                ),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=_extract_failing("bad")
+                ),
+            )
+            for _ in range(SET_ASIDE_AFTER * 2):
+                with pytest.raises(SyncItemsFailed):
+                    await _committed(
+                        sqlite_session,
+                        service,
+                        lambda: service.process_delta_changes(
+                            token_id=mock_oauth_token.id,
+                            integration_knowledge_id=ik.id,
+                        ),
+                    )
+                clock["now"] += 4 * 60
+
+        assert ik.delta_token == "token-1"
+        assert ledger.failed == {"bad": FailedItem(1, NOW)}
+
+
+class TestSetAsideCoolOff:
+    def _run(self, service, mock_oauth_token, ik):
+        return service.process_delta_changes(
+            token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+        )
+
+    async def test_a_set_aside_item_waits_out_its_cool_off(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        ledger,
+        sqlite_session,
+        clock,
+    ):
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        set_aside = FailedItem(SET_ASIDE_AFTER, NOW, set_aside_at=NOW)
+        ledger.failed = {"aside": set_aside}
+        clock["now"] = NOW + SET_ASIDE_SECONDS - HOUR
+        with patch(_CLIENT) as client_class:
+            client = _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=([], "token-2")),
+            )
+            await _committed(
+                sqlite_session,
+                service,
+                lambda: self._run(service, mock_oauth_token, ik),
+            )
+
+        client.get_file_metadata.assert_not_called()
+        assert ik.delta_token == "token-2"
+        assert ledger.failed == {"aside": set_aside}
+
+    async def test_after_its_cool_off_a_delta_pass_brings_it_back(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        ledger,
+        sqlite_session,
+        clock,
+    ):
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        ledger.failed = {"aside": FailedItem(SET_ASIDE_AFTER, NOW, set_aside_at=NOW)}
+        clock["now"] = NOW + SET_ASIDE_SECONDS
+        upsert = AsyncMock(return_value="added")
+        with (
+            patch(_CLIENT) as client_class,
+            patch.object(service._index, "upsert", upsert),
+        ):
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=([], "token-2")),
+                get_file_metadata=AsyncMock(return_value=_root_file("aside")),
+                get_file_extraction_by_id=AsyncMock(
+                    return_value=ExtractionResult.ok("Body", "text/plain")
+                ),
+            )
+            await _committed(
+                sqlite_session,
+                service,
+                lambda: self._run(service, mock_oauth_token, ik),
+            )
+
+        upsert.assert_awaited_once()
+        assert ik.delta_token == "token-2"
+        assert ledger.failed == {}
+
+    async def test_failing_again_it_stays_aside_without_holding_the_token(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        ledger,
+        sqlite_session,
+        clock,
+    ):
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        ledger.failed = {"aside": FailedItem(SET_ASIDE_AFTER, NOW, set_aside_at=NOW)}
+        retried_at = clock["now"] = NOW + SET_ASIDE_SECONDS
+        with patch(_CLIENT) as client_class:
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=([], "token-2")),
+                get_file_metadata=AsyncMock(return_value=_root_file("aside")),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=_extract_failing("aside")
+                ),
+            )
+            await _committed(
+                sqlite_session,
+                service,
+                lambda: self._run(service, mock_oauth_token, ik),
+            )
+
+        assert ik.delta_token == "token-2"
+        assert ik.last_sync_status == "success"
+        assert ledger.failed == {
+            "aside": FailedItem(SET_ASIDE_AFTER, NOW, set_aside_at=retried_at)
+        }
+        (detail,) = _last_log(mock_dependencies).metadata["skipped_details"]
+        assert detail["code"] == "set_aside"
+
+
 class TestFullSyncFailures:
     async def test_one_failed_file_keeps_the_baseline_and_the_next_delta_retries_it(
         self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
@@ -280,7 +491,7 @@ class TestFullSyncFailures:
 
             assert ik.delta_token == "delta-token"
             assert ik.last_sync_status == "error"
-            assert ledger.failed == {"f-17": 1}
+            assert ledger.counted() == {"f-17": 1}
             assert upsert.await_count == 49
 
             client.get_delta_changes = AsyncMock(return_value=([], "token-2"))
@@ -326,7 +537,7 @@ class TestFullSyncFailures:
 
         client.initialize_delta_token.assert_not_awaited()
         assert ik.delta_token == "token-1"
-        assert ledger.failed == {"b": 1}
+        assert ledger.counted() == {"b": 1}
 
     async def test_a_failure_no_delta_can_retry_still_clears_the_token(
         self, service, mock_dependencies, mock_oauth_token, ledger
@@ -361,7 +572,7 @@ class TestFullSyncFailures:
         self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
     ):
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
-        ledger.failed = {"gone": 1}
+        ledger.failed = {"gone": _failed(1)}
         delete = mock_dependencies[
             "info_blob_service"
         ].repo.delete_by_sharepoint_item_and_integration_knowledge
@@ -391,7 +602,7 @@ class TestRetriesWhileAccessIsLost:
         self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
     ):
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
-        ledger.failed = {"x": 1, "y": 1, "z": 1}
+        ledger.failed = {item_id: _failed(1) for item_id in ("x", "y", "z")}
 
         async def metadata(*, drive_id, item_id):
             return _root_file(item_id)
@@ -415,7 +626,7 @@ class TestRetriesWhileAccessIsLost:
                 )
 
         assert ik.delta_token == "token-1"
-        assert ledger.failed == {"x": 1, "y": 1, "z": 1}
+        assert ledger.counted() == {"x": 1, "y": 1, "z": 1}
         mock_dependencies[
             "info_blob_service"
         ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
@@ -436,7 +647,7 @@ class TestRefusedRetries:
         recorded when every one of several was refused."""
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
         item_ids = [f"item-{index}" for index in range(refused)]
-        ledger.failed = dict.fromkeys(item_ids, 1)
+        ledger.failed = {item_id: _failed(1) for item_id in item_ids}
         repo = mock_dependencies["info_blob_service"].repo
         repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
             return_value=[(uuid4(), item_id) for item_id in item_ids]
@@ -470,7 +681,7 @@ class TestRefusedRetries:
         else:
             assert removed == []
             assert ik.delta_token == "token-1"
-            assert ledger.failed == dict.fromkeys(item_ids, 1)
+            assert ledger.counted() == dict.fromkeys(item_ids, 1)
 
 
 class TestDeltaBaselineMint:

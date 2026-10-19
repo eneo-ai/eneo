@@ -11,6 +11,7 @@ existing owners. Do not add another implementation of their rules here.
 """
 
 import asyncio
+import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -63,7 +64,7 @@ from eneo.integration.infrastructure.content_service.sharepoint_results import (
     SyncItemsFailed,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_sync_ledger import (
-    SET_ASIDE_AFTER,
+    FailedItem,
     SyncLedger,
 )
 from eneo.integration.infrastructure.content_service.sync_state import (
@@ -175,8 +176,8 @@ class _DeltaPass:
     placements: dict[str, Optional[SharePointItem]] = field(
         default_factory=dict[str, Optional[SharePointItem]]
     )
-    # Items earlier passes could not finish, with how many passes failed them.
-    failed_before: dict[str, int] = field(default_factory=dict[str, int])
+    # Items earlier passes could not finish.
+    failed_before: dict[str, FailedItem] = field(default_factory=dict[str, FailedItem])
     # Those of them this pass tried again outside the change set.
     retried_ids: set[str] = field(default_factory=set[str])
     # What the walk cache keys of this pass end with, read when first needed;
@@ -223,6 +224,7 @@ class SharePointContentService:
         ):
             sync_ledger = SyncLedger(change_key_service.redis_client)
         self._ledger = sync_ledger
+        self._clock: Callable[[], float] = time.time
         self._progress = SyncProgressReporter(
             sync_progress_store,
             after_transaction=partial(self._after_transaction, on_rollback=True),
@@ -358,7 +360,7 @@ class SharePointContentService:
             retries_recorded = await self._settle_failures(
                 resolved_integration_knowledge_id,
                 stats,
-                failed_before=await self._failed_passes(
+                failed_before=await self._failed_items(
                     resolved_integration_knowledge_id
                 ),
                 attempted=None,
@@ -541,9 +543,12 @@ class SharePointContentService:
                 logger.info(
                     f"Delta query returned {len(changes)} items. New token: {new_delta_token[:20] if new_delta_token else 'None'}..."
                 )
-                failed_before = await self._failed_passes(integration_knowledge.id)
+                failed_before = await self._failed_items(integration_knowledge.id)
+                now = int(self._clock())
 
-                if len(changes) == 0 and not failed_before:
+                if len(changes) == 0 and not any(
+                    item.due(now) for item in failed_before.values()
+                ):
                     logger.info(
                         f"Delta query returned 0 changes for integration knowledge {integration_knowledge_id}. "
                         "No updates needed - SharePoint is in sync with database."
@@ -1031,12 +1036,12 @@ class SharePointContentService:
             delta_pass.indexed_ids = {item_id for _, item_id in indexed}
         return delta_pass.indexed_ids
 
-    async def _failed_passes(self, knowledge_id: UUID) -> dict[str, int]:
+    async def _failed_items(self, knowledge_id: UUID) -> dict[str, FailedItem]:
         """The items earlier passes could not finish; empty when unknown."""
         if self._ledger is None:
             return {}
         try:
-            return await self._ledger.failed_passes(knowledge_id)
+            return await self._ledger.failed_items(knowledge_id)
         except Exception as exc:
             logger.warning(
                 "Could not read the failed SharePoint items of %s: %s",
@@ -1050,11 +1055,13 @@ class SharePointContentService:
 
         A delta never re-emits an unchanged item, so a failure a full sync
         recorded is only retried here. Items the change set carries are
-        applied from it instead. Gone (404, 410) is removed, refused (403)
-        counts as a refused download, anything else fails the item again.
+        applied from it instead, and a set-aside item waits out its cool-off.
+        Gone (404, 410) is removed, refused (403) counts as a refused
+        download, anything else fails the item again.
         """
-        for item_id in delta_pass.failed_before:
-            if item_id in delta_pass.change_ids:
+        now = int(self._clock())
+        for item_id, failed in delta_pass.failed_before.items():
+            if item_id in delta_pass.change_ids or not failed.due(now):
                 continue
             delta_pass.retried_ids.add(item_id)
             try:
@@ -1097,39 +1104,42 @@ class SharePointContentService:
         knowledge_id: UUID,
         stats: SyncStats,
         *,
-        failed_before: dict[str, int],
+        failed_before: dict[str, FailedItem],
         attempted: set[str] | None,
     ) -> bool:
-        """Count this pass's failures per item and set repeat failures aside.
+        """Record this pass's failures per item; a set-aside item's are skips.
 
-        An item failed ``SET_ASIDE_AFTER`` passes in a row becomes a skip, so
-        the pass may advance past it; the rest are recorded for the next pass.
-        What the ledger held and this pass tried without failing is forgotten
-        after commit; ``attempted`` None means the pass tried every item (a
-        full sync). True when every failure naming an item is recorded.
+        How failures count and when an item is set aside is ``FailedItem``'s;
+        a set-aside item's failure lets the pass advance past it. What the
+        ledger held and this pass tried without failing is forgotten after
+        commit; ``attempted`` None means the pass tried every item (a full
+        sync). True when every failure naming an item is recorded.
         """
         if self._ledger is None:
             return False
-        passes: dict[str, int] = {}
-        resolved: set[str] = set()
+        now = int(self._clock())
+        failed_now: dict[str, FailedItem] = {}
         for item_id in sync_results.failed_item_ids(stats):
-            failed = failed_before.get(item_id, 0) + 1
-            if failed >= SET_ASIDE_AFTER:
-                sync_results.set_aside(stats, item_id, attempts=failed)
-                resolved.add(item_id)
-            else:
-                passes[item_id] = failed
+            previous = failed_before.get(item_id)
+            failed = (
+                previous.after_failure(now)
+                if previous
+                else FailedItem.first_failure(now)
+            )
+            failed_now[item_id] = failed
+            if failed.set_aside_at is not None:
+                sync_results.set_aside(stats, item_id, attempts=failed.counted)
         # Refusals still here were put down to the identity, not the files.
         refused = stats.get("refused_downloads", {})
-        resolved.update(
+        resolved = {
             item_id
             for item_id in failed_before
-            if item_id not in passes
+            if item_id not in failed_now
             and item_id not in refused
             and (attempted is None or item_id in attempted)
-        )
+        }
         try:
-            await self._ledger.record_failed_passes(knowledge_id, passes)
+            await self._ledger.record_failed_items(knowledge_id, failed_now)
         except Exception as exc:
             logger.warning(
                 "Could not record the failed SharePoint items of %s: %s",
