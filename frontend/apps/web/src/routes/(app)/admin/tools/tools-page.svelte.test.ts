@@ -12,8 +12,10 @@ const api = vi.hoisted(() => ({
     activate: vi.fn(async () => ({})),
     deactivate: vi.fn(async () => ({})),
     delete: vi.fn(async () => ({})),
-    getTools: vi.fn(async () => ({ items: [] }))
+    getTools: vi.fn(async () => ({ items: [] })),
+    flowUsage: vi.fn(async () => ({ total_count: 0, items: [] }))
   },
+  spaces: { list: vi.fn(async () => []) },
   userGroups: { list: vi.fn(async () => []) },
   models: {
     list: vi.fn(async () => ({
@@ -72,6 +74,9 @@ Object.assign(api.mcpServers, {
   listTools: vi.fn(async () => ({ items: [] }))
 });
 vi.mock("$lib/core/Eneo", () => ({ getEneo: () => api }));
+vi.mock("$lib/core/AppContext", () => ({
+  getAppContext: () => ({ user: { hasPermission: () => true } })
+}));
 vi.mock("$app/navigation", () => ({
   invalidate: vi.fn(async () => {}),
   replaceState: vi.fn(),
@@ -101,6 +106,7 @@ function source(overrides: Record<string, unknown> = {}) {
     audience_priority: 100,
     user_groups: [],
     is_enabled: true,
+    is_org_enabled: true,
     readiness_reason: null,
     tools: [],
     image_model_id: "model-1",

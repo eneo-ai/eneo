@@ -1,6 +1,6 @@
 // Browser contract: exercise the controller with real DOM anchors and driver.js.
 // Only the network/navigation boundary is replaced; spotlight is not mocked.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 
 const { goto, preloadData } = vi.hoisted(() => ({
@@ -34,6 +34,14 @@ function click(selector: string) {
   if (!button) throw new Error(`Missing spotlight button: ${selector}`);
   button.click();
 }
+
+// spotlight.ts loads driver.js lazily. Warm that import once here so the
+// first test's 1 s waitFor does not also pay a cold Vite transform on a
+// loaded CI runner.
+beforeAll(async () => {
+  await import("driver.js");
+  await import("driver.js/dist/driver.css");
+});
 
 beforeEach(() => {
   vi.resetAllMocks();
