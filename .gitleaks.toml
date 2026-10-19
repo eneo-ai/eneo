@@ -79,4 +79,4 @@ paths = [
   '''^backend/tests/unittests/spaces/api/test_integration_documents_routes\.py$''',
 ]
 regexTarget = "secret"
-regexes = ['''^v1\.eyJhdWQiOiJ4In0\.c2ln(?:bmF0dXJl)?$''']
+regexes = ['''^v1\.eyJ(?:hdWQiOiJ4In0|zaWduZWQiOiJ0b2tlbiJ9)\.c2ln(?:bmF0dXJl)?$''']
