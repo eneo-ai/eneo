@@ -1,6 +1,8 @@
+import re
+
 from pydantic import BaseModel, Field
 
-# Release identifiers mirror the versions in frontend/packages/whats-new/releases.json:
+# Installed release identifiers use the release notes' shared semver format:
 # plain semver without a leading "v" (e.g. "2.2.0", "2.3.0-rc.1").
 RELEASE_VERSION_PATTERN = r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$"
 
@@ -36,3 +38,17 @@ def release_order_key(
         if part
     )
     return (major, minor, patch, 0 if identifiers else 1, identifiers)
+
+
+def can_record_release(version: str, installed_version: str) -> bool:
+    """An RC backend must not let a stale client pre-record its final release.
+
+    RC0 clients submitted the content id (2.3.0), so a stale tab could undo
+    the marker correction after migration. Candidate deployments accept only
+    versions they have reached. Untagged development and final builds retain
+    the existing contract.
+    """
+    installed = installed_version.removeprefix("v")
+    if re.fullmatch(r"\d+\.\d+\.\d+-rc\.\d+", installed):
+        return release_order_key(version) <= release_order_key(installed)
+    return True

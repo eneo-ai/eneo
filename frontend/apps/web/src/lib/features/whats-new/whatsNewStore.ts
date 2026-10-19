@@ -1,6 +1,6 @@
 import { createContext } from "$lib/core/context";
 import type { Eneo } from "@eneo/eneo-js";
-import { compareVersions, hasUnseenRelease, latestRelease } from "@eneo/whats-new";
+import { compareVersions, hasUnseenRelease, releasesForVersion } from "@eneo/whats-new";
 import { derived, get, writable } from "svelte/store";
 
 export { getWhatsNewStore, initWhatsNewStore, createWhatsNewStore };
@@ -12,6 +12,8 @@ export interface WhatsNewInit {
   eneo: { whatsNew: Pick<Eneo["whatsNew"], "markSeen" | "markAnnounced" | "resetState"> };
   /** Tenant opt-out (admin setting): off hides the page, dot and announcement. */
   whatsNewEnabled: boolean;
+  /** Installed frontend version, including the RC suffix. */
+  whatsNewVersion: string;
   whatsNewSeenVersion: Marker;
   whatsNewAnnouncedVersion: Marker;
 }
@@ -27,11 +29,13 @@ function initWhatsNewStore(data: WhatsNewInit) {
 
 function createWhatsNewStore(data: WhatsNewInit) {
   const { eneo } = data;
+  const releases = releasesForVersion(data.whatsNewVersion);
+  const latest = releases[0];
   const enabled = writable(data.whatsNewEnabled);
   const seenVersion = writable<Marker>(data.whatsNewSeenVersion);
   const announcedVersion = writable<Marker>(data.whatsNewAnnouncedVersion);
   const hasUnseen = derived([enabled, seenVersion], ([$enabled, $seen]) =>
-    !$enabled || $seen === undefined ? false : hasUnseenRelease($seen)
+    !$enabled || $seen === undefined ? false : hasUnseenRelease($seen, latest)
   );
 
   let inFlight: Promise<void> | null = null;
@@ -40,9 +44,8 @@ function createWhatsNewStore(data: WhatsNewInit) {
   function markLatestSeen(): Promise<void> {
     if (!get(enabled)) return Promise.resolve();
     if (inFlight) return inFlight;
-    const latest = latestRelease();
     const seen = get(seenVersion);
-    if (!latest || seen === undefined || !hasUnseenRelease(seen)) return Promise.resolve();
+    if (!latest || seen === undefined || !hasUnseenRelease(seen, latest)) return Promise.resolve();
 
     // Optimistic: the dot disappears immediately and returns if saving fails.
     const previous = get(seenVersion);
@@ -65,7 +68,6 @@ function createWhatsNewStore(data: WhatsNewInit) {
    * shown an announcement for the newest bundled release (or newer).
    */
   function pendingAnnouncement() {
-    const latest = latestRelease();
     if (!get(enabled) || !latest) return null;
     const announced = get(announcedVersion);
     if (announced === undefined) return null;
@@ -98,6 +100,7 @@ function createWhatsNewStore(data: WhatsNewInit) {
   }
 
   return {
+    releases,
     enabled: { subscribe: enabled.subscribe },
     setEnabled: enabled.set,
     resetState,

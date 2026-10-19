@@ -61,17 +61,18 @@ Run this when the release branch is cut or the tag is about to be pushed.
 2. Write one entry per change (merge PRs that describe the same feature) into
    a new release object at the **top** of `releases` in `releases.json`:
 
-   | Field      | Rule                                                                                                                       |
-   | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
-   | `version`  | Semver without `v`, matching the tag (`v2.3.0` → `2.3.0`).                                                                 |
-   | `date`     | Leave out in the draft; set `YYYY-MM-DD` when the tag is pushed.                                                           |
-   | `id`       | Stable kebab-case, unique within the release. Never rename after publishing — it is the deep-link target on docs.          |
-   | `type`     | `new` (could not do before), `improved` (could, now better), `fixed` (was broken for users).                               |
-   | `area`     | Where the user meets it: `chat`, `assistants`, `knowledge`, `spaces`, `skills`, `account`, `admin`, `platform`.            |
-   | `audience` | `admin` when only administrators can see the screen. Omit otherwise. Hidden from non-admins in the app.                    |
-   | `title`    | ≤ 60 characters, verb first ("Change your own password"). Both `en` and `sv`.                                              |
-   | `body`     | 1–3 sentences. What the user can do now and where. Both `en` and `sv`.                                                     |
-   | `showMe`   | Optional. `href` is the app path without locale prefix; `anchor` must exist as `data-tour="…"` in `frontend/apps/web/src`. |
+   | Field      | Rule                                                                                                                                       |
+   | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+   | `version`  | Semver without `v`, matching the tag (`v2.3.0` → `2.3.0`).                                                                                 |
+   | `date`     | Leave out in the draft; set `YYYY-MM-DD` when the tag is pushed.                                                                           |
+   | `id`       | Stable kebab-case, unique within the release. Never rename after publishing — it is the deep-link target on docs.                          |
+   | `aliases`  | When merging published entries, keep their former ids here so existing links still work. Unique across all ids and aliases in the release. |
+   | `type`     | `new` (could not do before), `improved` (could, now better), `fixed` (was broken for users).                                               |
+   | `area`     | Where the user meets it: `chat`, `assistants`, `knowledge`, `spaces`, `skills`, `account`, `admin`, `platform`.                            |
+   | `audience` | `admin` when only administrators can see the screen. Omit otherwise. Hidden from non-admins in the app.                                    |
+   | `title`    | ≤ 60 characters, verb first ("Change your own password"). Both `en` and `sv`.                                                              |
+   | `body`     | 1–3 sentences. What the user can do now and where. Both `en` and `sv`.                                                                     |
+   | `showMe`   | Optional. `href` is the app path without locale prefix; `anchor` must exist as `data-tour="…"` in `frontend/apps/web/src`.                 |
 
 3. Editorial rules — the check script enforces the mechanical ones:
 
@@ -98,6 +99,14 @@ Run this when the release branch is cut or the tag is about to be pushed.
 
 ## 3. Review (release owner, 15–30 minutes)
 
+Before each RC, rerun the collector against the exact candidate commit, with
+an explicit `--since` tag. Reconcile every described and missing-section PR
+in the release PR: link it to an entry, or record why it is excluded (already
+released, internal-only, beta-only, or part of another entry). Inspect the
+titles of PRs marked No as well; the presence check cannot judge correctness.
+Repeat this reconciliation for commits added since the previous RC, especially
+late UI changes. A passing schema check proves shape and links, not coverage.
+
 Read it as a user would. Cut, reorder, sharpen. Set `date`. Merge to the
 release branch before the tag is pushed so the release image ships with its
 own notes, and run the tag rule before creating the GitHub release:
@@ -113,6 +122,24 @@ the tag fails (notes for a later version must not ship in an older release).
 A hotfix tag needs no entry of its own, but all the notes it does ship must be
 dated. Running it first avoids a published GitHub release whose image build
 then fails.
+
+### RC notification identity
+
+Author one content entry for the final core version, such as `2.3.0`.
+The tag validator rejects an RC with no matching release content, so a new
+candidate cannot silently reuse an older version's notification identity.
+The primary web app uses the installed frontend version from `APP_VERSION`
+to resolve that content as `2.3.0-rc.1` while running that candidate. The page,
+popup and persisted seen/announced markers use the same resolved identity.
+Do not copy the release entry for each RC or use an RC's core version as its
+progress marker. RCs ignore the draft's eventual final date; docs keep the
+authored release list. Local unversioned builds keep the authored identity.
+
+Validate RC0 → RC1 → RC10 → final, reload on the same version, and rollback
+to an older RC. The store and Chromium tests cover these boundaries. A newer
+RC backend ignores future markers sent by stale clients, so an old tab cannot
+pre-record the final release. The 2.3 migration corrects RC0's already stored
+`2.3.0` markers to `2.3.0-rc.0` and must ship before the first 2.3 final.
 
 ## Maintenance
 
