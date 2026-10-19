@@ -856,6 +856,8 @@ class MockContainerForJIT:
         "wrong-domain",
         "unverified",
         "missing-verification",
+        "string-verification",
+        "string-unverified",
         "mapped-unverified",
         "jit-disabled",
         "removed",
@@ -914,6 +916,10 @@ async def test_callback_enforces_jit_admission(monkeypatch, admission_case):
         claims["email_verified"] = False
     elif admission_case == "missing-verification":
         claims.pop("email_verified")
+    elif admission_case == "string-verification":
+        claims["email_verified"] = "true"
+    elif admission_case == "string-unverified":
+        claims["email_verified"] = "false"
     elif admission_case == "mapped-unverified":
         tenant.federation_config["claims_mapping"] = {"email": "mail"}
         claims["mail"] = "another@example.com"
@@ -986,7 +992,7 @@ async def test_callback_enforces_jit_admission(monkeypatch, admission_case):
 
     callback = CallbackRequest(code="auth-code", state=signed_state)
 
-    if admission_case != "allowed":
+    if admission_case not in ("allowed", "string-verification"):
         with pytest.raises(HTTPException) as caught:
             await federation_router.auth_callback(callback, container=container)
         assert caught.value.status_code == (
