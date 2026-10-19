@@ -1314,6 +1314,39 @@ contract's `transcription.speaker_labels.selectable` is `true`. When it is
 `null`, omit it: the new run follows the flow's current default, which may
 differ from what the earlier run used.
 
+### Name the speakers of a completed run
+
+Once a run has completed, your app can give the transcript's speaker labels the
+names of the people who spoke. Send them as `speaker_names` with the
+transcription step's corrections:
+`PATCH /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/`
+(`edit_flow_run_transcript_corrections`).
+
+- Key each name by a label of the stored segments, or by a label the request's
+  `speaker_edits` assign (a speaker split off in review). A name is one line of
+  at most 120 characters, and a request names at most 100 speakers.
+- `null` is explicitly no name: it clears the name a step that maps speakers to
+  names gave. A label you leave out keeps that step's name.
+- The map replaces the stored names. A request without `speaker_names` keeps
+  them, except the names of split labels its `speaker_edits` no longer assign;
+  send your map pruned the same way.
+- Names change only on a completed run. A request that would change them on
+  another run returns `400 flow_transcript_corrections_invalid_speaker_edit`
+  with `reason` `run_not_completed`. The other reasons for refused names are
+  `unknown_speaker_label`, `invalid_speaker_name` and
+  `too_many_speaker_names`.
+
+The corrections endpoints return the stored `speaker_names` in every response.
+Show the transcript with the speaker-naming step's names, the person's names
+over them, and the labels where neither names a speaker; Eneo's run view does
+the same. The stored transcript keeps its labels. To bring the names into the
+run's later steps and documents, regenerate the transcript with
+`POST /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-regenerations/`
+(`regenerate_flow_run_transcript`): the new run's transcript carries the names,
+and its copy of the corrections keeps them for the next regeneration. Saving a
+name changes the correction revision, so regenerate with the new revision and a
+new idempotency key.
+
 ### Word times without speaker labels
 
 When the flow has chosen a speaker identification service and a run labels no
