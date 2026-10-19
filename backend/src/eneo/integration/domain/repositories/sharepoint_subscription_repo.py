@@ -59,6 +59,18 @@ class SharePointSubscriptionRepository(ABC):
         ...
 
     @abstractmethod
+    async def lock_user_site(
+        self, user_integration_id: UUID, site_id: str
+    ) -> "Optional[SharePointSubscription]":
+        """Serialize work on one user+site subscription for the transaction.
+
+        Waits until no other transaction holds the same user+site, holds it
+        until this transaction ends, and returns the subscription as committed
+        by the previous holder (None if there is none yet).
+        """
+        ...
+
+    @abstractmethod
     async def get_by_subscription_id(
         self, subscription_id: str
     ) -> "Optional[SharePointSubscription]":

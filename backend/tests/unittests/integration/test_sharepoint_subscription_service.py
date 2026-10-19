@@ -29,6 +29,12 @@ def mock_subscription_repo():
     """Create a mock SharePoint subscription repository."""
     repo = AsyncMock()
     repo.get_by_user_and_site = AsyncMock(return_value=None)
+
+    async def lock_user_site(**kwargs):
+        # The lock's read is the same lookup; tests stub get_by_user_and_site.
+        return await repo.get_by_user_and_site(**kwargs)
+
+    repo.lock_user_site = AsyncMock(side_effect=lock_user_site)
     repo.add = AsyncMock()
     repo.update = AsyncMock()
     repo.remove = AsyncMock()

@@ -102,6 +102,34 @@ class SharePointSubscriptionRepositoryImpl(
         return self.mapper.to_entity(db_obj)
 
     @override
+    async def lock_user_site(
+        self, user_integration_id: UUID, site_id: str
+    ) -> Optional[SharePointSubscription]:
+        # A row lock cannot cover a subscription that does not exist yet, so
+        # the pair is locked by name; the unique constraint stays the backstop.
+        await self.session.execute(
+            sa.select(
+                sa.func.pg_advisory_xact_lock(
+                    sa.func.hashtextextended(
+                        f"sharepoint_subscription:{user_integration_id}:{site_id}", 0
+                    )
+                )
+            )
+        )
+        # The identity map may hold the row as this transaction first read it.
+        stmt = (
+            sa.select(SharePointSubscriptionDBModel)
+            .where(
+                SharePointSubscriptionDBModel.user_integration_id
+                == user_integration_id,
+                SharePointSubscriptionDBModel.site_id == site_id,
+            )
+            .execution_options(populate_existing=True)
+        )
+        db_obj = (await self.session.execute(stmt)).scalar_one_or_none()
+        return None if db_obj is None else self.mapper.to_entity(db_obj)
+
+    @override
     async def get_by_subscription_id(
         self, subscription_id: str
     ) -> Optional[SharePointSubscription]:

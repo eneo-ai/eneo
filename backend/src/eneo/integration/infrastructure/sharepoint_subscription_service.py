@@ -170,8 +170,12 @@ class SharePointSubscriptionService:
             )
             return None
 
-        # Check if subscription already exists for this user+site/drive
-        existing = await self.subscription_repo.get_by_user_and_site(
+        # Imports and syncs of several folders on one site arrive together
+        # ("Resync all" sends a few at once). Each would find the same missing,
+        # expired or drifted subscription and create one at Graph, and all but
+        # the last written would be left there unused. Holding the pair until
+        # the caller's transaction ends makes the next caller reuse the result.
+        existing = await self.subscription_repo.lock_user_site(
             user_integration_id=user_integration_id, site_id=site_id
         )
 
