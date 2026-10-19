@@ -11518,6 +11518,43 @@ def _drive_cards(
     return bundle, send_calls
 
 
+def _reshown_card_sends(
+    monkeypatch: MonkeyPatch, tmp_path: Path, tokens: list[str]
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    harness = _battle_harness()
+    case = harness.BattleCase(
+        case_id="reshown-card",
+        prompt="Bygg ett flöde.",
+        expected={"allow_question_instead_of_plan": True},
+    )
+    cards: list[dict[str, object]] = [
+        {"requirements_version": "v1", "instance_token": token, "assumptions": []}
+        for token in tokens
+    ]
+    return _drive_cards(monkeypatch, tmp_path, harness=harness, case=case, cards=cards)
+
+
+def test_a_card_shown_again_with_a_new_token_is_confirmed_again(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Kills: confirmations deduplicated by version alone (the Builder shows the
+    same version again after a question, and the run stopped unmeasured)."""
+    bundle, send_calls = _reshown_card_sends(monkeypatch, tmp_path, ["t1", "t2"])
+
+    assert len(send_calls) == 3
+    assert bundle["plan_id"] == "plan-1"
+
+
+def test_the_same_showing_is_confirmed_once(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Kills: no deduplication (one showing confirmed on every turn)."""
+    bundle, send_calls = _reshown_card_sends(monkeypatch, tmp_path, ["t1", "t1"])
+
+    assert len(send_calls) == 2
+    assert bundle["plan_id"] is None
+
+
 def test_a_mismatched_disclosure_withholds_the_confirmation(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
