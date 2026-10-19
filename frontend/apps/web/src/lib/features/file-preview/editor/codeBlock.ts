@@ -3,6 +3,7 @@ import bash from "highlight.js/lib/languages/bash";
 import c from "highlight.js/lib/languages/c";
 import javascript from "highlight.js/lib/languages/javascript";
 import json from "highlight.js/lib/languages/json";
+import markdown from "highlight.js/lib/languages/markdown";
 import plaintext from "highlight.js/lib/languages/plaintext";
 import python from "highlight.js/lib/languages/python";
 import sql from "highlight.js/lib/languages/sql";
@@ -21,6 +22,9 @@ const lowlight = createLowlight({
   bash,
   yaml,
   sql,
+  // A Markdown example (tagged md or markdown) reads as Markdown, fences
+  // inside it included, rather than as whatever the detector guesses.
+  markdown,
   plaintext
 });
 
