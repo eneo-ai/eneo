@@ -119,6 +119,7 @@ function SpacesManager(data: SpacesManagerParams) {
     space?: { id: string } | undefined
   ) {
     const { id } = space ?? get(currentSpace);
+    const navigation = navigationVersion;
     try {
       const updatedSpace = await eneo.spaces.update({ space: { id }, update });
       userSpaces.update((spaces) => {
@@ -128,8 +129,9 @@ function SpacesManager(data: SpacesManagerParams) {
         }
         return spaces;
       });
-      // Only update current if no other space was given
-      if (space === undefined) {
+      // The mutation still updates the list, but a late response cannot replace
+      // the space reached since it began, including navigation back to this id.
+      if (space === undefined && navigation === navigationVersion && id === get(currentSpace).id) {
         currentSpace.set(updatedSpace);
       }
       return updatedSpace;
