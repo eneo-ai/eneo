@@ -51,6 +51,7 @@
     "@tiptap/extension-code-block-lowlight": "3.32.0",
     "@tiptap/extension-image": "3.32.0",
     "@tiptap/extension-list": "3.32.0",
+    "@tiptap/extension-paragraph": "3.32.0",
     "@tiptap/extension-table": "3.32.0",
     "@tiptap/markdown": "3.32.0",
     "@tiptap/pm": "3.32.0",
@@ -96,7 +97,6 @@
     "@eneo/ui": "workspace:*",
     "@eneo/whats-new": "workspace:*",
     "@inlang/paraglide-js": "^2.20.2",
-    "@tiptap/extension-paragraph": "3.32.0",
     "paneforge": "^1.0.2"
   }
 }
