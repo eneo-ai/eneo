@@ -730,8 +730,9 @@ class SharepointWebhookService:
         that cannot be queued is retried once per window, not on every run.
 
         Only sources whose tenant is active and whose connection can still
-        authenticate are considered: an active tenant app, or the OAuth
-        connection of a user who can still sign in.
+        authenticate are considered: an active tenant app whose credentials
+        did not fail last, or the OAuth connection of a user who can still
+        sign in.
 
         Each source is queued in a transaction of its own on this service's
         session, which must have none open: one that fails is logged and
@@ -832,6 +833,20 @@ class SharepointWebhookService:
                     sa.and_(
                         connection.auth_type == "tenant_app",
                         TenantSharePointApp.is_active.is_(True),
+                        # As TenantSharePointApp.auth_status: the credentials
+                        # failed last. A sync now would fail the same way; the
+                        # next successful sign-in (a manual or notified sync, a
+                        # renewal) brings the source back.
+                        sa.not_(
+                            sa.and_(
+                                TenantSharePointApp.last_auth_error_at.is_not(None),
+                                sa.or_(
+                                    TenantSharePointApp.last_auth_success_at.is_(None),
+                                    TenantSharePointApp.last_auth_error_at
+                                    >= TenantSharePointApp.last_auth_success_at,
+                                ),
+                            )
+                        ),
                     ),
                     sa.and_(
                         connection.auth_type == "user_oauth",

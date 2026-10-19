@@ -392,3 +392,38 @@ async def test_a_removed_subscription_is_recreated_and_its_sources_queued(
         )
     assert graph_id == "graph-new"
     assert enqueue == [("sync_sharepoint_delta", personal)]
+
+
+@pytest.mark.parametrize(
+    ("failed_hours_ago", "succeeded_hours_ago", "candidate"),
+    [
+        pytest.param(1, None, False, id="never-signed-in"),
+        pytest.param(1, 2, False, id="failed-since"),
+        pytest.param(2, 1, True, id="signed-in-since"),
+        pytest.param(None, 1, True, id="healthy"),
+    ],
+)
+async def test_sources_of_an_org_app_whose_sign_in_fails_are_skipped(
+    db_container, failed_hours_ago, succeeded_hours_ago, candidate
+):
+    """A sync would fail the same way; the next successful sign-in elsewhere
+    brings them back."""
+    now = datetime.now(timezone.utc)
+    async with db_container() as container:
+        app_id = await _tenant_app(
+            container,
+            active=True,
+            failed_at=now - timedelta(hours=failed_hours_ago)
+            if failed_hours_ago
+            else None,
+            succeeded_at=now - timedelta(hours=succeeded_hours_ago)
+            if succeeded_hours_ago
+            else None,
+        )
+        organization = await _source(
+            container, auth_type="tenant_app", tenant_app_id=app_id
+        )
+
+        candidates = await _candidate_ids(container)
+
+    assert (organization in candidates) is candidate
