@@ -149,7 +149,6 @@ export type SettledImport = PendingImport & { jobStatus: Job["status"] | null };
 export type ImportReportContext = {
   queryClient: QueryClient;
   t: Translate;
-  announce: (message: string) => void;
   navigate: (href: string) => void;
 };
 
@@ -172,7 +171,7 @@ async function readSpace(queryClient: QueryClient, routeId: string): Promise<Spa
 
 async function report(
   settled: readonly SettledImport[],
-  { queryClient, t, announce, navigate }: ImportReportContext
+  { queryClient, t, navigate }: ImportReportContext
 ): Promise<void> {
   // An earlier run may have reported some of them since.
   const pending = settled.filter((item) =>
@@ -188,12 +187,11 @@ async function report(
       continue;
     }
     const reported: string[] = [];
-    const messages: string[] = [];
-    const fail = (name: string, error: string | null) => {
-      const message = t("integration_import_failed_toast", { name });
-      toast.error(message, { description: error || undefined });
-      messages.push(message);
-    };
+    // The toaster's live region speaks each notice.
+    const fail = (name: string, error: string | null) =>
+      toast.error(t("integration_import_failed_toast", { name }), {
+        description: error || undefined
+      });
     for (const item of pending.filter((candidate) => candidate.spaceRouteId === routeId)) {
       const knowledge = space?.knowledge.integration_knowledge_list.items.find(
         (candidate) => candidate.id === item.knowledgeId && candidate.space_id === space.id
@@ -226,10 +224,8 @@ async function report(
         duration: RESULT_TOAST_DURATION_MS,
         action: { label: t("show"), onClick: () => navigate(outcome.href) }
       });
-      messages.push(message);
     }
     untrackImports(reported);
-    if (messages.length > 0) announce(messages.join(". "));
   }
 }
 

@@ -202,7 +202,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   );
 
   // Each snapshot is compared with the last one: a job that was active and
-  // now has an outcome gets a toast, an announcement and a row highlight, and
+  // now has an outcome gets a toast (which speaks it) and a row highlight, and
   // the data it produced is refreshed. An import's first sync is told with
   // its counts instead, once its item is read (import-completion.ts); a sync
   // queued from a menu stops reading as queued once its job is over. The
@@ -225,7 +225,6 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         } else {
           toast.info(feedback.title);
         }
-        announce(feedback.title);
       }
       // A vanished job finished (or was cleaned up) without reporting; its
       // data may still have changed, so refresh as for a reported outcome.
@@ -250,12 +249,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         void reportImports(settled, {
           queryClient,
           t,
-          announce,
           navigate: (href) => router.push(href)
         });
       }
     },
-    [announce, queryClient, router, t]
+    [queryClient, router, t]
   );
   useEffect(() => {
     handleSnapshot(jobs);

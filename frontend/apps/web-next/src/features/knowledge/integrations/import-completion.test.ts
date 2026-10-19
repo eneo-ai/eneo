@@ -194,18 +194,16 @@ it("reports other spaces even while one space is unavailable, without duplicate 
   const context = {
     queryClient: testQueryClient(),
     t: createTranslator({ locale: "sv", messages: sv as Record<string, string> }),
-    announce: vi.fn(),
     navigate: vi.fn()
   };
   const settled = waiting.map((item) => ({ ...item, jobStatus: "complete" as const }));
   await Promise.all([reportImports(settled, context), reportImports(settled, context)]);
   expect(toast.success).toHaveBeenCalledTimes(1);
-  expect(context.announce).toHaveBeenCalledTimes(1);
   expect(pendingImports()).toEqual([waiting[0]]);
   logged.mockRestore();
 });
 
-it("announces every import finishing in the same space in one message", async () => {
+it("tells every import finishing in the same space in a toast of its own", async () => {
   const waiting = [pending("a"), pending("b")];
   trackImports(waiting);
   api.GET.mockResolvedValue({
@@ -220,19 +218,19 @@ it("announces every import finishing in the same space in one message", async ()
     }),
     response: new Response("{}")
   });
-  const announce = vi.fn();
   await reportImports(
     waiting.map((item) => ({ ...item, jobStatus: "complete" })),
     {
       queryClient: testQueryClient(),
       t: createTranslator({ locale: "sv", messages: sv as Record<string, string> }),
-      announce,
       navigate: vi.fn()
     }
   );
+  // The toaster's live region speaks them; nothing else says them again.
   expect(toast.success).toHaveBeenCalledTimes(2);
-  expect(announce).toHaveBeenCalledTimes(1);
-  expect(announce.mock.calls[0]?.[0]).toContain("Avtal:");
-  expect(announce.mock.calls[0]?.[0]).toContain("Policy:");
+  expect(toast.success.mock.calls.map(([message]) => message)).toEqual([
+    expect.stringContaining("Avtal:"),
+    expect.stringContaining("Policy:")
+  ]);
   expect(pendingImports()).toEqual([]);
 });

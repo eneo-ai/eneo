@@ -26,6 +26,11 @@ const toast = vi.hoisted(() => ({
   error: vi.fn()
 }));
 vi.mock("@/lib/toast", () => ({ toast }));
+const announce = vi.hoisted(() => vi.fn());
+vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
+  useAnnounce: () => announce
+}));
 vi.mock("next/navigation", () => import("@/test/navigation"));
 
 const job = { id: "job-1", name: "Avtal.pdf", status: "in progress" } as Job;
@@ -84,6 +89,8 @@ it("reports a pushed job update without waiting for a poll", async () => {
 
   await screen.findByRole("button", { name: "Aviseringar" });
   expect(toast.success).toHaveBeenCalledWith("Avtal.pdf är klar och sökbar.");
+  // The toaster's live region speaks it: not announced a second time.
+  expect(announce).not.toHaveBeenCalled();
   // The feed is open: nothing fetched the list again to learn this.
   expect(browserApi.GET).toHaveBeenCalledTimes(polls);
   fake.restore();
@@ -359,6 +366,7 @@ describe("an import's first sync", () => {
       )
     );
     expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(announce).not.toHaveBeenCalled();
     const [, options] = toast.success.mock.calls[0] as [
       string,
       { action: { onClick: () => void } }
