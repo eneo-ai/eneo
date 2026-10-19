@@ -66,6 +66,7 @@ class SyncStateFields(TypedDict, total=False):
     last_sync_attempted_at: datetime | None
     last_synced_at: datetime | None
     last_sync_summary: dict[str, Any] | None
+    sync_failed_items: dict[str, Any] | None
 
 
 class IntegrationKnowledgeRepository(ABC):
@@ -149,6 +150,11 @@ class IntegrationKnowledgeRepository(ABC):
         A sync holds its entity copy for minutes; ``update`` would write every
         column from that copy and undo a rename committed meanwhile.
         """
+        ...
+
+    @abstractmethod
+    async def get_sync_failed_items(self, id: "UUID") -> dict[str, Any] | None:
+        """The ``sync_failed_items`` column, which the entity does not carry."""
         ...
 
     @abstractmethod

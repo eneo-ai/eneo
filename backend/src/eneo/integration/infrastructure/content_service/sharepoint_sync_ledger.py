@@ -1,26 +1,29 @@
-"""What a SharePoint sync keeps about items between its passes, in Redis.
+"""What a SharePoint sync keeps about items between its passes.
 
-Failed items: per knowledge one hash, item id -> ``FailedItem``. A delta pass
+Failed items live on the knowledge row (``sync_failed_items``), written in the
+sync's own transaction, so they commit and roll back with the documents and
+the delta token they are kept for: item id -> ``FailedItem``. A delta pass
 retries the items in it. A failure counts toward the cap only once
 ``COUNT_INTERVAL_SECONDS`` have passed since the item's last counted one, so a
 burst of notifications during an outage does not use the attempts up; an item
 with ``SET_ASIDE_AFTER`` counted failures is set aside so the delta token can
 advance. A set-aside item is tried again by the first pass after
 ``SET_ASIDE_SECONDS``, or by a full sync, and stays set aside for another
-cool-off when it fails again. What adds work is written before the
-transaction commits (an extra retry is harmless); what removes it only after,
-so a rolled-back pass keeps it.
+cool-off when it fails again. A file whose download is refused keeps its
+indexed copy until a refusal at least ``COUNT_INTERVAL_SECONDS`` after the
+first one, so a passing 403 does not drop it. Above ``MAX_FAILED_ITEMS``
+nothing new is recorded: a full sync
+then leaves the next sync a full one.
 
-Walk generation: a counter every full sync moves on. The delta walk cache
-records it, so a folder walked before the last full sync is walked again: the
-full sync may have removed its files as orphans while it was elsewhere.
-
-Not authoritative: losing the data only costs retries a full sync makes up for.
+Walk generation: a counter in Redis every full sync moves on. The delta walk
+cache (also in Redis) records it, so a folder walked before the last full sync
+is walked again: the full sync may have removed its files as orphans while it
+was elsewhere.
 """
 
-from collections.abc import Awaitable, Collection, Mapping
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, cast
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID
 
 if TYPE_CHECKING:
@@ -29,7 +32,8 @@ if TYPE_CHECKING:
 SET_ASIDE_AFTER = 3
 COUNT_INTERVAL_SECONDS = 30 * 60
 SET_ASIDE_SECONDS = 24 * 3600
-_FAILURES_TTL_SECONDS = 30 * 24 * 3600
+MAX_FAILED_ITEMS = 2000
+_FORMAT_VERSION = 1
 # Far longer than a walk cache entry lives (7 days): a counter that expired and
 # starts over at 0 cannot match an entry recorded before it expired.
 _WALK_GENERATION_TTL_SECONDS = 90 * 24 * 3600
@@ -41,12 +45,17 @@ def _text(value: bytes | str) -> str:
 
 @dataclass(frozen=True)
 class FailedItem:
-    """An item passes could not finish. Times are epoch seconds."""
+    """An item passes could not finish, or whose download was refused.
+
+    Times are epoch seconds.
+    """
 
     # Failures that counted toward the cap, and when the last of them was.
     counted: int
     counted_at: int
     set_aside_at: Optional[int] = None
+    # The first refusal of the item since it was last read.
+    refused_at: Optional[int] = None
 
     def due(self, now: int) -> bool:
         """Whether a pass should try the item again now."""
@@ -55,83 +64,90 @@ class FailedItem:
     def after_failure(self, now: int) -> "FailedItem":
         """The item once a pass at ``now`` failed it again."""
         if self.set_aside_at is not None:
-            return FailedItem(self.counted, self.counted_at, set_aside_at=now)
+            return replace(self, set_aside_at=now)
         if now - self.counted_at < COUNT_INTERVAL_SECONDS:
             return self
-        return FailedItem.counted_now(self.counted + 1, now)
+        counted = self.counted + 1
+        return replace(
+            self,
+            counted=counted,
+            counted_at=now,
+            set_aside_at=now if counted >= SET_ASIDE_AFTER else None,
+        )
+
+    def after_refusal(self, now: int) -> tuple["FailedItem", bool]:
+        """The item once a pass at ``now`` was refused it, and whether that
+        confirms an earlier refusal: then its indexed copy goes."""
+        if self.refused_at is None:
+            return replace(self, refused_at=now), False
+        return self, now - self.refused_at >= COUNT_INTERVAL_SECONDS
+
+    @staticmethod
+    def uncounted() -> "FailedItem":
+        """Failed in a pass whose failures counted for nobody (an outage)."""
+        return FailedItem(0, 0)
 
     @staticmethod
     def first_failure(now: int) -> "FailedItem":
-        return FailedItem.counted_now(1, now)
+        return FailedItem.uncounted().after_failure(now)
+
+    def encode(self) -> list[int | None]:
+        return [self.counted, self.counted_at, self.set_aside_at, self.refused_at]
 
     @staticmethod
-    def counted_now(counted: int, now: int) -> "FailedItem":
-        set_aside_at = now if counted >= SET_ASIDE_AFTER else None
-        return FailedItem(counted, now, set_aside_at=set_aside_at)
-
-    def encode(self) -> str:
-        set_aside_at = "" if self.set_aside_at is None else str(self.set_aside_at)
-        return f"{self.counted}:{self.counted_at}:{set_aside_at}"
-
-    @staticmethod
-    def decode(value: str) -> "FailedItem":
-        counted, _, rest = value.partition(":")
-        counted_at, _, set_aside_at = rest.partition(":")
+    def decode(value: object) -> Optional["FailedItem"]:
+        if not isinstance(value, list):
+            return None
+        fields = cast(list[object], value) + [None] * 4
+        counted, counted_at, set_aside_at, refused_at = fields[:4]
+        if not isinstance(counted, int) or not isinstance(counted_at, int):
+            return None
         return FailedItem(
-            int(counted),
-            int(counted_at or 0),
-            set_aside_at=int(set_aside_at) if set_aside_at else None,
+            counted,
+            counted_at,
+            set_aside_at=set_aside_at if isinstance(set_aside_at, int) else None,
+            refused_at=refused_at if isinstance(refused_at, int) else None,
         )
 
 
-class SyncLedger:
+def decode_failed_items(stored: object) -> dict[str, FailedItem]:
+    """The column's items; anything unreadable is left out."""
+    if not isinstance(stored, dict):
+        return {}
+    items = cast(dict[str, object], stored).get("items")
+    if not isinstance(items, dict):
+        return {}
+    decoded: dict[str, FailedItem] = {}
+    for item_id, value in cast(dict[object, object], items).items():
+        item = FailedItem.decode(value)
+        if isinstance(item_id, str) and item is not None:
+            decoded[item_id] = item
+    return decoded
+
+
+def encode_failed_items(items: Mapping[str, FailedItem]) -> dict[str, Any] | None:
+    if not items:
+        return None
+    return {
+        "version": _FORMAT_VERSION,
+        "items": {item_id: item.encode() for item_id, item in items.items()},
+    }
+
+
+class WalkGenerations:
     def __init__(self, redis_client: "redis.Redis") -> None:
         self._redis = redis_client
 
     @staticmethod
-    def _failures_key(knowledge_id: UUID) -> str:
-        return f"sharepoint_failed_items:{knowledge_id}"
-
-    @staticmethod
-    def _walk_generation_key(knowledge_id: UUID) -> str:
+    def _key(knowledge_id: UUID) -> str:
         return f"sharepoint_walk_generation:{knowledge_id}"
 
-    async def failed_items(self, knowledge_id: UUID) -> dict[str, FailedItem]:
-        # The stubs type the asyncio client's commands as sync ones.
-        raw = await cast(
-            "Awaitable[dict[bytes | str, bytes | str]]",
-            self._redis.hgetall(self._failures_key(knowledge_id)),  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
-        )
-        return {
-            _text(item_id): FailedItem.decode(_text(value))
-            for item_id, value in raw.items()
-        }
-
-    async def record_failed_items(
-        self, knowledge_id: UUID, items: Mapping[str, FailedItem]
-    ) -> None:
-        if not items:
-            return
-        key = self._failures_key(knowledge_id)
-        mapping = {item_id: item.encode() for item_id, item in items.items()}
-        async with self._redis.pipeline(transaction=True) as pipe:
-            pipe.hset(key, mapping=mapping)  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
-            pipe.expire(key, _FAILURES_TTL_SECONDS)
-            await pipe.execute()
-
-    async def forget(self, knowledge_id: UUID, item_ids: Collection[str]) -> None:
-        if item_ids:
-            await cast(
-                "Awaitable[int]",
-                self._redis.hdel(self._failures_key(knowledge_id), *item_ids),
-            )
-
-    async def walk_generation(self, knowledge_id: UUID) -> int:
-        value = await self._redis.get(self._walk_generation_key(knowledge_id))
+    async def current(self, knowledge_id: UUID) -> int:
+        value = await self._redis.get(self._key(knowledge_id))
         return int(_text(value)) if value else 0
 
-    async def advance_walk_generation(self, knowledge_id: UUID) -> None:
-        key = self._walk_generation_key(knowledge_id)
+    async def advance(self, knowledge_id: UUID) -> None:
+        key = self._key(knowledge_id)
         async with self._redis.pipeline(transaction=True) as pipe:
             pipe.incr(key)
             pipe.expire(key, _WALK_GENERATION_TTL_SECONDS)

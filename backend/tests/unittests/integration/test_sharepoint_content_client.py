@@ -9,6 +9,7 @@ from multidict import CIMultiDict, CIMultiDictProxy
 from yarl import URL
 
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
+    IncompleteDownloadError,
     SharePointContentClient,
 )
 from eneo.integration.infrastructure.content_service.utils import (
@@ -204,6 +205,8 @@ class TestFileDownloadExtraction:
     async def test_truncated_download_is_a_failure_not_an_empty_file(
         self, client: SharePointContentClient, encoding: str | None
     ):
+        """Still cut off after its retries, it fails the item, which keeps its
+        copy and is tried again later, instead of being parsed or skipped."""
         payload = docx_bytes("Downloaded body")
         headers = {"Content-Length": str(len(payload))}
         if encoding:
@@ -211,16 +214,15 @@ class TestFileDownloadExtraction:
         _serve(client, [payload[: len(payload) // 2]], **headers)
 
         with patch("asyncio.sleep", new=AsyncMock()):
-            result = await client.get_file_extraction_by_id("drive", "item")
+            with pytest.raises(
+                IncompleteDownloadError,
+                match=(
+                    f"Incomplete download of 'report.docx' "
+                    rf"\({len(payload) // 2} of {len(payload)} bytes\)"
+                ),
+            ):
+                await client.get_file_extraction_by_id("drive", "item")
 
-        assert result == ExtractionResult(
-            skip_reason=(
-                f"Error: Incomplete download of 'report.docx' "
-                f"({len(payload) // 2} of {len(payload)} bytes)"
-            ),
-            failed=True,
-            content_type=OCTET,
-        )
         assert client.client.client.get.call_count == 5
 
     async def test_a_cut_off_download_is_fetched_again(
