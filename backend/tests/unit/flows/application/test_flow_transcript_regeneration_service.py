@@ -581,16 +581,16 @@ async def test_the_naming_steps_mapping_names_the_speakers_its_text_names(contex
 
     seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
     naming = seed.results[1].output_payload_json
-    # A later step that reads the mapping finds the person's names. The model's
-    # confidence and evidence argued for Anna and Bo, so a changed name keeps
-    # neither; Cecilia keeps hers. Doris follows the step's speakers with no
-    # support either.
+    # A later step that reads the mapping finds the person's names. A name a
+    # person gives is certain and one they clear is unknown; the model's
+    # evidence argued for Anna and Bo, so neither keeps it. Cecilia keeps hers.
+    # Doris, a person's name too, follows the step's speakers.
     assert naming["structured"] == {
         "speakers": [
             {
                 "label": "SPEAKER_00",
                 "name": "Bertil",
-                "confidence": "low",
+                "confidence": "high",
                 "evidence": "",
             },
             {"label": "SPEAKER_01", "name": None, "confidence": "low", "evidence": ""},
@@ -598,7 +598,7 @@ async def test_the_naming_steps_mapping_names_the_speakers_its_text_names(contex
             {
                 "label": "SPEAKER_03",
                 "name": "Doris",
-                "confidence": "low",
+                "confidence": "high",
                 "evidence": "",
             },
         ]

@@ -2177,7 +2177,7 @@ async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
     assert run_input["transkribering"]["text"] == document
 
 
-async def test_a_name_changed_at_the_mapping_review_keeps_no_model_support(
+async def test_a_name_given_at_the_mapping_review_is_the_persons(
     client,
     db_container,
     patch_auth_service_jwt,
@@ -2231,18 +2231,20 @@ async def test_a_name_changed_at_the_mapping_review_keeps_no_model_support(
     )
 
     assert approved.status_code == 200, approved.text
-    unsupported = {
+    # Bertil is certain, Bo's speaker unknown; the step's evidence was for
+    # Anna and Bo.
+    reviewed = {
         "speakers": [
             {
                 "label": "SPEAKER_00",
                 "name": "Bertil",
-                "confidence": "low",
+                "confidence": "high",
                 "evidence": "",
             },
             {"label": "SPEAKER_01", "name": None, "confidence": "low", "evidence": ""},
         ]
     }
-    assert approved.json()["current_payload_json"]["structured"] == unsupported
+    assert approved.json()["current_payload_json"]["structured"] == reviewed
     # The run view reads the step's result.
     async with db_container() as container:
         output = await container.session().scalar(
@@ -2251,7 +2253,7 @@ async def test_a_name_changed_at_the_mapping_review_keeps_no_model_support(
                 FlowStepResults.step_id == scenario.plain_step_id,
             )
         )
-    assert output["structured"] == unsupported
+    assert output["structured"] == reviewed
 
 
 async def _complete_run(session, run_id: UUID) -> None:

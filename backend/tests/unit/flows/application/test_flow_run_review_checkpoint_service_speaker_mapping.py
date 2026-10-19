@@ -112,13 +112,15 @@ def _checkpoint(payload: dict[str, object]) -> FlowRunReviewCheckpoint:
     )
 
 
+# The reviewer names the speaker the step left unknown: a name a person gives
+# is as certain as a name gets.
 EDITED = {
     "speakers": [
         {"label": "SPEAKER_00", "name": "Anna", "confidence": "high", "evidence": ""},
         {
             "label": "SPEAKER_01",
             "name": "Okänd gäst",
-            "confidence": "low",
+            "confidence": "high",
             "evidence": "",
         },
     ]
@@ -162,7 +164,7 @@ SUPPORTED = {
 }
 
 
-def test_a_name_the_reviewer_changed_or_cleared_keeps_no_model_support() -> None:
+def test_a_name_the_reviewer_gives_is_certain_and_one_they_clear_unknown() -> None:
     anna, bo = SUPPORTED["speakers"]
 
     # The review editor sends the step's confidence and evidence back as they were.
@@ -172,12 +174,13 @@ def test_a_name_the_reviewer_changed_or_cleared_keeps_no_model_support() -> None
         source_text=SOURCE,
     )
 
+    # The step's evidence argued for Anna and Bo; neither name is left to argue for.
     assert payload["structured"] == {
         "speakers": [
             {
                 "label": "SPEAKER_00",
                 "name": "Bertil",
-                "confidence": "low",
+                "confidence": "high",
                 "evidence": "",
             },
             {"label": "SPEAKER_01", "name": None, "confidence": "low", "evidence": ""},
@@ -187,7 +190,7 @@ def test_a_name_the_reviewer_changed_or_cleared_keeps_no_model_support() -> None
 
 def test_a_name_as_the_step_proposed_it_keeps_the_step_support() -> None:
     anna, bo = SUPPORTED["speakers"]
-    renamed = {**anna, "name": "Bertil", "confidence": "low", "evidence": ""}
+    renamed = {**anna, "name": "Bertil", "confidence": "high", "evidence": ""}
     proposed = {**_payload(SOURCE), "structured": SUPPORTED}
     # An earlier save renamed Anna.
     checkpoint = _checkpoint(proposed).model_copy(
@@ -647,18 +650,8 @@ async def test_review_edit_names_a_speaker_split_at_the_pause(split) -> None:
         return
     edited = await edit
 
-    # The split's name is the reviewer's: the step never proposed one.
-    assert edited.current_payload_json["structured"] == {
-        "speakers": [
-            *PROPOSAL["speakers"],
-            {
-                "label": "SPEAKER_05",
-                "name": "Eva Ek",
-                "confidence": "low",
-                "evidence": "",
-            },
-        ]
-    }
+    # The split's name is the reviewer's, certain: the step never proposed one.
+    assert edited.current_payload_json["structured"] == NAMED_SPLIT
     service.transcript_corrections_repo.get_for_step.assert_awaited_once_with(
         run_id=run.id, step_id=SOURCE_STEP_ID, tenant_id=run.tenant_id
     )
@@ -719,6 +712,8 @@ async def test_approval_renders_the_name_of_a_speaker_split_at_the_pause() -> No
     assert fold.folded_payload["text"] == "\n".join(
         ["[00:00:00 - 00:00:04] Anna: Hej.", "[00:00:05 - 00:00:09] Eva Ek: Hallå."]
     )
+    # The fold keeps the reviewer's name as the review stored it.
+    assert fold.folded_payload["structured"] == NAMED_SPLIT
     patch = flow_run_repo.update_input_payload.await_args.kwargs["input_payload_patch"]
     assert (
         patch.to_merge_dict()["transkribering"]["text"] == fold.folded_payload["text"]

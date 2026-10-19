@@ -248,7 +248,7 @@ def ground_speaker_mapping_proposal(
                 r"(?<!\w)" + re.escape(_normalize_name_evidence(name)) + r"(?!\w)"
             )
             if not any(pattern.search(text) for text in normalized_passages):
-                proposed = _without_model_support(proposed, None)
+                proposed = _without_model_support(proposed)
         speakers.append(proposed)
     return {**structured, "speakers": speakers}
 
@@ -257,9 +257,9 @@ def mapping_with_proposal_support(
     mapping: Mapping[str, Any], proposal: Mapping[str, Any]
 ) -> dict[str, Any]:
     """``mapping``, a person's review of ``proposal``, with ``proposal``'s
-    entry for each label it names as ``proposal`` does. A name the person
-    changed, cleared or gave a label ``proposal`` lacks is theirs, not the
-    model's, so its entry keeps no model support, whatever it was sent with."""
+    entry for each label it names as ``proposal`` does. Any other name, one
+    the person changed, cleared or gave a label ``proposal`` lacks, is theirs
+    (``_named_by_person``), whatever it was sent with."""
     proposed = {entry.get("label"): entry for entry in proposal.get("speakers", [])}
     speakers: list[dict[str, Any]] = []
     for entry in mapping["speakers"]:
@@ -267,17 +267,29 @@ def mapping_with_proposal_support(
         speakers.append(
             dict(kept)
             if kept is not None and kept.get("name") == entry["name"]
-            else _without_model_support(entry, entry["name"])
+            else _named_by_person(entry, entry["name"])
         )
     return {**mapping, "speakers": speakers}
 
 
-def _without_model_support(
-    entry: Mapping[str, Any], name: str | None
-) -> dict[str, Any]:
-    """``entry`` naming ``name``, an identity the model's evidence does not
-    support: the model's confidence and explanation are not kept."""
-    return {**entry, "name": name, "confidence": "low", "evidence": ""}
+def _named_by_person(entry: Mapping[str, Any], name: str | None) -> dict[str, Any]:
+    """``entry`` naming ``name``, a person's choice. A name a person gives is
+    the most reliable there is; one they clear leaves the speaker unknown, as
+    the model leaves one. The model's evidence argued for its own guess, so
+    none is kept."""
+    return {
+        **entry,
+        "name": name,
+        "confidence": "low" if name is None else "high",
+        "evidence": "",
+    }
+
+
+def _without_model_support(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """``entry`` without the identity the model proposed, which the model
+    input does not support: no name, and none of the model's confidence or
+    explanation."""
+    return {**entry, "name": None, "confidence": "low", "evidence": ""}
 
 
 def _normalize_name_evidence(text: str) -> str:
@@ -303,19 +315,19 @@ def mapping_with_names(
     """``structured`` naming each of its labels as ``names`` does, None where
     ``names`` has none; its labels and their order stay, followed by each of
     ``split_labels`` (speakers split off in review) that ``names`` names and
-    ``structured`` lacks. A name this changes or adds is a person's, not the
-    model's, so its entry keeps no model support."""
+    ``structured`` lacks. A name this changes or adds is a person's
+    (``_named_by_person``)."""
     current = mapping_to_names(structured)
     speakers: list[dict[str, Any]] = []
     for entry in structured.get("speakers", []):
         label = entry.get("label")
         name = names.get(label)
         speakers.append(
-            entry if name == current.get(label) else _without_model_support(entry, name)
+            entry if name == current.get(label) else _named_by_person(entry, name)
         )
     listed = {entry.get("label") for entry in speakers}
     speakers.extend(
-        _without_model_support({"label": label}, names[label])
+        _named_by_person({"label": label}, names[label])
         for label in split_labels
         if label in names and label not in listed
     )

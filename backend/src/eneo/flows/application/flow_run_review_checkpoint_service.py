@@ -434,7 +434,9 @@ def _speaker_mapping_text(
     so the two never disagree. Names outside the participant list are allowed:
     the reviewer is correcting, not proposing. The reviewer owns the names
     only: an entry has the confidence and evidence of the step's own proposal
-    (the original payload) while it keeps the proposed name, and none after.
+    (the original payload) while it keeps the proposed name. A name the
+    reviewer gives instead has high confidence and one they clear low, both
+    without evidence, whatever the request sent.
     """
     if source_text is None:
         raise TypedIOValidationException(
