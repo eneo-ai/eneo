@@ -3824,6 +3824,44 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
 
         assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
 
+    def test_silent_when_all_previous_steps_ancestor_reads_json_producer(
+        self,
+    ) -> None:
+        """Kills an ancestry walk that reads `all_previous_steps` as no input."""
+        spec = FlowDraftSpecCore(
+            flow_name="Assess the case",
+            steps=[
+                _step(
+                    "step_a",
+                    "Fetch",
+                    "Fetch.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("case"),
+                ),
+                _step(
+                    "step_b",
+                    "Assess",
+                    "Assess.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("assessment"),
+                ),
+                _step(
+                    "step_c",
+                    "Reply",
+                    "Reply.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_bindings={
+                        "question": "{{ step_b.output.structured.assessment }}"
+                    },
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
     @pytest.mark.parametrize(
         ("flow", "required_text", "forbidden_text"),
         [

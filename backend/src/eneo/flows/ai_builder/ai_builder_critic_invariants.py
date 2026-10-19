@@ -93,6 +93,7 @@ from eneo.flows.input_binding_contract_rules import (
     has_explicit_underlag,
     source_ref_bindings,
 )
+from eneo.flows.step_lineage import resolve_upstream_step_orders
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     TemplateReferenceKind,
@@ -1381,12 +1382,26 @@ def _structured_priors_consumed_on_composer_ancestry(
                 )
             )
         else:
-            dependencies = (
-                {step_index - 1}
-                if step.input_source == InputSource.PREVIOUS_STEP and step_index > 0
+            dependencies = {
+                order - 1
+                for order in resolve_upstream_step_orders(
+                    input_source=step.input_source.value,
+                    step_order=step_index + 1,
+                    binding_references=None,
+                    max_prior_step_order=step_index,
+                )
+            }
+            # An all_previous_steps step receives the text of every prior step,
+            # so no producer before it is dropped. A previous_step read credits
+            # nothing: a JSON step passes on only its own contract fields, so a
+            # chain of them is the under-bound shape this rule exists for. An
+            # explicit reference still counts only when it selects structured
+            # output: where a step names its sources, the rule asks for fields.
+            structured_dependencies = (
+                dependencies
+                if step.input_source == InputSource.ALL_PREVIOUS_STEPS
                 else set()
             )
-            structured_dependencies = set()
         consumed_indexes.update(structured_dependencies)
         ancestry.extend(
             dependency
@@ -1491,9 +1506,10 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
     """Require two relevant JSON producers on the composer's ancestry.
 
     A producer counts as consumed only when the composer or a dependency
-    ancestor explicitly references its structured output. Explicit structured
-    references replace the implicit predecessor edge; without such references,
-    a `previous_step` step depends on its immediate predecessor.
+    ancestor explicitly references its structured output, or an ancestor reads
+    `all_previous_steps`. Explicit structured references replace the implicit
+    input; without them a step depends on what its `input_source` reads
+    (`step_lineage`): a `previous_step` step on its immediate predecessor.
 
     Suppression cases:
     - aggregation_intent == compare: document-comparison flows are handled by
@@ -1501,7 +1517,7 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
       is often inferred from document-output language.
     - <2 prior content steps emit JSON+output_contract: there is no
       fan-in to surface, only a 2-step refinement chain.
-    - At least two JSON producers are explicitly consumed on the composer's
+    - At least two JSON producers are consumed on the composer's
       dependency ancestry.
     """
     spec = context.spec
@@ -1590,10 +1606,11 @@ _FINAL_TEXT_STEP_MUST_REFERENCE_RELEVANT_STRUCTURED_OUTPUTS = CriticInvariant(
     id="final_text_step_must_reference_relevant_structured_outputs",
     description=(
         "When at least two prior content steps emit a structured JSON "
-        "output_contract, at least two relevant producers must be explicitly "
-        "consumed on the final compositional text step's dependency ancestry. "
-        "Explicit structured references replace the implicit predecessor "
-        "edge. Document renderer terminals are skipped — the rule evaluates "
+        "output_contract, at least two relevant producers must be consumed on "
+        "the final compositional text step's dependency ancestry: referenced "
+        "as structured output, or read by a step that reads all previous "
+        "steps. Explicit references replace the implicit input. Document "
+        "renderer terminals are skipped — the rule evaluates "
         "the step that builds the body."
     ),
     evidence=_final_text_step_must_reference_relevant_structured_outputs_evidence,
