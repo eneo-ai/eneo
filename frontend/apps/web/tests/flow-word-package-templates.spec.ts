@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { backendFetch, expectOk, MOCK_REPLY, uniqueName } from "./helpers";
+import { backendFetch, currentDraftRevision, expectOk, MOCK_REPLY, uniqueName } from "./helpers";
 
 const EXPORT = /^(Export|Exportera)$/;
 const IMPORT = /^(Import|Importera)$/;
@@ -88,7 +88,7 @@ async function fixture(page: Page, request: APIRequestContext, shared: boolean) 
     page,
     request,
     `/api/v1/flows/${flow.id}/`,
-    { steps, expected_revision: flow.draft_revision },
+    { steps, expected_revision: await currentDraftRevision(page, request, flow.id) },
     "PATCH"
   );
   return { flow, asset, model };
@@ -145,6 +145,8 @@ test("included shared Word template imports to a new space once, preserves mappi
   page,
   request
 }) => {
+  // Export, import, publish, a flow run and its document download.
+  test.setTimeout(120_000);
   const { flow, asset, model } = await fixture(page, request, true);
   const file = await exportPackage(page, flow.id, true);
   const space = await api(page, request, "/api/v1/spaces/", {
