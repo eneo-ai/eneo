@@ -5820,12 +5820,12 @@ class TestSiteRootExtractionOutcomes:
         ]
 
     @pytest.mark.parametrize("delta_token", [None, "token-1"], ids=["first", "tokened"])
-    async def test_a_download_failure_fails_the_sync_without_a_delta_token(
+    async def test_a_download_failure_fails_the_sync_and_records_the_file(
         self, service, mock_dependencies, mock_oauth_token, delta_token
     ):
-        """No token means the next sync is a full one that retries the file,
-        instead of a delta that never sees it again; a token the knowledge
-        already had goes the same way."""
+        """The sync keeps its change tracking (the baseline it minted, or the
+        token it had) and records the file on the knowledge row, so the next
+        delta retries it instead of the next sync being a full one."""
         ik, delete, process, failure = await self._run(
             service,
             mock_dependencies,
@@ -5837,9 +5837,15 @@ class TestSiteRootExtractionOutcomes:
         assert str(failure) == ONE_FILE_FAILED
         process.assert_not_called()
         delete.assert_not_called()
-        assert ik.delta_token is None
+        assert ik.delta_token == (delta_token or "delta-token")
         written = mock_dependencies["integration_knowledge_repo"].update_sync_state
-        assert written.await_args.kwargs["delta_token"] is None
+        assert written.await_args.kwargs["delta_token"] == ik.delta_token
+        (recorded,) = [
+            call.kwargs["sync_failed_items"]
+            for call in written.await_args_list
+            if "sync_failed_items" in call.kwargs
+        ]
+        assert list(recorded["items"]) == ["item-1"]
         assert ik.last_sync_status == "error"
         assert ik.last_sync_error == ONE_FILE_FAILED
         assert ik.last_synced_at is None

@@ -13,6 +13,7 @@ existing owners. Do not add another implementation of their rules here.
 import asyncio
 import time
 from collections.abc import Callable, Coroutine
+from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
@@ -20,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID
 
 import aiohttp
+from sqlalchemy.ext.asyncio import AsyncSession as SqlAlchemyAsyncSession
 from sqlalchemy.orm import Session
 
 from eneo.database.transaction_callbacks import after_outer_transaction
@@ -64,8 +66,11 @@ from eneo.integration.infrastructure.content_service.sharepoint_results import (
     SyncItemsFailed,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_sync_ledger import (
+    MAX_FAILED_ITEMS,
     FailedItem,
-    SyncLedger,
+    WalkGenerations,
+    decode_failed_items,
+    encode_failed_items,
 )
 from eneo.integration.infrastructure.content_service.sync_state import (
     SyncStateRecorder,
@@ -200,7 +205,7 @@ class SharePointContentService:
         sync_log_repo: "SyncLogRepository | None" = None,
         change_key_service: "OfficeChangeKeyService | None" = None,
         sync_progress_store: SharePointSyncProgressStore | None = None,
-        sync_ledger: SyncLedger | None = None,
+        walk_generations: WalkGenerations | None = None,
     ) -> None:
         super().__init__()
         self.org_token_provider = org_token_provider
@@ -217,13 +222,12 @@ class SharePointContentService:
             info_blob_service, integration_knowledge_repo, user, change_key_service
         )
         self._reconciliation = SharePointReconciliation(self._index)
-        # Kept in the same Redis as the ChangeKey cache. Without it a full sync
-        # cannot hand failed items to the next delta and leaves it a full one.
-        if sync_ledger is None and isinstance(
+        # The walk cache lives in the ChangeKey Redis, and so does its generation.
+        if walk_generations is None and isinstance(
             change_key_service, OfficeChangeKeyService
         ):
-            sync_ledger = SyncLedger(change_key_service.redis_client)
-        self._ledger = sync_ledger
+            walk_generations = WalkGenerations(change_key_service.redis_client)
+        self._walk_generations = walk_generations
         self._clock: Callable[[], float] = time.time
         self._progress = SyncProgressReporter(
             sync_progress_store,
@@ -1036,12 +1040,20 @@ class SharePointContentService:
             delta_pass.indexed_ids = {item_id for _, item_id in indexed}
         return delta_pass.indexed_ids
 
+    def _savepoint(self) -> AbstractAsyncContextManager[object]:
+        # Unit tests hand the service a stand-in without savepoints.
+        session = cast(object, self.session)
+        if isinstance(session, SqlAlchemyAsyncSession):
+            return session.begin_nested()
+        return nullcontext()
+
     async def _failed_items(self, knowledge_id: UUID) -> dict[str, FailedItem]:
-        """The items earlier passes could not finish; empty when unknown."""
-        if self._ledger is None:
-            return {}
+        """The items earlier passes could not finish; empty when unreadable."""
         try:
-            return await self._ledger.failed_items(knowledge_id)
+            async with self._savepoint():
+                stored = await self.integration_knowledge_repo.get_sync_failed_items(
+                    knowledge_id
+                )
         except Exception as exc:
             logger.warning(
                 "Could not read the failed SharePoint items of %s: %s",
@@ -1049,6 +1061,7 @@ class SharePointContentService:
                 exc,
             )
             return {}
+        return decode_failed_items(stored)
 
     async def _retry_failed_items(self, delta_pass: "_DeltaPass") -> None:
         """Apply what Graph says now about items earlier passes could not finish.
@@ -1114,12 +1127,11 @@ class SharePointContentService:
 
         How failures count and when an item is set aside is ``FailedItem``'s;
         a set-aside item's failure lets the pass advance past it. What the
-        ledger held and this pass tried without failing is forgotten after
-        commit; ``attempted`` None means the pass tried every item (a full
-        sync). True when every failure naming an item is recorded.
+        record held and this pass tried without failing is forgotten;
+        ``attempted`` None means the pass tried every item (a full sync). The
+        record is written in the pass's transaction. True when every failure
+        naming an item is recorded.
         """
-        if self._ledger is None:
-            return False
         now = int(self._clock())
         # An outage fails the pass and keeps the token; nobody's count moves.
         systemic = sync_results.failures_look_systemic(stats)
@@ -1139,15 +1151,35 @@ class SharePointContentService:
                 sync_results.set_aside(stats, item_id, attempts=failed.counted)
         # Refusals still here were put down to the identity, not the files.
         refused = stats.get("refused_downloads", {})
-        resolved = {
-            item_id
-            for item_id in failed_before
-            if item_id not in failed_now
-            and item_id not in refused
-            and (attempted is None or item_id in attempted)
+        kept = {
+            item_id: item
+            for item_id, item in failed_before.items()
+            if item_id in failed_now
+            or item_id in refused
+            or (attempted is not None and item_id not in attempted)
         }
+        recorded = len(kept) + len(failed_now.keys() - kept.keys()) <= MAX_FAILED_ITEMS
+        if recorded:
+            kept.update(failed_now)
+        else:
+            logger.warning(
+                "Not recording %d failed SharePoint items of %s: above the limit of %d",
+                len(failed_now.keys() - kept.keys()),
+                knowledge_id,
+                MAX_FAILED_ITEMS,
+            )
+            kept.update(
+                (item_id, item)
+                for item_id, item in failed_now.items()
+                if item_id in kept
+            )
+        if kept == failed_before:
+            return recorded
         try:
-            await self._ledger.record_failed_items(knowledge_id, failed_now)
+            async with self._savepoint():
+                await self.integration_knowledge_repo.update_sync_state(
+                    knowledge_id, sync_failed_items=encode_failed_items(kept)
+                )
         except Exception as exc:
             logger.warning(
                 "Could not record the failed SharePoint items of %s: %s",
@@ -1155,31 +1187,14 @@ class SharePointContentService:
                 exc,
             )
             return False
-        if resolved and not self._after_transaction(
-            partial(self._forget_failures, knowledge_id, resolved),
-            on_rollback=False,
-        ):
-            logger.warning("Could not register the post-commit failure cleanup")
-        return True
-
-    async def _forget_failures(self, knowledge_id: UUID, item_ids: set[str]) -> None:
-        if self._ledger is None:
-            return
-        try:
-            await self._ledger.forget(knowledge_id, item_ids)
-        except Exception as exc:
-            logger.warning(
-                "Could not forget the retried SharePoint items of %s: %s",
-                knowledge_id,
-                exc,
-            )
+        return recorded
 
     async def _invalidate_walk_cache(self, knowledge_id: UUID) -> None:
-        """Have the next delta walk every folder again; see ``SyncLedger``."""
-        if self._ledger is None:
+        """Have the next delta walk every folder again; see ``WalkGenerations``."""
+        if self._walk_generations is None:
             return
         try:
-            await self._ledger.advance_walk_generation(knowledge_id)
+            await self._walk_generations.advance(knowledge_id)
         except Exception as exc:
             logger.warning(
                 "Could not invalidate the folder walk cache of %s: %s",
@@ -1190,11 +1205,11 @@ class SharePointContentService:
     async def _walk_cache_suffix(self, delta_pass: "_DeltaPass") -> Optional[str]:
         if not delta_pass.walk_cache_suffix_read:
             delta_pass.walk_cache_suffix_read = True
-            if self._ledger is None:
+            if self._walk_generations is None:
                 delta_pass.walk_cache_suffix = ""
             else:
                 try:
-                    generation = await self._ledger.walk_generation(
+                    generation = await self._walk_generations.current(
                         delta_pass.integration_knowledge.id
                     )
                 except Exception as exc:

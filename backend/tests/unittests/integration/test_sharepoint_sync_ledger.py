@@ -13,6 +13,9 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from eneo.integration.infrastructure.content_service import (
+    sharepoint_content_service as content_service_module,
+)
+from eneo.integration.infrastructure.content_service import (
     sharepoint_scope as scope_rules,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
@@ -30,6 +33,8 @@ from eneo.integration.infrastructure.content_service.sharepoint_sync_ledger impo
     SET_ASIDE_AFTER,
     SET_ASIDE_SECONDS,
     FailedItem,
+    decode_failed_items,
+    encode_failed_items,
 )
 from eneo.integration.infrastructure.content_service.utils import ExtractionResult
 from tests.unittests.integration.test_sharepoint_content_service import (
@@ -48,33 +53,39 @@ HOUR = 3600
 
 
 class FakeLedger:
-    def __init__(self) -> None:
-        self.failed: dict[str, FailedItem] = {}
+    """The knowledge row's ``sync_failed_items`` as the repository reads and
+    writes it, and the walk generation."""
+
+    def __init__(self, repo) -> None:
+        self.stored: object = None
         self.generation = 0
+
+        async def read(id):
+            return self.stored
+
+        async def write(id, **fields):
+            if "sync_failed_items" in fields:
+                self.stored = fields["sync_failed_items"]
+
+        repo.get_sync_failed_items = AsyncMock(side_effect=read)
+        repo.update_sync_state = AsyncMock(side_effect=write)
+
+    @property
+    def failed(self) -> dict[str, FailedItem]:
+        return decode_failed_items(self.stored)
+
+    @failed.setter
+    def failed(self, items: dict[str, FailedItem]) -> None:
+        self.stored = encode_failed_items(items)
 
     def counted(self) -> dict[str, int]:
         return {item_id: item.counted for item_id, item in self.failed.items()}
 
-    async def walk_generation(self, knowledge_id):
+    async def current(self, knowledge_id):
         return self.generation
 
-    async def advance_walk_generation(self, knowledge_id):
+    async def advance(self, knowledge_id):
         self.generation += 1
-
-    async def failed_items(self, knowledge_id):
-        return dict(self.failed)
-
-    async def record_failed_items(self, knowledge_id, items):
-        self.failed.update(items)
-
-    async def forget(self, knowledge_id, item_ids):
-        for item_id in item_ids:
-            self.failed.pop(item_id, None)
-
-
-@pytest.fixture
-def ledger():
-    return FakeLedger()
 
 
 @pytest.fixture
@@ -116,13 +127,18 @@ def _failed(counted: int, *, at: int = NOW - HOUR) -> FailedItem:
 
 
 @pytest.fixture
+def ledger(mock_dependencies):
+    return FakeLedger(mock_dependencies["integration_knowledge_repo"])
+
+
+@pytest.fixture
 def clock():
     return {"now": NOW}
 
 
 @pytest.fixture
 def service(mock_dependencies, ledger, clock):
-    service = SharePointContentService(**mock_dependencies, sync_ledger=ledger)
+    service = SharePointContentService(**mock_dependencies, walk_generations=ledger)
     service._clock = lambda: clock["now"]
     return service
 
@@ -260,9 +276,13 @@ class TestRepeatedFailures:
         assert ik.delta_token == "token-2"
         assert ledger.failed == {}
 
-    async def test_without_a_ledger_a_failing_item_keeps_the_token_as_before(
+    async def test_an_unreadable_record_never_sets_an_item_aside(
         self, mock_dependencies, mock_oauth_token
     ):
+        """Without the counts of earlier passes the token stays, as before."""
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].get_sync_failed_items.side_effect = RuntimeError("database error")
         service = SharePointContentService(**mock_dependencies)
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
         with (
@@ -877,6 +897,65 @@ class TestRefusedRetries:
             assert ledger.counted() == dict.fromkeys(item_ids, 1)
 
 
+class TestRecordLimit:
+    async def test_a_full_sync_with_more_failures_than_can_be_recorded_starts_over(
+        self, service, mock_dependencies, mock_oauth_token, ledger
+    ):
+        """Above the limit the next sync is a full one, which heals what a delta
+        could not retry."""
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        files = [_root_file(f"f-{index}") for index in range(4)]
+        with (
+            patch.object(content_service_module, "MAX_FAILED_ITEMS", 3),
+            patch(_CLIENT) as client_class,
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
+        ):
+            _mock_graph_client(
+                client_class,
+                get_drive_root_children=AsyncMock(return_value=files),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=_extract_failing("f-0", "f-1", "f-2", "f-3")
+                ),
+            )
+            with pytest.raises(SyncItemsFailed):
+                await service.pull_content(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        assert ik.delta_token is None
+        assert ledger.failed == {}
+
+    async def test_a_delta_keeps_what_it_recorded_when_the_limit_is_reached(
+        self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
+    ):
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        ledger.failed = {"old-1": _failed(1), "old-2": _failed(1)}
+        changes = [_delta_file(f"new-{index}", f"{index}.docx") for index in range(2)]
+        with (
+            patch.object(content_service_module, "MAX_FAILED_ITEMS", 3),
+            patch(_CLIENT) as client_class,
+        ):
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
+                get_file_metadata=AsyncMock(side_effect=_metadata),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=_extract_failing("old-1", "old-2", "new-0", "new-1")
+                ),
+            )
+            with pytest.raises(SyncItemsFailed):
+                await _committed(
+                    sqlite_session,
+                    service,
+                    lambda: service.process_delta_changes(
+                        token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                    ),
+                )
+
+        assert ik.delta_token == "token-1"
+        assert set(ledger.failed) == {"old-1", "old-2"}
+
+
 class TestDeltaBaselineMint:
     async def test_a_full_sync_without_a_token_to_continue_from_is_not_a_success(
         self, service, mock_dependencies, mock_oauth_token
@@ -961,7 +1040,7 @@ class TestFolderWalkCache:
         """The full sync may have removed a folder's files as orphans while the
         folder was elsewhere; moved back under the same parent it must be walked."""
         mock_dependencies["change_key_service"] = FakeChangeKeys()
-        service = SharePointContentService(**mock_dependencies, sync_ledger=ledger)
+        service = SharePointContentService(**mock_dependencies, walk_generations=ledger)
         ik = _knowledge(
             mock_dependencies,
             mock_oauth_token,

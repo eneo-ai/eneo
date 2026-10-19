@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
@@ -249,6 +249,12 @@ class IntegrationKnowledgeRepoImpl(
         result = await self.session.execute(stmt)
         if affected_row_count(result) == 0:
             raise NotFoundException(f"{self._db_model.__name__} not found")
+
+    @override
+    async def get_sync_failed_items(self, id: "UUID") -> dict[str, Any] | None:
+        return await self.session.scalar(
+            sa.select(self._db_model.sync_failed_items).where(self._db_model.id == id)
+        )
 
     @override
     async def adjust_size(self, id: "UUID", delta: int) -> int:
