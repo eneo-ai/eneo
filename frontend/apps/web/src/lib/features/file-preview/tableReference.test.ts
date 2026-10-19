@@ -7,7 +7,7 @@ import {
   toggleTableRows,
   tableLocationLabel
 } from "./tableReference";
-import { isLocator, locatorSheet } from "./selection";
+import { isLocator, locatorSheet } from "./passageLocator";
 
 const sheet = {
   name: 'Utfall "2025", juli',

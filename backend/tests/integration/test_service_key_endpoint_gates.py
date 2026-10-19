@@ -366,6 +366,11 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
         f"/api/v1/help-assistants/runs/{_STUB_ID}/turns/",
         {"question": "x"},
     ),
+    (
+        "POST",
+        f"/api/v1/conversations/{_STUB_ID}/documents/{_STUB_ID}/versions/",
+        {"content": "# x\n"},
+    ),
 ]
 
 

@@ -183,6 +183,24 @@ export function initConversations(client) {
     },
 
     /**
+     * Save the reader's edited Markdown of a conversation document as its
+     * next version. The version joins the turn that made the document.
+     * @param {{ sessionId: string, fileId: string, content: string }} params the version edited from, and the whole document
+     * @returns {Promise<import("../types/schema").components["schemas"]["FilePublic"]>} the saved version (the one edited from when nothing changed)
+     * @throws {EneoError}
+     */
+    saveDocumentVersion: async ({ sessionId, fileId, content }) => {
+      return await client.fetch(
+        "/api/v1/conversations/{session_id}/documents/{file_id}/versions/",
+        {
+          method: "post",
+          params: { path: { session_id: sessionId, file_id: fileId } },
+          requestBody: { "application/json": { content } }
+        }
+      );
+    },
+
+    /**
      * Load body-free diagnostics for one persisted chat turn.
      * @param {{ sessionId: string, messageId: string }} params
      * @returns {Promise<import('../types/resources').ChatTurnDiagnostics>}

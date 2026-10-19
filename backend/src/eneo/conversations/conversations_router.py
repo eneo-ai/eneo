@@ -27,6 +27,7 @@ from eneo.audit.infrastructure.rate_limiting import (
 )
 from eneo.authentication.auth_dependencies import (
     require_resource_permission_for_method,
+    require_user_for_creation,
 )
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -50,9 +51,12 @@ from eneo.conversations.document_export import (
     document_export_availability,
     export_document,
 )
+from eneo.conversations.document_versions import save_document_version
 from eneo.conversations.ui_message_stream import to_ui_message_stream_response
 from eneo.database.database import AsyncSession
 from eneo.document_templates.service import document_template_resolver
+from eneo.files.file_models import FilePublic
+from eneo.files.generated_documents import GeneratedDocumentRejected
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
@@ -85,6 +89,7 @@ from eneo.sessions.conversation_settings import (
 )
 from eneo.sessions.session import (
     DocumentExportRequest,
+    DocumentVersionCreate,
     SessionFeedback,
     SessionInDB,
     SessionMetadataPublic,
@@ -93,10 +98,13 @@ from eneo.sessions.session import (
     SSEError,
     SSEFiles,
     SSEFirstChunk,
+    SSEReasoning,
     SSEText,
+    SSETokenUsage,
     SSEToolApprovalRequired,
     SSEToolApprovalTimeout,
     SSEToolCall,
+    SSEToolCallDelta,
     ToolApprovalResponse,
     ToolCallResultPublic,
     ViewToolCallRequest,
@@ -321,10 +329,13 @@ async def _authorize_partner_access(
         response_codes=[400, 403, 404, 409],
         models=[
             SSEText,
+            SSEReasoning,
             SSEToolCall,
+            SSEToolCallDelta,
             SSEToolApprovalRequired,
             SSEToolApprovalTimeout,
             SSEFiles,
+            SSETokenUsage,
             SSEFirstChunk,
             SSEError,
         ],
@@ -1188,6 +1199,103 @@ async def export_conversation_document(
             "Cache-Control": "no-store",
         },
     )
+
+
+@router.post(
+    "/{session_id}/documents/{file_id}/versions/",
+    response_model=FilePublic,
+    status_code=201,
+    description="Save the reader's edited Markdown of a conversation document as its next version.",
+    responses=responses.get_responses([400, 403, 404, 413]),
+    dependencies=[
+        Depends(require_user_for_creation),
+        Depends(require_resource_permission_for_method("conversations")),
+    ],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+)
+async def save_conversation_document_version(
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    file_id: Annotated[
+        UUID,
+        Path(description="The version of a Markdown document the edit was made from"),
+    ],
+    request: DocumentVersionCreate,
+    http_request: Request,
+    response: Response,
+    container: Annotated[
+        Container,
+        # Committed before the response: the next turn and an export must see it.
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
+) -> FilePublic:
+    """Save a reader's edit of a Markdown document as a new version.
+
+    The version joins the turn that made the document it was edited from.
+    Saving unchanged text makes nothing and answers 200 with that version.
+    """
+    current_user = container.user()
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        assistant_id=None,
+        group_chat_id=None,
+        session_id=session_id,
+    )
+    session = await container.session_service().get_session_by_uuid(session_id)
+    await _authorize_session_access(container, session)
+    response.headers["Cache-Control"] = "no-store"
+
+    try:
+        saved = await save_document_version(
+            conversation=session,
+            file_id=file_id,
+            content=request.content,
+            user_id=current_user.id,
+            file_service=container.file_service(),
+            question_repo=container.question_repo(),
+        )
+    except GeneratedDocumentRejected as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "document_version_rejected",
+                "message": str(exc) or "The document text could not be saved.",
+            },
+        )
+
+    if not saved.created:
+        response.status_code = 200
+        return FilePublic(**saved.file.model_dump())
+
+    response.status_code = 201
+    await container.audit_service().log_async(
+        tenant_id=current_user.tenant_id,
+        user=current_user,
+        action=ActionType.DOCUMENT_VERSION_SAVED,
+        entity_type=EntityType.FILE,
+        entity_id=saved.file.id,
+        description="Saved a reader-edited version of a document",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=session,
+            extra={
+                "session_id": str(session_id),
+                "file_id": str(saved.file.id),
+                "revises_file_id": str(saved.file.revises_file_id),
+                "edited_from_file_id": str(file_id),
+                "question_id": str(saved.question_id),
+                "bytes": len(request.content.encode("utf-8")),
+            },
+        ),
+        outcome=Outcome.SUCCESS,
+    )
+    return FilePublic(**saved.file.model_dump())
 
 
 @router.delete(

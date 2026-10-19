@@ -84,6 +84,7 @@ def to_ask_response(
     completion_model: CompletionModel | CompletionModelPublic | None = None,
     show_pricing: bool = True,
     mcp_tool_references: Sequence[McpToolReference] = (),
+    generated_files: Sequence[File] = (),
 ) -> AskResponse:
     if completion_model is None:
         public_model = None
@@ -102,7 +103,7 @@ def to_ask_response(
     return AskResponse(
         question=question,
         files=[FilePublic(**file.model_dump()) for file in files],
-        generated_files=[],
+        generated_files=[FilePublic(**file.model_dump()) for file in generated_files],
         session_id=session.id,
         settings=session.settings,
         answer=answer,
@@ -143,6 +144,7 @@ def to_ask_conversation_response(
     created_at: Optional[datetime] = None,
     updated_at: Optional[datetime] = None,
     mcp_tool_references: Sequence[McpToolReference] = (),
+    generated_files: Sequence[File] = (),
 ) -> AskChatResponse:
     if completion_model is None:
         public_model = None
@@ -166,7 +168,7 @@ def to_ask_conversation_response(
         id=question_id,
         completion_model=public_model,
         files=[FilePublic(**file.model_dump()) for file in files],
-        generated_files=[],
+        generated_files=[FilePublic(**file.model_dump()) for file in generated_files],
         question=question,
         answer=answer,
         references=[
@@ -411,6 +413,7 @@ async def to_response(
         show_pricing=show_pricing,
         tools=response.tools,
         mcp_tool_references=response.mcp_tool_references,
+        generated_files=response.generated_files,
     )
 
 
@@ -462,4 +465,5 @@ async def to_conversation_response(
         created_at=response.created_at,
         updated_at=response.updated_at,
         mcp_tool_references=response.mcp_tool_references,
+        generated_files=response.generated_files,
     )

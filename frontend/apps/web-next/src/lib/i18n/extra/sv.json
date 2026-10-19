@@ -1600,5 +1600,7 @@
   "workspace_preview_selection_actions": "Åtgärder för markerade rader",
   "side_panel_latest_answer": "Senaste svaret",
   "chat_quote_label": "Citat",
-  "chat_quote_remove": "Ta bort citatet"
+  "chat_quote_remove": "Ta bort citatet",
+  "file_preview_previous_version": "Föregående version",
+  "file_preview_next_version": "Nästa version"
 }

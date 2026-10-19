@@ -29,7 +29,7 @@
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
   import { getMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
-  import { composeQuotedQuestion } from "../../questionQuote";
+  import { composeQuotedQuestion, tableQuoteSummary } from "../../questionQuote";
 
   const chat = getChatService();
   const { user } = getAppContext();
@@ -442,9 +442,20 @@
           >{m.file_quote_from({ name: quote.fileName })}</span
         >
         {#if location}<span class="text-secondary block text-xs">{location}</span>{/if}
-        <span class="text-default line-clamp-2 text-sm break-words whitespace-pre-line"
-          >{quote.text}</span
-        >
+        {#if tableQuoteSummary(quote.text)}
+          {@const table = tableQuoteSummary(quote.text)!}
+          <!-- No room for the table itself here: its columns and size stand in. -->
+          <span class="text-default block truncate text-sm">{table.columns.join(" · ")}</span>
+          <span class="text-secondary block text-xs">
+            {table.rows === 1
+              ? m.file_quote_table_row()
+              : m.file_quote_table_rows({ count: table.rows })}
+          </span>
+        {:else}
+          <span class="text-default line-clamp-2 text-sm break-words whitespace-pre-line"
+            >{quote.text}</span
+          >
+        {/if}
         {#if quote.fileId && !quotedFile}<span class="text-secondary block text-xs"
             >{m.table_reference_unavailable()}</span
           >{/if}
