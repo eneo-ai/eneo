@@ -9,17 +9,17 @@ superseded version too. This partial index holds only active rows, so the
 count is an index-only scan.
 
 ``CONCURRENTLY`` avoids a write lock on ``info_blobs`` during the build. It
-can leave the index INVALID if the build fails; Alembic still marks the
-migration applied. Recovery:
+can leave the index INVALID if the build fails. A retry drops that index
+before building it again. To inspect a failed build:
 
     SELECT indexrelid::regclass, indisvalid FROM pg_index
     WHERE indexrelid::regclass::text
         = 'ix_info_blobs_active_integration_knowledge';
     -- if indisvalid = false, run the upgrade statements by hand.
 
-Revision ID: 202610161200
+Revision ID: 202610191030
 Revises: 202610131400
-Create Date: 2026-10-16 12:00:00.000000
+Create Date: 2026-10-19 10:30:00.000000
 """
 
 from collections.abc import Sequence
@@ -28,7 +28,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "202610161200"
+revision: str = "202610191030"
 down_revision: str | None = "202610131400"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
