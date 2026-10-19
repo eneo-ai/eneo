@@ -22,6 +22,8 @@ const examples = [
   ["backend/tests/integration/test_model_provider_outbound_headers.py", ["sk-test-", "12345678"]],
   ["backend/tests/unittests/integration/test_sharepoint_content_service.py", ["integration_knowledge_id=", "ik.id"]],
   ["backend/tests/unittests/integration/test_sharepoint_content_service.py", ["integration_knowledge_id=", "knowledge_id"]],
+  ["backend/tests/unittests/integration/test_sharepoint_sync_ledger.py", ["integration_knowledge_id=", "ik.id"]],
+  ["backend/tests/unittests/integration/test_sharepoint_failed_items.py", ["integration_knowledge_id=", "ik.id"]],
   ["backend/tests/unittests/observability/test_error_text.py", ["v1.eyJhdWQiOiJ4In0.", "c2lnbmF0dXJl"]],
 ].map(([path, parts]) => ({ path, value: parts.join("") }));
 
