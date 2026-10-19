@@ -3940,6 +3940,8 @@
   "file_quote_table_rows": "{count} rows",
   "file_preview_version_number": "Version {number}",
   "file_preview_version_by_assistant": "Created by the assistant",
+  "file_preview_restore": "Restore",
+  "file_preview_version_restored": "Version {number} is now the latest version.",
   "file_preview_restore_version": "Restore this version",
   "file_preview_edited_by_you": "Edited by you",
   "file_preview_older_version_edited_by_you": "Older version, edited by you",

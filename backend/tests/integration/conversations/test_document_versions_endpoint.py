@@ -119,7 +119,7 @@ async def test_saved_edit_is_a_new_version_on_the_documents_turn(
     assert availability.status_code == 200, availability.text
 
 
-async def test_a_second_save_replaces_the_readers_first_version(
+async def test_a_second_save_is_a_version_of_the_readers_first(
     client, db_container, admin_user, patch_auth_service_jwt
 ):
     token = await _token(db_container, patch_auth_service_jwt, admin_user)
@@ -140,14 +140,14 @@ async def test_a_second_save_replaces_the_readers_first_version(
     )
 
     assert second.status_code == 201, second.text
-    # The reader's edits stay one layer on the assistant's version.
-    assert second.json()["revises_file_id"] == str(base)
-    assert await _file_count() == files_after_first
+    # The versions stack: the second stands on the first, which stays.
+    assert second.json()["revises_file_id"] == first.json()["id"]
+    assert await _file_count() == files_after_first + 1
     conversation = await client.get(
         f"/api/v1/conversations/{session_id}/", headers=_auth(token)
     )
     generated = {f["id"] for f in conversation.json()["messages"][0]["generated_files"]}
-    assert generated == {str(base), second.json()["id"]}
+    assert generated == {str(base), first.json()["id"], second.json()["id"]}
 
 
 async def test_unchanged_text_makes_no_version(

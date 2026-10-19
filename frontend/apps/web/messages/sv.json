@@ -3940,6 +3940,8 @@
   "file_quote_table_rows": "{count} rader",
   "file_preview_version_number": "Version {number}",
   "file_preview_version_by_assistant": "Skapad av assistenten",
+  "file_preview_restore": "Återställ",
+  "file_preview_version_restored": "Version {number} är nu den senaste versionen.",
   "file_preview_restore_version": "Återställ den här versionen",
   "file_preview_edited_by_you": "Redigerad av dig",
   "file_preview_older_version_edited_by_you": "Äldre version, redigerad av dig",

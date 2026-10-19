@@ -10,11 +10,13 @@
   import { m } from "$lib/paraglide/messages";
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Diff from "@lucide/svelte/icons/diff";
   import Download from "@lucide/svelte/icons/download";
   import FileText from "@lucide/svelte/icons/file-text";
   import History from "@lucide/svelte/icons/history";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Minimize2 from "@lucide/svelte/icons/minimize-2";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import X from "@lucide/svelte/icons/x";
   import { toast } from "svelte-sonner";
   import type { DocumentExport, DocumentSaver, FilePreview } from "../FilePreview.svelte";
@@ -227,14 +229,16 @@
   // The content components by file, for the document text the reader has edited.
   let contentOf = $state<Record<string, FilePreviewContent>>({});
 
+  /** Saves `markdown` as the document's next version; whether it was saved. */
   async function saveAs(target: DocumentSaver, markdown: string) {
     const request = preview.beginSave();
     try {
       const version = await target.save(markdown);
       request.apply(version, markdown);
-      target.saved?.(version);
+      return true;
     } catch {
       toast.error(m.file_preview_save_failed());
+      return false;
     } finally {
       request.finish();
     }
@@ -253,7 +257,12 @@
   const restorable = $derived(!!restorer && whole && !draft);
   async function restoreVersion() {
     if (!restorer || !restorable || content?.kind !== "markdown" || saving) return;
-    await saveAs(restorer, content.text);
+    // The restored text is the text on show, so the panel looks the same
+    // afterwards: the confirmation says what happened.
+    const number = position + 1;
+    if (await saveAs(restorer, content.text)) {
+      toast.success(m.file_preview_version_restored({ number }));
+    }
   }
 
   // Versions newest first, as the menu lists them.
@@ -310,20 +319,6 @@
           </span>
         </DropdownMenu.Item>
       {/each}
-      {#if comparable || restorable}
-        <DropdownMenu.Separator />
-      {/if}
-      {#if comparable}
-        <DropdownMenu.CheckboxItem bind:checked={preview.showChanges}>
-          {m.file_preview_show_changes()}
-        </DropdownMenu.CheckboxItem>
-      {/if}
-      {#if restorable}
-        <DropdownMenu.Item onSelect={restoreVersion} disabled={saving}>
-          <span class="size-4 shrink-0" aria-hidden="true"></span>
-          {m.file_preview_restore_version()}
-        </DropdownMenu.Item>
-      {/if}
     </DropdownMenu.Content>
   </DropdownMenu.Root>
 {/snippet}
@@ -515,9 +510,38 @@
     <div
       class="border-border flex shrink-0 items-center justify-between gap-2 border-b py-1.5 pr-3 pl-3"
     >
-      <span class="flex min-w-0 items-center">
+      <!-- What applies to the version on show stands beside its menu: the
+           change marks for one with a version before it, and bringing an
+           older one forward as the newest. -->
+      <span class="flex min-w-0 items-center gap-1">
         {#if versions.length > 1}
           {@render versionMenu()}
+        {/if}
+        {#if comparable}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            class="aria-pressed:bg-accent-dimmer aria-pressed:text-accent-stronger"
+            aria-pressed={preview.showChanges}
+            aria-label={m.file_preview_show_changes()}
+            title={m.file_preview_show_changes()}
+            onclick={() => (preview.showChanges = !preview.showChanges)}
+          >
+            <Diff aria-hidden="true" />
+          </Button>
+        {/if}
+        {#if restorable}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={saving}
+            aria-label={m.file_preview_restore_version()}
+            title={m.file_preview_restore_version()}
+            onclick={restoreVersion}
+          >
+            <RotateCcw aria-hidden="true" />
+            {m.file_preview_restore()}
+          </Button>
         {/if}
       </span>
       <span class="flex shrink-0 items-center gap-1">

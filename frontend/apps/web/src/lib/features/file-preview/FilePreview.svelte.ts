@@ -35,8 +35,6 @@ export type PreviewCover = { leave: () => void };
 /** How a reader's edit of a document is kept: as the document's next version. */
 export type DocumentSaver = {
   save: (markdown: string) => Promise<PreviewFile>;
-  /** The save succeeded; reconcile its replaced version after updating the preview if still current. */
-  saved?: (version: PreviewFile) => void;
 };
 
 /** Actual document input shown while the assistant is still writing it. */

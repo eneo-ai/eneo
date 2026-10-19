@@ -227,14 +227,6 @@ export class ChatService {
     holder.generated_files = [...(holder.generated_files ?? []), file];
   }
 
-  /** A reader's version a newer save of theirs replaced is gone from the conversation. */
-  removeGeneratedFile(fileId: string) {
-    for (const message of this.currentConversation.messages ?? []) {
-      if (!message.generated_files?.some((file) => file.id === fileId)) continue;
-      message.generated_files = message.generated_files.filter((file) => file.id !== fileId);
-    }
-  }
-
   /** Actual text/sheets as they arrive, with a visible preparation state from call start. */
   get writingDocument(): DocumentDraft | null {
     if (!this.askQuestion.isLoading) return null;
