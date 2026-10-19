@@ -110,7 +110,11 @@
           })
         );
       } else {
-        toast.success(m.sharepoint_subscriptions_renewed_success({ count: result.recreated ?? 0 }));
+        toast.success(
+          result.recreated === 1
+            ? m.sharepoint_subscriptions_renewed_success_one()
+            : m.sharepoint_subscriptions_renewed_success({ count: result.recreated ?? 0 })
+        );
       }
     } catch (error) {
       toastError(error, m.sharepoint_subscriptions_renew_error());
