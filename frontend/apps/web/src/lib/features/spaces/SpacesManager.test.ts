@@ -189,6 +189,21 @@ describe("SpacesManager.refreshCurrentSpace", () => {
     }
   );
 
+  it.each([false, true])(
+    "does not replace the current space with a rename started before navigation (%s)",
+    async (returnToA) => {
+      const { manager, eneo } = setup();
+      const response = deferred<Space>();
+      vi.spyOn(eneo.spaces, "update").mockReturnValue(response.promise);
+      const mutation = manager.updateSpace({ name: "Renamed" });
+      manager.watchPageData({ currentSpace: { ...initial, id: "space-b", name: "B" } });
+      if (returnToA) manager.watchPageData({ currentSpace: { ...initial, name: "New A" } });
+      response.resolve({ ...initial, name: "Renamed" });
+      expect((await mutation)?.name).toBe("Renamed");
+      expect(get(manager.state.currentSpace).name).toBe(returnToA ? "New A" : "B");
+    }
+  );
+
   it("keeps the newest successful response when requests finish out of order", async () => {
     const { manager, eneo } = setup();
     const old = deferred<Space>();
