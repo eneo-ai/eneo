@@ -881,6 +881,11 @@ MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
     ): "Completes the caller's own authorization (single-use state bound to them). "
     "Write key guard blocks read-only keys; require_user_for_creation blocks service keys.",
     (
+        "POST",
+        "/mcp-oauth/servers/{id}/decline/",
+    ): "Ends the caller's own paused authorization wait (a Redis mark keyed to them). "
+    "Write key guard blocks read-only keys; service keys are rejected by identity.",
+    (
         "DELETE",
         "/mcp-oauth/servers/{id}/connection/",
     ): "Forgets the caller's own connection (admin-only for a shared one, in the service). "

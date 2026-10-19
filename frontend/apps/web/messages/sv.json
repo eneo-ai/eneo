@@ -4924,5 +4924,6 @@
   "audit_action_mcp_oauth_shared_connection_set_description": "Loggar när en administratör ansluter en delad MCP-server för hela organisationen",
   "audit_action_mcp_oauth_shared_connection_cleared": "Delad MCP-anslutning borttagen",
   "audit_action_mcp_oauth_shared_connection_cleared_description": "Loggar när en administratör tar bort organisationens delade anslutning till en MCP-server",
-  "mcp_oauth_connected_continuing": "Anslutet. Fortsätter…"
+  "mcp_oauth_connected_continuing": "Anslutet. Fortsätter…",
+  "mcp_oauth_declined_continuing": "Fortsätter utan verktyget."
 }

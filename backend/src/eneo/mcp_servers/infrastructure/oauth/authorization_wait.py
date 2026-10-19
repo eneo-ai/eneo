@@ -35,6 +35,15 @@ def connected_key(user_id: UUID, server_id: UUID) -> str:
     )
 
 
+def declined_key(user_id: UUID, server_id: UUID) -> str:
+    return f"eneo:{get_settings().environment}:mcp:oauth:declined:{user_id}:{server_id}"
+
+
+# A decline only matters to a turn waiting right now; it must never spill
+# into a later turn's wait.
+DECLINED_MARK_TTL_SECONDS = 60
+
+
 class MCPOAuthAuthorizationWaiter:
     def __init__(
         self,
@@ -66,11 +75,23 @@ class MCPOAuthAuthorizationWaiter:
         except Exception as exc:  # pragma: no cover - Redis outage
             logger.warning("Could not mark MCP OAuth connection in Redis: %s", exc)
 
-    async def wait(self, user_id: UUID, server_ids: Iterable[UUID]) -> set[UUID]:
-        """Wait until every server is marked connected, or the timeout passes.
+    async def mark_declined(self, user_id: UUID, server_id: UUID) -> None:
+        """The user refused (or abandoned) the authorization: stop waiting."""
+        if self._redis is None:
+            return
+        try:
+            await self._redis.set(
+                declined_key(user_id, server_id), "1", ex=DECLINED_MARK_TTL_SECONDS
+            )
+        except Exception as exc:  # pragma: no cover - Redis outage
+            logger.warning("Could not mark MCP OAuth decline in Redis: %s", exc)
 
-        Returns the servers that were marked. Marks are consumed so a later
-        turn cannot mistake an old authorization for a new one.
+    async def wait(self, user_id: UUID, server_ids: Iterable[UUID]) -> set[UUID]:
+        """Wait until every server is marked connected or declined, or the
+        timeout passes.
+
+        Returns the servers that were connected. Marks are consumed so a later
+        turn cannot mistake an old answer for a new one.
         """
         pending = list(dict.fromkeys(server_ids))
         if not pending or not self.available or self._redis is None:
@@ -78,19 +99,25 @@ class MCPOAuthAuthorizationWaiter:
         connected: set[UUID] = set()
         deadline = asyncio.get_running_loop().time() + self._timeout
         while pending:
-            keys = [connected_key(user_id, sid) for sid in pending]
+            keys = [connected_key(user_id, sid) for sid in pending] + [
+                declined_key(user_id, sid) for sid in pending
+            ]
             try:
                 values: list[object] = list(await self._redis.mget(keys))
             except Exception as exc:  # pragma: no cover - Redis outage
                 logger.warning("MCP OAuth authorization wait aborted: %s", exc)
                 break
-            hits = [sid for sid, value in zip(pending, values) if value]
-            if hits:
+            count = len(pending)
+            hits = [sid for sid, value in zip(pending, values[:count]) if value]
+            declined = [sid for sid, value in zip(pending, values[count:]) if value]
+            if hits or declined:
                 connected.update(hits)
-                pending = [sid for sid in pending if sid not in connected]
+                settled = set(hits) | set(declined)
+                pending = [sid for sid in pending if sid not in settled]
                 try:
                     await self._redis.delete(
-                        *[connected_key(user_id, sid) for sid in hits]
+                        *[connected_key(user_id, sid) for sid in hits],
+                        *[declined_key(user_id, sid) for sid in declined],
                     )
                 except Exception:  # pragma: no cover - best effort
                     pass

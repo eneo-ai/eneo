@@ -176,6 +176,30 @@ async def complete_mcp_oauth(
     return MCPOAuthConnectionPublic(**state)
 
 
+@router.post(
+    "/servers/{id}/decline/",
+    status_code=204,
+    dependencies=[_WRITE_KEY],
+    description=(
+        "The user refused or abandoned the vendor's consent page: a turn paused "
+        "on this authorization proceeds without it."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CONNECTION_ACCESS_REASON,
+)
+async def decline_mcp_oauth(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(require_user_identity),
+):
+    await container.mcp_oauth_service().decline(id)
+    return None
+
+
 @router.delete(
     "/servers/{id}/connection/",
     status_code=204,

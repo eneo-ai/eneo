@@ -56,6 +56,24 @@ async def test_times_out_with_what_was_connected():
     assert connected == {first}
 
 
+async def test_a_decline_ends_the_wait_for_that_server():
+    redis = FakeRedis()
+    waiter = MCPOAuthAuthorizationWaiter(redis, timeout_seconds=5, poll_seconds=0.01)  # type: ignore[arg-type]
+    user, first, second = uuid4(), uuid4(), uuid4()
+
+    async def answer_later():
+        await asyncio.sleep(0.02)
+        await waiter.mark_connected(user, first)
+        await asyncio.sleep(0.02)
+        await waiter.mark_declined(user, second)
+
+    asyncio.create_task(answer_later())
+    connected = await waiter.wait(user, [first, second])
+
+    assert connected == {first}
+    assert redis.store == {}
+
+
 async def test_without_redis_there_is_nothing_to_wait_for():
     waiter = MCPOAuthAuthorizationWaiter(None, timeout_seconds=5)
 

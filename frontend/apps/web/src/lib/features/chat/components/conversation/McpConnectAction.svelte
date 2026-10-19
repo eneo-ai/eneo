@@ -11,6 +11,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { getMcpOAuthConnect } from "$lib/features/mcp/McpOAuthConnectService.svelte";
   import type { AuthorizationRemedy } from "$lib/features/mcp/oauthRemedy";
@@ -19,7 +20,9 @@
   let { remedy, live = false }: { remedy: AuthorizationRemedy; live?: boolean } = $props();
 
   const connect = getMcpOAuthConnect();
+  const eneo = getEneo();
   let connected = $state(false);
+  let declined = $state(false);
 
   async function run() {
     if (!connect) return;
@@ -28,8 +31,18 @@
       connected = true;
       // A live turn resumes the call by itself; a finished one needs a resend.
       toast.success(live ? m.mcp_oauth_connected_continuing() : m.mcp_oauth_connected_resend());
-    } else if (result.error.message !== "popup_closed") {
-      toastError(result.error);
+      return;
+    }
+    if (result.error.message !== "popup_closed") toastError(result.error);
+    if (live) {
+      // Refused at the vendor or the popup closed: the paused turn goes on
+      // without the tool instead of waiting out its timeout.
+      declined = true;
+      try {
+        await eneo.mcpOauth.decline({ id: remedy.mcp_server_id });
+      } catch {
+        /* the wait then ends at its timeout */
+      }
     }
   }
 </script>
@@ -40,6 +53,8 @@
   <span class="text-positive-default text-xs"
     >{live ? m.mcp_oauth_connected_continuing() : m.mcp_oauth_connected_resend()}</span
   >
+{:else if declined && live}
+  <span class="text-muted text-xs">{m.mcp_oauth_declined_continuing()}</span>
 {:else if connect}
   <Button
     variant="outline"

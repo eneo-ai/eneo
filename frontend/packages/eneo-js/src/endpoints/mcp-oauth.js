@@ -43,6 +43,21 @@ export function initMcpOauth(client) {
     },
 
     /**
+     * Tell a turn paused on this authorization to stop waiting: the user
+     * refused or abandoned the vendor's consent page.
+     * @param {Object} params
+     * @param {string} params.id The MCP server ID
+     * @throws {EneoError}
+     */
+    decline: async ({ id }) => {
+      await client.fetch("/api/v1/mcp-oauth/servers/{id}/decline/", {
+        method: "post",
+        params: { path: { id } }
+      });
+      return true;
+    },
+
+    /**
      * Forget the caller's connection to a server (revoking its tokens when possible).
      * @param {Object} params
      * @param {string} params.id The MCP server ID

@@ -388,6 +388,17 @@ class MCPOAuthService:
         )
         return connection_public_state(server, saved)
 
+    async def decline(self, mcp_server_id: UUID) -> None:
+        """The user refused or abandoned the vendor's consent: a turn paused on
+        this authorization proceeds without it instead of waiting it out."""
+        server = await self._oauth_server(mcp_server_id)
+        principal = self._principal_user_id(server)
+        if principal is None:
+            return
+        await MCPOAuthAuthorizationWaiter(self._redis).mark_declined(
+            principal, server.id
+        )
+
     async def disconnect(self, mcp_server_id: UUID) -> bool:
         server = await self._oauth_server(mcp_server_id)
         self._require_admin_for_shared(server)
