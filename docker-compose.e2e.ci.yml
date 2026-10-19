@@ -193,9 +193,11 @@ services:
       WORKER_ROLE: crawler
     networks: [e2e]
     healthcheck:
+      # arq --check imports the whole worker module (about 10 s on a loaded
+      # host), so a 10 s timeout fails the check before the import ends.
       test: ["CMD", "arq", "--check", "src.eneo.worker.arq.CrawlerWorkerSettings"]
       interval: 5s
-      timeout: 10s
+      timeout: 60s
       retries: 30
       start_period: 120s
 
