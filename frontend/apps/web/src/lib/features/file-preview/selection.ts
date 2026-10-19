@@ -1,3 +1,10 @@
+import {
+  MAX_MATCHES,
+  OCCURRENCE_LOCATOR,
+  ROWS_LOCATOR,
+  occurrenceLocator,
+  stripForMatch
+} from "./passageLocator";
 import { parseTableLocator } from "./tableReference";
 
 /** Selected text and where it is on screen, in the hosting page's viewport. */
@@ -84,7 +91,6 @@ export function watchSelection(doc: Document, { within, origin, report }: WatchO
 
 // Row numbers and other chrome are unselectable; a selection never holds them.
 const UNSELECTABLE = ".select-none";
-const MAX_MATCHES = 200;
 const MAX_CELL_LENGTH = 60;
 const MAX_CELLS_LENGTH = 300;
 const ELEMENT_NODE = 1;
@@ -96,7 +102,7 @@ const ELEMENT_NODE = 1;
  * that the text nodes do not hold.
  */
 function findOccurrences(root: Element, passage: string): Range[] {
-  const needle = passage.replace(/…$/, "").replace(/\s+/g, "");
+  const needle = stripForMatch(passage);
   if (!needle) return [];
 
   const doc = root.ownerDocument;
@@ -186,20 +192,8 @@ function reveal(range: Range, view: Window & typeof globalThis) {
   }
 }
 
-// A locator says which of several identical passages is meant. It is written
-// in plain English because the model reads it too, as part of the quote's
-// source line; these are the only shapes it takes.
-const ROWS_LOCATOR =
-  /^(?:sheet "(.*?)", )?rows? (\d+)(?:-\d+)? \((?:the header(?: and data rows? \d+(?:-\d+)?)?|data rows? \d+(?:-\d+)?)\)(?:, cells: .*)?$/;
-const OCCURRENCE_LOCATOR = /^occurrence (\d+) of \d+$/;
-
-/** Whether `text` is a locator, as opposed to the tail of a file name. */
-export const isLocator = (text: string) =>
-  !!parseTableLocator(text) || ROWS_LOCATOR.test(text) || OCCURRENCE_LOCATOR.test(text);
-
-/** The sheet a locator points into, when it names one. */
-export const locatorSheet = (locator: string | null) =>
-  parseTableLocator(locator)?.sheet ?? ((locator && ROWS_LOCATOR.exec(locator)?.[1]) || null);
+// The locator grammar lives in ./passageLocator, shared with the document editor.
+export { isLocator, locatorSheet } from "./passageLocator";
 
 const elementOf = (node: Node) =>
   node.nodeType === ELEMENT_NODE ? (node as Element) : node.parentElement;
@@ -247,7 +241,7 @@ export function locatePassage(root: Element, range: Range, text: string): string
   const index = occurrences.findIndex(
     (occurrence) => occurrence.compareBoundaryPoints(Range.END_TO_END, range) >= 0
   );
-  return index === -1 ? null : `occurrence ${index + 1} of ${occurrences.length}`;
+  return index === -1 ? null : occurrenceLocator(index + 1, occurrences.length);
 }
 
 /**

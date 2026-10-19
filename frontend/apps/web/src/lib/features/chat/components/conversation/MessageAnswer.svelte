@@ -148,6 +148,7 @@
   const previousAttempts = $derived(previousToolAttemptIndexes(tracedToolCalls, isStreamingTurn));
   const tracedSteps = $derived(
     tracedToolCalls.map((tc, i) => {
+      const writing = chat.writingDocument;
       const denied =
         (!!tc.tool_call_id && deniedToolIds.has(tc.tool_call_id)) ||
         tc.approved === false ||
@@ -181,6 +182,9 @@
         ? ((tc.arguments?.title as string | undefined) ??
           chat.partialArgumentsOf(tc.tool_call_id)?.title)
         : undefined;
+      // The document as far as it is written, so the step can show it again
+      // after the reader closed the panel on it.
+      const draft = createsFile && writing && writing.callId === tc.tool_call_id ? writing : null;
       // A change to an earlier document names that document while it is made.
       const updatingName = createsFile && !writingTitle ? revisedDocumentName(tc.arguments) : null;
       const activity = analysisStepLabels(
@@ -204,9 +208,11 @@
                 tc.is_internal
               ));
       return {
+        // The step opens the document at its newest version, a reader's
+        // saved edit included.
         document: file
           ? {
-              file,
+              file: chat.documents.latestOf(file.id) ?? file,
               label: createsFile
                 ? revisedFileId(tc.arguments)
                   ? (name: string) => m.tool_document_updated({ name })
@@ -248,7 +254,8 @@
         // whichever slim run it sits in rather than to a kind of its own.
         neutral: isSkillActivation(tc),
         icon: toolStepIcon(tc.purpose),
-        view
+        view,
+        draft
       };
     })
   );
@@ -312,16 +319,23 @@
   const createdDocument = (step: (typeof tracedSteps)[number]) =>
     step.document !== null && step.status === "complete";
   // Documents no step of this answer accounts for (an answer saved before
-  // calls recorded their files) keep a card, so each stays reachable.
+  // calls recorded their files) keep a card, so each stays reachable. A
+  // version a reader saved belongs to the document it revises, which the
+  // step that made the document opens at its newest version.
   const unclaimedDocumentIds = $derived.by(() => {
     const claimed = new Set(
       tracedSteps.flatMap((step) =>
-        step.kind !== "external" && step.document ? [step.document.file.id] : []
+        step.kind !== "external" && step.document
+          ? [
+              step.document.file.id,
+              ...chat.documents.versionsOf(step.document.file.id).map((version) => version.id)
+            ]
+          : []
       )
     );
     return new Set(
       message.generated_files
-        .filter((file) => isDocument(file) && !claimed.has(file.id))
+        .filter((file) => isDocument(file) && !claimed.has(file.id) && !file.revises_file_id)
         .map((file) => file.id)
     );
   });
@@ -509,6 +523,7 @@
                   document={step.document}
                   icon={step.icon}
                   view={step.view}
+                  draft={step.draft}
                   onLoadResult={step.toolCallId
                     ? () => chat.getToolCallResult(step.toolCallId!)
                     : undefined}
