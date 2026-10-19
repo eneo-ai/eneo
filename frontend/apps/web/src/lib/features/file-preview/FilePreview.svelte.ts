@@ -78,10 +78,11 @@ export class FilePreview {
   #opensByItself = true;
   // The draft the reader left for another file; it does not take the panel back.
   #leftDraft: string | null = null;
-  // A file has arrived for these calls. Late draft effects cannot take over
-  // either its download or its completed preview.
+  // The file that has arrived for each of these calls. Late draft effects
+  // cannot take over either its download or its completed preview, and a
+  // draft the reader asked for after its file came shows that file instead.
   // eslint-disable-next-line svelte/prefer-svelte-reactivity -- transition guard, never rendered
-  #finishedDrafts = new Set<string>();
+  #finishedDrafts = new Map<string, PreviewFile>();
 
   file = $state.raw<PreviewFile | null>(null);
   /**
@@ -422,14 +423,24 @@ export class FilePreview {
   showDraft(draft: PreviewDraft) {
     if (this.#finishedDrafts.has(draft.callId)) return;
     this.#guarded(() => {
+      // The reader may have been asked about their edits first, and the
+      // assistant written on meanwhile: the document, once it has come, is
+      // what they get to see, else the draft as it stands now.
+      const finished = this.#finishedDrafts.get(draft.callId);
+      if (finished) {
+        this.#open(finished);
+        return;
+      }
       if (this.#leftDraft === draft.callId) this.#leftDraft = null;
       this.openedByItself = false;
       this.cover?.leave();
       this.#abort?.abort();
+      // A save still in flight was of the document the draft replaces.
+      this.#releaseSave();
       this.#clearReplacement();
       this.file = null;
       this.content = null;
-      this.#takeDraft(draft);
+      this.#takeDraft(this.draft?.callId === draft.callId ? this.draft : draft);
     });
   }
 
@@ -438,6 +449,7 @@ export class FilePreview {
       this.#abort?.abort();
       this.#clearReplacement();
       if (this.status !== "ready" || !this.content) {
+        this.#releaseSave();
         this.file = null;
         this.content = null;
       }
@@ -471,14 +483,22 @@ export class FilePreview {
    * point out in it: what an edit of the earlier version put in.
    */
   arrive(file: PreviewFile, changed: PreviewPassage | null = null, callId?: string | null) {
-    if ((callId && callId === this.#leftDraft) || this.#holds(file)) return;
+    if (this.#holds(file)) return;
+    if (callId && callId === this.#leftDraft) {
+      // Not shown, since the reader left its draft; but asked for, it is this file.
+      this.#finishedDrafts.set(callId, file);
+      return;
+    }
     if (!this.shown || this.cover) {
       const opens = this.besideConversation && this.#opensByItself;
       if (!opens || !this.canPreview(file)) return;
       this.openedByItself = true;
       this.cover?.leave();
     }
-    if (this.draft) this.#finishedDrafts.add(this.draft.callId);
+    // The call that made the file is done, and so is the draft on show, which
+    // the file takes over whichever call it is from.
+    if (callId) this.#finishedDrafts.set(callId, file);
+    if (this.draft) this.#finishedDrafts.set(this.draft.callId, file);
     const keepCurrent = !!this.file && !!this.content && this.status === "ready";
     if (!keepCurrent) {
       this.#releaseSave();

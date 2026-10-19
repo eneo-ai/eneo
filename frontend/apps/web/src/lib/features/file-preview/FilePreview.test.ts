@@ -412,6 +412,62 @@ it("holds a newer version back while edits are unsaved and shows it when they ar
   expect(preview.dirty).toBe(false);
 });
 
+it("shows the finished document, not the draft it was, when edits are let go after the draft was asked for", async () => {
+  const preview = panel();
+  const document = { ...file, name: "report.md", mimetype: "text/markdown" };
+  vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
+  preview.open(document);
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  preview.setEdits(document.id, "# Edited\n");
+
+  preview.showDraft(draft);
+  expect(preview.pendingDiscard).not.toBeNull();
+  const finished = { ...document, id: "report-2" };
+  preview.arrive(finished, null, draft.callId);
+  await vi.waitFor(() => expect(preview.replacementContent).not.toBeNull());
+  preview.finishReplacement(finished.id);
+  expect(preview.file).toEqual(document);
+
+  preview.pendingDiscard?.proceed();
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  expect(preview.file).toEqual(finished);
+  expect(preview.draft).toBeNull();
+  expect(preview.dirty).toBe(false);
+});
+
+it("shows the draft as it stands when edits are let go, not as it was when asked for", async () => {
+  const preview = panel();
+  const document = { ...file, name: "report.md", mimetype: "text/markdown" };
+  vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
+  preview.open(document);
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  preview.setEdits(document.id, "# Edited\n");
+
+  preview.showDraft(draft);
+  preview.write({ ...draft, text: "Introduction and more" });
+  expect(preview.file).toEqual(document);
+
+  preview.pendingDiscard?.proceed();
+  expect(preview.file).toBeNull();
+  expect(preview.draft?.text).toBe("Introduction and more");
+});
+
+it("a save in flight no longer applies once a draft takes the panel", async () => {
+  const preview = panel();
+  const document = { ...file, name: "report.md", mimetype: "text/markdown" };
+  vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
+  preview.open(document);
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  const request = preview.beginSave();
+  expect(preview.saving).toBe(true);
+
+  preview.showDraft(draft);
+  expect(preview.saving).toBe(false);
+  expect(request.apply({ ...document, id: "report-2" }, "# Restored\n")).toBe(false);
+  expect(preview.file).toBeNull();
+  expect(preview.draft).toEqual(draft);
+});
+
 it("a save settles a question about discarding edits that was still open", async () => {
   const preview = panel();
   const document = { ...file, name: "report.md", mimetype: "text/markdown" };
