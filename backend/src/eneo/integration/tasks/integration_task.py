@@ -244,6 +244,8 @@ async def _drain_pending_delta(
     container: "Container",
     service: "SharePointContentService",
     params: "SharepointContentTaskParam",
+    *,
+    owned: bool = True,
 ) -> str | None:
     """Run the delta passes skipped tasks asked for, while still holding the lease.
 
@@ -254,6 +256,10 @@ async def _drain_pending_delta(
     failed or could not mint one; a delta pass would only start a second full
     sync, and the next sync is a full one that covers the change anyway, so
     the marker is dropped.
+
+    ``owned`` is false for a task that took the lease only on its retry: no
+    sync of its own ran, so its passes are ordinary ones whose failure is the
+    knowledge's status and the job's outcome.
     """
     result: str | None = None
     for _ in range(_PENDING_DRAIN_MAX_PASSES):
@@ -274,6 +280,9 @@ async def _drain_pending_delta(
             "lease was held",
             knowledge_id_str,
         )
+        if not owned:
+            result = await _run_delta(service, params, knowledge)
+            continue
         try:
             result = await _run_delta(service, params, knowledge, record_failure=False)
         except Exception:
@@ -382,7 +391,12 @@ async def sync_sharepoint_delta(
             if acquired and await redis_client.get(_pending_key(knowledge_id_str)):
                 _, service = await _prepare_sharepoint_sync(container, params)
                 drained = await _drain_pending_delta(
-                    redis_client, knowledge_id_str, container, service, params
+                    redis_client,
+                    knowledge_id_str,
+                    container,
+                    service,
+                    params,
+                    owned=False,
                 )
                 if drained is not None:
                     return drained

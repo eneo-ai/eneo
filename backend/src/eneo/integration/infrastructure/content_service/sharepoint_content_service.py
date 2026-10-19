@@ -1,8 +1,9 @@
 import asyncio
 import hashlib
+import random
 import unicodedata
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, Optional, cast
@@ -112,10 +113,14 @@ logger = get_logger(__name__)
 # Full-sync reconciliation safety guard: cap deletions at the LARGER of a fraction
 # of the indexed set and a small absolute floor. The floor only lets a tiny KB churn
 # fully; it is kept low so the fraction guard engages for medium KBs too (with the
-# old floor of 50 the fraction was inert below 100 blobs). A diff above the cap almost
-# always means a stale/incomplete enumeration, so we skip rather than mass-delete.
+# old floor of 50 the fraction was inert below 100 blobs). A diff above the cap usually
+# means a stale/incomplete enumeration, so above it the listing is not trusted: each
+# orphan is asked about by id and only those Graph confirms gone are deleted, a
+# bounded number per full sync, so a genuine large deletion is still cleaned.
 _RECONCILE_MAX_DELETE_FRACTION = 0.5
 _RECONCILE_MIN_DELETE_FLOOR = 10
+_RECONCILE_MAX_VERIFIED_ORPHANS = 500
+_GONE_HTTP_STATUSES = frozenset({404, 410})
 
 # skipped_details is persisted in last_sync_summary and SyncLog metadata; cap it so
 # a library full of unsupported files cannot bloat those rows. skipped_total keeps
@@ -319,13 +324,20 @@ class _DeltaPass:
     change_ids: set[str]
     scope_folder_path: Optional[str]
     folder_scope_path_unresolved: bool
+    # The change set's folders that lie in scope, placed before any entry is
+    # applied; see _place_folder_entries.
     known_subfolder_ids: set[str]
     # Processed (knowledge, item, change_key) triples, written to the Redis
     # ChangeKey cache only after the DB transaction commits; see
     # _schedule_post_commit_change_keys.
     pending_change_keys: list[tuple[UUID, str, str]]
-    # Indexed item ids, read once per pass for folders entering scope.
+    # Indexed item ids, read once per pass by the first entry that needs them.
     indexed_ids: set[str] | None = None
+    # Where Graph put a folder entry that had no path and that the change set
+    # could not place; None when Graph could not say.
+    placements: dict[str, Optional[SharePointItem]] = field(
+        default_factory=dict[str, Optional[SharePointItem]]
+    )
 
 
 class SharePointContentService:
@@ -707,6 +719,7 @@ class SharePointContentService:
                     pending_change_keys=[],
                 )
                 await self._progress.set_phase("processing", stats)
+                await self._place_folder_entries(delta_pass, changes)
                 for item in changes:
                     await self._apply_delta_change(delta_pass, item)
 
@@ -825,14 +838,11 @@ class SharePointContentService:
         content_client = delta_pass.content_client
         integration_knowledge = delta_pass.integration_knowledge
         resolved_integration_knowledge_id = integration_knowledge.id
-        resolved_site_id = delta_pass.site_id
         actual_drive_id = delta_pass.drive_id
         stats = delta_pass.stats
-        change_ids = delta_pass.change_ids
         scope_folder_path = delta_pass.scope_folder_path
-        folder_scope_path_unresolved = delta_pass.folder_scope_path_unresolved
         known_subfolder_ids = delta_pass.known_subfolder_ids
-        pending_change_keys = delta_pass.pending_change_keys
+        folder_scope = integration_knowledge.selected_item_type == "folder"
 
         item_name = item.get("name", "")
         item_id = item.get("id")
@@ -867,7 +877,7 @@ class SharePointContentService:
         if (
             is_folder
             and not is_deleted
-            and integration_knowledge.selected_item_type == "folder"
+            and folder_scope
             and self._is_ancestor_of_scope(item, scope_folder_path)
         ):
             return
@@ -875,16 +885,21 @@ class SharePointContentService:
         # Skip scope check for deleted items — they may lack
         # parentReference data.  The DB delete queries already
         # filter by integration_knowledge_id so they are safe.
-        if not is_deleted and not self._is_item_in_folder_scope(
-            item,
-            integration_knowledge.folder_id,
-            scope_folder_path=scope_folder_path,
-            known_subfolder_ids=known_subfolder_ids,
-            selected_item_type=integration_knowledge.selected_item_type,
-        ):
+        in_scope = (
+            is_deleted
+            or item_id in known_subfolder_ids
+            or self._is_item_in_folder_scope(
+                item,
+                integration_knowledge.folder_id,
+                scope_folder_path=scope_folder_path,
+                known_subfolder_ids=known_subfolder_ids,
+                selected_item_type=integration_knowledge.selected_item_type,
+            )
+        )
+        if not in_scope:
             if (
-                folder_scope_path_unresolved
-                and integration_knowledge.selected_item_type == "folder"
+                delta_pass.folder_scope_path_unresolved
+                and folder_scope
                 and integration_knowledge.folder_id
                 and not scope_folder_path
             ):
@@ -900,6 +915,25 @@ class SharePointContentService:
                 )
                 return
 
+            # Without a path the entry is out of scope only because its parent
+            # is not in this change set, which says nothing about where it is.
+            if folder_scope and not self._parent_path(item):
+                located = await self._place_unplaced_entry(
+                    delta_pass, item, is_folder=is_folder
+                )
+                if located is None or (
+                    is_folder and self._is_ancestor_of_scope(located, scope_folder_path)
+                ):
+                    return
+                in_scope = self._is_item_in_folder_scope(
+                    located,
+                    integration_knowledge.folder_id,
+                    scope_folder_path=scope_folder_path,
+                    known_subfolder_ids=known_subfolder_ids,
+                    selected_item_type="folder",
+                )
+
+        if not in_scope:
             logger.debug("  - Skipping item %s: not in folder scope", item_id)
             await self._delete_local_sharepoint_item(
                 item_id=item_id,
@@ -915,24 +949,9 @@ class SharePointContentService:
             # folder's current descendants and remove them too. Only a
             # folder scope ever indexes descendants; a file scope has
             # nothing under any folder.
-            if is_folder and integration_knowledge.selected_item_type == "folder":
-                await self._delete_out_of_scope_folder_subtree(
-                    content_client=content_client,
-                    resource_type=integration_knowledge.resource_type or "site",
-                    site_id=resolved_site_id,
-                    drive_id=actual_drive_id,
-                    folder_id=item_id,
-                    folder_name=item_id,
-                    integration_knowledge=integration_knowledge,
-                    integration_knowledge_id=resolved_integration_knowledge_id,
-                    stats=stats,
-                    scope_folder_path=scope_folder_path,
-                    known_subfolder_ids=known_subfolder_ids,
-                )
+            if is_folder and folder_scope:
+                await self._clean_folder_left_scope(delta_pass, item)
             return
-
-        if is_folder and integration_knowledge.selected_item_type == "folder":
-            known_subfolder_ids.add(item_id)
 
         if is_deleted:
             # Never placed in scope (see above), so named by its id; a removed
@@ -949,26 +968,8 @@ class SharePointContentService:
 
         if is_folder:
             stats["folders_processed"] += 1
-            if (
-                integration_knowledge.selected_item_type == "folder"
-                and item_id != integration_knowledge.folder_id
-            ):
-                delta_pass.indexed_ids = (
-                    await self._index_folder_subtree_entering_scope(
-                        content_client=content_client,
-                        resource_type=integration_knowledge.resource_type or "site",
-                        site_id=resolved_site_id,
-                        drive_id=actual_drive_id,
-                        folder_id=item_id,
-                        folder_name=item_name,
-                        integration_knowledge=integration_knowledge,
-                        integration_knowledge_id=resolved_integration_knowledge_id,
-                        stats=stats,
-                        pending_change_keys=pending_change_keys,
-                        change_ids=change_ids,
-                        indexed_ids=delta_pass.indexed_ids,
-                    )
-                )
+            if folder_scope and item_id != integration_knowledge.folder_id:
+                await self._walk_folder_in_scope(delta_pass, item)
             return
 
         await self._progress.update(stats, current=item_name)
@@ -978,7 +979,261 @@ class SharePointContentService:
             item=item,
             integration_knowledge=integration_knowledge,
             stats=stats,
-            pending_change_keys=pending_change_keys,
+            pending_change_keys=delta_pass.pending_change_keys,
+        )
+
+    async def _place_folder_entries(
+        self, delta_pass: "_DeltaPass", changes: list[SharePointItem]
+    ) -> None:
+        """Place the change set's folders against the scope before any entry is applied.
+
+        Graph orders a change set arbitrarily and need not give a parent path
+        in delta, so a folder is in scope when its parent is the scope folder
+        or an in-scope folder anywhere in the set, not only one seen earlier. A
+        folder that this leaves unplaced and that has no path of its own is
+        asked about once; its answer decides it and the folders under it.
+        """
+        integration_knowledge = delta_pass.integration_knowledge
+        scope_folder_id = integration_knowledge.folder_id
+        if integration_knowledge.selected_item_type != "folder" or not scope_folder_id:
+            return
+        folders = {
+            folder_id: entry
+            for entry in changes
+            if (folder_id := entry.get("id"))
+            and has_graph_facet(entry, "folder")
+            and not has_graph_facet(entry, "deleted")
+            and not has_graph_facet(entry, "root")
+        }
+        children: dict[str, list[str]] = {}
+        for folder_id, entry in folders.items():
+            if parent_id := entry.get("parentReference", {}).get("id"):
+                children.setdefault(parent_id, []).append(folder_id)
+
+        in_scope = delta_pass.known_subfolder_ids
+
+        def admit(folder_id: str) -> None:
+            pending = [folder_id]
+            while pending:
+                current = pending.pop()
+                if current not in in_scope:
+                    in_scope.add(current)
+                    pending.extend(children.get(current, ()))
+
+        admit(scope_folder_id)
+        for folder_id, entry in folders.items():
+            if self._is_item_in_folder_scope(
+                entry,
+                scope_folder_id,
+                scope_folder_path=delta_pass.scope_folder_path,
+                selected_item_type="folder",
+            ):
+                admit(folder_id)
+
+        if not delta_pass.scope_folder_path:
+            return
+        for folder_id, entry in folders.items():
+            if folder_id in in_scope or self._parent_path(entry):
+                continue
+            located = await self._locate_entry(delta_pass, entry, kind="folder")
+            delta_pass.placements[folder_id] = located
+            if located is not None and self._is_item_in_folder_scope(
+                located,
+                scope_folder_id,
+                scope_folder_path=delta_pass.scope_folder_path,
+                known_subfolder_ids=in_scope,
+                selected_item_type="folder",
+            ):
+                admit(folder_id)
+
+    async def _place_unplaced_entry(
+        self, delta_pass: "_DeltaPass", item: SharePointItem, *, is_folder: bool
+    ) -> Optional[SharePointItem]:
+        """Where an entry without a path is, when that decides anything; else ``None``.
+
+        Folders were placed before the entries were applied. New files need
+        placement too: skipping an unindexed file would advance past its only
+        delta event and leave it missing until a full sync.
+        """
+        item_id = item.get("id", "")
+        if is_folder:
+            return delta_pass.placements.get(item_id)
+        return await self._locate_entry(delta_pass, item, kind="file")
+
+    async def _locate_entry(
+        self, delta_pass: "_DeltaPass", item: SharePointItem, *, kind: str
+    ) -> Optional[SharePointItem]:
+        """The item as Graph has it now, with its path; ``None`` when Graph cannot say.
+
+        Either way nothing of it is deleted. An answer about the item (403,
+        404, 410) or one without a path keeps it for a full sync to reconcile
+        and lets the pass move on; any other failure fails the pass, which
+        keeps its token and is replayed.
+        """
+        item_id = item.get("id", "")
+        item_name = item_id  # Membership is unknown; do not disclose its name.
+        stats = delta_pass.stats
+        try:
+            located = cast(
+                SharePointItem,
+                await delta_pass.content_client.get_file_metadata(
+                    drive_id=delta_pass.drive_id, item_id=item_id
+                ),
+            )
+        except Exception as exc:
+            if (
+                not isinstance(exc, aiohttp.ClientResponseError)
+                or exc.status not in _ITEM_LEVEL_HTTP_STATUSES
+            ):
+                logger.warning(
+                    "Could not read where %s %s (%s) is: %s",
+                    kind,
+                    item_name,
+                    item_id,
+                    exc,
+                )
+                self._count_failure(
+                    stats,
+                    skipped(
+                        item_name,
+                        f"Could not confirm where the {kind} is in SharePoint: "
+                        + user_visible_error(exc),
+                    ),
+                )
+                return None
+            unplaced = f" ({user_visible_error(exc)})"
+        else:
+            if self._parent_path(located):
+                return located
+            unplaced = ""
+        logger.warning(
+            "Keeping %s %s (%s): Graph could not place it against the scope",
+            kind,
+            item_name,
+            item_id,
+        )
+        self._count_skip(
+            stats,
+            skipped(
+                item_name,
+                f"Could not confirm where the {kind} is in SharePoint"
+                f"{unplaced}; kept until the next full sync",
+            ),
+        )
+        return None
+
+    async def _pass_indexed_ids(
+        self, delta_pass: "_DeltaPass", item_name: str
+    ) -> set[str] | None:
+        """The indexed item ids, read once per pass; ``None`` when the read failed.
+
+        The failure is counted against the entry that needed them, so the pass
+        keeps its token and is replayed.
+        """
+        if delta_pass.indexed_ids is None:
+            try:
+                indexed = await self.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge(
+                    integration_knowledge_id=delta_pass.integration_knowledge.id
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not read the indexed SharePoint items: %s",
+                    exc,
+                    exc_info=True,
+                )
+                self._count_failure(
+                    delta_pass.stats,
+                    skipped(
+                        item_name,
+                        "Could not read the indexed documents: "
+                        + user_visible_error(exc),
+                    ),
+                )
+                return None
+            delta_pass.indexed_ids = {item_id for _, item_id in indexed}
+        return delta_pass.indexed_ids
+
+    async def _walk_folder_in_scope(
+        self, delta_pass: "_DeltaPass", item: SharePointItem
+    ) -> None:
+        """Index what an in-scope folder entry brought in, unless it was walked there before.
+
+        The entry does not say whether the folder moved, so its parent is kept
+        once a walk completed without failures, post-commit like a file's
+        ChangeKey. A folder re-emitted under the same parent (a rename, a
+        permission change, a replayed pass) has its files indexed already.
+        """
+        integration_knowledge = delta_pass.integration_knowledge
+        item_id = item.get("id", "")
+        item_name = item.get("name", "")
+        stats = delta_pass.stats
+        parent_id = item.get("parentReference", {}).get("id")
+        location_key = f"folder-under:{parent_id}" if parent_id else None
+        if location_key and self.change_key_service:
+            try:
+                walked_here = not await self.change_key_service.should_process(
+                    integration_knowledge_id=integration_knowledge.id,
+                    item_id=item_id,
+                    change_key=location_key,
+                )
+            except Exception as exc:
+                logger.warning("Could not read the walk cache for %s: %s", item_id, exc)
+                walked_here = False
+            if walked_here:
+                return
+
+        indexed_ids = await self._pass_indexed_ids(delta_pass, item_name)
+        if indexed_ids is None:
+            return
+        failed_before = stats.get("failed_items", 0)
+        await self._index_folder_subtree_entering_scope(
+            content_client=delta_pass.content_client,
+            resource_type=integration_knowledge.resource_type or "site",
+            site_id=delta_pass.site_id,
+            drive_id=delta_pass.drive_id,
+            folder_id=item_id,
+            folder_name=item_name,
+            integration_knowledge=integration_knowledge,
+            stats=stats,
+            pending_change_keys=delta_pass.pending_change_keys,
+            change_ids=delta_pass.change_ids,
+            indexed_ids=indexed_ids,
+        )
+        if location_key and stats.get("failed_items", 0) == failed_before:
+            delta_pass.pending_change_keys.append(
+                (integration_knowledge.id, item_id, location_key)
+            )
+
+    async def _clean_folder_left_scope(
+        self, delta_pass: "_DeltaPass", item: SharePointItem
+    ) -> None:
+        """Remove what was indexed under a folder entry that is out of scope.
+
+        Only the walk can say what lies under the folder now; it is skipped
+        when nothing can be there: Graph reports the folder empty or nothing
+        is indexed at all.
+        """
+        folder = item.get("folder")
+        if isinstance(folder, dict) and folder.get("childCount") == 0:
+            return
+        item_name = item.get("id", "")  # Outside this source; keep its name private.
+        indexed_ids = await self._pass_indexed_ids(delta_pass, item_name)
+        if not indexed_ids:
+            return
+        integration_knowledge = delta_pass.integration_knowledge
+        await self._delete_out_of_scope_folder_subtree(
+            content_client=delta_pass.content_client,
+            resource_type=integration_knowledge.resource_type or "site",
+            site_id=delta_pass.site_id,
+            drive_id=delta_pass.drive_id,
+            folder_id=item.get("id", ""),
+            folder_name=item_name,
+            integration_knowledge=integration_knowledge,
+            integration_knowledge_id=integration_knowledge.id,
+            stats=delta_pass.stats,
+            scope_folder_path=delta_pass.scope_folder_path,
+            known_subfolder_ids=delta_pass.known_subfolder_ids,
+            indexed_ids=indexed_ids,
         )
 
     async def _finish_delta_pass(
@@ -1781,6 +2036,7 @@ class SharePointContentService:
         stats: SyncStats,
         scope_folder_path: Optional[str],
         known_subfolder_ids: set[str],
+        indexed_ids: set[str],
     ) -> None:
         """Remove indexed blobs for the descendants of a folder that left scope.
 
@@ -1796,7 +2052,8 @@ class SharePointContentService:
         classification is only as good as its own parent path, and a subtree that
         turns out to contain the scope must not take the scope's documents with
         it. A descendant without a parent path cannot be placed and is left to the
-        next full sync's reconciliation.
+        next full sync's reconciliation. Only descendants in ``indexed_ids``
+        have anything to delete.
         """
         if not drive_id:
             return
@@ -1827,7 +2084,7 @@ class SharePointContentService:
 
         for descendant in descendants:
             descendant_id = descendant.get("id")
-            if not descendant_id:
+            if not descendant_id or descendant_id not in indexed_ids:
                 continue
             if self._is_item_in_folder_scope(
                 descendant,
@@ -1837,7 +2094,7 @@ class SharePointContentService:
                 selected_item_type="folder",
             ):
                 continue
-            if not descendant.get("parentReference", {}).get("path"):
+            if not self._parent_path(descendant):
                 logger.warning(
                     "Keeping item %s under out-of-scope folder %s: Graph gave no "
                     "parent path to place it by",
@@ -1845,7 +2102,7 @@ class SharePointContentService:
                     folder_id,
                 )
                 continue
-            await self._delete_local_sharepoint_item(
+            deleted = await self._delete_local_sharepoint_item(
                 item_id=descendant_id,
                 item_name=descendant_id,
                 integration_knowledge=integration_knowledge,
@@ -1853,6 +2110,8 @@ class SharePointContentService:
                 stats=stats,
                 reason="out-of-scope-subtree",
             )
+            if deleted is not None:
+                indexed_ids.discard(descendant_id)
 
     def _is_ancestor_of_scope(
         self, item: SharePointItem, scope_folder_path: Optional[str]
@@ -2001,21 +2260,19 @@ class SharePointContentService:
         folder_id: str,
         folder_name: str,
         integration_knowledge: "IntegrationKnowledge",
-        integration_knowledge_id: UUID,
         stats: SyncStats,
         pending_change_keys: list[tuple[UUID, str, str]],
         change_ids: set[str],
-        indexed_ids: set[str] | None,
-    ) -> set[str] | None:
+        indexed_ids: set[str],
+    ) -> None:
         """Index the files of a folder entry that may have entered the selected scope.
 
         Graph re-emits only the moved folder, not its unchanged children, so a
         folder dragged into scope would otherwise never get its files indexed.
-        Every in-scope folder entry (a rename, a move inside scope, a new folder)
-        takes this path because the entry does not say which it was; children
-        that are already indexed or that arrive as their own entries in this
-        change set are left alone. ``indexed_ids`` is read once per pass and
-        returned so later folders of the same pass reuse it; files indexed here
+        An in-scope folder entry not walked under its parent before takes this
+        path because the entry does not say whether it moved; children that are
+        already indexed or that arrive as their own entries in this change set
+        are left alone. ``indexed_ids`` is the pass's set; files indexed here
         are added so a nested folder entering scope does not download them again.
         """
         try:
@@ -2026,11 +2283,6 @@ class SharePointContentService:
                 drive_id=drive_id,
                 folder_id=folder_id,
             )
-            if indexed_ids is None:
-                indexed = await self.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge(
-                    integration_knowledge_id=integration_knowledge_id
-                )
-                indexed_ids = {item_id for _, item_id in indexed}
         except Exception as exc:
             logger.warning(
                 "Could not list folder %s (%s) entering scope; the next pass "
@@ -2046,7 +2298,7 @@ class SharePointContentService:
                     folder_name, "listing_failed", detail=user_visible_error(exc)
                 ),
             )
-            return indexed_ids
+            return
 
         for descendant in descendants:
             descendant_id = descendant.get("id")
@@ -2066,7 +2318,6 @@ class SharePointContentService:
                 pending_change_keys=pending_change_keys,
             )
             indexed_ids.add(descendant_id)
-        return indexed_ids
 
     def _schedule_post_commit_change_keys(
         self, pending: list[tuple[UUID, str, str]]
@@ -2289,31 +2540,40 @@ class SharePointContentService:
         if not orphans:
             return
 
+        orphan_ids = [item_id for _blob_id, item_id in orphans]
         cap = max(
             _RECONCILE_MIN_DELETE_FLOOR,
             int(len(indexed) * _RECONCILE_MAX_DELETE_FRACTION),
         )
         if len(orphans) > cap:
             logger.error(
-                "Skipping reconciliation for integration_knowledge %s: would delete "
-                "%d of %d blobs (> safety cap %d) — likely an incomplete enumeration.",
+                "Reconciliation for integration_knowledge %s would delete %d of %d "
+                "blobs (> safety cap %d); deleting only what Graph confirms gone.",
                 integration_knowledge.id,
                 len(orphans),
                 len(indexed),
                 cap,
             )
-            stats["reconcile_warning"] = (
-                f"Orphan cleanup skipped: {len(orphans)} of {len(indexed)} indexed "
-                f"documents are missing from SharePoint (above the safety cap of {cap})"
+            orphan_ids = await self._verified_orphans(
+                client, drive_id, orphan_ids, folder_id=folder_id
             )
-            return
+            kept = len(orphans) - len(orphan_ids)
+            if kept:
+                stats["reconcile_warning"] = (
+                    f"Orphan cleanup limited: {len(orphans)} of {len(indexed)} "
+                    "indexed documents are missing from SharePoint (above the safety "
+                    f"cap of {cap}); removed {len(orphan_ids)} SharePoint confirmed "
+                    f"deleted or outside the scope, kept {kept} it could not confirm"
+                )
+            if not orphan_ids:
+                return
 
         logger.info(
             "Reconciliation removing %d orphaned blob(s) for integration_knowledge %s",
-            len(orphans),
+            len(orphan_ids),
             integration_knowledge.id,
         )
-        for _blob_id, item_id in orphans:
+        for item_id in orphan_ids:
             await self._delete_local_sharepoint_item(
                 item_id=item_id,
                 item_name=item_id,
@@ -2322,6 +2582,67 @@ class SharePointContentService:
                 stats=stats,
                 reason="reconcile-orphan",
             )
+
+    async def _verified_orphans(
+        self,
+        client: SharePointContentClient,
+        drive_id: str,
+        orphan_ids: list[str],
+        *,
+        folder_id: str | None,
+    ) -> list[str]:
+        """Confirm deletions or moves out of a folder in bounded Graph batches.
+
+        Refresh the selected folder's path before trusting a returned item's
+        path. A failure to locate the scope disables move-based cleanup, never
+        falls back to its stored path. 403, missing paths and transient errors
+        cannot prove removal. Stop sending batches after an outage/throttle.
+        """
+        if len(orphan_ids) > _RECONCILE_MAX_VERIFIED_ORPHANS:
+            orphan_ids = random.sample(orphan_ids, _RECONCILE_MAX_VERIFIED_ORPHANS)
+        scope_path: str | None = None
+        if folder_id:
+            try:
+                scope_path = await self._current_scope_folder_path(
+                    client, drive_id, folder_id
+                )
+            except ScopeFolderUnavailable as exc:
+                logger.warning("Stopped verifying orphans: %s", exc)
+                return []
+        gone: list[str] = []
+        for offset in range(0, len(orphan_ids), SharePointContentClient.BATCH_SIZE):
+            batch = orphan_ids[offset : offset + SharePointContentClient.BATCH_SIZE]
+            try:
+                results = await client.get_item_metadata_batch(drive_id, batch)
+            except Exception as exc:
+                logger.warning("Stopped verifying orphans: %s", exc)
+                break
+            unavailable = False
+            for item_id in batch:
+                result = results.get(item_id)
+                if result is None:
+                    unavailable = True
+                elif result.status in _GONE_HTTP_STATUSES:
+                    gone.append(item_id)
+                elif result.status == 200:
+                    item = result.item
+                    if (
+                        item is not None
+                        and scope_path
+                        and self._parent_path(item)
+                        and not self._is_item_in_folder_scope(
+                            item, folder_id, scope_path, selected_item_type="folder"
+                        )
+                    ):
+                        gone.append(item_id)
+                elif result.status != 403:
+                    unavailable = True
+            if unavailable:
+                logger.warning(
+                    "Stopped verifying orphans: Graph could not answer a batch"
+                )
+                break
+        return gone
 
     async def _fetch_and_process_content(
         self,
@@ -2568,7 +2889,7 @@ class SharePointContentService:
         if parent_id == scope_folder_id:
             return True
 
-        # Child of a previously-seen subfolder in scope (backward compatibility).
+        # Child of an in-scope folder of the same change set.
         if known_subfolder_ids and parent_id in known_subfolder_ids:
             return True
 
@@ -2594,6 +2915,10 @@ class SharePointContentService:
                 return True
 
         return False
+
+    @staticmethod
+    def _parent_path(item: SharePointItem) -> Optional[str]:
+        return item.get("parentReference", {}).get("path") or None
 
     def _folder_path_from_item(self, item: SharePointItem) -> Optional[str]:
         relative_parent_path = self._extract_relative_graph_path(
