@@ -8,15 +8,17 @@
 
   let port: HTMLDivElement | undefined;
 
-  // The strip scrolls at narrow widths, and nothing brings the selected tab back once
-  // it is outside the port: it would keep its state while staying invisible. Moving
-  // focus is already handled by the browser, but selection and width changes (window
-  // resize, or the strip growing when the webfont replaces the fallback) are not.
+  // The strip scrolls at narrow widths, and nothing brings a tab back once it is
+  // outside the port: it would keep its state while staying invisible. Activation is
+  // manual, so arrow keys move focus without selecting, and Chromium does not scroll a
+  // partly clipped tab into view when it takes focus. A focus move, a selection change
+  // and a width change (window resize, or the strip growing when the webfont replaces
+  // the fallback) therefore all reveal the tab: the focused one first, so a width
+  // change does not scroll the user's place out of view.
   function reveal() {
-    port?.querySelector('[data-state="active"]')?.scrollIntoView({
-      block: "nearest",
-      inline: "nearest"
-    });
+    const target =
+      port?.querySelector('[role="tab"]:focus') ?? port?.querySelector('[data-state="active"]');
+    target?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
   // Queried inside the microtask: this runs before the DOM is patched, so looking the
@@ -39,7 +41,8 @@
 -->
 <div
   bind:this={port}
-  class="text-primary left-[50%] my-[-0.5rem] flex min-w-0 flex-grow items-center justify-center overflow-x-auto overflow-y-hidden py-2 pr-3 max-lg:order-2 max-lg:w-full max-lg:flex-none max-lg:justify-start @4xl:lg:absolute @4xl:lg:-translate-x-[50%]"
+  on:focusin={reveal}
+  class="my-[-0.5rem] mr-auto flex min-w-0 items-center overflow-x-auto overflow-y-hidden py-2"
 >
   <Tabs.List
     class="bg-secondary inline-flex w-fit items-center gap-[2px] rounded-lg p-[3px] whitespace-nowrap"

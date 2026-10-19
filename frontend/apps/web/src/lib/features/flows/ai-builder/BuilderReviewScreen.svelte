@@ -1289,8 +1289,12 @@
 
         <!-- One sheet: the heading spans it, the change leads the main column
              and what it rests on sits beside it, divided by hairlines rather
-             than split into cards. -->
-        <div class="border-default bg-primary @container rounded-xl border">
+             than split into cards. A region named by its heading, so a
+             screen reader can jump to the plan. -->
+        <section
+          aria-labelledby="builder-plan-heading"
+          class="border-default bg-primary @container rounded-xl border"
+        >
           <header class="flex items-start gap-4 px-6 pt-5 pb-4 max-sm:px-4">
             <div class="min-w-0 flex-1">
               <h2
@@ -2190,7 +2194,7 @@
               {/if}
             </aside>
           </div>
-        </div>
+        </section>
       </div>
     </div>
 
