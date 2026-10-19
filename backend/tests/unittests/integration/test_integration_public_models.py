@@ -100,6 +100,40 @@ def test_a_sync_log_is_served_clean():
     ]
 
 
+@pytest.mark.parametrize(
+    "metadata, served",
+    [
+        ({"trigger": [], "files_processed": 3}, {"files_processed": 3}),
+        ({"files_processed": []}, {}),
+        ({"skipped_truncated": []}, {}),
+        ({"files_processed": 2.5}, {}),
+        ({"skipped_details": {"a": 1}}, {}),
+        ({"skipped_details": None, "changed_details": []}, {"changed_details": []}),
+    ],
+    ids=[
+        "list-for-text",
+        "list-for-count",
+        "list-for-flag",
+        "fraction-for-count",
+        "mapping-for-list",
+        "null-list",
+    ],
+)
+def test_a_stored_value_of_another_shape_is_left_out(metadata, served):
+    log = SyncLog(
+        id=uuid4(),
+        integration_knowledge_id=uuid4(),
+        sync_type="delta",
+        status="success",
+        metadata=metadata,
+        started_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+    )
+
+    assert log.metadata == served
+    assert log.model_dump(mode="json")["skipped_details"] == []
+
+
 def test_a_sync_log_another_release_wrote_is_served_without_its_unreadable_parts():
     """A null or unexpected value in one stored row failed the whole history."""
     log = SyncLog(
@@ -128,6 +162,7 @@ def test_a_sync_log_another_release_wrote_is_served_without_its_unreadable_parts
     assert served["metadata"] == {
         "files_processed": 3,
         "skipped_items": 1,
+        "changed_details": [],
         "skipped_details": [
             {
                 "file": "b.zip",
