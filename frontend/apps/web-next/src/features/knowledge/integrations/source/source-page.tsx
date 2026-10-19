@@ -437,6 +437,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
             ) : (
               // Each folder's history is a request of its own; only fetch it when it is looked at.
               <ActivityView
+                spaceId={space.id}
                 items={source.items}
                 selectedId={multiple ? (selectedItem?.id ?? null) : null}
                 onSelect={(folder) => show({ tab: "activity", folder })}

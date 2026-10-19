@@ -30,6 +30,19 @@ vi.mock("@/lib/api/browser", async () => {
               ? { items: [], total_count: 0, limit: 50, offset: 0, total_size: 0 }
               : { items: [] }
         ),
+      POST: (
+        _path: string,
+        options: {
+          body: { items: { integration_knowledge_id: string; offset: number }[]; limit: number };
+        }
+      ) =>
+        ok({
+          items: options.body.items.map((item) => ({
+            integration_knowledge_id: item.integration_knowledge_id,
+            history: { items: [], total_count: 0, offset: item.offset, limit: options.body.limit },
+            skipped: { items: [], total: 0, truncated: false, synced_at: null }
+          }))
+        }),
       DELETE: (path: string) => {
         state.deleted.push(path);
         // What the space holds once the item is gone.

@@ -102,8 +102,47 @@ vi.mock("@/lib/api/browser", () => {
       },
       POST: (
         path: string,
-        options?: { params?: { path?: { integration_knowledge_id?: string } } }
+        options?: {
+          params?: { path?: { integration_knowledge_id?: string } };
+          body?: { items: { integration_knowledge_id: string; offset: number }[]; limit: number };
+        }
       ) => {
+        if (path.endsWith("/sync-details/")) {
+          return reply(
+            (async () => {
+              const items = [];
+              for (const request of options?.body?.items ?? []) {
+                const itemId = request.integration_knowledge_id;
+                const skipped =
+                  request.offset === 0
+                    ? await get("/documents/skipped/", {
+                        params: { path: { integration_knowledge_id: itemId } }
+                      })
+                    : { data: null };
+                if (skipped.error) return skipped;
+                const history = await get(
+                  "/api/v1/integrations/sync-logs/{integration_knowledge_id}/",
+                  {
+                    params: {
+                      path: { integration_knowledge_id: itemId },
+                      query: { skip: request.offset, limit: options?.body?.limit }
+                    }
+                  }
+                );
+                items.push({
+                  integration_knowledge_id: itemId,
+                  history: {
+                    ...(history.data as object),
+                    offset: request.offset,
+                    limit: options?.body?.limit
+                  },
+                  skipped: skipped.data
+                });
+              }
+              return { data: { items } };
+            })()
+          );
+        }
         const itemId = options?.params?.path?.integration_knowledge_id ?? "";
         if (!path.endsWith("/sync/")) return reply({ error: { message: `unexpected ${path}` } });
         state.synced.push(itemId);

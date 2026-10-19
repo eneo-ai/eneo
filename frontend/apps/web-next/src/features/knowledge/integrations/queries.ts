@@ -1,3 +1,4 @@
+import { createSyncDetailsLoader } from "@eneo/eneo-js/integrations/sync-details";
 import { queryOptions, type Query, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
@@ -7,6 +8,30 @@ import type { SkippedDocuments } from "./source-problems";
 import { continueWindow, mergeFirstPage } from "./sync-activity";
 import type { ProgressById } from "./sync-progress";
 import { compareSyncRevisions, syncRevision } from "./sync-status";
+
+const detailLoaders = new WeakMap<EneoClient, ReturnType<typeof createSyncDetailsLoader>>();
+
+function syncDetails(
+  api: EneoClient,
+  spaceId: string,
+  itemId: string,
+  offset: number,
+  limit: number
+) {
+  let load = detailLoaders.get(api);
+  if (!load) {
+    load = createSyncDetailsLoader((id, body) =>
+      unwrap(
+        api.POST("/api/v1/spaces/{id}/knowledge/integrations/sync-details/", {
+          params: { path: { id } },
+          body
+        })
+      )
+    );
+    detailLoaders.set(api, load);
+  }
+  return load(spaceId, itemId, offset, limit);
+}
 
 export type UserIntegration = Schema<"UserIntegration">;
 export type IntegrationPreview = Schema<"IntegrationPreviewData">;
@@ -161,40 +186,37 @@ export function skippedDocumentsQueryOptions(
     queryKey: [...itemKey, syncRevision(item)],
     // Only a sync rewrites the list, and its revision is in the key.
     staleTime: 5 * 60_000,
-    queryFn: (): Promise<SkippedDocuments> =>
-      unwrap(
-        api.GET(
-          "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/skipped/",
-          { params: { path: { id: spaceId, integration_knowledge_id: item.id } } }
-        )
-      ),
+    queryFn: async (): Promise<SkippedDocuments> => {
+      const details = await syncDetails(api, spaceId, item.id, 0, 1);
+      if (details.skipped === null) throw new Error("Missing skipped files in first sync page");
+      return details.skipped;
+    },
     placeholderData: () => latestCached<SkippedDocuments>(queryClient, itemKey)
   });
 }
 
-/** Per request; the sync-log endpoint caps `limit` at 100, so a long history is read page by page. */
+/** A bounded window per import; long histories are read page by page. */
 export const SYNC_LOG_PAGE_SIZE = 10;
 
 /** One page of an item's sync logs, newest first, from the `skip`th. */
-export function fetchSyncLogPage(
+export async function fetchSyncLogPage(
   api: EneoClient,
+  spaceId: string,
   knowledgeId: string,
   skip: number
 ): Promise<SyncLogPage> {
-  return unwrap(
-    api.GET("/api/v1/integrations/sync-logs/{integration_knowledge_id}/", {
-      params: {
-        path: { integration_knowledge_id: knowledgeId },
-        query: { skip, limit: SYNC_LOG_PAGE_SIZE }
-      }
-    })
-  );
+  return (await syncDetails(api, spaceId, knowledgeId, skip, SYNC_LOG_PAGE_SIZE)).history;
 }
 
 /** An item's sync logs as loaded so far, newest first, and how many it has in all. */
 export type SyncLogWindow = { logs: SyncLog[]; total: number };
 
-const syncLogItemKey = (itemId: string) => ["integrations", "sync-logs", itemId];
+const syncLogItemKey = (spaceId: string, itemId: string) => [
+  "integrations",
+  "sync-logs",
+  spaceId,
+  itemId
+];
 
 /**
  * The sync history an item shows: its current revision's window, or while
@@ -202,9 +224,10 @@ const syncLogItemKey = (itemId: string) => ["integrations", "sync-logs", itemId]
  */
 export function shownSyncLogWindow(
   queryClient: QueryClient,
+  spaceId: string,
   itemId: string
 ): SyncLogWindow | undefined {
-  return latestCached<SyncLogWindow>(queryClient, syncLogItemKey(itemId));
+  return latestCached<SyncLogWindow>(queryClient, syncLogItemKey(spaceId, itemId));
 }
 
 /**
@@ -216,11 +239,12 @@ export function shownSyncLogWindow(
  */
 export function addOlderSyncLogs(
   queryClient: QueryClient,
+  spaceId: string,
   itemId: string,
   page: Pick<SyncLogPage, "items" | "total_count">,
   after: string | undefined
 ): void {
-  const query = latestCachedQuery(queryClient, syncLogItemKey(itemId));
+  const query = latestCachedQuery(queryClient, syncLogItemKey(spaceId, itemId));
   const shown = query?.state.data as SyncLogWindow | undefined;
   const next = shown ? continueWindow(shown, page, after) : null;
   if (query && next) queryClient.setQueryData<SyncLogWindow>(query.queryKey, next);
@@ -234,13 +258,14 @@ export function addOlderSyncLogs(
 export function syncLogWindowQueryOptions(
   api: EneoClient,
   queryClient: QueryClient,
+  spaceId: string,
   item: IntegrationKnowledge
 ) {
-  const latest = () => shownSyncLogWindow(queryClient, item.id);
+  const latest = () => shownSyncLogWindow(queryClient, spaceId, item.id);
   return queryOptions({
-    queryKey: [...syncLogItemKey(item.id), syncRevision(item)],
+    queryKey: [...syncLogItemKey(spaceId, item.id), syncRevision(item)],
     queryFn: async (): Promise<SyncLogWindow> => {
-      const page = await fetchSyncLogPage(api, item.id, 0);
+      const page = await fetchSyncLogPage(api, spaceId, item.id, 0);
       return {
         logs: mergeFirstPage(latest()?.logs, page.items, page.total_count),
         total: page.total_count

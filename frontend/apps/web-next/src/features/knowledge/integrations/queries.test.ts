@@ -33,7 +33,7 @@ function cacheTwoRevisions() {
   const newerWindow: SyncLogWindow = { logs: logs("l9", "l8"), total: 9 };
   const earlierWindow: SyncLogWindow = { logs: logs("l8"), total: 8 };
   const key = (item: IntegrationKnowledge) =>
-    syncLogWindowQueryOptions(api, queryClient, item).queryKey;
+    syncLogWindowQueryOptions(api, queryClient, "space-1", item).queryKey;
   queryClient.setQueryData(key(newer), newerWindow, { updatedAt: 1_000 });
   queryClient.setQueryData(key(earlier), earlierWindow, { updatedAt: 2_000 });
   return { queryClient, key, newerWindow, earlierWindow };
@@ -42,12 +42,12 @@ function cacheTwoRevisions() {
 describe("the history an item shows while a new revision loads", () => {
   it("is the newest revision's, also when an earlier one was written after it", () => {
     const { queryClient, newerWindow } = cacheTwoRevisions();
-    expect(shownSyncLogWindow(queryClient, "i1")).toBe(newerWindow);
+    expect(shownSyncLogWindow(queryClient, "space-1", "i1")).toBe(newerWindow);
   });
 
   it("takes an older page into the newest revision's window", () => {
     const { queryClient, key, earlierWindow } = cacheTwoRevisions();
-    addOlderSyncLogs(queryClient, "i1", { items: logs("l7"), total_count: 9 }, "l8");
+    addOlderSyncLogs(queryClient, "space-1", "i1", { items: logs("l7"), total_count: 9 }, "l8");
     expect(queryClient.getQueryData<SyncLogWindow>(key(newer))?.logs.map((log) => log.id)).toEqual([
       "l9",
       "l8",
@@ -55,7 +55,7 @@ describe("the history an item shows while a new revision loads", () => {
     ]);
     expect(queryClient.getQueryData(key(earlier))).toBe(earlierWindow);
     // So the next revision starts from it.
-    expect(shownSyncLogWindow(queryClient, next.id)?.logs).toHaveLength(3);
+    expect(shownSyncLogWindow(queryClient, "space-1", next.id)?.logs).toHaveLength(3);
   });
 
   it("keeps the newest revision's skipped files on screen while the next one loads", () => {
@@ -75,4 +75,9 @@ describe("the history an item shows while a new revision loads", () => {
       .placeholderData as () => SkippedDocuments | undefined;
     expect(placeholder()?.total).toBe(2);
   });
+});
+
+it("does not reuse a source history through a different space's access context", () => {
+  const { queryClient } = cacheTwoRevisions();
+  expect(shownSyncLogWindow(queryClient, "another-space", "i1")).toBeUndefined();
 });

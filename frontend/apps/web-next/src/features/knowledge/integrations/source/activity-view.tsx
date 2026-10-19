@@ -303,10 +303,12 @@ function Total({
  * syncs are reached by choosing it in the folder selector.
  */
 export function ActivityView({
+  spaceId,
   items,
   selectedId,
   onSelect
 }: {
+  spaceId: string;
   items: IntegrationKnowledge[];
   /** The one folder whose history to show; null shows every folder's. */
   selectedId: string | null;
@@ -321,13 +323,14 @@ export function ActivityView({
   const multiple = items.length > 1;
   const shown = selectedId ? items.filter((item) => item.id === selectedId) : items;
   const results = useQueries({
-    queries: shown.map((item) => syncLogWindowQueryOptions(browserApi, queryClient, item))
+    queries: shown.map((item) => syncLogWindowQueryOptions(browserApi, queryClient, spaceId, item))
   });
   const loaded = shown.flatMap((item, index): LoadedWindow[] => {
     const result = results[index];
     // A new revision whose first page failed keeps the history shown before, beside the error.
     const data =
-      result?.data ?? (result?.isError ? shownSyncLogWindow(queryClient, item.id) : undefined);
+      result?.data ??
+      (result?.isError ? shownSyncLogWindow(queryClient, spaceId, item.id) : undefined);
     return data ? [{ ...data, item }] : [];
   });
 
@@ -343,12 +346,12 @@ export function ActivityView({
       Promise.all(
         targets.map(async (target) => ({
           target,
-          page: await fetchSyncLogPage(browserApi, target.item.id, target.logs.length)
+          page: await fetchSyncLogPage(browserApi, spaceId, target.item.id, target.logs.length)
         }))
       ),
     onSuccess: (pages, { selection }) => {
       for (const { target, page } of pages) {
-        addOlderSyncLogs(queryClient, target.item.id, page, target.logs.at(-1)?.id);
+        addOlderSyncLogs(queryClient, spaceId, target.item.id, page, target.logs.at(-1)?.id);
       }
       setOlderError((current) => (current?.selection === selection ? null : current));
       // The button goes once nothing older is left, the banner once a retry worked.

@@ -8,12 +8,12 @@ import type { IntegrationKnowledge } from "../../knowledge";
 import type { SyncLog } from "../queries";
 import { ActivityView } from "./activity-view";
 
-const { get } = vi.hoisted(() => ({ get: vi.fn() }));
-vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get } }));
+const { post } = vi.hoisted(() => ({ post: vi.fn() }));
+vi.mock("@/lib/api/browser", () => ({ browserApi: { POST: post } }));
 
 afterEach(() => {
   cleanup();
-  get.mockReset();
+  post.mockReset();
 });
 
 function folder(id: string, name: string, syncedAt = "2026-10-01T08:00:00Z"): IntegrationKnowledge {
@@ -67,68 +67,60 @@ function hourly(prefix: string, count: number, newest: string, overrides: Partia
 
 type Request = { item: string; skip: number; limit: number };
 
-/**
- * Serves each item's logs newest first, a page at a time, like the endpoint:
- * it refuses a limit over 100. `fail` rejects the requests it matches.
- */
+type Batch = { items: { integration_knowledge_id: string; offset?: number }[]; limit?: number };
+
+/** Serve the real batch contract; a failing batch returns no partial success. */
 function serve(logs: Record<string, SyncLog[]>, fail?: (request: Request) => boolean) {
-  get.mockImplementation(
-    (
-      _path: string,
-      {
-        params
-      }: {
-        params: {
-          path: { integration_knowledge_id: string };
-          query: { skip: number; limit: number };
-        };
-      }
-    ) => {
-      const request = {
-        item: params.path.integration_knowledge_id,
-        skip: params.query.skip,
-        limit: params.query.limit
-      };
-      if (request.limit > 100 || fail?.(request)) {
-        return Promise.resolve({
-          error: { message: "Boom" },
-          response: new Response("{}", { status: request.limit > 100 ? 422 : 500 })
-        });
-      }
-      const all = logs[request.item] ?? [];
+  post.mockImplementation((_path: string, { body }: { body: Batch }) => {
+    const reads = body.items.map((item) => ({
+      item: item.integration_knowledge_id,
+      skip: item.offset ?? 0,
+      limit: body.limit ?? 10
+    }));
+    if (reads.some((request) => request.limit > 10 || fail?.(request))) {
       return Promise.resolve({
-        data: {
-          items: all.slice(request.skip, request.skip + request.limit),
-          total_count: all.length,
-          page_size: request.limit,
-          offset: request.skip
-        },
-        response: new Response("{}")
+        error: { message: "Boom" },
+        response: new Response("{}", { status: 500 })
       });
     }
-  );
+    return Promise.resolve({
+      data: {
+        items: reads.map((request) => {
+          const all = logs[request.item] ?? [];
+          return {
+            integration_knowledge_id: request.item,
+            history: {
+              items: all.slice(request.skip, request.skip + request.limit),
+              total_count: all.length,
+              page_size: request.limit,
+              offset: request.skip
+            },
+            skipped: { items: [], total: 0, truncated: false, synced_at: null }
+          };
+        })
+      },
+      response: new Response("{}")
+    });
+  });
 }
 
 function requests(): Request[] {
-  return get.mock.calls.map(([, options]) => {
-    const { params } = options as {
-      params: {
-        path: { integration_knowledge_id: string };
-        query: { skip: number; limit: number };
-      };
-    };
-    return {
-      item: params.path.integration_knowledge_id,
-      skip: params.query.skip,
-      limit: params.query.limit
-    };
+  return post.mock.calls.flatMap(([, options]) => {
+    const { body } = options as { body: Batch };
+    return body.items.map((item) => ({
+      item: item.integration_knowledge_id,
+      skip: item.offset ?? 0,
+      limit: body.limit ?? 10
+    }));
   });
 }
 
 /** The source page's folder state: the selector changes it, like the page's address. */
 function Activity({ items }: { items: IntegrationKnowledge[] }) {
   const [selected, setSelected] = useState<string | null>(null);
-  return <ActivityView items={items} selectedId={selected} onSelect={setSelected} />;
+  return (
+    <ActivityView spaceId="space-1" items={items} selectedId={selected} onSelect={setSelected} />
+  );
 }
 
 function timelineRows(): HTMLElement[] {
@@ -177,6 +169,8 @@ describe("ActivityView", () => {
     const { container } = renderInApp(<Activity items={[avtal, mallar]} />);
 
     await screen.findByRole("heading", { name: "De senaste 3 synkarna" });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(requests()).toHaveLength(2);
     const events = screen.getByRole("region", { name: "Synkhändelser" });
     expect(
       within(events)
@@ -322,9 +316,9 @@ describe("ActivityView", () => {
 
     // A new sync of Protokoll lands; the space shows it with a new revision.
     logs.busy = [...hourly("new", 1, "2026-10-15T13:00:00Z", { files_processed: 7 }), ...logs.busy];
-    const answer = get.getMockImplementation()!;
+    const answer = post.getMockImplementation()!;
     let release: () => void = () => {};
-    get.mockImplementationOnce(
+    post.mockImplementationOnce(
       (...args: unknown[]) => new Promise((resolve) => (release = () => resolve(answer(...args))))
     );
     rerender(<Activity items={[folder("busy", "Protokoll", "2026-10-15T13:00:30Z"), quiet]} />);
@@ -332,6 +326,7 @@ describe("ActivityView", () => {
     // While its newest page loads again, the history shown stays.
     expect(timelineRows()).toHaveLength(20);
     expect(screen.queryByText("Laddar synkhistorik...")).toBeNull();
+    await waitFor(() => expect(requests()).toHaveLength(4));
     await act(async () => release());
 
     expect(await screen.findByText("7 filer synkade")).toBeTruthy();
@@ -348,9 +343,9 @@ describe("ActivityView", () => {
     await screen.findByText("av totalt 30 synkar");
 
     // The older page is read when "Visa äldre händelser" is pressed but answers late.
-    const answer = get.getMockImplementation()!;
+    const answer = post.getMockImplementation()!;
     let release: () => void = () => {};
-    get.mockImplementationOnce((...args: unknown[]) => {
+    post.mockImplementationOnce((...args: unknown[]) => {
       const page: unknown = answer(...args);
       return new Promise((resolve) => (release = () => resolve(page)));
     });
@@ -368,7 +363,7 @@ describe("ActivityView", () => {
     // The press is not lost: the older events join the history on screen.
     await waitFor(() => expect(timelineRows()).toHaveLength(21));
     // While the next revision loads, the newest history stays, with its newest sync.
-    get.mockImplementationOnce(() => new Promise(() => {}));
+    post.mockImplementationOnce(() => new Promise(() => {}));
     rerender(<Activity items={[folder("a", "Avtal", "2026-10-15T14:00:30Z")]} />);
     expect(screen.getByText("7 filer synkade")).toBeTruthy();
     expect(timelineRows()).toHaveLength(21);
@@ -430,7 +425,7 @@ describe("ActivityView", () => {
     renderInApp(<Activity items={[busy, quiet]} />);
     await chooseFolder("Protokoll");
     let fail: () => void = () => {};
-    get.mockImplementationOnce(
+    post.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           fail = () =>
