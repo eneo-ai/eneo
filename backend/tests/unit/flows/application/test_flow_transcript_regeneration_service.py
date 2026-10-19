@@ -1,3 +1,4 @@
+import copy
 import hashlib
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -12,6 +13,10 @@ from eneo.flows.application.flow_transcript_regeneration_service import (
     _render_reviewed_transcript,
 )
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.speaker_labels import (
+    apply_speaker_names,
+    effective_speaker_names,
+)
 from eneo.flows.domain.step_output import build_text_overflow_metadata
 from eneo.flows.domain.transcript_corrections import (
     TranscriptCorrectionOccurrence,
@@ -20,9 +25,12 @@ from eneo.flows.domain.transcript_corrections import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.runtime.speaker_mapping_runtime import mapping_to_names
 
 
-def _source_state(segments):
+def _source_state(segments, *, source=None):
+    """The step's transcript source: captured from ``segments``, or ``source``
+    as a run stores it."""
     from eneo.flows.domain.transcript_source import (
         PresentTranscriptSource,
         TranscriptComponentOmissions,
@@ -30,7 +38,8 @@ def _source_state(segments):
     from eneo.flows.runtime.transcription import capture_transcript_source
 
     return PresentTranscriptSource(
-        source=capture_transcript_source(
+        source=source
+        or capture_transcript_source(
             segments=segments, speaker_review=None, words=[], words_omitted_reason=None
         ),
         component_omissions=TranscriptComponentOmissions(detail=None, words=None),
@@ -525,6 +534,122 @@ async def test_a_persons_names_override_the_speaker_naming_step(context):
     assert (
         seed.provenance["reviewed_text_hash"]
         == hashlib.sha256(naming["text"].encode()).hexdigest()
+    )
+
+
+# The naming step's proposal, each identity with the model's support for it.
+PROPOSAL = {
+    "speakers": [
+        {
+            "label": "SPEAKER_00",
+            "name": "Anna",
+            "confidence": "high",
+            "evidence": "Anna presenterar sig.",
+        },
+        {
+            "label": "SPEAKER_01",
+            "name": "Bo",
+            "confidence": "medium",
+            "evidence": "Bo tilltalas vid namn.",
+        },
+        {
+            "label": "SPEAKER_02",
+            "name": "Cecilia",
+            "confidence": "high",
+            "evidence": "Cecilia hälsar.",
+        },
+    ]
+}
+
+
+def _rename_anna_and_clear_bo(context):
+    """A person names the step's Anna Bertil and clears its Bo."""
+    names = {"SPEAKER_00": "Bertil", "SPEAKER_01": None}
+    _name_the_transcript(context, names, speaker_step=True)
+    context.results[1].output_payload_json["structured"] = copy.deepcopy(PROPOSAL)
+    return names
+
+
+async def test_the_naming_steps_mapping_names_the_speakers_its_text_names(context):
+    _rename_anna_and_clear_bo(context)
+
+    await context.service.regenerate(**context.request)
+
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    naming = seed.results[1].output_payload_json
+    # A later step that reads the mapping finds the person's names. The model's
+    # confidence and evidence argued for Anna and Bo, so a changed name keeps
+    # neither; Cecilia keeps hers.
+    assert naming["structured"] == {
+        "speakers": [
+            {
+                "label": "SPEAKER_00",
+                "name": "Bertil",
+                "confidence": "low",
+                "evidence": "",
+            },
+            {"label": "SPEAKER_01", "name": None, "confidence": "low", "evidence": ""},
+            PROPOSAL["speakers"][2],
+        ]
+    }
+    # The text is the labelled transcript named by that mapping.
+    labelled = _render_reviewed_transcript(
+        NAMED_SEGMENTS, NAMED_OCCURRENCES, NAMED_EDITS, None
+    )
+    assert naming["text"] == apply_speaker_names(
+        labelled, mapping_to_names(naming["structured"])
+    )
+    named = naming["text"].splitlines()
+    assert named[2] == "[00:00:00 - 00:00:01] Bertil: Vi frågade Çagri."
+    assert named[3] == "[00:00:01 - 00:00:02] SPEAKER_01: Hej"
+    assert named[5] == "[00:00:02 - 00:00:03] Cecilia: Tredje."
+    # The source run keeps the step's own proposal.
+    assert context.results[1].output_payload_json["structured"] == PROPOSAL
+
+
+async def test_the_new_runs_mapping_and_regeneration_keep_the_persons_names(context):
+    names = _rename_anna_and_clear_bo(context)
+    await context.service.regenerate(**context.request)
+    first = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    copied = context.service.corrections_repo.copy_snapshot.await_args.kwargs[
+        "corrections"
+    ]
+
+    # The new run as it is stored: the imported prefix as attempt 1, the
+    # copied transcript source and corrections, and the step that reads them.
+    child = context.service.run_service.create_run.return_value.run
+    seeded = [
+        result.model_copy(update={"flow_run_id": child.id, "current_attempt_no": 1})
+        for result in first.results
+    ]
+    consumer = context.results[2].model_copy(update={"flow_run_id": child.id})
+    context.service.run_repo.get_step_result.return_value = seeded[0]
+    context.service.run_repo.list_step_results.return_value = [*seeded, consumer]
+    step_id = context.request["step_id"]
+    context.service.transcript_source_service.get_for_attempt.return_value = (
+        _source_state(None, source=first.transcript_sources[step_id])
+    )
+    context.service.corrections_repo.get_for_step.return_value = copied
+    context.service.access_policy.load_run.return_value = SimpleNamespace(
+        **{**vars(context.source), "id": child.id}
+    )
+
+    # What the person saw: the step's names under theirs. An app shows the
+    # new run the same way, and the new run's mapping already names them so.
+    seen = effective_speaker_names(mapping_to_names(PROPOSAL), names)
+    stored = mapping_to_names(seeded[1].output_payload_json["structured"])
+    assert stored == seen == {"SPEAKER_00": "Bertil", "SPEAKER_02": "Cecilia"}
+    assert effective_speaker_names(stored, copied.speaker_names) == seen
+
+    await context.service.regenerate(
+        **{**context.request, "run_id": child.id, "idempotency_key": "again"}
+    )
+
+    second = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    assert second.transcript.text == first.transcript.text
+    assert (
+        second.results[1].output_payload_json["structured"]
+        == seeded[1].output_payload_json["structured"]
     )
 
 

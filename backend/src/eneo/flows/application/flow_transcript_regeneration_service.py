@@ -64,7 +64,10 @@ from eneo.flows.infrastructure.flow_transcript_words_repo import (
     FlowTranscriptWordsRepository,
 )
 from eneo.flows.principal import FlowPrincipal
-from eneo.flows.runtime.speaker_mapping_runtime import mapping_to_names
+from eneo.flows.runtime.speaker_mapping_runtime import (
+    mapping_to_names,
+    mapping_with_names,
+)
 from eneo.main.exceptions import NotFoundException
 from eneo.users.user import UserInDB
 
@@ -324,15 +327,17 @@ class FlowTranscriptRegenerationService:
                     or not isinstance(mapping, dict)
                 ):
                     _invalid("speaker_mapping_source_changed", conflict=True)
-                reviewed = apply_speaker_names(
-                    reviewed,
-                    effective_speaker_names(
-                        mapping_to_names(cast(dict[str, Any], mapping)), names
-                    ),
+                shown = effective_speaker_names(
+                    mapping_to_names(cast(dict[str, Any], mapping)), names
                 )
+                reviewed = apply_speaker_names(reviewed, shown)
                 payload = {
                     **payload,
                     "text": reviewed,
+                    # A later step may read the mapping rather than the text.
+                    "structured": mapping_with_names(
+                        cast(dict[str, Any], mapping), shown
+                    ),
                     "speaker_mapping": {
                         **cast(dict[str, Any], extension),
                         "source_attempt_no": 1,
