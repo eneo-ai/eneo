@@ -20,6 +20,7 @@ from eneo.integration.infrastructure.content_service.utils import (
 from eneo.libs.clients import BaseClient
 from eneo.libs.clients.throttle_retry import (
     THROTTLE_AND_OVERLOAD_STATUS_CODES,
+    TRANSIENT_STATUS_CODES,
     parse_retry_after,
     retry_on_throttle,
 )
@@ -93,12 +94,17 @@ def _without_query(url: str) -> str:
     return re.split(r"[?#]", url, maxsplit=1)[0]
 
 
-class IncompleteDownloadError(Exception):
+class IncompleteDownloadError(aiohttp.ClientPayloadError):
     """The body ended before the announced Content-Length.
 
     Partial bytes must never be parsed: a truncated PDF or ZIP looks like a
-    corrupt or empty file and would be mistaken for one.
+    corrupt or empty file and would be mistaken for one. A payload error, so
+    the download is retried like any other cut-off transfer.
     """
+
+    def __init__(self, message: str, *, content_type: str) -> None:
+        super().__init__(message)
+        self.content_type = content_type
 
 
 class MissingDownloadUrlError(ValueError):
@@ -476,7 +482,8 @@ class SharePointContentClient(BaseClient):
             if content_length is not None and len(payload) != content_length:
                 raise IncompleteDownloadError(
                     f"Incomplete download of '{file_name}' "
-                    f"({len(payload)} of {content_length} bytes)"
+                    f"({len(payload)} of {content_length} bytes)",
+                    content_type=response.headers.get("Content-Type", ""),
                 )
 
         return bytes(payload)
@@ -487,9 +494,9 @@ class SharePointContentClient(BaseClient):
         file_name: str,
     ) -> ExtractionResult:
         # Streams the body directly off the raw session to enforce the size
-        # limit, bypassing WrappedAiohttpClient — so throttling retry must be
-        # applied here explicitly.
-        async def _download() -> ExtractionResult:
+        # limit, bypassing WrappedAiohttpClient — so the retry is applied here
+        # explicitly. Extraction runs once, after the transfer succeeded.
+        async def _download() -> tuple[bytes, str, Optional[str]]:
             # The status check raises, and so does the request itself, for
             # example after too many redirects or at an invalid redirect. from
             # None: a traceback must not show the original either.
@@ -500,27 +507,29 @@ class SharePointContentClient(BaseClient):
                     response.raise_for_status()
                     content_type = response.headers.get("Content-Type", "")
                     charset = response.charset
-                    try:
-                        payload = await self._read_response_with_size_limit(
-                            response, file_name
-                        )
-                    except IncompleteDownloadError as e:
-                        logger.warning(str(e))
-                        return ExtractionResult.error(str(e), content_type)
+                    payload = await self._read_response_with_size_limit(
+                        response, file_name
+                    )
             except aiohttp.ClientResponseError as e:
                 raise _without_download_credentials(e) from None
             except aiohttp.InvalidURL as e:
                 raise aiohttp.InvalidURL(
                     _without_query(str(e.url)), e.description
                 ) from None
+            return payload, content_type, charset
 
-            return await extract_sharepoint_content(
-                payload, content_type, file_name, charset=charset
+        try:
+            payload, content_type, charset = await retry_on_throttle(
+                _download,
+                retryable_status_codes=TRANSIENT_STATUS_CODES,
+                retry_transport_errors=True,
             )
+        except IncompleteDownloadError as e:
+            logger.warning(str(e))
+            return ExtractionResult.error(str(e), e.content_type)
 
-        return await retry_on_throttle(
-            _download,
-            retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+        return await extract_sharepoint_content(
+            payload, content_type, file_name, charset=charset
         )
 
     async def get_sites(self) -> dict[str, Any]:
@@ -585,7 +594,8 @@ class SharePointContentClient(BaseClient):
                         "v1.0/$batch",
                         data=body,
                         headers=self.headers,
-                        retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+                        retryable_status_codes=TRANSIENT_STATUS_CODES,
+                        retry_transport_errors=True,
                     )
                 except aiohttp.ClientResponseError as e:
                     if e.status == 401 and self.can_refresh_token:
@@ -597,7 +607,8 @@ class SharePointContentClient(BaseClient):
                             "v1.0/$batch",
                             data=body,
                             headers=self.headers,
-                            retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+                            retryable_status_codes=TRANSIENT_STATUS_CODES,
+                            retry_transport_errors=True,
                         )
                     raise
 
@@ -836,7 +847,8 @@ class SharePointContentClient(BaseClient):
                         "v1.0/$batch",
                         data={"requests": requests},
                         headers=self.headers,
-                        retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+                        retryable_status_codes=TRANSIENT_STATUS_CODES,
+                        retry_transport_errors=True,
                     ),
                 )
             except aiohttp.ClientResponseError as exc:

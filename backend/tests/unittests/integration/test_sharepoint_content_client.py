@@ -210,7 +210,8 @@ class TestFileDownloadExtraction:
             headers["Content-Encoding"] = encoding
         _serve(client, [payload[: len(payload) // 2]], **headers)
 
-        result = await client.get_file_extraction_by_id("drive", "item")
+        with patch("asyncio.sleep", new=AsyncMock()):
+            result = await client.get_file_extraction_by_id("drive", "item")
 
         assert result == ExtractionResult(
             skip_reason=(
@@ -220,6 +221,28 @@ class TestFileDownloadExtraction:
             failed=True,
             content_type=OCTET,
         )
+        assert client.client.client.get.call_count == 5
+
+    async def test_a_cut_off_download_is_fetched_again(
+        self, client: SharePointContentClient
+    ):
+        payload = docx_bytes("Whole body")
+        length = {"Content-Type": OCTET, "Content-Length": str(len(payload))}
+        client.client.client.get = MagicMock(
+            side_effect=[
+                _FakeResponse([payload[:10]], length),
+                _FailedRequest(
+                    aiohttp.ClientPayloadError("Response payload is not completed")
+                ),
+                _FakeResponse([payload], length),
+            ]
+        )
+
+        with patch("asyncio.sleep", new=AsyncMock()):
+            result = await client.get_file_extraction_by_id("drive", "item")
+
+        assert result.text is not None and "Whole body" in result.text
+        assert client.client.client.get.call_count == 3
 
     @pytest.mark.parametrize("encoding", ["gzip", "br", "deflate", "GZIP"])
     async def test_decompressed_body_is_not_measured_against_the_wire_length(
@@ -430,6 +453,57 @@ class TestRefusedDownloads:
 
         assert result.text is not None and "Second attempt" in result.text
         assert signed_client.client.client.get.call_count == 2
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            pytest.param(lambda: _RefusedResponse(502, "Bad Gateway", {}), id="502"),
+            pytest.param(
+                lambda: _RefusedResponse(504, "Gateway Timeout", {}), id="504"
+            ),
+            pytest.param(
+                lambda: _FailedRequest(
+                    aiohttp.ClientOSError(104, "Connection reset by peer")
+                ),
+                id="connection-reset",
+            ),
+            pytest.param(
+                lambda: _FailedRequest(aiohttp.ServerDisconnectedError()),
+                id="disconnected",
+            ),
+            pytest.param(lambda: _FailedRequest(TimeoutError()), id="timeout"),
+        ],
+    )
+    async def test_transient_download_failures_are_retried(
+        self, signed_client: SharePointContentClient, failure
+    ):
+        payload = docx_bytes("After a transient failure")
+        signed_client.client.client.get = MagicMock(
+            side_effect=[
+                failure(),
+                _FakeResponse(
+                    [payload],
+                    {"Content-Type": OCTET, "Content-Length": str(len(payload))},
+                ),
+            ]
+        )
+
+        with patch("asyncio.sleep", new=AsyncMock()):
+            result = await signed_client.get_file_extraction_by_id("drive", "item")
+
+        assert result.text is not None and "After a transient failure" in result.text
+        assert signed_client.client.client.get.call_count == 2
+
+    async def test_a_refused_download_is_not_retried(
+        self, signed_client: SharePointContentClient
+    ):
+        signed_client.client.client.get = MagicMock(
+            return_value=_RefusedResponse(403, "Forbidden", {})
+        )
+
+        with pytest.raises(aiohttp.ClientResponseError):
+            await signed_client.get_file_extraction_by_id("drive", "item")
+        assert signed_client.client.client.get.call_count == 1
 
     async def test_an_expired_token_is_still_refreshed(
         self, signed_client: SharePointContentClient
