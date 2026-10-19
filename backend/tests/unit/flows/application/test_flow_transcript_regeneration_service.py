@@ -25,7 +25,10 @@ from eneo.flows.domain.transcript_corrections import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
-from eneo.flows.runtime.speaker_mapping_runtime import mapping_to_names
+from eneo.flows.runtime.speaker_mapping_runtime import (
+    mapping_to_names,
+    validate_speaker_mapping,
+)
 
 
 def _source_state(segments, *, source=None):
@@ -562,16 +565,17 @@ PROPOSAL = {
 }
 
 
-def _rename_anna_and_clear_bo(context):
-    """A person names the step's Anna Bertil and clears its Bo."""
-    names = {"SPEAKER_00": "Bertil", "SPEAKER_01": None}
+def _correct_the_steps_names(context):
+    """A person names the step's Anna Bertil, clears its Bo, and names Doris
+    the speaker they split off from Bo's line, whom the step never saw."""
+    names = {"SPEAKER_00": "Bertil", "SPEAKER_01": None, "SPEAKER_03": "Doris"}
     _name_the_transcript(context, names, speaker_step=True)
     context.results[1].output_payload_json["structured"] = copy.deepcopy(PROPOSAL)
     return names
 
 
 async def test_the_naming_steps_mapping_names_the_speakers_its_text_names(context):
-    _rename_anna_and_clear_bo(context)
+    _correct_the_steps_names(context)
 
     await context.service.regenerate(**context.request)
 
@@ -579,7 +583,8 @@ async def test_the_naming_steps_mapping_names_the_speakers_its_text_names(contex
     naming = seed.results[1].output_payload_json
     # A later step that reads the mapping finds the person's names. The model's
     # confidence and evidence argued for Anna and Bo, so a changed name keeps
-    # neither; Cecilia keeps hers.
+    # neither; Cecilia keeps hers. Doris follows the step's speakers with no
+    # support either.
     assert naming["structured"] == {
         "speakers": [
             {
@@ -590,8 +595,25 @@ async def test_the_naming_steps_mapping_names_the_speakers_its_text_names(contex
             },
             {"label": "SPEAKER_01", "name": None, "confidence": "low", "evidence": ""},
             PROPOSAL["speakers"][2],
+            {
+                "label": "SPEAKER_03",
+                "name": "Doris",
+                "confidence": "low",
+                "evidence": "",
+            },
         ]
     }
+    # A review of the new run's mapping takes it as it is.
+    assert (
+        validate_speaker_mapping(
+            naming["structured"],
+            inventory=PROPOSAL["speakers"],
+            participants=[],
+            allow_free_text=True,
+            split_labels=["SPEAKER_03"],
+        )
+        == naming["structured"]
+    )
     # The text is the labelled transcript named by that mapping.
     labelled = _render_reviewed_transcript(
         NAMED_SEGMENTS, NAMED_OCCURRENCES, NAMED_EDITS, None
@@ -602,13 +624,34 @@ async def test_the_naming_steps_mapping_names_the_speakers_its_text_names(contex
     named = naming["text"].splitlines()
     assert named[2] == "[00:00:00 - 00:00:01] Bertil: Vi frågade Çagri."
     assert named[3] == "[00:00:01 - 00:00:02] SPEAKER_01: Hej"
+    assert named[4] == "[00:00:01 - 00:00:02] Doris: där alla."
     assert named[5] == "[00:00:02 - 00:00:03] Cecilia: Tredje."
     # The source run keeps the step's own proposal.
     assert context.results[1].output_payload_json["structured"] == PROPOSAL
 
 
+async def test_a_split_whose_words_were_deleted_is_not_named_in_the_mapping(context):
+    _correct_the_steps_names(context)
+    context.corrections.occurrences = lambda: [
+        *NAMED_OCCURRENCES,
+        TranscriptCorrectionOccurrence(1, 4, 13, "där alla.", ""),
+    ]
+
+    await context.service.regenerate(**context.request)
+
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    naming = seed.results[1].output_payload_json
+    # Neither the text nor the mapping has Doris left to name.
+    assert "Doris" not in naming["text"]
+    assert [entry["label"] for entry in naming["structured"]["speakers"]] == [
+        "SPEAKER_00",
+        "SPEAKER_01",
+        "SPEAKER_02",
+    ]
+
+
 async def test_the_new_runs_mapping_and_regeneration_keep_the_persons_names(context):
-    names = _rename_anna_and_clear_bo(context)
+    names = _correct_the_steps_names(context)
     await context.service.regenerate(**context.request)
     first = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
     copied = context.service.corrections_repo.copy_snapshot.await_args.kwargs[
@@ -638,7 +681,12 @@ async def test_the_new_runs_mapping_and_regeneration_keep_the_persons_names(cont
     # new run the same way, and the new run's mapping already names them so.
     seen = effective_speaker_names(mapping_to_names(PROPOSAL), names)
     stored = mapping_to_names(seeded[1].output_payload_json["structured"])
-    assert stored == seen == {"SPEAKER_00": "Bertil", "SPEAKER_02": "Cecilia"}
+    assert stored == seen
+    assert seen == {
+        "SPEAKER_00": "Bertil",
+        "SPEAKER_02": "Cecilia",
+        "SPEAKER_03": "Doris",
+    }
     assert effective_speaker_names(stored, copied.speaker_names) == seen
 
     await context.service.regenerate(

@@ -13,6 +13,9 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
+from eneo.flows.application.flow_run_review_checkpoint_service import (
+    split_speaker_labels,
+)
 from eneo.flows.application.flow_run_service import (
     CreateRunResult,
     FlowRunService,
@@ -24,6 +27,7 @@ from eneo.flows.application.flow_transcript_source_service import (
 from eneo.flows.domain.flow import FlowRunStatus, FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.speaker_labels import (
     apply_speaker_names,
+    build_speaker_inventory,
     effective_speaker_names,
     render_line_prefix,
 )
@@ -330,13 +334,25 @@ class FlowTranscriptRegenerationService:
                 shown = effective_speaker_names(
                     mapping_to_names(cast(dict[str, Any], mapping)), names
                 )
+                # Speakers split off in review that the text shows join the
+                # mapping in label order, as a review of the mapping orders them.
+                in_text = {
+                    entry["label"] for entry in build_speaker_inventory(reviewed)
+                }
+                split_labels = [
+                    label
+                    for label in split_speaker_labels(corrections)
+                    if label in in_text
+                ]
                 reviewed = apply_speaker_names(reviewed, shown)
                 payload = {
                     **payload,
                     "text": reviewed,
                     # A later step may read the mapping rather than the text.
                     "structured": mapping_with_names(
-                        cast(dict[str, Any], mapping), shown
+                        cast(dict[str, Any], mapping),
+                        shown,
+                        split_labels=split_labels,
                     ),
                     "speaker_mapping": {
                         **cast(dict[str, Any], extension),

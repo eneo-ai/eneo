@@ -276,11 +276,16 @@ def mapping_to_names(structured: Mapping[str, Any]) -> dict[str, str]:
 
 
 def mapping_with_names(
-    structured: Mapping[str, Any], names: Mapping[str, str]
+    structured: Mapping[str, Any],
+    names: Mapping[str, str],
+    *,
+    split_labels: Sequence[str],
 ) -> dict[str, Any]:
     """``structured`` naming each of its labels as ``names`` does, None where
-    ``names`` has none; its labels and their order stay. A name this changes
-    is a person's, not the model's, so its entry keeps no model support."""
+    ``names`` has none; its labels and their order stay, followed by each of
+    ``split_labels`` (speakers split off in review) that ``names`` names and
+    ``structured`` lacks. A name this changes or adds is a person's, not the
+    model's, so its entry keeps no model support."""
     current = mapping_to_names(structured)
     speakers: list[dict[str, Any]] = []
     for entry in structured.get("speakers", []):
@@ -289,4 +294,10 @@ def mapping_with_names(
         speakers.append(
             entry if name == current.get(label) else _without_model_support(entry, name)
         )
+    listed = {entry.get("label") for entry in speakers}
+    speakers.extend(
+        _without_model_support({"label": label}, names[label])
+        for label in split_labels
+        if label in names and label not in listed
+    )
     return {**structured, "speakers": speakers}
