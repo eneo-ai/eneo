@@ -4998,7 +4998,7 @@ export interface paths {
     put?: never;
     /**
      * Create Space Integration Knowledge Batch
-     * @description Add multiple integration knowledge items to a space in a single batch.
+     * @description Add multiple integration knowledge items to a space in a single batch. Access, the connection and its token are checked first: when they fail, the request fails and nothing is written. Otherwise each item is created or reported failed on its own.
      */
     post: operations["create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post"];
     delete?: never;
@@ -7886,16 +7886,12 @@ export interface paths {
     post: operations["configure_sharepoint_app_api_v1_admin_sharepoint_app_post"];
     /**
      * Permanently delete SharePoint app
-     * @description Permanently delete the tenant's SharePoint app configuration and all associated data. WARNING: This action CANNOT be undone. This will cascade delete:
-     *     - All user_integrations using this tenant app (both org and personal)
-     *     - All integration_knowledge (imported SharePoint content)
-     *     - All info_blobs and embeddings (document data and vectors)
-     *     - All sharepoint_subscriptions (webhooks)
-     *     - All oauth_tokens for personal SharePoint integrations
-     *     - All sync_logs
+     * @description Permanently delete the tenant's SharePoint app configuration and the organization-wide SharePoint connection that uses it (app or service account). WARNING: This action CANNOT be undone. In one request it deletes:
+     *     - the organization-wide connections of this app
+     *     - the SharePoint knowledge imported through them, with its documents, embeddings and sync history
+     *     - Eneo's records of their change-notification subscriptions
      *
-     *     Assistants linked to this knowledge will lose their connections.
-     *     Requires admin role.
+     *     Personal SharePoint connections and their imports are kept, but they sign in through this app and stop syncing until an app is configured again. Subscriptions registered at Microsoft are not removed there; they expire on their own. Assistants lose the deleted knowledge. Requires admin role.
      */
     delete: operations["delete_sharepoint_app_api_v1_admin_sharepoint_app_delete"];
     options?: never;
@@ -13380,7 +13376,10 @@ export interface components {
        * @default site
        */
       resource_type?: ("site" | "onedrive") | null;
-      /** Name */
+      /**
+       * Name
+       * @description Stored without surrounding whitespace; an item whose name is then empty or longer than 255 characters fails on its own
+       */
       name: string;
       /** Url */
       url: string;
@@ -15821,6 +15820,8 @@ export interface components {
         | "listing_failed"
         | "scope_path_unavailable"
         | "missing_item_id"
+        | "unchanged"
+        | "set_aside"
         | "error";
       /**
        * Params
@@ -15994,6 +15995,8 @@ export interface components {
             | "listing_failed"
             | "scope_path_unavailable"
             | "missing_item_id"
+            | "unchanged"
+            | "set_aside"
             | "error"
           )
         | null;
@@ -21839,6 +21842,8 @@ export interface components {
         | "listing_failed"
         | "scope_path_unavailable"
         | "missing_item_id"
+        | "unchanged"
+        | "set_aside"
         | "error";
       /** Params */
       params?: {
@@ -43025,7 +43030,7 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
-      /** @description Bad Request */
+      /** @description Bad request; `code` is `sharepoint_credentials_invalid` when Microsoft refuses the organization's SharePoint credentials, which an administrator must reconnect. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -43088,7 +43093,7 @@ export interface operations {
           "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResponse"];
         };
       };
-      /** @description Bad Request */
+      /** @description Bad request; `code` is `sharepoint_credentials_invalid` when Microsoft refuses the organization's SharePoint credentials, which an administrator must reconnect. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -43163,6 +43168,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description `code` is `integration_knowledge_syncing`: a sync holds the source; try again when it has finished. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -43204,6 +43218,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description `code` is `integration_knowledge_syncing`: a sync holds the source; try again when it has finished. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -43267,6 +43290,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description `code` is `integration_knowledge_syncing`: a sync holds the source; try again when it has finished. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -43439,6 +43471,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description `code` is `integration_knowledge_syncing`: a sync holds the source; try again when it has finished. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -43578,7 +43619,7 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
-      /** @description Bad Request */
+      /** @description Bad request; `code` is `sharepoint_credentials_invalid` when Microsoft refuses the organization's SharePoint credentials, which an administrator must reconnect. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -52516,7 +52557,7 @@ export interface operations {
           "application/json": components["schemas"]["TenantSharePointAppPublic"];
         };
       };
-      /** @description Invalid state or auth code */
+      /** @description Invalid state or auth code; `code` is `oauth_code_rejected` when Microsoft refuses the code (start the sign-in again) and `oauth_client_rejected` when it refuses the app's client ID or secret */
       400: {
         headers: {
           [name: string]: unknown;
@@ -53475,7 +53516,7 @@ export interface operations {
           "application/json": components["schemas"]["UserIntegration"];
         };
       };
-      /** @description Bad Request */
+      /** @description Bad request; `code` is `oauth_code_rejected` when the identity provider refuses the code (expired, already used or issued for another redirect URI; the state is spent, start the sign-in again) and `oauth_client_rejected` when it refuses the app's client ID or secret, which an administrator must fix. */
       400: {
         headers: {
           [name: string]: unknown;

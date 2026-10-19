@@ -31,6 +31,8 @@ SkipReasonCode = Literal[
     "listing_failed",
     "scope_path_unavailable",
     "missing_item_id",
+    "unchanged",
+    "set_aside",
     "error",
 ]
 SKIP_REASON_CODES: tuple[SkipReasonCode, ...] = get_args(SkipReasonCode)
@@ -58,6 +60,8 @@ PASSWORD_PROTECTED_REASON = "Password-protected file"
 CORRUPT_FILE_REASON = "Corrupt or malformed file"
 SCOPE_PATH_UNAVAILABLE_REASON = "Folder scope path unavailable"
 MISSING_ITEM_ID_REASON = "Missing item id"
+# 2.2.x delta syncs listed a file whose change was already processed as skipped.
+ALREADY_SYNCED_REASON = "Already synced (no changes)"
 
 # The parser ran to completion and found nothing. Only these reasons may
 # remove an existing index entry; every other outcome is non-destructive.
@@ -87,6 +91,12 @@ def file_too_large_reason(limit_bytes: int) -> str:
 
 def extraction_limit_reason(limit: str) -> str:
     return f"Exceeds extraction limit ({limit})"
+
+
+def set_aside_reason(attempts: int, detail: str) -> str:
+    """An item that kept failing, set aside so newer changes keep flowing; a
+    later sync tries it again."""
+    return f"Set aside after {attempts} failed attempts, tried again later: {detail}"
 
 
 def error_reason(detail: str | BaseException) -> str:
@@ -123,6 +133,12 @@ def reason_text(code: SkipReasonCode, params: Mapping[str, str | int]) -> str:
         return SCOPE_PATH_UNAVAILABLE_REASON
     if code == "missing_item_id":
         return MISSING_ITEM_ID_REASON
+    if code == "unchanged":
+        return ALREADY_SYNCED_REASON
+    if code == "set_aside":
+        return set_aside_reason(
+            int(params.get("attempts", 0)), str(params.get("detail", ""))
+        )
     return error_reason(str(params.get("detail", "")))
 
 
@@ -180,6 +196,10 @@ _LIMIT_TEXT_BYTES = re.compile(r"^(\d+) bytes of text$")
 _LIMIT_PDF_PAGES = re.compile(r"^(\d+) PDF pages$")
 _REMOVAL_FAILED = re.compile(r"^Could not remove ?([^:]*): (.+)$", re.S)
 _LISTING_FAILED = re.compile(r"^Could not list folder contents: (.+)$", re.S)
+_SET_ASIDE = re.compile(
+    r"^Set aside after (\d+) failed attempts, tried again later: (.+)$",
+    re.S,
+)
 _ERROR = re.compile(r"^Error: (.+)$", re.S)
 _HTTP_ERROR = re.compile(r"^HTTP (\d{3})\b\s*(.*)$", re.S)
 _INCOMPLETE_DOWNLOAD = re.compile(r"^Incomplete download\b")
@@ -212,6 +232,8 @@ def classify_skip_reason(
         return "scope_path_unavailable", {}, retry
     if text == MISSING_ITEM_ID_REASON:
         return "missing_item_id", {}, retry
+    if text == ALREADY_SYNCED_REASON:
+        return "unchanged", {}, retry
     if match := _UNSUPPORTED_TYPE.match(text):
         return "unsupported_type", {"label": match.group(1)}, retry
     if match := _FILE_TOO_LARGE.match(text):
@@ -223,6 +245,9 @@ def classify_skip_reason(
         return "removal_failed", params, retry
     if match := _LISTING_FAILED.match(text):
         return "listing_failed", {"detail": match.group(1)}, retry
+    if match := _SET_ASIDE.match(text):
+        attempts = int(match.group(1))
+        return "set_aside", {"attempts": attempts, "detail": match.group(2)}, retry
     if match := _ERROR.match(text):
         return _classify_error(match.group(1)) + (retry,)
     return "error", {"detail": text}, retry

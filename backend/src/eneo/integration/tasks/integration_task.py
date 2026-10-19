@@ -2,24 +2,32 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
+from uuid import UUID
 
 import redis.asyncio as redis
 import sqlalchemy as sa
+from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.database.database import sessionmanager
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.integration.infrastructure.detached_tasks import run_detached
 from eneo.integration.infrastructure.sharepoint_sync_keys import (
     SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+    release_sync_queue_slot,
 )
 from eneo.integration.infrastructure.sharepoint_sync_keys import (
     sync_lock_key as _lock_key,
 )
 from eneo.integration.infrastructure.sharepoint_sync_keys import (
+    sync_pending_full_key as _pending_full_key,
+)
+from eneo.integration.infrastructure.sharepoint_sync_keys import (
     sync_pending_key as _pending_key,
 )
 from eneo.main.config import get_settings
+from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.main.logging import get_logger
 from eneo.main.models import ChannelType
@@ -39,7 +47,6 @@ if TYPE_CHECKING:
         ConfluenceContentTaskParam,
         SharepointContentTaskParam,
     )
-    from eneo.main.container.container import Container
 
 worker = Worker()
 logger = get_logger(__name__)
@@ -131,9 +138,9 @@ async def pull_confluence_content(
         raise IntegrationSyncError(exc) from exc
 
 
-_PENDING_RETRY_DELAY_SECONDS = 1.0
 # Markers that keep arriving faster than passes complete are left for the
-# next sync rather than holding the lease indefinitely.
+# follow-up job queued after the lease is released, rather than holding the
+# lease indefinitely.
 _PENDING_DRAIN_MAX_PASSES = 3
 
 
@@ -147,11 +154,43 @@ async def _open_redis() -> "redis.Redis":
     )
 
 
+async def _queue_sync_job(knowledge_id: UUID, *, full: bool) -> None:
+    """Queue a sync for the knowledge in a transaction of its own."""
+    async with sessionmanager.session() as session, session.begin():
+        container = Container(session=providers.Object(session))
+        await container.sharepoint_webhook_service().queue_sync_for_knowledge(
+            knowledge_id, full=full
+        )
+
+
+async def _queue_follow_up(redis_client: "redis.Redis", knowledge_id: UUID) -> None:
+    """Queue a job for the markers still left once the lease is released.
+
+    A marker is left here by a sync requested during the lease that the
+    holder did not run: one set after its last pending pass, one put back
+    by a failed pending pass or past the pass limit, one a pass without a
+    delta token cannot serve, a manual full sync, or any marker when the
+    holder's own sync failed. Whoever sets a marker checks the lease again
+    afterwards, so one set after this check finds the lease free and is
+    served by its setter.
+    """
+    knowledge_id_str = str(knowledge_id)
+    full = bool(await redis_client.exists(_pending_full_key(knowledge_id_str)))
+    if not full and not await redis_client.exists(_pending_key(knowledge_id_str)):
+        return
+    logger.info(
+        "Queuing a follow-up %s sync for knowledge %s requested during the lease",
+        "full" if full else "delta",
+        knowledge_id_str,
+    )
+    await _queue_sync_job(knowledge_id, full=full)
+
+
 @asynccontextmanager
 async def _sync_lease(
-    container: "Container", lock_key: str
+    container: "Container", params: "SharepointContentTaskParam"
 ) -> AsyncGenerator[tuple["redis.Redis", bool]]:
-    """Open Redis and take the sync lease for the block.
+    """Open Redis and take the knowledge's sync lease for the block.
 
     The worker commits the task's transaction only after the task has
     returned. A lease released when the block ends would let the next holder
@@ -160,32 +199,58 @@ async def _sync_lease(
     its pending marker because the token is not there yet. A lease that was
     acquired is therefore released, and the Redis client closed, once the
     task's transaction has ended, however it ends; a worker that dies first
-    leaves it to the TTL.
+    leaves it to the TTL. After the release, a job is queued for the markers
+    left during the lease (``_queue_follow_up``).
+
+    A task that starts clears the queued-sync marker first: from here on a
+    new notification either finds the lease taken and leaves a marker, or
+    queues a job of its own.
     """
-    stack = AsyncExitStack()
+    knowledge_id_str = str(params.integration_knowledge_id)
+    lease = AsyncExitStack()
     redis_client = await _open_redis()
-    stack.push_async_callback(redis_client.close)
     try:
-        acquired = await stack.enter_async_context(
+        await release_sync_queue_slot(redis_client, knowledge_id_str)
+        acquired = await lease.enter_async_context(
             redis_lease(
-                redis_client, lock_key, ttl_seconds=SHAREPOINT_SYNC_LOCK_TTL_SECONDS
+                redis_client,
+                _lock_key(knowledge_id_str),
+                ttl_seconds=SHAREPOINT_SYNC_LOCK_TTL_SECONDS,
             )
         )
     except BaseException:
-        await stack.aclose()
+        await redis_client.close()
         raise
     if not acquired:
-        async with stack:
+        try:
             yield redis_client, False
+        finally:
+            await lease.aclose()
+            await redis_client.close()
         return
 
     async def release() -> None:
+        # The lease goes before the markers are read: a marker's setter checks
+        # the lease after setting it and relies on this order.
         try:
-            await stack.aclose()
+            await lease.aclose()
         except Exception:
             logger.warning(
-                "Could not release the sync lease %s", lock_key, exc_info=True
+                "Could not release the sync lease of knowledge %s",
+                knowledge_id_str,
+                exc_info=True,
             )
+        try:
+            await _queue_follow_up(redis_client, params.integration_knowledge_id)
+        except Exception:
+            logger.error(
+                "Could not queue the follow-up sync of knowledge %s; the periodic "
+                "catch-up picks its markers up",
+                knowledge_id_str,
+                exc_info=True,
+            )
+        finally:
+            await redis_client.close()
 
     def release_detached() -> None:
         run_detached(release())
@@ -217,7 +282,51 @@ async def _prepare_sharepoint_sync(
     )
     assert knowledge is not None
     await _validate_embedding_provider(container, knowledge)
+    await _link_subscription_if_missing(container, knowledge)
     return knowledge, container.sharepoint_content_service()
+
+
+async def _link_subscription_if_missing(
+    container: "Container", knowledge: "IntegrationKnowledge"
+) -> None:
+    """Point the knowledge at its site's subscription when nothing else could.
+
+    Notifications reach a knowledge row only through this link. An import or
+    resync skips writing it while a sync holds the row; this sync holds it
+    now. A failure here never fails the sync.
+    """
+    if knowledge.sharepoint_subscription_id is not None:
+        return
+    # OneDrive subscriptions store the drive id as their site.
+    resource_id = knowledge.site_id or knowledge.drive_id
+    if not resource_id:
+        return
+    session = cast(AsyncSession, container.session())
+    try:
+        async with session.begin_nested():
+            subscription = (
+                await container.sharepoint_subscription_repo().get_by_user_and_site(
+                    user_integration_id=knowledge.user_integration.id,
+                    site_id=resource_id,
+                )
+            )
+            if subscription is None:
+                return
+            if await container.integration_knowledge_repo().link_subscription(
+                knowledge.id, subscription.id
+            ):
+                knowledge.sharepoint_subscription_id = subscription.id
+                logger.info(
+                    "Linked knowledge %s to SharePoint subscription %s",
+                    knowledge.id,
+                    subscription.subscription_id,
+                )
+    except Exception:
+        logger.warning(
+            "Could not link knowledge %s to its SharePoint subscription",
+            knowledge.id,
+            exc_info=True,
+        )
 
 
 async def _run_delta(
@@ -253,28 +362,30 @@ async def _drain_pending_delta(
     may have initialised the delta token. A full sync mints its baseline
     before it enumerates, so a delta pass from that token sees the change the
     marker stands for. A knowledge still without a token had a full sync that
-    failed or could not mint one; a delta pass would only start a second full
-    sync, and the next sync is a full one that covers the change anyway, so
-    the marker is dropped.
+    failed or could not mint one; a delta pass would start a second full sync
+    inside this lease, so the marker is left for the follow-up job queued
+    once the lease is released.
 
     ``owned`` is false for a task that took the lease only on its retry: no
     sync of its own ran, so its passes are ordinary ones whose failure is the
     knowledge's status and the job's outcome.
     """
+    pending_key = _pending_key(knowledge_id_str)
     result: str | None = None
     for _ in range(_PENDING_DRAIN_MAX_PASSES):
-        if not await redis_client.delete(_pending_key(knowledge_id_str)):
+        if not await redis_client.exists(pending_key):
             break
         knowledge = await container.integration_knowledge_repo().one(
             id=params.integration_knowledge_id
         )
         if not knowledge.delta_token:
             logger.info(
-                "Dropping pending delta marker for knowledge %s: no delta token, "
-                "the next sync is a full one and covers the change",
+                "Leaving the pending marker of knowledge %s for a full sync after "
+                "the lease: it has no delta token",
                 knowledge_id_str,
             )
             break
+        await redis_client.delete(pending_key)
         logger.info(
             "Running pending delta pass for knowledge %s requested while the sync "
             "lease was held",
@@ -287,19 +398,58 @@ async def _drain_pending_delta(
             result = await _run_delta(service, params, knowledge, record_failure=False)
         except Exception:
             # The sync that owned the lease succeeded and its status stands; the
-            # marker goes back so the change is retried by the next notification
-            # or scheduled sync, not lost.
+            # marker goes back for the follow-up job queued after the release.
             logger.error(
                 "Pending delta pass failed for knowledge %s",
                 knowledge_id_str,
                 exc_info=True,
             )
             await redis_client.set(
-                _pending_key(knowledge_id_str),
-                "1",
-                ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+                pending_key, "1", ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS
             )
             break
+    return result
+
+
+DEFERRED_FULL_SYNC_RESULT = (
+    "Deferred: another sync of this source is running; "
+    "a full sync starts when it finishes"
+)
+SKIPPED_DELTA_SYNC_RESULT = (
+    "Skipped: another sync of this source is running and applies these changes"
+)
+
+
+async def _run_full_sync(
+    redis_client: "redis.Redis",
+    knowledge_id_str: str,
+    container: "Container",
+    params: "SharepointContentTaskParam",
+) -> str:
+    # This sync starts after every change announced so far, so it serves the
+    # markers already left; a job that fails before reading them must not
+    # queue itself again.
+    await redis_client.delete(
+        _pending_full_key(knowledge_id_str), _pending_key(knowledge_id_str)
+    )
+    logger.info(f"Acquired sync lock for knowledge {knowledge_id_str}")
+    knowledge, service = await _prepare_sharepoint_sync(container, params)
+
+    result = await service.pull_content(
+        token_id=params.token_id,
+        tenant_app_id=params.tenant_app_id,
+        integration_knowledge_id=knowledge.id,
+        site_id=params.site_id,
+        drive_id=params.drive_id,
+        folder_id=params.folder_id,
+        folder_path=params.folder_path,
+        resource_type=params.resource_type,
+    )
+
+    logger.info(f"Completed full sync for knowledge {knowledge_id_str}")
+    await _drain_pending_delta(
+        redis_client, knowledge_id_str, container, service, params
+    )
     return result
 
 
@@ -307,39 +457,38 @@ async def _drain_pending_delta(
 async def pull_sharepoint_content(
     params: "SharepointContentTaskParam", container: "Container", **kw: Any
 ):
+    """Run a full sync, or leave it for after the sync holding the lease.
+
+    A full sync asked for while another sync runs (typically a manual one
+    during a webhook's delta) leaves the full-sync marker; the holder queues
+    the full sync once it releases the lease, and this job reports that.
+    """
     knowledge_id_str = str(params.integration_knowledge_id)
 
     try:
-        async with _sync_lease(container, _lock_key(knowledge_id_str)) as (
-            redis_client,
-            acquired,
-        ):
-            if not acquired:
-                logger.info(
-                    f"Skipping full sync for knowledge {knowledge_id_str} - "
-                    f"another sync is already in progress (Redis lock active)"
+        async with _sync_lease(container, params) as (redis_client, acquired):
+            if acquired:
+                return await _run_full_sync(
+                    redis_client, knowledge_id_str, container, params
                 )
-                return "Skipped: Duplicate sync blocked by Redis lock"
-
-            logger.info(f"Acquired sync lock for knowledge {knowledge_id_str}")
-            knowledge, service = await _prepare_sharepoint_sync(container, params)
-
-            result = await service.pull_content(
-                token_id=params.token_id,
-                tenant_app_id=params.tenant_app_id,
-                integration_knowledge_id=knowledge.id,
-                site_id=params.site_id,
-                drive_id=params.drive_id,
-                folder_id=params.folder_id,
-                folder_path=params.folder_path,
-                resource_type=params.resource_type,
+            await redis_client.set(
+                _pending_full_key(knowledge_id_str),
+                "1",
+                ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
             )
-
-            logger.info(f"Completed full sync for knowledge {knowledge_id_str}")
-            await _drain_pending_delta(
-                redis_client, knowledge_id_str, container, service, params
-            )
-            return result
+        # The holder reads the markers after releasing the lease; one that
+        # released before the marker was set is caught by taking it here.
+        async with _sync_lease(container, params) as (redis_client, acquired):
+            if acquired:
+                return await _run_full_sync(
+                    redis_client, knowledge_id_str, container, params
+                )
+        logger.info(
+            "Sync lease for knowledge %s is held by another sync; the full sync "
+            "is queued after it",
+            knowledge_id_str,
+        )
+        return DEFERRED_FULL_SYNC_RESULT
 
     except Exception as exc:
         logger.error(
@@ -358,11 +507,13 @@ async def sync_sharepoint_delta(
     This is called by webhooks to efficiently sync only changed items.
     """
     knowledge_id_str = str(params.integration_knowledge_id)
-    lock_key = _lock_key(knowledge_id_str)
+    pending_key = _pending_key(knowledge_id_str)
 
     try:
-        async with _sync_lease(container, lock_key) as (redis_client, acquired):
+        async with _sync_lease(container, params) as (redis_client, acquired):
             if acquired:
+                # This pass starts after every change announced so far.
+                await redis_client.delete(pending_key)
                 logger.info(f"Acquired sync lock for knowledge {knowledge_id_str}")
                 knowledge, service = await _prepare_sharepoint_sync(container, params)
                 result = await _run_delta(service, params, knowledge)
@@ -376,19 +527,15 @@ async def sync_sharepoint_delta(
                 "sync; leaving a pending marker for the lease holder"
             )
             await redis_client.set(
-                _pending_key(knowledge_id_str),
-                "1",
-                ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+                pending_key, "1", ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS
             )
-        # The holder may have passed its own pending check and be about to
-        # release; one short retry closes that window instead of waiting for
-        # the next webhook.
-        await asyncio.sleep(_PENDING_RETRY_DELAY_SECONDS)
-        async with _sync_lease(container, lock_key) as (redis_client, acquired):
-            # The marker is checked first: when the holder drained it there
+        # The holder reads the markers after releasing the lease; one that
+        # released before the marker was set is caught by taking it here.
+        async with _sync_lease(container, params) as (redis_client, acquired):
+            # The marker is checked first: when someone else served it there
             # is nothing to do, and preparing a sync (embedding validation)
             # must not be what fails this job.
-            if acquired and await redis_client.get(_pending_key(knowledge_id_str)):
+            if acquired and await redis_client.exists(pending_key):
                 _, service = await _prepare_sharepoint_sync(container, params)
                 drained = await _drain_pending_delta(
                     redis_client,
@@ -400,7 +547,7 @@ async def sync_sharepoint_delta(
                 )
                 if drained is not None:
                     return drained
-        return "Skipped: Duplicate sync blocked by Redis lock"
+        return SKIPPED_DELTA_SYNC_RESULT
 
     except Exception as e:
         logger.error(f"Error in sync_sharepoint_delta: {e}", exc_info=True)

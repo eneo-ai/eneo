@@ -14,6 +14,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { focusAfterRemoval } from "$lib/core/focus/focusAfterRemoval";
   import { m } from "$lib/paraglide/messages";
+  import { KNOWLEDGE_NAME_MAX_LENGTH } from "$lib/features/integrations/knowledgeNames";
 
   interface Props {
     knowledgeItem: IntegrationKnowledge;
@@ -112,6 +113,7 @@
 <NameDialog
   bind:open={showRenameDialog}
   title={m.integration_rename_title()}
+  maxlength={KNOWLEDGE_NAME_MAX_LENGTH}
   label={m.name()}
   initial={knowledgeItem.name}
   submitLabel={m.save()}

@@ -9,7 +9,9 @@ import aiohttp
 from eneo.integration.infrastructure.auth_service.org_token_provider import (
     CREDENTIALS_INVALID_MESSAGE,
     SharePointCredentialsInvalidError,
+    SharePointCredentialsRefusedError,
 )
+from eneo.main.exceptions import BadRequestException
 
 # A response about an individual item, not a transient Graph/network failure.
 ITEM_LEVEL_HTTP_STATUSES = frozenset({403, 404, 410})
@@ -42,3 +44,14 @@ def user_facing_sharepoint_error(exc: BaseException) -> Optional[str]:
             if cause.status == 401:
                 return CREDENTIALS_INVALID_MESSAGE
     return None
+
+
+def user_facing_sharepoint_failure(exc: BaseException) -> BadRequestException | None:
+    """``user_facing_sharepoint_error`` as the 400 to raise; refused
+    credentials carry the same ``code`` as an import or sync reports."""
+    message = user_facing_sharepoint_error(exc)
+    if message is None:
+        return None
+    if message == CREDENTIALS_INVALID_MESSAGE:
+        return SharePointCredentialsRefusedError()
+    return BadRequestException(message)

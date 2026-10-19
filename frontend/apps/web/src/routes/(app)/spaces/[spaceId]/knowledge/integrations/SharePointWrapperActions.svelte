@@ -7,6 +7,7 @@
   import { trackSyncs } from "$lib/features/integrations/pendingSyncs";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
+  import { KNOWLEDGE_NAME_MAX_LENGTH } from "$lib/features/integrations/knowledgeNames";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { IconEdit } from "@eneo/icons/edit";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
@@ -168,6 +169,7 @@
 <NameDialog
   bind:open={showRenameDialog}
   title={m.rename_wrapper()}
+  maxlength={KNOWLEDGE_NAME_MAX_LENGTH}
   label={m.sharepoint_wrapper_name_label()}
   initial={wrapperName}
   submitLabel={m.save()}

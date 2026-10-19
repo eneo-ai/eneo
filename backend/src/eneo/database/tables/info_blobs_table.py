@@ -65,6 +65,13 @@ class InfoBlobs(BasePublic):
             "integration_knowledge_id",
             postgresql_where=text("version_state = 'active'"),
         ),
+        # Per-file lookups and deletes of a SharePoint sync, all versions.
+        Index(
+            "ix_info_blobs_integration_knowledge_sharepoint_item",
+            "integration_knowledge_id",
+            "sharepoint_item_id",
+            postgresql_where=text("sharepoint_item_id IS NOT NULL"),
+        ),
         Index(
             "ix_info_blobs_active_website_source_url",
             "website_id",

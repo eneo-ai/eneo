@@ -10,6 +10,7 @@ from eneo.integration.presentation.models import (
     IntegrationDocumentItem,
     IntegrationSkippedDocument,
     IntegrationSkippedDocuments,
+    served_sync_metadata,
 )
 
 if TYPE_CHECKING:
@@ -55,6 +56,24 @@ def _url_segments(url: str | None) -> list[str]:
     return _segments(urlsplit(url).path) if url else []
 
 
+def _folder_path_forms(folder_path: str | None) -> list[list[str]]:
+    """The stored folder path's segments: as stored, and decoded once.
+
+    The sync stores the path decoded, so a name like "Budget 50%AB" must not
+    be decoded again; a path stored percent-encoded before that still reads
+    until the sync refreshes it.
+    """
+    if not folder_path:
+        return []
+    stored = [
+        unicodedata.normalize("NFC", segment)
+        for segment in folder_path.split("/")
+        if segment
+    ]
+    decoded = _segments(folder_path)
+    return [stored] if decoded == stored else [stored, decoded]
+
+
 def _fold(segments: list[str]) -> list[str]:
     return [segment.casefold() for segment in segments]
 
@@ -90,18 +109,19 @@ def relative_document_path(
     if not segments:
         return ""
     folders = segments[:-1]
-    folder_segments = _segments(folder_path)
+    folder_forms = _folder_path_forms(folder_path)
 
     anchor = _url_segments(item_url)
     if anchor and _fold(segments[: len(anchor)]) == _fold(anchor):
         rest = folders[len(anchor) :]
-        if not folder_segments and resource_type != ONEDRIVE_RESOURCE_TYPE:
+        if not folder_forms and resource_type != ONEDRIVE_RESOURCE_TYPE:
             rest = rest[1:]
         return "/".join(rest)
 
-    start = _find(folders, folder_segments)
-    if start is not None:
-        return "/".join(folders[start + len(folder_segments) :])
+    for folder_segments in folder_forms:
+        start = _find(folders, folder_segments)
+        if start is not None:
+            return "/".join(folders[start + len(folder_segments) :])
     return "/".join(folders)
 
 
@@ -160,15 +180,11 @@ def document_items(
 def skipped_documents(sync_log: SyncLog | None) -> IntegrationSkippedDocuments:
     if sync_log is None:
         return IntegrationSkippedDocuments(items=[], total=0, truncated=False)
-    metadata = sync_log.metadata
-    # Stored JSON: anything but a mapping is not a detail.
-    details = cast(list[object], metadata.get("skipped_details", []))
+    # Read like the sync history, so a value of another shape is left out.
+    metadata = served_sync_metadata(sync_log.metadata)
+    details = cast(list[dict[str, object]], metadata.get("skipped_details", []))
     return IntegrationSkippedDocuments(
-        items=[
-            IntegrationSkippedDocument.model_validate(detail)
-            for detail in details
-            if isinstance(detail, dict)
-        ],
+        items=[IntegrationSkippedDocument.model_validate(detail) for detail in details],
         total=int(
             metadata.get("skipped_total", metadata.get("skipped_items", len(details)))
         ),

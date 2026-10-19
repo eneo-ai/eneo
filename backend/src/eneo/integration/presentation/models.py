@@ -1,12 +1,25 @@
 from collections.abc import Mapping
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Generic, Literal, Optional, TypeVar, cast
+from typing import (
+    Any,
+    Dict,
+    Generic,
+    Literal,
+    Optional,
+    TypeVar,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 from uuid import UUID, uuid4
 
 from pydantic import (
     BaseModel,
     Field,
+    TypeAdapter,
+    ValidationError,
     computed_field,
     field_validator,
     model_validator,
@@ -34,6 +47,10 @@ from eneo.main.models import ResourcePermission
 from eneo.observability.error_text import user_visible_error
 
 T = TypeVar("T", bound=BaseModel)
+
+# Above this an offset stops being a page anyone browses to, and past int64
+# the database driver fails the query.
+MAX_PAGE_OFFSET = 1_000_000
 
 
 def _empty_resource_permissions() -> list[ResourcePermission]:
@@ -97,6 +114,54 @@ def _visible_detail(detail: object) -> object:
     # A sync names an item Graph returned without a name as a null file; a
     # detail without a readable reason keeps its shape and loses the reason.
     return {**entry, **_visible_skip(entry)}
+
+
+_SYNC_METADATA_HINTS = get_type_hints(SyncMetadata)
+_SYNC_METADATA_TYPES = {
+    key: TypeAdapter(hint)
+    for key, hint in _SYNC_METADATA_HINTS.items()
+    if get_origin(hint) is not list
+}
+# List keys are read entry by entry, so one odd entry loses only itself.
+_SYNC_METADATA_ENTRY_TYPES = {
+    key: TypeAdapter(get_args(hint)[0])
+    for key, hint in _SYNC_METADATA_HINTS.items()
+    if get_origin(hint) is list
+}
+
+
+def served_sync_metadata(metadata: object) -> Dict[str, Any]:
+    """A stored sync log's metadata as served: cleaned, and only the values
+    that have their declared type.
+
+    A row another release wrote, with a null, an unknown key or a changed
+    type, loses that value (or that list entry) instead of failing the
+    whole response.
+    """
+    if not isinstance(metadata, dict):
+        return {}
+    readable: Dict[str, Any] = {}
+    for key, value in _visible_summary(cast(Dict[str, Any], metadata)).items():
+        if key in _SYNC_METADATA_ENTRY_TYPES:
+            if isinstance(value, list):
+                entry_type = _SYNC_METADATA_ENTRY_TYPES[key]
+                readable[key] = [
+                    entry
+                    for entry in cast(list[object], value)
+                    if _validates(entry_type, entry)
+                ]
+        elif key in _SYNC_METADATA_TYPES and value is not None:
+            if _validates(_SYNC_METADATA_TYPES[key], value):
+                readable[key] = value
+    return readable
+
+
+def _validates(adapter: TypeAdapter[Any], value: object) -> bool:
+    try:
+        adapter.validate_python(value)
+    except ValidationError:
+        return False
+    return True
 
 
 class BaseListModel(BaseModel, Generic[T]):
@@ -163,7 +228,8 @@ class AuthUrlPublic(BaseModel):
 class AuthCallbackParams(BaseModel):
     auth_code: str
     tenant_integration_id: UUID
-    state: str
+    # The issued state is token_urlsafe(32), 43 characters.
+    state: str = Field(max_length=256)
 
 
 class ConfluenceContentTaskParam(ResourceTaskParams):
@@ -390,9 +456,9 @@ class SyncLog(BaseModel):
     @field_validator("metadata", mode="before")
     @classmethod
     def _user_visible_metadata(cls, value: object) -> object:
-        if not isinstance(value, dict):
-            return value
-        return _visible_summary(cast(Dict[str, Any], value))
+        if isinstance(value, dict):
+            return served_sync_metadata(cast(object, value))
+        return value
 
     @field_validator("error_message")
     @classmethod
@@ -626,7 +692,7 @@ class PaginatedSyncLogList(BaseModel):
 
 class IntegrationSyncWindowRequest(BaseModel):
     integration_knowledge_id: UUID
-    offset: int = Field(default=0, ge=0)
+    offset: int = Field(default=0, ge=0, le=MAX_PAGE_OFFSET)
 
 
 class IntegrationSyncDetailsRequest(BaseModel):

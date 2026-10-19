@@ -19,7 +19,7 @@ from eneo.integration.infrastructure.auth_service.base_auth_service import (
     TokenResponse,
 )
 from eneo.integration.infrastructure.auth_service.org_token_provider import (
-    summarize_token_endpoint_error,
+    loggable_token_reason,
 )
 from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
     TenantAppToken,
@@ -222,7 +222,7 @@ class ServiceAccountAuthService:
                 except httpx.HTTPStatusError as exc:
                     logger.error(
                         "Service account token exchange failed: %s",
-                        summarize_token_endpoint_error(exc),
+                        loggable_token_reason(exc),
                     )
                     raise
 
@@ -339,7 +339,7 @@ class ServiceAccountAuthService:
                     logger.error(
                         "Service account token refresh failed for tenant %s: %s",
                         tenant_app.tenant_id,
-                        summarize_token_endpoint_error(exc),
+                        loggable_token_reason(exc),
                     )
                     raise
 

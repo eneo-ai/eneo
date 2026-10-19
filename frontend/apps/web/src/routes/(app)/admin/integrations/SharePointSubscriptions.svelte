@@ -47,7 +47,11 @@
         await eneo.integrations.admin.sharepoint.renewExpiredSubscriptions();
 
       if ((result.recreated ?? 0) > 0 && (result.failed ?? 0) === 0) {
-        toast.success(m.sharepoint_subscriptions_renewed_success({ count: result.recreated ?? 0 }));
+        toast.success(
+          result.recreated === 1
+            ? m.sharepoint_subscriptions_renewed_success_one()
+            : m.sharepoint_subscriptions_renewed_success({ count: result.recreated ?? 0 })
+        );
       } else if ((result.failed ?? 0) > 0) {
         toast.error(
           m.sharepoint_subscriptions_renewed_partial({
@@ -135,9 +139,10 @@
 
   function getHealthLabel(subscription: SharePointSubscription): string {
     if (hasRenewalFailures(subscription)) {
-      return m.sharepoint_subscription_health_failing({
-        count: getRenewalFailureCount(subscription)
-      });
+      const count = getRenewalFailureCount(subscription);
+      return count === 1
+        ? m.sharepoint_subscription_health_failing_one()
+        : m.sharepoint_subscription_health_failing({ count });
     }
     if (!subscription.last_webhook_received_at) return m.sharepoint_subscription_health_waiting();
     return m.sharepoint_subscription_health_ok();

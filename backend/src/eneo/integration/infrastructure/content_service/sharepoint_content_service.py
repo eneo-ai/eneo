@@ -5,11 +5,13 @@ Scope decisions and strict listing: sharepoint_scope.
 Index mutations and content identity: SharePointIndex.
 Full-sync orphan and moved-subtree cleanup: SharePointReconciliation.
 Counts and result semantics: sharepoint_results.
+What is kept about items between passes: sharepoint_sync_ledger.
 Graph transport, parsing, credentials, progress and persisted status retain their
 existing owners. Do not add another implementation of their rules here.
 """
 
 import asyncio
+import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -57,8 +59,13 @@ from eneo.integration.infrastructure.content_service.sharepoint_reconciliation i
     SharePointReconciliation,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_results import (
+    DeltaBaselineUnavailable,
     SyncAccessDenied,
     SyncItemsFailed,
+)
+from eneo.integration.infrastructure.content_service.sharepoint_sync_ledger import (
+    FailedItem,
+    SyncLedger,
 )
 from eneo.integration.infrastructure.content_service.sync_state import (
     SyncStateRecorder,
@@ -169,6 +176,14 @@ class _DeltaPass:
     placements: dict[str, Optional[SharePointItem]] = field(
         default_factory=dict[str, Optional[SharePointItem]]
     )
+    # Items earlier passes could not finish.
+    failed_before: dict[str, FailedItem] = field(default_factory=dict[str, FailedItem])
+    # Those of them this pass tried again outside the change set.
+    retried_ids: set[str] = field(default_factory=set[str])
+    # What the walk cache keys of this pass end with, read when first needed;
+    # None when it could not be read and the cache is not used.
+    walk_cache_suffix: Optional[str] = None
+    walk_cache_suffix_read: bool = False
 
 
 class SharePointContentService:
@@ -185,6 +200,7 @@ class SharePointContentService:
         sync_log_repo: "SyncLogRepository | None" = None,
         change_key_service: "OfficeChangeKeyService | None" = None,
         sync_progress_store: SharePointSyncProgressStore | None = None,
+        sync_ledger: SyncLedger | None = None,
     ) -> None:
         super().__init__()
         self.org_token_provider = org_token_provider
@@ -194,7 +210,6 @@ class SharePointContentService:
         self.session = session
         self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
         self._sync_state = SyncStateRecorder(integration_knowledge_repo, sync_log_repo)
-        self.change_key_service = change_key_service
         # Strong refs to in-flight post-transaction tasks (ChangeKey flushes,
         # progress clears) so the event loop does not GC them before they run.
         self._post_transaction_tasks: set["asyncio.Task[None]"] = set()
@@ -202,6 +217,14 @@ class SharePointContentService:
             info_blob_service, integration_knowledge_repo, user, change_key_service
         )
         self._reconciliation = SharePointReconciliation(self._index)
+        # Kept in the same Redis as the ChangeKey cache. Without it a full sync
+        # cannot hand failed items to the next delta and leaves it a full one.
+        if sync_ledger is None and isinstance(
+            change_key_service, OfficeChangeKeyService
+        ):
+            sync_ledger = SyncLedger(change_key_service.redis_client)
+        self._ledger = sync_ledger
+        self._clock: Callable[[], float] = time.time
         self._progress = SyncProgressReporter(
             sync_progress_store,
             after_transaction=partial(self._after_transaction, on_rollback=True),
@@ -287,6 +310,8 @@ class SharePointContentService:
         # Outside the try: what a failed sync indexed or deleted before the
         # error is committed, so its log records it.
         stats = sync_results.initialize_stats()
+        # The token a failure leaves in place; None clears it.
+        token_after_failure: str | None = None
 
         try:
             await self._progress.begin(integration_knowledge_id, "full")
@@ -317,8 +342,9 @@ class SharePointContentService:
                 integration_knowledge.folder_path = folder_path
                 binding["folder_path"] = folder_path
             await self._sync_state.started(integration_knowledge, started_at, **binding)
+            await self._invalidate_walk_cache(resolved_integration_knowledge_id)
 
-            delta_baseline = await self._pull_content(
+            delta_baseline, baseline_failure = await self._pull_content(
                 token=token,
                 oauth_token_id=oauth_token_id,
                 integration_knowledge_id=resolved_integration_knowledge_id,
@@ -329,14 +355,31 @@ class SharePointContentService:
                 access_token_provider=access_token_provider,
             )
             await self._progress.set_phase("finishing", stats)
+            if not sync_results.refused_access(stats):
+                await self._index.remove_refused(integration_knowledge, stats)
+            retries_recorded = await self._settle_failures(
+                resolved_integration_knowledge_id,
+                stats,
+                failed_before=await self._failed_items(
+                    resolved_integration_knowledge_id
+                ),
+                attempted=None,
+            )
             summary_stats, forbidden = sync_results.summarize_pass(stats)
-            # The baseline is not persisted and an existing token is cleared
-            # by the failure record: the next sync is a full one and retries
-            # the failed files instead of a delta never seeing them again.
             if forbidden:
                 raise SyncAccessDenied(summary_stats, forbidden=forbidden)
             if summary_stats.get("failed_items"):
+                # A delta never re-emits an unchanged item, so the token may
+                # stay only when the next delta pass retries every failure.
+                # Otherwise the failure record clears it and the next sync is
+                # a full one.
+                if retries_recorded and not sync_results.unretryable_failures(stats):
+                    token_after_failure = (
+                        delta_baseline or integration_knowledge.delta_token
+                    )
                 raise SyncItemsFailed(summary_stats)
+            if not delta_baseline and not integration_knowledge.delta_token:
+                raise DeltaBaselineUnavailable(summary_stats, detail=baseline_failure)
 
             integration_knowledge.last_sync_summary = sync_results.summary_counts(
                 summary_stats
@@ -381,7 +424,9 @@ class SharePointContentService:
                     trigger=sync_trigger,
                     recovery=recovery,
                 ),
-                clear_delta_token=isinstance(e, SyncItemsFailed),
+                clear_delta_token=isinstance(e, SyncItemsFailed)
+                and token_after_failure is None,
+                delta_token=token_after_failure,
             )
             _log_pass_failure("Error in pull_content", e)
             raise
@@ -498,8 +543,12 @@ class SharePointContentService:
                 logger.info(
                     f"Delta query returned {len(changes)} items. New token: {new_delta_token[:20] if new_delta_token else 'None'}..."
                 )
+                failed_before = await self._failed_items(integration_knowledge.id)
+                now = int(self._clock())
 
-                if len(changes) == 0:
+                if len(changes) == 0 and not any(
+                    item.due(now) for item in failed_before.values()
+                ):
                     logger.info(
                         f"Delta query returned 0 changes for integration knowledge {integration_knowledge_id}. "
                         "No updates needed - SharePoint is in sync with database."
@@ -545,9 +594,11 @@ class SharePointContentService:
                     folder_scope_path_unresolved=folder_scope_path_unresolved,
                     known_subfolder_ids=set(),
                     pending_change_keys=[],
+                    failed_before=failed_before,
                 )
                 await self._progress.set_phase("processing", stats)
                 await self._place_folder_entries(delta_pass, changes)
+                await self._retry_failed_items(delta_pass)
                 for item in changes:
                     await self._apply_delta_change(delta_pass, item)
 
@@ -930,6 +981,7 @@ class SharePointContentService:
                         f"Could not confirm where the {kind} is in SharePoint: "
                         + user_visible_error(exc),
                     ),
+                    item_id=item_id,
                 )
                 return None
             unplaced = f" ({user_visible_error(exc)})"
@@ -984,6 +1036,165 @@ class SharePointContentService:
             delta_pass.indexed_ids = {item_id for _, item_id in indexed}
         return delta_pass.indexed_ids
 
+    async def _failed_items(self, knowledge_id: UUID) -> dict[str, FailedItem]:
+        """The items earlier passes could not finish; empty when unknown."""
+        if self._ledger is None:
+            return {}
+        try:
+            return await self._ledger.failed_items(knowledge_id)
+        except Exception as exc:
+            logger.warning(
+                "Could not read the failed SharePoint items of %s: %s",
+                knowledge_id,
+                exc,
+            )
+            return {}
+
+    async def _retry_failed_items(self, delta_pass: "_DeltaPass") -> None:
+        """Apply what Graph says now about items earlier passes could not finish.
+
+        A delta never re-emits an unchanged item, so a failure a full sync
+        recorded is only retried here. Items the change set carries are
+        applied from it instead, and a set-aside item waits out its cool-off.
+        Gone (404, 410) is removed, refused (403) counts as a refused
+        download, anything else fails the item again.
+        """
+        now = int(self._clock())
+        for item_id, failed in delta_pass.failed_before.items():
+            if item_id in delta_pass.change_ids or not failed.due(now):
+                continue
+            delta_pass.retried_ids.add(item_id)
+            try:
+                current = cast(
+                    SharePointItem,
+                    await delta_pass.content_client.get_file_metadata(
+                        drive_id=delta_pass.drive_id, item_id=item_id
+                    ),
+                )
+            except aiohttp.ClientResponseError as exc:
+                if exc.status in (404, 410):
+                    await self._index.remove(
+                        item_id=item_id,
+                        item_name=item_id,
+                        integration_knowledge=delta_pass.integration_knowledge,
+                        integration_knowledge_id=delta_pass.integration_knowledge.id,
+                        stats=delta_pass.stats,
+                        reason="removed",
+                    )
+                elif exc.status == 403:
+                    sync_results.count_download_attempt(delta_pass.stats)
+                    sync_results.count_refused_download(delta_pass.stats, item_id)
+                    sync_results.count_skip(
+                        delta_pass.stats, error_skipped(item_id, exc)
+                    )
+                else:
+                    sync_results.count_failure(
+                        delta_pass.stats, error_skipped(item_id, exc), item_id=item_id
+                    )
+                continue
+            except Exception as exc:
+                sync_results.count_failure(
+                    delta_pass.stats, error_skipped(item_id, exc), item_id=item_id
+                )
+                continue
+            await self._apply_delta_change(delta_pass, current)
+
+    async def _settle_failures(
+        self,
+        knowledge_id: UUID,
+        stats: SyncStats,
+        *,
+        failed_before: dict[str, FailedItem],
+        attempted: set[str] | None,
+    ) -> bool:
+        """Record this pass's failures per item; a set-aside item's are skips.
+
+        How failures count and when an item is set aside is ``FailedItem``'s;
+        a set-aside item's failure lets the pass advance past it. What the
+        ledger held and this pass tried without failing is forgotten after
+        commit; ``attempted`` None means the pass tried every item (a full
+        sync). True when every failure naming an item is recorded.
+        """
+        if self._ledger is None:
+            return False
+        now = int(self._clock())
+        failed_now: dict[str, FailedItem] = {}
+        for item_id in sync_results.failed_item_ids(stats):
+            previous = failed_before.get(item_id)
+            failed = (
+                previous.after_failure(now)
+                if previous
+                else FailedItem.first_failure(now)
+            )
+            failed_now[item_id] = failed
+            if failed.set_aside_at is not None:
+                sync_results.set_aside(stats, item_id, attempts=failed.counted)
+        # Refusals still here were put down to the identity, not the files.
+        refused = stats.get("refused_downloads", {})
+        resolved = {
+            item_id
+            for item_id in failed_before
+            if item_id not in failed_now
+            and item_id not in refused
+            and (attempted is None or item_id in attempted)
+        }
+        try:
+            await self._ledger.record_failed_items(knowledge_id, failed_now)
+        except Exception as exc:
+            logger.warning(
+                "Could not record the failed SharePoint items of %s: %s",
+                knowledge_id,
+                exc,
+            )
+            return False
+        if resolved and not self._after_transaction(
+            partial(self._forget_failures, knowledge_id, resolved),
+            on_rollback=False,
+        ):
+            logger.warning("Could not register the post-commit failure cleanup")
+        return True
+
+    async def _forget_failures(self, knowledge_id: UUID, item_ids: set[str]) -> None:
+        if self._ledger is None:
+            return
+        try:
+            await self._ledger.forget(knowledge_id, item_ids)
+        except Exception as exc:
+            logger.warning(
+                "Could not forget the retried SharePoint items of %s: %s",
+                knowledge_id,
+                exc,
+            )
+
+    async def _invalidate_walk_cache(self, knowledge_id: UUID) -> None:
+        """Have the next delta walk every folder again; see ``SyncLedger``."""
+        if self._ledger is None:
+            return
+        try:
+            await self._ledger.advance_walk_generation(knowledge_id)
+        except Exception as exc:
+            logger.warning(
+                "Could not invalidate the folder walk cache of %s: %s",
+                knowledge_id,
+                exc,
+            )
+
+    async def _walk_cache_suffix(self, delta_pass: "_DeltaPass") -> Optional[str]:
+        if not delta_pass.walk_cache_suffix_read:
+            delta_pass.walk_cache_suffix_read = True
+            if self._ledger is None:
+                delta_pass.walk_cache_suffix = ""
+            else:
+                try:
+                    generation = await self._ledger.walk_generation(
+                        delta_pass.integration_knowledge.id
+                    )
+                except Exception as exc:
+                    logger.warning("Could not read the walk cache generation: %s", exc)
+                else:
+                    delta_pass.walk_cache_suffix = f"@{generation}"
+        return delta_pass.walk_cache_suffix
+
     async def _walk_folder_in_scope(
         self, delta_pass: "_DeltaPass", item: SharePointItem
     ) -> None:
@@ -992,17 +1203,24 @@ class SharePointContentService:
         The entry does not say whether the folder moved, so its parent is kept
         once a walk completed without failures, post-commit like a file's
         ChangeKey. A folder re-emitted under the same parent (a rename, a
-        permission change, a replayed pass) has its files indexed already.
+        permission change, a replayed pass) has its files indexed already,
+        unless a full sync ran since: it may have removed them as orphans while
+        the folder was elsewhere, so the key carries the walk generation.
         """
         integration_knowledge = delta_pass.integration_knowledge
         item_id = item.get("id", "")
         item_name = item.get("name", "")
         stats = delta_pass.stats
         parent_id = item.get("parentReference", {}).get("id")
-        location_key = f"folder-under:{parent_id}" if parent_id else None
-        if location_key and self.change_key_service:
+        suffix = await self._walk_cache_suffix(delta_pass)
+        location_key = (
+            f"folder-under:{parent_id}{suffix}"
+            if parent_id and suffix is not None
+            else None
+        )
+        if location_key and self._index.change_key_service:
             try:
-                walked_here = not await self.change_key_service.should_process(
+                walked_here = not await self._index.change_key_service.should_process(
                     integration_knowledge_id=integration_knowledge.id,
                     item_id=item_id,
                     change_key=location_key,
@@ -1083,6 +1301,14 @@ class SharePointContentService:
         stats = delta_pass.stats
         pending_change_keys = delta_pass.pending_change_keys
 
+        if not sync_results.refused_access(stats):
+            await self._index.remove_refused(integration_knowledge, stats)
+        await self._settle_failures(
+            integration_knowledge.id,
+            stats,
+            failed_before=delta_pass.failed_before,
+            attempted=delta_pass.change_ids | delta_pass.retried_ids,
+        )
         summary_stats, forbidden = sync_results.summarize_pass(stats)
         if forbidden or summary_stats.get("failed_items"):
             # Keep the token: Graph never re-emits an item once a pass
@@ -1154,16 +1380,16 @@ class SharePointContentService:
         resource_type: str,
         stats: SyncStats,
         access_token_provider: Optional[AccessTokenProvider] = None,
-    ) -> str | None:
+    ) -> tuple[str | None, str | None]:
         """Enumerate and index the scope; returns the delta baseline minted for it.
 
         The baseline is minted before the first listing: a change made while a
         folder is being enumerated is then replayed by the first delta instead
         of lost until the item changes again (the replay is idempotent through
         the content hash and the ChangeKey cache). The caller persists it with
-        the success write only, so a pass that fails leaves the next sync a
-        full one. ``None`` when the knowledge already has a token or the mint
-        failed.
+        the success write, or with a failure whose items the next delta pass
+        retries. The baseline is ``None`` when the knowledge already has a
+        token or the mint failed; the second value says why it failed.
 
         Args:
             token: SharePoint token for authentication (SharePointToken or SimpleSharePointToken)
@@ -1177,6 +1403,7 @@ class SharePointContentService:
             id=integration_knowledge_id
         )
         delta_baseline: str | None = None
+        baseline_failure: str | None = None
 
         try:
             site_id_value = site_id
@@ -1198,7 +1425,10 @@ class SharePointContentService:
                     )
 
                 if not integration_knowledge.delta_token:
-                    delta_baseline = await self._mint_delta_baseline(
+                    (
+                        delta_baseline,
+                        baseline_failure,
+                    ) = await self._mint_delta_baseline(
                         content_client, actual_drive_id, integration_knowledge_id
                     )
 
@@ -1225,7 +1455,7 @@ class SharePointContentService:
             logger.error(f"Error processing document {site_id}: {e}", exc_info=True)
             raise
 
-        return delta_baseline
+        return delta_baseline, baseline_failure
 
     async def _pull_selected_item(
         self,
@@ -1372,8 +1602,8 @@ class SharePointContentService:
         content_client: SharePointContentClient,
         drive_id: str,
         integration_knowledge_id: UUID,
-    ) -> str | None:
-        """A delta token for the drive as it is now; ``None`` when Graph refused."""
+    ) -> tuple[str | None, str | None]:
+        """A delta token for the drive as it is now, or ``None`` and why not."""
         try:
             delta_token = await content_client.initialize_delta_token(drive_id)
         except Exception as e:
@@ -1382,13 +1612,14 @@ class SharePointContentService:
                 integration_knowledge_id,
                 e,
             )
-            return None
-        if delta_token:
-            logger.info(
-                "Initialized delta token for integration knowledge %s",
-                integration_knowledge_id,
-            )
-        return delta_token
+            return None, user_visible_error(e)
+        if not delta_token:
+            return None, "Graph returned no delta link"
+        logger.info(
+            "Initialized delta token for integration knowledge %s",
+            integration_knowledge_id,
+        )
+        return delta_token, None
 
     async def _process_documents(
         self,
@@ -1528,6 +1759,7 @@ class SharePointContentService:
                 skipped_by_code(
                     folder_name, "listing_failed", detail=user_visible_error(exc)
                 ),
+                item_id=folder_id,
             )
             return
 
@@ -1574,7 +1806,7 @@ class SharePointContentService:
         re-embed, so the only cost is a redundant download. Not worth blocking the
         event loop with a synchronous Redis write to close it.
         """
-        if not pending or not self.change_key_service:
+        if not pending or not self._index.change_key_service:
             return
         # Skipping is the safe direction: the item re-processes next sync.
         if not self._after_transaction(
@@ -1620,11 +1852,11 @@ class SharePointContentService:
         return True
 
     async def _flush_change_keys(self, pending: list[tuple[UUID, str, str]]) -> None:
-        if not self.change_key_service:
+        if not self._index.change_key_service:
             return
         for integration_knowledge_id, item_id, change_key in pending:
             try:
-                await self.change_key_service.update_change_key(
+                await self._index.change_key_service.update_change_key(
                     integration_knowledge_id=integration_knowledge_id,
                     item_id=item_id,
                     change_key=change_key,

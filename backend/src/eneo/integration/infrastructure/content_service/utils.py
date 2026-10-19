@@ -55,6 +55,7 @@ __all__ = [
     "extraction_limit_reason",
     "file_too_large_reason",
     "unsupported_file_reason",
+    "unsupported_package_reason",
     "unsupported_type_reason",
 ]
 
@@ -282,6 +283,16 @@ def unsupported_file_reason(filename: str) -> Optional[str]:
     """Skip reason for a file type that can never yield text, else None."""
     label = _UNSUPPORTED_EXTENSIONS.get(_extension(filename))
     return unsupported_type_reason(label) if label else None
+
+
+def unsupported_package_reason(item: SharePointItem) -> Optional[str]:
+    """Skip reason for a package (a OneNote notebook): a folder Graph serves
+    without a folder facet and without a download."""
+    package = item.get("package")
+    if not isinstance(package, dict):
+        return None
+    label = _ONENOTE_LABEL if package.get("type") == "oneNote" else "package"
+    return unsupported_type_reason(label)
 
 
 def _unsupported_content_type_label(mime: str) -> Optional[str]:

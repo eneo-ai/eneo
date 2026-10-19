@@ -187,9 +187,9 @@ def test_items_from_the_organization_app_offer_changes_to_admins_only(
         ResourcePermission.EDIT,
         ResourcePermission.DELETE,
     ]
-    organization_item = MagicMock()
+    organization_item = MagicMock(space_id=space.id)
     organization_item.user_integration.auth_type = "tenant_app"
-    personal_item = MagicMock()
+    personal_item = MagicMock(space_id=space.id)
     personal_item.user_integration.auth_type = "user_oauth"
     space.integration_knowledge_list = [organization_item, personal_item]
 
@@ -201,6 +201,97 @@ def test_items_from_the_organization_app_offer_changes_to_admins_only(
         ResourcePermission.EDIT,
         ResourcePermission.DELETE,
     ]
+
+
+@pytest.mark.parametrize("user_permissions", [[], [Permission.ADMIN]])
+@pytest.mark.parametrize("auth_type", ["user_oauth", "tenant_app"])
+def test_items_of_another_space_offer_no_changes(
+    space: Space,
+    space_assembler: SpaceAssembler,
+    user_permissions: list[Permission],
+    auth_type: str,
+):
+    """Inherited and distributed items are renamed, synced and deleted only
+    from the space that owns them; the service refuses it here."""
+    space_assembler.user.permissions = user_permissions
+    actor = space_assembler.actor_manager.get_space_actor_from_space.return_value
+    actor.get_integrations_permissions.return_value = [
+        ResourcePermission.READ,
+        ResourcePermission.EDIT,
+        ResourcePermission.DELETE,
+    ]
+    distributed = MagicMock(space_id=uuid4())
+    distributed.user_integration.auth_type = auth_type
+    space.integration_knowledge_list = [distributed]
+
+    space_assembler._set_permissions_on_resources(space)
+
+    assert distributed.permissions == [ResourcePermission.READ]
+
+
+@pytest.mark.parametrize(
+    "level, expected",
+    [
+        ("read", [ResourcePermission.READ]),
+        (
+            "write",
+            [
+                ResourcePermission.READ,
+                ResourcePermission.EDIT,
+                ResourcePermission.DELETE,
+            ],
+        ),
+    ],
+)
+def test_an_api_key_caps_what_each_item_offers(
+    space: Space, space_assembler: SpaceAssembler, level: str, expected: list
+):
+    space_assembler.user.permissions = []
+    space_assembler.user.active_api_key = MagicMock(
+        resource_permissions={
+            "assistants": "read",
+            "apps": "read",
+            "spaces": "read",
+            "knowledge": level,
+        }
+    )
+    actor = space_assembler.actor_manager.get_space_actor_from_space.return_value
+    actor.get_integrations_permissions.return_value = [
+        ResourcePermission.READ,
+        ResourcePermission.EDIT,
+        ResourcePermission.DELETE,
+    ]
+    own = MagicMock(space_id=space.id)
+    own.user_integration.auth_type = "user_oauth"
+    space.integration_knowledge_list = [own]
+
+    assert (
+        space_assembler.integration_item_permissions(
+            own, space_id=space.id, actor=actor
+        )
+        == expected
+    )
+
+
+def test_served_items_are_capped_like_collections_and_websites(
+    space_assembler: SpaceAssembler,
+):
+    space_assembler.user.active_api_key = MagicMock(
+        resource_permissions={"knowledge": "read"}
+    )
+    item = MagicMock(
+        permissions=[
+            ResourcePermission.READ,
+            ResourcePermission.EDIT,
+            ResourcePermission.DELETE,
+        ]
+    )
+    knowledge = MagicMock()
+    knowledge.integration_knowledge_list.items = [item]
+
+    space_assembler._apply_api_key_resource_caps(MagicMock(), knowledge)
+
+    assert item.permissions == [ResourcePermission.READ]
 
 
 def test_from_personal_space_to_model_sets_personal(

@@ -29,7 +29,8 @@ const ERROR_DETAILS: Record<string, () => string> = {
   "Database error": m.skip_reason_detail_database,
   "Cache service error": m.skip_reason_detail_cache,
   "Connection error": m.skip_reason_detail_connection,
-  "Request timed out": m.skip_reason_detail_timeout
+  "Request timed out": m.skip_reason_detail_timeout,
+  "SharePoint offers no download for this item": m.skip_reason_detail_no_download
 };
 const HTTP_DETAIL = /^HTTP (\d{3})\b/;
 
@@ -98,6 +99,12 @@ const DESCRIPTIONS: Record<SkipReasonCode, (params: SkipReason["params"]) => str
     m.skip_reason_listing_failed({ detail: describeErrorDetail(text(p, "detail")) }),
   scope_path_unavailable: () => m.skip_reason_scope_path_unavailable(),
   missing_item_id: () => m.skip_reason_missing_item_id(),
+  unchanged: () => m.skip_reason_unchanged(),
+  set_aside: (p) =>
+    m.skip_reason_set_aside({
+      attempts: count(p, "attempts"),
+      detail: describeErrorDetail(text(p, "detail"))
+    }),
   error: (p) => m.skip_reason_error({ detail: describeErrorDetail(text(p, "detail")) })
 };
 
