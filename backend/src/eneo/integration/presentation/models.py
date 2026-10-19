@@ -1,12 +1,14 @@
 from collections.abc import Mapping
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Generic, Literal, Optional, TypeVar, cast
+from typing import Any, Dict, Generic, Literal, Optional, TypeVar, cast, get_type_hints
 from uuid import UUID, uuid4
 
 from pydantic import (
     BaseModel,
     Field,
+    TypeAdapter,
+    ValidationError,
     computed_field,
     field_validator,
     model_validator,
@@ -101,6 +103,44 @@ def _visible_detail(detail: object) -> object:
     # A sync names an item Graph returned without a name as a null file; a
     # detail without a readable reason keeps its shape and loses the reason.
     return {**entry, **_visible_skip(entry)}
+
+
+_SYNC_METADATA_TYPES = {
+    key: TypeAdapter(hint) for key, hint in get_type_hints(SyncMetadata).items()
+}
+
+
+def _readable_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """The values of ``metadata`` that have their declared type.
+
+    A row another release wrote, with a null, an unknown key or a changed
+    type, loses that value (or that list entry) instead of failing the
+    whole history response.
+    """
+    readable: Dict[str, Any] = {}
+    for key, value in metadata.items():
+        adapter = _SYNC_METADATA_TYPES.get(key)
+        if adapter is None or value is None:
+            continue
+        if isinstance(value, list):
+            entries = [
+                entry
+                for entry in cast(list[object], value)
+                if _validates(adapter, [entry])
+            ]
+            if entries or not value:
+                readable[key] = entries
+        elif _validates(adapter, value):
+            readable[key] = value
+    return readable
+
+
+def _validates(adapter: TypeAdapter[Any], value: object) -> bool:
+    try:
+        adapter.validate_python(value)
+    except ValidationError:
+        return False
+    return True
 
 
 class BaseListModel(BaseModel, Generic[T]):
@@ -396,7 +436,7 @@ class SyncLog(BaseModel):
     def _user_visible_metadata(cls, value: object) -> object:
         if not isinstance(value, dict):
             return value
-        return _visible_summary(cast(Dict[str, Any], value))
+        return _readable_metadata(_visible_summary(cast(Dict[str, Any], value)))
 
     @field_validator("error_message")
     @classmethod
