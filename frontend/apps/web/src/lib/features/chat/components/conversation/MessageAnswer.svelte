@@ -449,10 +449,13 @@
   {#each stepRuns as run, runIndex (runIndex)}
     {#if run.kind === "external"}
       <div class="mb-4">
+        <!-- Open while its step runs, not only as the latest run: a call
+             paused for the user's authorization is running too, and its
+             connect action must not sit behind a collapsed header. -->
         <ReasoningTrace
           steps={run.steps}
           reasoning={runIndex === 0 ? reasoningText : ""}
-          working={toolsStillExecuting && runIndex === stepRuns.length - 1}
+          working={runWorking(run, runIndex)}
           loadToolResult={(toolCallId) => chat.getToolCallResult(toolCallId)}
         />
       </div>
