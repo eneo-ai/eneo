@@ -8,6 +8,9 @@ from eneo.integration.presentation.validation import https_url_or_none
 from eneo.spaces.api.space_models import (
     CreateSpaceIntegrationKnowledge,
     CreateSpaceIntegrationKnowledgeBatchItem,
+    CreateSpaceIntegrationKnowledgeBatchRequest,
+    UpdateIntegrationKnowledgeRequest,
+    UpdateIntegrationKnowledgeWrapperRequest,
 )
 
 _BASE = {"name": "Policies", "url": "https://contoso.sharepoint.com/sites/x"}
@@ -200,3 +203,39 @@ def test_knowledge_items_only_link_to_https(url, expected):
     )
 
     assert knowledge.url == expected
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 256])
+@pytest.mark.parametrize(
+    "model",
+    [
+        CreateSpaceIntegrationKnowledge,
+        CreateSpaceIntegrationKnowledgeBatchItem,
+        UpdateIntegrationKnowledgeRequest,
+        UpdateIntegrationKnowledgeWrapperRequest,
+    ],
+)
+def test_a_knowledge_name_is_neither_blank_nor_overlong(model, name):
+    fields = {
+        "embedding_model": {"id": "00000000-0000-0000-0000-000000000001"},
+        "url": "https://contoso.sharepoint.com/sites/x",
+        "name": name,
+    }
+    with pytest.raises(ValidationError) as error:
+        model(**fields)
+    assert [problem["loc"] for problem in error.value.errors()] == [("name",)]
+
+
+def test_a_knowledge_name_is_stored_without_surrounding_whitespace():
+    assert UpdateIntegrationKnowledgeRequest(name="  Protokoll  ").name == "Protokoll"
+    assert UpdateIntegrationKnowledgeRequest(name="x" * 255).name == "x" * 255
+
+
+def test_a_batch_wrapper_name_may_be_blank_but_not_overlong():
+    request = {
+        "embedding_model": {"id": "00000000-0000-0000-0000-000000000001"},
+        "items": [_BASE],
+    }
+    assert CreateSpaceIntegrationKnowledgeBatchRequest(**request, wrapper_name="")
+    with pytest.raises(ValidationError):
+        CreateSpaceIntegrationKnowledgeBatchRequest(**request, wrapper_name="x" * 256)

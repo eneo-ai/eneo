@@ -928,6 +928,21 @@ async def _audit_integration_knowledge(
     )
 
 
+async def _attach_item_permissions(
+    container: Container, space_id: UUID, items: "list[IntegrationKnowledge]"
+) -> None:
+    """The permissions the space response gives these items, for a response
+    that serves them on their own."""
+    actor = container.actor_manager().get_space_actor(
+        await container.space_repo().get_space_access_facts(space_id)
+    )
+    assembler = container.space_assembler()
+    for item in items:
+        item.permissions = assembler.integration_item_permissions(
+            item, space_id=space_id, actor=actor
+        )
+
+
 @router.post(
     "/{id}/knowledge/integrations/add/{user_integration_id}/",
     response_model=JobPublic,
@@ -1172,6 +1187,7 @@ async def update_integration_knowledge_wrapper(
         wrapper_id=wrapper_id,
         name=data.name,
     )
+    await _attach_item_permissions(container, id, updated_items)
     return [
         IntegrationKnowledgeAssembler.to_space_knowledge_model(item)
         for item in updated_items
@@ -1296,6 +1312,7 @@ async def update_integration_knowledge(
         integration_knowledge_id=integration_knowledge_id,
         name=data.name,
     )
+    await _attach_item_permissions(container, id, [knowledge])
     return IntegrationKnowledgeAssembler.to_space_knowledge_model(knowledge)
 
 

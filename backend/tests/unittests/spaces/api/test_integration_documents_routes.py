@@ -14,6 +14,7 @@ from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts
+from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
 from eneo.authentication.auth_dependencies import get_current_active_user
 from eneo.authentication.auth_models import ApiKeyOwnership, ApiKeyPermission
 from eneo.info_blobs.info_blob import InfoBlobInDBNoText
@@ -45,6 +46,9 @@ from eneo.users.user import UserInDB
 from tests.unit.api_key_test_utils import make_api_key
 
 FOLDER = "https://contoso.sharepoint.com/sites/KS/Shared%20Documents/Protokoll"
+EMBEDDING_MODEL = EmbeddingModelLegacy(
+    id=uuid4(), name="multilingual-e5-large", is_deprecated=False, open_source=True
+)
 
 
 @dataclass
@@ -781,3 +785,72 @@ async def test_service_keys_cannot_queue_imports_or_syncs(
     assert response.json()["detail"]["code"] == "service_key_cannot_create_resources"
     jobs.queue_job.assert_not_awaited()
     api.space_repo.one.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "route, body",
+    [
+        pytest.param("{id}/", {"name": "  Protokoll KS  "}, id="item"),
+        pytest.param("wrappers/{wrapper}/", {"name": "Kommunstyrelsen"}, id="wrapper"),
+    ],
+)
+async def test_a_rename_serves_the_item_with_its_permissions(
+    documents_api, route, body
+):
+    """The rename responses used to serve no permissions at all."""
+    api = documents_api
+    api.user.roles = [
+        RoleInDB(
+            id=uuid4(),
+            name="Importer",
+            tenant_id=api.user.tenant_id,
+            permissions=[Permission.INTEGRATIONS],
+        )
+    ]
+    api.space.members[api.user.id].role = SpaceRoleValue.ADMIN
+    api.knowledge.wrapper_id = uuid4()
+    api.knowledge.embedding_model = EMBEDDING_MODEL
+    api.knowledge.user_integration.id = uuid4()
+    api.knowledge.user_integration.auth_type = "user_oauth"
+    api.knowledge_repo.one.return_value = api.knowledge
+    api.knowledge_repo.get_by_ids.return_value = [api.knowledge]
+
+    async with AsyncClient(
+        transport=ASGITransport(app=api.app), base_url="http://test"
+    ) as client:
+        response = await client.patch(
+            f"/spaces/{api.space.id}/knowledge/integrations/"
+            + route.format(id=api.knowledge.id, wrapper=api.knowledge.wrapper_id),
+            json=body,
+        )
+
+    assert response.status_code == 200, response.text
+    served = response.json()
+    item = served[0] if isinstance(served, list) else served
+    # As the space response lists them for an item the space owns.
+    assert item["permissions"] == ["edit", "delete"]
+    if route == "{id}/":
+        api.knowledge_repo.rename.assert_awaited_once_with(
+            api.knowledge.id, "Protokoll KS"
+        )
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 256])
+@pytest.mark.parametrize("route", ["{id}/", "wrappers/{wrapper}/"])
+async def test_a_rename_to_a_blank_or_overlong_name_is_refused(
+    documents_api, route, name
+):
+    api = documents_api
+
+    async with AsyncClient(
+        transport=ASGITransport(app=api.app), base_url="http://test"
+    ) as client:
+        response = await client.patch(
+            f"/spaces/{api.space.id}/knowledge/integrations/"
+            + route.format(id=api.knowledge.id, wrapper=uuid4()),
+            json={"name": name},
+        )
+
+    assert response.status_code == 422, response.text
+    api.knowledge_repo.rename.assert_not_awaited()
+    api.knowledge_repo.rename_wrapper.assert_not_awaited()
