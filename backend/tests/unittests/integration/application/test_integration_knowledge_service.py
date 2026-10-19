@@ -320,7 +320,9 @@ class TestTenantAppAdminPermission:
             integration_knowledge_id=tenant_app_knowledge.id,
             name="New Name",
         )
-        service.integration_knowledge_repo.update.assert_called_once()
+        service.integration_knowledge_repo.rename.assert_awaited_once_with(
+            tenant_app_knowledge.id, "New Name"
+        )
 
     async def test_rename_knowledge_user_oauth_no_admin_required(
         self, non_admin_user, actor, space, user_oauth_knowledge
@@ -332,7 +334,9 @@ class TestTenantAppAdminPermission:
             integration_knowledge_id=user_oauth_knowledge.id,
             name="New Name",
         )
-        service.integration_knowledge_repo.update.assert_called_once()
+        service.integration_knowledge_repo.rename.assert_awaited_once_with(
+            user_oauth_knowledge.id, "New Name"
+        )
 
     # --- update_wrapper_name ---
 
@@ -381,7 +385,7 @@ class TestUpdateKnowledgeName:
         actor: MagicMock,
         integration_knowledge: MagicMock,
     ):
-        """Test successful rename of integration knowledge."""
+        """Only the name column is written; the item is re-read for the response."""
         actor.can_edit_integrations.return_value = True
         new_name = "New Knowledge Name"
 
@@ -391,12 +395,11 @@ class TestUpdateKnowledgeName:
             name=new_name,
         )
 
-        # Verify the name was updated
-        assert integration_knowledge.name == new_name
-        # Verify repo.update was called
-        service.integration_knowledge_repo.update.assert_called_once_with(
-            integration_knowledge
+        service.integration_knowledge_repo.rename.assert_awaited_once_with(
+            integration_knowledge.id, new_name
         )
+        # A full-row write would put back the sync state of a stale copy.
+        service.integration_knowledge_repo.update.assert_not_called()
         # The renamed item is served back to the UI, so it carries its count.
         assert updated is integration_knowledge
         service.integration_knowledge_repo.attach_document_counts.assert_awaited_once_with(
@@ -419,8 +422,7 @@ class TestUpdateKnowledgeName:
                 name="New Name",
             )
 
-        # Verify update was not called
-        service.integration_knowledge_repo.update.assert_not_called()
+        service.integration_knowledge_repo.rename.assert_not_called()
 
     async def test_rename_knowledge_unauthorized_from_different_space(
         self,
@@ -442,39 +444,20 @@ class TestUpdateKnowledgeName:
             )
 
         assert "Cannot rename knowledge from this space" in str(exc_info.value)
-        # Verify update was not called
-        service.integration_knowledge_repo.update.assert_not_called()
+        service.integration_knowledge_repo.rename.assert_not_called()
 
-    async def test_rename_preserves_original_name(
+    async def test_rename_reads_the_item_after_writing_the_name(
         self,
         service: IntegrationKnowledgeService,
         actor: MagicMock,
         integration_knowledge: MagicMock,
     ):
-        """Test that renaming does not change the original_name field."""
+        """The response shows what the row holds after the rename, including a
+        sync's state committed while the rename waited for its row lock."""
         actor.can_edit_integrations.return_value = True
-        original = integration_knowledge.original_name
-        new_name = "New Knowledge Name"
-
-        await service.update_knowledge_name(
-            space_id=integration_knowledge.space_id,
-            integration_knowledge_id=integration_knowledge.id,
-            name=new_name,
-        )
-
-        # original_name should remain unchanged
-        assert integration_knowledge.original_name == original
-        # name should be updated
-        assert integration_knowledge.name == new_name
-
-    async def test_rename_fetches_knowledge_from_repo(
-        self,
-        service: IntegrationKnowledgeService,
-        actor: MagicMock,
-        integration_knowledge: MagicMock,
-    ):
-        """Test that knowledge is fetched from repo for update (to get created_at)."""
-        actor.can_edit_integrations.return_value = True
+        calls = MagicMock()
+        calls.attach_mock(service.integration_knowledge_repo.rename, "rename")
+        calls.attach_mock(service.integration_knowledge_repo.one, "one")
 
         await service.update_knowledge_name(
             space_id=integration_knowledge.space_id,
@@ -482,7 +465,7 @@ class TestUpdateKnowledgeName:
             name="New Name",
         )
 
-        # Verify knowledge was fetched from repo
+        assert [call[0] for call in calls.mock_calls] == ["rename", "one"]
         service.integration_knowledge_repo.one.assert_called_once_with(
             id=integration_knowledge.id
         )
@@ -522,8 +505,7 @@ class TestWrapperOperations:
         space_repo.one.return_value = space
 
         integration_knowledge_repo = AsyncMock()
-        integration_knowledge_repo.one.side_effect = [first, second]
-        integration_knowledge_repo.update.side_effect = [first, second]
+        integration_knowledge_repo.get_by_ids.return_value = [second, first]
 
         service = IntegrationKnowledgeService(
             job_service=AsyncMock(),
@@ -556,10 +538,14 @@ class TestWrapperOperations:
             name="  New wrapper name  ",
         )
 
-        assert first.wrapper_name == "New wrapper name"
-        assert second.wrapper_name == "New wrapper name"
-        assert integration_knowledge_repo.update.await_count == 2
-        assert len(result) == 2
+        integration_knowledge_repo.rename_wrapper.assert_awaited_once_with(
+            [first.id, second.id], "New wrapper name"
+        )
+        integration_knowledge_repo.update.assert_not_called()
+        assert result == [first, second]
+        integration_knowledge_repo.attach_document_counts.assert_awaited_once_with(
+            [first, second]
+        )
 
     async def test_remove_wrapper_knowledge_deletes_all_owned_items(self, actor, space):
         actor.can_delete_integrations.return_value = True
@@ -2042,7 +2028,12 @@ class TestTriggerFullSync:
             token=oauth_token,
             is_onedrive=False,
         )
-        integration_knowledge_repo.update.assert_called_once()
+        # Only the subscription column: the sync this queues may already be
+        # writing the row's sync state.
+        integration_knowledge_repo.link_subscription.assert_awaited_once_with(
+            sharepoint_knowledge_user_oauth.id, subscription.id
+        )
+        integration_knowledge_repo.update.assert_not_called()
         job_service.queue_job.assert_called_once()
         task_params = job_service.queue_job.call_args.kwargs["task_params"]
         assert task_params.token_id == oauth_token.id

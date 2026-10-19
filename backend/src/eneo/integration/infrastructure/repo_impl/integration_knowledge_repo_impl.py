@@ -201,6 +201,29 @@ class IntegrationKnowledgeRepoImpl(
         await self.delete(id=id)
 
     @override
+    async def rename(self, id: "UUID", name: str) -> None:
+        await self._update_columns([id], name=name)
+
+    @override
+    async def rename_wrapper(self, ids: Sequence["UUID"], wrapper_name: str) -> None:
+        await self._update_columns(ids, wrapper_name=wrapper_name)
+
+    @override
+    async def link_subscription(self, id: "UUID", subscription_id: "UUID") -> None:
+        await self._update_columns([id], sharepoint_subscription_id=subscription_id)
+
+    async def _update_columns(self, ids: Sequence["UUID"], **values: object) -> None:
+        if not ids:
+            return
+        result = await self.session.execute(
+            sa.update(self._db_model)
+            .where(self._db_model.id.in_(list(ids)))
+            .values(**values)
+        )
+        if affected_row_count(result) != len(set(ids)):
+            raise NotFoundException(f"{self._db_model.__name__} not found")
+
+    @override
     async def update_sync_state(
         self, id: "UUID", **fields: Unpack[SyncStateFields]
     ) -> None:

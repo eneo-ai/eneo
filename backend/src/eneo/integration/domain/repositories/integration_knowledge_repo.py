@@ -101,6 +101,24 @@ class IntegrationKnowledgeRepository(ABC):
     async def update(self, obj: "IntegrationKnowledge") -> "IntegrationKnowledge": ...
 
     @abstractmethod
+    async def rename(self, id: "UUID", name: str) -> None:
+        """Write only ``name``, so a sync running meanwhile keeps its state.
+
+        The row lock a running sync holds still makes this wait for its commit.
+        """
+        ...
+
+    @abstractmethod
+    async def rename_wrapper(self, ids: "Sequence[UUID]", wrapper_name: str) -> None:
+        """Write only ``wrapper_name`` on every item in ``ids``."""
+        ...
+
+    @abstractmethod
+    async def link_subscription(self, id: "UUID", subscription_id: "UUID") -> None:
+        """Write only ``sharepoint_subscription_id``."""
+        ...
+
+    @abstractmethod
     async def update_sync_state(
         self, id: "UUID", **fields: Unpack[SyncStateFields]
     ) -> None:

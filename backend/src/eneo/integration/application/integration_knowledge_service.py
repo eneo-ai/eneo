@@ -753,8 +753,10 @@ class IntegrationKnowledgeService:
                     subscription_db_id
                     and existing_subscription_db_id != subscription_db_id
                 ):
+                    await self.integration_knowledge_repo.link_subscription(
+                        knowledge.id, subscription_db_id
+                    )
                     knowledge.sharepoint_subscription_id = subscription_db_id
-                    await self.integration_knowledge_repo.update(knowledge)
             except Exception as exc:
                 logger.warning(
                     "Failed to ensure SharePoint subscription during full sync "
@@ -821,12 +823,10 @@ class IntegrationKnowledgeService:
                 "This knowledge belongs to another space and must be renamed from there."
             )
 
-        # Fetch from repo to get the full entity with created_at for update
+        await self.integration_knowledge_repo.rename(integration_knowledge_id, name)
         knowledge = await self.integration_knowledge_repo.one(
             id=integration_knowledge_id
         )
-        knowledge.name = name
-        knowledge = await self.integration_knowledge_repo.update(knowledge)
         await self.integration_knowledge_repo.attach_document_counts([knowledge])
         return knowledge
 
@@ -884,13 +884,13 @@ class IntegrationKnowledgeService:
                     "Please contact your administrator."
                 )
 
-        updated_items: list[IntegrationKnowledge] = []
-        for item in owned_items:
-            knowledge = await self.integration_knowledge_repo.one(id=item.id)
-            knowledge.wrapper_name = normalized_name
-            updated_items.append(
-                await self.integration_knowledge_repo.update(knowledge)
-            )
+        ids = [item.id for item in owned_items]
+        await self.integration_knowledge_repo.rename_wrapper(ids, normalized_name)
+        by_id = {
+            item.id: item
+            for item in await self.integration_knowledge_repo.get_by_ids(ids)
+        }
+        updated_items = [by_id[id] for id in ids if id in by_id]
         await self.integration_knowledge_repo.attach_document_counts(updated_items)
 
         return updated_items
