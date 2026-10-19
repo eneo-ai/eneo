@@ -3,10 +3,8 @@
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
@@ -135,16 +133,6 @@ class WebsiteRepository:
                 )
                 .values(**values)
             )
-
-    async def link(self, website_id: UUID, space_id: UUID) -> None:
-        await self.session.execute(
-            pg_insert(WebsitesSpaces)
-            .values(
-                website_id=website_id,
-                space_id=space_id,
-            )
-            .on_conflict_do_nothing()
-        )
 
     async def delete(self, website_id: UUID, owner_space_id: UUID) -> None:
         # Foreign keys remove distributions and assistant links atomically.

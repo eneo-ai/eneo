@@ -2,9 +2,12 @@
 // This is trusted transport glue only; AppBridge/App own the RPC protocol.
 (() => {
   "use strict";
-  const hostOrigin = __HOST_ORIGIN__;
-  if (!hostOrigin || window.parent === window || location.origin === hostOrigin)
-    return;
+  // The addresses Eneo is opened on. Several frontends may run side by side;
+  // whichever of them framed this page is the host from its first message on.
+  const hostOrigins = __HOST_ORIGINS__;
+  if (!hostOrigins.length || window.parent === window) return;
+  if (hostOrigins.includes(location.origin)) return;
+  let hostOrigin = null;
   let inner;
   let loaded = false;
   let revoked = false;
@@ -12,7 +15,11 @@
   window.addEventListener("message", (event) => {
     const message = event.data;
     if (!message || message.jsonrpc !== "2.0") return;
-    if (event.source === window.parent && event.origin === hostOrigin) {
+    if (
+      event.source === window.parent &&
+      (hostOrigin === null ? hostOrigins.includes(event.origin) : event.origin === hostOrigin)
+    ) {
+      hostOrigin = event.origin;
       if (message.method === "ui/notifications/sandbox-resource-ready") {
         if (inner || typeof message.params?.html !== "string") return;
         inner = document.createElement("iframe");
@@ -38,6 +45,7 @@
     } else if (
       !revoked &&
       inner &&
+      hostOrigin !== null &&
       event.source === inner.contentWindow &&
       event.origin === "null"
     ) {
@@ -49,14 +57,18 @@
   window.addEventListener(
     "load",
     () => {
-      window.parent.postMessage(
-        {
-          jsonrpc: "2.0",
-          method: "ui/notifications/sandbox-proxy-ready",
-          params: {},
-        },
-        hostOrigin,
-      );
+      // Said to each address Eneo may be opened on; only the one that framed
+      // this page receives it, the browser drops the rest.
+      for (const origin of hostOrigins) {
+        window.parent.postMessage(
+          {
+            jsonrpc: "2.0",
+            method: "ui/notifications/sandbox-proxy-ready",
+            params: {},
+          },
+          origin,
+        );
+      }
     },
     { once: true },
   );

@@ -488,9 +488,9 @@ Global OIDC uses `OIDC_ALLOWED_DOMAINS` (JSON array, default `[]`); per-tenant f
 | Existing active member of the tenant | Sign in, subject to any configured domain restriction. No new email-verification requirement is applied. |
 | Existing account in another tenant, or inactive/removed account | `403`; no account creation or reactivation. |
 | No account, `tenant.provisioning: false` (default) | `403`; provision through SCIM or administration. |
-| No account, `tenant.provisioning: true` | Creation requires a non-empty domain allowlist, a matching domain and the ID token's boolean `email_verified: true` for the selected address. |
+| No account, `tenant.provisioning: true` | Creation requires a non-empty domain allowlist, a matching domain and the ID token's `email_verified: true` for the selected address. |
 
-`FederatedIdentity.from_claims` receives validated token claims and preserves only a valid email address and its verification status. Values such as `"true"` or `1` do not count as verification. When email is selected through a custom claims mapping, standard `email_verified` only authorizes JIT if the selected address equals the standard `email` claim.
+`FederatedIdentity.from_claims` receives validated token claims and preserves only a valid email address and its verification status. OIDC defines `email_verified` as a boolean; as a compatibility deviation for IdPs that can only emit text claims, the strings `"true"` (case-insensitive) and `"1"` and the number `1` also count as verification. Missing claims and all other values do not. When email is selected through a custom claims mapping, standard `email_verified` only authorizes JIT if the selected address equals the standard `email` claim.
 
 Provisioning is a per-tenant flag set through the sysadmin API (`POST /api/v1/sysadmin/tenants/{id}/`). Keep it `false` when SCIM manages membership. A SCIM token does not implicitly change this setting. SCIM or an administrator can restore an account; login cannot.
 

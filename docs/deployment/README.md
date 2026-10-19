@@ -18,7 +18,7 @@ Quick deployment reference for Eneo using Docker Compose.
 - `env_db.template` - Database credentials
 - `env_modules.template` / `env_module_ttt.template` - Module configuration (only needed when enabling modules)
 - `OBJECT_CONTENT.md` - Offline object-content operations reference
-- `TOOL_RUNTIME.md` - Bundled tools runtime: isolation, release bundle, upgrade, diagnostics and omitting it
+- `TOOL_RUNTIME.md` - Bundled tools runtime operator guide: release bundle, configuration, isolation checklist, upgrade, diagnostics and omitting it (architecture and security model on [docs.eneo.ai](https://docs.eneo.ai/dev/docs/tool-architecture))
 - `MCP_APPS.md` - Optional interactive tool views (MCP Apps): the extra hostname, settings and what administrators approve
 
 ## Quick Start

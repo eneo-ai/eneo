@@ -1,0 +1,289 @@
+"use client";
+
+import { Button } from "@astryxdesign/core/Button";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { ChevronLeft, ChevronRight, Download, FileText } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
+import { useState } from "react";
+import { FileKindIcon } from "@/features/chat/attachments";
+import { signedOriginalUrl } from "@/features/files/signed-original-url";
+import { FilePreviewContent } from "@/features/workspace/preview/file-preview-content";
+import { previewKindOf, type PreviewFile } from "@/features/workspace/preview/preview-kind";
+import { browserApi } from "@/lib/api/browser";
+import { formatBytes } from "@/lib/format";
+import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
+import type { DocumentExport } from "./document-export";
+import { DraftPreview } from "./draft-preview";
+import { ExportMenu } from "./export-menu";
+import { displayFileName } from "./panel-contents-list";
+import { PanelFrame, type PanelMaximise, type PanelSwitcher } from "./panel-frame";
+import type { SidePanelStore } from "./side-panel-store";
+
+const extensionOf = (name: string) => {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toUpperCase() : "";
+};
+
+/**
+ * A file in the side panel: the document being written, a loaded file with
+ * its versions and export, or the reason it cannot be shown. The content
+ * holds per-file state (the active sheet, a rendered frame, the selection),
+ * so a replacement is prepared beside it and swapped in once ready.
+ */
+export function FilePanel({
+  panel,
+  versionsOf,
+  exportOf,
+  switcher,
+  maximise,
+  narrow
+}: {
+  panel: SidePanelStore;
+  /** Every version of the document a file belongs to, oldest first. */
+  versionsOf: (file: PreviewFile) => PreviewFile[];
+  /** How a file is exported, for a document that can be; null for any other file. */
+  exportOf: (file: PreviewFile) => DocumentExport | null;
+  switcher: PanelSwitcher | null;
+  maximise: PanelMaximise | null;
+  /** Shown as a sheet over the conversation, where there is less room. */
+  narrow: boolean;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const [downloading, setDownloading] = useState(false);
+
+  // Keep the existing renderer mounted while its replacement is prepared.
+  const keepingFile = !!panel.file && !!panel.content && panel.status === "ready";
+  const draft = keepingFile ? null : panel.draft;
+  const updating = keepingFile && (!!panel.draft || !!panel.replacementFile);
+  const nextTitle =
+    panel.replacementFile?.name || panel.draft?.title || t("file_preview_untitled_document");
+  const file = draft ? null : panel.file;
+
+  const bytes = file ? (file.original_size ?? file.size) : 0;
+  const title = draft
+    ? draft.title || t("file_preview_untitled_document")
+    : file
+      ? displayFileName(file)
+      : "";
+
+  const versions = file ? versionsOf(file) : [];
+  const position = versions.findIndex((version) => version.id === file?.id);
+  const earlier = position > 0 ? versions[position - 1] : null;
+  const later = position >= 0 && position < versions.length - 1 ? versions[position + 1] : null;
+  const latest = later ? versions[versions.length - 1] : null;
+  // The type and size under the title; a draft and an older version say
+  // something else there.
+  const detail =
+    draft || latest || !file
+      ? undefined
+      : `${extensionOf(file.name)}${bytes > 0 ? ` · ${formatBytes(bytes, locale)}` : ""}`;
+
+  const exporting = file ? exportOf(file) : null;
+  const content = panel.content;
+  const namesImages =
+    content?.kind === "markdown" && /!\[[^\]\n]*\]\(eneo-file:[0-9a-f]{32}/.test(content.text);
+
+  async function saveOriginal() {
+    if (!file) return;
+    setDownloading(true);
+    try {
+      const url = await signedOriginalUrl(browserApi, file.id);
+      Object.assign(document.createElement("a"), { href: url, download: file.name }).click();
+    } catch {
+      toast.error(t("attachment_error_loading_content"));
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  const views =
+    file && content && panel.status === "ready"
+      ? [
+          { file, content, pending: false },
+          ...(panel.replacementFile && panel.replacementContent
+            ? [{ file: panel.replacementFile, content: panel.replacementContent, pending: true }]
+            : [])
+        ]
+      : [];
+  // What to mark in the file: a quote the user asked to see in place, else the
+  // quote waiting in the composer, so it stays visible while the question is written.
+  const highlight = panel.highlight ?? (panel.quote?.fileId === file?.id ? panel.quote : null);
+
+  const versionButtons = (
+    <>
+      <IconButton
+        label={t("file_preview_previous_version")}
+        tooltip={t("file_preview_previous_version")}
+        icon={<ChevronLeft className="size-4" />}
+        variant="ghost"
+        size="sm"
+        isDisabled={!earlier}
+        onClick={() => earlier && panel.open(earlier)}
+      />
+      {!narrow && (
+        <span className="text-ax-text-secondary min-w-9 text-center text-xs tabular-nums">
+          {position + 1} / {versions.length}
+        </span>
+      )}
+      <IconButton
+        label={t("file_preview_next_version")}
+        tooltip={t("file_preview_next_version")}
+        icon={<ChevronRight className="size-4" />}
+        variant="ghost"
+        size="sm"
+        isDisabled={!later}
+        onClick={() => later && panel.open(later)}
+      />
+    </>
+  );
+
+  return (
+    <PanelFrame
+      icon={
+        file ? (
+          <FileKindIcon mimetype={file.mimetype} className="size-4" />
+        ) : (
+          <FileText className="size-4" />
+        )
+      }
+      title={title}
+      detail={detail}
+      status={
+        draft ? (
+          <p className="text-ax-text-accent flex items-center gap-1.5 text-xs">
+            <span aria-hidden="true" className="bg-ax-accent size-1.5 shrink-0 rounded-full" />
+            {t("file_preview_writing")}
+          </p>
+        ) : latest ? (
+          <p className="text-ax-text-secondary flex min-w-0 items-center gap-1.5 text-xs">
+            <span className="truncate">{t("file_preview_older_version")}</span>
+            <button
+              type="button"
+              className="text-ax-text-accent focus-visible:outline-ring rounded-ax-inner shrink-0 font-medium underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2"
+              onClick={() => latest && panel.open(latest)}
+            >
+              {t("file_preview_show_latest")}
+            </button>
+          </p>
+        ) : undefined
+      }
+      actions={
+        <>
+          {versions.length > 1 && !narrow && (
+            <div
+              role="group"
+              aria-label={t("file_preview_versions")}
+              className="flex shrink-0 items-center gap-0.5"
+            >
+              {versionButtons}
+            </div>
+          )}
+          {file && exporting ? (
+            <ExportMenu
+              fileId={file.id}
+              title={title}
+              namesImages={namesImages}
+              exporting={exporting}
+              onSaveOriginal={() => void saveOriginal()}
+              compact={narrow}
+            />
+          ) : file ? (
+            <IconButton
+              label={t("generated_file_download", { name: file.name })}
+              tooltip={t("download")}
+              icon={<Download className="size-4" />}
+              variant="ghost"
+              size="sm"
+              isLoading={downloading}
+              onClick={() => void saveOriginal()}
+            />
+          ) : null}
+        </>
+      }
+      switcher={switcher}
+      maximise={maximise}
+      onClose={() => panel.close()}
+    >
+      {versions.length > 1 && narrow && (
+        // On a narrow screen the versions get a row of their own.
+        <div
+          role="group"
+          aria-label={t("file_preview_versions")}
+          className="border-ax-border flex shrink-0 items-center justify-between border-b px-4 py-1.5"
+        >
+          <span className="text-ax-text-secondary text-xs tabular-nums">
+            {t("file_preview_version_of", { current: position + 1, total: versions.length })}
+          </span>
+          <div className="flex items-center gap-0.5">{versionButtons}</div>
+        </div>
+      )}
+      {updating && (
+        <div className="border-ax-border shrink-0 border-b px-4 py-2 text-sm">
+          {panel.replacementError ? (
+            <>
+              <p>{t("file_preview_update_failed")}</p>
+              <Button
+                label={t("retry")}
+                variant="secondary"
+                size="sm"
+                className="mt-2"
+                onClick={() => panel.retry()}
+              />
+            </>
+          ) : (
+            <>
+              <p className="text-ax-text-accent font-medium">
+                {t("file_preview_updating", { name: nextTitle })}
+              </p>
+              <p className="text-ax-text-secondary text-xs">{t("file_preview_keep_current")}</p>
+            </>
+          )}
+        </div>
+      )}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {draft ? (
+          <DraftPreview draft={draft} />
+        ) : !file ? null : panel.status === "loading" ? (
+          <p className="text-ax-text-secondary p-6 text-sm">{t("file_preview_loading")}</p>
+        ) : panel.status === "too_large" ? (
+          <p className="text-ax-text-secondary p-6 text-sm">{t("file_preview_too_large")}</p>
+        ) : panel.status === "failed" || !content ? (
+          <div className="flex flex-col items-start gap-3 p-6">
+            <p className="text-ax-text-secondary text-sm">{t("file_preview_failed")}</p>
+            <Button
+              label={t("retry")}
+              variant="secondary"
+              size="sm"
+              onClick={() => panel.retry()}
+            />
+          </div>
+        ) : (
+          views.map((view) => (
+            <div
+              key={view.file.id}
+              className={cn("absolute inset-0 flex min-h-0 flex-col", view.pending && "invisible")}
+              inert={view.pending || undefined}
+              aria-hidden={view.pending ? "true" : undefined}
+            >
+              <FilePreviewContent
+                content={view.content}
+                title={view.file.name}
+                highlight={view.pending ? null : highlight}
+                onReady={() => panel.finishReplacement(view.file.id)}
+                onError={() => panel.failReplacement(view.file.id)}
+                onQuote={(text, locator) => panel.quoteSelection(text, locator)}
+              />
+            </div>
+          ))
+        )}
+      </div>
+    </PanelFrame>
+  );
+}
+
+/** Whether a file can be exported as Word or PDF: a Markdown document the assistant made here. */
+export function isExportableDocument(file: PreviewFile): boolean {
+  return previewKindOf(file) === "markdown";
+}

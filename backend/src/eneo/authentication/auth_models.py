@@ -695,6 +695,20 @@ class ApiKeyUsageResponse(BaseModel):
     next_cursor: Optional[datetime] = None
 
 
+def _is_verified_claim(value: object) -> bool:
+    # OIDC defines email_verified as a JSON boolean. Some IdPs (e.g. Nexus
+    # Digital Access) can only emit claims as text, so the string forms of a
+    # positive value are accepted as a compatibility deviation. Nothing else
+    # counts as verified.
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1"}
+    return False
+
+
 class FederatedIdentity(BaseModel):
     """Email identity extracted only after the OIDC token has been validated."""
 
@@ -718,7 +732,7 @@ class FederatedIdentity(BaseModel):
                 # The standard verification claim verifies the standard email,
                 # not an unrelated address selected by a custom claims mapping.
                 email_verified=(
-                    claims.get("email_verified") is True
+                    _is_verified_claim(claims.get("email_verified"))
                     and claims.get("email") == email
                 ),
             )

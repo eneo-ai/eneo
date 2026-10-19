@@ -20,7 +20,7 @@ import {
 import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderInput, Globe, Pencil, RefreshCw, SearchX, Square, Trash2 } from "lucide-react";
+import { Globe, Pencil, RefreshCw, SearchX, Square, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -41,7 +41,6 @@ import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
 import { embeddingModelsInUse, formatWebsiteName, type CrawlRun, type Website } from "./knowledge";
 import { WEBSITE_DEFAULT_SORT, websiteComparators, type WebsiteSortKey } from "./knowledge-sort";
-import { MoveResourceDialog } from "./move-dialog";
 import { NoCreatePermissionInfo } from "./no-create-permission-info";
 import { filterWebsites } from "./table-controls";
 import { KnowledgeLabel, KnowledgeNameCell, KnowledgeTableControls } from "./table-controls-ui";
@@ -153,13 +152,12 @@ function deleteOutcomeToast(
   }
 }
 
-/** Row menu for a website: edit, move to another space, delete. */
+/** Row menu for a website: edit, delete. */
 export function WebsiteActions({ website }: { website: Website }) {
   const t = useTranslations();
-  const { space, routeId } = useSpace();
+  const { routeId } = useSpace();
   const queryClient = useQueryClient();
   const [showEdit, setShowEdit] = useState(false);
-  const [showMove, setShowMove] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
 
   const canDelete = website.permissions?.includes("delete") ?? false;
@@ -181,31 +179,10 @@ export function WebsiteActions({ website }: { website: Website }) {
     }
   });
 
-  const moveWebsite = useRemovalMutation({
-    mutationFn: (targetSpaceId: string) =>
-      unwrap(
-        browserApi.POST("/api/v1/websites/{id}/transfer/", {
-          params: { path: { id: website.id } },
-          body: { target_space_id: targetSpaceId }
-        })
-      ),
-    refresh: invalidate,
-    onRemoved: () => setShowMove(false)
-  });
-
   const websiteDisplay = website.name ? `${website.name} (${website.url})` : website.url;
 
   const items: DropdownMenuOption[] = [
     { label: t("edit"), icon: <Pencil aria-hidden="true" />, onClick: () => setShowEdit(true) },
-    ...(canDelete && !space.organization
-      ? [
-          {
-            label: t("move"),
-            icon: <FolderInput aria-hidden="true" />,
-            onClick: () => setShowMove(true)
-          }
-        ]
-      : []),
     ...(canDelete
       ? [
           {
@@ -226,15 +203,6 @@ export function WebsiteActions({ website }: { website: Website }) {
         alignment="end"
       />
       {showEdit && <WebsiteDialog website={website} open={showEdit} onOpenChange={setShowEdit} />}
-      <MoveResourceDialog
-        open={showMove}
-        onOpenChange={setShowMove}
-        title={t("move_website")}
-        hint={t("move_website_hint")}
-        confirmLabel={t("move_website")}
-        pending={moveWebsite.isPending}
-        onMove={(targetSpaceId) => moveWebsite.mutate(targetSpaceId)}
-      />
       <ConfirmDialogControlled
         open={showDelete}
         onOpenChange={setShowDelete}

@@ -15,7 +15,7 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import type { ServiceSparse } from "./services";
 
-/** Edit/move/delete menu for a service. Services have no publish or knowledge transfer. */
+/** Edit/move/delete menu for a service. Services have no publish. */
 export function ServiceActions({ service }: { service: ServiceSparse }) {
   const t = useTranslations();
   const router = useRouter();
@@ -32,7 +32,7 @@ export function ServiceActions({ service }: { service: ServiceSparse }) {
       unwrap(
         browserApi.POST("/api/v1/services/{id}/transfer/", {
           params: { path: { id: service.id } },
-          body: { target_space_id: targetSpaceId, move_resources: false }
+          body: { target_space_id: targetSpaceId }
         })
       ),
     refresh: invalidate,

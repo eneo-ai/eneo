@@ -1260,10 +1260,8 @@ class Container(containers.DeclarativeContainer):
         space_repo=space_repo,
         space_service=space_service,
         actor_manager=actor_manager,
-        group_service=group_service,
         skill_repo=skill_repo,
         assistant_repo=assistant_repo,
-        website_repo=website_repo,
     )
     # Personal assistant governance services are declared before assistant_service
     # because runtime enforcement injects effective_config_service into

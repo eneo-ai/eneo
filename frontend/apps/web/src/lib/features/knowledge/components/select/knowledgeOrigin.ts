@@ -1,7 +1,7 @@
 /**
- * Helpers for deciding whether a knowledge item belongs to the user's personal space or to a
- * shared/organization space. Items can carry their owning space id in a few different shapes,
- * so {@link ownerSpaceId} probes all of them.
+ * Knowledge origin is determined by ownership, independently of the user's space membership.
+ * The available options and selected sources use the same exhaustive classification, so a
+ * source the space can see always has exactly one section and stays removable.
  */
 
 type SpaceOwned = {
@@ -23,43 +23,28 @@ export function ownerSpaceId(item: SpaceOwned | null | undefined): string | unde
   );
 }
 
-/** Personal = no owning space recorded, or owned by the current (personal) space. */
-export function isPersonalItem(item: SpaceOwned, currentSpaceId: string | undefined): boolean {
-  const sid = ownerSpaceId(item);
-  if (!sid) return true;
-  return sid === currentSpaceId;
-}
+export type KnowledgeOrigin = "space" | "organization";
 
-/** Org = owned by the configured organization space, or (absent one) any space that isn't current. */
-export function isOrgItem(
+export function classifyKnowledgeOrigin(
   item: SpaceOwned,
   currentSpaceId: string | undefined,
-  orgSpaceId: string | undefined
-): boolean {
+  organizationSpaceId: string | undefined
+): KnowledgeOrigin {
   const sid = ownerSpaceId(item);
-  if (orgSpaceId) {
-    return sid === orgSpaceId;
-  }
-  if (!currentSpaceId) {
-    return false;
-  }
-  return Boolean(sid) && sid !== currentSpaceId;
+  // Anything the organization space does not own, including legacy links from another space,
+  // belongs to the current space's section.
+  if (sid && sid !== currentSpaceId && sid === organizationSpaceId) return "organization";
+  return "space";
 }
 
-/**
- * Split a list into personal vs org buckets using the simple rule the picker sections rely on:
- * personal when unowned or owned by the current space, org otherwise.
- */
 export function partitionByOrigin<T extends SpaceOwned>(
   items: T[],
-  currentSpaceId: string | undefined
-): { personal: T[]; org: T[] } {
-  const personal: T[] = [];
-  const org: T[] = [];
+  currentSpaceId: string | undefined,
+  organizationSpaceId: string | undefined
+): Record<KnowledgeOrigin, T[]> {
+  const partitions: Record<KnowledgeOrigin, T[]> = { space: [], organization: [] };
   for (const item of items) {
-    const sid = ownerSpaceId(item);
-    if (!sid || sid === currentSpaceId) personal.push(item);
-    else org.push(item);
+    partitions[classifyKnowledgeOrigin(item, currentSpaceId, organizationSpaceId)].push(item);
   }
-  return { personal, org };
+  return partitions;
 }

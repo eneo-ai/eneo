@@ -26,10 +26,10 @@ import { spacesListQueryOptions } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 
 /**
- * Move a resource to another accessible space. The hint warns about what the
- * move breaks; the transfer itself fails if the target lacks matching models.
- * Extra rows (e.g. the assistant "include knowledge" switch) go in children.
- * A missing destination shows at its picker on move, which takes focus.
+ * Move an assistant or service to another accessible space. The hint warns
+ * about what the move breaks; the transfer itself fails if the target lacks
+ * matching models. A missing destination shows at its picker on move, which
+ * takes focus.
  */
 export function MoveResourceDialog({
   open,
@@ -38,8 +38,7 @@ export function MoveResourceDialog({
   hint,
   confirmLabel,
   pending,
-  onMove,
-  children
+  onMove
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -48,7 +47,6 @@ export function MoveResourceDialog({
   confirmLabel: string;
   pending: boolean;
   onMove: (targetSpaceId: string) => void;
-  children?: React.ReactNode;
 }) {
   const t = useTranslations();
   const { space } = useSpace();
@@ -104,7 +102,6 @@ export function MoveResourceDialog({
             </SelectContent>
           </Select>
           <FieldProblem id={destinationId} problem={destinationProblem} />
-          {children}
           {hint && (
             <p className="text-muted-foreground text-sm">
               <span className="font-medium">{t("hint")}: </span>

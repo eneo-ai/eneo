@@ -1593,5 +1593,13 @@
   "select_additional_knowledge": "Select additional knowledge sources that this assistant will be able to search for relevant answers.",
   "organization_knowledge_description": "Select additional sources from your organization's space that this assistant will be able to search for relevant answers.",
   "skill_used_in_reply": "Skill “{name}” used in this reply",
-  "eneo_error_9070": "You need to choose a new password before you can continue."
+  "eneo_error_9070": "You need to choose a new password before you can continue.",
+  "add_knowledge_personal": "Add knowledge (Personal)",
+  "no_personal_sources": "No Personal sources available.",
+  "workspace_preview_row_label": "row {row}",
+  "workspace_preview_table_hint": "Select rows with the checkboxes to ask about them, or select text to quote it. Hold Shift to select a range.",
+  "workspace_preview_selection_actions": "Actions for selected rows",
+  "side_panel_latest_answer": "Latest answer",
+  "chat_quote_label": "Quote",
+  "chat_quote_remove": "Remove the quote"
 }
