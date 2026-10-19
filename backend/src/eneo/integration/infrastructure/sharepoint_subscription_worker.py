@@ -3,17 +3,28 @@
 This worker handles:
 1. Subscription renewal - runs every 12 hours to renew expiring subscriptions
 2. Orphaned subscription cleanup - runs daily to remove unused subscriptions
+3. Stale sync jobs - every 30 minutes, fails sync jobs a crashed worker left
+4. Sync catch-up - every 15 minutes, queues the syncs notifications missed
+5. Lifecycle events - renews or recreates a subscription Graph asked about
 """
 
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional, cast
 
+from dependency_injector import providers
+
+from eneo.database.database import sessionmanager
 from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
     SimpleSharePointToken,
 )
+from eneo.integration.infrastructure.sharepoint_webhook_service import (
+    LIFECYCLE_SUBSCRIPTION_REMOVED,
+    SubscriptionMaintenance,
+)
+from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.observability.error_text import user_visible_error
@@ -139,6 +150,85 @@ async def get_token_for_subscription(
                 f"Failed to get/refresh OAuth token for subscription {subscription.subscription_id}: {e}"
             )
             return None
+
+
+async def maintain_subscriptions(requests: list[SubscriptionMaintenance]) -> None:
+    """Run the Graph calls lifecycle events asked for, each in its own transaction.
+
+    Started once the lifecycle notification has been acknowledged, on a
+    session of its own. A failure is recorded on the subscription like a
+    failed renewal; the renewal cron retries before the subscription expires.
+    """
+    for request in requests:
+        try:
+            async with sessionmanager.session() as session, session.begin():
+                container = Container(session=providers.Object(session))
+                await _maintain_subscription(container, request)
+        except Exception:
+            logger.error(
+                "Could not handle %s for SharePoint subscription %s",
+                request.event,
+                request.subscription_id,
+                exc_info=True,
+            )
+
+
+async def _maintain_subscription(
+    container: Container, request: SubscriptionMaintenance
+) -> None:
+    subscription = await container.sharepoint_subscription_repo().one_or_none(
+        id=request.subscription_id
+    )
+    if subscription is None:
+        return
+    service = container.sharepoint_subscription_service()
+    token = await get_token_for_subscription(subscription, container)
+    if token is None:
+        await record_renewal_failure(
+            subscription,
+            container,
+            f"Could not get a token to handle {request.event} from Microsoft Graph",
+        )
+        return
+    session = cast("AsyncSession", container.session())
+    failures_before = subscription.consecutive_renewal_failures
+    try:
+        # The savepoint keeps a token refreshed above when Graph refuses.
+        async with session.begin_nested():
+            if request.event == LIFECYCLE_SUBSCRIPTION_REMOVED:
+                # Graph has deleted it; renewing is not possible.
+                done = await service.recreate_expired_subscription(
+                    subscription=subscription,
+                    token=token,
+                    is_onedrive=subscription.site_id == subscription.drive_id,
+                )
+            else:
+                # A renewal reauthorizes the subscription as well.
+                done = await service.renew_subscription(
+                    subscription=subscription, token=token
+                )
+            if not done:
+                raise RuntimeError(f"Microsoft Graph refused {request.event}")
+    except Exception as exc:
+        if subscription.consecutive_renewal_failures > failures_before:
+            await persist_renewal_failure(subscription, container)
+        else:
+            await record_renewal_failure(
+                subscription, container, user_visible_error(exc)
+            )
+        return
+    if request.event == LIFECYCLE_SUBSCRIPTION_REMOVED:
+        # Changes made while the subscription was gone were never notified.
+        queued = (
+            await container.sharepoint_webhook_service().queue_syncs_for_subscription(
+                subscription
+            )
+        )
+        logger.info(
+            "Recreated removed SharePoint subscription %s and queued %d sync(s)",
+            subscription.id,
+            queued,
+        )
 
 
 @worker.cron_job(minute=0, hour={0, 12})  # Every 12 hours (midnight and noon)
@@ -322,9 +412,10 @@ async def cleanup_orphaned_subscriptions(container: Container):
 # task runs its whole body in ONE transaction committed only at the end, so a hard
 # crash rolls back the in-flight IN_PROGRESS write and the row reverts to its last
 # committed state (QUEUED). The reaper therefore targets BOTH QUEUED and IN_PROGRESS
-# (see JobRepository.mark_stale_jobs_failed). The timeout must exceed the longest
-# legitimate full sync of a large site AND any normal queue wait, so a slow-but-live
-# job is never killed.
+# (see JobRepository.mark_stale_jobs_failed). A running sync holds its job row
+# locked until it commits and the reaper skips locked rows, so a live sync is
+# never failed and never blocks the reaper; the timeout only has to exceed a
+# normal queue wait.
 SHAREPOINT_SYNC_TASKS = ["pull_sharepoint_content", "sync_sharepoint_delta"]
 SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES = 120
 
@@ -355,3 +446,38 @@ async def fail_stale_sharepoint_sync_jobs(container: Container):
         )
 
     return {"failed_stale_jobs": len(failed_ids)}
+
+
+@worker.cron_job(minute={7, 22, 37, 52})  # Every 15 minutes, offset from the others
+async def catch_up_sharepoint_syncs(container: Container):
+    """Queue the SharePoint syncs that notifications alone would have missed.
+
+    Graph notifications are the only other trigger. Graph drops them when it
+    throttles or the endpoint was unreachable, and a sync interrupted by a
+    worker crash leaves its markers unread. Every source with such a marker,
+    and every source with a delta token that no sync has touched for
+    SHAREPOINT_CATCH_UP_AFTER_HOURS, gets a sync here (a delta, or a full
+    sync when one was asked for), at most
+    SHAREPOINT_CATCH_UP_MAX_SYNCS_PER_RUN per run and never while a sync of
+    it runs or is queued.
+    """
+    settings = get_settings()
+    hours = settings.sharepoint_catch_up_after_hours
+    if hours <= 0:
+        return {"queued": 0, "markers": 0, "stale": 0}
+    window = timedelta(hours=hours)
+    summary = await container.sharepoint_webhook_service().queue_catch_up_syncs(
+        stale_before=datetime.now(timezone.utc) - window,
+        limit=settings.sharepoint_catch_up_max_syncs_per_run,
+        window_seconds=int(window.total_seconds()),
+    )
+    if summary["queued"]:
+        logger.info(
+            "SharePoint catch-up queued %d sync(s): %d for unread markers, "
+            "%d for sources without a sync in %d hours",
+            summary["queued"],
+            summary["markers"],
+            summary["stale"],
+            hours,
+        )
+    return summary

@@ -47,6 +47,24 @@ def normalize_notification_url(url: str) -> str:
     )
 
 
+def lifecycle_notification_url_for(
+    notification_url: Optional[str], configured: Optional[str]
+) -> Optional[str]:
+    """Where Graph posts lifecycle events: the configured URL, else the
+    notification URL itself. None without a notification URL.
+
+    Graph validates this URL when it creates a subscription. The notification
+    URL is already known to reach Eneo, so defaulting to it cannot break
+    subscriptions behind a proxy that forwards only that path; the webhook
+    tells lifecycle events from changes by their ``lifecycleEvent`` field.
+    """
+    if not notification_url:
+        return None
+    if configured and configured.strip():
+        return configured.strip()
+    return notification_url
+
+
 def _resource_label(site_id: Optional[str], drive_id: Optional[str] = None) -> str:
     """Safe short label for log messages, handles None values."""
     if site_id:
@@ -75,6 +93,10 @@ class SharePointSubscriptionService:
             self.notification_url = (
                 f"{settings.public_origin}/api/v1/integrations/sharepoint/webhook/"
             )
+        self.lifecycle_notification_url = lifecycle_notification_url_for(
+            self.notification_url,
+            settings.sharepoint_webhook_lifecycle_notification_url,
+        )
         self.client_state = (
             settings.sharepoint_webhook_client_state.strip()
             if settings.sharepoint_webhook_client_state
@@ -110,6 +132,19 @@ class SharePointSubscriptionService:
             != normalize_notification_url(self.notification_url)
         )
 
+    def lifecycle_url_missing(self, subscription: SharePointSubscription) -> bool:
+        """True when Graph does not post this subscription's lifecycle events here.
+
+        Graph takes ``lifecycleNotificationUrl`` only when a subscription is
+        created, so such a subscription is recreated rather than renewed.
+        """
+        if not self.lifecycle_notification_url:
+            return False
+        stored = subscription.lifecycle_notification_url
+        return stored is None or normalize_notification_url(
+            stored
+        ) != normalize_notification_url(self.lifecycle_notification_url)
+
     async def ensure_subscription_for_site(
         self,
         user_integration_id: UUID,
@@ -141,8 +176,12 @@ class SharePointSubscriptionService:
             )
             return None
 
-        # Check if subscription already exists for this user+site/drive
-        existing = await self.subscription_repo.get_by_user_and_site(
+        # Imports and syncs of several folders on one site arrive together
+        # ("Resync all" sends a few at once). Each would find the same missing,
+        # expired or drifted subscription and create one at Graph, and all but
+        # the last written would be left there unused. Holding the pair until
+        # the caller's transaction ends makes the next caller reuse the result.
+        existing = await self.subscription_repo.lock_user_site(
             user_integration_id=user_integration_id, site_id=site_id
         )
 
@@ -227,6 +266,7 @@ class SharePointSubscriptionService:
             drive_id=drive_id,
             expires_at=expiration,
             notification_url=self.notification_url,
+            lifecycle_notification_url=self.lifecycle_notification_url,
         )
 
         try:
@@ -318,6 +358,7 @@ class SharePointSubscriptionService:
         subscription.subscription_id = new_subscription_id
         subscription.expires_at = new_expiration
         subscription.notification_url = self.notification_url
+        subscription.lifecycle_notification_url = self.lifecycle_notification_url
         subscription.mark_renewal_success()
         # The row is written before the old subscription is deleted: a failed
         # write must not leave the row pointing at a subscription Graph no
@@ -370,6 +411,22 @@ class SharePointSubscriptionService:
                 subscription=subscription,
                 token=token,
                 is_onedrive=self._is_onedrive(subscription),
+            )
+        if self.lifecycle_url_missing(subscription):
+            logger.info(
+                f"Subscription {subscription.subscription_id} has no lifecycle "
+                f"notification URL; recreating it for {self.lifecycle_notification_url}"
+            )
+            if await self.recreate_expired_subscription(
+                subscription=subscription,
+                token=token,
+                is_onedrive=self._is_onedrive(subscription),
+            ):
+                return True
+            # Renewed in place it keeps working, only without lifecycle events.
+            logger.warning(
+                f"Could not recreate subscription {subscription.subscription_id} "
+                "with a lifecycle notification URL; renewing it as it is"
             )
 
         new_expiration = datetime.now(timezone.utc) + timedelta(
@@ -558,6 +615,10 @@ class SharePointSubscriptionService:
             "expirationDateTime": expiration.isoformat().replace("+00:00", "Z"),
             "clientState": self._require_client_state(),
         }
+        if self.lifecycle_notification_url:
+            # Graph validates this URL like the notification URL, and only
+            # accepts it here: a renewal cannot add it later.
+            payload["lifecycleNotificationUrl"] = self.lifecycle_notification_url
 
         try:
             # Use IPv4-only connector to avoid IPv6 issues
