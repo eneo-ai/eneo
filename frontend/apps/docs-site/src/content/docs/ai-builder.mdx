@@ -340,9 +340,12 @@ proposes: a value the tool's input schema refuses, a run-form field of
 another type, or an earlier step's field the plan no longer has is asked
 again. Your answers are kept for the session (for the 20 tool uses answered
 most recently), also when a later plan leaves the value out; the latest answer
-to a question counts. A plan uses tools at most 20 times, and the Builder asks
-for at most 40 values of one tool step; beyond that it tells you to split the
-work or to add the step in the step editor.
+to a question counts. If you choose an option of a tool question, the Builder
+keeps the confirmation of the requirements card unless your answer changed the
+card; then you confirm the new card. Before the Builder has proposed a plan, a
+typed reply to the question still withdraws the confirmation. A plan uses tools at most 20 times, and the Builder
+asks for at most 40 values of one tool step; beyond that it tells you to split
+the work or to add the step in the step editor.
 When the request needs a tool that the space may not use (for example switched
 off in the space or waiting for review), or a tool whose input schema is too
 large for the Builder to show while it writes the arguments, the Builder says

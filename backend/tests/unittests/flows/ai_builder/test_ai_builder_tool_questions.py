@@ -55,7 +55,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalReady,
 )
 from eneo.flows.ai_builder.ai_builder_question_state import shown_question
-from eneo.flows.ai_builder.ai_builder_requirements_state import RequirementsState
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
+    RequirementsState,
+    resolve_requirements_state,
+)
 from eneo.flows.ai_builder.ai_builder_tool_catalog import (
     AIBuilderToolCatalogLeftOut,
     tool_ref,
@@ -116,6 +119,9 @@ from tests.unittests.flows.ai_builder.test_ai_builder_planner import (
     _requirements_state_unconfirmed,
     _route,
     _runtime_result,
+)
+from tests.unittests.flows.ai_builder.test_ai_builder_requirements_state import (
+    _summary_payload,
 )
 from tests.unittests.flows.ai_builder.test_ai_builder_tool_steps import (
     DEPARTMENT,
@@ -230,12 +236,13 @@ def _answer(
     shown: StructuredQuestionPayload,
     option_id: str,
     custom_value: str | None = None,
+    message: str = "",
 ) -> None:
     """Send an answer through the validation every client answer passes."""
     prepared = prepare_user_question_metadata(
         is_edit_mode=False,
         conversation=conversation,
-        message="",
+        message=message,
         question_answer=StructuredQuestionAnswerRequest(
             question_id=shown.question_id,
             instance_token=shown.instance_token,
@@ -245,7 +252,7 @@ def _answer(
         ui_language="en",
     )
     conversation.append(
-        ConversationMessage(role="user", content="", metadata=prepared.metadata)
+        ConversationMessage(role="user", content=message, metadata=prepared.metadata)
     )
 
 
@@ -1463,3 +1470,37 @@ def test_a_tool_refusal_reaches_the_web_typed() -> None:
     metadata["non_plan_outcome"]["tool_refusal"]["kind"] = "renamed"
     (garbled,) = _to_public_conversation(conversation)
     assert garbled.tool_refusal is None
+
+
+@pytest.mark.parametrize(
+    ("question", "option", "keeps"),
+    [("tool_choice:rows", ROWS_REF, True), ("terminal_output", "pdf_document", False)],
+)
+def test_only_a_tool_answer_keeps_the_confirmed_requirements(
+    question: str, option: str, keeps: bool
+) -> None:
+    # Kills: any message before a plan withdrawing the confirmation (an edit
+    # adding a tool use shows the same card again after the tool answer), and
+    # the exemption widened to requirements answers or to free text.
+    shown = _summary_payload()
+    version = shown.requirements_version
+    conversation = [
+        ConversationMessage(
+            role="assistant",
+            content="Summary",
+            metadata={"requirements_summary": shown.model_dump(mode="json")},
+        ),
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={"requirements_confirmed": True, "requirements_version": version},
+        ),
+    ]
+    # The web sends the chosen option's label as the message content.
+    shown = _shown_by_hand(conversation, question, option)
+    _answer(conversation, shown, option, message=option)
+    answered = resolve_requirements_state(conversation)
+    conversation.append(ConversationMessage(role="user", content="Use a PDF."))
+
+    assert answered.confirmed_requirements_version == (version if keeps else None)
+    assert resolve_requirements_state(conversation).confirmed is False

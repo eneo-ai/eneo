@@ -7,6 +7,7 @@ from typing import Final, Iterable
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     RequirementsConfirmationMetadata,
+    question_answer_from_metadata,
     requirements_confirmation_from_metadata,
     requirements_summary_from_metadata,
     tool_calls_from_message,
@@ -20,6 +21,9 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     PROPOSE_FLOW_TOOL_NAME,
+)
+from eneo.flows.ai_builder.ai_builder_tool_question_ids import (
+    parse_tool_question_id,
 )
 
 
@@ -234,6 +238,9 @@ def resolve_requirements_state(
         if has_plan_after_confirmation and confirmed_version is not None:
             continue
 
+        if _answers_a_tool_question(message):
+            continue
+
         confirmed_version = None
 
     return RequirementsState(
@@ -241,6 +248,27 @@ def resolve_requirements_state(
         latest_version=latest_version,
         confirmed_version=confirmed_version,
         attested_summary=attested.summary if attested is not None else None,
+    )
+
+
+def _answers_a_tool_question(message: ConversationMessage) -> bool:
+    """Whether this message chooses an option of one of the Builder's tool questions.
+
+    Such an answer decides how the draft uses a tool, and the disclosure is
+    built without the tool decisions, so asking the user to accept the same
+    card again stalled every edit that adds a tool use. The answer's words can
+    still be read as requirement evidence (a typed fixed value, for instance);
+    then the derived card is a new version this confirmation does not name, and
+    the user confirms that card. Before a plan exists, a typed reply and the
+    answers to the requirements questions withdraw a pending confirmation like
+    any other message.
+    """
+
+    answer = question_answer_from_metadata(message.metadata)
+    return (
+        answer is not None
+        and answer.question_id is not None
+        and parse_tool_question_id(answer.question_id) is not None
     )
 
 
@@ -265,13 +293,14 @@ def resolve_attested_disclosure(
 
     A confirmation names one disclosure by version, so acceptance survives a
     later disclosure the user has not answered yet. That is deliberately
-    narrower than what withdraws a *pending* confirmation, where any ordinary
-    message before a plan is a change of mind: the user cannot un-say
-    something they already said, and the pinned architecture is derived from
-    it. What they say next is not un-saying it either — a slot they resolve
-    differently later is settled by the newer evidence
-    (`attested_slots_without_newer_evidence`), which is a typed comparison of
-    what was cited when, not a reading of how the request was worded.
+    narrower than what withdraws a *pending* confirmation. There, any message
+    before a plan except the answer to a tool question is a change of mind:
+    the user cannot un-say something they already said, and the pinned
+    architecture is derived from it. What they say next is not un-saying it
+    either — a slot they resolve differently later is settled by the newer
+    evidence (`attested_slots_without_newer_evidence`), which is a typed
+    comparison of what was cited when, not a reading of how the request was
+    worded.
     """
 
     shown: dict[str, tuple[int, RequirementsSummaryPayload]] = {}
