@@ -7,6 +7,13 @@ import type { Space } from "@/features/spaces/space";
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn() }));
 const space = vi.hoisted(() => ({ current: null as unknown }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn()
+}));
+vi.mock("@/lib/toast", () => ({ toast }));
 vi.mock("next/navigation", () => import("@/test/navigation"));
 const jobs = vi.hoisted(() => ({ trackJob: vi.fn() }));
 vi.mock("@/features/jobs/use-jobs", () => ({ useJobs: () => jobs }));
@@ -199,4 +206,60 @@ it("SharePoint: shows what is missing where it is chosen, one step at a time", a
       created(1, "Rutiner").job
     ])
   );
+});
+
+it("SharePoint: tells how many imports failed when only some were queued", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation((path: string) =>
+    path.endsWith("/preview/")
+      ? ok({
+          items: [{ key: "site-1", type: "site", name: "Intranätet", url: "https://sp/intra" }]
+        })
+      : ok({
+          items: [
+            { id: "f1", name: "Policyer", type: "folder", path: "/Policyer", has_children: true },
+            { id: "f2", name: "Rutiner", type: "folder", path: "/Rutiner", has_children: true }
+          ],
+          current_path: "/",
+          drive_id: "drive-1"
+        })
+  );
+  api.POST.mockImplementation(() =>
+    ok({
+      created_count: 1,
+      failed_count: 1,
+      items: [
+        {
+          index: 0,
+          name: "Policyer",
+          status: "created",
+          integration_knowledge_id: "ik-1",
+          job: { id: "job-0", name: "Policyer", status: "queued" }
+        },
+        { index: 1, name: "Rutiner", status: "failed", error: "Mappen finns inte" }
+      ]
+    })
+  );
+  const onOpenChange = vi.fn();
+  renderInApp(
+    <SharePointImportDialog
+      open
+      onOpenChange={onOpenChange}
+      onBack={() => {}}
+      integration={integration("sharepoint")}
+    />
+  );
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(await within(dialog).findByRole("button", { name: "Intranätet" }));
+  const tree = within(dialog).getByRole("group", { name: "Innehåll" });
+  fireEvent.click(await within(tree).findByRole("checkbox", { name: "Policyer" }));
+  fireEvent.click(within(tree).getByRole("checkbox", { name: "Rutiner" }));
+  fireEvent.change(within(dialog).getByRole("textbox", { name: /^Gruppnamn/ }), {
+    target: { value: "Styrdokument" }
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Importera" }));
+
+  await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  expect(toast.warning).toHaveBeenCalledWith("1 av 2 importer köades. 1 misslyckades.");
+  expect(toast.error).not.toHaveBeenCalled();
 });

@@ -221,6 +221,15 @@ export function SharePointImportDialog({
         );
         return;
       }
+      if (result.failed_count > 0) {
+        toast.warning(
+          t("sharepoint_batch_import_partial", {
+            created: String(result.created_count),
+            total: String(result.items.length),
+            failed: String(result.failed_count)
+          })
+        );
+      }
       reset();
       onOpenChange(false);
     },
