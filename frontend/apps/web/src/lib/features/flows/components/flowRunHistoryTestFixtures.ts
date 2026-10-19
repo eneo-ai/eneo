@@ -8,8 +8,6 @@ import {
   type FlowRunSummary
 } from "@eneo/eneo-js";
 
-type FlowRunResultFileItem = NonNullable<FlowRun["result_files"]>[number];
-
 /**
  * Canonical valid FlowRun test fixture carrying every field the generated
  * contract requires, so tests fail at compile time when the contract grows
@@ -29,31 +27,6 @@ export function makeFlowRun(overrides: Partial<FlowRun> = {}): FlowRun {
     flow_version: 1,
     purpose: "production",
     input_payload_json: { arende: "Bygglov Storgatan 5" }
-  };
-  return { ...base, ...overrides };
-}
-
-/** Canonical result-file fixture carrying the generated required fields. */
-export function makeFlowRunResultFile(
-  overrides: Partial<FlowRunResultFileItem> = {}
-): FlowRunResultFileItem {
-  const base: FlowRunResultFileItem = {
-    flow_run_id: "run-1",
-    flow_id: "flow-1",
-    tenant_id: "tenant-1",
-    step_result_id: "step-result-1",
-    step_id: "step-1",
-    step_order: 1,
-    ordinal: 0,
-    attempt_no: 1,
-    file_id: "file-1",
-    name: "resultat.pdf",
-    mimetype: "application/pdf",
-    file_type: "document",
-    size: 1024,
-    source: "generated_output",
-    checksum: "checksum-1",
-    availability: "available"
   };
   return { ...base, ...overrides };
 }
