@@ -264,11 +264,9 @@ async def test_cancellation_during_acceptance_commits_job_identity(
 async def test_accepted_receipt_commits_and_retains_identity(
     accepted_call_recorder, terminal
 ):
-    from eneo.flows.infrastructure.flow_provider_call_repo import (
-        FlowProviderCallRepository,
-    )
+    from eneo.flows.domain.provider_call import ProviderCall
 
-    recorder, row, session, commits = accepted_call_recorder
+    recorder, row, _, commits = accepted_call_recorder
     await recorder.accepted(row.id, "job-1")
     assert commits == ["job-1"]
     assert row.status == "started"
@@ -277,7 +275,7 @@ async def test_accepted_receipt_commits_and_retains_identity(
         await recorder.rejected(row.id, "provider_rejected")
     else:
         await recorder.outcome_unknown(row.id, "provider_error")
-    evidence = await FlowProviderCallRepository(session).get_call(call_id=row.id)
+    evidence = ProviderCall.model_validate(row)
     assert evidence.status.value == terminal
     assert evidence.provider_response_id == "job-1"
 

@@ -1085,7 +1085,6 @@ async def test_publish_flow_rejects_legacy_http_post_input_before_version_work(u
     ):
         await service.publish_flow(flow_id=flow_id)
 
-    version_repo.get_latest.assert_not_awaited()
     version_repo.create.assert_not_awaited()
     flow_repo.update.assert_not_awaited()
 

@@ -129,6 +129,14 @@ async def _activate_resolved_inputs(
     assert activated is not None
 
 
+async def _read_call(session, call_id: UUID) -> ProviderCall:
+    row = await session.scalar(
+        sa.select(FlowProviderCalls).where(FlowProviderCalls.id == call_id)
+    )
+    assert row is not None
+    return ProviderCall.model_validate(row)
+
+
 async def _start_provider_call(
     *,
     repo: FlowProviderCallRepository,
@@ -1672,9 +1680,7 @@ async def test_provider_call_recorder_commits_outside_executor_session(
         sessionmanager.session() as verification_session,
         verification_session.begin(),
     ):
-        persisted = await FlowProviderCallRepository(verification_session).get_call(
-            call_id=call_id
-        )
+        persisted = await _read_call(verification_session, call_id)
         platform_usage = await verification_session.scalar(
             sa.select(ProviderTokenUsages).where(
                 ProviderTokenUsages.source_type == "flow_provider_call",
@@ -1849,8 +1855,8 @@ async def test_stale_run_recovery_marks_only_started_provider_calls_unknown(
         )
 
         assert changed == 1
-        assert (await repo.get_call(call_id=completed_start.id)).status == "completed"
-        recovered = await repo.get_call(call_id=started.id)
+        assert (await _read_call(session, completed_start.id)).status == "completed"
+        recovered = await _read_call(session, started.id)
         assert recovered.status == "outcome_unknown"
         assert recovered.outcome_reason == "stale_started"
         assert recovered.finished_at is not None

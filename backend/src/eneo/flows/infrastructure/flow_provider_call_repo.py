@@ -572,16 +572,6 @@ class FlowProviderCallRepository:
             logical_json_bytes=int(row.logical_json_bytes),
         )
 
-    async def get_call(self, *, call_id: UUID) -> ProviderCall:
-        row = await self.session.scalar(
-            sa.select(FlowProviderCalls).where(FlowProviderCalls.id == call_id)
-        )
-        if row is None:
-            raise FlowProviderCallNotFoundError(
-                f"Flow provider call {call_id} was not found."
-            )
-        return ProviderCall.model_validate(row)
-
     async def list_evidence_page(
         self,
         *,

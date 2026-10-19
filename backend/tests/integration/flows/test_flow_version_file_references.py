@@ -111,7 +111,7 @@ async def test_create_records_every_file_the_definition_names(
         session = container.session()
         model = await completion_model_factory(session, "refs-create-model")
         space = await space_factory(session, "Refs create", [model.id])
-        flow, (template, direct, attached, unused) = await _flow_with_files(
+        flow, (template, direct, attached, _unused) = await _flow_with_files(
             session,
             space,
             admin_user,
@@ -138,9 +138,6 @@ async def test_create_records_every_file_the_definition_names(
             (1, direct.id),
             (1, attached.id),
         }
-        assert unused.id not in await repo.file_ids_referenced_by_versions(
-            flow.id, admin_user.tenant_id
-        )
 
 
 @pytest.mark.asyncio

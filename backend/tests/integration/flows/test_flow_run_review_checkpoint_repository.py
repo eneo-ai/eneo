@@ -200,11 +200,13 @@ async def test_checkpoint_history_preserves_edits_and_fold_reference(
                         current_payload_json={"answer": "must roll back"},
                         principal=principal_a,
                     )
-        unchanged = await repo.get_review_checkpoint(
-            checkpoint_id=reverted.id,
-            tenant_id=scenario.tenant_id,
-            flow_id=scenario.flow_id,
-            flow_run_id=scenario.flow_run_id,
+        unchanged = await session.scalar(
+            sa.select(FlowRunReviewCheckpoints).where(
+                FlowRunReviewCheckpoints.id == reverted.id,
+                FlowRunReviewCheckpoints.tenant_id == scenario.tenant_id,
+                FlowRunReviewCheckpoints.flow_id == scenario.flow_id,
+                FlowRunReviewCheckpoints.flow_run_id == scenario.flow_run_id,
+            )
         )
         assert unchanged is not None and unchanged.revision == 3
         assert unchanged.current_payload_json == original

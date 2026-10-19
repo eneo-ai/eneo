@@ -15,6 +15,23 @@ from eneo.flows.published_definition import (
 from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
+async def _referenced_file_ids(session, flow_id: UUID, tenant_id: UUID) -> set[UUID]:
+    import sqlalchemy as sa
+
+    from eneo.database.tables.flow_tables import FlowVersionFileReferences
+
+    return set(
+        (
+            await session.scalars(
+                sa.select(FlowVersionFileReferences.file_id)
+                .where(FlowVersionFileReferences.flow_id == flow_id)
+                .where(FlowVersionFileReferences.tenant_id == tenant_id)
+                .distinct()
+            )
+        ).all()
+    )
+
+
 def _flow(
     *,
     tenant_id: UUID,
@@ -270,18 +287,17 @@ async def test_snapshot_file_references_are_idempotent_and_protect_files(
             assert candidate.first_published_at is None
             assert candidate.source_draft_revision is None
         assert (
-            await repo.file_ids_referenced_by_versions(flow.id, admin_user.tenant_id)
-            == set()
+            await _referenced_file_ids(session, flow.id, admin_user.tenant_id) == set()
         )
         for version in (1, 1, 2):
             await repo.add_file_references(
                 flow.id, version, admin_user.tenant_id, [file.id, file.id]
             )
         await repo.add_file_references(flow.id, 1, admin_user.tenant_id, [])
-        assert await repo.file_ids_referenced_by_versions(
-            flow.id, admin_user.tenant_id
-        ) == {file.id}
-        assert await repo.file_ids_referenced_by_versions(flow.id, uuid4()) == set()
+        assert await _referenced_file_ids(session, flow.id, admin_user.tenant_id) == {
+            file.id
+        }
+        assert await _referenced_file_ids(session, flow.id, uuid4()) == set()
         count = await session.scalar(
             sa.text(
                 "SELECT count(*) FROM flow_version_file_references WHERE flow_id = :flow_id"
@@ -297,15 +313,14 @@ async def test_snapshot_file_references_are_idempotent_and_protect_files(
                 FlowVersions.flow_id == flow.id, FlowVersions.version == 2
             )
         )
-        assert await repo.file_ids_referenced_by_versions(
-            flow.id, admin_user.tenant_id
-        ) == {file.id}
+        assert await _referenced_file_ids(session, flow.id, admin_user.tenant_id) == {
+            file.id
+        }
         await session.execute(
             sa.delete(FlowVersions).where(FlowVersions.flow_id == flow.id)
         )
         assert (
-            await repo.file_ids_referenced_by_versions(flow.id, admin_user.tenant_id)
-            == set()
+            await _referenced_file_ids(session, flow.id, admin_user.tenant_id) == set()
         )
         await session.execute(sa.delete(Files).where(Files.id == file.id))
 
@@ -366,8 +381,7 @@ async def test_snapshot_file_references_reject_cross_tenant_file(
                 )
 
         assert (
-            await repo.file_ids_referenced_by_versions(flow.id, admin_user.tenant_id)
-            == set()
+            await _referenced_file_ids(session, flow.id, admin_user.tenant_id) == set()
         )
 
 

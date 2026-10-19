@@ -217,20 +217,6 @@ class FlowVersionRepository:
             ],
         )
 
-    async def file_ids_referenced_by_versions(
-        self, flow_id: UUID, tenant_id: UUID
-    ) -> set[UUID]:
-        return set(
-            (
-                await self.session.scalars(
-                    sa.select(FlowVersionFileReferences.file_id)
-                    .where(FlowVersionFileReferences.flow_id == flow_id)
-                    .where(FlowVersionFileReferences.tenant_id == tenant_id)
-                    .distinct()
-                )
-            ).all()
-        )
-
     async def get(self, flow_id: UUID, version: int, tenant_id: UUID) -> FlowVersion:
         stmt = (
             sa.select(FlowVersions)
@@ -294,19 +280,6 @@ class FlowVersionRepository:
             .where(FlowVersions.definition_checksum == definition_checksum)
         )
         return frozenset((await self.session.execute(stmt)).scalars().all())
-
-    async def get_latest(self, flow_id: UUID, tenant_id: UUID) -> FlowVersion | None:
-        stmt = (
-            sa.select(FlowVersions)
-            .where(FlowVersions.flow_id == flow_id)
-            .where(FlowVersions.tenant_id == tenant_id)
-            .order_by(FlowVersions.version.desc())
-            .limit(1)
-        )
-        version_in_db = await self.session.scalar(stmt)
-        if version_in_db is None:
-            return None
-        return FlowVersion.model_validate(version_in_db)
 
     async def list_versions(self, flow_id: UUID, tenant_id: UUID) -> list[FlowVersion]:
         stmt = (

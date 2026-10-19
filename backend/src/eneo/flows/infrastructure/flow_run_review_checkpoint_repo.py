@@ -291,24 +291,6 @@ class FlowRunReviewCheckpointRepository:
             stmt = stmt.limit(limit)
         return await self._read_edits(stmt)
 
-    async def get_review_checkpoint(
-        self,
-        *,
-        checkpoint_id: UUID,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-    ) -> FlowRunReviewCheckpoint | None:
-        row = await self.session.scalar(
-            sa.select(FlowRunReviewCheckpoints).where(
-                FlowRunReviewCheckpoints.id == checkpoint_id,
-                FlowRunReviewCheckpoints.tenant_id == tenant_id,
-                FlowRunReviewCheckpoints.flow_id == flow_id,
-                FlowRunReviewCheckpoints.flow_run_id == flow_run_id,
-            )
-        )
-        return FlowRunReviewCheckpoint.model_validate(row) if row is not None else None
-
     async def get_review_checkpoint_history_baseline(
         self,
         *,
