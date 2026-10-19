@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { Markdown } from "$lib/components/markdown/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { tick } from "svelte";
@@ -14,6 +13,7 @@
     watchSelection,
     type SelectedPassage
   } from "../selection";
+  import DocumentEditor from "./DocumentEditor.svelte";
   import DocxPreview from "./DocxPreview.svelte";
   import PdfPreview from "./PdfPreview.svelte";
   import TablePreview from "./TablePreview.svelte";
@@ -27,12 +27,47 @@
     highlight: PreviewPassage | null;
     /** Called with the selected text, and where it stands, when the user quotes it. */
     onquote: (text: string, locator: string | null) => void;
+    /** Whether a Markdown document may be edited in place. */
+    editable?: boolean;
+    /** The reader's unsaved text of a Markdown document, shown in place of the file's. */
+    edits?: string | null;
+    /** The version before this one, as Markdown; what changed against it is marked. */
+    previousMarkdown?: string | null;
+    /** The document's text as the reader has it; null once it is the file's again. */
+    onchange?: (text: string | null) => void;
+    /** The reader asked to save the document (Mod+S). */
+    onsave?: () => void;
   };
 
-  let { content, title, highlight, onquote, onready, onerror }: Props = $props();
+  let {
+    content,
+    title,
+    highlight,
+    onquote,
+    onready,
+    onerror,
+    editable = false,
+    edits = null,
+    previousMarkdown = null,
+    onchange,
+    onsave
+  }: Props = $props();
 
+  let editor = $state<DocumentEditor>();
+
+  /** The document as the reader has it now; null unless a Markdown document is shown. */
+  export function getMarkdown(): string | null {
+    return editor?.getMarkdown() ?? null;
+  }
+
+  /** Drops the reader's edits to the document on show. */
+  export function resetEditor() {
+    editor?.reset();
+  }
+
+  // A Word document and the editor report readiness themselves.
   $effect(() => {
-    if (content.kind === "docx" || content.kind === "pdf") return;
+    if (content.kind === "docx" || content.kind === "pdf" || content.kind === "markdown") return;
     const ready = onready;
     let active = true;
     void tick().then(() => {
@@ -51,10 +86,11 @@
   /** A selection and where it is, measured from the preview's top left corner. */
   type Placed = { text: string; range: Range; centre: number; top: number; bottom: number };
 
-  // A Word document lives in a frame with a selection of its own; every other
-  // renderer draws into the page, whose selection counts while it lies wholly
-  // inside the preview. A PDF's text belongs to the browser's viewer and can
-  // be reached by neither.
+  // A Word document lives in a frame with a selection of its own; a plain text
+  // file draws into the page, whose selection counts while it lies wholly
+  // inside the preview. A Markdown document's editor places its own quote
+  // action; a PDF's text belongs to the browser's viewer and can be reached by
+  // none of these.
   let frameSelection = $state.raw<Placed | null>(null);
   let pageSelection = $state.raw<Placed | null>(null);
   const selection = $derived(frameSelection ?? pageSelection);
@@ -76,7 +112,7 @@
   }
 
   $effect(() => {
-    if (!body) return;
+    if (!body || content.kind !== "text") return;
     const watch = watchSelection(document, {
       within: () => body,
       report: (passage) => (pageSelection = place(passage))
@@ -120,12 +156,12 @@
     if (pageSelection) document.getSelection()?.removeAllRanges();
   }
 
-  // Marks the highlighted passage in content drawn into the page; a Word
-  // document marks its own frame.
+  // Marks the highlighted passage in text drawn into the page; a Word
+  // document marks its own frame, and the editor its document.
   $effect(() => {
     const passage = highlight;
     const root = body;
-    if (!root || content.kind === "docx" || content.kind === "pdf") return;
+    if (!root || content.kind !== "text") return;
     let current = true;
     // After the table has switched to the sheet the passage is on.
     void tick().then(() => {
@@ -167,7 +203,18 @@
   {:else}
     <div class="min-h-0 flex-1 overflow-auto">
       {#if content.kind === "markdown"}
-        <Markdown source={content.text} breaks={false} class="mx-auto max-w-[72ch] p-6 text-base" />
+        <DocumentEditor
+          bind:this={editor}
+          markdown={content.text}
+          {edits}
+          {editable}
+          {highlight}
+          {previousMarkdown}
+          {onquote}
+          {onchange}
+          {onsave}
+          {onready}
+        />
       {:else}
         <pre class="p-6 font-mono text-sm break-words whitespace-pre-wrap">{content.text}</pre>
       {/if}
@@ -202,7 +249,7 @@
 </div>
 
 <style>
-  /* The mark painted by markPassages (../selection.ts) on content in the page. */
+  /* The mark painted by markPassages (../selection.ts) on text drawn into the page. */
   :global(::highlight(file-preview-quote)) {
     background-color: var(--warning-dimmer);
   }

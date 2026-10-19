@@ -643,7 +643,7 @@ class TestUpdateConnectionValidation:
 
         result = await service.update_mcp_server(
             mcp_server_id=existing.id,
-            http_url="http://bad-host:9999",
+            http_url="https://bad-host:9999",
         )
 
         assert result.connection is not None
@@ -665,7 +665,7 @@ class TestUpdateConnectionValidation:
 
         result = await service.update_mcp_server(
             mcp_server_id=existing.id,
-            http_url="http://new-host:8080",
+            http_url="https://new-host:8080",
         )
 
         assert result.connection is None or result.connection.success is not False
@@ -879,7 +879,7 @@ class TestUpdateConnectionValidation:
 
         await service.update_mcp_server(
             mcp_server_id=existing.id,
-            http_url="http://new-host:8080",
+            http_url="https://new-host:8080",
         )
 
         # Verify decrypted existing credentials were used

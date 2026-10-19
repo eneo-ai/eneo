@@ -349,6 +349,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_document_exported,
     description: m.audit_action_document_exported_description
   },
+  document_version_saved: {
+    name: m.audit_action_document_version_saved,
+    description: m.audit_action_document_version_saved_description
+  },
   website_created: {
     name: m.audit_action_website_created,
     description: m.audit_action_website_created_description

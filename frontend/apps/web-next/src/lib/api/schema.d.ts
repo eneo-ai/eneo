@@ -1708,6 +1708,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/{session_id}/documents/{file_id}/versions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Save Conversation Document Version
+     * @description Save the reader's edited Markdown of a conversation document as its next version.
+     */
+    post: operations["save_conversation_document_version_api_v1_conversations__session_id__documents__file_id__versions__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/feedback/": {
     parameters: {
       query?: never;
@@ -9507,6 +9527,7 @@ export interface components {
       | "file_original_downloaded"
       | "file_signed_url_minted"
       | "document_exported"
+      | "document_version_saved"
       | "info_blob_original_download_link_created"
       | "website_created"
       | "website_updated"
@@ -10954,6 +10975,8 @@ export interface components {
        * @default false
        */
       has_download_reference?: boolean;
+      /** Revises File Id */
+      revises_file_id?: string | null;
       /**
        * Inline Text
        * @default true
@@ -13818,6 +13841,17 @@ export interface components {
       /** Is Default */
       is_default?: boolean | null;
     };
+    /**
+     * DocumentVersionCreate
+     * @description A reader's edited Markdown of a conversation document, saved as its next version.
+     */
+    DocumentVersionCreate: {
+      /**
+       * Content
+       * @description The whole document as Markdown, as the reader left it.
+       */
+      content: string;
+    };
     /** DynamicValuePublic */
     DynamicValuePublic: {
       /**
@@ -14638,6 +14672,8 @@ export interface components {
        * @default false
        */
       has_download_reference?: boolean;
+      /** Revises File Id */
+      revises_file_id?: string | null;
     };
     /** FileRestrictions */
     FileRestrictions: {
@@ -29353,6 +29389,8 @@ export interface operations {
                  * @default false
                  */
                 has_download_reference?: boolean;
+                /** Revises File Id */
+                revises_file_id?: string | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -29799,6 +29837,8 @@ export interface operations {
                  * @default false
                  */
                 has_download_reference?: boolean;
+                /** Revises File Id */
+                revises_file_id?: string | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -30804,6 +30844,15 @@ export interface operations {
                  * Format: uuid
                  */
                 session_id: string;
+                /** Reasoning */
+                reasoning: string;
+              }
+            | {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
                 /** @default tool_call */
                 eneo_event_type?: components["schemas"]["EneoEventType"];
                 /** Tools */
@@ -30907,6 +30956,17 @@ export interface operations {
                     } | null;
                   };
                 };
+              }
+            | {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** Tool Call Id */
+                tool_call_id: string;
+                /** Arguments Delta */
+                arguments_delta: string;
               }
             | {
                 /**
@@ -31087,6 +31147,62 @@ export interface operations {
                      * @default false
                      */
                     has_download_reference?: boolean;
+                    /** Revises File Id */
+                    revises_file_id?: string | null;
+                  };
+                };
+              }
+            | {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** @default token_usage */
+                eneo_event_type?: components["schemas"]["EneoEventType"];
+                usage: components["schemas"]["TokenUsageEvent"];
+                $defs: {
+                  /**
+                   * EneoEventType
+                   * @enum {string}
+                   */
+                  EneoEventType:
+                    | "tool_call"
+                    | "tool_approval_required"
+                    | "tool_approval_timeout"
+                    | "token_usage";
+                  /** TokenUsageEvent */
+                  TokenUsageEvent: {
+                    /**
+                     * Prompt Tokens
+                     * @description Cumulative prompt tokens across every provider request in this logical turn. Use context_prompt_tokens for context-window headroom.
+                     */
+                    prompt_tokens: number;
+                    /**
+                     * Completion Tokens
+                     * @description Cumulative completion tokens across every provider response in this logical turn. Use context_completion_tokens for context-window headroom.
+                     */
+                    completion_tokens: number;
+                    /**
+                     * Turn Tokens
+                     * @description Cumulative prompt_tokens plus completion_tokens for this turn.
+                     */
+                    turn_tokens: number;
+                    /**
+                     * Context Prompt Tokens
+                     * @description Prompt tokens for the final provider request only.
+                     */
+                    context_prompt_tokens: number;
+                    /**
+                     * Context Completion Tokens
+                     * @description Completion tokens for the final provider response only.
+                     */
+                    context_completion_tokens: number;
+                    /**
+                     * Skill Context Tokens
+                     * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again.
+                     */
+                    skill_context_tokens: number;
                   };
                 };
               }
@@ -31245,6 +31361,8 @@ export interface operations {
                      * @default false
                      */
                     has_download_reference?: boolean;
+                    /** Revises File Id */
+                    revises_file_id?: string | null;
                   };
                   /** InfoBlobAskAssistantPublic */
                   InfoBlobAskAssistantPublic: {
@@ -32033,6 +32151,80 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  save_conversation_document_version_api_v1_conversations__session_id__documents__file_id__versions__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description The version of a Markdown document the edit was made from */
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DocumentVersionCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FilePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

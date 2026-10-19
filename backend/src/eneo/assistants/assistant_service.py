@@ -259,6 +259,14 @@ class AssistantCompletionFileInputs:
 
 
 @dataclass(frozen=True)
+class NonStreamingAnswer:
+    """A complete answer, with the files its tools made, for a non-streaming ask."""
+
+    text: str
+    generated_files: tuple[File, ...] = ()
+
+
+@dataclass(frozen=True)
 class AssistantPreflightBaseline:
     prompt_tokens: int
     skill_context_tokens: int
@@ -2404,7 +2412,7 @@ class AssistantService:
         initial_skill_context_tokens: int,
         version: int = 1,
         assistant_selector_tokens: int = 0,
-    ) -> str | AsyncGenerator[Completion, None]:
+    ) -> NonStreamingAnswer | AsyncGenerator[Completion, None]:
         # Capture tenant_id outside the generator so the abort-path background save
         # doesn't depend on self.user being safely accessible during teardown.
         tenant_id = self.user.tenant_id
@@ -2998,7 +3006,9 @@ class AssistantService:
                 skill_activation=skill_activation,
             )
 
-            return final_answer
+            return NonStreamingAnswer(
+                text=final_answer, generated_files=tuple(generated_files)
+            )
 
     async def _build_completion_file_inputs(
         self,
@@ -3639,7 +3649,7 @@ class AssistantService:
 
         # TODO: Separate the response based on stream true or false
 
-        answer = await self._handle_response(
+        handled = await self._handle_response(
             response=response,
             datastore_result=datastore_result,
             question=question,
@@ -3658,8 +3668,11 @@ class AssistantService:
         )
 
         mcp_tool_references: list[McpToolReference] = []
-        if not stream:
-            assert isinstance(answer, str)
+        generated_files: list[File] = []
+        answer: str | AsyncGenerator[Completion, None]
+        if isinstance(handled, NonStreamingAnswer):
+            answer = handled.text
+            generated_files = list(handled.generated_files)
             info_blob_references = datastore_result.info_blobs
             if isinstance(response.completion, Completion):
                 mcp_tool_references = filter_mcp_tool_references(
@@ -3668,12 +3681,14 @@ class AssistantService:
                     version=version,
                 )
         else:
+            answer = handled
             info_blob_references = datastore_result.info_blobs
 
         final_response = AssistantResponse(
             created_at=question_created_at,
             question=question,
             files=files,
+            generated_files=generated_files,
             session=session,
             answer=answer,
             info_blobs=info_blob_references,

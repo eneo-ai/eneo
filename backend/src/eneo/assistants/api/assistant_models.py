@@ -145,6 +145,10 @@ def _empty_mcp_tool_reference_list() -> list[McpToolReference]:
     return []
 
 
+def _empty_file_list() -> list[File]:
+    return []
+
+
 class EffectiveConfigPublic(BaseModel):
     available_capabilities: list[CapabilityAvailability] = Field(
         default_factory=list[CapabilityAvailability]
@@ -368,6 +372,9 @@ class AssistantResponse(BaseModel):
     question: str
     question_id: Optional[UUID] = None
     files: list[File]
+    # The files the answer's tools made; only known up front for a complete
+    # (non-streaming) answer, since a stream delivers each file as it comes.
+    generated_files: list[File] = Field(default_factory=_empty_file_list)
     answer: str | AsyncIterable[Completion]
     info_blobs: list[InfoBlobInDBWithScore]
     completion_model: CompletionModel | CompletionModelPublic
