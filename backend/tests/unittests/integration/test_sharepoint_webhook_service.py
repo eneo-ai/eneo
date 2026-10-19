@@ -1026,6 +1026,14 @@ async def test_onedrive_queued_job_contains_drive_id(
     assert task_params.resource_type == "onedrive"
 
 
+class _Transaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+
 class _NxRedis:
     """Enough of Redis for the queued-sync marker: SET NX really refuses."""
 
@@ -1275,6 +1283,7 @@ async def test_a_change_behind_a_dead_queued_sync_is_served_by_the_catch_up(
     setup.service._fetch_knowledge = AsyncMock(  # pyright: ignore[reportPrivateUsage]
         return_value=[(mock_knowledge_db, mock_tenant_app_integration_db)]
     )
+    setup.session.begin = MagicMock(return_value=_Transaction())
     setup.user_repo.list_tenant_admins.return_value = [mock_user]
     job_service = AsyncMock()
 
@@ -1310,6 +1319,7 @@ async def test_a_change_behind_a_dead_queued_sync_is_served_by_the_catch_up(
                     full_requested=full,
                     delta_requested=not full,
                     recently_caught_up=False,
+                    marker_recently_caught_up=False,
                 )
             }
         )

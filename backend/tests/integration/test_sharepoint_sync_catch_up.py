@@ -5,7 +5,9 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from dependency_injector import providers
 
+from eneo.database.database import sessionmanager
 from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.database.tables.integration_table import (
     Integration as IntegrationDB,
@@ -31,6 +33,7 @@ from eneo.integration.infrastructure.sharepoint_sync_keys import (
     sync_catch_up_key,
     sync_queued_key,
 )
+from eneo.main.container.container import Container
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -125,7 +128,13 @@ async def _source(
     return knowledge.id
 
 
-async def _tenant_app(container, *, active: bool) -> UUID:
+async def _tenant_app(
+    container,
+    *,
+    active: bool,
+    failed_at: datetime | None = None,
+    succeeded_at: datetime | None = None,
+) -> UUID:
     session = container.session()
     user = container.user()
     app = TenantSharePointApp(
@@ -136,6 +145,11 @@ async def _tenant_app(container, *, active: bool) -> UUID:
         tenant_domain="contoso.onmicrosoft.com",
         is_active=active,
         created_by=user.id,
+        last_auth_error="AADSTS7000222: the client secret has expired"
+        if failed_at
+        else None,
+        last_auth_error_at=failed_at,
+        last_auth_success_at=succeeded_at,
     )
     session.add(app)
     await session.flush()
@@ -252,7 +266,9 @@ async def test_a_stale_source_gets_one_delta_job_per_window(
         personal = await _source(container)
     try:
         for _ in range(2):
-            async with db_container() as container:
+            # As the cron runs it: a session with no transaction open.
+            async with sessionmanager.session() as session:
+                container = Container(session=providers.Object(session))
                 summary = (
                     await container.sharepoint_webhook_service().queue_catch_up_syncs(
                         stale_before=stale_before, limit=25, window_seconds=3600

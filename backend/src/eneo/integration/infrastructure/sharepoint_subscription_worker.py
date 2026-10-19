@@ -499,7 +499,9 @@ async def fail_stale_sharepoint_sync_jobs(container: Container):
     return {"failed_stale_jobs": len(failed_ids)}
 
 
-@worker.cron_job(minute={7, 22, 37, 52})  # Every 15 minutes, offset from the others
+@worker.cron_job(
+    minute={7, 22, 37, 52}, manages_own_session=True
+)  # Every 15 minutes, offset from the others
 async def catch_up_sharepoint_syncs(container: Container):
     """Queue the SharePoint syncs that notifications alone would have missed.
 

@@ -13,6 +13,7 @@ from eneo.integration.infrastructure.sharepoint_subscription_worker import (
 )
 from eneo.integration.infrastructure.sharepoint_sync_keys import (
     sync_catch_up_key,
+    sync_catch_up_marker_key,
     sync_lock_key,
     sync_pending_full_key,
     sync_pending_key,
@@ -78,10 +79,30 @@ def redis() -> _Redis:
     return _Redis()
 
 
+class _Session:
+    """Transactions as the catch-up opens them, one per source."""
+
+    def __init__(self) -> None:
+        self.transactions = 0
+
+    def begin(self):
+        session = self
+
+        class Transaction:
+            async def __aenter__(self):
+                session.transactions += 1
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+        return Transaction()
+
+
 @pytest.fixture
 def service(redis) -> SharepointWebhookService:
     service = SharepointWebhookService(
-        session=AsyncMock(),
+        session=_Session(),  # pyright: ignore[reportArgumentType]
         oauth_token_repo=AsyncMock(),
         job_repo=AsyncMock(),
         user_repo=AsyncMock(),
@@ -95,8 +116,14 @@ def service(redis) -> SharepointWebhookService:
 def _with_candidates(service, candidates: list[_CatchUpCandidate]) -> AsyncMock:
     service._catch_up_candidates = AsyncMock(return_value=candidates)
 
-    async def fetch(_condition):
-        return [(MagicMock(id=candidate.id), MagicMock()) for candidate in candidates]
+    async def fetch(condition):
+        # The catch-up asks for one knowledge row at a time, by id.
+        wanted = condition.right.value
+        return [
+            (MagicMock(id=candidate.id), MagicMock())
+            for candidate in candidates
+            if candidate.id == wanted
+        ]
 
     service._fetch_knowledge = fetch
     queue = AsyncMock(return_value=Task.SYNC_SHAREPOINT_DELTA)
@@ -178,6 +205,45 @@ async def test_an_unread_marker_gets_its_sync_however_recent_the_last_one(
     assert queue.await_args.kwargs["full"] is full
     assert summary == {"queued": 1, "markers": 1, "stale": 0}
     assert sync_catch_up_key(str(recent.id)) not in redis.store
+    assert redis.ttls[sync_catch_up_marker_key(str(recent.id))] == 3600
+
+
+async def test_a_marker_retried_within_its_window_waits(service, redis):
+    """A marker whose source cannot be queued (no tenant admin, no token)
+    would otherwise take a place in every run."""
+    marked = _candidate(hours_ago=0.5)
+    redis.store[sync_pending_key(str(marked.id))] = "1"
+    redis.store[sync_catch_up_marker_key(str(marked.id))] = "1"
+    queue = _with_candidates(service, [marked])
+
+    await _catch_up(service)
+
+    queue.assert_not_awaited()
+
+
+async def test_a_source_that_fails_to_queue_holds_up_neither_others_nor_later_runs(
+    service, redis
+):
+    broken = _candidate(hours_ago=0.5)
+    redis.store[sync_pending_key(str(broken.id))] = "1"
+    stale = _candidate(hours_ago=30)
+    queue = _with_candidates(service, [broken, stale])
+
+    async def queue_sync(knowledge_db, _connection, **_kwargs):
+        if knowledge_db.id == broken.id:
+            raise RuntimeError("MultipleResultsFound on the OAuth token")
+        return Task.SYNC_SHAREPOINT_DELTA
+
+    queue.side_effect = queue_sync
+
+    first = await _catch_up(service)
+    second = await _catch_up(service)
+
+    assert first == {"queued": 1, "markers": 0, "stale": 1}
+    assert second == {"queued": 0, "markers": 0, "stale": 0}
+    assert _queued_ids(queue) == [broken.id, stale.id]
+    # Each run's listing, and one transaction per source attempted.
+    assert service.session.transactions == (1 + 2) + 1  # pyright: ignore[reportAttributeAccessIssue]
 
 
 async def test_a_run_is_bounded_markers_first_then_the_longest_unsynced(service, redis):

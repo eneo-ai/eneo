@@ -44,6 +44,7 @@ from eneo.integration.infrastructure.sharepoint_sync_keys import (
     claim_sync_queue_slot,
     release_sync_queue_slot,
     sync_catch_up_key,
+    sync_catch_up_marker_key,
     sync_lock_key,
     sync_pending_full_key,
     sync_pending_key,
@@ -81,6 +82,9 @@ LIFECYCLE_MISSED = "missed"
 LIFECYCLE_REAUTHORIZATION_REQUIRED = "reauthorizationRequired"
 LIFECYCLE_SUBSCRIPTION_REMOVED = "subscriptionRemoved"
 _MAINTENANCE_WINDOW_SECONDS = 10 * 60
+# A marker stands for a known change, so it is retried sooner than a source
+# that is only stale.
+_MARKER_CATCH_UP_WINDOW_SECONDS = 60 * 60
 # Catch-up reads the sync state of this many sources per Redis round trip.
 _SYNC_STATE_BATCH = 500
 _USERS_WHO_CAN_SIGN_IN = (UserState.ACTIVE.value, UserState.INVITED.value)
@@ -108,6 +112,7 @@ class _SyncState:
     full_requested: bool
     delta_requested: bool
     recently_caught_up: bool
+    marker_recently_caught_up: bool
 
 
 @dataclass
@@ -720,14 +725,20 @@ class SharepointWebhookService:
         not be queued), and one with a delta token that no sync has touched
         since ``stale_before`` (Graph dropped or never sent its
         notifications). A source queued for being stale is not queued for it
-        again within ``window_seconds``, whatever became of that sync, so a
-        broken source is retried once per window rather than on every run.
+        again within ``window_seconds``, and one queued for a marker not
+        within the marker window, whatever became of that attempt; a source
+        that cannot be queued is retried once per window, not on every run.
 
         Only sources whose tenant is active and whose connection can still
         authenticate are considered: an active tenant app, or the OAuth
         connection of a user who can still sign in.
+
+        Each source is queued in a transaction of its own on this service's
+        session, which must have none open: one that fails is logged and
+        does not hold up the others.
         """
-        candidates = await self._catch_up_candidates()
+        async with self.session.begin():
+            candidates = await self._catch_up_candidates()
         states = await self._sync_states([str(c.id) for c in candidates])
         with_markers: list[_CatchUpCandidate] = []
         stale: list[_CatchUpCandidate] = []
@@ -736,7 +747,8 @@ class SharepointWebhookService:
             if state.running or state.queued:
                 continue
             if state.full_requested or state.delta_requested:
-                with_markers.append(candidate)
+                if not state.marker_recently_caught_up:
+                    with_markers.append(candidate)
             elif (
                 candidate.has_delta_token
                 and candidate.last_activity < stale_before
@@ -747,32 +759,38 @@ class SharepointWebhookService:
         stale.sort(key=lambda c: c.last_activity)
         picked = (with_markers + stale)[:limit]
         summary = {"queued": 0, "markers": 0, "stale": 0}
-        if not picked:
-            return summary
-
-        records = {
-            knowledge_db.id: (knowledge_db, user_integration_db)
-            for knowledge_db, user_integration_db in await self._fetch_knowledge(
-                IntegrationKnowledgeDBModel.id.in_([c.id for c in picked])
-            )
-        }
         stale_ids = {c.id for c in stale}
         context = _QueueContext()
         for candidate in picked:
-            record = records.get(candidate.id)
-            if record is None:
-                continue
             knowledge_id_str = str(candidate.id)
             is_stale = candidate.id in stale_ids
-            if is_stale:
-                await self.redis_client.set(
-                    sync_catch_up_key(knowledge_id_str), "1", ex=window_seconds
-                )
-            queued = await self._queue_sync(
-                *record,
-                context=context,
-                full=states[knowledge_id_str].full_requested,
+            # Set first, so a source whose queueing fails waits its window too.
+            await self.redis_client.set(
+                (sync_catch_up_key if is_stale else sync_catch_up_marker_key)(
+                    knowledge_id_str
+                ),
+                "1",
+                ex=window_seconds if is_stale else _MARKER_CATCH_UP_WINDOW_SECONDS,
             )
+            try:
+                async with self.session.begin():
+                    records = await self._fetch_knowledge(
+                        IntegrationKnowledgeDBModel.id == candidate.id
+                    )
+                    if not records:
+                        continue
+                    queued = await self._queue_sync(
+                        *records[0],
+                        context=context,
+                        full=states[knowledge_id_str].full_requested,
+                    )
+            except Exception:
+                logger.error(
+                    "SharePoint catch-up could not queue a sync for knowledge %s",
+                    knowledge_id_str,
+                    exc_info=True,
+                )
+                continue
             if queued is None:
                 continue
             summary["queued"] += 1
@@ -840,6 +858,7 @@ class SharepointWebhookService:
             sync_pending_full_key,
             sync_pending_key,
             sync_catch_up_key,
+            sync_catch_up_marker_key,
         )
         states: dict[str, _SyncState] = {}
         for start in range(0, len(knowledge_ids), _SYNC_STATE_BATCH):
@@ -850,7 +869,7 @@ class SharepointWebhookService:
                         pipe.exists(key(knowledge_id))
                 flags = [bool(flag) for flag in await pipe.execute()]
             for index, knowledge_id in enumerate(batch):
-                running, queued, full, delta, caught_up = flags[
+                running, queued, full, delta, caught_up, marker_caught_up = flags[
                     index * len(keys) : (index + 1) * len(keys)
                 ]
                 states[knowledge_id] = _SyncState(
@@ -859,6 +878,7 @@ class SharepointWebhookService:
                     full_requested=full,
                     delta_requested=delta,
                     recently_caught_up=caught_up,
+                    marker_recently_caught_up=marker_caught_up,
                 )
         return states
 
