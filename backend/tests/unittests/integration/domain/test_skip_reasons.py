@@ -19,6 +19,7 @@ from eneo.integration.domain.skip_reasons import (
     extraction_limit_reason,
     file_too_large_reason,
     reason_text,
+    set_aside_reason,
     skipped,
     skipped_by_code,
     unsupported_type_reason,
@@ -122,6 +123,12 @@ WRITTEN_TEXTS = [
         SCOPE_PATH_UNAVAILABLE_REASON, "scope_path_unavailable", {}, id="scope-path"
     ),
     pytest.param(MISSING_ITEM_ID_REASON, "missing_item_id", {}, id="missing-id"),
+    pytest.param(
+        set_aside_reason(3, error_reason("HTTP 502 Bad Gateway")),
+        "set_aside",
+        {"attempts": 3, "detail": "Error: HTTP 502 Bad Gateway"},
+        id="set-aside",
+    ),
 ]
 
 
