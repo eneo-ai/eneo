@@ -44,7 +44,9 @@ export function useRenewExpiredSubscriptions() {
         );
       } else {
         toast.success(
-          t("sharepoint_subscriptions_renewed_success", { count: result.recreated ?? 0 })
+          result.recreated === 1
+            ? t("sharepoint_subscriptions_renewed_success_one")
+            : t("sharepoint_subscriptions_renewed_success", { count: result.recreated ?? 0 })
         );
       }
     },
@@ -229,9 +231,11 @@ function HealthBadge({
     return (
       <div className="flex flex-col gap-0.5">
         <Badge variant="destructive">
-          {t("sharepoint_subscription_health_failing", {
-            count: sub.consecutive_renewal_failures
-          })}
+          {sub.consecutive_renewal_failures === 1
+            ? t("sharepoint_subscription_health_failing_one")
+            : t("sharepoint_subscription_health_failing", {
+                count: sub.consecutive_renewal_failures
+              })}
         </Badge>
         {sub.last_renewal_error && (
           <span className="text-muted-foreground max-w-64 text-xs break-words whitespace-normal">
