@@ -9,6 +9,26 @@ const state = vi.hoisted(() => ({
   error: null as unknown,
   requested: [] as unknown[]
 }));
+/** React's cache() memoizes for one server request; each test is one request. */
+const request = vi.hoisted(() => ({ memos: [] as Map<string, unknown>[] }));
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return {
+    ...actual,
+    cache: <Args extends unknown[], Result>(fn: (...args: Args) => Result) => {
+      const memo = new Map<string, Result>();
+      request.memos.push(memo as Map<string, unknown>);
+      return (...args: Args) => {
+        const key = JSON.stringify(args);
+        if (!memo.has(key)) memo.set(key, fn(...args));
+        return memo.get(key) as Result;
+      };
+    }
+  };
+});
+vi.mock("next-intl/server", () => ({
+  getTranslations: async () => (key: string) => key
+}));
 
 vi.mock("@/lib/api/server", () => ({ eneoApi: () => ({}) }));
 vi.mock("@/lib/api/query", () => ({
@@ -27,17 +47,21 @@ vi.mock("next/navigation", () => ({
   },
   redirect: (url: string) => {
     throw new Error(`redirect ${url}`);
-  }
+  },
+  unstable_rethrow: () => {}
 }));
 
 import IntegrationsPage from "./page";
-import IntegrationItemPage from "./[integrationKnowledgeId]/page";
-import WrapperPage from "./wrapper/[wrapperId]/page";
+import IntegrationItemPage, {
+  generateMetadata as itemMetadata
+} from "./[integrationKnowledgeId]/page";
+import WrapperPage, { generateMetadata as wrapperMetadata } from "./wrapper/[wrapperId]/page";
 
 afterEach(() => {
   state.space = null;
   state.error = null;
   state.requested = [];
+  for (const memo of request.memos) memo.clear();
 });
 
 function spaceWith(integrations: unknown[]): Space {
@@ -110,5 +134,27 @@ describe("the wrapper route", () => {
     ]);
     await expect(wrapperPage("w9")).rejects.toThrow("not found");
     await expect(wrapperPage("w2")).rejects.toThrow("not found");
+  });
+});
+
+describe("a source page and its title", () => {
+  it("read the space once per request", async () => {
+    state.space = spaceWith([
+      makeIntegration({ id: "i1", name: "Avtal" }),
+      makeIntegration({ id: "i2", wrapper_id: "w1", wrapper_name: "Byggnad" })
+    ]);
+
+    const item = { spaceId: "space-1", integrationKnowledgeId: "i1" };
+    expect(await itemMetadata({ params: Promise.resolve(item) })).toEqual({ title: "Avtal" });
+    await itemPage("i1");
+    expect(state.requested).toEqual([["spaces", "space-1"]]);
+
+    state.requested = [];
+    const wrapper = { spaceId: "space-1", wrapperId: "w1" };
+    expect(await wrapperMetadata({ params: Promise.resolve(wrapper) })).toEqual({
+      title: "Byggnad"
+    });
+    await wrapperPage("w1");
+    expect(state.requested).toEqual([["spaces", "space-1"]]);
   });
 });

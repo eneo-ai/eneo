@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 import { EneoApiError } from "@/lib/api/errors";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
@@ -13,9 +14,9 @@ type Params = Promise<{ spaceId: string; wrapperId: string }>;
 /**
  * The space's own items imported under the wrapper, as one source (as on the
  * client). The server copy can stand in until the client rereads its space
- * (useSourceItems).
+ * (useSourceItems). Once per request: the metadata and the page both ask.
  */
-async function findWrapper(spaceId: string, wrapperId: string) {
+const findWrapper = cache(async (spaceId: string, wrapperId: string) => {
   try {
     const queryClient = getQueryClient();
     const options = spaceQueryOptions(eneoApi(), spaceId);
@@ -29,7 +30,7 @@ async function findWrapper(spaceId: string, wrapperId: string) {
     if (error instanceof EneoApiError && error.status === 404) notFound();
     throw error;
   }
-}
+});
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const { spaceId, wrapperId } = await params;

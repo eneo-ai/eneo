@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
+import { cache } from "react";
 import { EneoApiError } from "@/lib/api/errors";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
@@ -14,9 +15,10 @@ type SearchParams = Promise<{ tab?: string | string[] }>;
 /**
  * The space's own item; one shared in from another space is not opened here
  * (as on the client). The server copy can stand in until the client rereads
- * its space (useSourceItems).
+ * its space (useSourceItems). Once per request: the metadata and the page
+ * both ask.
  */
-async function findItem(spaceId: string, itemId: string) {
+const findItem = cache(async (spaceId: string, itemId: string) => {
   try {
     const queryClient = getQueryClient();
     const options = spaceQueryOptions(eneoApi(), spaceId);
@@ -29,7 +31,7 @@ async function findItem(spaceId: string, itemId: string) {
     if (error instanceof EneoApiError && error.status === 404) notFound();
     throw error;
   }
-}
+});
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const { spaceId, integrationKnowledgeId } = await params;
