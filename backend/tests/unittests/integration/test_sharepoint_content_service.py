@@ -34,6 +34,12 @@ from eneo.integration.infrastructure.content_service import (
     sharepoint_content_service as content_service_module,
 )
 from eneo.integration.infrastructure.content_service import (
+    sharepoint_index as index_module,
+)
+from eneo.integration.infrastructure.content_service import (
+    sharepoint_reconciliation as reconciliation_module,
+)
+from eneo.integration.infrastructure.content_service import (
     sharepoint_results as sync_results,
 )
 from eneo.integration.infrastructure.content_service import (
@@ -6199,13 +6205,27 @@ class TestOutOfScopeNamesStayPrivate:
             def emit(self, record: logging.LogRecord) -> None:
                 records.append(record.getMessage())
 
-        logger = content_service_module.logger
-        handler, level = Collect(logging.DEBUG), logger.level
-        logger.addHandler(handler)
-        logger.setLevel(logging.DEBUG)
+        # Every module of the split sync; one without a logger is covered once it gets one.
+        loggers = [
+            module.logger
+            for module in (
+                content_service_module,
+                scope_rules,
+                sync_results,
+                index_module,
+                reconciliation_module,
+            )
+            if hasattr(module, "logger")
+        ]
+        handler = Collect(logging.DEBUG)
+        levels = [logger.level for logger in loggers]
+        for logger in loggers:
+            logger.addHandler(handler)
+            logger.setLevel(logging.DEBUG)
         yield records
-        logger.removeHandler(handler)
-        logger.setLevel(level)
+        for logger, level in zip(loggers, levels):
+            logger.removeHandler(handler)
+            logger.setLevel(level)
 
     async def _run_delta(
         self,
