@@ -276,3 +276,103 @@ async def test_a_stale_source_gets_one_delta_job_per_window(
     assert [(task.value, knowledge) for task, _, knowledge in enqueue] == [
         ("sync_sharepoint_delta", personal)
     ]
+
+
+async def test_a_follow_up_queues_the_sync_its_markers_ask_for(
+    db_container, redis_client, monkeypatch
+):
+    """The job a lease holder queues after releasing runs on its own session."""
+    from eneo.integration.tasks import integration_task
+
+    enqueue = []
+
+    async def record(task, job_id, params):
+        enqueue.append((task.value, params.integration_knowledge_id))
+
+    monkeypatch.setattr("eneo.jobs.job_service.job_manager.enqueue", record)
+    async with db_container() as container:
+        personal = await _source(container)
+    try:
+        await integration_task._queue_sync_job(personal, full=True)  # pyright: ignore[reportPrivateUsage]
+    finally:
+        await redis_client.delete(sync_queued_key(str(personal)))
+
+    assert enqueue == [("pull_sharepoint_content", personal)]
+
+
+async def test_a_removed_subscription_is_recreated_and_its_sources_queued(
+    db_container, redis_client, monkeypatch
+):
+    from eneo.database.tables.sharepoint_subscription_table import (
+        SharePointSubscription as SubscriptionDB,
+    )
+    from eneo.integration.infrastructure import sharepoint_subscription_worker
+    from eneo.integration.infrastructure.sharepoint_subscription_service import (
+        SharePointSubscriptionService,
+    )
+    from eneo.integration.infrastructure.sharepoint_webhook_service import (
+        SubscriptionMaintenance,
+    )
+
+    enqueue = []
+
+    async def record(task, job_id, params):
+        enqueue.append((task.value, params.integration_knowledge_id))
+
+    async def token(*_args):
+        return object()
+
+    async def create_at_graph(self, **_kwargs):
+        return "graph-new"
+
+    async def delete_at_graph(self, **_kwargs):
+        return True
+
+    monkeypatch.setattr("eneo.jobs.job_service.job_manager.enqueue", record)
+    monkeypatch.setattr(
+        sharepoint_subscription_worker, "get_token_for_subscription", token
+    )
+    monkeypatch.setattr(
+        SharePointSubscriptionService, "_create_graph_subscription", create_at_graph
+    )
+    monkeypatch.setattr(
+        SharePointSubscriptionService, "_delete_graph_subscription", delete_at_graph
+    )
+    async with db_container() as container:
+        personal = await _source(container)
+        session = container.session()
+        connection_id = await session.scalar(
+            sa.select(IntegrationKnowledgeDB.user_integration_id).where(
+                IntegrationKnowledgeDB.id == personal
+            )
+        )
+        subscription = SubscriptionDB(
+            user_integration_id=connection_id,
+            site_id="site-1",
+            subscription_id="graph-removed",
+            drive_id="drive-1",
+            expires_at=datetime.now(timezone.utc) + timedelta(days=10),
+        )
+        session.add(subscription)
+        await session.flush()
+        subscription_id = subscription.id
+        await session.execute(
+            sa.update(IntegrationKnowledgeDB)
+            .where(IntegrationKnowledgeDB.id == personal)
+            .values(sharepoint_subscription_id=subscription_id)
+        )
+    try:
+        await sharepoint_subscription_worker.maintain_subscriptions(
+            [SubscriptionMaintenance(subscription_id, "subscriptionRemoved")]
+        )
+    finally:
+        await redis_client.delete(sync_queued_key(str(personal)))
+
+    async with db_container() as container:
+        graph_id = await container.session().scalar(
+            sa.select(SubscriptionDB.subscription_id).where(
+                SubscriptionDB.id == subscription_id
+            )
+        )
+    assert graph_id == "graph-new"
+    assert enqueue == [("sync_sharepoint_delta", personal)]
