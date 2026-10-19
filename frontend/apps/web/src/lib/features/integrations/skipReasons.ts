@@ -98,6 +98,7 @@ const DESCRIPTIONS: Record<SkipReasonCode, (params: SkipReason["params"]) => str
     m.skip_reason_listing_failed({ detail: describeErrorDetail(text(p, "detail")) }),
   scope_path_unavailable: () => m.skip_reason_scope_path_unavailable(),
   missing_item_id: () => m.skip_reason_missing_item_id(),
+  unchanged: () => m.skip_reason_unchanged(),
   error: (p) => m.skip_reason_error({ detail: describeErrorDetail(text(p, "detail")) })
 };
 

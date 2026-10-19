@@ -24,7 +24,8 @@ export type FileProblemCategory =
 /** Fixable files can be made searchable by changing them; intentional ones never become knowledge. */
 export type FileProblemSeverity = "fixable" | "intentional";
 
-const CATEGORY_BY_CODE: Record<SkipReasonCode, FileProblemCategory> = {
+// Older versions listed unchanged files as skipped; those are no problem.
+const CATEGORY_BY_CODE: Record<SkipReasonCode, FileProblemCategory | null> = {
   no_text_layer: "no_text_layer",
   file_too_large: "too_large",
   extraction_limit: "too_much_text",
@@ -38,7 +39,8 @@ const CATEGORY_BY_CODE: Record<SkipReasonCode, FileProblemCategory> = {
   scope_path_unavailable: "transient",
   missing_item_id: "transient",
   error: "transient",
-  unsupported_type: "unsupported"
+  unsupported_type: "unsupported",
+  unchanged: null
 };
 
 const CATEGORY_ORDER: FileProblemCategory[] = [
@@ -130,6 +132,7 @@ export function buildSourceProblems(
     if (skipped.truncated) notListed += Math.max(0, skipped.total - skipped.items.length);
     for (const entry of skipped.items) {
       const category = CATEGORY_BY_CODE[skipReasonKind(entry)];
+      if (category === null) continue;
       let group = groups.get(category);
       if (!group) {
         group = { category, severity: fileProblemSeverity(category), files: [] };

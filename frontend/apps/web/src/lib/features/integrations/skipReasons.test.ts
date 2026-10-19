@@ -15,6 +15,7 @@ const EXAMPLES: Record<SkipReasonCode, [SkipReason, string]> = {
     m.skip_reason_unsupported_type({ label: m.skip_reason_type_legacy_word() })
   ],
   no_text_layer: [{ code: "no_text_layer", params: {} }, m.skip_reason_no_text_layer()],
+  unchanged: [{ code: "unchanged", params: {} }, m.skip_reason_unchanged()],
   empty_content: [{ code: "empty_content", params: {} }, m.skip_reason_empty_content()],
   file_too_large: [
     { code: "file_too_large", params: { limit_mb: "50" } },
