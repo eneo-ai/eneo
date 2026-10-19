@@ -5272,6 +5272,63 @@ class TestDeltaExtractionOutcomes:
         repo.get_sharepoint_item_ids_for_integration_knowledge.assert_awaited_once()
         assert ik.last_sync_summary["skipped_items"] == 5
 
+    async def test_a_rename_reaches_the_index_without_a_download(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        """A rename or move keeps the cTag: the ChangeKey says unchanged, but the
+        title and citation URL must follow."""
+        ik = _real_integration_knowledge(delta_token="token-1")
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        cached: dict[str, str] = {}
+
+        async def should_process(*, integration_knowledge_id, item_id, change_key):
+            return cached.get(item_id) != change_key
+
+        async def update_change_key(*, integration_knowledge_id, item_id, change_key):
+            cached[item_id] = change_key
+
+        change_keys = mock_dependencies["change_key_service"]
+        change_keys.should_process.side_effect = should_process
+        change_keys.update_change_key.side_effect = update_change_key
+        renamed = _delta_file(
+            "item-1", "Budget 2027.docx", webUrl="https://x/Ekonomi/Budget 2027.docx"
+        )
+        cached["item-1"] = renamed["cTag"]
+        refresh = mock_dependencies[
+            "info_blob_service"
+        ].repo.refresh_sharepoint_citation = AsyncMock(return_value=True)
+        with (
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+            patch.object(
+                service,
+                "_schedule_post_commit_change_keys",
+                side_effect=lambda pending: [
+                    cached.__setitem__(item_id, key) for _, item_id, key in pending
+                ],
+            ),
+        ):
+            client = _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(return_value=([renamed], "token-2")),
+            )
+            for _ in range(2):
+                await service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+        client.get_file_extraction_by_id.assert_not_called()
+        refresh.assert_awaited_once_with(
+            sharepoint_item_id="item-1",
+            integration_knowledge_id=ik.id,
+            title="Budget 2027.docx",
+            url="https://x/Ekonomi/Budget 2027.docx",
+        )
+        assert ik.delta_token == "token-2"
+        assert ik.last_sync_summary["unchanged_items"] == 1
+
     async def test_a_onenote_notebook_is_skipped_without_a_download(
         self, service, mock_dependencies, mock_oauth_token
     ):
@@ -5663,7 +5720,10 @@ class TestDeltaExtractionOutcomes:
         assert ik.last_sync_error == ONE_FILE_FAILED
         assert ik.delta_token == "token-1"
         assert client.get_file_extraction_by_id.await_args.kwargs["item_id"] == "item-2"
-        assert [key[1] for key in schedule.call_args.args[0]] == ["item-2"]
+        assert [key[1] for key in schedule.call_args.args[0]] == [
+            "item-2",
+            "item-2#citation",
+        ]
         assert ik.last_sync_summary["files_processed"] == 1
         assert ik.last_sync_summary["skipped_items"] == 1
         assert ik.last_sync_summary["failed_items"] == 1

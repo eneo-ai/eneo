@@ -197,6 +197,44 @@ class SharePointIndex:
         return digest.digest()
 
     @staticmethod
+    def citation_key(item: SharePointItem) -> Optional[str]:
+        """What a rename or move changes without touching the cTag."""
+        name, url = item.get("name"), item.get("webUrl")
+        if not name or not url:
+            return None
+        return hashlib.sha256(f"{name}\x00{url}".encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def citation_cache_id(item_id: str) -> str:
+        return f"{item_id}#citation"
+
+    async def _refresh_citation(
+        self,
+        item: SharePointItem,
+        item_id: str,
+        integration_knowledge_id: UUID,
+        pending_change_keys: list[tuple[UUID, str, str]],
+    ) -> None:
+        """Rename or move an unchanged document's indexed copy without re-embedding it."""
+        citation_key = self.citation_key(item)
+        if not citation_key or not self.change_key_service:
+            return
+        cache_id = self.citation_cache_id(item_id)
+        if not await self.change_key_service.should_process(
+            integration_knowledge_id=integration_knowledge_id,
+            item_id=cache_id,
+            change_key=citation_key,
+        ):
+            return
+        await self.info_blob_service.repo.refresh_sharepoint_citation(
+            sharepoint_item_id=item_id,
+            integration_knowledge_id=integration_knowledge_id,
+            title=item.get("name", ""),
+            url=item.get("webUrl", ""),
+        )
+        pending_change_keys.append((integration_knowledge_id, cache_id, citation_key))
+
+    @staticmethod
     def change_key(
         change_key: Optional[str],
         source_metadata: Optional[list[SourceMetadataEntry]],
@@ -580,6 +618,9 @@ class SharePointIndex:
                     logger.info(
                         f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
                     )
+                    await self._refresh_citation(
+                        item, item_id, integration_knowledge_id, pending_change_keys
+                    )
                     stats["unchanged_items"] += 1
                     return
 
@@ -613,6 +654,14 @@ class SharePointIndex:
                 pending_change_keys.append(
                     (integration_knowledge_id, item_id, change_key)
                 )
+                if citation_key := self.citation_key(item):
+                    pending_change_keys.append(
+                        (
+                            integration_knowledge_id,
+                            self.citation_cache_id(item_id),
+                            citation_key,
+                        )
+                    )
         except Exception as e:
             logger.error(f"Error processing file {item_name}: {e}", exc_info=True)
             sync_results.count_failure(
