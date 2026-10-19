@@ -2019,6 +2019,7 @@
   "category_help": "Välj en kategori för att organisera denna mall",
   "server_url_required": "Server-URL",
   "server_url_hint": "Fullständig URL till MCP-serverns endpoint (Streamable HTTP)",
+  "mcp_credential_requires_https": "Inloggningsuppgifter (bearer-token, API-nyckel eller användarnamn och lösenord i URL:en) skickas bara över https. Ändra serverns URL till https://; vanlig http fungerar bara för localhost, 127.0.0.1 och [::1].",
   "authentication_type": "Autentiseringstyp",
   "mcp_auth_type_none": "Publik (ingen autentisering)",
   "bearer_token": "Bearer-token",
