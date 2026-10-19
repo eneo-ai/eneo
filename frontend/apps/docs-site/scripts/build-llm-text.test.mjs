@@ -6,13 +6,19 @@
  * lines are indistinguishable from the MDX component imports the flattener
  * removes, so a regex applied to the whole document silently mutilates them.
  */
-import { test, expect } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { test, expect, afterEach } from "bun:test";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
-import { flattenMdx } from "./build-llm-text.mjs";
+import {
+  FLOWS_BUNDLE_ROUTES,
+  buildLlmText,
+  flattenMdx,
+} from "./build-llm-text.mjs";
 
 const appDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const integratingGuide = join(
@@ -138,4 +144,63 @@ test("every route in the Flows bundle exists as content", async () => {
     }
     expect(found, route).toBe(true);
   }
+});
+
+// build-versions builds every release line with this script and that line's own
+// content. Content from before Flows has none of the bundle's pages; content
+// with only some of them means the route list and the pages have drifted apart.
+const fixtureApps = [];
+afterEach(async () => {
+  await Promise.all(
+    fixtureApps
+      .splice(0)
+      .map((app) => rm(app, { recursive: true, force: true })),
+  );
+});
+
+async function appWithPages(routes) {
+  const app = await mkdtemp(join(tmpdir(), "eneo-llm-text-"));
+  fixtureApps.push(app);
+  for (const route of routes) {
+    const file = join(app, "src", "content", `${route || "index"}.mdx`);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, `# ${route || "Eneo"}\n\nAbout ${route}.\n`, "utf8");
+  }
+  return app;
+}
+
+test("content without Flows pages builds without the Flows bundle", async () => {
+  const app = await appWithPages(["", "guides/deployment"]);
+
+  await buildLlmText(app);
+
+  expect(existsSync(join(app, "out", "llms-flows.txt"))).toBe(false);
+  expect(await readFile(join(app, "out", "llms-full.txt"), "utf8")).toContain(
+    "About guides/deployment.",
+  );
+  const index = await readFile(join(app, "out", "llms.txt"), "utf8");
+  expect(index).toContain("/guides/deployment.md");
+  expect(index).not.toContain("Flows");
+});
+
+test("content with every Flows page gets the bundle in reading order", async () => {
+  const app = await appWithPages(["", ...FLOWS_BUNDLE_ROUTES]);
+
+  await buildLlmText(app);
+
+  const bundle = await readFile(join(app, "out", "llms-flows.txt"), "utf8");
+  expect(
+    [...bundle.matchAll(/^<!-- source: \/(.+)\.md -->$/gm)].map((m) => m[1]),
+  ).toEqual(FLOWS_BUNDLE_ROUTES);
+  expect(await readFile(join(app, "out", "llms.txt"), "utf8")).toContain(
+    "/llms-flows.txt",
+  );
+});
+
+test("content with only some Flows pages fails and names the missing ones", async () => {
+  const app = await appWithPages(FLOWS_BUNDLE_ROUTES.slice(0, -1));
+
+  await expect(buildLlmText(app)).rejects.toThrow(
+    `llms-flows.txt lists routes that do not exist: ${FLOWS_BUNDLE_ROUTES.at(-1)}`,
+  );
 });

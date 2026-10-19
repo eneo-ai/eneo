@@ -4,11 +4,13 @@
  * The exported `out/*.txt` files Next.js writes are React server-component
  * payloads, not prose, so an agent that fetches them learns nothing. This step
  * writes, next to every exported page, the Markdown a language model can read
- * directly, plus the two index files agents look for by convention:
+ * directly, plus the two index files agents look for by convention and a
+ * Flows-only bundle:
  *
  *   out/<route>.md   the page body, JSX flattened to Markdown
  *   out/llms.txt     an index: one line per page, with its .md link
  *   out/llms-full.txt  every page concatenated, for a single fetch
+ *   out/llms-flows.txt  the Flows pages in reading order, when the content has them
  *
  * Run it after `next build` and before Pagefind indexes `out/`.
  */
@@ -17,8 +19,6 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const contentDir = join(appDir, "src", "content");
-const outDir = join(appDir, "out");
 const siteUrl = "https://docs.eneo.ai";
 
 // Reading order for the Flows-only bundle: product, API guide, developer pages,
@@ -108,7 +108,7 @@ export function flattenMdx(source) {
     .trim();
 }
 
-function routeFor(file) {
+function routeFor(contentDir, file) {
   const rel = relative(contentDir, file).replace(/\\/g, "/");
   const route = rel.replace(/\.mdx$/, "").replace(/(^|\/)index$/, "");
   return route;
@@ -133,14 +133,17 @@ function summaryFor(body) {
   return "";
 }
 
-export async function buildLlmText() {
+/** Mirror the content of the docs-site app at `app` into its `out/` export. */
+export async function buildLlmText(app = appDir) {
+  const contentDir = join(app, "src", "content");
+  const outDir = join(app, "out");
   const pages = [];
   for (const file of (await collectMdxFiles(contentDir)).sort()) {
     const { frontmatter, body: raw } = splitFrontmatter(
       await readFile(file, "utf8"),
     );
     const flattened = flattenMdx(raw);
-    const route = routeFor(file);
+    const route = routeFor(contentDir, file);
     const title = titleFor(frontmatter, flattened, route);
     const body = /^#\s+/m.test(flattened)
       ? flattened
@@ -155,6 +158,18 @@ export async function buildLlmText() {
       body,
       href: `/${route || "index"}.md`,
     });
+  }
+
+  // build-versions runs this script on each release line's own content. Lines
+  // from before Flows have none of its pages and get no bundle; content with
+  // only some of them means this list and the pages have drifted apart.
+  const byRoute = new Map(pages.map((page) => [page.route, page]));
+  const missing = FLOWS_BUNDLE_ROUTES.filter((route) => !byRoute.has(route));
+  const hasFlows = missing.length < FLOWS_BUNDLE_ROUTES.length;
+  if (hasFlows && missing.length) {
+    throw new Error(
+      `llms-flows.txt lists routes that do not exist: ${missing.join(", ")}`,
+    );
   }
 
   const bySection = new Map();
@@ -173,14 +188,25 @@ export async function buildLlmText() {
   const indexLines = [
     "# Eneo",
     "",
-    "> Eneo is an open-source AI platform for the Swedish public sector. Eneo Flows is its",
-    "> workflow runtime: a published flow runs as a sequence of steps, can pause for human",
-    "> review, and returns typed results and downloadable artifacts over an HTTP API.",
+    "> Eneo is an open-source AI platform for the Swedish public sector.",
+    ...(hasFlows
+      ? [
+          "> Eneo Flows is its workflow runtime: a published flow runs as a sequence of steps,",
+          "> can pause for human review, and returns typed results and downloadable artifacts",
+          "> over an HTTP API.",
+        ]
+      : []),
     "",
     "Every page below is available as Markdown at the linked path. The complete site is also",
-    "available as a single document at /llms-full.txt; the Flows pages alone (product guide,",
-    "API guide, developer pages, AI Builder) are at /llms-flows.txt. The runtime API contract",
-    "is served as OpenAPI 3.1 from the Eneo deployment itself at /openapi.json.",
+    "available as a single document at /llms-full.txt.",
+    ...(hasFlows
+      ? [
+          "The Flows pages alone (product guide, API guide, developer pages, AI Builder) are at",
+          "/llms-flows.txt.",
+        ]
+      : []),
+    "The runtime API contract is served as OpenAPI 3.1 from the Eneo deployment itself at",
+    "/openapi.json.",
     "",
   ];
   for (const [section, list] of bySection) {
@@ -207,34 +233,29 @@ export async function buildLlmText() {
     "utf8",
   );
 
-  const byRoute = new Map(pages.map((page) => [page.route, page]));
-  const missing = FLOWS_BUNDLE_ROUTES.filter((route) => !byRoute.has(route));
-  if (missing.length) {
-    throw new Error(
-      `llms-flows.txt lists routes that do not exist: ${missing.join(", ")}`,
+  if (hasFlows) {
+    const flowsParts = FLOWS_BUNDLE_ROUTES.map((route) =>
+      byRoute.get(route),
+    ).map((page) => `<!-- source: ${page.href} -->\n\n${page.body}`);
+    await writeFile(
+      join(outDir, "llms-flows.txt"),
+      `${[
+        "# Eneo Flows documentation",
+        "",
+        "Product guide, API guide, developer pages, and AI Builder, in reading order. Each part",
+        "names its source page; the same pages are listed in /llms.txt.",
+        ...flowsParts,
+      ].join("\n\n---\n\n")}\n`,
+      "utf8",
     );
   }
-  const flowsParts = FLOWS_BUNDLE_ROUTES.map((route) => byRoute.get(route)).map(
-    (page) => `<!-- source: ${page.href} -->\n\n${page.body}`,
-  );
-  await writeFile(
-    join(outDir, "llms-flows.txt"),
-    `${[
-      "# Eneo Flows documentation",
-      "",
-      "Product guide, API guide, developer pages, and AI Builder, in reading order. Each part",
-      "names its source page; the same pages are listed in /llms.txt.",
-      ...flowsParts,
-    ].join("\n\n---\n\n")}\n`,
-    "utf8",
-  );
 
-  return pages;
+  return { pages, hasFlows };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const pages = await buildLlmText();
+  const { pages, hasFlows } = await buildLlmText();
   console.log(
-    `llm text: wrote ${pages.length} .md pages, llms.txt, llms-full.txt and llms-flows.txt`,
+    `llm text: wrote ${pages.length} .md pages, llms.txt, llms-full.txt${hasFlows ? " and llms-flows.txt" : "; no Flows pages, so no llms-flows.txt"}`,
   );
 }
