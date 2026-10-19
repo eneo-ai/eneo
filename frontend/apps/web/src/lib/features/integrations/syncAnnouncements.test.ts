@@ -22,7 +22,7 @@ describe("announceSourceChange", () => {
     expect(announceSourceChange("Avtal", null, syncing(3), 60_000)).toBeNull();
   });
 
-  it("speaks a queued, started and finished sync", () => {
+  it("speaks a queued, started and stopped sync", () => {
     expect(announceSourceChange("Avtal", idle, queued, 0)).toBe(
       m.integration_announce_sync_queued({ name: "Avtal" })
     );
@@ -30,7 +30,7 @@ describe("announceSourceChange", () => {
       m.integration_announce_sync_started({ name: "Avtal" })
     );
     expect(announceSourceChange("Avtal", syncing(40), idle, 0)).toBe(
-      m.integration_announce_sync_finished({ name: "Avtal", indexed: 39, skipped: 1 })
+      m.integration_announce_sync_stopped({ name: "Avtal" })
     );
   });
 

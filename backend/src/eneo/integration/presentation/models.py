@@ -16,6 +16,7 @@ from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
 )
 from eneo.info_blobs.info_blob import SourceMetadataEntry
+from eneo.integration.domain.entities.sync_log import SyncLog as SyncLogEntity
 from eneo.integration.domain.skip_reasons import (
     SkipReasonCode,
     visible_skip_params,
@@ -370,6 +371,20 @@ class SyncLog(BaseModel):
     completed_at: Optional[datetime] = None
     created_at: datetime
 
+    @classmethod
+    def from_domain(cls, log: SyncLogEntity) -> "SyncLog":
+        return cls(
+            id=log.id,
+            integration_knowledge_id=log.integration_knowledge_id,
+            sync_type=log.sync_type,
+            status=log.status,
+            metadata=log.metadata,
+            error_message=log.error_message,
+            started_at=log.started_at,
+            completed_at=log.completed_at,
+            created_at=log.created_at or log.started_at,
+        )
+
     # Cleaned before validation: a stored detail with a null file would not
     # pass the SkippedDetail shape otherwise.
     @field_validator("metadata", mode="before")
@@ -607,3 +622,33 @@ class PaginatedSyncLogList(BaseModel):
     def has_previous(self) -> bool:
         """Check if there is a previous page."""
         return self.offset > 0
+
+
+class IntegrationSyncWindowRequest(BaseModel):
+    integration_knowledge_id: UUID
+    offset: int = Field(default=0, ge=0)
+
+
+class IntegrationSyncDetailsRequest(BaseModel):
+    items: list[IntegrationSyncWindowRequest] = Field(min_length=1, max_length=50)
+    limit: int = Field(default=10, ge=1, le=10)
+
+    @model_validator(mode="after")
+    def unique_items(self) -> "IntegrationSyncDetailsRequest":
+        if len({item.integration_knowledge_id for item in self.items}) != len(
+            self.items
+        ):
+            raise ValueError("Each integration knowledge item may appear only once")
+        return self
+
+
+class IntegrationSyncDetails(BaseModel):
+    integration_knowledge_id: UUID
+    history: PaginatedSyncLogList
+    skipped: IntegrationSkippedDocuments | None = Field(
+        description="Latest skipped files on the first page; null on older history pages"
+    )
+
+
+class IntegrationSyncDetailsList(BaseModel):
+    items: list[IntegrationSyncDetails]

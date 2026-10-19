@@ -71,6 +71,7 @@
     const current = $rows;
     untrack(() => {
       const next: Record<string, SourceSnapshot> = {};
+      const messages: string[] = [];
       for (const { source, summary } of current) {
         const snapshot: SourceSnapshot = { state: summary.state, progress: summary.progress };
         next[source.id] = snapshot;
@@ -81,9 +82,10 @@
           0,
           { speakProgress: false }
         );
-        if (text) announcement = text;
+        if (text) messages.push(text);
       }
       previousSnapshots = next;
+      if (messages.length > 0) announcement = messages.join(". ");
     });
   });
 

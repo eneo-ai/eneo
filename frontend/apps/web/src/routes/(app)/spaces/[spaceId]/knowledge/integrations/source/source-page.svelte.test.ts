@@ -37,8 +37,17 @@ vi.mock("$lib/core/Eneo", () => ({
     integrations: {
       knowledge: {
         listDocuments: api.listDocuments,
-        listSkippedDocuments: api.listSkippedDocuments,
-        getSyncLogs: api.getSyncLogs,
+        getSyncDetails: async (args: {
+          knowledge: { id: string };
+          offset?: number;
+          limit: number;
+        }) => ({
+          history:
+            args.limit === 1
+              ? { items: [], total_count: 0 }
+              : await api.getSyncLogs({ ...args, skip: args.offset ?? 0 }),
+          skipped: args.limit === 1 ? await api.listSkippedDocuments(args) : null
+        }),
         getSyncProgress: api.getSyncProgress
       }
     },
@@ -304,11 +313,7 @@ describe("source page", () => {
 
     api.getSyncProgress.mockResolvedValue({ items: [] });
     currentSpace.set({ ...space });
-    await expect
-      .poll(live)
-      .toBe(
-        m.integration_announce_sync_finished({ name: "Kommunstyrelsen", indexed: 7, skipped: 1 })
-      );
+    await expect.poll(live).toBe(m.integration_announce_sync_stopped({ name: "Kommunstyrelsen" }));
   });
 
   it("lists the problems by cause on the problems tab", async () => {

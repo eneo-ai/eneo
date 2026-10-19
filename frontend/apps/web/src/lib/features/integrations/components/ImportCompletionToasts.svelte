@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { get } from "svelte/store";
   import { goto } from "$app/navigation";
   import { toast } from "$lib/components/toast";
-  import { getJobManager, jobCompletionEvents } from "$lib/features/jobs/JobManager";
+  import { getJobManager } from "$lib/features/jobs/JobManager";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
   import {
@@ -34,16 +34,22 @@
     toast.error(error ? `${message}: ${error}` : message, { duration: RESULT_TOAST_DURATION_MS });
   }
 
+  function settledHere() {
+    return settledImports(get(pendingImports), get(jobs), get(jobsLoaded)).filter(
+      (pending) => pending.spaceRouteId === get(currentSpace).routeId
+    );
+  }
+
   async function report() {
     const jobList = get(jobs);
-    const settled = settledImports(get(pendingImports), jobList, get(jobsLoaded));
-    // Only the current space's items can be looked up; the rest wait for a return.
-    const local = settled.filter((pending) => pending.spaceRouteId === get(currentSpace).routeId);
+    const routeId = get(currentSpace).routeId;
+    const local = settledHere();
     if (local.length === 0) return;
 
     // A stale store would read a not-yet-listed item as deleted: wait for the next run instead.
     if (!(await refreshCurrentSpace("knowledge"))) return;
     const space = get(currentSpace);
+    if (disposed || space.routeId !== routeId) return;
     const reported: string[] = [];
     for (const pending of local) {
       const knowledge = space.knowledge.integrationKnowledge.find(
@@ -88,42 +94,57 @@
     untrackImports(reported);
   }
 
-  // Runs are serialised: a space change and a job event close together must
-  // not both read the same pending list and report an import twice. A failed
-  // run is logged so the chain never rejects.
+  // One active read and at most one queued report. Retry settled imports even
+  // after job polling stops: a transient space read must not lose the notice.
   let queue = Promise.resolve();
+  let queued = false;
+  let disposed = false;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let retryDelay = 2_000;
+
   function enqueueReport() {
+    if (disposed || queued || document.hidden) return;
+    clearTimeout(retry);
+    queued = true;
     queue = queue.then(async () => {
+      queued = false;
+      if (disposed) return;
       try {
         await report();
       } catch (error) {
         console.error("Could not report the result of an import", error);
+      } finally {
+        if (!disposed && !queued && settledHere().length > 0) {
+          retry = setTimeout(enqueueReport, retryDelay);
+          retryDelay = Math.min(30_000, retryDelay * 2);
+        } else {
+          retryDelay = 2_000;
+        }
       }
     });
   }
 
-  $effect(() => {
-    const event = $jobCompletionEvents;
-    if (!event) return;
-    untrack(enqueueReport);
+  onMount(() => {
+    const onVisibility = () => {
+      if (!document.hidden && settledHere().length > 0) enqueueReport();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      disposed = true;
+      clearTimeout(retry);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   });
 
-  // Imports persisted from an earlier page load are judged by the first job
-  // list, which arrives without a completion event.
-  $effect(() => {
-    if (!$jobsLoaded) return;
-    untrack(() => {
-      if (get(pendingImports).length > 0) enqueueReport();
-    });
-  });
-
-  // A report refreshes the space, which publishes a new space object with
-  // the same id; only a change of space may queue another report.
   const spaceId = $derived($currentSpace.id);
   $effect(() => {
+    // A successful unchanged job poll also retries a previously unresolved result.
+    void $jobs;
+    void $pendingImports;
     void spaceId;
+    if (!$jobsLoaded) return;
     untrack(() => {
-      if (get(pendingImports).length > 0) enqueueReport();
+      if (settledHere().length > 0) enqueueReport();
     });
   });
 </script>

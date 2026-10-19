@@ -1,9 +1,14 @@
+import {
+  syncAnnouncement,
+  problemCountChanged,
+  PROGRESS_ANNOUNCE_INTERVAL_MS
+} from "@eneo/eneo-js/integrations/sync-announcements";
+export { PROGRESS_ANNOUNCE_INTERVAL_MS };
 import { m } from "$lib/paraglide/messages";
 import type { SourceState } from "./sources";
 import type { SyncProgressSummary } from "./syncProgress";
 
 /** A running sync's count is spoken at most this often; phase changes always are. */
-export const PROGRESS_ANNOUNCE_INTERVAL_MS = 10_000;
 
 export type SourceSnapshot = {
   state: SourceState;
@@ -24,36 +29,28 @@ export function announceSourceChange(
   sinceProgressAnnounced: number,
   { speakProgress = true }: { speakProgress?: boolean } = {}
 ): string | null {
-  if (!previous) return null;
-  const was = previous.progress;
-  const now = next.progress;
-  if (now && !was) return m.integration_announce_sync_started({ name });
-  if (!now && was) {
-    return m.integration_announce_sync_finished({
-      name,
-      indexed: was.indexed,
-      skipped: was.skipped
-    });
+  const transition = syncAnnouncement(previous, next, sinceProgressAnnounced, { speakProgress });
+  if (!transition) return null;
+  switch (transition.kind) {
+    case "started":
+      return m.integration_announce_sync_started({ name });
+    case "stopped":
+      return m.integration_announce_sync_stopped({ name });
+    case "queued":
+      return m.integration_announce_sync_queued({ name });
+    case "progress":
+      return transition.total === null
+        ? m.integration_announce_sync_progress({ name, count: transition.done })
+        : m.integration_announce_sync_progress_total({
+            name,
+            done: transition.done,
+            total: transition.total
+          });
   }
-  if (now && was) {
-    if (!speakProgress) return null;
-    const phaseChanged = now.phase !== was.phase;
-    const moved = now.done !== was.done;
-    if (!phaseChanged && (!moved || sinceProgressAnnounced < PROGRESS_ANNOUNCE_INTERVAL_MS)) {
-      return null;
-    }
-    return now.total === null
-      ? m.integration_announce_sync_progress({ name, count: now.done })
-      : m.integration_announce_sync_progress_total({ name, done: now.done, total: now.total });
-  }
-  if (next.state === "queued" && previous.state !== "queued") {
-    return m.integration_announce_sync_queued({ name });
-  }
-  return null;
 }
 
 /** A spoken note when the number of problems changes once the lists are known. */
 export function announceProblemCount(previous: number | null, next: number | null): string | null {
-  if (previous === null || next === null || previous === next) return null;
+  if (!problemCountChanged(previous, next) || next === null) return null;
   return m.integration_announce_problems({ count: next });
 }

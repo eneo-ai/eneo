@@ -1,3 +1,5 @@
+import { createSyncDetailsLoader } from "../integrations/sync-details.js";
+
 /** @typedef {import('../types/resources').Integration} Integration */
 /** @typedef {import('../types/resources').TenantIntegration} TenantIntegration */
 /** @typedef {import('../client/client').EneoError} EneoError */
@@ -7,6 +9,13 @@
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
  */
 export function initIntegrations(client) {
+  const syncDetails = createSyncDetailsLoader((id, data) =>
+    client.fetch("/api/v1/spaces/{id}/knowledge/integrations/sync-details/", {
+      method: "post",
+      params: { path: { id } },
+      requestBody: { "application/json": data }
+    })
+  );
   return {
     /**
      * List all integrations available to this eneo instance.
@@ -73,6 +82,12 @@ export function initIntegrations(client) {
     },
 
     knowledge: {
+      /**
+       * Batches concurrent source history/problem reads while keeping per-item results.
+       * @param {{space: {id: string}, knowledge: {id: string}, offset?: number, limit?: number}} args
+       */
+      getSyncDetails: ({ space, knowledge, offset = 0, limit = 10 }) =>
+        syncDetails(space.id, knowledge.id, offset, limit),
       /**
        * Preview to knowledge items that can be imported through this integration
        * @param {{id: string}} integration UserIntegration

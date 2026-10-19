@@ -5071,6 +5071,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/spaces/{id}/knowledge/integrations/sync-details/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Get Integration Sync Details
+     * @description Read bounded sync history windows and latest skipped files for several imports.
+     */
+    post: operations["get_integration_sync_details_api_v1_spaces__id__knowledge_integrations_sync_details__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/": {
     parameters: {
       query?: never;
@@ -15839,6 +15859,32 @@ export interface components {
        */
       synced_at?: string | null;
     };
+    /** IntegrationSyncDetails */
+    IntegrationSyncDetails: {
+      /**
+       * Integration Knowledge Id
+       * Format: uuid
+       */
+      integration_knowledge_id: string;
+      history: components["schemas"]["PaginatedSyncLogList"];
+      /** @description Latest skipped files on the first page; null on older history pages */
+      skipped: components["schemas"]["IntegrationSkippedDocuments"] | null;
+    };
+    /** IntegrationSyncDetailsList */
+    IntegrationSyncDetailsList: {
+      /** Items */
+      items: components["schemas"]["IntegrationSyncDetails"][];
+    };
+    /** IntegrationSyncDetailsRequest */
+    IntegrationSyncDetailsRequest: {
+      /** Items */
+      items: components["schemas"]["IntegrationSyncWindowRequest"][];
+      /**
+       * Limit
+       * @default 10
+       */
+      limit?: number;
+    };
     /**
      * IntegrationSyncProgress
      * @description Live progress of a SharePoint sync that is running now.
@@ -15969,6 +16015,19 @@ export interface components {
     IntegrationSyncProgressList: {
       /** Items */
       items: components["schemas"]["IntegrationSyncProgress"][];
+    };
+    /** IntegrationSyncWindowRequest */
+    IntegrationSyncWindowRequest: {
+      /**
+       * Integration Knowledge Id
+       * Format: uuid
+       */
+      integration_knowledge_id: string;
+      /**
+       * Offset
+       * @default 0
+       */
+      offset?: number;
     };
     /**
      * IntegrationType
@@ -43244,6 +43303,59 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["IntegrationSyncProgressList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_integration_sync_details_api_v1_spaces__id__knowledge_integrations_sync_details__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IntegrationSyncDetailsRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IntegrationSyncDetailsList"];
         };
       };
       /** @description Forbidden */

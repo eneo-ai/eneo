@@ -1703,7 +1703,6 @@
   "integration_announce_sync_started": "Sync of {name} started",
   "integration_announce_sync_progress": "{name}: {count} read so far",
   "integration_announce_sync_progress_total": "{name}: {done} of {total} read",
-  "integration_announce_sync_finished": "Sync of {name} finished: {indexed} searchable, {skipped} could not be read",
   "integration_announce_problems": "Problems: {count}",
   "integration_source_state_attention": "Needs attention",
   "integration_source_state_never": "Waiting for first sync",
@@ -5154,6 +5153,7 @@
   "audit_action_document_template_deleted_description": "A document template was removed from the organisation's library",
   "audit_action_document_template_default_set": "Default Document Template Set",
   "audit_action_document_template_default_set_description": "A document template was made the organisation's default",
+  "integration_announce_sync_stopped": "Sync of {name} is no longer running",
   "activation_failed": "Activation failed — your account could not be created yet. Ask your administrator to create an invitation for your email address, then try again.",
   "mcp_tools_count": "{count, plural, one {# tool} other {# tools}}",
   "mcp_toggle_server": "Enable {name}",
@@ -6706,7 +6706,6 @@
   "side_panel_latest_answer": "Latest answer",
   "chat_quote_label": "Quote",
   "chat_quote_remove": "Remove the quote",
-  "integration_announce_sync_stopped": "Sync of {name} is no longer running",
   "file_preview_previous_version": "Previous version",
   "file_preview_next_version": "Next version"
 }

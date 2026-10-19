@@ -1,4 +1,5 @@
 import type { IntegrationKnowledge } from "@eneo/eneo-js";
+import { writable } from "svelte/store";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +14,24 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock("$lib/core/Eneo", () => ({
-  getEneo: () => ({ integrations: { knowledge: { getSyncLogs: api.getSyncLogs } } })
+  getEneo: () => ({
+    integrations: {
+      knowledge: {
+        getSyncDetails: async (args: {
+          knowledge: { id: string };
+          offset: number;
+          limit: number;
+        }) => ({
+          history: await api.getSyncLogs({ ...args, skip: args.offset }),
+          skipped: null
+        })
+      }
+    }
+  })
+}));
+
+vi.mock("$lib/features/spaces/SpacesManager", () => ({
+  getSpacesManager: () => ({ state: { currentSpace: writable({ id: "space-1" }) } })
 }));
 
 import SourceActivityView from "./SourceActivityView.svelte";

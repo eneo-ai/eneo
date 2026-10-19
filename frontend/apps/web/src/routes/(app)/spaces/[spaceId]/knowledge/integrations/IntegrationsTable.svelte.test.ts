@@ -179,9 +179,7 @@ describe("IntegrationsTable", () => {
     api.getSyncProgress.mockResolvedValue({ items: [] });
     await expect
       .poll(liveText, { timeout: 5_000 })
-      .toContain(
-        m.integration_announce_sync_finished({ name: "HR-handboken", indexed: 7, skipped: 1 })
-      );
+      .toContain(m.integration_announce_sync_stopped({ name: "HR-handboken" }));
   });
 
   it("finds a source by its own name or a folder's name", async () => {

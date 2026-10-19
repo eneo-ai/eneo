@@ -1736,7 +1736,6 @@
   "integration_announce_sync_started": "Synk av {name} har startat",
   "integration_announce_sync_progress": "{name}: {count} lästa hittills",
   "integration_announce_sync_progress_total": "{name}: {done} av {total} lästa",
-  "integration_announce_sync_finished": "Synk av {name} klar: {indexed} sökbara, {skipped} kunde inte läsas",
   "integration_announce_problems": "Problem: {count}",
   "integration_source_state_attention": "Behöver åtgärd",
   "integration_source_state_never": "Väntar på första synken",
@@ -5154,6 +5153,7 @@
   "audit_action_document_template_deleted_description": "En dokumentmall togs bort ur organisationens bibliotek",
   "audit_action_document_template_default_set": "Standardmall vald",
   "audit_action_document_template_default_set_description": "En dokumentmall gjordes till organisationens standard",
+  "integration_announce_sync_stopped": "Synk av {name} pågår inte längre",
   "activation_failed": "Aktiveringen misslyckades – ditt konto kunde inte skapas ännu. Be din administratör skapa en inbjudan för din e-postadress och försök sedan igen.",
   "mcp_tools_count": "{count, plural, one {# verktyg} other {# verktyg}}",
   "mcp_toggle_server": "Aktivera {name}",
@@ -6706,7 +6706,6 @@
   "side_panel_latest_answer": "Senaste svaret",
   "chat_quote_label": "Citat",
   "chat_quote_remove": "Ta bort citatet",
-  "integration_announce_sync_stopped": "Synk av {name} pågår inte längre",
   "file_preview_previous_version": "Föregående version",
   "file_preview_next_version": "Nästa version"
 }
