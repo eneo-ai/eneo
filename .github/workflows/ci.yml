@@ -429,6 +429,8 @@ jobs:
         if: matrix.task == 'build'
         # The legacy web image ships only apps/web. web-next has its own job
         # with the server-side environment its production build requires.
+        # The build script ends with check-server-bundle.mjs, which fails when the
+        # server bundle imports a package the node_modules-free image lacks.
         run: bun run --filter '@eneo/web' build
         env:
           # The Svelte production build exceeds Node's default heap on GitHub-hosted runners.

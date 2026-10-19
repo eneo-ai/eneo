@@ -27,7 +27,8 @@ FROM node:20-bullseye-slim AS runner
 WORKDIR /app
 # No node_modules in this image: adapter-node bundles apps/web devDependencies into build/,
 # while server-side imports of packages under `dependencies` stay external and fail to resolve.
-# Keep runtime libraries in devDependencies.
+# Keep runtime libraries in devDependencies; the web build fails if one stays external
+# (apps/web/scripts/check-server-bundle.mjs).
 COPY --from=builder /app/apps/web/build build/
 COPY --from=builder /app/apps/web/package.json .
 
