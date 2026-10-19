@@ -258,8 +258,27 @@ async def test_invalid_domain_configuration_fails_closed(
     assert users.created == []
 
 
-@pytest.mark.parametrize("verified", [None, "true", "false", 1, 0])
-async def test_jit_requires_boolean_true_verification(
+@pytest.mark.parametrize("verified", ["true", "TRUE", " True ", "1", 1])
+async def test_jit_accepts_text_forms_of_a_positive_verification(
+    monkeypatch, tenant, entrypoint, verified
+):
+    users = UsersInMemory(tenant)
+    user, created, _ = await sign_in(
+        monkeypatch,
+        tenant,
+        users,
+        {**CLAIMS, "email_verified": verified},
+        ["example.com"],
+        entrypoint,
+    )
+    assert created is True
+    assert user.email_verified is True
+
+
+@pytest.mark.parametrize(
+    "verified", [None, "false", "0", 0, 2, "yes", "", "true1", 1.0, ["true"]]
+)
+async def test_jit_requires_a_positive_verification(
     monkeypatch, tenant, entrypoint, verified
 ):
     claims = {**CLAIMS, "email_verified": verified}
@@ -355,10 +374,12 @@ async def test_inactive_tenant_cannot_admit_users(
     assert users.created == []
 
 
+@pytest.mark.parametrize("verified", [True, "true"])
 @pytest.mark.parametrize("mapped_email", ["user@example.com", "someone@example.com"])
-def test_verification_must_cover_the_selected_email(mapped_email):
+def test_verification_must_cover_the_selected_email(mapped_email, verified):
     identity = FederatedIdentity.from_claims(
-        {**CLAIMS, "mail": mapped_email}, email_claim="mail"
+        {**CLAIMS, "email_verified": verified, "mail": mapped_email},
+        email_claim="mail",
     )
     assert identity.email_verified is (mapped_email == CLAIMS["email"])
 
