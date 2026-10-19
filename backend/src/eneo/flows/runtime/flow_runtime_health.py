@@ -22,7 +22,7 @@ from eneo.flows.application.flow_run_audit_outbox_policy import (
     FLOW_AUDIT_OUTBOX_BACKLOG_GRACE_SECONDS,
 )
 from eneo.flows.application.flow_webhook_delivery_policy import (
-    FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
+    FLOW_WEBHOOK_OUTBOX_BACKLOG_GRACE_SECONDS,
 )
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
@@ -282,7 +282,7 @@ def build_flow_runtime_health_policy(
         ),
         terminal_integrity_lookback=timedelta(hours=TERMINAL_INTEGRITY_LOOKBACK_HOURS),
         audit_outbox_backlog_grace_seconds=FLOW_AUDIT_OUTBOX_BACKLOG_GRACE_SECONDS,
-        webhook_outbox_backlog_grace_seconds=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
+        webhook_outbox_backlog_grace_seconds=FLOW_WEBHOOK_OUTBOX_BACKLOG_GRACE_SECONDS,
     )
 
 

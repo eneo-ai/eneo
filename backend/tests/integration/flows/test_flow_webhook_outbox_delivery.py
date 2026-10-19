@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -21,9 +22,9 @@ from eneo.database.tables.flow_tables import (
     FlowStepResults,
     FlowVersions,
 )
+from eneo.flows.application import flow_webhook_delivery_policy as webhook_policy
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_webhook_delivery_policy import (
-    FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
     FLOW_WEBHOOK_DELIVERY_CONCURRENCY,
     FLOW_WEBHOOK_MAX_ATTEMPTS,
 )
@@ -722,12 +723,14 @@ async def test_flow_webhook_delivery_reclaims_expired_claim_after_pre_send_crash
         service.http_runtime.send_request = send_http_request
 
         recovered = await service.deliver_due(now=now + timedelta(seconds=121))
+        recorded_by = datetime.now(timezone.utc)
         delivery_state = (
             await session.execute(
                 sa.select(
                     FlowRunWebhookDeliveries.delivery_status,
                     FlowRunWebhookDeliveries.delivery_attempts,
                     FlowRunWebhookDeliveries.idempotency_key,
+                    FlowRunWebhookDeliveries.delivered_at,
                 ).where(FlowRunWebhookDeliveries.id == delivery_id)
             )
         ).one()
@@ -739,6 +742,8 @@ async def test_flow_webhook_delivery_reclaims_expired_claim_after_pre_send_crash
     assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
     assert delivery_state.delivery_attempts == 2
     assert delivery_state.idempotency_key == first_claim.idempotency_key
+    # Recorded when it happened, not at the (here future) claim time.
+    assert delivery_state.delivered_at <= recorded_by
 
 
 @pytest.mark.asyncio
@@ -787,7 +792,11 @@ async def test_flow_webhook_delivery_reposts_after_expired_success_claim_with_st
 
         outcome_commit_lost = await service.deliver_due(now=now)
         recovered = await service.deliver_due(
-            now=now + timedelta(seconds=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS + 1)
+            now=now
+            + timedelta(
+                seconds=webhook_policy.flow_webhook_delivery_budget().claim_ttl_seconds
+                + 1
+            )
         )
         delivery_state = (
             await session.execute(
@@ -2011,12 +2020,14 @@ async def test_flow_webhook_delivery_five_claims_then_converges_without_sixth_po
             )
         )
         converged = await service.deliver_due(now=now)
+        recorded_by = datetime.now(timezone.utc)
         delivery_state = (
             await session.execute(
                 sa.select(
                     FlowRunWebhookDeliveries.delivery_status,
                     FlowRunWebhookDeliveries.delivery_attempts,
                     FlowRunWebhookDeliveries.delivery_last_error,
+                    FlowRunWebhookDeliveries.dead_lettered_at,
                 ).where(FlowRunWebhookDeliveries.id == delivery_id)
             )
         ).one()
@@ -2036,6 +2047,8 @@ async def test_flow_webhook_delivery_five_claims_then_converges_without_sixth_po
         delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
     )
     assert delivery_state.delivery_attempts == FLOW_WEBHOOK_MAX_ATTEMPTS
+    # Recorded when it happened, not at the (here future) claim time.
+    assert delivery_state.dead_lettered_at <= recorded_by
     assert "outcome is unknown" in delivery_state.delivery_last_error
     assert "may have been delivered" in delivery_state.delivery_last_error
     assert run_state.status == FlowRunStatus.FAILED.value
@@ -2111,10 +2124,10 @@ async def test_flow_webhook_outbox_reaches_but_never_exceeds_invocation_concurre
 ):
     """One task invocation runs at most FLOW_WEBHOOK_DELIVERY_CONCURRENCY sends.
 
-    The deployment-wide ceiling a webhook receiver sees is this number times the
-    maintenance-worker process count, so the per-invocation half has to be
-    observed rather than assumed. Claiming more rows than the ceiling is what
-    makes the observation meaningful.
+    The cron's fixed job id runs one invocation at a time, so this is the
+    ceiling a webhook receiver sees; it has to be observed rather than assumed.
+    Claiming more rows than the ceiling is what makes the observation
+    meaningful.
     """
     from eneo.flows.runtime import tasks as tasks_module
 
@@ -2165,7 +2178,9 @@ async def test_flow_webhook_outbox_reaches_but_never_exceeds_invocation_concurre
 
     monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _send_http_request)
 
-    result = await tasks_module._deliver_flow_webhook_outbox(limit=row_count)
+    result = await tasks_module._deliver_flow_webhook_outbox(
+        budget=webhook_policy.flow_webhook_delivery_budget(), limit=row_count
+    )
 
     assert peak_in_flight == FLOW_WEBHOOK_DELIVERY_CONCURRENCY
     assert in_flight == 0
@@ -2223,7 +2238,9 @@ async def test_flow_webhook_delivery_claim_replaces_only_after_expiry_and_voids_
             ).claim_due_delivery_rows(
                 now=now,
                 limit=5,
-                claim_ttl_seconds=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
+                claim_ttl_seconds=(
+                    webhook_policy.flow_webhook_delivery_budget().claim_ttl_seconds
+                ),
                 max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
             )
             await claim_session.commit()
@@ -2280,6 +2297,12 @@ async def test_flow_webhook_delivery_claim_replaces_only_after_expiry_and_voids_
             )
             is False
         )
+        assert (
+            await stale_repo.release_unsent_claim(
+                delivery_id=delivery_id, claim_token=displaced.claim_token
+            )
+            is False
+        )
         await stale_session.commit()
 
     async with sessionmanager.session() as intact_session:
@@ -2328,3 +2351,494 @@ async def test_flow_webhook_delivery_claim_replaces_only_after_expiry_and_voids_
     assert stored.delivered_at == delivered_at
     assert stored.delivery_last_error is None
     assert stored.claim_token is None
+
+
+async def _insert_due_webhook_rows(
+    *,
+    row_count: int,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+) -> list[UUID]:
+    delivery_ids: list[UUID] = []
+    async with sessionmanager.session() as setup_session:
+        enable_autobegin_for_flow_task_session(setup_session)
+        for row_no in range(row_count):
+            flow, run, step = await _create_running_webhook_run(
+                session=setup_session,
+                admin_user=admin_user,
+                completion_model_factory=completion_model_factory,
+                space_factory=space_factory,
+                assistant_factory=assistant_factory,
+                model_name=f"webhook-budget-model-{row_no}",
+            )
+            assert flow.id is not None and step.id is not None
+            delivery_ids.append(
+                await FlowRunWebhookDeliveryRepository(
+                    session=setup_session
+                ).insert_pending_delivery(
+                    flow_id=flow.id,
+                    tenant_id=admin_user.tenant_id,
+                    intent=_intent(run_id=run.id, step_id=step.id),
+                )
+            )
+        await setup_session.commit()
+    return delivery_ids
+
+
+async def _delivery_states(delivery_ids: list[UUID]) -> dict[UUID, sa.Row]:
+    async with sessionmanager.session() as check_session:
+        async with check_session.begin():
+            rows = (
+                await check_session.execute(
+                    sa.select(
+                        FlowRunWebhookDeliveries.id,
+                        FlowRunWebhookDeliveries.flow_run_id,
+                        FlowRunWebhookDeliveries.delivery_status,
+                        FlowRunWebhookDeliveries.delivery_attempts,
+                        FlowRunWebhookDeliveries.claim_token,
+                        FlowRunWebhookDeliveries.next_delivery_at,
+                        FlowRunWebhookDeliveries.delivery_last_error,
+                    ).where(FlowRunWebhookDeliveries.id.in_(delivery_ids))
+                )
+            ).all()
+    return {row.id: row for row in rows}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_release_returns_the_claimed_attempt_and_frees_the_row(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """Kills: a released row keeps its claim, or keeps the attempt it was
+    charged at claim although nothing was sent."""
+    [delivery_id] = await _insert_due_webhook_rows(
+        row_count=1,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    due_at = (await _delivery_states([delivery_id]))[delivery_id].next_delivery_at
+    now = datetime.now(timezone.utc)
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        [claimed] = await webhook_repo.claim_due_delivery_rows(
+            now=now,
+            limit=1,
+            claim_ttl_seconds=120,
+            max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
+        )
+        released = await webhook_repo.release_unsent_claim(
+            delivery_id=delivery_id, claim_token=claimed.claim_token
+        )
+        await session.commit()
+    released_state = (await _delivery_states([delivery_id]))[delivery_id]
+
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        reclaimed = await FlowRunWebhookDeliveryRepository(
+            session=session
+        ).claim_due_delivery_rows(
+            now=now,
+            limit=1,
+            claim_ttl_seconds=120,
+            max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
+        )
+        await session.commit()
+
+    assert claimed.delivery_attempts == 1
+    assert released is True
+    assert released_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+    assert released_state.delivery_attempts == 0
+    assert released_state.claim_token is None
+    assert released_state.next_delivery_at == due_at
+    assert [row.delivery_attempts for row in reclaimed] == [1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_releases_a_row_whose_preparation_outlasts_the_send_deadline(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+):
+    """Kills: a claim made after the deadline stopped covering a whole delivery;
+    an unsent row that loses an attempt when the job deadline fires during its
+    preparation (here inside a database query); and a preparation that runs
+    past the job deadline."""
+    from eneo.flows.application import flow_webhook_delivery_policy as policy
+
+    [delivery_id] = await _insert_due_webhook_rows(
+        row_count=1,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    send_http_request = AsyncMock()
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send_http_request)
+    budget = policy.FlowWebhookDeliveryBudget(
+        max_request_timeout_seconds=0.1,
+        preparation_margin_seconds=0.1,
+        persistence_margin_seconds=0.1,
+        finish_margin_seconds=0.1,
+        cancel_margin_seconds=0.1,
+        claim_window_seconds=0.1,
+    )
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+        )
+        service = container.flow_run_webhook_delivery_service()
+        prepare = service._prepare_delivery_payload
+
+        async def _slow_prepare(**kwargs):
+            await session.execute(sa.text("SELECT pg_sleep(5)"))
+            return await prepare(**kwargs)
+
+        monkeypatch.setattr(service, "_prepare_delivery_payload", _slow_prepare)
+        loop = asyncio.get_running_loop()
+        spent = budget.deadline(started_at=loop.time() - budget.job_deadline_seconds)
+        async with session.begin():
+            refused = await service.claim_due_batch(
+                now=datetime.now(timezone.utc), limit=1, deadline=spent
+            )
+        assert refused.claimed_rows == []
+        deadline = budget.deadline(started_at=loop.time())
+        async with session.begin():
+            batch = await service.claim_due_batch(
+                now=datetime.now(timezone.utc), limit=1, deadline=deadline
+            )
+        [row] = batch.claimed_rows
+        result = await asyncio.wait_for(
+            service.deliver_claimed(row=row, deadline=deadline),
+            timeout=budget.job_timeout_seconds,
+        )
+
+    state = (await _delivery_states([delivery_id]))[delivery_id]
+    assert result.to_task_payload()["released"] == 1
+    assert result.attempted_count == 0
+    send_http_request.assert_not_awaited()
+    assert state.delivery_attempts == 0
+    assert state.claim_token is None
+    assert state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_outbox_job_claims_only_what_its_deadline_can_send(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+):
+    """A receiver that never answers, with more due rows than one wave, and a
+    claim on its last attempt that expires while the wave is out.
+
+    Kills: a wave claimed without the budget (rows beyond the first wave are
+    claimed and must be handed back); a send not bounded by the send deadline
+    (it runs into the time kept to record it); a cut send that is not the
+    typed timeout failure; a claim session opened after the last wave (it
+    dead-letters the expired claim after the sends ended); a backoff counted
+    from the batch start instead of the failure."""
+    from eneo.flows.application import flow_webhook_delivery_policy as policy
+    from eneo.flows.runtime import tasks as tasks_module
+
+    *delivery_ids, last_attempt_id = await _insert_due_webhook_rows(
+        row_count=FLOW_WEBHOOK_DELIVERY_CONCURRENCY + 3,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    send_stopped_at: list[datetime] = []
+
+    async def _unanswered_send(_self, **_kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            send_stopped_at.append(datetime.now(timezone.utc))
+
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _unanswered_send)
+    # The sends end 1.5 s after the start; the margins after them only bound
+    # the test, they are not waited for.
+    budget = policy.FlowWebhookDeliveryBudget(
+        max_request_timeout_seconds=0.1,
+        preparation_margin_seconds=1.2,
+        persistence_margin_seconds=2.0,
+        finish_margin_seconds=2.0,
+        claim_window_seconds=0.2,
+    )
+    sends_end_after = timedelta(
+        seconds=budget.job_deadline_seconds - budget.persistence_margin_seconds
+    )
+    started_at = datetime.now(timezone.utc)
+    async with sessionmanager.session() as session:
+        async with session.begin():
+            # Held by another job; it expires halfway to the end of the sends.
+            await session.execute(
+                sa.update(FlowRunWebhookDeliveries)
+                .where(FlowRunWebhookDeliveries.id == last_attempt_id)
+                .values(
+                    delivery_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
+                    claim_token=uuid4(),
+                    claimed_at=started_at,
+                    claim_expires_at=started_at + sends_end_after / 2,
+                )
+            )
+
+    result = await asyncio.wait_for(
+        tasks_module._deliver_flow_webhook_outbox(budget=budget),
+        timeout=budget.job_timeout_seconds,
+    )
+
+    states = await _delivery_states(delivery_ids)
+    last_attempt = (await _delivery_states([last_attempt_id]))[last_attempt_id]
+    sent = [state for state in states.values() if state.delivery_attempts == 1]
+    unsent = [state for state in states.values() if state.delivery_attempts == 0]
+    # One wave only. A row of it whose preparation outlasted the deadline on a
+    # busy host is released, not charged.
+    assert result["attempted"] + result["released"] == (
+        FLOW_WEBHOOK_DELIVERY_CONCURRENCY
+    )
+    assert result["attempted"] >= 1
+    assert result["retry_scheduled"] == result["attempted"]
+    assert result["dead_lettered"] == 0
+    assert last_attempt.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+    assert len(send_stopped_at) == len(sent) == result["attempted"]
+    # Half the persistence margin absorbs a late timer on a busy host.
+    assert max(send_stopped_at) - started_at <= sends_end_after + timedelta(
+        seconds=budget.persistence_margin_seconds / 2
+    )
+    assert all("timed out" in state.delivery_last_error for state in sent)
+    assert len(sent) + len(unsent) == len(delivery_ids)
+    assert all(state.claim_token is None for state in states.values())
+    first_backoff = timedelta(seconds=policy.FLOW_WEBHOOK_RETRY_BACKOFF_SECONDS[0])
+    assert all(
+        state.next_delivery_at is not None
+        and state.next_delivery_at >= min(send_stopped_at) + first_backoff
+        for state in sent
+    )
+
+
+def _capture_logs(monkeypatch, caplog, logger: logging.Logger) -> None:
+    monkeypatch.setattr(logger, "disabled", False)
+    monkeypatch.setattr(logger, "propagate", False)
+    monkeypatch.setattr(logger, "handlers", [caplog.handler])
+
+
+async def _answer_200(_self, **_kwargs):
+    return httpx.Response(
+        200, request=httpx.Request("POST", "https://example.org/hook/case-123")
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_outbox_records_a_200_whose_audit_never_returns(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+    caplog,
+):
+    """Kills: an outbound audit with no bound (the hard stop then cuts the
+    delivery and the 200 is sent again later), and an audit cut that turns the
+    known HTTP result into a delivery failure."""
+    from eneo.audit.application.audit_service import AuditService
+    from eneo.flows.runtime import flow_webhook_delivery as flow_webhook_delivery_module
+    from eneo.flows.runtime import tasks as tasks_module
+
+    [delivery_id] = await _insert_due_webhook_rows(
+        row_count=1,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    audit_entered = asyncio.Event()
+
+    async def _audit_that_never_returns(_self, **_kwargs):
+        audit_entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(AuditService, "log_async", _audit_that_never_returns)
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _answer_200)
+    _capture_logs(monkeypatch, caplog, flow_webhook_delivery_module.logger)
+    budget = webhook_policy.FlowWebhookDeliveryBudget(
+        max_request_timeout_seconds=0.2,
+        preparation_margin_seconds=1.0,
+        persistence_margin_seconds=0.3,
+        finish_margin_seconds=0.5,
+        cancel_margin_seconds=1.0,
+        claim_window_seconds=0.1,
+    )
+    loop = asyncio.get_running_loop()
+    started_at = loop.time()
+
+    result = await asyncio.wait_for(
+        tasks_module._deliver_flow_webhook_outbox(budget=budget),
+        timeout=budget.job_timeout_seconds,
+    )
+
+    state = (await _delivery_states([delivery_id]))[delivery_id]
+    assert audit_entered.is_set()
+    assert loop.time() - started_at < budget.hard_stop_seconds
+    assert (result["status"], result["delivered"]) == ("ok", 1)
+    assert state.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
+    assert [
+        record.levelno
+        for record in caplog.records
+        if record.exc_info is not None and record.exc_info[0] is TimeoutError
+    ] == [logging.WARNING]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_outbox_keeps_the_claim_when_recording_blocks_to_the_hard_stop(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+    caplog,
+):
+    """A 200 whose outcome cannot be recorded: another session holds the
+    delivery row's lock.
+
+    Kills: recording with no bound (the job runs on until ARQ cancels it), and
+    a cut delivery or a cut job that is not logged."""
+    from eneo.flows.runtime import tasks as tasks_module
+
+    [delivery_id] = await _insert_due_webhook_rows(
+        row_count=1,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    send_started = asyncio.Event()
+    lock_held = asyncio.Event()
+    release_lock = asyncio.Event()
+
+    async def _hold_the_row_lock() -> None:
+        await send_started.wait()
+        async with sessionmanager.session() as lock_session, lock_session.begin():
+            await lock_session.execute(
+                sa.select(FlowRunWebhookDeliveries.id)
+                .where(FlowRunWebhookDeliveries.id == delivery_id)
+                .with_for_update()
+            )
+            lock_held.set()
+            await release_lock.wait()
+
+    async def _send_once_the_row_is_locked(_self, **kwargs):
+        send_started.set()
+        await lock_held.wait()
+        return await _answer_200(_self, **kwargs)
+
+    monkeypatch.setattr(
+        FlowHttpRuntimeHelper, "send_request", _send_once_the_row_is_locked
+    )
+    _capture_logs(monkeypatch, caplog, tasks_module.logger)
+    budget = webhook_policy.FlowWebhookDeliveryBudget(
+        max_request_timeout_seconds=0.2,
+        preparation_margin_seconds=1.0,
+        persistence_margin_seconds=0.3,
+        finish_margin_seconds=0.3,
+        cancel_margin_seconds=1.0,
+        claim_window_seconds=0.1,
+    )
+    loop = asyncio.get_running_loop()
+    lock_holder = asyncio.create_task(_hold_the_row_lock())
+    started_at = loop.time()
+    try:
+        result = await asyncio.wait_for(
+            tasks_module._deliver_flow_webhook_outbox(budget=budget),
+            timeout=budget.job_timeout_seconds,
+        )
+        returned_after = loop.time() - started_at
+    finally:
+        release_lock.set()
+        # A job that ends before its send (for example a released row) never
+        # wakes the helper; cancel it so the job's own failure is reported
+        # instead of a hang.
+        if not send_started.is_set():
+            lock_holder.cancel()
+        await asyncio.gather(lock_holder, return_exceptions=True)
+
+    state = (await _delivery_states([delivery_id]))[delivery_id]
+    assert budget.hard_stop_seconds <= returned_after < budget.job_timeout_seconds
+    assert (result["status"], result["unfinished"], result["delivered"]) == (
+        "hard_stopped",
+        1,
+        0,
+    )
+    assert state.claim_token is not None
+    assert state.delivery_attempts == 1
+    assert state.delivery_status != FlowOutboxDeliveryStatus.DELIVERED.value
+    errors = [record for record in caplog.records if record.levelno == logging.ERROR]
+    assert [
+        (getattr(record, "delivery_id", None), getattr(record, "flow_run_id", None))
+        for record in errors
+    ] == [(str(delivery_id), str(state.flow_run_id)), (None, None)]
+    assert getattr(errors[1], "unfinished", None) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_outbox_cuts_a_blocked_claim_session_at_the_hard_stop(
+    setup_database,
+    monkeypatch,
+):
+    """Kills: claim sessions that run outside the hard stop."""
+    from eneo.flows.runtime import tasks as tasks_module
+
+    async def _blocked_dead_letter_lock(self, **_kwargs):
+        await self.session.execute(sa.text("SELECT pg_sleep(30)"))
+        return []
+
+    monkeypatch.setattr(
+        FlowRunWebhookDeliveryRepository,
+        "lock_expired_at_budget_delivery_rows",
+        _blocked_dead_letter_lock,
+    )
+    budget = webhook_policy.FlowWebhookDeliveryBudget(
+        max_request_timeout_seconds=0.1,
+        preparation_margin_seconds=0.1,
+        persistence_margin_seconds=0.1,
+        finish_margin_seconds=0.1,
+        cancel_margin_seconds=1.0,
+        claim_window_seconds=0.1,
+    )
+    loop = asyncio.get_running_loop()
+    started_at = loop.time()
+
+    result = await asyncio.wait_for(
+        tasks_module._deliver_flow_webhook_outbox(budget=budget),
+        timeout=budget.job_timeout_seconds,
+    )
+
+    assert loop.time() - started_at < budget.job_timeout_seconds
+    assert (result["status"], result["attempted"], result["unfinished"]) == (
+        "hard_stopped",
+        0,
+        0,
+    )

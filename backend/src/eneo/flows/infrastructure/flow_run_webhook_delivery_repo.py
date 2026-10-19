@@ -196,7 +196,7 @@ class FlowRunWebhookDeliveryRepository:
         *,
         now: datetime,
         limit: int,
-        claim_ttl_seconds: int,
+        claim_ttl_seconds: float,
         max_attempts: int,
     ) -> list[FlowRunWebhookDeliveryRow]:
         if limit <= 0:
@@ -360,6 +360,32 @@ class FlowRunWebhookDeliveryRepository:
                 delivered_at=None,
                 dead_lettered_at=dead_lettered_at,
                 delivery_last_error=error_message,
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        return bool(getattr(result, "rowcount", 0))
+
+    async def release_unsent_claim(
+        self,
+        *,
+        delivery_id: UUID,
+        claim_token: UUID,
+    ) -> bool:
+        """Hand back a claim whose send never started, with the attempt the
+        claim charged: nothing reached the receiver."""
+        result = await self.session.execute(
+            sa.update(FlowRunWebhookDeliveries)
+            .where(FlowRunWebhookDeliveries.id == delivery_id)
+            .where(FlowRunWebhookDeliveries.claim_token == claim_token)
+            .where(
+                FlowRunWebhookDeliveries.delivery_status
+                == FlowOutboxDeliveryStatus.PENDING.value
+            )
+            .values(
+                claim_token=None,
+                claimed_at=None,
+                claim_expires_at=None,
+                delivery_attempts=FlowRunWebhookDeliveries.delivery_attempts - 1,
                 updated_at=datetime.now(timezone.utc),
             )
         )

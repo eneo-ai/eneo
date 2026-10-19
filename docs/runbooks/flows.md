@@ -77,6 +77,34 @@ Production has two Flow-related platform processes:
 
 There is no Flow-private worker, beat process, or scheduler.
 
+The webhook outbox cron ticks every 30 seconds and runs one job at a time: it
+is enqueued under one fixed ARQ job id without a kept result, so ARQ skips a
+tick while the previous job is queued or running. ARQ keeps a finished cron
+job's in-progress marker for 60 s, so the next job starts no earlier than 60 s
+after the previous one ended. A job killed mid-run (for example by a SIGKILL
+at deploy) keeps its job id, so ticks are skipped until ARQ picks it up again
+when its in-progress marker expires: the longest maintenance job timeout plus
+10 s after it started (205 s with the default 120 s request timeout). The
+webhook cron allows one try, so that pickup records the job as failed; the
+maintenance worker keeps no failed result, so the next tick runs a new job.
+
+The job's time budget is derived from `FLOW_HTTP_MAX_TIMEOUT_SECONDS`
+(default 120). One delivery is budgeted 15 s of preparation, the maximum
+request timeout and 15 s to audit the call and record the outcome (150 s by
+default). A job claims deliveries in waves of 10, only while its remaining
+time covers one such delivery, so it claims during its first 30 s and has a
+180 s deadline. Every send ends by the deadline minus those 15 s; a send cut
+short is a normal retryable failure. A claimed delivery whose request was not
+sent before then is released and is not charged an attempt. The outbound
+audit after a send waits at most until the deadline; an audit given up there
+is logged as a warning and the HTTP result is still recorded. Everything the
+job does, claims included, is cut at its hard stop 10 s after the deadline
+(190 s). A delivery still unfinished there keeps its claim, so its outcome is
+unknown until the claim expires; the job logs an error for each such delivery
+and one error with its counts, and returns with the `hard_stopped` status.
+ARQ cancels the job only after a further 5 s (195 s), and a claim lasts as
+long as that timeout. Retry delays count from the failure.
+
 ## Health flags and recovery
 
 Timing values are returned in `thresholds`; code-owned defaults are shown below.

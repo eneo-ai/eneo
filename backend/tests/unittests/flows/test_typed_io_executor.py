@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from contextlib import nullcontext
 from dataclasses import replace
@@ -5649,6 +5650,7 @@ async def test_webhook_body_is_the_conformed_output(user):
         context={},
         deps=deps,
         idempotency_key="run-1:step-2:1:webhook",
+        sends_end_at=math.inf,
     )
 
     body = send_http_request.await_args.kwargs["body_bytes"]

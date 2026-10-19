@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import cast
 from uuid import UUID
 
+from eneo.flows.application.flow_webhook_delivery_policy import (
+    FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS,
+    flow_webhook_delivery_budget,
+)
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS,
     flow_task_hard_timeout_seconds,
@@ -112,8 +116,14 @@ async def deliver_audit_outbox(*, container: Container) -> dict[str, int | str]:
 @maintenance_worker.cron_job(
     manages_own_session=True,
     name=FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
-    second={0, 30},
-    keep_result=60,
+    second=set(range(0, 60, FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS)),
+    # One webhook job at a time, so jobs that outlast the cadence cannot fill
+    # the maintenance slots: ARQ skips a tick while a job with this id is
+    # queued or running, and a kept result would skip ticks after it ended.
+    job_id=FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
+    keep_result=0,
+    # The job stops itself at its hard stop; ARQ only cancels a job that overruns.
+    timeout=flow_webhook_delivery_budget().job_timeout_seconds,
 )
 async def deliver_webhook_outbox(*, container: Container) -> dict[str, int | str]:
     del container
@@ -166,6 +176,12 @@ class PlatformMaintenanceWorkerSettings:
     job_serializer = maintenance_worker.job_serializer
     job_deserializer = maintenance_worker.job_deserializer
     job_timeout = settings.task_maintenance_timeout_seconds
+    # A job killed mid-run is picked up again when its in-progress marker expires
+    # and, past its one try, recorded as failed with this worker-level value, not
+    # the cron's own keep_result. A kept result under the webhook cron's fixed job
+    # id would skip its ticks until it expired (an hour by default). Nothing reads
+    # these results.
+    keep_result = 0
     max_jobs = settings.task_maintenance_max_jobs
     queue_name = settings.task_maintenance_queue
     expires_extra_ms = maintenance_worker.expires_extra_ms

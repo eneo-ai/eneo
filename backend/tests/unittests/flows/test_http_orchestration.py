@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import traceback
 from dataclasses import dataclass
 from typing import Any
@@ -22,6 +23,9 @@ from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 from eneo.settings.encryption_service import EncryptionService
 from tests.unittests.flows.async_test_support import until_task_reaches
+
+# deliver_webhook outside a delivery job: only the step's timeout bounds the send.
+_NO_JOB_DEADLINE = math.inf
 
 
 @dataclass
@@ -471,6 +475,39 @@ async def test_an_http_input_read_waits_little_for_its_one_audit(
 
 
 @pytest.mark.asyncio
+async def test_deliver_webhook_does_not_start_a_send_past_the_job_deadline() -> None:
+    """Kills: a send started with no time left, which spends the attempt on a
+    request the job cannot wait for."""
+    from eneo.flows.runtime import http_orchestration
+
+    send_http_request = AsyncMock()
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(http_orchestration.WebhookSendNotStartedError):
+        await deliver_webhook(
+            step=_Step(
+                step_order=4,
+                step_id="step-4",
+                input_type="text",
+                input_source="flow_input",
+                output_config={
+                    "url": "https://example.org/webhook",
+                    "auth": {"mode": "none"},
+                },
+            ),
+            text_payload="payload",
+            run=_Run(id="run-4", flow_id="flow-1", tenant_id="tenant-1"),
+            context={},
+            deps=deps,
+            idempotency_key="run-4:step-4:1:webhook",
+            sends_end_at=asyncio.get_running_loop().time(),
+        )
+
+    send_http_request.assert_not_awaited()
+    deps.audit_http_outbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_deliver_webhook_timeout_maps_to_delivery_error_and_audits() -> None:
     step = _Step(
         step_order=4,
@@ -494,6 +531,7 @@ async def test_deliver_webhook_timeout_maps_to_delivery_error_and_audits() -> No
             context={},
             deps=deps,
             idempotency_key="run-4:step-4:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
         )
 
     assert "timed out" in str(exc.value)
@@ -574,6 +612,7 @@ async def test_http_transport_failures_do_not_disclose_credentials_to_run_audit_
                 context={},
                 deps=deps,
                 idempotency_key="run-44:step-44:1:webhook",
+                sends_end_at=_NO_JOB_DEADLINE,
             )
 
     assert canary not in str(exc.value)
@@ -621,6 +660,7 @@ async def test_deliver_webhook_exposes_typed_http_status(status_code: int) -> No
             context={},
             deps=deps,
             idempotency_key="run-43:step-43:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
         )
 
     assert exc.value.status_code == status_code
@@ -648,6 +688,7 @@ async def test_deliver_webhook_requires_url_in_output_config() -> None:
             context={},
             deps=deps,
             idempotency_key="run-41:step-41:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
         )
 
     deps.audit_http_outbound.assert_not_awaited()
@@ -682,6 +723,7 @@ async def test_deliver_webhook_maps_typed_transport_error_to_bad_request() -> No
             context={},
             deps=deps,
             idempotency_key="run-42:step-42:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
         )
 
     # The typed code travels with the failure: delivery decides retry by it.
@@ -723,6 +765,7 @@ async def test_deliver_webhook_sets_idempotency_key() -> None:
         context={},
         deps=deps,
         idempotency_key="run-5:step-5:3:webhook",
+        sends_end_at=_NO_JOB_DEADLINE,
     )
 
     kwargs = send_http_request.await_args.kwargs
@@ -787,6 +830,7 @@ async def test_deliver_webhook_authored_config_compiles_request() -> None:
         },
         deps=deps,
         idempotency_key="run-51:step-51:1:webhook",
+        sends_end_at=_NO_JOB_DEADLINE,
     )
 
     kwargs = send_http_request.await_args.kwargs
@@ -846,6 +890,7 @@ async def test_deliver_webhook_authored_auto_body_uses_text_payload() -> None:
         context={"step_1": {"output": {"trace_id": "trace-52"}}},
         deps=deps,
         idempotency_key="run-52:step-52:1:webhook",
+        sends_end_at=_NO_JOB_DEADLINE,
     )
 
     kwargs = send_http_request.await_args.kwargs
@@ -875,6 +920,7 @@ async def test_deliver_webhook_rejects_flat_config_before_send() -> None:
             context={},
             deps=deps,
             idempotency_key="run-53:step-53:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
         )
 
     send_http_request.assert_not_awaited()
@@ -915,6 +961,7 @@ async def test_deliver_webhook_retry_keeps_same_idempotency_key_after_partial_fa
             context={},
             deps=deps,
             idempotency_key="run-6:step-6:4:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
         )
 
     await deliver_webhook(
@@ -924,6 +971,7 @@ async def test_deliver_webhook_retry_keeps_same_idempotency_key_after_partial_fa
         context={},
         deps=deps,
         idempotency_key="run-6:step-6:4:webhook",
+        sends_end_at=_NO_JOB_DEADLINE,
     )
 
     assert len(keys) == 2
@@ -1003,6 +1051,7 @@ async def test_webhook_refuses_a_template_in_a_credential_before_send() -> None:
             context={"step_1": {"output": {"text": "classified"}}},
             deps=deps,
             idempotency_key="run-1:s2:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
         )
 
     # The typed code stays on the error, so a delivery can tell it is permanent.
@@ -1078,6 +1127,7 @@ async def test_webhook_raises_the_typed_code_for_a_config_the_runtime_rejects(
             context={"step_1": {"output": {"text": "not a url"}}},
             deps=deps,
             idempotency_key="run-1:s2:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
         )
 
     assert exc_info.value.code == "typed_io_http_invalid_config"
@@ -1193,6 +1243,7 @@ async def test_webhook_reports_a_malformed_interpolated_port_as_invalid_config(
             context={"step_1": {"output": {"text": port}}},
             deps=deps,
             idempotency_key="run-1:s2:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
         )
 
     assert exc_info.value.code == "typed_io_http_invalid_config"

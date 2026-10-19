@@ -1,25 +1,110 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from eneo.audit.domain.constants import MAX_ERROR_MESSAGE_LENGTH
 from eneo.flows.flow_run_redaction import redact_string
+from eneo.main.config import get_settings
 
+# The outbox cron ticks at this cadence (one job at a time), and a job claims
+# new waves only during its first interval.
 FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS = 30
 FLOW_WEBHOOK_DELIVERY_BATCH_SIZE = 50
-# Bounds simultaneous outbound requests within ONE task invocation, not across
-# the deployment: every maintenance-worker process runs its own invocation, so
-# the ceiling a receiver sees is that process count x this value. Raising it
-# raises the deployment-wide ceiling by the same factor.
+# Bounds simultaneous outbound requests of one outbox job. The cron enqueues the
+# job under one fixed ARQ job id, so one job runs at a time across maintenance
+# processes.
 #
 # Delivery is at-least-once. A claim whose outcome is unknown when it expires is
 # redelivered under the same idempotency key, so receivers must deduplicate on
 # that key.
 FLOW_WEBHOOK_DELIVERY_CONCURRENCY = 10
-FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS = 300
 FLOW_WEBHOOK_MAX_ATTEMPTS = 5
 FLOW_WEBHOOK_RETRY_BACKOFF_SECONDS = (30, 120, 300, 900)
 
 assert FLOW_WEBHOOK_DELIVERY_CONCURRENCY <= FLOW_WEBHOOK_DELIVERY_BATCH_SIZE
 assert len(FLOW_WEBHOOK_RETRY_BACKOFF_SECONDS) == FLOW_WEBHOOK_MAX_ATTEMPTS - 1
+# How long a due delivery may wait for a claim before runtime health reports a
+# backlog.
+FLOW_WEBHOOK_OUTBOX_BACKLOG_GRACE_SECONDS = 300
+
+
+@dataclass(frozen=True, slots=True)
+class FlowWebhookDeliveryBudget:
+    """The time arithmetic of one webhook outbox job.
+
+    One delivery reads its run (preparation), sends one request bounded by the
+    maximum request timeout, and audits the call and records the outcome
+    (persistence). The job stops claiming once its remaining time no longer
+    covers that worst case. Everything the job does, claims included, is cut at
+    the hard stop (the finish margin after the job deadline), and ARQ's timeout
+    leaves a cancel margin after that, so the job stops itself before ARQ
+    cancels it. A claim outlives the job that made it, so a live delivery is
+    never reclaimed by another job."""
+
+    max_request_timeout_seconds: float
+    preparation_margin_seconds: float = 15
+    persistence_margin_seconds: float = 15
+    finish_margin_seconds: float = 10
+    cancel_margin_seconds: float = 5
+    claim_window_seconds: float = FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS
+
+    @property
+    def per_delivery_worst_case_seconds(self) -> float:
+        return (
+            self.preparation_margin_seconds
+            + self.max_request_timeout_seconds
+            + self.persistence_margin_seconds
+        )
+
+    @property
+    def job_deadline_seconds(self) -> float:
+        return self.per_delivery_worst_case_seconds + self.claim_window_seconds
+
+    @property
+    def hard_stop_seconds(self) -> float:
+        return self.job_deadline_seconds + self.finish_margin_seconds
+
+    @property
+    def job_timeout_seconds(self) -> float:
+        return self.hard_stop_seconds + self.cancel_margin_seconds
+
+    @property
+    def claim_ttl_seconds(self) -> float:
+        return self.job_timeout_seconds
+
+    def deadline(self, *, started_at: float) -> FlowWebhookDeliveryDeadline:
+        return FlowWebhookDeliveryDeadline(
+            budget=self, ends_at=started_at + self.job_deadline_seconds
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FlowWebhookDeliveryDeadline:
+    """One job's deadline on the event-loop clock (``loop.time()``).
+
+    Sends end a persistence margin before ``ends_at``; the outbound audit after
+    a send waits at most until ``ends_at``, so recording the outcome has at
+    least the finish margin before ``hard_stop_at``."""
+
+    budget: FlowWebhookDeliveryBudget
+    ends_at: float
+
+    @property
+    def sends_end_at(self) -> float:
+        return self.ends_at - self.budget.persistence_margin_seconds
+
+    @property
+    def hard_stop_at(self) -> float:
+        return self.ends_at + self.budget.finish_margin_seconds
+
+    def allows_new_wave(self, now: float) -> bool:
+        return self.ends_at - now >= self.budget.per_delivery_worst_case_seconds
+
+
+def flow_webhook_delivery_budget() -> FlowWebhookDeliveryBudget:
+    return FlowWebhookDeliveryBudget(
+        max_request_timeout_seconds=get_settings().flow_http_max_timeout_seconds
+    )
 
 
 def flow_webhook_retry_delay_seconds(*, failed_attempt_no: int) -> int | None:

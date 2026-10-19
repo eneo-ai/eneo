@@ -98,6 +98,11 @@ class WebhookDeliveryError(RuntimeError):
         self.status_code = status_code
 
 
+class WebhookSendNotStartedError(RuntimeError):
+    """The job's send deadline passed before the request was sent, so nothing
+    reached the receiver."""
+
+
 @dataclass(frozen=True, slots=True)
 class FlowOutsideInputResolution:
     """A step input that was read from outside the run: the response of an
@@ -319,7 +324,11 @@ async def deliver_webhook(
     context: dict[str, Any],
     deps: FlowHttpOrchestrationDeps,
     idempotency_key: str,
+    sends_end_at: float,
 ) -> None:
+    """Send one webhook request. ``sends_end_at`` (event-loop clock) bounds the
+    send together with the step's own timeout; a send that cannot start before
+    it raises WebhookSendNotStartedError without contacting the receiver."""
     if step.output_config is None:
         return
     try:
@@ -359,20 +368,29 @@ async def deliver_webhook(
         idempotency_key.encode("utf-8")
     ).hexdigest()
 
+    timeout_seconds = min(
+        timeout_seconds, sends_end_at - asyncio.get_running_loop().time()
+    )
+    if timeout_seconds <= 0:
+        raise WebhookSendNotStartedError(
+            "The webhook delivery job ran out of time before the request was sent."
+        )
     start_time = time.monotonic()
     try:
         # Normalize before auditing so audit failures cannot chain raw credentials.
         try:
-            response = await deps.send_http_request(
-                method="POST",
-                url=url,
-                headers=headers,
-                timeout_seconds=timeout_seconds,
-                body_bytes=body_bytes,
-                json_body=json_body,
-                read_response_body=False,
-            )
-        except httpx.TimeoutException:
+            # httpx applies its timeout to each phase; this bounds the whole send.
+            async with asyncio.timeout(timeout_seconds):
+                response = await deps.send_http_request(
+                    method="POST",
+                    url=url,
+                    headers=headers,
+                    timeout_seconds=timeout_seconds,
+                    body_bytes=body_bytes,
+                    json_body=json_body,
+                    read_response_body=False,
+                )
+        except (httpx.TimeoutException, TimeoutError):
             raise WebhookDeliveryError(
                 f"Webhook delivery timed out after {timeout_seconds:g}s."
             ) from None

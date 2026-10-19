@@ -28,6 +28,7 @@ from eneo.tasks.contracts import (
     TaskEnqueueStatus,
 )
 from eneo.tasks.routing import (
+    FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
     FLOW_DRAIN_RETIRED_RUNS_TASK,
     FLOW_EXECUTE_TASK,
     TASK_CAPACITY_BY_NAME,
@@ -188,6 +189,63 @@ def test_retired_run_drain_runs_at_the_configured_cadence() -> None:
     assert TASK_CAPACITY_BY_NAME[FLOW_DRAIN_RETIRED_RUNS_TASK] is (
         TaskCapacityClass.MAINTENANCE
     )
+
+
+def test_webhook_outbox_cron_is_one_job_that_stops_itself_before_arq_cancels_it() -> (
+    None
+):
+    """Kills: the webhook cron left on the maintenance default timeout, which
+    cancels the job before its deadline with unsent rows still charged; and
+    the cron without its fixed job id or with a kept result, so ticks queue
+    overlapping jobs or are skipped after a job ended; and the maintenance
+    worker keeping a failed job's result (an hour by default), which skips
+    every webhook tick once a job killed mid-run is recorded as failed."""
+    from eneo.flows.application import flow_webhook_delivery_policy as policy
+
+    [webhook] = [
+        job
+        for job in PlatformMaintenanceWorkerSettings.cron_jobs
+        if job.name == FLOW_DELIVER_WEBHOOK_OUTBOX_TASK
+    ]
+    budget = policy.flow_webhook_delivery_budget()
+
+    assert webhook.timeout_s == budget.job_timeout_seconds
+    assert webhook.second == set(
+        range(0, 60, policy.FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS)
+    )
+    assert webhook.job_id == FLOW_DELIVER_WEBHOOK_OUTBOX_TASK
+    assert webhook.keep_result_s == 0
+    assert not webhook.keep_result_forever
+    assert PlatformMaintenanceWorkerSettings.keep_result == 0
+
+
+@pytest.mark.parametrize("max_request_timeout_seconds", [1, 120, 600])
+def test_webhook_budget_fits_a_maximal_delivery_inside_the_job_and_its_claim(
+    max_request_timeout_seconds: float,
+) -> None:
+    """Kills: a deadline that admits no full delivery at the maximum request
+    timeout after the last claim, sends that may end inside the time kept to
+    record them, a hard stop that ARQ's timeout does not exceed, and a claim
+    that can expire while its job still runs."""
+    from eneo.flows.application import flow_webhook_delivery_policy as policy
+
+    budget = policy.FlowWebhookDeliveryBudget(
+        max_request_timeout_seconds=max_request_timeout_seconds
+    )
+    started_at = 1000.0
+    deadline = budget.deadline(started_at=started_at)
+    last_claim_at = started_at + budget.claim_window_seconds
+
+    assert budget.claim_ttl_seconds >= budget.job_timeout_seconds
+    assert deadline.ends_at < deadline.hard_stop_at
+    assert deadline.hard_stop_at < started_at + budget.job_timeout_seconds
+    assert deadline.allows_new_wave(last_claim_at)
+    assert not deadline.allows_new_wave(last_claim_at + 0.5)
+    assert (
+        deadline.sends_end_at - last_claim_at
+        >= budget.preparation_margin_seconds + max_request_timeout_seconds
+    )
+    assert deadline.ends_at - deadline.sends_end_at >= budget.persistence_margin_seconds
 
 
 def test_flow_layers_are_transport_neutral_and_celery_is_not_a_dependency() -> None:

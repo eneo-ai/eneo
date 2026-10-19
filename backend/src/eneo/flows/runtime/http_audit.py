@@ -55,6 +55,9 @@ class HttpAuditDeps:
     audit_service: Any | None
     actor: FlowRunActor
     logger: Any
+    # Event-loop time at which the audit write is given up and logged like any
+    # other audit failure; None waits for it.
+    ends_at: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,19 +164,20 @@ async def audit_http_outbound(
             extra["tool_name"] = tool.tool_name
         extra["url_host"] = url_host
         actor_fields = deps.actor.audit_actor_fields()
-        await deps.audit_service.log_async(
-            tenant_id=run.tenant_id,
-            actor_id=actor_fields["actor_id"],
-            actor_type=actor_fields["actor_type"],
-            actor_api_key_id=actor_fields["actor_api_key_id"],
-            action=ActionType.FLOW_HTTP_OUTBOUND_CALL,
-            entity_type=EntityType.FLOW_RUN,
-            entity_id=run.id,
-            description=f"Flow HTTP {call_type} {method} to {target}",
-            metadata=deps.actor.audit_metadata(target=run, extra=extra),
-            outcome=outcome,
-            error_message=error_message,
-        )
+        async with asyncio.timeout_at(deps.ends_at):
+            await deps.audit_service.log_async(
+                tenant_id=run.tenant_id,
+                actor_id=actor_fields["actor_id"],
+                actor_type=actor_fields["actor_type"],
+                actor_api_key_id=actor_fields["actor_api_key_id"],
+                action=ActionType.FLOW_HTTP_OUTBOUND_CALL,
+                entity_type=EntityType.FLOW_RUN,
+                entity_id=run.id,
+                description=f"Flow HTTP {call_type} {method} to {target}",
+                metadata=deps.actor.audit_metadata(target=run, extra=extra),
+                outcome=outcome,
+                error_message=error_message,
+            )
     except Exception:
         deps.logger.warning(
             "flow_executor.audit_http_outbound_failed run_id=%s step_order=%d",

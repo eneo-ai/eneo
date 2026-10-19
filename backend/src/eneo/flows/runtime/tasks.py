@@ -22,8 +22,10 @@ from eneo.flows.application.flow_run_audit_outbox_policy import (
 )
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
-    FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
     FLOW_WEBHOOK_DELIVERY_CONCURRENCY,
+    FlowWebhookDeliveryBudget,
+    FlowWebhookDeliveryDeadline,
+    flow_webhook_delivery_budget,
 )
 from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.domain.flow_run_recovery_policy import (
@@ -904,56 +906,102 @@ async def _deliver_flow_audit_outbox(
 
 
 async def _deliver_flow_webhook_outbox(
-    *, limit: int = FLOW_WEBHOOK_DELIVERY_BATCH_SIZE
+    *,
+    budget: FlowWebhookDeliveryBudget,
+    limit: int = FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
 ) -> dict[str, int | str]:
-    if limit <= 0:
-        return FlowWebhookDeliveryResult().to_task_payload()
+    """Claim and deliver due webhooks in waves of the concurrency until a wave
+    claims nothing or the job deadline no longer covers a whole delivery.
 
-    now = datetime.now(timezone.utc)
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        async with session.begin():
-            container = Container(session=providers.Object(session))
-            service = container.flow_run_webhook_delivery_service()
-            batch = await service.claim_due_batch(now=now, limit=limit)
-
-    concurrency = min(FLOW_WEBHOOK_DELIVERY_CONCURRENCY, len(batch.claimed_rows))
-    if concurrency == 0:
-        return batch.result.to_task_payload()
-    semaphore = asyncio.Semaphore(concurrency)
-
-    async def _deliver_claimed(
-        row: FlowRunWebhookDeliveryRow,
-    ) -> FlowWebhookDeliveryResult:
-        async with semaphore:
-            try:
-                async with sessionmanager.session() as delivery_session:
-                    enable_autobegin_for_flow_task_session(delivery_session)
-                    delivery_container = Container(
-                        session=providers.Object(delivery_session)
-                    )
-                    delivery_service = (
-                        delivery_container.flow_run_webhook_delivery_service()
-                    )
-                    return await delivery_service.deliver_claimed(row=row, now=now)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception(
-                    "Flow webhook delivery worker failed before recording an outcome",
-                    extra={"delivery_id": str(row.id)},
-                )
-                return FlowWebhookDeliveryResult(attempted_count=1)
-
-    delivery_tasks: list[asyncio.Task[FlowWebhookDeliveryResult]] = []
-    async with asyncio.TaskGroup() as task_group:
-        for row in batch.claimed_rows:
-            delivery_tasks.append(task_group.create_task(_deliver_claimed(row)))
-
-    result = batch.result
-    for delivery_task in delivery_tasks:
-        result = result.combine(delivery_task.result())
+    Claims, deliveries and their recording are all cut at the budget's hard
+    stop. A delivery cut there keeps its claim; the job then returns its counts
+    with the hard_stopped status and logs them once."""
+    loop = asyncio.get_running_loop()
+    deadline = budget.deadline(started_at=loop.time())
+    result = FlowWebhookDeliveryResult()
+    wave: list[asyncio.Task[FlowWebhookDeliveryResult]] = []
+    hard_stop = asyncio.timeout_at(deadline.hard_stop_at)
+    try:
+        async with hard_stop:
+            remaining = limit
+            # A claim session dead-letters expired claims before it checks the
+            # deadline, so none opens once a new wave no longer fits.
+            while remaining > 0 and deadline.allows_new_wave(loop.time()):
+                async with sessionmanager.session() as session:
+                    enable_autobegin_for_flow_task_session(session)
+                    async with session.begin():
+                        container = Container(session=providers.Object(session))
+                        service = container.flow_run_webhook_delivery_service()
+                        batch = await service.claim_due_batch(
+                            now=datetime.now(timezone.utc),
+                            limit=min(FLOW_WEBHOOK_DELIVERY_CONCURRENCY, remaining),
+                            deadline=deadline,
+                        )
+                result = result.combine(batch.result)
+                if not batch.claimed_rows:
+                    break
+                remaining -= len(batch.claimed_rows) + batch.result.dead_lettered_count
+                async with asyncio.TaskGroup() as task_group:
+                    wave = [
+                        task_group.create_task(
+                            _deliver_claimed_webhook(row=row, deadline=deadline)
+                        )
+                        for row in batch.claimed_rows
+                    ]
+                for delivery_task in wave:
+                    result = result.combine(delivery_task.result())
+                wave = []
+    except TimeoutError:
+        if not hard_stop.expired():
+            raise
+        ended = [task for task in wave if not task.cancelled()]
+        for delivery_task in ended:
+            result = result.combine(delivery_task.result())
+        result = result.combine(
+            FlowWebhookDeliveryResult(unfinished_count=len(wave) - len(ended))
+        )
+        payload = result.to_task_payload(status="hard_stopped")
+        logger.error(
+            "Flow webhook outbox job reached its hard stop; unfinished deliveries "
+            "keep their claims until they expire",
+            extra=payload,
+        )
+        return payload
     return result.to_task_payload()
+
+
+async def _deliver_claimed_webhook(
+    *,
+    row: FlowRunWebhookDeliveryRow,
+    deadline: FlowWebhookDeliveryDeadline,
+) -> FlowWebhookDeliveryResult:
+    try:
+        async with sessionmanager.session() as delivery_session:
+            enable_autobegin_for_flow_task_session(delivery_session)
+            delivery_container = Container(session=providers.Object(delivery_session))
+            delivery_service = delivery_container.flow_run_webhook_delivery_service()
+            try:
+                return await delivery_service.deliver_claimed(
+                    row=row, deadline=deadline
+                )
+            except asyncio.CancelledError:
+                logger.error(
+                    "Flow webhook delivery was stopped before it ended; its claim "
+                    "stays until it expires unless its outcome was already committed",
+                    extra={
+                        "delivery_id": str(row.id),
+                        "flow_run_id": str(row.flow_run_id),
+                    },
+                )
+                raise
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception(
+            "Flow webhook delivery worker failed before recording an outcome",
+            extra={"delivery_id": str(row.id)},
+        )
+        return FlowWebhookDeliveryResult(attempted_count=1)
 
 
 async def reconcile_stale_running_runs() -> dict[str, int | str]:
@@ -977,8 +1025,7 @@ async def deliver_flow_audit_outbox() -> dict[str, int | str]:
 
 
 async def deliver_flow_webhook_outbox() -> dict[str, int | str]:
-    async with asyncio.timeout(FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS + 30):
-        return await _deliver_flow_webhook_outbox()
+    return await _deliver_flow_webhook_outbox(budget=flow_webhook_delivery_budget())
 
 
 def _flow_transcribers(

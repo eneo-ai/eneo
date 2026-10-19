@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -93,6 +94,7 @@ async def test_authored_host_cannot_redirect_a_saved_credential(surface, host_he
                 audit_http_outbound=AsyncMock(),
             ),
             idempotency_key="run-1:step-1",
+            sends_end_at=math.inf,
         )
     assert len(outgoing) == 1
     assert outgoing[0].headers["Host"] == "example.org:8443"
