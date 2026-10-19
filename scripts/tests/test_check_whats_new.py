@@ -250,12 +250,13 @@ class ReleaseTagTests(_RepoCase):
         self.assertIn("newer than release tag", result.stdout)
 
     def test_rc_requires_its_own_release_content_instead_of_reusing_an_older_version(self) -> None:
-        result = self.run_check(
-            self.make_repo(self.releases("2.2.0", "2026-10-01")),
-            "--release-tag", "v2.3.0-rc.1",
-        )
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("RC tag v2.3.0-rc.1 needs notes for 2.3.0", result.stdout)
+        for data in [self.releases("2.2.0", "2026-10-01"), {"releases": []}]:
+            with self.subTest(data=data):
+                result = self.run_check(
+                    self.make_repo(data), "--release-tag", "v2.3.0-rc.1",
+                )
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("RC tag v2.3.0-rc.1 needs notes for 2.3.0", result.stdout)
 
     def test_rejects_malformed_tags(self) -> None:
         result = self.run_check(self.make_repo(self.releases("2.2.0")), "--release-tag", "2.2")
