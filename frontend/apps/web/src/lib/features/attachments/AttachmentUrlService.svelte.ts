@@ -48,6 +48,16 @@ class AttachmentUrlService {
     return url;
   }
 
+  /**
+   * Resolves the signed URL of the file's primary representation, for code
+   * that needs the link rather than a template. Shares the cache with
+   * `getUrl`; undefined when no link can be minted for the file.
+   */
+  async resolveUrl(file: { id: string }): Promise<string | undefined> {
+    const key = `primary:${file.id}`;
+    return this.#fresh(key) ?? (await this.#request(file.id, "primary", key));
+  }
+
   #fresh(key: string) {
     const record = this.#attachmentUrls.get(key);
     return record && Date.now() < record.expiresAt ? record.url : undefined;

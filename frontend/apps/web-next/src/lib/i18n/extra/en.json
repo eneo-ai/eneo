@@ -1606,5 +1606,7 @@
   "side_panel_latest_answer": "Latest answer",
   "chat_quote_label": "Quote",
   "chat_quote_remove": "Remove the quote",
-  "integration_announce_sync_stopped": "Sync of {name} is no longer running"
+  "integration_announce_sync_stopped": "Sync of {name} is no longer running",
+  "file_preview_previous_version": "Previous version",
+  "file_preview_next_version": "Next version"
 }

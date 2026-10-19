@@ -14,6 +14,7 @@ from eneo.assistants.api.assistant_protocol import (
     to_ask_conversation_response,
     to_sse_response,
 )
+from eneo.files.file_models import File, FileType
 from eneo.questions.question import UseTools
 from eneo.sessions.session import SessionInDB, TokenUsageEvent
 
@@ -46,6 +47,35 @@ def test_non_streaming_conversation_response_includes_mcp_references():
     assert response.id == question_id
     assert response.mcp_tool_references[0].id == reference.id
     assert response.mcp_tool_references[0].content == "resource content"
+
+
+def test_non_streaming_conversation_response_carries_the_files_the_answer_made():
+    """A complete answer lists its generated files, as the stream and history do."""
+    made = File(
+        id=uuid4(),
+        name="Plan.md",
+        checksum="a1",
+        size=12,
+        text="# Plan",
+        mimetype="text/markdown",
+        file_type=FileType.TEXT,
+        user_id=uuid4(),
+        tenant_id=uuid4(),
+    )
+
+    response = to_ask_conversation_response(
+        question="Question",
+        files=[],
+        session=SessionInDB(id=uuid4(), user_id=uuid4(), name="Conversation"),
+        answer="Answer",
+        info_blobs=[],
+        tools=UseTools(assistants=[]),
+        generated_files=[made],
+    )
+
+    assert [file.id for file in response.generated_files] == [made.id]
+    assert response.generated_files[0].mimetype == "text/markdown"
+    assert "checksum" not in response.generated_files[0].model_dump()
 
 
 def test_tool_call_sse_preserves_null_tool_call_id():

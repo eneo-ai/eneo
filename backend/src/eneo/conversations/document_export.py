@@ -56,6 +56,7 @@ if TYPE_CHECKING:
         MCPProxySessionFactory,
     )
     from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
+    from eneo.questions.question import Question
     from eneo.sessions.session import SessionInDB
 
 logger = get_logger(__name__)
@@ -190,15 +191,30 @@ def _stem(filename: str) -> str:
     return filename.rsplit(".", 1)[0] if "." in filename else filename
 
 
+def conversation_document_turn(
+    conversation: "SessionInDB", file_id: UUID
+) -> "tuple[Question, File] | None":
+    """The turn whose answer holds this Markdown document, and the document.
+
+    A version a user saved of the document counts too: it is attached to the
+    same turn as the version it was made from.
+    """
+    for question in conversation.questions or []:
+        for file in question.generated_files or []:
+            if file.id == file_id and file.mimetype == MARKDOWN_MIME_TYPE:
+                return question, file
+    return None
+
+
 def conversation_document(
     conversation: "SessionInDB", file_id: UUID
 ) -> "tuple[UUID | None, File] | None":
     """The Markdown document the assistant made in this conversation, and its assistant."""
-    for question in conversation.questions or []:
-        for file in question.generated_files or []:
-            if file.id == file_id and file.mimetype == MARKDOWN_MIME_TYPE:
-                return question.assistant_id, file
-    return None
+    found = conversation_document_turn(conversation, file_id)
+    if found is None:
+        return None
+    question, file = found
+    return question.assistant_id, file
 
 
 def _with_images(
