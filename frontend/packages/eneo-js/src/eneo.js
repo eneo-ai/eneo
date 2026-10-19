@@ -30,6 +30,7 @@ import { initSecurityClassifications } from "./endpoints/security-classification
 import { initMCPServers } from "./endpoints/mcp-servers.js";
 import { initDocumentTemplates } from "./endpoints/document-templates.js";
 import { initMcpApps } from "./endpoints/mcp-apps.js";
+import { initMcpOauth } from "./endpoints/mcp-oauth.js";
 import { initPromptLibrary } from "./endpoints/prompt-library.js";
 import { initGovernancePolicy } from "./endpoints/governance-policy.js";
 import { initSettings } from "./endpoints/settings.js";
@@ -89,6 +90,7 @@ export function createEneo(args) {
     mcpServers: initMCPServers(client),
     documentTemplates: initDocumentTemplates(client),
     mcpApps: initMcpApps(client),
+    mcpOauth: initMcpOauth(client),
     promptLibrary: initPromptLibrary(client),
     governancePolicy: initGovernancePolicy(client),
     settings: initSettings(client),

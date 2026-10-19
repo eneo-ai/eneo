@@ -23,6 +23,11 @@
   import AddWizard from "../models/AddWizard/AddWizard.svelte";
   import { writable } from "svelte/store";
   import { readinessMessage } from "$lib/features/mcp/readiness";
+  import {
+    useMcpOAuthConnect,
+    type McpOAuthConnection
+  } from "$lib/features/mcp/McpOAuthConnectService.svelte";
+  import { toastError } from "$lib/core/errors";
   import type { ModelProviderPublic } from "@eneo/eneo-js";
   import type { Writable } from "svelte/store";
 
@@ -120,9 +125,39 @@
   let name = $state("");
   let description = $state("");
   let http_url = $state("");
-  let http_auth_type = $state<"none" | "bearer" | "api_key_header" | "internal" | "bundled">(
-    "none"
-  );
+  let http_auth_type = $state<
+    "none" | "bearer" | "api_key_header" | "internal" | "bundled" | "oauth"
+  >("none");
+  // OAuth servers: whose identity the vendor sees, and an optional
+  // pre-registered client at its authorization server plus a scope override.
+  let auth_scope = $state<"per_user" | "shared">("per_user");
+  let oauth_client_id = $state("");
+  let oauth_client_secret = $state("");
+  let oauth_scope = $state("");
+  const isOauth = $derived(http_auth_type === "oauth");
+  // The acting admin's own connection to this server (or the shared one):
+  // tools can only be synced through it, so the dialog offers it here.
+  const oauthConnect = useMcpOAuthConnect();
+  let oauthConnection = $state<McpOAuthConnection | null>(null);
+  async function loadOauthConnection(serverId: string) {
+    try {
+      const connections = await eneo.mcpOauth.myConnections();
+      oauthConnection = connections.find((c) => c.mcp_server_id === serverId) ?? null;
+    } catch {
+      oauthConnection = null;
+    }
+  }
+  oauthConnect.subscribe((serverId, result) => {
+    if (result.success) oauthConnection = result.connection;
+    else if (result.error.message !== "popup_closed") toastError(result.error);
+  });
+  $effect(() => {
+    if ($openController && mcpServer?.http_auth_type === "oauth") {
+      void loadOauthConnection(mcpServer.mcp_server_id);
+    } else {
+      oauthConnection = null;
+    }
+  });
   let documentation_url = $state("");
   let security_classification = $state<SecurityClassification | null>(null);
   let forward_identity = $state(false);
@@ -283,7 +318,8 @@
       http_url = mcpServer.http_url || "";
       http_auth_type =
         (mcpServer.http_auth_type as
-          "none" | "bearer" | "api_key_header" | "internal" | "bundled") || "none";
+          "none" | "bearer" | "api_key_header" | "internal" | "bundled" | "oauth") || "none";
+      auth_scope = (mcpServer.auth_scope as "per_user" | "shared") ?? "per_user";
       source = mcpServer.http_auth_type === "internal" ? "builtin" : "external";
       imageModelId = mcpServer.image_model_id ?? "";
       documentation_url = mcpServer.documentation_url || "";
@@ -306,6 +342,7 @@
       description = "";
       http_url = "";
       http_auth_type = "none";
+      auth_scope = "per_user";
       source = hasBuiltinProvider(initialPurpose) ? "builtin" : "external";
       imageModelId = "";
       documentation_url = "";
@@ -324,6 +361,9 @@
     bearer_token = "";
     api_key_header_name = "";
     api_key_token = "";
+    oauth_client_id = "";
+    oauth_client_secret = "";
+    oauth_scope = "";
     errorMessage = "";
   });
 
@@ -349,6 +389,9 @@
       }
       if (!isEditMode || http_auth_type !== mcpServer?.http_auth_type) {
         data.http_auth_type = http_auth_type;
+      }
+      if (isOauth && (!isEditMode || auth_scope !== mcpServer?.auth_scope)) {
+        data.auth_scope = auth_scope;
       }
       if (isBuiltin) {
         data.image_model_id = imageModelId;
@@ -395,6 +438,13 @@
           ? { header_name: api_key_header_name, token: api_key_token }
           : { token: api_key_token };
       }
+      if (isOauth && (oauth_client_id || oauth_client_secret || oauth_scope)) {
+        const config: Record<string, string> = {};
+        if (oauth_client_id) config.client_id = oauth_client_id;
+        if (oauth_client_secret) config.client_secret = oauth_client_secret;
+        if (oauth_scope) config.scope = oauth_scope;
+        data.http_auth_config_schema = config;
+      }
 
       await onSubmit(data, mcpServer?.mcp_server_id);
 
@@ -409,6 +459,10 @@
         bearer_token = "";
         api_key_header_name = "";
         api_key_token = "";
+        oauth_client_id = "";
+        oauth_client_secret = "";
+        oauth_scope = "";
+        auth_scope = "per_user";
         security_classification = null;
         audience = "everyone";
         audiencePriority = 100;
@@ -438,7 +492,8 @@
   const authTypeOptions = $derived([
     { value: "none" as const, label: m.mcp_auth_type_none() },
     { value: "bearer" as const, label: m.bearer_token() },
-    { value: "api_key_header" as const, label: m.api_key_header_auth() }
+    { value: "api_key_header" as const, label: m.api_key_header_auth() },
+    { value: "oauth" as const, label: m.mcp_auth_type_oauth() }
   ]);
   // The number input yields null when cleared and accepts negatives; the
   // backend requires a non-negative integer, so gate submit here.
@@ -1003,6 +1058,129 @@
                       {m.will_be_sent_as_bearer()}
                     </p>
                   </div>
+                {/if}
+
+                {#if isOauth}
+                  <Field.Field>
+                    <Field.Label for="mcp-auth-scope">{m.mcp_oauth_scope_label()}</Field.Label>
+                    <Select.Root
+                      type="single"
+                      value={auth_scope}
+                      onValueChange={(key) =>
+                        (auth_scope = key === "shared" ? "shared" : "per_user")}
+                    >
+                      <Select.Trigger id="mcp-auth-scope" class="w-full">
+                        {auth_scope === "shared"
+                          ? m.mcp_oauth_scope_shared()
+                          : m.mcp_oauth_scope_per_user()}
+                      </Select.Trigger>
+                      <Select.Content>
+                        <Select.Item value="per_user" label={m.mcp_oauth_scope_per_user()}>
+                          {m.mcp_oauth_scope_per_user()}
+                        </Select.Item>
+                        <Select.Item value="shared" label={m.mcp_oauth_scope_shared()}>
+                          {m.mcp_oauth_scope_shared()}
+                        </Select.Item>
+                      </Select.Content>
+                    </Select.Root>
+                    <p class="text-muted mt-1.5 text-xs">
+                      {auth_scope === "shared"
+                        ? m.mcp_oauth_scope_shared_hint()
+                        : m.mcp_oauth_scope_per_user_hint()}
+                    </p>
+                  </Field.Field>
+
+                  <div>
+                    <label
+                      for="mcp-oauth-client-id"
+                      class="text-default mb-1.5 block text-sm font-medium"
+                    >
+                      {m.mcp_oauth_client_id()}
+                      <span class="text-muted ml-1 text-xs font-normal"
+                        >{m.mcp_optional_label()}</span
+                      >
+                    </label>
+                    <input
+                      id="mcp-oauth-client-id"
+                      type="text"
+                      bind:value={oauth_client_id}
+                      autocomplete="off"
+                      class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                    />
+                    <p class="text-muted mt-1.5 text-xs">{m.mcp_oauth_client_id_hint()}</p>
+                  </div>
+                  <div>
+                    <label
+                      for="mcp-oauth-client-secret"
+                      class="text-default mb-1.5 block text-sm font-medium"
+                    >
+                      {m.mcp_oauth_client_secret()}
+                      <span class="text-muted ml-1 text-xs font-normal"
+                        >{m.mcp_optional_label()}</span
+                      >
+                    </label>
+                    <input
+                      id="mcp-oauth-client-secret"
+                      type="password"
+                      bind:value={oauth_client_secret}
+                      placeholder={authPlaceholder}
+                      autocomplete="off"
+                      class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                    />
+                    {#if isEditMode}
+                      <p class="text-muted mt-1.5 text-xs">
+                        <span class="text-warning-default">{m.leave_empty_keep_existing()}.</span>
+                      </p>
+                    {/if}
+                  </div>
+                  <div>
+                    <label
+                      for="mcp-oauth-scope"
+                      class="text-default mb-1.5 block text-sm font-medium"
+                    >
+                      {m.mcp_oauth_scope_override()}
+                    </label>
+                    <input
+                      id="mcp-oauth-scope"
+                      type="text"
+                      bind:value={oauth_scope}
+                      autocomplete="off"
+                      class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                    />
+                    <p class="text-muted mt-1.5 text-xs">{m.mcp_oauth_scope_override_hint()}</p>
+                  </div>
+
+                  {#if isEditMode && mcpServer}
+                    <div
+                      class="border-dimmer bg-secondary/40 flex items-center gap-3 rounded-lg border px-3 py-2.5"
+                    >
+                      <div class="min-w-0 flex-1">
+                        <p class="text-default text-sm font-medium">
+                          {auth_scope === "shared"
+                            ? m.mcp_oauth_scope_shared()
+                            : m.mcp_oauth_admin_connection_status()}
+                        </p>
+                        <p class="text-muted text-xs">
+                          {oauthConnection?.status === "connected"
+                            ? m.connected()
+                            : oauthConnection?.status === "needs_authorization"
+                              ? m.mcp_oauth_needs_authorization()
+                              : m.mcp_oauth_connect_to_sync()}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={oauthConnect.isConnecting(mcpServer.mcp_server_id)}
+                        onclick={() => oauthConnect.connect(mcpServer.mcp_server_id)}
+                      >
+                        {oauthConnection?.status === "connected"
+                          ? m.mcp_oauth_reconnect()
+                          : m.connect()}
+                      </Button>
+                    </div>
+                  {/if}
                 {/if}
               </fieldset>
             {/if}

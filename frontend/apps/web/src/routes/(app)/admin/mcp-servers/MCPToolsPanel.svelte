@@ -11,6 +11,7 @@
   import { RefreshCw, TriangleAlert, Trash2, Check, Pencil, X, ShieldAlert } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+  import { useMcpOAuthConnect } from "$lib/features/mcp/McpOAuthConnectService.svelte";
   import { invalidate } from "$app/navigation";
   import { untrack } from "svelte";
   import type { Eneo, components } from "@eneo/eneo-js";
@@ -143,15 +144,28 @@
   let pendingTools = $derived(tools.filter((t) => t.requires_approval));
   let hasPendingChanges = $derived(pendingTools.length > 0);
 
+  // An OAuth server syncs through the acting admin's own connection; a sync
+  // refused for want of one is answered with a connect button here.
+  const oauthConnect = useMcpOAuthConnect();
+  let syncNeedsAuthorization = $state(false);
+  oauthConnect.subscribe((_serverId, result) => {
+    if (result.success) syncNeedsAuthorization = false;
+  });
+
   async function syncTools() {
     syncing = true;
     try {
       await eneoClient.mcpServers.syncTools({ mcp_server_id: mcpServerId });
       const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
+      syncNeedsAuthorization = false;
       await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
-      console.error("Failed to sync tools:", error);
+      if (getErrorMessage(error).startsWith("mcp_authorization_required")) {
+        syncNeedsAuthorization = true;
+      } else {
+        console.error("Failed to sync tools:", error);
+      }
     } finally {
       syncing = false;
     }
@@ -327,6 +341,20 @@
       <span>{syncing ? m.syncing() : m.sync_tools()}</span>
     </Button>
   </div>
+
+  {#if syncNeedsAuthorization}
+    <div
+      class="border-dimmer bg-secondary/40 mr-4 mb-2 ml-10 flex items-center justify-between gap-3 rounded-lg border px-4 py-3"
+    >
+      <span class="text-secondary text-sm">{m.mcp_oauth_connect_to_sync()}</span>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={oauthConnect.isConnecting(mcpServerId)}
+        onclick={() => oauthConnect.connect(mcpServerId)}>{m.connect()}</Button
+      >
+    </div>
+  {/if}
 
   <!-- Pending changes banner -->
   {#if hasPendingChanges}

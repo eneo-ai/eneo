@@ -9,6 +9,8 @@
   import { m } from "$lib/paraglide/messages";
   import { Check, X, LoaderCircle, ChevronRight, RotateCcw } from "@lucide/svelte";
   import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";
+  import McpConnectAction from "./McpConnectAction.svelte";
+  import type { AuthorizationRemedy } from "$lib/features/mcp/oauthRemedy";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";
 
@@ -20,7 +22,8 @@
     toolCallId,
     onLoadResult,
     previousAttempt = false,
-    status = "complete"
+    status = "complete",
+    authorization = null
   }: {
     toolName: string;
     serverName: string;
@@ -31,6 +34,8 @@
     onLoadResult?: () => Promise<string | null>;
     status?: Status;
     previousAttempt?: boolean;
+    /** The connect action when the call failed for want of OAuth authorization. */
+    authorization?: AuthorizationRemedy | null;
   } = $props();
 
   let argsOpen = $state(false);
@@ -129,6 +134,12 @@
       />
     {/if}
   </button>
+
+  {#if authorization && status === "failed"}
+    <div class="border-dimmer flex items-center gap-2 border-t px-3 py-2">
+      <McpConnectAction remedy={authorization} />
+    </div>
+  {/if}
 
   <ToolCallDetailsPanel open={argsOpen} {toolName} {args} {toolCallId} {onLoadResult} {status} />
 </div>

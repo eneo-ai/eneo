@@ -18,6 +18,7 @@
   import ChatReasoningSelect from "../switcher/ChatReasoningSelect.svelte";
   import ChatKnowledge from "./ChatKnowledge.svelte";
   import ChatMcpServers from "./ChatMcpServers.svelte";
+  import McpConnectionsChip from "./McpConnectionsChip.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
   import { effectiveKnowledgeMode, internalMcpServerNames } from "../../internalMcpAvailability";
@@ -371,6 +372,14 @@
     return [];
   });
 
+  // The assistant whose OAuth servers the connect chip asks about; group
+  // chats route to their assistants' servers per turn and get no chip.
+  const oauthChipAssistantId = $derived.by(() => {
+    const partner = chat.partner;
+    if (!partner || !("completion_model" in partner) || !hasMcpTools) return null;
+    return partner.id;
+  });
+
   const effectiveModel = $derived.by(() => {
     const partner = chat.partner;
     if (!partner || !("completion_model" in partner)) return undefined;
@@ -611,6 +620,10 @@
         <X class="size-4" />
       </button>
     </div>
+  {/if}
+
+  {#if oauthChipAssistantId}
+    <McpConnectionsChip assistantId={oauthChipAssistantId} />
   {/if}
 
   <PromptInput.Body>
