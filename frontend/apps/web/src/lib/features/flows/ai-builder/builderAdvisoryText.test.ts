@@ -23,6 +23,10 @@ describe("advisoryText", () => {
     [
       "terminal_renderer_must_not_consume_review_only_step",
       m.ai_builder_advisory_terminal_renderer_must_not_consume_review_only_step()
+    ],
+    [
+      "redundant_terminal_json_format_tail_after_final_text_composer",
+      m.ai_builder_advisory_redundant_terminal_json_format_tail_after_final_text_composer()
     ]
   ])("reads %s in the reader's language", (code, expected) => {
     expect(advisoryText({ code, message: ENGLISH })).toBe(expected);

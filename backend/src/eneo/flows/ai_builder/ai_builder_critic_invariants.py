@@ -1476,6 +1476,12 @@ _REDUNDANT_TERMINAL_JSON_FORMAT_TAIL_AFTER_FINAL_TEXT_COMPOSER = CriticInvariant
         "Behåll JSON-svansen endast om användaren uttryckligen har valt JSON "
         "som slutformat eller om JSON-steget drivs av ett runtime-formulärfält."
     ),
+    # Advisory on edits: the rule judges the whole spec, so an edit that only
+    # adds a lookup before saved steps makes those untouched steps look like a
+    # removable tail, and the only repair would delete a step the person kept.
+    # This also makes a tail the edit itself adds advisory, not blocking; create
+    # still blocks.
+    edit_topology=True,
 )
 
 

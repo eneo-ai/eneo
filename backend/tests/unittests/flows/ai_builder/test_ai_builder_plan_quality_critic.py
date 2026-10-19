@@ -3091,6 +3091,51 @@ class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
         )
         assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
 
+    def test_edit_gives_advisory_not_refusal_and_create_still_refuses(self) -> None:
+        # Kills: dropping edit_topology=True from the invariant. The chain is the
+        # nc4046 shape: untouched saved steps that look like a removable tail.
+        from uuid import uuid4
+
+        from eneo.flows.ai_builder.ai_builder_proposal_policy import (
+            build_create_contextual_quality_feedback,
+            evaluate_edit_topology_policy,
+            format_contextual_quality_feedback,
+        )
+        from eneo.flows.domain.flow import Flow
+
+        spec = _quality_chain_with_redundant_terminal_json_tail(
+            terminal_text_unwrap=False
+        )
+        flow = Flow(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            space_id=uuid4(),
+            name="Sparat flöde",
+            steps=[],
+        )
+
+        edit_feedback = format_contextual_quality_feedback(
+            [], spec, flow=flow, aggregation_intent="linear"
+        )
+        policy = evaluate_edit_topology_policy(
+            conversation=[], spec=spec, flow=flow, planning_state=None
+        )
+        create_feedback = build_create_contextual_quality_feedback(
+            conversation=[],
+            spec=spec,
+            aggregation_intent="linear",
+            resource_catalog=None,
+        )
+
+        assert edit_feedback is None
+        assert policy.failure_codes == frozenset()
+        assert [advisory.code for advisory in policy.advisories] == [
+            _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID
+        ]
+        assert _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID in (
+            create_feedback.failure_codes
+        )
+
     def test_silent_on_three_step_text_revision_quality_chain(self) -> None:
         spec = FlowDraftSpecCore(
             flow_name="Kvalitetskedja utan svans",

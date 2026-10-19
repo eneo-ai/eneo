@@ -75,6 +75,8 @@ const ADVISORY_COPY: Record<string, () => string> = {
     m.ai_builder_advisory_document_renderer_must_immediately_follow_body_writer(),
   terminal_renderer_must_not_consume_review_only_step: () =>
     m.ai_builder_advisory_terminal_renderer_must_not_consume_review_only_step(),
+  redundant_terminal_json_format_tail_after_final_text_composer: () =>
+    m.ai_builder_advisory_redundant_terminal_json_format_tail_after_final_text_composer(),
   citation_mode_unsupported: () => m.flow_validation_msg_citation_mode_unsupported()
 };
 
