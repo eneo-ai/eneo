@@ -1965,6 +1965,7 @@
   "skip_reason_detail_cache": "cache error",
   "skip_reason_detail_connection": "connection error",
   "skip_reason_detail_timeout": "timed out",
+  "skip_reason_detail_no_download": "SharePoint offers no download for this item",
   "skip_reason_detail_http": "HTTP {status}",
   "skip_reason_with_retry": "{reason}. Tried again at the next sync",
   "integration_import_complete_title": "Import queued",

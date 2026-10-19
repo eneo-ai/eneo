@@ -29,7 +29,8 @@ const ERROR_DETAILS: Record<string, () => string> = {
   "Database error": m.skip_reason_detail_database,
   "Cache service error": m.skip_reason_detail_cache,
   "Connection error": m.skip_reason_detail_connection,
-  "Request timed out": m.skip_reason_detail_timeout
+  "Request timed out": m.skip_reason_detail_timeout,
+  "SharePoint offers no download for this item": m.skip_reason_detail_no_download
 };
 const HTTP_DETAIL = /^HTTP (\d{3})\b/;
 

@@ -114,6 +114,15 @@ describe("describeSkipReason", () => {
     }
   });
 
+  it("names an item SharePoint offers no download for", () => {
+    expect(
+      describeSkipReason({
+        code: "error",
+        params: { detail: "SharePoint offers no download for this item" }
+      })
+    ).toBe(m.skip_reason_error({ detail: m.skip_reason_detail_no_download() }));
+  });
+
   it("does not double the full stop before the retry note", () => {
     expect(describeSkipReason({ reason: "Server busy.", retry: true })).toBe(
       m.skip_reason_with_retry({ reason: "Server busy" })
