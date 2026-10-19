@@ -1,8 +1,8 @@
 """An in-memory OAuth 2.1 authorization server protecting one MCP server.
 
 Served through ``httpx.MockTransport`` so the discovery, token and connect
-code talk to it over their normal HTTP paths. It mirrors what a vendor like
-Infocaption publishes: protected resource metadata, authorization server
+code talk to it over their normal HTTP paths. It mirrors what such a vendor
+publishes: protected resource metadata, authorization server
 metadata (with optional CIMD, DCR, client-credentials and ID-JAG support),
 the token endpoint for every grant Eneo uses, registration and revocation.
 """
