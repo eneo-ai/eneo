@@ -20,6 +20,7 @@ def module(name, path):
 
 release = module("release_bundle", "scripts/release_bundle.py")
 setup = module("deployment_setup", "docs/deployment/setup.py")
+smoke = module("smoke_release_bundle", "scripts/smoke_release_bundle.py")
 
 
 class ReleaseTests(unittest.TestCase):
@@ -221,6 +222,38 @@ class ReleaseTests(unittest.TestCase):
 
 
 class ComposeTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI required")
+    def test_release_smoke_runs_every_backend_role_on_the_bundle_image(self):
+        # Kills: only e2e-backend is swapped, so a worker role keeps the
+        # locally built image name and the smoke's --no-build start fails.
+        config = json.loads(
+            subprocess.check_output(
+                [
+                    "docker",
+                    "compose",
+                    "-f",
+                    str(ROOT / "docker-compose.e2e.ci.yml"),
+                    "config",
+                    "--format",
+                    "json",
+                ],
+                text=True,
+            )
+        )
+        services = config["services"]
+        local = services["e2e-backend"]["image"]
+        roles = [name for name, s in services.items() if s.get("image") == local]
+        self.assertIn("task-execution-worker", roles)
+        image = release.REGISTRY + "backend@sha256:" + "c" * 64
+        smoke.use_bundle_backend(services, image, "token")
+        for name in roles:
+            self.assertEqual(services[name]["image"], image)
+            self.assertNotIn("build", services[name])
+            self.assertEqual(
+                services[name]["environment"]["TOOL_RUNTIME_URL"],
+                "http://tool-runtime:3010",
+            )
+
     @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI required")
     def test_bundle_pins_every_service_and_legacy_overlay_is_inert(self):
         with tempfile.TemporaryDirectory() as directory:
