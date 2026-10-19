@@ -65,9 +65,12 @@ class FakeOAuthRepo(MCPOAuthRepository):
     async def delete_connection(self, *, mcp_server_id, user_id):
         return self.connections.pop((mcp_server_id, user_id), None) is not None
 
-    async def delete_server_state(self, *, mcp_server_id):
+    async def delete_connections(self, *, mcp_server_id):
         for key in [k for k in self.connections if k[0] == mcp_server_id]:
             del self.connections[key]
+
+    async def delete_server_state(self, *, mcp_server_id):
+        await self.delete_connections(mcp_server_id=mcp_server_id)
         for key in [k for k in self.registrations if k[0] == mcp_server_id]:
             del self.registrations[key]
 

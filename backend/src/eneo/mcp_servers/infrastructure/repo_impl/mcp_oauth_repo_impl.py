@@ -159,12 +159,15 @@ class MCPOAuthRepoImpl(MCPOAuthRepository):
         result = await self.session.execute(stmt)
         return affected_row_count(result) > 0
 
-    async def delete_server_state(self, *, mcp_server_id: UUID) -> None:
+    async def delete_connections(self, *, mcp_server_id: UUID) -> None:
         await self.session.execute(
             sa.delete(MCPOAuthConnections).where(
                 MCPOAuthConnections.mcp_server_id == mcp_server_id
             )
         )
+
+    async def delete_server_state(self, *, mcp_server_id: UUID) -> None:
+        await self.delete_connections(mcp_server_id=mcp_server_id)
         await self.session.execute(
             sa.delete(MCPOAuthClientRegistrations).where(
                 MCPOAuthClientRegistrations.mcp_server_id == mcp_server_id

@@ -894,6 +894,9 @@ class MCPServerService:
             http_auth_type is not None and http_auth_type != mcp_server.http_auth_type
         )
         credentials_changed = http_auth_config_schema is not None
+        auth_scope_changed = (
+            auth_scope is not None and auth_scope != mcp_server.auth_scope
+        )
         identity_mode_changed = (
             forward_identity is not None
             and forward_identity != mcp_server.forward_identity
@@ -1122,6 +1125,15 @@ class MCPServerService:
             or (auth_type_changed and not is_oauth_server(mcp_server.http_auth_type))
         ):
             await self.mcp_oauth_repo.delete_server_state(mcp_server_id=mcp_server.id)
+        elif (
+            self.mcp_oauth_repo is not None
+            and auth_scope_changed
+            and is_oauth_server(mcp_server.http_auth_type)
+        ):
+            # Whose identity the server sees changed: the personal tokens of a
+            # server that is now shared, or the service account's token of one
+            # that is now per user, must not be the ones it keeps using.
+            await self.mcp_oauth_repo.delete_connections(mcp_server_id=mcp_server.id)
 
         # Encrypt and apply new credentials after validation passes
         if http_auth_config_schema is not None and mcp_server.http_auth_type != "none":

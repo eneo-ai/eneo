@@ -159,6 +159,35 @@ class TestSavingWithoutAConnection:
         assert oauth_repo.connections == {}
         assert oauth_repo.registrations == {}
 
+    async def test_a_new_auth_scope_forgets_the_connections_but_not_the_client(
+        self, monkeypatch
+    ):
+        vendor = FakeAuthorizationServer()
+        vendor.install(monkeypatch)
+        from tests.unit.mcp_servers.application.test_mcp_oauth_token_provider import (
+            FakeOAuthRepo,
+        )
+
+        oauth_repo = FakeOAuthRepo()
+        service, repo = _service(oauth_repo=oauth_repo)
+        server = MCPServer(
+            id=uuid4(),
+            tenant_id=service.user.tenant_id,
+            name="Vendor",
+            http_url=vendor.server_url,
+            http_auth_type=OAUTH_AUTH_TYPE,
+            auth_scope="shared",
+        )
+        repo.one = AsyncMock(return_value=server)
+        repo.update = AsyncMock(side_effect=lambda s: s)
+        oauth_repo.connections[(server.id, None)] = MagicMock()
+        oauth_repo.registrations[(server.id, vendor.issuer)] = MagicMock()
+
+        await service.update_mcp_server(server.id, auth_scope="per_user")
+
+        assert oauth_repo.connections == {}
+        assert list(oauth_repo.registrations) == [(server.id, vendor.issuer)]
+
     async def test_tool_sync_names_the_remedy_when_the_admin_is_not_connected(
         self, monkeypatch
     ):
