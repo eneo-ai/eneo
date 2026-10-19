@@ -61,17 +61,18 @@ Run this when the release branch is cut or the tag is about to be pushed.
 2. Write one entry per change (merge PRs that describe the same feature) into
    a new release object at the **top** of `releases` in `releases.json`:
 
-   | Field      | Rule                                                                                                                       |
-   | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
-   | `version`  | Semver without `v`, matching the tag (`v2.3.0` → `2.3.0`).                                                                 |
-   | `date`     | Leave out in the draft; set `YYYY-MM-DD` when the tag is pushed.                                                           |
-   | `id`       | Stable kebab-case, unique within the release. Never rename after publishing — it is the deep-link target on docs.          |
-   | `type`     | `new` (could not do before), `improved` (could, now better), `fixed` (was broken for users).                               |
-   | `area`     | Where the user meets it: `chat`, `assistants`, `knowledge`, `spaces`, `skills`, `account`, `admin`, `platform`.            |
-   | `audience` | `admin` when only administrators can see the screen. Omit otherwise. Hidden from non-admins in the app.                    |
-   | `title`    | ≤ 60 characters, verb first ("Change your own password"). Both `en` and `sv`.                                              |
-   | `body`     | 1–3 sentences. What the user can do now and where. Both `en` and `sv`.                                                     |
-   | `showMe`   | Optional. `href` is the app path without locale prefix; `anchor` must exist as `data-tour="…"` in `frontend/apps/web/src`. |
+   | Field      | Rule                                                                                                                                       |
+   | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+   | `version`  | Semver without `v`, matching the tag (`v2.3.0` → `2.3.0`).                                                                                 |
+   | `date`     | Leave out in the draft; set `YYYY-MM-DD` when the tag is pushed.                                                                           |
+   | `id`       | Stable kebab-case, unique within the release. Never rename after publishing — it is the deep-link target on docs.                          |
+   | `aliases`  | When merging published entries, keep their former ids here so existing links still work. Unique across all ids and aliases in the release. |
+   | `type`     | `new` (could not do before), `improved` (could, now better), `fixed` (was broken for users).                                               |
+   | `area`     | Where the user meets it: `chat`, `assistants`, `knowledge`, `spaces`, `skills`, `account`, `admin`, `platform`.                            |
+   | `audience` | `admin` when only administrators can see the screen. Omit otherwise. Hidden from non-admins in the app.                                    |
+   | `title`    | ≤ 60 characters, verb first ("Change your own password"). Both `en` and `sv`.                                                              |
+   | `body`     | 1–3 sentences. What the user can do now and where. Both `en` and `sv`.                                                                     |
+   | `showMe`   | Optional. `href` is the app path without locale prefix; `anchor` must exist as `data-tour="…"` in `frontend/apps/web/src`.                 |
 
 3. Editorial rules — the check script enforces the mechanical ones:
 
