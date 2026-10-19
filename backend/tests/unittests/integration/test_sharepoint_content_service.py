@@ -131,7 +131,30 @@ def _http_error(status: int, message: str) -> aiohttp.ClientResponseError:
     )
 
 
-RETRY_NOTE = " (retried by the next sync)"
+def _reasons(details):
+    """File, text and retry flag of each detail; codes are pinned by their own tests."""
+    return [
+        {
+            "file": detail["file"],
+            "reason": detail["reason"],
+            **({"retry": True} if detail.get("retry") else {}),
+        }
+        for detail in details
+    ]
+
+
+def _feed(files):
+    """Name, outcome and text of each live-feed entry."""
+    return [
+        {
+            "name": entry["name"],
+            "outcome": entry["outcome"],
+            "reason": entry.get("reason"),
+        }
+        for entry in files
+    ]
+
+
 ONE_FILE_FAILED = "1 file could not be processed; the next sync retries it"
 
 
@@ -1633,7 +1656,7 @@ class TestDeltaChangesProcessing:
         assert "1 item skipped" in result
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
         # The item may sit outside the folder, so it is named by its id.
-        assert sync_log.metadata["skipped_details"] == [
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
             {"file": "item-123", "reason": "Folder scope path unavailable"}
         ]
 
@@ -1730,10 +1753,10 @@ class TestOneDriveFolderTraversal:
     @pytest.mark.parametrize(
         ("outcome", "expected_reason", "failed"),
         [
-            (Exception("Graph timeout"), "Error: Graph timeout" + RETRY_NOTE, True),
+            (Exception("Graph timeout"), "Error: Graph timeout", True),
             (
                 _http_error(503, "Service Unavailable"),
-                "Error: HTTP 503 Service Unavailable" + RETRY_NOTE,
+                "Error: HTTP 503 Service Unavailable",
                 True,
             ),
             (_http_error(404, "Not Found"), "Error: HTTP 404 Not Found", False),
@@ -1815,8 +1838,12 @@ class TestOneDriveFolderTraversal:
         assert stats["files_deleted"] == 0
         assert stats["skipped_items"] == 1
         assert stats["failed_items"] == (1 if failed else 0)
-        assert stats["skipped_details"] == [
-            {"file": "still-readable.docx", "reason": expected_reason}
+        assert _reasons(stats["skipped_details"]) == [
+            {
+                "file": "still-readable.docx",
+                "reason": expected_reason,
+                **({"retry": True} if failed else {}),
+            }
         ]
 
     async def test_full_sync_keeps_a_workbook_whose_only_text_is_its_header_row(
@@ -1967,7 +1994,7 @@ class TestFileExtraction:
         )
 
         client.get_file_extraction_by_id.assert_not_called()
-        assert stats["skipped_details"] == [
+        assert _reasons(stats["skipped_details"]) == [
             {"file": "a.pdf", "reason": "Missing item id"}
         ]
 
@@ -1986,7 +2013,7 @@ class TestFileExtraction:
         )
 
         client.get_file_extraction_by_id.assert_not_called()
-        assert stats["skipped_details"] == [
+        assert _reasons(stats["skipped_details"]) == [
             {
                 "file": "Old.DOC",
                 "reason": "Unsupported file type (legacy Word .doc, save as .docx)",
@@ -2025,7 +2052,7 @@ class TestFileExtraction:
             reason=NO_TEXT_LAYER_REASON,
         )
 
-        assert stats["skipped_details"] == [
+        assert _reasons(stats["skipped_details"]) == [
             {"file": "scan.pdf", "reason": NO_TEXT_LAYER_REASON}
         ]
 
@@ -2050,10 +2077,11 @@ class TestFileExtraction:
 
         assert stats["skipped_items"] == 1
         assert stats["failed_items"] == 1
-        assert stats["skipped_details"] == [
+        assert _reasons(stats["skipped_details"]) == [
             {
                 "file": "scan.pdf",
-                "reason": "Could not remove unextractable: db down" + RETRY_NOTE,
+                "reason": "Could not remove unextractable: db down",
+                "retry": True,
             }
         ]
 
@@ -2960,7 +2988,7 @@ class TestProcessPages:
         assert process.await_count == 1
         assert process.await_args.kwargs["sharepoint_item_id"] == "p-real"
         assert stats["pages_processed"] == 1
-        assert stats["skipped_details"] == [
+        assert _reasons(stats["skipped_details"]) == [
             {"file": "p-empty.aspx", "reason": "Empty or unreadable content"}
         ]
 
@@ -2988,8 +3016,8 @@ class TestProcessPages:
         assert stats["pages_processed"] == 1
         assert stats["skipped_items"] == 1
         assert stats["failed_items"] == 1
-        assert stats["skipped_details"] == [
-            {"file": "p-bad.aspx", "reason": "Error: Graph 500" + RETRY_NOTE}
+        assert _reasons(stats["skipped_details"]) == [
+            {"file": "p-bad.aspx", "reason": "Error: Graph 500", "retry": True}
         ]
 
 
@@ -3033,7 +3061,7 @@ class TestProcessInfoBlobEmptyText:
         assert mock_integration_knowledge.size == 380
         assert stats["files_deleted"] == 1
         assert stats["skipped_items"] == 1
-        assert stats["skipped_details"] == [
+        assert _reasons(stats["skipped_details"]) == [
             {"file": "Doc", "reason": EMPTY_CONTENT_REASON}
         ]
         mock_dependencies[
@@ -3064,7 +3092,7 @@ class TestProcessInfoBlobEmptyText:
         delete.assert_not_called()
         assert stats["files_deleted"] == 0
         assert stats["skipped_items"] == 1
-        assert stats["skipped_details"] == [
+        assert _reasons(stats["skipped_details"]) == [
             {"file": "Start.aspx", "reason": EMPTY_CONTENT_REASON}
         ]
 
@@ -3092,10 +3120,11 @@ class TestProcessInfoBlobEmptyText:
 
         assert outcome == "failed"
         assert (stats["failed_items"], stats["skipped_items"]) == (1, 1)
-        assert stats["skipped_details"] == [
+        assert _reasons(stats["skipped_details"]) == [
             {
                 "file": "Doc",
-                "reason": "Could not remove unextractable: 503" + RETRY_NOTE,
+                "reason": "Could not remove unextractable: 503",
+                "retry": True,
             }
         ]
 
@@ -3221,7 +3250,7 @@ class TestSyncStatus:
             {"file": "Beslut.pdf", "change": "added"}
         ]
         assert (metadata["changed_total"], metadata["changed_truncated"]) == (1, False)
-        assert metadata["skipped_details"] == [
+        assert _reasons(metadata["skipped_details"]) == [
             {"file": "scan.pdf", "reason": NO_TEXT_LAYER_REASON}
         ]
         assert (metadata["skipped_total"], metadata["skipped_truncated"]) == (1, False)
@@ -4370,10 +4399,11 @@ class TestDeltaFolderScopeOrdering:
         assert folder_scoped.last_sync_summary["failed_items"] == 1
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
         assert sync_log.status == "error"
-        assert sync_log.metadata["skipped_details"] == [
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
             {
                 "file": "X",
-                "reason": "Could not list folder contents: throttled" + RETRY_NOTE,
+                "reason": "Could not list folder contents: throttled",
+                "retry": True,
             }
         ]
 
@@ -4448,7 +4478,7 @@ class TestDeltaExtractionOutcomes:
         assert ik.last_sync_summary["files_deleted"] == 1
         assert ik.last_sync_summary["skipped_items"] == 1
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
-        assert sync_log.metadata["skipped_details"] == [
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
             {"file": "scan.pdf", "reason": NO_TEXT_LAYER_REASON}
         ]
 
@@ -4495,7 +4525,7 @@ class TestDeltaExtractionOutcomes:
         assert "failed_items" not in ik.last_sync_summary
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
         assert sync_log.status == "success"
-        assert sync_log.metadata["skipped_details"] == [
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
             {"file": "scan.pdf", "reason": expected_reason}
         ]
 
@@ -4543,8 +4573,8 @@ class TestDeltaExtractionOutcomes:
         assert sync_log.error_message == ONE_FILE_FAILED
         assert sync_log.metadata["changes_detected"] == 1
         assert sync_log.metadata["failed_items"] == 1
-        assert sync_log.metadata["skipped_details"] == [
-            {"file": "scan.pdf", "reason": expected_reason + RETRY_NOTE}
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
+            {"file": "scan.pdf", "reason": expected_reason, "retry": True}
         ]
 
     @pytest.mark.parametrize("every_download_refused", [False, True])
@@ -4614,7 +4644,7 @@ class TestDeltaExtractionOutcomes:
             assert ik.last_sync_summary["skipped_items"] == 1
             assert "failed_items" not in ik.last_sync_summary
             assert sync_log.status == "success"
-        assert sync_log.metadata["skipped_details"][0] == {
+        assert _reasons(sync_log.metadata["skipped_details"])[0] == {
             "file": "a.docx",
             "reason": "Error: HTTP 403 Forbidden",
         }
@@ -4659,10 +4689,11 @@ class TestDeltaExtractionOutcomes:
         assert ik.last_sync_summary["skipped_items"] == 1
         assert ik.last_sync_summary["failed_items"] == 1
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
-        assert sync_log.metadata["skipped_details"] == [
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
             {
                 "file": "nulls.txt",
-                "reason": "Could not remove unextractable: db down" + RETRY_NOTE,
+                "reason": "Could not remove unextractable: db down",
+                "retry": True,
             }
         ]
 
@@ -4706,7 +4737,7 @@ class TestDeltaExtractionOutcomes:
         assert ik.last_sync_summary["files_deleted"] == 1
         assert ik.last_sync_summary["skipped_items"] == 1
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
-        assert sync_log.metadata["skipped_details"] == [
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
             {"file": "nulls.txt", "reason": EMPTY_CONTENT_REASON}
         ]
 
@@ -4764,8 +4795,8 @@ class TestDeltaExtractionOutcomes:
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
         assert sync_log.status == "error"
         assert sync_log.metadata["files_processed"] == 1
-        assert sync_log.metadata["skipped_details"] == [
-            {"file": "a.docx", "reason": "Error: redis down" + RETRY_NOTE}
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
+            {"file": "a.docx", "reason": "Error: redis down", "retry": True}
         ]
 
 
@@ -4829,7 +4860,7 @@ class TestSiteRootExtractionOutcomes:
         assert ik.last_sync_summary["skipped_items"] == 1
         assert ik.last_sync_summary["files_deleted"] == 0
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
-        assert sync_log.metadata["skipped_details"] == [
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
             {"file": "photo", "reason": "Unsupported file type (image)"}
         ]
 
@@ -4849,7 +4880,7 @@ class TestSiteRootExtractionOutcomes:
         )
         assert ik.last_sync_summary["files_deleted"] == 1
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
-        assert sync_log.metadata["skipped_details"] == [
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
             {"file": "photo", "reason": EMPTY_CONTENT_REASON}
         ]
 
@@ -4881,10 +4912,11 @@ class TestSiteRootExtractionOutcomes:
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
         assert sync_log.status == "error"
         assert sync_log.sync_type == "full"
-        assert sync_log.metadata["skipped_details"] == [
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
             {
                 "file": "photo",
-                "reason": "Error: HTTP 503 Service Unavailable" + RETRY_NOTE,
+                "reason": "Error: HTTP 503 Service Unavailable",
+                "retry": True,
             }
         ]
 
@@ -5455,9 +5487,9 @@ class TestSyncProgress:
         reason = (
             EMPTY_CONTENT_REASON
             if removal == "succeeds"
-            else "Could not remove unextractable: 503" + RETRY_NOTE
+            else "Could not remove unextractable: 503"
         )
-        assert _progress_phases(progress_redis)[-1]["recent"] == [
+        assert _feed(_progress_phases(progress_redis)[-1]["recent"]) == [
             {"name": "nulls.txt", "outcome": "skipped", "reason": reason}
         ]
 
@@ -5667,7 +5699,7 @@ class TestOutOfScopeNamesStayPrivate:
             "Protokoll.docx",
             "Budget.docx",
         }
-        assert published[-1]["recent"] == [
+        assert _feed(published[-1]["recent"]) == [
             {"name": "Budget.docx", "outcome": "indexed", "reason": None},
             {"name": "Protokoll.docx", "outcome": "indexed", "reason": None},
         ]
@@ -5711,7 +5743,7 @@ class TestOutOfScopeNamesStayPrivate:
         )
 
         sync_log = self._assert_private(mock_dependencies, progress_redis, ik, logged)
-        assert sync_log.metadata["skipped_details"] == [
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
             {"file": "out-1", "reason": "Folder scope path unavailable"}
         ]
 
@@ -5832,23 +5864,26 @@ class TestUserVisibleErrors:
                 )
 
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
-        assert sync_log.metadata["skipped_details"] == [
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
             {"file": "refused.docx", "reason": "Error: HTTP 403 Forbidden"},
             {
                 "file": "cached.docx",
-                "reason": "Error: Cache service error" + RETRY_NOTE,
+                "reason": "Error: Cache service error",
+                "retry": True,
             },
             {
                 "file": "empty.docx",
-                "reason": "Could not remove unextractable: Database error" + RETRY_NOTE,
+                "reason": "Could not remove unextractable: Database error",
+                "retry": True,
             },
             {
                 "file": "away",
-                "reason": "Could not remove out-of-scope: Database error" + RETRY_NOTE,
+                "reason": "Could not remove out-of-scope: Database error",
+                "retry": True,
             },
         ]
         published = [call.args[1] for call in progress_redis.set.await_args_list]
-        assert json.loads(published[-1])["recent"][-1] == {
+        assert _feed(json.loads(published[-1])["recent"])[-1] == {
             "name": "refused.docx",
             "outcome": "skipped",
             "reason": "Error: HTTP 403 Forbidden",
@@ -5951,13 +5986,17 @@ class TestUserVisibleErrors:
         assert stats["reconcile_warning"] == (
             "Orphan cleanup skipped: could not list SharePoint items (Database error)"
         )
-        assert stats["skipped_details"] == [
+        assert _reasons(stats["skipped_details"]) == [
             {
                 "file": "X",
-                "reason": "Could not list folder contents: HTTP 403 Forbidden"
-                + RETRY_NOTE,
+                "reason": "Could not list folder contents: HTTP 403 Forbidden",
+                "retry": True,
             },
-            {"file": "Start.aspx", "reason": "Error: HTTP 404 Not Found" + RETRY_NOTE},
+            {
+                "file": "Start.aspx",
+                "reason": "Error: HTTP 404 Not Found",
+                "retry": True,
+            },
         ]
 
     def test_the_summary_cleans_whatever_text_reached_the_stats(self, service):
@@ -5973,7 +6012,7 @@ class TestUserVisibleErrors:
 
         summary = service._build_summary_stats(stats)
 
-        assert summary["skipped_details"] == [
+        assert _reasons(summary["skipped_details"]) == [
             {"file": "a.docx", "reason": "Error: HTTP 403 Forbidden"}
         ]
         assert summary["reconcile_warning"] == (

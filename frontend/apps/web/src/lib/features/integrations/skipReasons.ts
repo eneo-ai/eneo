@@ -1,77 +1,100 @@
+import type { components } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
-// The sync writes its skip reasons as the stable English strings defined in
-// backend/src/eneo/integration/infrastructure/content_service/utils.py; this
-// turns each one into the viewer's language. Unknown strings pass through.
+// The sync gives every skipped file a code with parameters (see
+// backend/src/eneo/integration/domain/skip_reasons.py); this turns it into the
+// viewer's language. The English `reason` is only shown for a code this client
+// does not know.
 
-const UNSUPPORTED_TYPE = /^Unsupported file type \((.+)\)$/s;
-const NO_TEXT_LAYER = "No text layer (scanned document; OCR is not supported)";
-const EMPTY_CONTENT = "Empty or unreadable content";
-const FILE_TOO_LARGE = /^File too large \(exceeds (.+) MB limit\)$/;
-const EXTRACTION_LIMIT = /^Exceeds extraction limit \((.+)\)$/s;
-const LIMIT_TEXT_BYTES = /^(\d+) bytes of text$/;
-const LIMIT_PDF_PAGES = /^(\d+) PDF pages$/;
-const ERROR = /^Error: (.+)$/s;
-const INCOMPLETE_DOWNLOAD = /^Incomplete download of '.*' \(\d+ of \d+ bytes\)$/s;
-const PASSWORD_PROTECTED = "Password-protected file";
-const CORRUPT_FILE = "Corrupt or malformed file";
+export type SkipReasonCode = components["schemas"]["IntegrationSkippedDocument"]["code"];
 
-function describeLimit(limit: string): string {
-  const bytes = LIMIT_TEXT_BYTES.exec(limit);
-  if (bytes) return m.skip_reason_limit_text_bytes({ count: Number(bytes[1]) });
-  const pages = LIMIT_PDF_PAGES.exec(limit);
-  if (pages) return m.skip_reason_limit_pdf_pages({ count: Number(pages[1]) });
-  return limit;
+export type SkipReason = {
+  reason?: string | null;
+  code?: SkipReasonCode | null;
+  params?: Record<string, string | number>;
+  retry?: boolean;
+};
+
+function text(params: SkipReason["params"], key: string): string {
+  const value = params?.[key];
+  return value === undefined || value === null ? "" : String(value);
 }
 
-function describeError(detail: string): string {
-  if (INCOMPLETE_DOWNLOAD.test(detail)) return m.skip_reason_incomplete_download();
-  if (detail === PASSWORD_PROTECTED) return m.skip_reason_password_protected();
-  if (detail === CORRUPT_FILE) return m.skip_reason_corrupt_file();
-  return m.skip_reason_error({ detail });
+function count(params: SkipReason["params"], key: string): number {
+  return Number(params?.[key] ?? 0);
 }
 
-export type SkipReasonKind =
-  | "unsupported_type"
-  | "no_text_layer"
-  | "empty_content"
-  | "file_too_large"
-  | "extraction_limit"
-  | "incomplete_download"
-  | "password_protected"
-  | "corrupt_file"
-  | "error";
+// The backend describes an error by its kind; these are the kinds it names.
+const ERROR_DETAILS: Record<string, () => string> = {
+  "Database error": m.skip_reason_detail_database,
+  "Cache service error": m.skip_reason_detail_cache,
+  "Connection error": m.skip_reason_detail_connection,
+  "Request timed out": m.skip_reason_detail_timeout
+};
+const HTTP_DETAIL = /^HTTP (\d{3})\b/;
 
-/** Which of the sync's skip reasons a reason string is; anything unrecognised is an error. */
-export function skipReasonKind(reason: string): SkipReasonKind {
-  const trimmed = reason.trim();
-  if (trimmed === NO_TEXT_LAYER) return "no_text_layer";
-  if (trimmed === EMPTY_CONTENT) return "empty_content";
-  if (UNSUPPORTED_TYPE.test(trimmed)) return "unsupported_type";
-  if (FILE_TOO_LARGE.test(trimmed)) return "file_too_large";
-  if (EXTRACTION_LIMIT.test(trimmed)) return "extraction_limit";
-  const error = ERROR.exec(trimmed);
-  if (error) {
-    const detail = error[1];
-    if (INCOMPLETE_DOWNLOAD.test(detail)) return "incomplete_download";
-    if (detail === PASSWORD_PROTECTED) return "password_protected";
-    if (detail === CORRUPT_FILE) return "corrupt_file";
-  }
-  return "error";
-}
-
-/** The reason a sync skipped a file, in the viewer's language. */
-export function describeSkipReason(reason: string): string {
-  const trimmed = reason.trim();
-  if (trimmed === NO_TEXT_LAYER) return m.skip_reason_no_text_layer();
-  if (trimmed === EMPTY_CONTENT) return m.skip_reason_empty_content();
-  const unsupported = UNSUPPORTED_TYPE.exec(trimmed);
-  if (unsupported) return m.skip_reason_unsupported_type({ label: unsupported[1] });
-  const tooLarge = FILE_TOO_LARGE.exec(trimmed);
-  if (tooLarge) return m.skip_reason_file_too_large({ limit: tooLarge[1] });
-  const limit = EXTRACTION_LIMIT.exec(trimmed);
-  if (limit) return m.skip_reason_extraction_limit({ limit: describeLimit(limit[1]) });
-  const error = ERROR.exec(trimmed);
-  if (error) return describeError(error[1]);
+/** An error detail in the viewer's language where the backend named its kind. */
+export function describeErrorDetail(detail: string): string {
+  const trimmed = detail.trim();
+  const known = ERROR_DETAILS[trimmed];
+  if (known) return known();
+  const http = HTTP_DETAIL.exec(trimmed);
+  if (http) return m.skip_reason_detail_http({ status: Number(http[1]) });
   return trimmed;
+}
+
+function describeHttp(params: SkipReason["params"]): string {
+  const status = count(params, "status");
+  if (status === 403) return m.skip_reason_http_forbidden();
+  if (status === 404 || status === 410) return m.skip_reason_http_gone({ status });
+  if (status === 429) return m.skip_reason_http_throttled();
+  return m.skip_reason_http_other({ status });
+}
+
+function describeLimit(params: SkipReason["params"]): string {
+  switch (text(params, "limit")) {
+    case "text_bytes":
+      return m.skip_reason_limit_text_bytes({ count: count(params, "value") });
+    case "pdf_pages":
+      return m.skip_reason_limit_pdf_pages({ count: count(params, "value") });
+    case "resource":
+      return m.skip_reason_limit_resource();
+    case "deadline":
+      return m.skip_reason_limit_deadline();
+    case "output":
+      return m.skip_reason_limit_output();
+    default:
+      return text(params, "detail");
+  }
+}
+
+const DESCRIPTIONS: Record<SkipReasonCode, (params: SkipReason["params"]) => string> = {
+  unsupported_type: (p) => m.skip_reason_unsupported_type({ label: text(p, "label") }),
+  no_text_layer: () => m.skip_reason_no_text_layer(),
+  empty_content: () => m.skip_reason_empty_content(),
+  file_too_large: (p) => m.skip_reason_file_too_large({ limit: text(p, "limit_mb") }),
+  extraction_limit: (p) => m.skip_reason_extraction_limit({ limit: describeLimit(p) }),
+  incomplete_download: () => m.skip_reason_incomplete_download(),
+  password_protected: () => m.skip_reason_password_protected(),
+  corrupt_file: () => m.skip_reason_corrupt_file(),
+  http_error: describeHttp,
+  removal_failed: (p) =>
+    m.skip_reason_removal_failed({ detail: describeErrorDetail(text(p, "detail")) }),
+  listing_failed: (p) =>
+    m.skip_reason_listing_failed({ detail: describeErrorDetail(text(p, "detail")) }),
+  scope_path_unavailable: () => m.skip_reason_scope_path_unavailable(),
+  missing_item_id: () => m.skip_reason_missing_item_id(),
+  error: (p) => m.skip_reason_error({ detail: describeErrorDetail(text(p, "detail")) })
+};
+
+/** Which of the sync's skip reasons this is; anything without a known code is an error. */
+export function skipReasonKind(skip: SkipReason): SkipReasonCode {
+  return skip.code && skip.code in DESCRIPTIONS ? skip.code : "error";
+}
+
+/** Why a sync skipped a file, in the viewer's language, with when it is tried again. */
+export function describeSkipReason(skip: SkipReason): string {
+  const describe = skip.code ? DESCRIPTIONS[skip.code] : undefined;
+  const description = describe ? describe(skip.params) : (skip.reason ?? "").trim();
+  return skip.retry ? m.skip_reason_with_retry({ reason: description }) : description;
 }

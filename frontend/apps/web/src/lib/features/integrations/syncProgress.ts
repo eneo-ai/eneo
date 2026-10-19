@@ -1,11 +1,16 @@
 // Response shape of GET /spaces/{id}/knowledge/integrations/sync-progress/;
 // mirrors the backend's IntegrationSyncProgress model.
+import type { SkipReasonCode } from "./skipReasons";
+
 export type SyncProgressPhase = "discovering" | "processing" | "finishing";
 
 export type SyncProgressFile = {
   name: string;
   outcome: "indexed" | "unchanged" | "skipped";
   reason?: string | null;
+  code?: SkipReasonCode | null;
+  params?: Record<string, string | number>;
+  retry?: boolean;
 };
 
 export type IntegrationSyncProgress = {

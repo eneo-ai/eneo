@@ -22,6 +22,12 @@ from eneo.integration.domain.entities.tenant_sharepoint_app import (
 from eneo.integration.domain.repositories.integration_knowledge_repo import (
     SyncStateFields,
 )
+from eneo.integration.domain.skip_reasons import (
+    SkippedDetail,
+    error_skipped,
+    skipped,
+    skipped_by_code,
+)
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     AccessTokenProvider,
     DeltaTokenExpiredException,
@@ -889,12 +895,8 @@ class SharePointContentService:
                     item_id,
                     resolved_integration_knowledge_id,
                 )
-                stats["skipped_items"] += 1
-                stats["skipped_details"].append(
-                    {
-                        "file": item_id,
-                        "reason": "Folder scope path unavailable",
-                    }
+                self._count_skip(
+                    stats, skipped_by_code(item_id, "scope_path_unavailable")
                 )
                 return
 
@@ -1369,10 +1371,7 @@ class SharePointContentService:
                     if not page_text:
                         page_text = content.get("description", "")
                 if not content or not page_text.strip():
-                    stats["skipped_items"] += 1
-                    stats["skipped_details"].append(
-                        {"file": page_name, "reason": EMPTY_CONTENT_REASON}
-                    )
+                    self._count_skip(stats, skipped_by_code(page_name, "empty_content"))
                     continue
                 outcome = await self._process_info_blob(
                     title=content.get("title", ""),
@@ -1388,7 +1387,7 @@ class SharePointContentService:
                 logger.error(
                     f"Error processing site page {page_name}: {e}", exc_info=True
                 )
-                self._count_failure(stats, page_name, error_reason(e))
+                self._count_failure(stats, error_skipped(page_name, e))
 
     async def _column_catalog(
         self, client: SharePointContentClient, drive_id: Optional[str]
@@ -1616,19 +1615,21 @@ class SharePointContentService:
         elif outcome == "unchanged":
             stats["unchanged_items"] += 1
         elif outcome == "empty":
-            stats["skipped_items"] += 1
-            stats["skipped_details"].append(
-                {"file": item_name, "reason": EMPTY_CONTENT_REASON}
+            SharePointContentService._count_skip(
+                stats, skipped_by_code(item_name, "empty_content")
             )
 
     @staticmethod
-    def _count_failure(stats: SyncStats, item_name: str, reason: str) -> None:
+    def _count_skip(stats: SyncStats, detail: SkippedDetail) -> None:
+        stats["skipped_items"] += 1
+        stats["skipped_details"].append(detail)
+
+    @staticmethod
+    def _count_failure(stats: SyncStats, detail: SkippedDetail) -> None:
         """Count an item the pass could not finish; the pass must not move past it."""
         stats["failed_items"] = stats.get("failed_items", 0) + 1
         stats["skipped_items"] += 1
-        stats["skipped_details"].append(
-            {"file": item_name, "reason": f"{reason} (retried by the next sync)"}
-        )
+        stats["skipped_details"].append({**detail, "retry": True})
 
     async def _delete_local_sharepoint_item(
         self,
@@ -1704,7 +1705,13 @@ class SharePointContentService:
                 e,
             )
             self._count_failure(
-                stats, item_name, f"Could not remove {reason}: {user_visible_error(e)}"
+                stats,
+                skipped_by_code(
+                    item_name,
+                    "removal_failed",
+                    what=reason,
+                    detail=user_visible_error(e),
+                ),
             )
             return None
 
@@ -1732,8 +1739,7 @@ class SharePointContentService:
         )
         if deleted is None:
             return
-        stats["skipped_items"] += 1
-        stats["skipped_details"].append({"file": item_name, "reason": reason})
+        self._count_skip(stats, skipped(item_name, reason))
 
     async def _skip_or_remove_unextractable(
         self,
@@ -1756,9 +1762,10 @@ class SharePointContentService:
                 reason=skip_reason or EMPTY_CONTENT_REASON,
             )
             return
-        stats["skipped_items"] += 1
         if skip_reason:
-            stats["skipped_details"].append({"file": item_name, "reason": skip_reason})
+            self._count_skip(stats, skipped(item_name, skip_reason))
+        else:
+            stats["skipped_items"] += 1
 
     async def _delete_out_of_scope_folder_subtree(
         self,
@@ -1812,8 +1819,9 @@ class SharePointContentService:
             )
             self._count_failure(
                 stats,
-                folder_name,
-                "Could not list folder contents: " + user_visible_error(exc),
+                skipped_by_code(
+                    folder_name, "listing_failed", detail=user_visible_error(exc)
+                ),
             )
             return
 
@@ -1921,9 +1929,8 @@ class SharePointContentService:
         item_name = item.get("name", "")
         item_id = item.get("id")
         if not item_id:
-            stats["skipped_items"] += 1
-            stats["skipped_details"].append(
-                {"file": item_name or "unknown", "reason": "Missing item id"}
+            self._count_skip(
+                stats, skipped_by_code(item_name or "unknown", "missing_item_id")
             )
             return
         integration_knowledge_id = integration_knowledge.id
@@ -1947,10 +1954,7 @@ class SharePointContentService:
 
             unsupported_reason = unsupported_file_reason(item_name)
             if unsupported_reason:
-                stats["skipped_items"] += 1
-                stats["skipped_details"].append(
-                    {"file": item_name, "reason": unsupported_reason}
-                )
+                self._count_skip(stats, skipped(item_name, unsupported_reason))
                 return
 
             content, skip_reason = await self._extract_file(
@@ -1985,7 +1989,7 @@ class SharePointContentService:
                 )
         except Exception as e:
             logger.error(f"Error processing file {item_name}: {e}", exc_info=True)
-            self._count_failure(stats, item_name, error_reason(e))
+            self._count_failure(stats, error_skipped(item_name, e))
 
     async def _index_folder_subtree_entering_scope(
         self,
@@ -2038,8 +2042,9 @@ class SharePointContentService:
             )
             self._count_failure(
                 stats,
-                folder_name,
-                "Could not list folder contents: " + user_visible_error(exc),
+                skipped_by_code(
+                    folder_name, "listing_failed", detail=user_visible_error(exc)
+                ),
             )
             return indexed_ids
 
@@ -2471,10 +2476,7 @@ class SharePointContentService:
             "skipped_total": stats.get("skipped_items", 0),
             "skipped_truncated": len(skipped_details) > _MAX_SKIPPED_DETAILS,
             "skipped_details": [
-                {
-                    "file": detail["file"],
-                    "reason": user_visible_error(detail["reason"]),
-                }
+                {**detail, "reason": user_visible_error(detail["reason"])}
                 for detail in skipped_details[:_MAX_SKIPPED_DETAILS]
             ],
             "changed_total": changed_total,

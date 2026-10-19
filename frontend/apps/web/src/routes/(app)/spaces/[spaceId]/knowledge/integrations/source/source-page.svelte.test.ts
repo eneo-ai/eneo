@@ -124,9 +124,17 @@ vi.mock("$lib/features/spaces/SpacesManager", () => ({
 
 import SourcePage from "./SourcePage.svelte";
 
-function skippedList(entries: [string, string][]): IntegrationSkippedDocuments {
+function skippedList(
+  entries: [string, IntegrationSkippedDocuments["items"][number]["code"], Record<string, string>?][]
+): IntegrationSkippedDocuments {
   return {
-    items: entries.map(([file, reason]) => ({ file, reason })),
+    items: entries.map(([file, code, params = {}]) => ({
+      file,
+      reason: "",
+      code,
+      params,
+      retry: false
+    })),
     total: entries.length,
     truncated: false,
     synced_at: null
@@ -173,8 +181,8 @@ describe("source page", () => {
     api.listSkippedDocuments.mockReset().mockImplementation(async ({ knowledge: item }) =>
       item.id === "ik-a"
         ? skippedList([
-            ["scan.pdf", "No text layer (scanned document; OCR is not supported)"],
-            ["bild.png", "Unsupported file type (image)"]
+            ["scan.pdf", "no_text_layer"],
+            ["bild.png", "unsupported_type", { label: "image" }]
           ])
         : skippedList([])
     );
@@ -293,11 +301,7 @@ describe("source page", () => {
         ? skippedList(
             Array.from(
               { length: 14 },
-              (_, i) =>
-                [`scan-${i}.pdf`, "No text layer (scanned document; OCR is not supported)"] as [
-                  string,
-                  string
-                ]
+              (_, i) => [`scan-${i}.pdf`, "no_text_layer"] as [string, "no_text_layer"]
             )
           )
         : skippedList([])

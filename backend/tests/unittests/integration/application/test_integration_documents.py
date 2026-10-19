@@ -18,6 +18,7 @@ from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.integration.domain.entities.sync_log import SyncLog
+from eneo.integration.domain.skip_reasons import classify_skip_reason
 from eneo.integration.presentation import models as presentation
 
 SITE = "https://contoso.sharepoint.com/sites/KS"
@@ -265,6 +266,18 @@ def test_skipped_documents_without_a_sync_log_is_empty():
     }
 
 
+def _served(file: str, reason: str) -> dict:
+    """A skipped document as the API serves it: classified from its text."""
+    code, params, retry = classify_skip_reason(reason)
+    return {
+        "file": file,
+        "reason": reason,
+        "code": code,
+        "params": params,
+        "retry": retry,
+    }
+
+
 @pytest.mark.parametrize(
     "metadata, completed_at, expected",
     [
@@ -280,8 +293,8 @@ def test_skipped_documents_without_a_sync_log_is_empty():
             datetime(2026, 10, 13, 8, tzinfo=timezone.utc),
             {
                 "items": [
-                    {"file": "scan.pdf", "reason": "No text layer"},
-                    {"file": "old.xyz", "reason": "Unsupported format"},
+                    _served("scan.pdf", "No text layer"),
+                    _served("old.xyz", "Unsupported format"),
                 ],
                 "total": 17,
                 "truncated": True,
@@ -294,7 +307,7 @@ def test_skipped_documents_without_a_sync_log_is_empty():
             {"skipped_items": 1, "skipped_details": [{"file": "a.pdf", "reason": "r"}]},
             None,
             {
-                "items": [{"file": "a.pdf", "reason": "r"}],
+                "items": [_served("a.pdf", "r")],
                 "total": 1,
                 "truncated": False,
                 "synced_at": datetime(2026, 10, 13, 7, tzinfo=timezone.utc),
@@ -348,7 +361,17 @@ def test_served_sync_log_tolerates_a_skipped_item_without_a_name():
 
     assert log.metadata == {
         "skipped_details": [
-            {"file": "", "reason": "Missing item id"},
-            {"file": "a.pdf", "reason": f"Download failed: {FOLDER}/a.pdf"},
+            {
+                "file": "",
+                "reason": "Missing item id",
+                "code": "missing_item_id",
+                "params": {},
+            },
+            {
+                "file": "a.pdf",
+                "reason": f"Download failed: {FOLDER}/a.pdf",
+                "code": "error",
+                "params": {"detail": f"Download failed: {FOLDER}/a.pdf"},
+            },
         ]
     }

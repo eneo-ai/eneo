@@ -210,7 +210,13 @@ describe("FolderDocuments", () => {
     show({
       skipped: {
         items: [
-          { file: "scan.pdf", reason: "No text layer (scanned document; OCR is not supported)" }
+          {
+            file: "scan.pdf",
+            reason: "No text layer (scanned document; OCR is not supported)",
+            code: "no_text_layer",
+            params: {},
+            retry: false
+          }
         ],
         total: 3,
         truncated: true,
@@ -251,7 +257,13 @@ describe("FolderDocuments", () => {
           deleted: 0,
           current: "Protokoll KS 2026-04.pdf",
           recent: [
-            { name: "Bild.png", outcome: "skipped", reason: "Unsupported file type (image)" },
+            {
+              name: "Bild.png",
+              outcome: "skipped",
+              reason: "Unsupported file type (image)",
+              code: "unsupported_type",
+              params: { label: "image" }
+            },
             { name: "Protokoll KS 2026-03.pdf", outcome: "indexed" }
           ]
         }

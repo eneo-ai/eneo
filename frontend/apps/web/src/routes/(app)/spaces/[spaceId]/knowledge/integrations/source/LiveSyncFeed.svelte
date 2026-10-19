@@ -54,7 +54,7 @@
             <span class="truncate">{file.name}</span>
             {#if file.outcome === "skipped" && file.reason}
               <span class="text-secondary text-xs break-words">
-                {describeSkipReason(file.reason)}
+                {describeSkipReason(file)}
               </span>
             {/if}
           </span>

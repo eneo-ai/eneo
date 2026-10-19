@@ -270,7 +270,7 @@
                 >{file.file}</Table.Cell
               >
               <Table.Cell class="text-warning-stronger whitespace-normal">
-                {describeSkipReason(file.reason)}
+                {describeSkipReason(file)}
               </Table.Cell>
             </Table.Row>
           {/each}

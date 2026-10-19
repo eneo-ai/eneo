@@ -190,6 +190,17 @@ def feed_reporter(
     )
 
 
+def _feed(files):
+    return [
+        {
+            "name": entry["name"],
+            "outcome": entry["outcome"],
+            "reason": entry.get("reason"),
+        }
+        for entry in files
+    ]
+
+
 async def test_each_finished_file_enters_the_feed_with_its_outcome(
     feed_reporter, redis_client
 ):
@@ -243,7 +254,7 @@ async def test_each_finished_file_enters_the_feed_with_its_outcome(
     finishing = _saved(redis_client)[-1]
     assert finishing["phase"] == "finishing"
     assert finishing["current"] is None
-    assert finishing["recent"] == [
+    assert _feed(finishing["recent"]) == [
         {"name": "Start.aspx", "outcome": "indexed", "reason": None},
         {"name": "f.pdf", "outcome": "skipped", "reason": "No text found"},
         {"name": "d.docx", "outcome": "skipped", "reason": None},
@@ -265,7 +276,7 @@ async def test_the_file_being_handled_is_published_with_the_files_before_it(
 
     processing = _saved(redis_client)[-1]
     assert (processing["phase"], processing["current"]) == ("processing", "b.docx")
-    assert processing["recent"] == [
+    assert _feed(processing["recent"]) == [
         {"name": "a.docx", "outcome": "unchanged", "reason": None}
     ]
 

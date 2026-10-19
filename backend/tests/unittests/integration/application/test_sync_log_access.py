@@ -383,7 +383,12 @@ async def test_sync_history_written_before_the_cleanup_is_served_clean(
     item = response.json()["items"][0]
     assert item["error_message"] == "Database error"
     assert item["skipped_details"] == [
-        {"file": "a.docx", "reason": "Error: HTTP 403 Forbidden"}
+        {
+            "file": "a.docx",
+            "reason": "Error: HTTP 403 Forbidden",
+            "code": "http_error",
+            "params": {"status": 403, "message": "Forbidden"},
+        }
     ]
     assert item["metadata"]["reconcile_warning"] == (
         "Orphan cleanup skipped (HTTP 403 Forbidden)"

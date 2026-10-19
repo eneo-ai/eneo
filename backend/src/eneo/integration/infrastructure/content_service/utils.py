@@ -27,43 +27,36 @@ from eneo.files.text import (
     TextSanitizer,
     UnsupportedFormatError,
 )
+from eneo.integration.domain.skip_reasons import (
+    CORRUPT_FILE_REASON,
+    EMPTY_CONTENT_REASON,
+    NO_TEXT_LAYER_REASON,
+    NO_TEXT_REASONS,
+    PASSWORD_PROTECTED_REASON,
+    error_reason,
+    extraction_limit_reason,
+    file_too_large_reason,
+    unsupported_type_reason,
+)
 from eneo.integration.infrastructure.content_service.types import SharePointItem
-from eneo.observability.error_text import user_visible_error
 
 logger = getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Skip reasons (user-facing in the sync history dialog; matched in tests)
-# ---------------------------------------------------------------------------
-
-NO_TEXT_LAYER_REASON = "No text layer (scanned document; OCR is not supported)"
-EMPTY_CONTENT_REASON = "Empty or unreadable content"
-
-
-def file_too_large_reason(limit_bytes: int) -> str:
-    """Skip reason for a download above ``SHAREPOINT_MAX_DOWNLOAD_BYTES``."""
-    limit_mb = limit_bytes / (1024 * 1024)
-    return f"File too large (exceeds {limit_mb:g} MB limit)"
-
-
-# The parser ran to completion and found nothing. Only these reasons may
-# remove an existing index entry; every other outcome is non-destructive.
-NO_TEXT_REASONS: frozenset[str] = frozenset(
-    {NO_TEXT_LAYER_REASON, EMPTY_CONTENT_REASON}
-)
-
-
-def unsupported_type_reason(label: str) -> str:
-    return f"Unsupported file type ({label})"
-
-
-def extraction_limit_reason(limit: str) -> str:
-    return f"Exceeds extraction limit ({limit})"
-
-
-def error_reason(detail: str | BaseException) -> str:
-    """``Error: <detail>``; an exception is described by ``user_visible_error``."""
-    return user_visible_error(f"Error: {user_visible_error(detail)}")
+# The skip reasons (user-facing, matched in tests) are defined with their
+# codes in eneo.integration.domain.skip_reasons and re-exported here.
+__all__ = [
+    "CORRUPT_FILE_REASON",
+    "EMPTY_CONTENT_REASON",
+    "NO_TEXT_LAYER_REASON",
+    "NO_TEXT_REASONS",
+    "PASSWORD_PROTECTED_REASON",
+    "ExtractionResult",
+    "error_reason",
+    "extraction_limit_reason",
+    "file_too_large_reason",
+    "unsupported_file_reason",
+    "unsupported_type_reason",
+]
 
 
 @dataclass(frozen=True)
@@ -454,9 +447,9 @@ async def extract_sharepoint_content(
                 extraction_limit_reason(e.limit), content_type
             )
         except EncryptedFileError:
-            return ExtractionResult.error("Password-protected file", content_type)
+            return ExtractionResult.error(PASSWORD_PROTECTED_REASON, content_type)
         except CorruptFileError:
-            return ExtractionResult.error("Corrupt or malformed file", content_type)
+            return ExtractionResult.error(CORRUPT_FILE_REASON, content_type)
         except UnsupportedFormatError:
             label = _extension(filename) or mime or "binary"
             return ExtractionResult.skipped(
