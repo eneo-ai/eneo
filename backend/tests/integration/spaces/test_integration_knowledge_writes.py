@@ -311,6 +311,42 @@ async def test_a_rolled_back_request_hands_no_job_to_the_worker(
     assert dispatches.knowledge_ids == []
 
 
+async def test_a_resync_survives_a_database_error_in_its_subscription_step(
+    db_container, setup, dispatches
+):
+    """The error was swallowed but left the transaction aborted, so queueing
+    the job failed and the resync was a 500."""
+    async with db_container() as container:
+        knowledge = IntegrationKnowledge(
+            name="Protokoll",
+            url="https://contoso.sharepoint.com/sites/KS/Protokoll",
+            space_id=setup.personal_space,
+            tenant_id=container.user().tenant_id,
+            embedding_model_id=setup.embedding_model,
+            user_integration_id=setup.connection,
+            site_id="contoso.sharepoint.com,site,web",
+            resource_type="site",
+        )
+        container.session().add(knowledge)
+        await container.session().flush()
+        knowledge_id = knowledge.id
+
+    async with db_container() as container:
+        service = _service(container, job_service=container.job_service())
+
+        async def failing_ensure(**_):
+            await container.session().execute(sa.text("SELECT 1/0"))
+
+        subscriptions = service.sharepoint_subscription_service
+        subscriptions.ensure_subscription_for_site.side_effect = failing_ensure
+        job = await service.trigger_full_sync(setup.personal_space, knowledge_id)
+
+    await dispatches.wait_for(1)
+    assert dispatches.knowledge_ids == [knowledge_id]
+    async with db_container() as container:
+        assert await container.job_service().get_job(job.id)
+
+
 async def test_a_failed_item_in_the_organization_space_loses_its_distribution(
     db_container, setup
 ):

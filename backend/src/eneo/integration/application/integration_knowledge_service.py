@@ -881,28 +881,31 @@ class IntegrationKnowledgeService:
         )
 
         if subscription_resource_id:
+            # A savepoint keeps a failed statement here from aborting the
+            # transaction the job is queued in.
             try:
-                sharepoint_token = _as_sharepoint_token(subscription_token)
-                subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
-                    user_integration_id=user_integration.id,
-                    site_id=subscription_resource_id,
-                    token=sharepoint_token,
-                    is_onedrive=is_onedrive,
-                )
-                subscription_db_id = (
-                    getattr(subscription, "id", None) if subscription else None
-                )
-                existing_subscription_db_id = getattr(
-                    knowledge, "sharepoint_subscription_id", None
-                )
-                if (
-                    subscription_db_id
-                    and existing_subscription_db_id != subscription_db_id
-                ):
-                    await self.integration_knowledge_repo.link_subscription(
-                        knowledge.id, subscription_db_id
+                async with self.space_repo.session.begin_nested():
+                    sharepoint_token = _as_sharepoint_token(subscription_token)
+                    subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
+                        user_integration_id=user_integration.id,
+                        site_id=subscription_resource_id,
+                        token=sharepoint_token,
+                        is_onedrive=is_onedrive,
                     )
-                    knowledge.sharepoint_subscription_id = subscription_db_id
+                    subscription_db_id = (
+                        getattr(subscription, "id", None) if subscription else None
+                    )
+                    existing_subscription_db_id = getattr(
+                        knowledge, "sharepoint_subscription_id", None
+                    )
+                    if (
+                        subscription_db_id
+                        and existing_subscription_db_id != subscription_db_id
+                    ):
+                        await self.integration_knowledge_repo.link_subscription(
+                            knowledge.id, subscription_db_id
+                        )
+                        knowledge.sharepoint_subscription_id = subscription_db_id
             except Exception as exc:
                 logger.warning(
                     "Failed to ensure SharePoint subscription during full sync "

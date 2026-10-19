@@ -2234,6 +2234,7 @@ class TestTriggerFullSync:
 
         space_repo = AsyncMock()
         space_repo.one.return_value = space
+        space_repo.session = _Savepoints()
 
         oauth_token = MagicMock()
         oauth_token.id = uuid4()
@@ -2305,6 +2306,7 @@ class TestTriggerFullSync:
         job_service.queue_job.assert_called_once()
         # A worker that picked the job up before the commit would not see it.
         assert job_service.queue_job.call_args.kwargs["after_commit"] is True
+        assert space_repo.session.outcomes == ["released"]
         task_params = job_service.queue_job.call_args.kwargs["task_params"]
         assert task_params.token_id == oauth_token.id
         assert task_params.tenant_app_id is None
@@ -2321,6 +2323,7 @@ class TestTriggerFullSync:
 
         space_repo = AsyncMock()
         space_repo.one.return_value = space
+        space_repo.session = _Savepoints()
 
         oauth_token = MagicMock()
         oauth_token.id = uuid4()
@@ -2373,6 +2376,8 @@ class TestTriggerFullSync:
         assert result == queued_job
         sharepoint_subscription_service.ensure_subscription_for_site.assert_called_once()
         job_service.queue_job.assert_called_once()
+        # The failure is rolled back to its savepoint before the job is queued.
+        assert space_repo.session.outcomes == ["rolled back"]
 
     async def test_trigger_full_sync_tenant_app_requires_admin_permission(
         self, actor, space, sharepoint_knowledge_tenant_app
@@ -2387,6 +2392,7 @@ class TestTriggerFullSync:
 
         space_repo = AsyncMock()
         space_repo.one.return_value = space
+        space_repo.session = _Savepoints()
 
         job_service = AsyncMock()
         tenant_sharepoint_app_repo = AsyncMock()
@@ -2445,6 +2451,7 @@ class TestTriggerFullSync:
 
         space_repo = AsyncMock()
         space_repo.one.return_value = space
+        space_repo.session = _Savepoints()
 
         actor_manager = MagicMock()
         actor_manager.get_space_actor_from_space.return_value = actor
