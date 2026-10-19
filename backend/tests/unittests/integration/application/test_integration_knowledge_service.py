@@ -26,7 +26,6 @@ from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.integration.infrastructure.auth_service.org_token_provider import (
-    CREDENTIALS_INVALID_MESSAGE,
     OrgTokenProvider,
     SharePointCredentialsInvalidError,
 )
@@ -2153,22 +2152,22 @@ class TestCreateSpaceIntegrationKnowledgeBatch:
         assert results[0]["error"] == "Database error"
         assert batch.space_repo.session.outcomes == ["rolled back"]
 
-    async def test_a_missing_personal_token_fails_every_item_before_any_write(
+    async def test_a_missing_personal_token_fails_the_request_before_any_write(
         self, batch
     ):
+        """Every item reported the same failure with a 202 before."""
         batch.oauth_token_repo.one.side_effect = NotFoundException(
             "OauthToken not found"
         )
 
-        results = await self._create(batch, ["Protokoll", "Rutiner", "Budget"])
+        with pytest.raises(NotFoundException):
+            await self._create(batch, ["Protokoll", "Rutiner", "Budget"])
 
-        assert [result["status"] for result in results] == ["failed"] * 3
-        assert {result["error"] for result in results} == {"OauthToken not found"}
         batch.integration_knowledge_repo.add.assert_not_awaited()
         batch.job_service.queue_job.assert_not_awaited()
         assert batch.space_repo.session.outcomes == []
 
-    async def test_refused_organization_credentials_fail_every_item_before_any_write(
+    async def test_refused_organization_credentials_fail_the_request_before_any_write(
         self, batch
     ):
         user_integration = (
@@ -2185,10 +2184,9 @@ class TestCreateSpaceIntegrationKnowledgeBatch:
             SharePointCredentialsInvalidError("invalid_client")
         )
 
-        results = await self._create(batch, ["Protokoll", "Rutiner", "Budget"])
+        with pytest.raises(SharePointCredentialsInvalidError):
+            await self._create(batch, ["Protokoll", "Rutiner", "Budget"])
 
-        assert [result["status"] for result in results] == ["failed"] * 3
-        assert {result["error"] for result in results} == {CREDENTIALS_INVALID_MESSAGE}
         batch.integration_knowledge_repo.add.assert_not_awaited()
         batch.job_service.queue_job.assert_not_awaited()
         batch.oauth_token_repo.one.assert_not_awaited()

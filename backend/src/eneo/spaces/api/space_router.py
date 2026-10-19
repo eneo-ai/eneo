@@ -1013,8 +1013,11 @@ async def create_space_integration_knowledge(
     "/{id}/knowledge/integrations/add/{user_integration_id}/batch/",
     response_model=CreateSpaceIntegrationKnowledgeBatchResponse,
     status_code=202,
-    description="Add multiple integration knowledge items to a space in a single batch.",
-    responses=responses.get_responses([400, 403, 404]),
+    description="Add multiple integration knowledge items to a space in a single "
+    "batch. Access, the connection and its token are checked first: when they "
+    "fail, the request fails and nothing is written. Otherwise each item is "
+    "created or reported failed on its own.",
+    responses=_ORGANIZATION_TOKEN_RESPONSES,
 )
 @endpoint_access(
     authentication=Authentication.USER,

@@ -595,9 +595,10 @@ class IntegrationKnowledgeService:
         """Create several items in one request; a failed item leaves nothing behind.
 
         Access, the embedding model and the token are checked once, before any
-        write; when that fails, every item fails. Each item is then written in
-        its own savepoint, so an item that fails part-way is rolled back alone,
-        and its job is dispatched only after its savepoint is released.
+        write; when that fails, the request fails with that error and nothing
+        is written. Each item is then written in its own savepoint, so an item
+        that fails part-way is rolled back alone, and its job is dispatched
+        only after its savepoint is released.
         """
         normalized_wrapper_name = (
             wrapper_name.strip() if wrapper_name and wrapper_name.strip() else None
@@ -605,23 +606,11 @@ class IntegrationKnowledgeService:
         batch_wrapper_id = uuid4() if len(items) > 1 else None
         batch_wrapper_name = normalized_wrapper_name if batch_wrapper_id else None
 
-        try:
-            context = await self._prepare_import(
-                user_integration_id=user_integration_id,
-                embedding_model_id=embedding_model_id,
-                space_id=space_id,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Integration knowledge batch failed before any item was created: %s",
-                exc,
-                exc_info=True,
-            )
-            error = user_visible_error(exc)
-            return [
-                _failed_batch_item(index, item, error)
-                for index, item in enumerate(items)
-            ]
+        context = await self._prepare_import(
+            user_integration_id=user_integration_id,
+            embedding_model_id=embedding_model_id,
+            space_id=space_id,
+        )
 
         results: list[BatchIntegrationKnowledgeCreateResult] = []
         for index, item in enumerate(items):

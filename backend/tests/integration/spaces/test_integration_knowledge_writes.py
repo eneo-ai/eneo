@@ -29,7 +29,6 @@ from eneo.integration.application.user_integration_service import (
     AuthorizedIntegration,
 )
 from eneo.integration.infrastructure.auth_service.org_token_provider import (
-    CREDENTIALS_INVALID_MESSAGE,
     SharePointCredentialsInvalidError,
 )
 from eneo.integration.presentation.models import IntegrationType
@@ -371,23 +370,21 @@ async def test_a_failed_item_in_the_organization_space_loses_its_distribution(
 
 
 async def test_refused_organization_credentials_write_no_item(db_container, setup):
-    async with db_container() as container:
-        job_service = _jobs()
-        service = _service(
-            container,
-            job_service=job_service,
-            organization_token=SharePointCredentialsInvalidError("invalid_client"),
-        )
-        results = await service.create_space_integration_knowledge_batch(
-            user_integration_id=setup.connection,
-            embedding_model_id=setup.embedding_model,
-            space_id=setup.organization_space,
-            items=_items("Budget", "Protokoll", "Rutiner"),
-        )
+    job_service = _jobs()
+    with pytest.raises(SharePointCredentialsInvalidError):
+        async with db_container() as container:
+            service = _service(
+                container,
+                job_service=job_service,
+                organization_token=SharePointCredentialsInvalidError("invalid_client"),
+            )
+            await service.create_space_integration_knowledge_batch(
+                user_integration_id=setup.connection,
+                embedding_model_id=setup.embedding_model,
+                space_id=setup.organization_space,
+                items=_items("Budget", "Protokoll", "Rutiner"),
+            )
 
-    assert [(result["status"], result["error"]) for result in results] == [
-        ("failed", CREDENTIALS_INVALID_MESSAGE)
-    ] * 3
     job_service.queue_job.assert_not_awaited()
     async with db_container() as container:
         assert await _stored(container, setup.organization_space) == ([], [])

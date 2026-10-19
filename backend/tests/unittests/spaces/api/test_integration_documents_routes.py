@@ -854,3 +854,29 @@ async def test_a_rename_to_a_blank_or_overlong_name_is_refused(
     assert response.status_code == 422, response.text
     api.knowledge_repo.rename.assert_not_awaited()
     api.knowledge_repo.rename_wrapper.assert_not_awaited()
+
+
+async def test_a_batch_the_caller_may_not_import_into_is_refused_whole(documents_api):
+    """A viewer got a 202 with every item reported failed."""
+    api = documents_api
+    api.knowledge_repo.add = AsyncMock()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=api.app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            f"/spaces/{api.space.id}/knowledge/integrations/add/{uuid4()}/batch/",
+            json={
+                "embedding_model": {"id": str(uuid4())},
+                "items": [
+                    {
+                        "name": "Protokoll",
+                        "url": "https://contoso.sharepoint.com/sites/KS",
+                        "key": "contoso.sharepoint.com,site,web",
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 403, response.text
+    api.knowledge_repo.add.assert_not_awaited()
