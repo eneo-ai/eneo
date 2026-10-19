@@ -1575,8 +1575,6 @@ class Container(containers.DeclarativeContainer):
     sharepoint_content_service = providers.Factory(
         SharePointContentService,
         oauth_token_repo=oauth_token_repo,
-        job_service=job_service,
-        user_integration_repo=user_integration_repo,
         user=user,
         oauth_token_service=oauth_token_service,
         info_blob_service=info_blob_service,

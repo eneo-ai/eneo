@@ -207,3 +207,55 @@ def extract_relative_graph_path(parent_path: str) -> str:
     if "root:" in parent_path:
         return "/"
     return parent_path
+
+
+async def enumerate_items(
+    *,
+    client: SharePointContentClient,
+    resource_type: str,
+    site_id: Optional[str],
+    drive_id: str,
+    folder_id: Optional[str],
+) -> list[SharePointItem]:
+    """Strictly enumerate every in-scope file (and page) item.
+
+    Listing errors propagate instead of being swallowed: an incomplete
+    enumeration must NOT be treated as the authoritative set during
+    reconciliation, or it would delete valid blobs.
+    """
+    items: list[SharePointItem] = []
+
+    async def _walk(current_folder_id: Optional[str]) -> None:
+        if resource_type == "onedrive":
+            results = (
+                await client.get_drive_root_children(drive_id)
+                if not current_folder_id
+                else await client.get_drive_folder_items(
+                    drive_id=drive_id, folder_id=current_folder_id
+                )
+            )
+        elif not site_id:
+            raise ValueError("site_id required to enumerate SharePoint drive items")
+        elif not current_folder_id:
+            results = await client.get_drive_root_children(drive_id)
+        else:
+            results = await client.get_folder_items(
+                site_id=site_id, drive_id=drive_id, folder_id=current_folder_id
+            )
+
+        for item in results or []:
+            item_id = item.get("id")
+            if has_graph_facet(item, "folder"):
+                if item_id:
+                    await _walk(item_id)
+            elif item_id:
+                items.append(item)
+
+    await _walk(folder_id)
+
+    # Site pages live alongside drive documents for site-root SharePoint scopes.
+    if resource_type != "onedrive" and site_id and folder_id is None:
+        pages = await client.get_site_pages(site_id=site_id)
+        items.extend(page for page in pages.get("value", []) if page.get("id"))
+
+    return items

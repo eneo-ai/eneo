@@ -1,10 +1,3 @@
-from eneo.integration.infrastructure.content_service import (
-    sharepoint_results as sync_results,
-)
-from eneo.integration.infrastructure.content_service import (
-    sharepoint_scope as scope_rules,
-)
-
 """Unit tests for SharePointContentService - content sync from SharePoint.
 
 Tests the content pulling, delta change processing, and token handling
@@ -40,13 +33,25 @@ from eneo.integration.infrastructure.clients.sharepoint_content_client import (
 from eneo.integration.infrastructure.content_service import (
     sharepoint_content_service as content_service_module,
 )
+from eneo.integration.infrastructure.content_service import (
+    sharepoint_results as sync_results,
+)
+from eneo.integration.infrastructure.content_service import (
+    sharepoint_scope as scope_rules,
+)
+from eneo.integration.infrastructure.content_service.parsing import (
+    extract_text_from_canvas_layout,
+)
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
-    ScopeFolderUnavailable,
     SharePointContentService,
     SimpleSharePointToken,
+)
+from eneo.integration.infrastructure.content_service.sharepoint_results import (
     SyncAccessDenied,
     SyncItemsFailed,
-    extract_text_from_canvas_layout,
+)
+from eneo.integration.infrastructure.content_service.sharepoint_scope import (
+    ScopeFolderUnavailable,
 )
 from eneo.integration.infrastructure.content_service.utils import (
     EMPTY_CONTENT_REASON,
@@ -176,9 +181,7 @@ def mock_dependencies(mock_user, mock_integration_knowledge):
 
     integration_knowledge_repo.adjust_size = AsyncMock(side_effect=adjust_size)
     return {
-        "job_service": AsyncMock(),
         "oauth_token_repo": AsyncMock(),
-        "user_integration_repo": AsyncMock(),
         "user": mock_user,
         "info_blob_service": AsyncMock(),
         "integration_knowledge_repo": integration_knowledge_repo,
@@ -359,7 +362,7 @@ class TestProcessInfoBlobSizeAccounting:
 
         mock_integration_knowledge.size = 500
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text="New text",
             url="https://example.com",
@@ -397,7 +400,7 @@ class TestProcessInfoBlobSizeAccounting:
 
         mock_integration_knowledge.size = 500
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text="Unchanged text",
             url="https://example.com",
@@ -427,7 +430,7 @@ class TestProcessInfoBlobSizeAccounting:
         mock_dependencies[
             "info_blob_service"
         ].publish_info_blob_without_validation = AsyncMock(return_value=new_blob)
-        await service._process_info_blob(
+        await service._index.upsert(
             title="New",
             text="fresh text",
             url="https://example.com/new",
@@ -440,7 +443,7 @@ class TestProcessInfoBlobSizeAccounting:
         repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
             return_value=[deleted_blob]
         )
-        await service._delete_local_sharepoint_item(
+        await service._index.remove(
             item_id="item-old",
             item_name="old.docx",
             integration_knowledge=copy_b,
@@ -459,7 +462,7 @@ class TestProcessInfoBlobSizeAccounting:
     ):
         import hashlib
 
-        from eneo.integration.infrastructure.content_service.sharepoint_content_service import (  # noqa: E501
+        from eneo.integration.infrastructure.content_service.parsing import (
             sanitize_text_for_db,
         )
 
@@ -483,7 +486,7 @@ class TestProcessInfoBlobSizeAccounting:
         ].publish_info_blob_without_validation = AsyncMock()
         mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text=text,
             url="https://example.com",
@@ -507,7 +510,7 @@ class TestProcessInfoBlobSizeAccounting:
         without re-embedding."""
         import hashlib
 
-        from eneo.integration.infrastructure.content_service.sharepoint_content_service import (  # noqa: E501
+        from eneo.integration.infrastructure.content_service.parsing import (
             sanitize_text_for_db,
         )
 
@@ -530,7 +533,7 @@ class TestProcessInfoBlobSizeAccounting:
             "info_blob_service"
         ].publish_info_blob_without_validation = AsyncMock()
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="New name.docx",
             text=text,
             url="https://example.com/new",
@@ -570,7 +573,7 @@ class TestProcessInfoBlobSizeAccounting:
         mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
         mock_dependencies["info_blob_service"].repo.session.execute = AsyncMock()
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text="Brand new content",
             url="https://example.com",
@@ -588,7 +591,7 @@ class TestProcessInfoBlobSizeAccounting:
     ):
         import hashlib
 
-        from eneo.integration.infrastructure.content_service.sharepoint_content_service import (  # noqa: E501
+        from eneo.integration.infrastructure.content_service.parsing import (
             sanitize_text_for_db,
         )
 
@@ -618,7 +621,7 @@ class TestProcessInfoBlobSizeAccounting:
             "info_blob_service"
         ].publish_info_blob_without_validation = AsyncMock(side_effect=publish)
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text=text,
             url="https://example.com",
@@ -647,7 +650,7 @@ class TestProcessInfoBlobSizeAccounting:
         )
 
         with pytest.raises(RuntimeError, match="embedding service unavailable"):
-            await service._process_info_blob(
+            await service._index.upsert(
                 title="Doc",
                 text="Fresh content",
                 url="https://example.com",
@@ -1453,9 +1456,7 @@ class TestDeltaChangesProcessing:
             )
             mock_client_class.return_value = mock_client
 
-            with patch.object(
-                service, "_process_info_blob", AsyncMock()
-            ) as mock_process:
+            with patch.object(service._index, "upsert", AsyncMock()) as mock_process:
                 result = await service.process_delta_changes(
                     token_id=mock_oauth_token.id,
                     integration_knowledge_id=mock_integration_knowledge.id,
@@ -1588,7 +1589,7 @@ class TestDeltaChangesProcessing:
             mock_client_class.return_value = mock_client
 
             with patch.object(
-                service, "_delete_out_of_scope_folder_subtree", AsyncMock()
+                service._reconciliation, "remove_subtree", AsyncMock()
             ) as mock_delete_subtree:
                 result = await service.process_delta_changes(
                     token_id=mock_oauth_token.id,
@@ -1726,7 +1727,7 @@ class TestOneDriveFolderTraversal:
         )
         stats = sync_results.initialize_stats()
 
-        with patch.object(service, "_process_info_blob", AsyncMock()) as mock_process:
+        with patch.object(service._index, "upsert", AsyncMock()) as mock_process:
             await service._process_folder_results(
                 site_id="site-123",
                 drive_id="drive-123",
@@ -1820,7 +1821,7 @@ class TestOneDriveFolderTraversal:
             mock_client.get_file_extraction_by_id.return_value = outcome
         stats = sync_results.initialize_stats()
 
-        with patch.object(service, "_process_info_blob", AsyncMock()) as mock_process:
+        with patch.object(service._index, "upsert", AsyncMock()) as mock_process:
             await service._process_folder_results(
                 site_id="site-123",
                 drive_id="drive-123",
@@ -1880,7 +1881,7 @@ class TestOneDriveFolderTraversal:
         stats = sync_results.initialize_stats()
 
         with patch.object(
-            service, "_process_info_blob", AsyncMock(return_value="added")
+            service._index, "upsert", AsyncMock(return_value="added")
         ) as mock_process:
             await service._process_folder_results(
                 site_id="site-123",
@@ -1928,7 +1929,7 @@ class TestFileExtraction:
         client = AsyncMock()
         client.get_file_extraction_by_id.return_value = ExtractionResult.ok("Body")
 
-        assert await service._extract_file(
+        assert await service._index._extract_file(
             client, "drive-1", "item-1", "Report.PDF", sync_results.initialize_stats()
         ) == ("Body", None)
         client.get_file_extraction_by_id.assert_awaited_once_with(
@@ -1980,7 +1981,7 @@ class TestFileExtraction:
         else:
             client.get_file_extraction_by_id.return_value = outcome
 
-        content, skip_reason = await service._extract_file(
+        content, skip_reason = await service._index._extract_file(
             client, "drive-1", "item-1", "Report.PDF", sync_results.initialize_stats()
         )
 
@@ -1993,7 +1994,7 @@ class TestFileExtraction:
         client = AsyncMock()
         stats = sync_results.initialize_stats()
 
-        await service._index_file(
+        await service._index.index_file(
             client=client,
             drive_id="drive-1",
             item={"name": "a.pdf", "file": {}},
@@ -2012,7 +2013,7 @@ class TestFileExtraction:
         client = AsyncMock()
         stats = sync_results.initialize_stats()
 
-        await service._index_file(
+        await service._index.index_file(
             client=client,
             drive_id="drive-1",
             item={**self.ITEM, "name": "Old.DOC"},
@@ -2032,7 +2033,7 @@ class TestFileExtraction:
         self, service, mock_integration_knowledge
     ):
         with pytest.raises(ValueError, match="no-text reason"):
-            await service._delete_local_blob_for_unextractable_item(
+            await service._index._remove_empty(
                 item_id="item-1",
                 item_name="a.pdf",
                 integration_knowledge=mock_integration_knowledge,
@@ -2051,7 +2052,7 @@ class TestFileExtraction:
         )
         stats = sync_results.initialize_stats()
 
-        await service._delete_local_blob_for_unextractable_item(
+        await service._index._remove_empty(
             item_id="item-1",
             item_name="scan.pdf",
             integration_knowledge=mock_integration_knowledge,
@@ -2074,7 +2075,7 @@ class TestFileExtraction:
         )
         stats = sync_results.initialize_stats()
 
-        await service._delete_local_blob_for_unextractable_item(
+        await service._index._remove_empty(
             item_id="item-1",
             item_name="scan.pdf",
             integration_knowledge=mock_integration_knowledge,
@@ -2501,8 +2502,8 @@ class TestOutOfScopeFolderSubtreeCleanup:
         content_client = AsyncMock()
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(
                 return_value=[
                     _descendant("child-1", "/Documents/Moved"),
@@ -2511,7 +2512,7 @@ class TestOutOfScopeFolderSubtreeCleanup:
             ),
         ):
             stats = sync_results.initialize_stats()
-            await service._delete_out_of_scope_folder_subtree(
+            await service._reconciliation.remove_subtree(
                 content_client=content_client,
                 resource_type="site",
                 site_id="site-1",
@@ -2545,12 +2546,12 @@ class TestOutOfScopeFolderSubtreeCleanup:
         content_client = AsyncMock()
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(return_value=[_descendant("od-child", "/Moved")]),
         ) as mock_enum:
             stats = sync_results.initialize_stats()
-            await service._delete_out_of_scope_folder_subtree(
+            await service._reconciliation.remove_subtree(
                 content_client=content_client,
                 resource_type="onedrive",
                 site_id=None,
@@ -2588,9 +2589,7 @@ class TestOutOfScopeFolderSubtreeCleanup:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_enumerate_authoritative_items", AsyncMock()
-            ) as enumerate_ids,
+            patch.object(scope_rules, "enumerate_items", AsyncMock()) as enumerate_ids,
         ):
             _mock_graph_client(
                 mock_client_class,
@@ -2617,9 +2616,9 @@ class TestOutOfScopeFolderSubtreeCleanup:
         content_client = AsyncMock()
         repo = mock_dependencies["info_blob_service"].repo
 
-        with patch.object(service, "_enumerate_authoritative_items") as mock_enum:
+        with patch.object(scope_rules, "enumerate_items") as mock_enum:
             stats = sync_results.initialize_stats()
-            await service._delete_out_of_scope_folder_subtree(
+            await service._reconciliation.remove_subtree(
                 content_client=content_client,
                 resource_type="site",
                 site_id="site-1",
@@ -2656,14 +2655,14 @@ class TestFullSyncReconciliation:
         )
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_item_ids",
+            service._reconciliation,
+            "_enumerate_item_ids",
             AsyncMock(return_value={"keep-1", "keep-2"}),
         ):
             with patch.object(
-                service, "_delete_local_sharepoint_item", AsyncMock(return_value=1)
+                service._index, "remove", AsyncMock(return_value=1)
             ) as mock_delete:
-                await service._reconcile_indexed_blobs(
+                await service._reconciliation.reconcile(
                     client=AsyncMock(),
                     integration_knowledge=ik,
                     resource_type="site",
@@ -2694,9 +2693,11 @@ class TestFullSyncReconciliation:
         )
 
         with patch.object(
-            service, "_enumerate_authoritative_item_ids", AsyncMock(return_value=set())
+            service._reconciliation,
+            "_enumerate_item_ids",
+            AsyncMock(return_value=set()),
         ):
-            await service._reconcile_indexed_blobs(
+            await service._reconciliation.reconcile(
                 client=AsyncMock(),
                 integration_knowledge=ik,
                 resource_type="site",
@@ -2718,14 +2719,12 @@ class TestFullSyncReconciliation:
         )
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_item_ids",
+            service._reconciliation,
+            "_enumerate_item_ids",
             AsyncMock(side_effect=Exception("throttled mid-listing")),
         ):
-            with patch.object(
-                service, "_delete_local_sharepoint_item", AsyncMock()
-            ) as mock_delete:
-                await service._reconcile_indexed_blobs(
+            with patch.object(service._index, "remove", AsyncMock()) as mock_delete:
+                await service._reconciliation.reconcile(
                     client=AsyncMock(),
                     integration_knowledge=ik,
                     resource_type="site",
@@ -2750,12 +2749,12 @@ class TestFullSyncReconciliation:
         )
 
         with patch.object(
-            service, "_enumerate_authoritative_item_ids", AsyncMock(return_value=set())
+            service._reconciliation,
+            "_enumerate_item_ids",
+            AsyncMock(return_value=set()),
         ):
-            with patch.object(
-                service, "_delete_local_sharepoint_item", AsyncMock()
-            ) as mock_delete:
-                await service._reconcile_indexed_blobs(
+            with patch.object(service._index, "remove", AsyncMock()) as mock_delete:
+                await service._reconciliation.reconcile(
                     client=AsyncMock(
                         get_item_metadata_batch=AsyncMock(return_value={})
                     ),
@@ -2779,14 +2778,12 @@ class TestFullSyncReconciliation:
         )
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_item_ids",
+            service._reconciliation,
+            "_enumerate_item_ids",
             AsyncMock(return_value={"a", "b", "c"}),
         ):
-            with patch.object(
-                service, "_delete_local_sharepoint_item", AsyncMock()
-            ) as mock_delete:
-                await service._reconcile_indexed_blobs(
+            with patch.object(service._index, "remove", AsyncMock()) as mock_delete:
+                await service._reconciliation.reconcile(
                     client=AsyncMock(),
                     integration_knowledge=ik,
                     resource_type="site",
@@ -2847,7 +2844,7 @@ class TestFolderFullSyncRefreshesFolderPath:
 
             with (
                 patch.object(service, "_fetch_and_process_content", AsyncMock()),
-                patch.object(service, "_reconcile_indexed_blobs", AsyncMock()),
+                patch.object(service._reconciliation, "reconcile", AsyncMock()),
             ):
                 await service.pull_content(
                     token_id=mock_oauth_token.id,
@@ -2888,7 +2885,7 @@ class TestFolderFullSyncRefreshesFolderPath:
 
             with (
                 patch.object(service, "_fetch_and_process_content", AsyncMock()),
-                patch.object(service, "_reconcile_indexed_blobs", AsyncMock()),
+                patch.object(service._reconciliation, "reconcile", AsyncMock()),
             ):
                 await service.pull_content(
                     token_id=mock_oauth_token.id,
@@ -2913,7 +2910,7 @@ class TestEnumerateAuthoritativeItemIds:
         client.get_folder_items.return_value = [{"id": "file-2", "file": {}}]
         client.get_site_pages.return_value = {"value": [{"id": "page-1"}]}
 
-        result = await service._enumerate_authoritative_item_ids(
+        result = await service._reconciliation._enumerate_item_ids(
             client=client,
             resource_type="site",
             site_id="site-1",
@@ -2928,7 +2925,7 @@ class TestEnumerateAuthoritativeItemIds:
         client = AsyncMock()
         client.get_drive_root_children.return_value = [{"id": "od-file", "file": {}}]
 
-        result = await service._enumerate_authoritative_item_ids(
+        result = await service._reconciliation._enumerate_item_ids(
             client=client,
             resource_type="onedrive",
             site_id=None,
@@ -2946,7 +2943,7 @@ class TestEnumerateAuthoritativeItemIds:
         client.get_drive_root_children.side_effect = RuntimeError("graph throttled")
 
         with pytest.raises(RuntimeError):
-            await service._enumerate_authoritative_item_ids(
+            await service._reconciliation._enumerate_item_ids(
                 client=client,
                 resource_type="site",
                 site_id="site-1",
@@ -2989,7 +2986,7 @@ class TestProcessPages:
         stats = sync_results.initialize_stats()
 
         with patch.object(
-            service, "_process_info_blob", AsyncMock(return_value="added")
+            service._index, "upsert", AsyncMock(return_value="added")
         ) as process:
             await service._process_pages(
                 pages=[self._page("p-empty"), self._page("p-real")],
@@ -3016,7 +3013,7 @@ class TestProcessPages:
         stats = sync_results.initialize_stats()
 
         with patch.object(
-            service, "_process_info_blob", AsyncMock(return_value="added")
+            service._index, "upsert", AsyncMock(return_value="added")
         ) as process:
             await service._process_pages(
                 pages=[self._page("p-bad"), self._page("p-real")],
@@ -3055,7 +3052,7 @@ class TestProcessInfoBlobEmptyText:
         ].publish_info_blob_without_validation
         stats = sync_results.initialize_stats()
 
-        outcome = await service._process_info_blob(
+        outcome = await service._index.upsert(
             title="Doc",
             text=text,
             url="https://example.com",
@@ -3091,7 +3088,7 @@ class TestProcessInfoBlobEmptyText:
         ].repo.delete_by_sharepoint_item_and_integration_knowledge
         stats = sync_results.initialize_stats()
 
-        outcome = await service._process_info_blob(
+        outcome = await service._index.upsert(
             title="Start",
             text="\x00",
             url="https://example.com",
@@ -3121,7 +3118,7 @@ class TestProcessInfoBlobEmptyText:
         )
         stats = sync_results.initialize_stats()
 
-        outcome = await service._process_info_blob(
+        outcome = await service._index.upsert(
             title="Doc",
             text="\x00",
             url="https://example.com",
@@ -3288,9 +3285,7 @@ class TestSyncStatus:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="added")
-            ),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
             _mock_graph_client(
                 mock_client_class,
@@ -3483,9 +3478,7 @@ class TestSyncStatus:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="added")
-            ),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
             _mock_graph_client(
                 mock_client_class,
@@ -3647,9 +3640,7 @@ class TestSyncStatus:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="added")
-            ),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
             _mock_graph_client(
                 mock_client_class,
@@ -3741,7 +3732,7 @@ class TestSyncStatus:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(service, "_reconcile_indexed_blobs", refuse),
+            patch.object(service._reconciliation, "reconcile", refuse),
         ):
             _mock_graph_client(mock_client_class)
             await service.pull_content(
@@ -3795,9 +3786,7 @@ class TestDeltaBaseline:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="added")
-            ),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
             client = _mock_graph_client(
                 mock_client_class,
@@ -3842,9 +3831,11 @@ class TestReconcileWarnings:
         stats = sync_results.initialize_stats()
 
         with patch.object(
-            service, "_enumerate_authoritative_item_ids", AsyncMock(return_value=set())
+            service._reconciliation,
+            "_enumerate_item_ids",
+            AsyncMock(return_value=set()),
         ):
-            await service._reconcile_indexed_blobs(
+            await service._reconciliation.reconcile(
                 client=AsyncMock(get_item_metadata_batch=AsyncMock(return_value={})),
                 integration_knowledge=ik,
                 resource_type="site",
@@ -3863,11 +3854,11 @@ class TestReconcileWarnings:
         stats = sync_results.initialize_stats()
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_item_ids",
+            service._reconciliation,
+            "_enumerate_item_ids",
             AsyncMock(side_effect=RuntimeError("throttled mid-listing")),
         ):
-            await service._reconcile_indexed_blobs(
+            await service._reconciliation.reconcile(
                 client=AsyncMock(),
                 integration_knowledge=ik,
                 resource_type="site",
@@ -3890,9 +3881,11 @@ class TestReconcileWarnings:
         stats = sync_results.initialize_stats()
 
         with patch.object(
-            service, "_enumerate_authoritative_item_ids", AsyncMock(return_value={"a"})
+            service._reconciliation,
+            "_enumerate_item_ids",
+            AsyncMock(return_value={"a"}),
         ):
-            await service._reconcile_indexed_blobs(
+            await service._reconciliation.reconcile(
                 client=AsyncMock(),
                 integration_knowledge=ik,
                 resource_type="site",
@@ -3925,15 +3918,13 @@ class TestReconcileAboveTheCap:
         stats = sync_results.initialize_stats()
         with (
             patch.object(
-                service,
-                "_enumerate_authoritative_item_ids",
+                service._reconciliation,
+                "_enumerate_item_ids",
                 AsyncMock(return_value=set()),
             ),
-            patch.object(
-                service, "_delete_local_sharepoint_item", AsyncMock(return_value=1)
-            ) as delete,
+            patch.object(service._index, "remove", AsyncMock(return_value=1)) as delete,
         ):
-            await service._reconcile_indexed_blobs(
+            await service._reconciliation.reconcile(
                 client=client,
                 integration_knowledge=ik,
                 resource_type="site",
@@ -4374,8 +4365,8 @@ class TestDeltaFolderScopeOrdering:
         }
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(return_value=descendants),
         ) as walk:
             await self._run_delta(
@@ -4479,8 +4470,8 @@ class TestDeltaFolderScopeOrdering:
         )
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(return_value=descendants),
         ) as enumerate_items:
             client, result = await self._run_delta(
@@ -4530,8 +4521,8 @@ class TestDeltaFolderScopeOrdering:
         )
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(side_effect=lambda **kw: subtree[kw["folder_id"]]),
         ):
             client, result = await self._run_delta(
@@ -4553,9 +4544,7 @@ class TestDeltaFolderScopeOrdering:
         be out of scope and have the whole drive enumerated for deletion."""
         changes = [{"id": "root-1", "name": "root", "root": {}, "folder": {}}]
 
-        with patch.object(
-            service, "_enumerate_authoritative_items", AsyncMock()
-        ) as enumerate_ids:
+        with patch.object(scope_rules, "enumerate_items", AsyncMock()) as enumerate_ids:
             _, result = await self._run_delta(
                 service, mock_dependencies, mock_oauth_token, folder_scoped, changes
             )
@@ -4580,8 +4569,8 @@ class TestDeltaFolderScopeOrdering:
 
         with (
             patch.object(
-                service,
-                "_enumerate_authoritative_items",
+                scope_rules,
+                "enumerate_items",
                 AsyncMock(side_effect=RuntimeError("throttled")),
             ),
             pytest.raises(SyncItemsFailed, match=ONE_FILE_FAILED),
@@ -4669,9 +4658,7 @@ class TestDeltaFolderScopeOrdering:
         ]
         self._indexed(mock_dependencies, "n-1")
 
-        with patch.object(
-            service, "_enumerate_authoritative_items", AsyncMock(return_value=[])
-        ):
+        with patch.object(scope_rules, "enumerate_items", AsyncMock(return_value=[])):
             client, result = await self._run_delta(
                 service,
                 mock_dependencies,
@@ -4881,8 +4868,8 @@ class TestDeltaFolderScopeOrdering:
         descendants = [_descendant("q-1", f"{q_path}/folder-q")]
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(return_value=descendants),
         ) as walk:
             client, _ = await self._run_delta(
@@ -4933,8 +4920,8 @@ class TestDeltaFolderScopeOrdering:
         }
         with (
             patch.object(
-                service,
-                "_enumerate_authoritative_items",
+                scope_rules,
+                "enumerate_items",
                 AsyncMock(return_value=[{"id": "x-1", "name": "one.docx"}]),
             ) as walk,
             patch.object(
@@ -4978,8 +4965,8 @@ class TestDeltaFolderScopeOrdering:
 
         with (
             patch.object(
-                service,
-                "_enumerate_authoritative_items",
+                scope_rules,
+                "enumerate_items",
                 AsyncMock(side_effect=[RuntimeError("throttled"), []]),
             ) as walk,
             patch.object(
@@ -5036,8 +5023,8 @@ class TestDeltaFolderScopeOrdering:
         descendants = [_descendant(f"z-{i}", "/Documents/Z") for i in (1, 2, 3)]
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(return_value=descendants),
         ) as walk:
             await self._run_delta(
@@ -5097,7 +5084,7 @@ class TestDeltaExtractionOutcomes:
                 get_file_extraction_by_id=extraction,
             )
             failure = None
-            with patch.object(service, "_process_info_blob", AsyncMock()) as process:
+            with patch.object(service._index, "upsert", AsyncMock()) as process:
                 try:
                     await service.process_delta_changes(
                         token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
@@ -5243,9 +5230,7 @@ class TestDeltaExtractionOutcomes:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="added")
-            ),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
             _mock_graph_client(
                 mock_client_class,
@@ -5482,7 +5467,7 @@ class TestSiteRootExtractionOutcomes:
                 ),
             )
             failure = None
-            with patch.object(service, "_process_info_blob", AsyncMock()) as process:
+            with patch.object(service._index, "upsert", AsyncMock()) as process:
                 try:
                     await service.pull_content(
                         token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
@@ -5763,9 +5748,7 @@ class TestSelectedItemTypePersistence:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="added")
-            ),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
             _mock_graph_client(
                 mock_client_class,
@@ -5856,8 +5839,8 @@ class TestSyncProgress:
                 ),
             )
             with patch.object(
-                progress_service,
-                "_process_info_blob",
+                progress_service._index,
+                "upsert",
                 AsyncMock(side_effect=["added", "unchanged", "added", "added"]),
             ):
                 await progress_service.pull_content(
@@ -5911,8 +5894,8 @@ class TestSyncProgress:
                 ),
             )
             with patch.object(
-                progress_service,
-                "_process_info_blob",
+                progress_service._index,
+                "upsert",
                 AsyncMock(side_effect=["added", "unchanged"]),
             ):
                 await progress_service.process_delta_changes(
@@ -6249,13 +6232,13 @@ class TestOutOfScopeNamesStayPrivate:
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
             patch.object(
-                service,
-                "_process_info_blob",
+                service._index,
+                "upsert",
                 AsyncMock(side_effect=["added", "added"]),
             ),
             patch.object(
-                service,
-                "_enumerate_authoritative_items",
+                scope_rules,
+                "enumerate_items",
                 AsyncMock(
                     return_value=[
                         {
@@ -6638,11 +6621,11 @@ class TestUserVisibleErrors:
         client.get_drive_root_children.return_value = []
         client.get_site_pages.return_value = {"value": []}
         stats = sync_results.initialize_stats()
-        service.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+        service._index.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
             side_effect=_database_error()
         )
 
-        await service._reconcile_indexed_blobs(
+        await service._reconciliation.reconcile(
             client=client,
             integration_knowledge=mock_integration_knowledge,
             resource_type="site",
@@ -6652,8 +6635,8 @@ class TestUserVisibleErrors:
             stats=stats,
         )
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(side_effect=_refused()),
         ):
             await service._index_folder_subtree_entering_scope(
