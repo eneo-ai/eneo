@@ -237,6 +237,16 @@ def initialize_stats() -> SyncStats:
     }
 
 
+def count_download_attempt(stats: SyncStats) -> None:
+    stats["download_attempts"] = stats.get("download_attempts", 0) + 1
+
+
+def count_refused_download(stats: SyncStats, item_id: str, item_name: str = "") -> None:
+    """A download refused with 403: about the file unless ``refused_access``."""
+    stats["download_forbidden"] = stats.get("download_forbidden", 0) + 1
+    stats.setdefault("refused_downloads", {})[item_id] = item_name or item_id
+
+
 # Fewer refused downloads than this say nothing about the identity, even when
 # nothing else could be downloaded: one restricted file must not hold a pass.
 _MIN_REFUSALS_FOR_ACCESS_PROBLEM = 3

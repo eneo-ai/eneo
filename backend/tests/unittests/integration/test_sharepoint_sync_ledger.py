@@ -421,6 +421,58 @@ class TestRetriesWhileAccessIsLost:
         ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
 
 
+class TestRefusedRetries:
+    @pytest.mark.parametrize("refused", [1, 3])
+    async def test_a_retried_item_eneo_may_no_longer_read(
+        self,
+        service,
+        mock_dependencies,
+        mock_oauth_token,
+        ledger,
+        sqlite_session,
+        refused,
+    ):
+        """Refused like a download: removed when it is about the item, kept
+        recorded when every one of several was refused."""
+        ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
+        item_ids = [f"item-{index}" for index in range(refused)]
+        ledger.failed = dict.fromkeys(item_ids, 1)
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), item_id) for item_id in item_ids]
+        )
+        with patch(_CLIENT) as client_class:
+            _mock_graph_client(
+                client_class,
+                get_delta_changes=AsyncMock(return_value=([], "token-2")),
+                get_file_metadata=AsyncMock(side_effect=_http_error(403, "Forbidden")),
+            )
+
+            async def run():
+                return await service.process_delta_changes(
+                    token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+                )
+
+            if refused == 1:
+                await _committed(sqlite_session, service, run)
+            else:
+                with pytest.raises(SyncAccessDenied):
+                    await _committed(sqlite_session, service, run)
+
+        removed = [
+            call.kwargs["sharepoint_item_id"]
+            for call in repo.delete_by_sharepoint_item_and_integration_knowledge.await_args_list
+        ]
+        if refused == 1:
+            assert removed == ["item-0"]
+            assert ik.delta_token == "token-2"
+            assert ledger.failed == {}
+        else:
+            assert removed == []
+            assert ik.delta_token == "token-1"
+            assert ledger.failed == dict.fromkeys(item_ids, 1)
+
+
 class TestDeltaBaselineMint:
     async def test_a_full_sync_without_a_token_to_continue_from_is_not_a_success(
         self, service, mock_dependencies, mock_oauth_token

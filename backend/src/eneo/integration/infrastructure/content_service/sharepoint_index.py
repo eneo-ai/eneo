@@ -613,8 +613,8 @@ class SharePointIndex:
 
         The counted failure fails the pass at its end. With ``pending_change_keys``
         (a delta pass) an item whose ChangeKey was processed before is skipped as
-        unchanged, and the key of an indexed item is queued for the post-commit
-        cache write. A full sync passes none: it re-verifies every file and
+        unchanged, its title and URL still following a rename, and the key of an
+        indexed item is queued for the post-commit cache write. A full sync passes none: it re-verifies every file and
         relies on the content hash alone.
         """
         item_name = item.get("name", "")
@@ -722,7 +722,7 @@ class SharePointIndex:
         way for good, and one still being uploaded changes again when it is
         done, so failing it would only hold the token back.
         """
-        stats["download_attempts"] = stats.get("download_attempts", 0) + 1
+        sync_results.count_download_attempt(stats)
         try:
             result = await client.get_file_extraction_by_id(
                 drive_id=drive_id, item_id=item_id
@@ -745,8 +745,7 @@ class SharePointIndex:
             if e.status not in ITEM_LEVEL_HTTP_STATUSES:
                 raise
             if e.status == 403:
-                stats["download_forbidden"] = stats.get("download_forbidden", 0) + 1
-                stats.setdefault("refused_downloads", {})[item_id] = item_name
+                sync_results.count_refused_download(stats, item_id, item_name)
             logger.warning(
                 "File %s (item_id=%s) is gone or not accessible: %s",
                 item_name,

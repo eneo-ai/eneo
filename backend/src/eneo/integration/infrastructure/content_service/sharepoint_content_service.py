@@ -5,6 +5,7 @@ Scope decisions and strict listing: sharepoint_scope.
 Index mutations and content identity: SharePointIndex.
 Full-sync orphan and moved-subtree cleanup: SharePointReconciliation.
 Counts and result semantics: sharepoint_results.
+What is kept about items between passes: sharepoint_sync_ledger.
 Graph transport, parsing, credentials, progress and persisted status retain their
 existing owners. Do not add another implementation of their rules here.
 """
@@ -1049,8 +1050,8 @@ class SharePointContentService:
 
         A delta never re-emits an unchanged item, so a failure a full sync
         recorded is only retried here. Items the change set carries are
-        applied from it instead. Gone (404, 410) is removed, refused (403) is
-        kept for the next full sync, anything else fails the item again.
+        applied from it instead. Gone (404, 410) is removed, refused (403)
+        counts as a refused download, anything else fails the item again.
         """
         for item_id in delta_pass.failed_before:
             if item_id in delta_pass.change_ids:
@@ -1073,7 +1074,9 @@ class SharePointContentService:
                         stats=delta_pass.stats,
                         reason="removed",
                     )
-                elif exc.status in ITEM_LEVEL_HTTP_STATUSES:
+                elif exc.status == 403:
+                    sync_results.count_download_attempt(delta_pass.stats)
+                    sync_results.count_refused_download(delta_pass.stats, item_id)
                     sync_results.count_skip(
                         delta_pass.stats, error_skipped(item_id, exc)
                     )
