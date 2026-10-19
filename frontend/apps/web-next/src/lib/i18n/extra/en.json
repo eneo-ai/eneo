@@ -1618,5 +1618,7 @@
   "workspace_preview_selection_actions": "Actions for selected rows",
   "side_panel_latest_answer": "Latest answer",
   "chat_quote_label": "Quote",
-  "chat_quote_remove": "Remove the quote"
+  "chat_quote_remove": "Remove the quote",
+  "file_preview_previous_version": "Previous version",
+  "file_preview_next_version": "Next version"
 }

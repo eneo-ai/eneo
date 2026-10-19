@@ -1,7 +1,8 @@
 <script lang="ts">
   import { fade, fly } from "svelte/transition";
   import { parseTokens } from "../mentions/parseMentions";
-  import { parseQuotedQuestion, quotedFileMatches } from "../../questionQuote";
+  import { Markdown } from "$lib/components/markdown/index.js";
+  import { isTableQuote, parseQuotedQuestion, quotedFileMatches } from "../../questionQuote";
   import { getChatService } from "../../ChatService.svelte";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
@@ -47,7 +48,11 @@
     {#snippet quoted(quote: NonNullable<typeof parsed.quote>)}
       {@const location = tableLocationLabel(quote.locator, (row) => m.table_reference_row({ row }))}
       <blockquote class="m-0">
-        <p class="text-secondary m-0 line-clamp-6 text-base whitespace-pre-wrap">{quote.text}</p>
+        {#if isTableQuote(quote.text)}
+          <div class="text-secondary text-sm"><Markdown source={quote.text} /></div>
+        {:else}
+          <p class="text-secondary m-0 line-clamp-6 text-base whitespace-pre-wrap">{quote.text}</p>
+        {/if}
         {#if quote.fileName}
           <footer class="text-tertiary mt-1 text-xs">
             {quote.fileName}
