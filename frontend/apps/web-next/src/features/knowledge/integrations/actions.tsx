@@ -36,6 +36,7 @@ import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { settleWithLimit } from "@/lib/settle-with-limit";
 import { toast } from "@/lib/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useRemovalMutation } from "@/features/spaces/removal";
@@ -247,6 +248,10 @@ export function IntegrationActions({
   );
 }
 
+const RESYNC_CONCURRENCY = 4;
+/** Folders that could not be queued are named up to this many; the count tells the rest. */
+const NAMED_FAILURES = 5;
+
 /**
  * Wrapper actions (rename / resync every item / delete all items) shown on
  * source rows and the wrapper page. `items` are the wrapper's items;
@@ -286,16 +291,15 @@ export function WrapperActions({
   const canResync = canEdit && resyncable.length > 0;
 
   // Never rejects: confirming again after a failure would queue the items
-  // that were queued already once more.
+  // that were queued already once more. A few at a time: each request also
+  // checks the site's change subscription.
   const resync = useMutation({
     mutationFn: async () => {
-      const results = await Promise.allSettled(
-        resyncable.map((item) =>
-          unwrap(
-            browserApi.POST(
-              "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/sync/",
-              { params: { path: { id: space.id, integration_knowledge_id: item.id } } }
-            )
+      const results = await settleWithLimit(resyncable, RESYNC_CONCURRENCY, (item) =>
+        unwrap(
+          browserApi.POST(
+            "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/sync/",
+            { params: { path: { id: space.id, integration_knowledge_id: item.id } } }
           )
         )
       );
@@ -338,7 +342,9 @@ export function WrapperActions({
             : t("resync_all_wrapper_partial_failure", {
                 failed,
                 total,
-                names: failedNames.join(", ")
+                names:
+                  failedNames.slice(0, NAMED_FAILURES).join(", ") +
+                  (failedNames.length > NAMED_FAILURES ? ", …" : "")
               }),
           // The first refusal's reason, in the catalog's words as toastApiError gives them.
           { description: getErrorMessage(refusal, t) }

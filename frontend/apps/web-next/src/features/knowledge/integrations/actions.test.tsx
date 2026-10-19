@@ -8,6 +8,13 @@ import type { IntegrationKnowledge } from "../knowledge";
 
 const api = vi.hoisted(() => ({ PATCH: vi.fn(), POST: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn()
+}));
+vi.mock("@/lib/toast", () => ({ toast }));
 const jobs = vi.hoisted(() => ({ trackJob: vi.fn() }));
 vi.mock("@/features/jobs/use-jobs", () => ({ useJobs: () => jobs }));
 vi.mock("@/features/spaces/use-space", async () => {
@@ -173,4 +180,51 @@ it("offers a rename or full sync only of an item the user may edit", async () =>
   expect(await screen.findByRole("menuitem", { name: "Ta bort" })).toBeTruthy();
   expect(screen.queryByRole("menuitem", { name: "Fullständig synk" })).toBeNull();
   expect(screen.queryByRole("menuitem", { name: "Byt namn" })).toBeNull();
+});
+
+it("resyncs a group's folders four at a time and names at most five it could not queue", async () => {
+  const folders = Array.from(
+    { length: 7 },
+    (_, index) =>
+      ({
+        ...policies,
+        id: `f${index}`,
+        name: `Mapp ${index}`,
+        wrapper_id: "w1"
+      }) as IntegrationKnowledge
+  );
+  let inFlight = 0;
+  let most = 0;
+  api.POST.mockImplementation(
+    async (_path: string, options: { params: { path: { integration_knowledge_id: string } } }) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      const id = options.params.path.integration_knowledge_id;
+      return id === "f0"
+        ? { data: { id: "job-f0", name: "Mapp 0", status: "queued" }, response: new Response("{}") }
+        : { error: { message: "Nej" }, response: new Response("{}", { status: 403 }) };
+    }
+  );
+  renderInApp(
+    <WrapperActions
+      wrapperId="w1"
+      wrapperName="Byggnad"
+      items={folders}
+      canEdit
+      canDelete={false}
+    />
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Byggnad/ }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Synka om alla objekt" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Synka om alla objekt" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Starta fullständig synk" }));
+
+  await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+  expect(api.POST).toHaveBeenCalledTimes(7);
+  expect(most).toBe(4);
+  expect(toast.error.mock.calls[0]?.[0]).toBe(
+    "6 av 7 objekt kunde inte köas: Mapp 1, Mapp 2, Mapp 3, Mapp 4, Mapp 5, …"
+  );
 });
