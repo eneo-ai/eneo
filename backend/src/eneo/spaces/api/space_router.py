@@ -38,11 +38,16 @@ from eneo.integration.presentation.models import (
     IntegrationDocumentsPage,
     IntegrationKnowledgePublic,
     IntegrationSkippedDocuments,
+    IntegrationSyncDetails,
+    IntegrationSyncDetailsList,
+    IntegrationSyncDetailsRequest,
     IntegrationSyncProgressList,
+    PaginatedSyncLogList,
+    SyncLog,
 )
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
-from eneo.main.exceptions import UnauthorizedException
+from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
 from eneo.roles.permissions import Permission
 from eneo.server import protocol
@@ -1199,6 +1204,54 @@ async def get_integration_knowledge_sync_progress(
     knowledge_ids = await service.list_readable_knowledge_ids(space_id=id)
     items = await container.sharepoint_sync_progress_store().get_many(knowledge_ids)
     return IntegrationSyncProgressList(items=items)
+
+
+@router.post(
+    "/{id}/knowledge/integrations/sync-details/",
+    response_model=IntegrationSyncDetailsList,
+    description="Read bounded sync history windows and latest skipped files for several imports.",
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
+)
+async def get_integration_sync_details(
+    id: UUID,
+    data: IntegrationSyncDetailsRequest,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    # Check membership once before looking up any requested item. Reject the
+    # whole batch if one id is not visible; never return another tenant's data.
+    readable = set(
+        await container.integration_knowledge_service().list_readable_knowledge_ids(id)
+    )
+    offsets = {item.integration_knowledge_id: item.offset for item in data.items}
+    if not offsets.keys() <= readable:
+        raise NotFoundException()
+    pages = await container.sync_log_repo().get_windows(
+        offsets, tenant_id=container.user().tenant_id, limit=data.limit
+    )
+    return IntegrationSyncDetailsList(
+        items=[
+            IntegrationSyncDetails(
+                integration_knowledge_id=knowledge_id,
+                history=PaginatedSyncLogList(
+                    items=[SyncLog.from_domain(log) for log in page.logs],
+                    total_count=page.total,
+                    page_size=data.limit,
+                    offset=offsets[knowledge_id],
+                ),
+                skipped=(
+                    skipped_documents(page.logs[0] if page.logs else None)
+                    if offsets[knowledge_id] == 0
+                    else None
+                ),
+            )
+            for knowledge_id, page in pages.items()
+        ]
+    )
 
 
 @router.patch(

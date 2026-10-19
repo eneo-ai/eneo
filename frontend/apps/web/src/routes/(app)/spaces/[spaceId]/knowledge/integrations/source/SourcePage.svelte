@@ -101,10 +101,13 @@
         skippedRequests.set(item.id, request);
         let skipped: IntegrationSkippedDocuments | null = null;
         try {
-          skipped = (await eneo.integrations.knowledge.listSkippedDocuments({
-            knowledge: item,
-            space: $currentSpace
-          })) as IntegrationSkippedDocuments;
+          skipped = (
+            await eneo.integrations.knowledge.getSyncDetails({
+              knowledge: item,
+              space: $currentSpace,
+              limit: 1
+            })
+          ).skipped;
         } catch (error) {
           console.error("Could not load the skipped files of an integration item", error);
         }
@@ -148,8 +151,10 @@
   let announcement = $state("");
   let previousSnapshot: SourceSnapshot | null = null;
   let progressAnnouncedAt = 0;
+  let previousProblemCount: number | null = null;
   $effect(() => {
     const next: SourceSnapshot = { state: summary.state, progress: summary.progress };
+    const nextProblemCount = problems ? problemCount : null;
     untrack(() => {
       const now = Date.now();
       const text = announceSourceChange(
@@ -159,18 +164,11 @@
         now - progressAnnouncedAt
       );
       previousSnapshot = next;
-      if (!text) return;
-      announcement = text;
-      if (next.progress) progressAnnouncedAt = now;
-    });
-  });
-  let previousProblemCount: number | null = null;
-  $effect(() => {
-    const next = problems ? problemCount : null;
-    untrack(() => {
-      const text = announceProblemCount(previousProblemCount, next);
-      if (next !== null) previousProblemCount = next;
-      if (text) announcement = text;
+      const problemText = announceProblemCount(previousProblemCount, nextProblemCount);
+      if (nextProblemCount !== null) previousProblemCount = nextProblemCount;
+      const message = [text, problemText].filter(Boolean).join(". ");
+      if (message) announcement = message;
+      if (text && next.progress) progressAnnouncedAt = now;
     });
   });
 

@@ -1,7 +1,7 @@
 import type { IntegrationKnowledge, Job } from "@eneo/eneo-js";
 import { get } from "svelte/store";
 import { render } from "vitest-browser-svelte";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import { pendingImports, type PendingImport } from "../importCompletion";
 
@@ -34,6 +34,7 @@ const api = vi.hoisted(() => ({
   toastError: vi.fn(),
   refreshCurrentSpace: vi.fn(async () => true),
   jobs: [] as Pick<Job, "id" | "status">[],
+  jobSubscribers: new Set<(jobs: Pick<Job, "id" | "status">[]) => void>(),
   jobsLoaded: (() => {
     let value = true;
     const subscribers = new Set<(loaded: boolean) => void>();
@@ -68,14 +69,16 @@ vi.mock("$lib/features/jobs/JobManager", () => {
       set(next: CompletionEvent) {
         value = next;
         subscribers.forEach((run) => run(value));
+        api.jobSubscribers.forEach((run) => run(api.jobs));
       }
     },
     getJobManager: () => ({
       state: {
         jobs: {
           subscribe(run: (jobs: Pick<Job, "id" | "status">[]) => void) {
+            api.jobSubscribers.add(run);
             run(api.jobs);
-            return () => undefined;
+            return () => api.jobSubscribers.delete(run);
           }
         },
         jobsLoaded: api.jobsLoaded
@@ -125,6 +128,7 @@ function settle() {
 }
 
 describe("ImportCompletionToasts", () => {
+  afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     api.goto.mockClear();
     api.toastSuccess.mockClear();
@@ -373,5 +377,53 @@ describe("ImportCompletionToasts", () => {
       m.integration_import_result_toast({ name: "Protokoll 2026", indexed: 4, skipped: 0 })
     );
     expect(get(pendingImports)).toEqual([]);
+  });
+
+  it("retries a settled import after a read failure even when job polling has stopped", async () => {
+    vi.useFakeTimers();
+    const item = pending("job-1", "ik-1", "Arkiv");
+    pendingImports.set([item]);
+    api.jobs = [{ id: "job-1", status: "complete" }];
+    spaces.currentSpace.set(
+      space("space-1", [
+        knowledge("ik-1", "Arkiv", {
+          last_sync_status: "success",
+          document_count: 2,
+          last_sync_summary: { files_processed: 2, unchanged_items: 0, skipped_total: 0 }
+        })
+      ])
+    );
+    api.refreshCurrentSpace.mockResolvedValueOnce(false).mockResolvedValue(true);
+    render(ImportCompletionToasts);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.toastSuccess).not.toHaveBeenCalled();
+    expect(get(pendingImports)).toEqual([item]);
+    // No completion event, space change or new jobs list arrives.
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.toastSuccess).toHaveBeenCalledTimes(1);
+    expect(get(pendingImports)).toEqual([]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(api.toastSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report or forget an import after navigating away during its refresh", async () => {
+    const item = pending("job-1", "ik-1", "Arkiv");
+    pendingImports.set([item]);
+    api.jobs = [{ id: "job-1", status: "complete" }];
+    let finish!: (value: boolean) => void;
+    api.refreshCurrentSpace.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    render(ImportCompletionToasts);
+    await vi.waitFor(() => expect(api.refreshCurrentSpace).toHaveBeenCalled());
+    spaces.currentSpace.set(space("space-2"));
+    finish(false);
+    await settle();
+    expect(get(pendingImports)).toEqual([item]);
+    expect(api.toastSuccess).not.toHaveBeenCalled();
+    expect(api.toastError).not.toHaveBeenCalled();
   });
 });

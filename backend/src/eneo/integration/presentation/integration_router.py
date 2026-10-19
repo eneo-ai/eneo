@@ -338,20 +338,7 @@ async def get_sync_logs(
     )
 
     # Convert domain entities to presentation models
-    sync_log_models = [
-        SyncLog(
-            id=log.id,
-            integration_knowledge_id=log.integration_knowledge_id,
-            sync_type=log.sync_type,
-            status=log.status,
-            metadata=log.metadata,
-            error_message=log.error_message,
-            started_at=log.started_at,
-            completed_at=log.completed_at,
-            created_at=log.created_at or log.started_at,
-        )
-        for log in sync_logs
-    ]
+    sync_log_models = [SyncLog.from_domain(log) for log in sync_logs]
 
     return PaginatedSyncLogList(
         items=sync_log_models, total_count=total_count, page_size=limit, offset=skip

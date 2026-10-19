@@ -5,6 +5,7 @@
   import X from "@lucide/svelte/icons/x";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors";
   import { formatDateMedium, formatDuration, formatTime } from "$lib/core/formatting/dateTime";
@@ -37,6 +38,9 @@
   let { items, selectedId, signatures, onSelect }: Props = $props();
 
   const eneo = getEneo();
+  const {
+    state: { currentSpace }
+  } = getSpacesManager();
   /** Per request; the endpoint caps a page, so a long history is read page by page. */
   const PAGE_SIZE = 10;
 
@@ -72,9 +76,10 @@
   async function fetchPage(item: IntegrationKnowledge, skip: number) {
     const request = ++requestCount;
     requests.set(item.id, request);
-    const response = await eneo.integrations.knowledge.getSyncLogs({
+    const { history: response } = await eneo.integrations.knowledge.getSyncDetails({
       knowledge: item,
-      skip,
+      space: $currentSpace,
+      offset: skip,
       limit: PAGE_SIZE
     });
     if (requests.get(item.id) !== request) return null;
