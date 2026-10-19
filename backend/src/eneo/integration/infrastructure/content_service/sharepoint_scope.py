@@ -3,6 +3,11 @@
 The sole owner of path normalization, ancestor checks and scope membership.
 A failed location read is uncertainty, never evidence that content left scope.
 No index writes, sync-state writes or orchestration belong here.
+
+Graph percent-encodes ``parentReference.path`` and never an item's ``name``.
+A Graph path is decoded exactly once, a name never: a folder named
+"Budget 50%AB" must not lose "%AB" to a second decoding. Scope paths are
+stored decoded.
 """
 
 import unicodedata
@@ -51,9 +56,10 @@ def is_ancestor_of_scope(
     own_path = folder_path_from_item(item)
     if not own_path:
         return False
-    scope = normalize_path(scope_folder_path)
     own = normalize_path(own_path)
-    return bool(own) and scope.startswith(own + "/")
+    return bool(own) and any(
+        scope.startswith(own + "/") for scope in _scope_forms(scope_folder_path)
+    )
 
 
 async def current_scope_folder_path(
@@ -149,17 +155,17 @@ def is_item_in_folder_scope(
         relative_path = extract_relative_graph_path(parent_ref.get("path", ""))
 
         # Item is in scope if its parent path starts with or equals the folder
-        # path. SharePoint paths are case-insensitive and may arrive
+        # path. SharePoint paths are case-insensitive and Graph's arrive
         # percent-encoded (e.g. "%20", encoded å/ä/ö), so normalize both sides
         # before comparing — otherwise folders with spaces or non-ASCII names
         # silently fail the scope check and never get indexed.
-        normalized_scope = normalize_path(scope_folder_path)
-        normalized_parent = normalize_path(relative_path)
-        if normalized_scope and (
-            normalized_parent == normalized_scope
-            or normalized_parent.startswith(normalized_scope + "/")
-        ):
-            return True
+        normalized_parent = normalize_path(unquote(relative_path))
+        for normalized_scope in _scope_forms(scope_folder_path):
+            if normalized_scope and (
+                normalized_parent == normalized_scope
+                or normalized_parent.startswith(normalized_scope + "/")
+            ):
+                return True
 
     return False
 
@@ -169,8 +175,9 @@ def parent_path(item: SharePointItem) -> Optional[str]:
 
 
 def folder_path_from_item(item: SharePointItem) -> Optional[str]:
-    relative_parent_path = extract_relative_graph_path(
-        item.get("parentReference", {}).get("path", "")
+    """The folder's decoded drive-relative path: its parent's path plus its name."""
+    relative_parent_path = unquote(
+        extract_relative_graph_path(item.get("parentReference", {}).get("path", ""))
     )
     folder_name = str(item.get("name", "")).strip("/")
 
@@ -186,16 +193,25 @@ def folder_path_from_item(item: SharePointItem) -> Optional[str]:
 
 
 def normalize_path(path: str) -> str:
-    """Normalize a SharePoint path for case- and encoding-insensitive comparison.
+    """Normalize a decoded SharePoint path for case-insensitive comparison.
 
-    URL-decodes percent-encoding, normalizes Unicode to NFC (so å/ä/ö in NFC
-    vs NFD forms compare equal), strips a trailing slash, and casefolds.
+    Normalizes Unicode to NFC (so å/ä/ö in NFC vs NFD forms compare equal),
+    strips a trailing slash, and casefolds. Decoding is the caller's: a path
+    is decoded once, where it comes from Graph.
     """
     if not path:
         return ""
-    decoded = unquote(path)
-    nfc = unicodedata.normalize("NFC", decoded)
+    nfc = unicodedata.normalize("NFC", path)
     return nfc.rstrip("/").casefold()
+
+
+def _scope_forms(scope_folder_path: str) -> set[str]:
+    """The stored scope path, and decoded once more for a path stored before
+    scope paths were stored decoded; a pass refreshes it before it decides."""
+    return {
+        normalize_path(scope_folder_path),
+        normalize_path(unquote(scope_folder_path)),
+    }
 
 
 def extract_relative_graph_path(parent_path: str) -> str:

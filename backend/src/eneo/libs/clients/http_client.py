@@ -5,8 +5,8 @@ import aiohttp
 from aiohttp.typedefs import Query
 
 from eneo.libs.clients.throttle_retry import (
-    THROTTLE_AND_OVERLOAD_STATUS_CODES,
     THROTTLE_STATUS_CODES,
+    TRANSIENT_STATUS_CODES,
     retry_on_throttle,
 )
 from eneo.main.exceptions import InternalHTTPException
@@ -59,12 +59,13 @@ class WrappedAiohttpClient:
             async with self.client.get(url, params=params, headers=headers) as response:
                 return await self._handle_response(
                     response,
-                    retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+                    retryable_status_codes=TRANSIENT_STATUS_CODES,
                 )
 
         return await retry_on_throttle(
             _do,
-            retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+            retryable_status_codes=TRANSIENT_STATUS_CODES,
+            retry_transport_errors=True,
         )
 
     async def post(
@@ -74,9 +75,10 @@ class WrappedAiohttpClient:
         headers: RequestHeaders | None = None,
         *,
         retryable_status_codes: Collection[int] = THROTTLE_STATUS_CODES,
+        retry_transport_errors: bool = False,
     ) -> Any:
-        # 503 retry is opt-in: only safe when the POST is idempotent (e.g. a
-        # Graph $batch of GETs).
+        # Retrying overload and transport failures is opt-in: only safe when
+        # the POST is idempotent (e.g. a Graph $batch of GETs).
         url = self._create_url(endpoint=endpoint)
 
         async def _do() -> Any:
@@ -89,6 +91,7 @@ class WrappedAiohttpClient:
         return await retry_on_throttle(
             _do,
             retryable_status_codes=retryable_status_codes,
+            retry_transport_errors=retry_transport_errors,
         )
 
     async def request(
@@ -136,7 +139,7 @@ class WrappedAiohttpClient:
                     response.raise_for_status()
                     return await response.read()
             except aiohttp.ClientResponseError as http_err:
-                if http_err.status in THROTTLE_AND_OVERLOAD_STATUS_CODES:
+                if http_err.status in TRANSIENT_STATUS_CODES:
                     raise http_err
                 logger.exception(f"HTTP error while downloading from {url}:")
                 raise http_err
@@ -149,7 +152,8 @@ class WrappedAiohttpClient:
 
         return await retry_on_throttle(
             _do,
-            retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+            retryable_status_codes=TRANSIENT_STATUS_CODES,
+            retry_transport_errors=True,
         )
 
     async def close(self) -> None:

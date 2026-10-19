@@ -450,7 +450,7 @@ class TestDeltaMetadata:
         deps["oauth_token_repo"].one.return_value = token
         deps["session"].sync_session = None
         old_key = service._index.change_key("same-ctag", ENTRIES, title="Doc.docx")
-        service.change_key_service.should_process.side_effect = (
+        service._index.change_key_service.should_process.side_effect = (
             lambda **kwargs: kwargs["change_key"] != old_key
         )
         existing = _existing(

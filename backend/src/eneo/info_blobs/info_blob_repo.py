@@ -281,6 +281,26 @@ class InfoBlobRepository:
         *,
         original_sha256: bytes | None = None,
     ) -> None:
+        """Serialize publishers of one identity until the transaction ends.
+
+        Without it two transactions that both find no active version insert
+        two. A sync publishes a whole library in one transaction, and an
+        advisory lock per document would stay held until it commits and fill
+        the shared lock table; an integration knowledge's publications lock its
+        row instead, whose lock lives in the tuple and which the sync already
+        holds from recording its start.
+        """
+        if (
+            info_blob.group_id is None
+            and info_blob.website_id is None
+            and info_blob.integration_knowledge_id is not None
+        ):
+            await self.session.execute(
+                sa.select(IntegrationKnowledge.id)
+                .where(IntegrationKnowledge.id == info_blob.integration_knowledge_id)
+                .with_for_update(key_share=True)
+            )
+            return
         identities = {
             identity
             for identity in (
@@ -887,6 +907,36 @@ class InfoBlobRepository:
             )
         )
         return InfoBlobInDB.model_validate(record) if record is not None else None
+
+    async def refresh_sharepoint_citation(
+        self,
+        *,
+        sharepoint_item_id: str,
+        integration_knowledge_id: UUID,
+        title: str,
+        url: str,
+    ) -> bool:
+        """Point the active version at the item's current name and address.
+
+        Neither is embedded for a document without source properties, and a
+        document with them re-embeds on a rename anyway (its title is in the
+        header), so nothing else needs to change. True when a row changed.
+        """
+        updated = await self.session.execute(
+            sa.update(InfoBlobs)
+            .where(
+                InfoBlobs.sharepoint_item_id == sharepoint_item_id,
+                InfoBlobs.integration_knowledge_id == integration_knowledge_id,
+                active_info_blob_version(),
+                sa.or_(
+                    InfoBlobs.title.is_distinct_from(title),
+                    InfoBlobs.url.is_distinct_from(url),
+                ),
+            )
+            .values(title=title, url=url)
+            .execution_options(synchronize_session=False)
+        )
+        return affected_row_count(updated) > 0
 
     async def get_by_sharepoint_item_and_integration_knowledge(
         self,

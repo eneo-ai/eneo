@@ -2,7 +2,7 @@ import asyncio
 import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional, Sequence, cast
-from urllib.parse import ParseResult, parse_qs, quote, urlparse
+from urllib.parse import ParseResult, quote, unquote, urlparse
 from uuid import UUID
 
 import aiohttp
@@ -20,6 +20,7 @@ from eneo.integration.infrastructure.content_service.utils import (
 from eneo.libs.clients import BaseClient
 from eneo.libs.clients.throttle_retry import (
     THROTTLE_AND_OVERLOAD_STATUS_CODES,
+    TRANSIENT_STATUS_CODES,
     parse_retry_after,
     retry_on_throttle,
 )
@@ -60,8 +61,12 @@ def _strip_query_param(url: str, name: str) -> str:
 
 
 def _token_from_delta_link(delta_link: str) -> Optional[str]:
-    query_params: dict[str, list[str]] = parse_qs(urlparse(delta_link).query)
-    return query_params.get("token", [None])[0]
+    """The token as Graph encoded it: a ``+`` in it is a plus, not a space."""
+    for part in urlparse(delta_link).query.split("&"):
+        name, _, value = part.partition("=")
+        if name == "token":
+            return unquote(value) or None
+    return None
 
 
 def _without_download_credentials(
@@ -93,19 +98,25 @@ def _without_query(url: str) -> str:
     return re.split(r"[?#]", url, maxsplit=1)[0]
 
 
-class IncompleteDownloadError(Exception):
+class IncompleteDownloadError(aiohttp.ClientPayloadError):
     """The body ended before the announced Content-Length.
 
     Partial bytes must never be parsed: a truncated PDF or ZIP looks like a
-    corrupt or empty file and would be mistaken for one.
+    corrupt or empty file and would be mistaken for one. A payload error, so
+    the download is retried like any other cut-off transfer.
     """
+
+    def __init__(self, message: str, *, content_type: str) -> None:
+        super().__init__(message)
+        self.content_type = content_type
 
 
 class MissingDownloadUrlError(ValueError):
     """Graph returned the item without a download URL.
 
-    Transient (a file being uploaded or processed), so callers must not treat
-    it as a verdict about the file.
+    Either for good (some item kinds have no content stream) or for now (a
+    file being uploaded or processed), so callers must not treat it as a
+    verdict about the file's content.
     """
 
 
@@ -476,7 +487,8 @@ class SharePointContentClient(BaseClient):
             if content_length is not None and len(payload) != content_length:
                 raise IncompleteDownloadError(
                     f"Incomplete download of '{file_name}' "
-                    f"({len(payload)} of {content_length} bytes)"
+                    f"({len(payload)} of {content_length} bytes)",
+                    content_type=response.headers.get("Content-Type", ""),
                 )
 
         return bytes(payload)
@@ -487,9 +499,9 @@ class SharePointContentClient(BaseClient):
         file_name: str,
     ) -> ExtractionResult:
         # Streams the body directly off the raw session to enforce the size
-        # limit, bypassing WrappedAiohttpClient — so throttling retry must be
-        # applied here explicitly.
-        async def _download() -> ExtractionResult:
+        # limit, bypassing WrappedAiohttpClient — so the retry is applied here
+        # explicitly. Extraction runs once, after the transfer succeeded.
+        async def _download() -> tuple[bytes, str, Optional[str]]:
             # The status check raises, and so does the request itself, for
             # example after too many redirects or at an invalid redirect. from
             # None: a traceback must not show the original either.
@@ -500,27 +512,29 @@ class SharePointContentClient(BaseClient):
                     response.raise_for_status()
                     content_type = response.headers.get("Content-Type", "")
                     charset = response.charset
-                    try:
-                        payload = await self._read_response_with_size_limit(
-                            response, file_name
-                        )
-                    except IncompleteDownloadError as e:
-                        logger.warning(str(e))
-                        return ExtractionResult.error(str(e), content_type)
+                    payload = await self._read_response_with_size_limit(
+                        response, file_name
+                    )
             except aiohttp.ClientResponseError as e:
                 raise _without_download_credentials(e) from None
             except aiohttp.InvalidURL as e:
                 raise aiohttp.InvalidURL(
                     _without_query(str(e.url)), e.description
                 ) from None
+            return payload, content_type, charset
 
-            return await extract_sharepoint_content(
-                payload, content_type, file_name, charset=charset
+        try:
+            payload, content_type, charset = await retry_on_throttle(
+                _download,
+                retryable_status_codes=TRANSIENT_STATUS_CODES,
+                retry_transport_errors=True,
             )
+        except IncompleteDownloadError as e:
+            logger.warning(str(e))
+            return ExtractionResult.error(str(e), e.content_type)
 
-        return await retry_on_throttle(
-            _download,
-            retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+        return await extract_sharepoint_content(
+            payload, content_type, file_name, charset=charset
         )
 
     async def get_sites(self) -> dict[str, Any]:
@@ -585,7 +599,8 @@ class SharePointContentClient(BaseClient):
                         "v1.0/$batch",
                         data=body,
                         headers=self.headers,
-                        retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+                        retryable_status_codes=TRANSIENT_STATUS_CODES,
+                        retry_transport_errors=True,
                     )
                 except aiohttp.ClientResponseError as e:
                     if e.status == 401 and self.can_refresh_token:
@@ -597,7 +612,8 @@ class SharePointContentClient(BaseClient):
                             "v1.0/$batch",
                             data=body,
                             headers=self.headers,
-                            retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+                            retryable_status_codes=TRANSIENT_STATUS_CODES,
+                            retry_transport_errors=True,
                         )
                     raise
 
@@ -836,7 +852,8 @@ class SharePointContentClient(BaseClient):
                         "v1.0/$batch",
                         data={"requests": requests},
                         headers=self.headers,
-                        retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+                        retryable_status_codes=TRANSIENT_STATUS_CODES,
+                        retry_transport_errors=True,
                     ),
                 )
             except aiohttp.ClientResponseError as exc:
@@ -992,40 +1009,41 @@ class SharePointContentClient(BaseClient):
                 return await self.client.get(stripped, headers=headers)
             raise
 
+    async def _final_delta_link(self, endpoint: str) -> Optional[str]:
+        """Follow delta pages to the deltaLink, discarding what they list."""
+        headers = {**self.headers, **DELTA_REQUEST_HEADERS}
+        next_link: Optional[str] = endpoint
+        while next_link:
+            if next_link.startswith("http"):
+                next_link = _relative_graph_link(next_link)
+            response = await self.client.get(next_link, headers=headers)
+            if "@odata.deltaLink" in response:
+                return cast(str, response["@odata.deltaLink"])
+            next_link = cast(Optional[str], response.get("@odata.nextLink"))
+        return None
+
     async def initialize_delta_token(
         self, drive_id: str, *, _retried: bool = False
     ) -> Optional[str]:
-        """
-        Initialize delta tracking for a drive by calling delta without a token.
-        Returns the deltaLink token for future incremental syncs.
+        """A delta token for the drive as it is now; ``None`` without a deltaLink.
 
-        Args:
-            drive_id: The drive ID to track
-
-        Returns:
-            The delta token to use for future incremental syncs, or None if failed
+        ``token=latest`` has Graph answer with the deltaLink alone instead of
+        listing every item of the drive first. A drive that rejects it (400)
+        is listed the old way.
         """
+        delta_root = f"v1.0/drives/{drive_id}/root/delta"
         try:
-            endpoint = self._with_item_expand(f"v1.0/drives/{drive_id}/root/delta")
-
-            # Iterate through all pages to get to the final deltaLink
-            delta_link = None
-            next_link = endpoint
-
-            while next_link:
-                # Handle full URL or relative endpoint
-                if next_link.startswith("http"):
-                    next_link = _relative_graph_link(next_link)
-
-                response = await self._get_delta_page(next_link)
-
-                # Check for @odata.nextLink (more pages to fetch)
-                next_link = cast(str | None, response.get("@odata.nextLink"))
-
-                # Check for @odata.deltaLink (final page with token)
-                if "@odata.deltaLink" in response:
-                    delta_link = cast(str, response["@odata.deltaLink"])
-                    break
+            try:
+                delta_link = await self._final_delta_link(f"{delta_root}?token=latest")
+            except aiohttp.ClientResponseError as e:
+                if e.status != 400:
+                    raise
+                logger.warning(
+                    "Graph rejected token=latest for drive %s; listing the drive "
+                    "for a delta baseline",
+                    drive_id,
+                )
+                delta_link = await self._final_delta_link(delta_root)
 
             if not delta_link:
                 logger.warning(f"No deltaLink found for drive {drive_id}")
@@ -1068,7 +1086,7 @@ class SharePointContentClient(BaseClient):
         """
         try:
             endpoint = self._with_item_expand(
-                f"v1.0/drives/{drive_id}/root/delta?token={delta_token}"
+                f"v1.0/drives/{drive_id}/root/delta?token={quote(delta_token, safe='')}"
             )
 
             all_changes: list[SharePointItem] = []

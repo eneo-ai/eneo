@@ -32,6 +32,7 @@ SkipReasonCode = Literal[
     "scope_path_unavailable",
     "missing_item_id",
     "unchanged",
+    "set_aside",
     "error",
 ]
 SKIP_REASON_CODES: tuple[SkipReasonCode, ...] = get_args(SkipReasonCode)
@@ -92,6 +93,14 @@ def extraction_limit_reason(limit: str) -> str:
     return f"Exceeds extraction limit ({limit})"
 
 
+def set_aside_reason(attempts: int, detail: str) -> str:
+    """An item that failed ``attempts`` passes in a row; a full sync tries it again."""
+    return (
+        f"Set aside after {attempts} failed attempts, retried by the next full "
+        f"sync: {detail}"
+    )
+
+
 def error_reason(detail: str | BaseException) -> str:
     """``Error: <detail>``; an exception is described by ``user_visible_error``."""
     return user_visible_error(f"Error: {user_visible_error(detail)}")
@@ -128,6 +137,10 @@ def reason_text(code: SkipReasonCode, params: Mapping[str, str | int]) -> str:
         return MISSING_ITEM_ID_REASON
     if code == "unchanged":
         return ALREADY_SYNCED_REASON
+    if code == "set_aside":
+        return set_aside_reason(
+            int(params.get("attempts", 0)), str(params.get("detail", ""))
+        )
     return error_reason(str(params.get("detail", "")))
 
 
@@ -185,6 +198,10 @@ _LIMIT_TEXT_BYTES = re.compile(r"^(\d+) bytes of text$")
 _LIMIT_PDF_PAGES = re.compile(r"^(\d+) PDF pages$")
 _REMOVAL_FAILED = re.compile(r"^Could not remove ?([^:]*): (.+)$", re.S)
 _LISTING_FAILED = re.compile(r"^Could not list folder contents: (.+)$", re.S)
+_SET_ASIDE = re.compile(
+    r"^Set aside after (\d+) failed attempts, retried by the next full sync: (.+)$",
+    re.S,
+)
 _ERROR = re.compile(r"^Error: (.+)$", re.S)
 _HTTP_ERROR = re.compile(r"^HTTP (\d{3})\b\s*(.*)$", re.S)
 _INCOMPLETE_DOWNLOAD = re.compile(r"^Incomplete download\b")
@@ -230,6 +247,9 @@ def classify_skip_reason(
         return "removal_failed", params, retry
     if match := _LISTING_FAILED.match(text):
         return "listing_failed", {"detail": match.group(1)}, retry
+    if match := _SET_ASIDE.match(text):
+        attempts = int(match.group(1))
+        return "set_aside", {"attempts": attempts, "detail": match.group(2)}, retry
     if match := _ERROR.match(text):
         return _classify_error(match.group(1)) + (retry,)
     return "error", {"detail": text}, retry

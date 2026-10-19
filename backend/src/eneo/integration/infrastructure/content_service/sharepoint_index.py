@@ -6,13 +6,21 @@ not decide folder membership, advance delta tokens or commit transactions.
 """
 
 import hashlib
+from contextlib import AbstractAsyncContextManager, nullcontext
 from typing import TYPE_CHECKING, Optional, cast
 from uuid import UUID
 
 import aiohttp
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate, SourceMetadataEntry
-from eneo.integration.domain.skip_reasons import error_skipped, skipped, skipped_by_code
+from eneo.integration.domain.skip_reasons import (
+    SkipReasonCode,
+    classify_skip_reason,
+    error_skipped,
+    skipped,
+    skipped_by_code,
+)
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     MissingDownloadUrlError,
     SharePointContentClient,
@@ -43,6 +51,7 @@ from eneo.integration.infrastructure.content_service.utils import (
     error_reason,
     file_too_large_reason,
     is_unextractable_content,
+    unsupported_package_reason,
 )
 from eneo.integration.infrastructure.graph_errors import ITEM_LEVEL_HTTP_STATUSES
 from eneo.main.config import get_settings
@@ -65,6 +74,15 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+NO_DOWNLOAD_REASON = "SharePoint offers no download for this item"
+# Verdicts about the file itself: its indexed copy no longer stands for it.
+# The value names the removal in logs and in a failed removal's reason.
+_REMOVING_VERDICTS: dict[SkipReasonCode, str] = {
+    "password_protected": "encrypted",
+    "unsupported_type": "unsupported",
+    "file_too_large": "too-large",
+}
+
 
 class SharePointIndex:
     def __init__(
@@ -81,12 +99,37 @@ class SharePointIndex:
         # None is a failed read; an empty catalog is a successful empty read.
         # Both are cached for the lifetime of this sync service, once per drive.
         self._column_catalogs: dict[str, SharePointColumnCatalog | None] = {}
+        # Item ids that may be indexed, per knowledge: read once, kept current
+        # by this writer. A superset is fine; it only saves a delete that
+        # cannot match.
+        self._maybe_indexed: dict[UUID, set[str]] = {}
+
+    def _savepoint(self) -> AbstractAsyncContextManager[object]:
+        """Around one item's writes: a failing statement rolls back that item
+        only, instead of aborting the transaction the whole sync runs in."""
+        session = getattr(self.info_blob_service.repo, "session", None)
+        if isinstance(session, AsyncSession):
+            return session.begin_nested()
+        return nullcontext()
 
     async def list_items(self, knowledge_id: UUID) -> list[tuple[UUID, str]]:
         """Indexed blob/item identities without loading text or embeddings."""
         return await self.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge(
             integration_knowledge_id=knowledge_id
         )
+
+    async def _may_be_indexed(self, knowledge_id: UUID, item_id: str) -> bool:
+        known = self._maybe_indexed.get(knowledge_id)
+        if known is None:
+            try:
+                indexed = await self.list_items(knowledge_id)
+            except Exception as exc:
+                logger.warning("Could not read the indexed SharePoint items: %s", exc)
+                return True
+            known = self._maybe_indexed[knowledge_id] = {
+                indexed_id for _, indexed_id in indexed
+            }
+        return item_id in known
 
     async def _column_catalog(
         self, client: SharePointContentClient, drive_id: Optional[str]
@@ -164,6 +207,45 @@ class SharePointIndex:
         return digest.digest()
 
     @staticmethod
+    def citation_key(item: SharePointItem) -> Optional[str]:
+        """What a rename or move changes without touching the cTag."""
+        name, url = item.get("name"), item.get("webUrl")
+        if not name or not url:
+            return None
+        return hashlib.sha256(f"{name}\x00{url}".encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def citation_cache_id(item_id: str) -> str:
+        return f"{item_id}#citation"
+
+    async def _refresh_citation(
+        self,
+        item: SharePointItem,
+        item_id: str,
+        integration_knowledge_id: UUID,
+        pending_change_keys: list[tuple[UUID, str, str]],
+    ) -> None:
+        """Rename or move an unchanged document's indexed copy without re-embedding it."""
+        citation_key = self.citation_key(item)
+        if not citation_key or not self.change_key_service:
+            return
+        cache_id = self.citation_cache_id(item_id)
+        if not await self.change_key_service.should_process(
+            integration_knowledge_id=integration_knowledge_id,
+            item_id=cache_id,
+            change_key=citation_key,
+        ):
+            return
+        async with self._savepoint():
+            await self.info_blob_service.repo.refresh_sharepoint_citation(
+                sharepoint_item_id=item_id,
+                integration_knowledge_id=integration_knowledge_id,
+                title=item.get("name", ""),
+                url=item.get("webUrl", ""),
+            )
+        pending_change_keys.append((integration_knowledge_id, cache_id, citation_key))
+
+    @staticmethod
     def change_key(
         change_key: Optional[str],
         source_metadata: Optional[list[SourceMetadataEntry]],
@@ -196,6 +278,30 @@ class SharePointIndex:
         item_name: Optional[str] = None,
     ) -> BlobOutcome:
         """Index one document; ``item_name`` (default ``title``) names a skip."""
+        async with self._savepoint():
+            return await self._upsert(
+                title,
+                text,
+                url,
+                integration_knowledge,
+                stats=stats,
+                sharepoint_item_id=sharepoint_item_id,
+                source_metadata=source_metadata,
+                item_name=item_name,
+            )
+
+    async def _upsert(
+        self,
+        title: str,
+        text: str,
+        url: str,
+        integration_knowledge: "IntegrationKnowledge",
+        *,
+        stats: SyncStats,
+        sharepoint_item_id: Optional[str],
+        source_metadata: Optional[list[SourceMetadataEntry]],
+        item_name: Optional[str],
+    ) -> BlobOutcome:
         sanitized_text = sanitize_text_for_db(text)
         if not sanitized_text.strip():
             # Nothing indexable survives sanitising; treat it like a parser that
@@ -289,6 +395,8 @@ class SharePointIndex:
             embedding_model=integration_knowledge.embedding_model,
         )
 
+        if sharepoint_item_id and integration_knowledge.id in self._maybe_indexed:
+            self._maybe_indexed[integration_knowledge.id].add(sharepoint_item_id)
         new_blob_size = safe_int(getattr(info_blob, "size", 0))
         await self._adjust_size(
             integration_knowledge, new_blob_size - previous_blob_size
@@ -320,26 +428,29 @@ class SharePointIndex:
         the failure is counted here, so callers add no entry of their own.
         """
         try:
-            deleted_blobs = await self.info_blob_service.repo.delete_by_sharepoint_item_and_integration_knowledge(
-                sharepoint_item_id=item_id,
-                integration_knowledge_id=integration_knowledge_id,
-            )
-
-            valid_deleted_blobs = [
-                blob
-                for blob in deleted_blobs
-                if blob is not None  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard
-            ]
-            if valid_deleted_blobs:
-                deleted_size = sum(
-                    safe_int(getattr(blob, "size", 0)) for blob in valid_deleted_blobs
+            async with self._savepoint():
+                deleted_blobs = await self.info_blob_service.repo.delete_by_sharepoint_item_and_integration_knowledge(
+                    sharepoint_item_id=item_id,
+                    integration_knowledge_id=integration_knowledge_id,
                 )
-                await self._adjust_size(integration_knowledge, -deleted_size)
+
+                valid_deleted_blobs = [
+                    blob
+                    for blob in deleted_blobs
+                    if blob is not None  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard
+                ]
+                if valid_deleted_blobs:
+                    deleted_size = sum(
+                        safe_int(getattr(blob, "size", 0))
+                        for blob in valid_deleted_blobs
+                    )
+                    await self._adjust_size(integration_knowledge, -deleted_size)
             for blob in valid_deleted_blobs:
                 # Orphan and subtree cleanup only know the item id; the blob
                 # still carries the document's name.
                 sync_results.record_change(stats, blob.title or item_name, "deleted")
 
+            self._maybe_indexed.get(integration_knowledge_id, set()).discard(item_id)
             deleted_count = len(valid_deleted_blobs)
             if deleted_count:
                 logger.info(
@@ -385,6 +496,7 @@ class SharePointIndex:
                     what=reason,
                     detail=user_visible_error(e),
                 ),
+                item_id=item_id,
             )
             return None
 
@@ -424,7 +536,32 @@ class SharePointIndex:
         integration_knowledge_id: UUID,
         stats: SyncStats,
     ) -> None:
-        """Count a file that yielded no text; drop the local copy only for a positive no-text result."""
+        """Count a file that yielded no text; drop the local copy for a verdict about the file.
+
+        A completed parse without text, or a verdict in ``_REMOVING_VERDICTS``,
+        says the indexed copy no longer stands for the file. Anything else (a
+        parser error, a cut-off download, a limit) says nothing about it and
+        keeps the copy.
+        """
+        verdict = (
+            _REMOVING_VERDICTS.get(classify_skip_reason(skip_reason)[0])
+            if skip_reason
+            else None
+        )
+        if item_id and skip_reason and verdict:
+            if await self._may_be_indexed(integration_knowledge_id, item_id):
+                deleted = await self.remove(
+                    item_id=item_id,
+                    item_name=item_name,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=integration_knowledge_id,
+                    stats=stats,
+                    reason=verdict,
+                )
+                if deleted is None:
+                    return
+            sync_results.count_skip(stats, skipped(item_name, skip_reason))
+            return
         if item_id and skip_reason in NO_TEXT_REASONS:
             await self._remove_empty(
                 item_id=item_id,
@@ -440,6 +577,28 @@ class SharePointIndex:
         else:
             stats["skipped_items"] += 1
 
+    async def remove_refused(
+        self, integration_knowledge: "IntegrationKnowledge", stats: SyncStats
+    ) -> None:
+        """Drop the indexed copies of files whose download was refused (403).
+
+        Called at the end of a pass that ``sharepoint_results.refused_access``
+        did not put down to the identity: a refusal among downloads that work
+        is about the file (a sensitivity label, broken inheritance), and what
+        Eneo may no longer read must not stay answerable. The refusal itself
+        was counted as the file's skip when it came.
+        """
+        for item_id, item_name in stats.pop("refused_downloads", {}).items():
+            if await self._may_be_indexed(integration_knowledge.id, item_id):
+                await self.remove(
+                    item_id=item_id,
+                    item_name=item_name,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=integration_knowledge.id,
+                    stats=stats,
+                    reason="access-refused",
+                )
+
     async def index_file(
         self,
         *,
@@ -454,8 +613,8 @@ class SharePointIndex:
 
         The counted failure fails the pass at its end. With ``pending_change_keys``
         (a delta pass) an item whose ChangeKey was processed before is skipped as
-        unchanged, and the key of an indexed item is queued for the post-commit
-        cache write. A full sync passes none: it re-verifies every file and
+        unchanged, its title and URL still following a rename, and the key of an
+        indexed item is queued for the post-commit cache write. A full sync passes none: it re-verifies every file and
         relies on the content hash alone.
         """
         item_name = item.get("name", "")
@@ -467,6 +626,21 @@ class SharePointIndex:
             return
         integration_knowledge_id = integration_knowledge.id
         try:
+            # Before the ChangeKey: a rename to an unsupported type keeps its cTag.
+            unsupported_reason = unsupported_file_reason(
+                item_name
+            ) or unsupported_package_reason(item)
+            if unsupported_reason:
+                await self.record_unextractable(
+                    item_id=item_id,
+                    item_name=item_name,
+                    skip_reason=unsupported_reason,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=integration_knowledge_id,
+                    stats=stats,
+                )
+                return
+
             source_metadata = await self.source_metadata_for(client, drive_id, item)
             change_key = None
             if pending_change_keys is not None and self.change_key_service:
@@ -481,13 +655,11 @@ class SharePointIndex:
                     logger.info(
                         f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
                     )
+                    await self._refresh_citation(
+                        item, item_id, integration_knowledge_id, pending_change_keys
+                    )
                     stats["unchanged_items"] += 1
                     return
-
-            unsupported_reason = unsupported_file_reason(item_name)
-            if unsupported_reason:
-                sync_results.count_skip(stats, skipped(item_name, unsupported_reason))
-                return
 
             content, skip_reason = await self._extract_file(
                 client, drive_id, item_id, item_name, stats
@@ -519,9 +691,19 @@ class SharePointIndex:
                 pending_change_keys.append(
                     (integration_knowledge_id, item_id, change_key)
                 )
+                if citation_key := self.citation_key(item):
+                    pending_change_keys.append(
+                        (
+                            integration_knowledge_id,
+                            self.citation_cache_id(item_id),
+                            citation_key,
+                        )
+                    )
         except Exception as e:
             logger.error(f"Error processing file {item_name}: {e}", exc_info=True)
-            sync_results.count_failure(stats, error_skipped(item_name, e))
+            sync_results.count_failure(
+                stats, error_skipped(item_name, e), item_id=item_id
+            )
 
     async def _extract_file(
         self,
@@ -534,17 +716,22 @@ class SharePointIndex:
         """``(text, None)`` or ``(None, skip_reason)`` for an outcome of the file itself.
 
         Graph or network trouble (5xx, throttling past its retries, connection
-        and timeout errors, an item served without a download URL, anything
-        unexpected) propagates: it says nothing about the file, so the caller
-        must not move past it.
+        and timeout errors, anything unexpected) propagates: it says nothing
+        about the file, so the caller must not move past it. An item served
+        without a download URL is skipped instead: Graph serves some items that
+        way for good, and one still being uploaded changes again when it is
+        done, so failing it would only hold the token back.
         """
-        stats["download_attempts"] = stats.get("download_attempts", 0) + 1
+        sync_results.count_download_attempt(stats)
         try:
             result = await client.get_file_extraction_by_id(
                 drive_id=drive_id, item_id=item_id
             )
         except MissingDownloadUrlError:
-            raise
+            logger.warning(
+                "File %s (item_id=%s) has no download URL", item_name, item_id
+            )
+            return None, error_reason(NO_DOWNLOAD_REASON)
         except ValueError as e:
             if "exceeds max download size" in str(e):
                 return None, file_too_large_reason(
@@ -558,7 +745,7 @@ class SharePointIndex:
             if e.status not in ITEM_LEVEL_HTTP_STATUSES:
                 raise
             if e.status == 403:
-                stats["download_forbidden"] = stats.get("download_forbidden", 0) + 1
+                sync_results.count_refused_download(stats, item_id, item_name)
             logger.warning(
                 "File %s (item_id=%s) is gone or not accessible: %s",
                 item_name,

@@ -291,6 +291,7 @@ class SharePointReconciliation:
                 skipped_by_code(
                     folder_name, "listing_failed", detail=user_visible_error(exc)
                 ),
+                item_id=folder_id,
             )
             return
 
