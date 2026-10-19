@@ -83,6 +83,7 @@ def _public(items: list[dict[str, Any]]) -> MCPOAuthConnectionList:
 
 @router.get(
     "/client.json",
+    response_model=dict[str, Any],
     description=(
         "Eneo's OAuth Client ID Metadata Document. Authorization servers fetch "
         "it to validate Eneo's client id and redirect URI."
