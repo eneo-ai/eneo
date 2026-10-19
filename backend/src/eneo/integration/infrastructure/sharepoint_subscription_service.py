@@ -50,13 +50,19 @@ def normalize_notification_url(url: str) -> str:
 def lifecycle_notification_url_for(
     notification_url: Optional[str], configured: Optional[str]
 ) -> Optional[str]:
-    """Where Graph posts lifecycle events: the configured URL, else ``lifecycle/``
-    under the notification URL. None without a notification URL."""
+    """Where Graph posts lifecycle events: the configured URL, else the
+    notification URL itself. None without a notification URL.
+
+    Graph validates this URL when it creates a subscription. The notification
+    URL is already known to reach Eneo, so defaulting to it cannot break
+    subscriptions behind a proxy that forwards only that path; the webhook
+    tells lifecycle events from changes by their ``lifecycleEvent`` field.
+    """
     if not notification_url:
         return None
     if configured and configured.strip():
         return configured.strip()
-    return f"{notification_url.rstrip('/')}/lifecycle/"
+    return notification_url
 
 
 def _resource_label(site_id: Optional[str], drive_id: Optional[str] = None) -> str:

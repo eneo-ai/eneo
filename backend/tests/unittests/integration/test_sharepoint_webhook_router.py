@@ -373,3 +373,71 @@ def test_the_lifecycle_path_stays_out_of_the_published_api():
 
     assert LIFECYCLE not in app.openapi()["paths"]
     assert WEBHOOK in app.openapi()["paths"]
+
+
+async def test_the_webhook_path_hands_lifecycle_events_to_lifecycle_handling(
+    api, monkeypatch
+):
+    """Graph posts lifecycle events to the webhook URL by default; a change in
+    the same batch still queues its sync."""
+    maintain = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.integration.presentation.sharepoint_webhook_router.maintain_subscriptions",
+        maintain,
+    )
+    result = MagicMock()
+    result.all.return_value = _knowledge_rows(1)
+    api.session.execute.return_value = result
+    api.service.oauth_token_repo.one_or_none.return_value = MagicMock(id=uuid4())
+    api.service.user_repo.get_user_by_id.return_value = MagicMock(id=uuid4())
+
+    response = await api.client.post(
+        WEBHOOK,
+        json={"value": [_lifecycle("reauthorizationRequired"), _notification()]},
+    )
+    for _ in range(3):
+        await asyncio.sleep(0)
+
+    assert response.status_code == 202
+    [requests] = maintain.await_args.args
+    assert [(r.subscription_id, r.event) for r in requests] == [
+        (api.subscription.id, "reauthorizationRequired")
+    ]
+    [queued] = api.job_service.queue_job.await_args_list
+    assert queued.kwargs["task_params"].integration_knowledge_id == (
+        result.all.return_value[0][0].id
+    )
+
+
+async def test_a_change_notification_alone_starts_no_lifecycle_handling(
+    api, monkeypatch
+):
+    maintain = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.integration.presentation.sharepoint_webhook_router.maintain_subscriptions",
+        maintain,
+    )
+    result = MagicMock()
+    result.all.return_value = _knowledge_rows(1)
+    api.session.execute.return_value = result
+    api.service.oauth_token_repo.one_or_none.return_value = MagicMock(id=uuid4())
+    api.service.user_repo.get_user_by_id.return_value = MagicMock(id=uuid4())
+
+    response = await api.client.post(WEBHOOK, json={"value": [_notification()]})
+
+    assert response.status_code == 202
+    api.job_service.queue_job.assert_awaited_once()
+    maintain.assert_not_called()
+
+
+async def test_missed_notifications_on_the_webhook_path_queue_syncs(api):
+    result = MagicMock()
+    result.all.return_value = _knowledge_rows(2)
+    api.session.execute.return_value = result
+    api.service.oauth_token_repo.one_or_none.return_value = MagicMock(id=uuid4())
+    api.service.user_repo.get_user_by_id.return_value = MagicMock(id=uuid4())
+
+    response = await api.client.post(WEBHOOK, json={"value": [_lifecycle("missed")]})
+
+    assert response.status_code == 202
+    assert api.job_service.queue_job.await_count == 2

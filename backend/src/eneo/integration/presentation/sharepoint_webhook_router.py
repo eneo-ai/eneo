@@ -69,10 +69,11 @@ async def _read_capped_body(request: Request) -> Optional[bytes]:
     return b"".join(chunks)
 
 
-# The lifecycle notification URL Graph is given (reauthorization, removal,
-# missed notifications) is served by the same handlers: a lifecycle event is
-# told from a change by its lifecycleEvent field. Graph is the only caller, so
-# the path stays out of the published API.
+# Both paths serve both kinds of notification: a lifecycle event
+# (reauthorization, removal, missed notifications) is told from a change by
+# its lifecycleEvent field. Graph posts lifecycle events to the webhook path by
+# default; the lifecycle path is for SHAREPOINT_WEBHOOK_LIFECYCLE_NOTIFICATION_URL
+# pointing at it. Graph is its only caller, so it stays out of the published API.
 @router.get(
     "/sharepoint/webhook/lifecycle/",
     description="Graph validation handshake for the lifecycle notification URL.",

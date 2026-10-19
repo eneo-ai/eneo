@@ -650,8 +650,8 @@ class Settings(BaseSettings):
     sharepoint_webhook_client_state: Optional[str] = None
     sharepoint_webhook_notification_url: Optional[str] = None
     # Where Graph posts subscription lifecycle events (reauthorization, removal,
-    # missed notifications). Defaults to "lifecycle/" under the notification
-    # URL; may be the notification URL itself.
+    # missed notifications). Defaults to the notification URL itself; the
+    # webhook's "lifecycle/" path serves them too.
     sharepoint_webhook_lifecycle_notification_url: Optional[str] = None
     # Max SharePoint/OneDrive file size to download and process (bytes)
     # Default: 50 MB

@@ -21,7 +21,7 @@ from eneo.integration.infrastructure.sharepoint_subscription_service import (
     lifecycle_notification_url_for,
 )
 
-LIFECYCLE_URL = "https://example.com/webhook/lifecycle/"
+LIFECYCLE_URL = "https://example.com/webhook/"
 
 
 @pytest.fixture
@@ -834,19 +834,13 @@ class TestListExpiringSubscriptions:
         pytest.param(
             "https://eneo.example/api/webhook/",
             None,
-            "https://eneo.example/api/webhook/lifecycle/",
-            id="derived",
-        ),
-        pytest.param(
-            "https://eneo.example/api/webhook",
-            None,
-            "https://eneo.example/api/webhook/lifecycle/",
-            id="derived-without-slash",
+            "https://eneo.example/api/webhook/",
+            id="the-webhook-url-by-default",
         ),
         pytest.param(
             "https://eneo.example/api/webhook/",
-            " https://eneo.example/api/webhook/ ",
-            "https://eneo.example/api/webhook/",
+            " https://eneo.example/api/webhook/lifecycle/ ",
+            "https://eneo.example/api/webhook/lifecycle/",
             id="configured",
         ),
         pytest.param(None, "https://eneo.example/x/", None, id="no-webhooks"),
