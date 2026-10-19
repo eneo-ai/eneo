@@ -508,6 +508,8 @@ async def test_tool_choices_survive_server_and_model_availability_transitions():
     blocked = await service.resolve_settings(
         assistant_id=assistant.id, settings=choices
     )
+    assert blocked.mcp_servers[0].selected
+    assert not blocked.capabilities[0].selected
     assert blocked.mcp_servers[0].reason == "server_disabled"
     assert blocked.settings == choices
     server.is_enabled = True
@@ -523,6 +525,8 @@ async def test_tool_choices_survive_server_and_model_availability_transitions():
     )
     assert restored.mcp_servers[0].available
     assert restored.capabilities[0].available
+    assert restored.mcp_servers[0].selected
+    assert not restored.capabilities[0].selected
     assert restored.settings == choices
 
 
@@ -564,3 +568,132 @@ async def test_model_lock_follows_current_policy_without_rewriting_saved_choice(
     )
     assert not unlocked.model_locked
     assert unlocked.settings == choices
+
+
+@pytest.mark.parametrize(
+    "unknown", [{"future_safety": {"required": True}}, {"schema_version": 2}]
+)
+def test_future_state_preserves_history_without_exposing_unknown_editable_fields(
+    unknown,
+):
+    payload = {"revision": 7, "settings": {"require_tool_approval": True}}
+    if "schema_version" in unknown:
+        payload.update(unknown)
+    else:
+        payload["settings"].update(unknown)
+    state = ConversationSettingsState.model_validate(payload)
+    history = SessionInDB(id=uuid4(), name="History", settings=payload)
+    assert history.settings == state
+    assert ConversationSettingsState.model_validate(state.to_storage()) == state
+    assert not state.is_compatible
+    assert state.to_storage()["settings"] == {
+        **state.settings.model_dump(mode="json"),
+        **(unknown if "schema_version" not in unknown else {}),
+    }
+    assert set(state.model_dump()) == {"revision", "settings"}
+    assert "future_safety" not in state.model_dump()["settings"]
+    with pytest.raises(BadRequestException, match="unsupported"):
+        state.with_settings(ConversationSettings())
+
+
+def test_retired_capability_is_preserved_across_updates_but_never_executed():
+    state = ConversationSettingsState.model_validate(
+        {
+            "revision": 2,
+            "settings": {
+                "capability_states": {
+                    "retired_tool": {"selected": True},
+                    "charts": False,
+                }
+            },
+        }
+    )
+    assert state.is_compatible
+    assert state.settings.capability_states == {"charts": False}
+    assert state.settings.disabled_capabilities([]) == ["charts"]
+    updated = state.with_settings(ConversationSettings(require_tool_approval=True))
+    stored = updated.to_storage()
+    assert stored["settings"]["capability_states"] == {
+        "retired_tool": {"selected": True}
+    }
+    assert updated.settings.capability_states == {}
+    assert updated.revision == 3
+    assert ConversationSettingsState.model_validate(stored) == updated
+    assert (
+        SessionAdd(name="Retained", settings=state).model_dump()["settings"]
+        == state.to_storage()
+    )
+
+
+@pytest.mark.parametrize(
+    "choices", [{"future_option": True}, {"capability_states": {"retired_tool": True}}]
+)
+def test_unknown_incoming_choices_are_still_rejected(choices):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ConversationSettings.model_validate(choices)
+
+
+@pytest.mark.parametrize(
+    "choices",
+    [
+        {"require_tool_approval": "invalid"},
+        {"capability_states": {"charts": "invalid"}},
+    ],
+)
+def test_known_invalid_stored_values_are_not_silently_repaired(choices):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ConversationSettingsState.model_validate({"revision": 1, "settings": choices})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group_chat", [False, True])
+async def test_future_settings_are_readable_but_block_updates_and_new_turns(group_chat):
+    service, assistant, _, _, _ = service_with_policy()
+    session_id = uuid4()
+    state = ConversationSettingsState.model_validate(
+        {"revision": 2, "settings": {"future_safety": True}}
+    )
+    service.session_service.get_context.return_value = SessionContext(
+        id=session_id,
+        user_id=None,
+        api_key_id=None,
+        assistant_id=None if group_chat else assistant.id,
+        group_chat_id=uuid4() if group_chat else None,
+        space_id=None,
+        settings=state,
+    )
+    resolved = await service.resolve_settings(session_id=session_id)
+    assert not resolved.settings_compatible
+    assert resolved.revision == 2
+    with pytest.raises(BadRequestException, match="unsupported"):
+        await service.update_settings(session_id, ConversationSettings(), 2)
+    with pytest.raises(BadRequestException, match="unsupported"):
+        await service.ask_conversation(session_id=session_id, question="Continue")
+    with pytest.raises(BadRequestException, match="unsupported"):
+        await service.preflight_tokens(
+            question="Continue", file_ids=[], session_id=session_id
+        )
+    service.session_service.update_settings.assert_not_awaited()
+    service.assistant_service.ask.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolved_tool_selection_uses_the_same_defaults_as_runtime():
+    service, assistant, _, server, policy = service_with_policy()
+    policy.default_disabled_capabilities = ["web_search"]
+    choices = ConversationSettings()
+    result = await service.resolve_settings(assistant_id=assistant.id, settings=choices)
+    assert result.mcp_servers[0].selected == (
+        server.id
+        not in choices.disabled_servers(policy.default_disabled_mcp_server_ids)
+    )
+    assert result.capabilities[0].selected == (
+        "web_search"
+        not in choices.disabled_capabilities(policy.default_disabled_capabilities)
+    )
+    assert not result.mcp_servers[0].selected
+    assert not result.capabilities[0].selected

@@ -12693,6 +12693,26 @@ export interface components {
        */
       stream?: boolean;
     };
+    /** ConversationCapability */
+    ConversationCapability: {
+      /**
+       * Purpose
+       * @enum {string}
+       */
+      purpose:
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute";
+      /** Available */
+      available: boolean;
+      /** Reason */
+      reason?: string | null;
+      /** Selected */
+      selected: boolean;
+    };
     /** ConversationInsightResponse */
     ConversationInsightResponse: {
       /** Total Conversations */
@@ -12720,6 +12740,8 @@ export interface components {
       icon_url?: string | null;
       /** Available */
       available: boolean;
+      /** Selected */
+      selected: boolean;
       /** Reason */
       reason?: string | null;
     };
@@ -12806,6 +12828,11 @@ export interface components {
       /** Revision */
       revision: number;
       settings: components["schemas"]["ConversationSettings"];
+      /**
+       * Settings Compatible
+       * @default true
+       */
+      settings_compatible?: boolean;
       /** Available Models */
       available_models?: components["schemas"]["CompletionModelPublic"][] | null;
       effective_model?: components["schemas"]["CompletionModelPublic"] | null;
@@ -12833,13 +12860,7 @@ export interface components {
       /** Mcp Servers */
       mcp_servers?: components["schemas"]["ConversationMcpServer"][];
       /** Capabilities */
-      capabilities?: components["schemas"]["CapabilityAvailability"][];
-      /** Default Disabled Mcp Server Ids */
-      default_disabled_mcp_server_ids?: string[];
-      /** Default Disabled Capabilities */
-      default_disabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
-      )[];
+      capabilities?: components["schemas"]["ConversationCapability"][];
     };
     /** ConversationSettingsState */
     ConversationSettingsState: {

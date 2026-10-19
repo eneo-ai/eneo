@@ -21,26 +21,10 @@ export function useToolChoices() {
     icon_url: server.icon_url ?? null
   }));
   const disabledCapabilities = new Set(
-    allCapabilities
-      .filter(
-        ({ purpose }) =>
-          !(
-            settings?.capability_states?.[purpose] ??
-            !resolution?.default_disabled_capabilities?.includes(purpose)
-          )
-      )
-      .map(({ purpose }) => purpose)
+    allCapabilities.filter(({ selected }) => !selected).map(({ purpose }) => purpose)
   );
   const disabledMcpServerIds = new Set(
-    mcpServers
-      .filter(
-        ({ id }) =>
-          !(
-            settings?.mcp_server_states?.[id] ??
-            !resolution?.default_disabled_mcp_server_ids?.includes(id)
-          )
-      )
-      .map(({ id }) => id)
+    mcpServers.filter(({ selected }) => !selected).map(({ id }) => id)
   );
 
   function setTools(mcpDisabled: Set<string>, capabilityDisabled: Set<Capability>) {

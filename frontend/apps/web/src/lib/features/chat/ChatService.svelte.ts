@@ -391,7 +391,13 @@ export class ChatService {
   }
 
   async updateSettings(update: Partial<ConversationSettings>) {
-    if (!this.settings || this.settingsBusy || this.askQuestion.isLoading) return;
+    if (
+      !this.settings ||
+      this.settingsBusy ||
+      this.askQuestion.isLoading ||
+      this.settingsResolution?.settings_compatible === false
+    )
+      return;
     const conversation = this.currentConversation;
     const settings = { ...this.settings, ...update };
     this.settingsBusy = true;
@@ -888,10 +894,11 @@ export class ChatService {
     ) => {
       if (this.#settingsEnabled) {
         if (this.settingsError) throw this.settingsError;
+        if (this.settingsResolution?.settings_compatible === false)
+          throw new Error(m.conversation_settings_incompatible());
         if (this.settingsResolution?.model_unavailable)
           throw new Error(m.conversation_settings_model_unavailable());
-        if (!this.settings || this.settingsBusy)
-          throw new Error("Conversation settings are still loading.");
+        if (!this.settings || this.settingsBusy) throw new Error(m.conversation_settings_loading());
       }
       // Stop pressed while the send was still waiting its turn.
       if (abortController?.signal.aborted) {

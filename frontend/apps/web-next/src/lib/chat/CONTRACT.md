@@ -65,6 +65,21 @@ message's text parts (joined with `\n`) and the per-send options
 Exactly one of `session_id`, `assistant_id`, `group_chat_id` identifies the
 target (backend `ConversationRequest`).
 
+## Saved choices and current policy
+
+The canonical [conversation settings API contract](https://docs.eneo.ai/dev/docs/api#conversation-settings)
+separates assistant policy, saved conversation choices and per-turn restrictions.
+`ConversationSettingsProvider` owns the mounted conversation's revision and
+lifecycle. Tool controls render the backend's `selected` and `available` fields;
+they do not compute policy defaults. `settings_compatible: false` keeps history
+readable while disabling edits, sends and automatic interactive-tool execution.
+The backend enforces the same compatibility boundary independently.
+
+The transport's `disabled_capabilities` is still useful for a per-turn feature
+restriction such as hidden web search; it only narrows the saved and allowed set.
+New options belong in the typed backend contract and generated types before a
+client control is added. Both frontends use the same resolution response.
+
 ## Stream parts
 
 All parts are JSON objects with a `type` discriminator. Fields marked

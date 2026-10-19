@@ -36,7 +36,7 @@ class SessionAdd(SessionBase):
 
     @field_serializer("settings")
     def serialize_settings(self, value: ConversationSettingsState | None) -> object:
-        return value.model_dump(mode="json") if value is not None else None
+        return value.to_storage() if value is not None else None
 
     # Exactly one of user_id (real user) or api_key_id (service-key principal)
     # is set per session. The session_service write paths enforce this invariant.

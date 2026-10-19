@@ -480,6 +480,8 @@ class GroupChatService:
             session = await self.session_service.get_session_by_uuid(id=session_id)
             if conversation_settings is None:
                 conversation_settings = session.settings
+        if conversation_settings is not None:
+            conversation_settings.require_supported()
 
         selection_result = None
         if tool_assistant_id is not None:

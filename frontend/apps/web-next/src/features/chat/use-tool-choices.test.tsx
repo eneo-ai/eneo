@@ -32,11 +32,19 @@ beforeEach(() => {
       supports_tool_calling: supportsTools,
       mcp_servers: personal.mcpServers?.map((server) => ({
         ...server,
+        selected:
+          (body.session_id ? saved.settings : (body.settings ?? defaults)).mcp_server_states?.[
+            server.id
+          ] ?? true,
         available: supportsTools,
         reason: supportsTools ? null : "model_no_tool_calling"
       })),
       capabilities: personal.availableCapabilities?.map((capability) => ({
         ...capability,
+        selected:
+          (body.session_id ? saved.settings : (body.settings ?? defaults)).capability_states?.[
+            capability.purpose
+          ] ?? true,
         available: supportsTools,
         reason: supportsTools ? null : "model_no_tool_calling"
       })),
@@ -121,6 +129,35 @@ async function ready(view: ReturnType<typeof renderChoices>) {
 }
 
 describe("conversation choices", () => {
+  it("uses backend selection even when saved maps are empty and a tool is unavailable", async () => {
+    api.POST.mockResolvedValueOnce({
+      data: {
+        revision: 2,
+        settings: {},
+        mcp_servers: [{ id: "diarium", name: "diarium", available: false, selected: true }],
+        capabilities: [{ purpose: "web_search", available: true, selected: false }]
+      },
+      response: new Response()
+    });
+    const view = renderChoices(personal, "saved");
+    await ready(view);
+    expect(view.current.tools.disabledMcpServerIds.has("diarium")).toBe(false);
+    expect(view.current.tools.mcpServers[0]?.available).toBe(false);
+    expect(view.current.tools.disabledCapabilities.has("web_search")).toBe(true);
+  });
+
+  it("blocks edits and automatic tool calls for an incompatible stored configuration", async () => {
+    api.POST.mockResolvedValueOnce({
+      data: { ...saved, settings_compatible: false },
+      response: new Response()
+    });
+    const view = renderChoices(personal, "saved");
+    await ready(view);
+    expect(view.current.settings.resolution?.settings_compatible).toBe(false);
+    expect(view.current.automatic).toBe(false);
+    await act(async () => view.current.settings.update({ require_tool_approval: false }));
+    expect(api.PATCH).not.toHaveBeenCalled();
+  });
   it("saves bulk tools atomically and restores them when the same conversation is opened again", async () => {
     const first = renderChoices(personal, "saved");
     await ready(first);
@@ -151,7 +188,7 @@ describe("conversation choices", () => {
     await ready(view);
     expect(api.PATCH).not.toHaveBeenCalled();
     expect(view.current.settings.error).toBeNull();
-    expect(view.current.settings.resolution?.available_models?.[0].id).toBe("model-2");
+    expect(view.current.settings.resolution?.available_models?.[0]?.id).toBe("model-2");
     await act(async () => view.current.settings.update({ completion_model_id: "model-2" }));
     expect(saved.revision).toBe(1);
     expect(view.current.settings.resolution?.settings.completion_model_id).toBe("model-2");

@@ -4888,6 +4888,8 @@
   "audit_action_document_template_deleted_description": "En dokumentmall togs bort ur organisationens bibliotek",
   "audit_action_document_template_default_set": "Standardmall vald",
   "audit_action_document_template_default_set_description": "En dokumentmall gjordes till organisationens standard",
+  "conversation_settings_loading": "Konversationens inställningar läses fortfarande in.",
+  "conversation_settings_incompatible": "Den här appversionen stöder inte alla sparade inställningar. Du kan läsa historiken, men behöver en kompatibel appversion för att fortsätta chatta eller ändra inställningar.",
   "activation_failed": "Aktiveringen misslyckades – ditt konto kunde inte skapas ännu. Be din administratör skapa en inbjudan för din e-postadress och försök sedan igen.",
   "mcp_tools_count": "{count, plural, one {# verktyg} other {# verktyg}}",
   "mcp_toggle_server": "Aktivera {name}",

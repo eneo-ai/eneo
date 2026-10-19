@@ -181,6 +181,8 @@ async def call_tool_from_view(
     tenant_id: UUID,
 ) -> ViewToolCallResult:
     """Run ``name`` on the server of the view shown for ``tool_call_id``."""
+    if conversation.settings is not None:
+        conversation.settings.require_supported()
     found = originating_call(conversation, tool_call_id, view_id)
     if found is None:
         raise NotFoundException(_NOT_FOUND)

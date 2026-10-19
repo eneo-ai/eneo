@@ -95,7 +95,10 @@
   let abortController: AbortController | undefined;
   const autoAcceptTools = $derived(!chat.settings?.require_tool_approval);
   const settingsDisabled = $derived(
-    !chat.settings || chat.settingsBusy || chat.askQuestion.isLoading
+    !chat.settings ||
+      chat.settingsBusy ||
+      chat.askQuestion.isLoading ||
+      chat.settingsResolution?.settings_compatible === false
   );
 
   $effect(() => {
@@ -302,17 +305,8 @@
 
   const disabledMcpServerIds = $derived.by(() => {
     const disabled = new SvelteSet<string>();
-    const config = chat.settingsResolution;
-    for (const id of availableMcpServerIds) {
-      const purpose = getCapability(
-        id.startsWith("capability:") ? id.slice("capability:".length) : null
-      )?.purpose;
-      const enabled = purpose
-        ? (chat.settings?.capability_states?.[purpose] ??
-          !config?.default_disabled_capabilities?.includes(purpose))
-        : (chat.settings?.mcp_server_states?.[id] ??
-          !config?.default_disabled_mcp_server_ids?.includes(id));
-      if (!enabled) disabled.add(id);
+    for (const tool of [...generalMcpServers, ...capabilityServers]) {
+      if (!tool.selected) disabled.add(tool.id);
     }
     return disabled;
   });
@@ -487,11 +481,13 @@
     <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
   </PromptInput.Body>
 
-  {#if chat.settingsError || chat.settingsResolution?.model_unavailable}
+  {#if chat.settingsError || chat.settingsResolution?.settings_compatible === false || chat.settingsResolution?.model_unavailable}
     <div class="text-destructive flex items-center gap-2 px-3 py-2 text-sm" role="alert">
       <p>
         {#if chat.settingsError}
           {m.conversation_settings_save_failed()} {getErrorMessage(chat.settingsError)}
+        {:else if chat.settingsResolution?.settings_compatible === false}
+          {m.conversation_settings_incompatible()}
         {:else}
           {m.conversation_settings_model_unavailable()}
         {/if}

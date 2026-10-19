@@ -222,8 +222,16 @@ class SessionRepository:
         self, id: UUID, settings: ConversationSettings, expected_revision: int
     ) -> ConversationSettingsState:
         """Compare and swap after SessionService has checked ownership."""
-        state = ConversationSettingsState(
-            revision=expected_revision + 1, settings=settings
+        stored = await self.session.scalar(
+            sa.select(Sessions.settings).where(Sessions.id == id)
+        )
+        previous = ConversationSettingsState.model_validate(stored) if stored else None
+        if (previous.revision if previous else 0) != expected_revision:
+            raise ConversationSettingsConflictException()
+        state = (
+            previous.with_settings(settings)
+            if previous
+            else ConversationSettingsState(revision=1, settings=settings)
         )
         predicate = (
             Sessions.settings.is_(None)
@@ -233,7 +241,7 @@ class SessionRepository:
         result = await self.session.scalar(
             sa.update(Sessions)
             .where(Sessions.id == id, predicate)
-            .values(settings=state.model_dump(mode="json"))
+            .values(settings=state.to_storage())
             .returning(Sessions.id)
         )
         if result is None:

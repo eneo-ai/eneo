@@ -35,7 +35,10 @@
 {#if options.length > 0}
   <Select.Root type="single" value={selectedValue} onValueChange={selectEffort}>
     <Select.Trigger
-      disabled={chat.settingsBusy || !chat.settings || chat.askQuestion.isLoading}
+      disabled={chat.settingsBusy ||
+        !chat.settings ||
+        chat.askQuestion.isLoading ||
+        chat.settingsResolution?.settings_compatible === false}
       size="sm"
       class="hover:bg-muted h-8 max-w-40 border-transparent bg-transparent px-2 font-medium shadow-none"
       aria-label={`${m.reasoning_effort()}: ${effectiveEffort ? getModelKwargOptionLabel(effectiveEffort) : m.default_behavior()}`}

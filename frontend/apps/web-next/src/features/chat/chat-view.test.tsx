@@ -41,6 +41,7 @@ const api = vi.hoisted(() => ({
           revision: init?.body?.session_id ? 1 : 0,
           settings: {},
           supports_tool_calling: true,
+          settings_compatible: true,
           mcp_servers: [],
           capabilities: []
         }
@@ -155,6 +156,32 @@ describe("ChatView start state", () => {
 });
 
 describe("ChatView conversation", () => {
+  it("shows readable history and an announced explanation when saved settings are unsupported", async () => {
+    api.POST.mockResolvedValueOnce({
+      data: {
+        revision: 2,
+        settings: {},
+        supports_tool_calling: true,
+        settings_compatible: false,
+        mcp_servers: [],
+        capabilities: []
+      },
+      response: new Response()
+    });
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    const notice = await screen.findByText(
+      /Den här appversionen stöder inte alla sparade inställningar/
+    );
+    expect(spies.announce).toHaveBeenCalledWith(notice.textContent);
+    expect(screen.getByText("Direktupphandlingsgränsen är 700 000 kr.")).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: /Meddelande till/ }), {
+      target: { value: "Fortsätt" }
+    });
+    expect(screen.getByRole("button", { name: "Skicka meddelande" }).hasAttribute("disabled")).toBe(
+      true
+    );
+    expect(api.PATCH).not.toHaveBeenCalled();
+  });
   it("names the message list and keeps it out of live announcements", () => {
     renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
     const log = screen.getByRole("log", { name: "Konversation" });

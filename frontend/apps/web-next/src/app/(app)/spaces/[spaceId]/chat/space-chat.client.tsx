@@ -45,7 +45,7 @@ function ModelSwitcher() {
           if (hasMessages) setPendingId(id);
           else return update({ completion_model_id: id, reasoning_effort: null });
         }}
-        disabled={busy || running || !resolution}
+        disabled={busy || running || !resolution || resolution.settings_compatible === false}
         size="sm"
         showPricing={tenant.show_model_pricing}
         className={COMPOSER_PICKER_CLASS}
@@ -79,7 +79,7 @@ function ReasoningSwitcher() {
   const options = resolution?.reasoning_effort_options ?? [];
   if (options.length === 0) return null;
   return (
-    <fieldset disabled={busy || running}>
+    <fieldset disabled={busy || running || resolution?.settings_compatible === false}>
       <ReasoningEffortSelector
         options={options}
         stored={resolution?.settings.reasoning_effort ?? null}

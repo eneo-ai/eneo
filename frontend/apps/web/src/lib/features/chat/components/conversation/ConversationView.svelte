@@ -70,13 +70,12 @@
         completion_model,
         acceptsImageAttachments:
           completion_model?.vision === true ||
-          (chat.settingsResolution?.capabilities?.some(
-            (capability) => capability.purpose === "image_generation" && capability.available
-          ) === true &&
-            (chat.settings?.capability_states?.image_generation ??
-              !chat.settingsResolution?.default_disabled_capabilities?.includes(
-                "image_generation"
-              )))
+          chat.settingsResolution?.capabilities?.some(
+            (capability) =>
+              capability.purpose === "image_generation" &&
+              capability.available &&
+              capability.selected
+          ) === true
       };
     })
   );

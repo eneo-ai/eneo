@@ -209,7 +209,8 @@ function ConversationView({
     !resolution ||
     conversationSettings.busy ||
     Boolean(conversationSettings.error) ||
-    Boolean(resolution.model_unavailable);
+    Boolean(resolution.model_unavailable) ||
+    resolution.settings_compatible === false;
   const t = useTranslations();
   const { featureFlags, can } = useAppContext();
   const queryClient = useQueryClient();
@@ -781,7 +782,14 @@ function ConversationView({
     ) : null;
 
   const tools = (
-    <fieldset disabled={conversationSettings.busy || sending || !resolution}>
+    <fieldset
+      disabled={
+        conversationSettings.busy ||
+        sending ||
+        !resolution ||
+        resolution.settings_compatible === false
+      }
+    >
       <ChatTools
         capabilities={toolChoices.capabilities}
         disabledCapabilities={toolChoices.disabledCapabilities}
@@ -856,14 +864,18 @@ function ConversationView({
   // Shown in both layouts: a first question that fails before streaming
   // starts puts the view back in the start state.
   const settingsNotice =
-    conversationSettings.error || resolution?.model_unavailable ? (
+    conversationSettings.error ||
+    resolution?.model_unavailable ||
+    resolution?.settings_compatible === false ? (
       <ChatSystemMessage icon={<CircleAlert aria-hidden="true" className="text-ax-error size-4" />}>
         <span className="flex flex-wrap items-center justify-center gap-2">
           <span>
             {t(
               conversationSettings.error
                 ? "conversation_settings_save_failed"
-                : "conversation_settings_model_unavailable"
+                : resolution?.settings_compatible === false
+                  ? "conversation_settings_incompatible"
+                  : "conversation_settings_model_unavailable"
             )}
           </span>
           <Button
@@ -883,8 +895,16 @@ function ConversationView({
     ) : null;
   useEffect(() => {
     if (conversationSettings.error) announce(t("conversation_settings_save_failed"));
+    else if (resolution?.settings_compatible === false)
+      announce(t("conversation_settings_incompatible"));
     else if (resolution?.model_unavailable) announce(t("conversation_settings_model_unavailable"));
-  }, [conversationSettings.error, resolution?.model_unavailable, announce, t]);
+  }, [
+    conversationSettings.error,
+    resolution?.model_unavailable,
+    resolution?.settings_compatible,
+    announce,
+    t
+  ]);
 
   const errorNotice = failure ? (
     <ChatSystemMessage icon={<CircleAlert aria-hidden="true" className="text-ax-error size-4" />}>

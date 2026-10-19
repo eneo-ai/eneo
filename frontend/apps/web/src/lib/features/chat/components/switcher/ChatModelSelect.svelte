@@ -95,7 +95,10 @@
 {:else}
   <ModelSelector.Root bind:open={selectorOpen}>
     <ModelSelector.Trigger
-      disabled={chat.settingsBusy || !chat.settings || chat.askQuestion.isLoading}
+      disabled={chat.settingsBusy ||
+        !chat.settings ||
+        chat.askQuestion.isLoading ||
+        chat.settingsResolution?.settings_compatible === false}
       aria-label={m.choose_a_completion_model()}
     >
       {#if selectedModel}

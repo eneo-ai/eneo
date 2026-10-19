@@ -3252,6 +3252,8 @@ class AssistantService:
                 group_chat_id=group_chat_id,
             )
             conversation_settings = existing.settings
+        if conversation_settings is not None:
+            conversation_settings.require_supported()
         choices = conversation_settings.settings if conversation_settings else None
         completion_model_id = (
             choices.completion_model_id

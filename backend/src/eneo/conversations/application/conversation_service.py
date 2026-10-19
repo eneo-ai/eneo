@@ -40,6 +40,7 @@ from eneo.mcp_servers.domain.capabilities import (
     CapabilityPurpose,
 )
 from eneo.sessions.conversation_settings import (
+    ConversationCapability,
     ConversationMcpServer,
     ConversationSettings,
     ConversationSettingsResolution,
@@ -178,10 +179,12 @@ class ConversationService:
         settings_revision: int | None = None,
     ) -> ConversationSettingsResolution:
         revision = 0
+        compatible = True
         if session_id is not None:
             session = await self.session_service.get_context(session_id)
             assistant_id, group_chat_id = session.assistant_id, session.group_chat_id
             if session.settings:
+                compatible = session.settings.is_compatible
                 settings, revision = (
                     session.settings.settings,
                     session.settings.revision,
@@ -191,7 +194,9 @@ class ConversationService:
         if group_chat_id is not None:
             await self.group_chat_service.get_group_chat(group_chat_id)
             return ConversationSettingsResolution(
-                revision=revision, settings=settings or ConversationSettings()
+                revision=revision,
+                settings=settings or ConversationSettings(),
+                settings_compatible=compatible,
             )
         if assistant_id is None:
             raise BadRequestException("A conversation target is required.")
@@ -205,7 +210,15 @@ class ConversationService:
         space = await self.space_service.get_space_by_assistant(assistant_id)
         if settings is None:
             settings = self._assistant_settings_defaults(assistant, space, config)
-        result = ConversationSettingsResolution(revision=revision, settings=settings)
+        result = ConversationSettingsResolution(
+            revision=revision, settings=settings, settings_compatible=compatible
+        )
+        disabled_servers = settings.disabled_servers(
+            config.default_disabled_mcp_server_ids if config else []
+        )
+        disabled_capabilities = settings.disabled_capabilities(
+            config.default_disabled_capabilities if config else []
+        )
         personal = (
             space.is_personal()
             and space.default_assistant is not None
@@ -299,6 +312,7 @@ class ConversationService:
                     description=server.description,
                     icon_url=server.icon_url,
                     available=reason is None,
+                    selected=server.id not in disabled_servers,
                     reason=reason,
                 )
             )
@@ -322,12 +336,14 @@ class ConversationService:
                 state = state.model_copy(
                     update={"available": False, "reason": "model_no_tool_calling"}
                 )
-            result.capabilities.append(state)
-        if config:
-            result.default_disabled_mcp_server_ids = (
-                config.default_disabled_mcp_server_ids
+            result.capabilities.append(
+                ConversationCapability(
+                    purpose=state.purpose,
+                    available=state.available,
+                    reason=state.reason,
+                    selected=state.purpose not in disabled_capabilities,
+                )
             )
-            result.default_disabled_capabilities = config.default_disabled_capabilities
         return result
 
     async def validate_settings(
@@ -399,6 +415,8 @@ class ConversationService:
         self, session_id: "UUID", settings: ConversationSettings, expected_revision: int
     ) -> ConversationSettingsState:
         session = await self.session_service.get_context(session_id)
+        if session.settings:
+            session.settings.require_supported()
         await self.validate_settings(
             settings,
             assistant_id=session.assistant_id,
@@ -445,6 +463,7 @@ class ConversationService:
                 )
             else:
                 state = ConversationSettingsState(revision=1, settings=choices)
+        state.require_supported()
         if settings_revision is not None and settings_revision != state.revision:
             raise ConversationSettingsConflictException(
                 "Conversation settings changed elsewhere. Reload the conversation and try again."
@@ -515,6 +534,7 @@ class ConversationService:
             assistant_id = session.assistant_id
             group_chat_id = session.group_chat_id
             if session.settings:
+                session.settings.require_supported()
                 if (
                     settings_revision is not None
                     and settings_revision != session.settings.revision

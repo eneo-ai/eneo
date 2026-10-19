@@ -86,3 +86,36 @@ async def test_settings_update_is_independent_of_history_hydration(
         repo = SessionRepository(session)
         assert (await repo.get_context(saved.id, tenant_id)).settings == state
         assert await repo.get_context(saved.id, uuid4()) is None
+
+
+async def test_known_settings_update_preserves_retired_capability(
+    db_container, db_session
+):
+    async with db_container() as container:
+        saved = await container.session_service().create_session(
+            name="Retired capability"
+        )
+    async with db_session() as session:
+        await session.execute(
+            sa.update(Sessions)
+            .where(Sessions.id == saved.id)
+            .values(
+                settings={
+                    "revision": 1,
+                    "settings": {
+                        "capability_states": {"retired_tool": True, "charts": False}
+                    },
+                }
+            )
+        )
+    async with db_container() as container:
+        state = await container.session_service().update_settings(
+            saved.id, ConversationSettings(require_tool_approval=True), 1
+        )
+        assert state.revision == 2
+    async with db_session() as session:
+        stored = await session.scalar(
+            sa.select(Sessions.settings).where(Sessions.id == saved.id)
+        )
+    assert stored["settings"]["capability_states"] == {"retired_tool": True}
+    assert stored["settings"]["require_tool_approval"] is True

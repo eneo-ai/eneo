@@ -121,7 +121,13 @@ export function ConversationSettingsProvider({
   }, []);
 
   async function update(patch: Partial<Settings>) {
-    if (locked.current || running || !current.current) return;
+    if (
+      locked.current ||
+      running ||
+      !current.current ||
+      current.current.settings_compatible === false
+    )
+      return;
     locked.current = true;
     setBusy(true);
     setError(null);
@@ -185,6 +191,7 @@ export function useAutomaticConversationTools() {
     context?.resolution &&
     !context.busy &&
     !context.error &&
+    context.resolution.settings_compatible !== false &&
     context.resolution.settings.require_tool_approval === false
   );
 }

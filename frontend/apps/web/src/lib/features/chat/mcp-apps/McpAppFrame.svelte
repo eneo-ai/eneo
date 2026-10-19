@@ -172,6 +172,7 @@
   function permissionToRunTools(name: string, args: Record<string, unknown>): Promise<boolean> {
     if (
       call.is_bundled === true &&
+      chat.settingsResolution?.settings_compatible !== false &&
       chat.settings?.require_tool_approval === false &&
       !chat.settingsBusy &&
       !chat.settingsError

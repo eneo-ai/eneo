@@ -696,6 +696,29 @@ describe("ChatService personal conversation model", () => {
 });
 
 describe("ChatService saved conversation choices", () => {
+  it("keeps history readable but blocks sends and edits for unsupported settings", async () => {
+    const ask = completedAsk();
+    const updateSettings = vi.fn();
+    const chat = chatService(vi.fn(), {
+      ask,
+      updateSettings,
+      resolveSettings: vi.fn().mockResolvedValue({
+        revision: 2,
+        settings: { require_tool_approval: false },
+        settings_compatible: false
+      }),
+      initialConversation: { id: "saved", messages: [], settings: { revision: 2, settings: {} } }
+    });
+    await chat.loadSettings();
+    expect(chat.settingsError).toBeNull();
+    expect(chat.currentConversation.id).toBe("saved");
+    await expect(chat.askQuestion("Continue")).rejects.toThrow(
+      m.conversation_settings_incompatible()
+    );
+    await chat.updateSettings({ require_tool_approval: false });
+    expect(ask).not.toHaveBeenCalled();
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
   it("blocks a removed model and recovers by selecting the only allowed replacement", async () => {
     const ask = completedAsk();
     const resolveSettings = vi.fn().mockImplementation(async ({ settings }) => ({

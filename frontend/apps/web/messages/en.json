@@ -4888,5 +4888,7 @@
   "audit_action_document_template_deleted": "Document Template Removed",
   "audit_action_document_template_deleted_description": "A document template was removed from the organisation's library",
   "audit_action_document_template_default_set": "Default Document Template Set",
-  "audit_action_document_template_default_set_description": "A document template was made the organisation's default"
+  "audit_action_document_template_default_set_description": "A document template was made the organisation's default",
+  "conversation_settings_loading": "Conversation settings are still loading.",
+  "conversation_settings_incompatible": "This app version does not support all saved settings. You can read the history, but need a compatible app version to continue chatting or change settings."
 }
