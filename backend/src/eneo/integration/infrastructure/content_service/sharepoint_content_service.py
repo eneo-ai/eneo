@@ -11,6 +11,7 @@ existing owners. Do not add another implementation of their rules here.
 """
 
 import asyncio
+import hashlib
 import time
 from collections.abc import Callable, Coroutine
 from contextlib import AbstractAsyncContextManager, nullcontext
@@ -1246,12 +1247,14 @@ class SharePointContentService:
     ) -> None:
         """Index what an in-scope folder entry brought in, unless it was walked there before.
 
-        The entry does not say whether the folder moved, so its parent is kept
-        once a walk completed without failures, post-commit like a file's
-        ChangeKey. A folder re-emitted under the same parent (a rename, a
+        The entry does not say whether the folder moved, so its parent and name
+        are kept once a walk completed without failures, post-commit like a
+        file's ChangeKey. A folder re-emitted under the same parent and name (a
         permission change, a replayed pass) has its files indexed already,
         unless a full sync ran since: it may have removed them as orphans while
-        the folder was elsewhere, so the key carries the walk generation.
+        the folder was elsewhere, so the key carries the walk generation. A
+        rename or move is walked: Graph emits no entry for the descendants,
+        whose titles and links the walk refreshes.
         """
         integration_knowledge = delta_pass.integration_knowledge
         item_id = item.get("id", "")
@@ -1259,8 +1262,9 @@ class SharePointContentService:
         stats = delta_pass.stats
         parent_id = item.get("parentReference", {}).get("id")
         suffix = await self._walk_cache_suffix(delta_pass)
+        name_key = hashlib.sha256(item_name.encode("utf-8")).hexdigest()[:16]
         location_key = (
-            f"folder-under:{parent_id}{suffix}"
+            f"folder-under:{parent_id}:{name_key}{suffix}"
             if parent_id and suffix is not None
             else None
         )
@@ -1776,11 +1780,12 @@ class SharePointContentService:
 
         Graph re-emits only the moved folder, not its unchanged children, so a
         folder dragged into scope would otherwise never get its files indexed.
-        An in-scope folder entry not walked under its parent before takes this
-        path because the entry does not say whether it moved; children that are
-        already indexed or that arrive as their own entries in this change set
-        are left alone. ``indexed_ids`` is the pass's set; files indexed here
-        are added so a nested folder entering scope does not download them again.
+        An in-scope folder entry not walked under its parent and name before
+        takes this path because the entry does not say whether it moved;
+        children that arrive as their own entries in this change set are left
+        alone, and already indexed ones only get their title and link
+        refreshed. ``indexed_ids`` is the pass's set; files indexed here are
+        added so a nested folder entering scope does not download them again.
         """
         try:
             descendants = await scope_rules.enumerate_items(
@@ -1810,11 +1815,16 @@ class SharePointContentService:
 
         for descendant in descendants:
             descendant_id = descendant.get("id")
-            if (
-                not descendant_id
-                or descendant_id in indexed_ids
-                or descendant_id in change_ids
-            ):
+            if not descendant_id or descendant_id in change_ids:
+                continue
+            if descendant_id in indexed_ids:
+                # The folder was renamed or moved: the file's link changed.
+                await self._index.refresh_citation(
+                    descendant,
+                    descendant_id,
+                    integration_knowledge.id,
+                    pending_change_keys,
+                )
                 continue
             await self._progress.update(stats, current=descendant.get("name"))
             await self._index.index_file(

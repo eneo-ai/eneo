@@ -4899,8 +4899,9 @@ class TestDeltaFolderScopeOrdering:
     async def test_a_folder_walked_before_under_the_same_parent_is_not_walked_again(
         self, service, mock_dependencies, mock_oauth_token, folder_scoped
     ):
-        """A rename, a permission change or a replayed pass re-emits a folder whose
-        files were indexed when it was walked; only a move needs a new walk."""
+        """A permission change or a replayed pass re-emits a folder whose files
+        were indexed when it was walked; a rename or a move needs a new walk,
+        which refreshes its files' links."""
         cache: dict[str, str] = {}
         change_keys = mock_dependencies["change_key_service"]
         change_keys.should_process = AsyncMock(
@@ -4941,15 +4942,50 @@ class TestDeltaFolderScopeOrdering:
         ):
             for changes in (
                 folder_x("folder-a"),
+                folder_x("folder-a"),
                 folder_x("folder-a", name="X renamed"),
-                [sub_folder, *folder_x("folder-s")],
+                [sub_folder, *folder_x("folder-s", name="X renamed")],
             ):
                 await self._run_delta(
                     service, mock_dependencies, mock_oauth_token, folder_scoped, changes
                 )
 
         walked = [call.kwargs["folder_id"] for call in walk.await_args_list]
-        assert walked == ["folder-x", "folder-s", "folder-x"]
+        assert walked == ["folder-x", "folder-x", "folder-s", "folder-x"]
+
+    async def test_a_renamed_folder_refreshes_the_links_of_its_indexed_files(
+        self, service, mock_dependencies, mock_oauth_token, folder_scoped
+    ):
+        """Graph emits only the folder; its files keep their cTag."""
+        self._indexed(mock_dependencies, "x-1")
+        refresh = mock_dependencies[
+            "info_blob_service"
+        ].repo.refresh_sharepoint_citation = AsyncMock(return_value=True)
+        renamed = {
+            "id": "folder-x",
+            "name": "X renamed",
+            "folder": {"childCount": 1},
+            "parentReference": {"id": "folder-a"},
+        }
+        moved_file = {
+            "id": "x-1",
+            "name": "one.docx",
+            "webUrl": "https://x/Documents/A/X renamed/one.docx",
+        }
+        with patch.object(
+            scope_rules, "enumerate_items", AsyncMock(return_value=[moved_file])
+        ):
+            client, _ = await self._run_delta(
+                service, mock_dependencies, mock_oauth_token, folder_scoped, [renamed]
+            )
+
+        client.get_file_extraction_by_id.assert_not_called()
+        refresh.assert_awaited_once_with(
+            sharepoint_item_id="x-1",
+            integration_knowledge_id=folder_scoped.id,
+            title="one.docx",
+            url="https://x/Documents/A/X renamed/one.docx",
+        )
 
     async def test_a_folder_whose_walk_failed_is_walked_again(
         self, service, mock_dependencies, mock_oauth_token, folder_scoped

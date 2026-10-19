@@ -218,7 +218,7 @@ class SharePointIndex:
     def citation_cache_id(item_id: str) -> str:
         return f"{item_id}#citation"
 
-    async def _refresh_citation(
+    async def refresh_citation(
         self,
         item: SharePointItem,
         item_id: str,
@@ -661,7 +661,7 @@ class SharePointIndex:
                     logger.info(
                         f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
                     )
-                    await self._refresh_citation(
+                    await self.refresh_citation(
                         item, item_id, integration_knowledge_id, pending_change_keys
                     )
                     stats["unchanged_items"] += 1
