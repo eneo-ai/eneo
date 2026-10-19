@@ -597,12 +597,9 @@ class Space:
                 raise BadRequestException(
                     "Can not change security classification of personal space"
                 )
-            # Only a change of level may remove links: eligibility depends on
-            # the level alone, so a PATCH that resends the classification, or
-            # names another one at the same level, leaves every link as it is.
-            changes_classification = _security_level(
-                self.security_classification
-            ) != _security_level(security_classification)
+            changes_classification = self.changes_security_level(
+                security_classification
+            )
             self.security_classification = security_classification
             # A linked model the new classification allows is usable again.
             self._split_models_by_classification()
@@ -876,6 +873,16 @@ class Space:
 
     def get_website(self, website_id: UUID) -> "Website":
         return self._get_entity(website_id, self.websites)
+
+    def changes_security_level(
+        self, classification: Optional[SecurityClassification]
+    ) -> bool:
+        """Whether moving to ``classification`` may remove links. Eligibility
+        depends on the level alone, so a PATCH that resends the classification,
+        or names another one at the same level, leaves every link as it is."""
+        return _security_level(self.security_classification) != _security_level(
+            classification
+        )
 
     def allows_security_classification(self, link: ClassifiedLink) -> bool:
         """Whether this space's classification permits the model or service.
